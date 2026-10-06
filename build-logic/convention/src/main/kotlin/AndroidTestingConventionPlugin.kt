@@ -13,34 +13,35 @@ import org.gradle.kotlin.dsl.dependencies
  * Devices): the test runner, orchestrator with `clearPackageData`, Robolectric, and the managed devices.
  */
 class AndroidTestingConventionPlugin : Plugin<Project> {
-    override fun apply(target: Project) = with(target) {
-        pluginManager.withPlugin("com.android.application") {
-            extensions.configure<ApplicationExtension> { configureAndroidTesting(this) }
-        }
-        pluginManager.withPlugin("com.android.library") {
-            extensions.configure<LibraryExtension> { configureAndroidTesting(this) }
-        }
-
-        val robolectric = libs.version("robolectric")
-        configurations.configureEach {
-            // media3-test-utils pulls an older Robolectric; one version everywhere (09)
-            resolutionStrategy.eachDependency {
-                val separatelyVersioned = SEPARATELY_VERSIONED.any { requested.name.startsWith(it) }
-                if (requested.group == ROBOLECTRIC_GROUP && !separatelyVersioned) useVersion(robolectric)
+    override fun apply(target: Project) =
+        with(target) {
+            pluginManager.withPlugin("com.android.application") {
+                extensions.configure<ApplicationExtension> { configureAndroidTesting(this) }
             }
+            pluginManager.withPlugin("com.android.library") {
+                extensions.configure<LibraryExtension> { configureAndroidTesting(this) }
+            }
+
+            val robolectric = libs.version("robolectric")
+            configurations.configureEach {
+                // media3-test-utils pulls an older Robolectric; one version everywhere (09)
+                resolutionStrategy.eachDependency {
+                    val separatelyVersioned = SEPARATELY_VERSIONED.any { requested.name.startsWith(it) }
+                    if (requested.group == ROBOLECTRIC_GROUP && !separatelyVersioned) useVersion(robolectric)
+                }
+            }
+            dependencies {
+                add("testImplementation", project(":core:testing"))
+                add("testImplementation", libs.findBundle("jvm-test").get())
+                add("testImplementation", libs.lib("robolectric"))
+                add("androidTestImplementation", libs.lib("androidx-test-runner"))
+                add("androidTestImplementation", libs.lib("androidx-test-ext-junit"))
+                add("androidTestImplementation", libs.lib("truth"))
+                add("androidTestImplementation", project(":core:testing"))
+                add("androidTestUtil", libs.lib("androidx-test-orchestrator"))
+            }
+            configureNeutrodyneTestTasks()
         }
-        dependencies {
-            add("testImplementation", project(":core:testing"))
-            add("testImplementation", libs.findBundle("jvm-test").get())
-            add("testImplementation", libs.lib("robolectric"))
-            add("androidTestImplementation", libs.lib("androidx-test-runner"))
-            add("androidTestImplementation", libs.lib("androidx-test-ext-junit"))
-            add("androidTestImplementation", libs.lib("truth"))
-            add("androidTestImplementation", project(":core:testing"))
-            add("androidTestUtil", libs.lib("androidx-test-orchestrator"))
-        }
-        configureNeutrodyneTestTasks()
-    }
 
     private fun Project.configureAndroidTesting(ext: CommonExtension) {
         ext.defaultConfig.testInstrumentationRunner = if (path == ":app") APP_RUNNER else DEFAULT_RUNNER
@@ -66,11 +67,22 @@ class AndroidTestingConventionPlugin : Plugin<Project> {
                 require64Bit = true
             }
         }
-        md.groups.maybeCreate(GROUP_CI).targetDevices.addAll(listOf(API_26, API_36).map { devices.getByName(it) })
-        md.groups.maybeCreate(GROUP_NIGHTLY).targetDevices.addAll(MANAGED_DEVICES.map { devices.getByName(it.name) })
+        md.groups
+            .maybeCreate(GROUP_CI)
+            .targetDevices
+            .addAll(listOf(API_26, API_36).map { devices.getByName(it) })
+        md.groups
+            .maybeCreate(GROUP_NIGHTLY)
+            .targetDevices
+            .addAll(MANAGED_DEVICES.map { devices.getByName(it.name) })
     }
 
-    private data class ManagedDevice(val name: String, val hardware: String, val apiLevel: Int, val imageSource: String)
+    private data class ManagedDevice(
+        val name: String,
+        val hardware: String,
+        val apiLevel: Int,
+        val imageSource: String,
+    )
 
     private companion object {
         const val APP_RUNNER = "ch.lkmc.neutrodyne.NeutrodyneTestRunner"
@@ -91,11 +103,12 @@ class AndroidTestingConventionPlugin : Plugin<Project> {
         const val IMAGE_AOSP = "aosp"
         const val IMAGE_ATD = "aosp-atd"
 
-        val MANAGED_DEVICES = listOf(
-            ManagedDevice(API_26, PIXEL_2, 26, IMAGE_AOSP),
-            ManagedDevice("api33", PIXEL_6, 33, IMAGE_ATD),
-            ManagedDevice("api34", PIXEL_6, 34, IMAGE_ATD),
-            ManagedDevice(API_36, PIXEL_6, 36, IMAGE_ATD),
-        )
+        val MANAGED_DEVICES =
+            listOf(
+                ManagedDevice(API_26, PIXEL_2, 26, IMAGE_AOSP),
+                ManagedDevice("api33", PIXEL_6, 33, IMAGE_ATD),
+                ManagedDevice("api34", PIXEL_6, 34, IMAGE_ATD),
+                ManagedDevice(API_36, PIXEL_6, 36, IMAGE_ATD),
+            )
     }
 }

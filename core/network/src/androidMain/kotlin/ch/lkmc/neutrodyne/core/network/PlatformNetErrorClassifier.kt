@@ -16,9 +16,10 @@ import dev.zacsweers.metro.SingleIn
  */
 @SingleIn(AppScope::class)
 @ContributesBinding(AppScope::class)
-internal class PlatformNetErrorClassifier @Inject constructor(
-    private val monitor: NetworkMonitor,
-) : NetErrorClassifier {
-    override fun classify(e: Throwable): NetError =
-        JvmNetErrors.classify(e, monitor.status.value.isConnected)
-}
+internal class PlatformNetErrorClassifier
+    @Inject
+    constructor(
+        private val monitor: NetworkMonitor,
+    ) : NetErrorClassifier {
+        override fun classify(e: Throwable): NetError = JvmNetErrors.classify(e, monitor.status.value.isConnected)
+    }

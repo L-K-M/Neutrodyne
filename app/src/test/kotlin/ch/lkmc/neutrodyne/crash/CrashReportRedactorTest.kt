@@ -28,10 +28,11 @@ class CrashReportRedactorTest {
 
     @Test
     fun customDataKeepsOnlyAllowListedKeysRedacted() {
-        val custom = JSONObject()
-            .put(CrashKey.SCREEN.name, "FeedsKey")
-            .put(CrashKey.SYNC.name, "failed for $FEED_WITH_SECRETS")
-            .put("DEVICE_ID", "abc")
+        val custom =
+            JSONObject()
+                .put(CrashKey.SCREEN.name, "FeedsKey")
+                .put(CrashKey.SYNC.name, "failed for $FEED_WITH_SECRETS")
+                .put("DEVICE_ID", "abc")
         val data = CrashReportData()
         data.put(ReportField.CUSTOM_DATA, custom)
 

@@ -28,17 +28,21 @@ import dev.zacsweers.metro.Provides
 public object SettingsNavigation {
     @Provides
     @IntoSet
-    public fun entries(buildInfo: BuildInfo, licencesSource: LicencesSource?): EntryProviderInstaller = {
-        entry<SettingsHomeKey>(
-            metadata = NdSceneMetadata.paneList(detailPlaceholder = { AppearancePage() }),
-        ) {
-            SettingsHomeRoute()
+    public fun entries(
+        buildInfo: BuildInfo,
+        licencesSource: LicencesSource?,
+    ): EntryProviderInstaller =
+        {
+            entry<SettingsHomeKey>(
+                metadata = NdSceneMetadata.paneList(detailPlaceholder = { AppearancePage() }),
+            ) {
+                SettingsHomeRoute()
+            }
+            entry<SettingsKey>(metadata = NdSceneMetadata.paneDetail()) { key ->
+                SettingsRoute(key, buildInfo)
+            }
+            entry<LicencesKey>(metadata = NdSceneMetadata.paneDetail()) {
+                LicencesRoute(licencesSource)
+            }
         }
-        entry<SettingsKey>(metadata = NdSceneMetadata.paneDetail()) { key ->
-            SettingsRoute(key, buildInfo)
-        }
-        entry<LicencesKey>(metadata = NdSceneMetadata.paneDetail()) {
-            LicencesRoute(licencesSource)
-        }
-    }
 }

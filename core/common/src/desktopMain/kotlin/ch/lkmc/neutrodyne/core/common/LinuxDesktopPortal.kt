@@ -15,5 +15,8 @@ interface LinuxDesktopPortal {
      * Portal `org.freedesktop.portal.FileChooser.OpenFile` with `directory: true`; [title] is the
      * dialog title, [start] an optional initial directory. `null` = no portal answered.
      */
-    suspend fun chooseDirectory(title: String, start: String?): String?
+    suspend fun chooseDirectory(
+        title: String,
+        start: String?,
+    ): String?
 }

@@ -25,7 +25,10 @@ import org.jetbrains.compose.resources.stringResource
  * M0a row share the placeholder until their milestone lands.
  */
 @Composable
-internal fun SettingsRoute(key: SettingsKey, buildInfo: BuildInfo) {
+internal fun SettingsRoute(
+    key: SettingsKey,
+    buildInfo: BuildInfo,
+) {
     when (key.page) {
         SettingsPage.ABOUT -> AboutPage(buildInfo)
         else -> AppearancePage()

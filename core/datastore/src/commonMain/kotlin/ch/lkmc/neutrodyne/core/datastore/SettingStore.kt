@@ -29,10 +29,16 @@ interface SettingStore {
     suspend fun <T : Any> get(key: SettingKey<T>): T
 
     /** Persists [value] for [key]; rejects a value the key itself forbids (a `Choice` outside its values). */
-    suspend fun <T : Any> set(key: SettingKey<T>, value: T)
+    suspend fun <T : Any> set(
+        key: SettingKey<T>,
+        value: T,
+    )
 
     /** Atomic read-modify-write: [transform] receives the current value (or the default). */
-    suspend fun <T : Any> update(key: SettingKey<T>, transform: (T) -> T)
+    suspend fun <T : Any> update(
+        key: SettingKey<T>,
+        transform: (T) -> T,
+    )
 
     /** Removes the stored value so the key reads its default again. */
     suspend fun reset(key: SettingKey<*>)
@@ -53,13 +59,19 @@ internal class SettingStoreImpl(
         return SettingPreferences.read(dataStore.data.first(), key)
     }
 
-    override suspend fun <T : Any> set(key: SettingKey<T>, value: T) {
+    override suspend fun <T : Any> set(
+        key: SettingKey<T>,
+        value: T,
+    ) {
         requireFile(key)
         SettingPreferences.validate(key, value)
         dataStore.edit { preferences -> SettingPreferences.write(preferences, key, value) }
     }
 
-    override suspend fun <T : Any> update(key: SettingKey<T>, transform: (T) -> T) {
+    override suspend fun <T : Any> update(
+        key: SettingKey<T>,
+        transform: (T) -> T,
+    ) {
         requireFile(key)
         dataStore.edit { preferences ->
             val current = SettingPreferences.read(preferences, key)

@@ -21,9 +21,9 @@ import ch.lkmc.neutrodyne.core.navigation.AppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SyncHeldChangesKey
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.dismiss
+import ch.lkmc.neutrodyne.core.ui.resources.group_count
 import ch.lkmc.neutrodyne.core.ui.resources.held_changes_message
 import ch.lkmc.neutrodyne.core.ui.resources.held_changes_unknown_device
-import ch.lkmc.neutrodyne.core.ui.resources.group_count
 import ch.lkmc.neutrodyne.core.ui.resources.notice_first_run_body
 import ch.lkmc.neutrodyne.core.ui.resources.notice_first_run_off
 import ch.lkmc.neutrodyne.core.ui.resources.notice_first_run_ok
@@ -55,24 +55,27 @@ internal fun RootBanners(
         val groups = pluralStringResource(Res.plurals.group_count, held.groupCount, held.groupCount)
         NdBanner(
             message = stringResource(Res.string.held_changes_message, device, podcasts, groups),
-            primary = NdDialogAction(
-                label = stringResource(Res.string.review),
-                onClick = { navigator.push(SyncHeldChangesKey(held.id)) },
-            ),
+            primary =
+                NdDialogAction(
+                    label = stringResource(Res.string.review),
+                    onClick = { navigator.push(SyncHeldChangesKey(held.id)) },
+                ),
         )
     }
 
     if (state.notice == RootNotice.FIRST_RUN_CHOICE) {
         NdBanner(
             message = stringResource(Res.string.notice_first_run_body),
-            primary = NdDialogAction(
-                label = stringResource(Res.string.notice_first_run_ok),
-                onClick = { actions.dismissNotice(RootNotice.FIRST_RUN_CHOICE) },
-            ),
-            secondary = NdDialogAction(
-                label = stringResource(Res.string.notice_first_run_off),
-                onClick = actions.disableUpdateChecks,
-            ),
+            primary =
+                NdDialogAction(
+                    label = stringResource(Res.string.notice_first_run_ok),
+                    onClick = { actions.dismissNotice(RootNotice.FIRST_RUN_CHOICE) },
+                ),
+            secondary =
+                NdDialogAction(
+                    label = stringResource(Res.string.notice_first_run_off),
+                    onClick = actions.disableUpdateChecks,
+                ),
         )
     }
 }

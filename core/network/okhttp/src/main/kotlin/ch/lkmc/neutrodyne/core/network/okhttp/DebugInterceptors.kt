@@ -59,8 +59,10 @@ interface NetworkIslandBindings {
          */
         @Provides
         @SingleIn(AppScope::class)
-        fun userAgentProvider(info: PlatformInfo, build: BuildInfo): UserAgentProvider =
-            UserAgentProvider(info, build.versionName, build.repoUrl)
+        fun userAgentProvider(
+            info: PlatformInfo,
+            build: BuildInfo,
+        ): UserAgentProvider = UserAgentProvider(info, build.versionName, build.repoUrl)
     }
 }
 
@@ -89,19 +91,22 @@ interface NetworkIslandYtxBindings {
         /** Same agent string as the main process — `PlatformInfo`/`BuildInfo` come from `YtxGraph`. */
         @Provides
         @SingleIn(YtxScope::class)
-        fun userAgentProvider(info: PlatformInfo, build: BuildInfo): UserAgentProvider =
-            UserAgentProvider(info, build.versionName, build.repoUrl)
+        fun userAgentProvider(
+            info: PlatformInfo,
+            build: BuildInfo,
+        ): UserAgentProvider = UserAgentProvider(info, build.versionName, build.repoUrl)
 
         @Provides
         fun localNetworkAccess(): LocalNetworkAccess = LocalNetworkAccess()
 
         @Provides
-        fun localNetworkGuard(access: LocalNetworkAccess, info: PlatformInfo): LocalNetworkGuard =
-            LocalNetworkGuard(access, info)
+        fun localNetworkGuard(
+            access: LocalNetworkAccess,
+            info: PlatformInfo,
+        ): LocalNetworkGuard = LocalNetworkGuard(access, info)
 
         @Provides
-        fun userAgentInterceptor(provider: UserAgentProvider): UserAgentInterceptor =
-            UserAgentInterceptor(provider)
+        fun userAgentInterceptor(provider: UserAgentProvider): UserAgentInterceptor = UserAgentInterceptor(provider)
 
         @Provides
         fun dnsFamilyHints(): DnsFamilyHints = DnsFamilyHints()

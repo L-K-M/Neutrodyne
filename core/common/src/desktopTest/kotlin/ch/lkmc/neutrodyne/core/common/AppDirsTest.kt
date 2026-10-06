@@ -21,11 +21,12 @@ class AppDirsTest {
 
     @Test
     fun `windows layout lives under LOCALAPPDATA`() {
-        val dirs = AppDirs.resolve(
-            AppDirs.DesktopOs.WINDOWS,
-            env = mapOf("LOCALAPPDATA" to "C:\\Users\\T\\AppData\\Local"),
-            home = home,
-        )
+        val dirs =
+            AppDirs.resolve(
+                AppDirs.DesktopOs.WINDOWS,
+                env = mapOf("LOCALAPPDATA" to "C:\\Users\\T\\AppData\\Local"),
+                home = home,
+            )
         assertEquals("C:/Users/T/AppData/Local/Neutrodyne", norm(dirs.data))
         assertEquals(dirs.data, dirs.config)
         assertEquals("C:/Users/T/AppData/Local/Neutrodyne/Cache", norm(dirs.cache))
@@ -36,36 +37,40 @@ class AppDirsTest {
 
     @Test
     fun `windows never reads APPDATA`() {
-        val dirs = AppDirs.resolve(
-            AppDirs.DesktopOs.WINDOWS,
-            env = mapOf(
-                "APPDATA" to "C:\\Roaming",
-                "LOCALAPPDATA" to "C:\\Users\\T\\AppData\\Local",
-            ),
-            home = home,
-        )
+        val dirs =
+            AppDirs.resolve(
+                AppDirs.DesktopOs.WINDOWS,
+                env =
+                    mapOf(
+                        "APPDATA" to "C:\\Roaming",
+                        "LOCALAPPDATA" to "C:\\Users\\T\\AppData\\Local",
+                    ),
+                home = home,
+            )
         assertTrue(!norm(dirs.data).contains("Roaming"))
     }
 
     @Test
     fun `windows falls back to the known-folder lookup when LOCALAPPDATA is missing`() {
-        val dirs = AppDirs.resolve(
-            AppDirs.DesktopOs.WINDOWS,
-            env = emptyMap(),
-            home = home,
-            windowsLocalAppData = { Path.of("D:\\Known\\Local") },
-        )
+        val dirs =
+            AppDirs.resolve(
+                AppDirs.DesktopOs.WINDOWS,
+                env = emptyMap(),
+                home = home,
+                windowsLocalAppData = { Path.of("D:\\Known\\Local") },
+            )
         assertEquals("D:/Known/Local/Neutrodyne", norm(dirs.data))
     }
 
     @Test
     fun `windows falls back when LOCALAPPDATA is relative`() {
-        val dirs = AppDirs.resolve(
-            AppDirs.DesktopOs.WINDOWS,
-            env = mapOf("LOCALAPPDATA" to "not\\absolute"),
-            home = home,
-            windowsLocalAppData = { Path.of("D:\\Known\\Local") },
-        )
+        val dirs =
+            AppDirs.resolve(
+                AppDirs.DesktopOs.WINDOWS,
+                env = mapOf("LOCALAPPDATA" to "not\\absolute"),
+                home = home,
+                windowsLocalAppData = { Path.of("D:\\Known\\Local") },
+            )
         assertEquals("D:/Known/Local/Neutrodyne", norm(dirs.data))
     }
 
@@ -100,16 +105,18 @@ class AppDirsTest {
 
     @Test
     fun `linux uses absolute XDG overrides`() {
-        val dirs = AppDirs.resolve(
-            AppDirs.DesktopOs.LINUX,
-            env = mapOf(
-                "XDG_DATA_HOME" to "/xdg/data",
-                "XDG_CONFIG_HOME" to "/xdg/config",
-                "XDG_CACHE_HOME" to "/xdg/cache",
-                "XDG_STATE_HOME" to "/xdg/state",
-            ),
-            home = home,
-        )
+        val dirs =
+            AppDirs.resolve(
+                AppDirs.DesktopOs.LINUX,
+                env =
+                    mapOf(
+                        "XDG_DATA_HOME" to "/xdg/data",
+                        "XDG_CONFIG_HOME" to "/xdg/config",
+                        "XDG_CACHE_HOME" to "/xdg/cache",
+                        "XDG_STATE_HOME" to "/xdg/state",
+                    ),
+                home = home,
+            )
         assertEquals("/xdg/data/neutrodyne", norm(dirs.data))
         assertEquals("/xdg/config/neutrodyne", norm(dirs.config))
         assertEquals("/xdg/cache/neutrodyne", norm(dirs.cache))
@@ -130,11 +137,12 @@ class AppDirsTest {
 
     @Test
     fun `linux ignores relative XDG values`() {
-        val dirs = AppDirs.resolve(
-            AppDirs.DesktopOs.LINUX,
-            env = mapOf("XDG_DATA_HOME" to "relative/path", "XDG_CACHE_HOME" to "also/relative"),
-            home = home,
-        )
+        val dirs =
+            AppDirs.resolve(
+                AppDirs.DesktopOs.LINUX,
+                env = mapOf("XDG_DATA_HOME" to "relative/path", "XDG_CACHE_HOME" to "also/relative"),
+                home = home,
+            )
         assertEquals("/home/tester/.local/share/neutrodyne", norm(dirs.data))
         assertEquals("/home/tester/.cache/neutrodyne", norm(dirs.cache))
     }
@@ -142,20 +150,22 @@ class AppDirsTest {
     @Test
     fun `ensureCreated makes every directory user-only on posix`() {
         val root = Files.createTempDirectory("neutrodyne-test")
-        val dirs = AppDirs(
-            data = root.resolve("data"),
-            config = root.resolve("data"),
-            cache = root.resolve("cache"),
-            state = root.resolve("state"),
-            logs = root.resolve("state").resolve("logs"),
-            downloadsDefault = root.resolve("data").resolve("Downloads"),
-        )
+        val dirs =
+            AppDirs(
+                data = root.resolve("data"),
+                config = root.resolve("data"),
+                cache = root.resolve("cache"),
+                state = root.resolve("state"),
+                logs = root.resolve("state").resolve("logs"),
+                downloadsDefault = root.resolve("data").resolve("Downloads"),
+            )
         dirs.ensureCreated()
         for (dir in setOf(dirs.data, dirs.cache, dirs.state, dirs.logs)) {
             assertTrue(Files.isDirectory(dir), "$dir missing")
             val perms = Files.getPosixFilePermissions(dir)
             assertEquals(
-                java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"),
+                java.nio.file.attribute.PosixFilePermissions
+                    .fromString("rwx------"),
                 perms,
                 "$dir permissions",
             )

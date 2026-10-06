@@ -16,9 +16,10 @@ class LogTest {
     )
 
     private val records = mutableListOf<Recording>()
-    private val sink = LogSink { level, tag, message ->
-        records += Recording(level, tag, message)
-    }
+    private val sink =
+        LogSink { level, tag, message ->
+            records += Recording(level, tag, message)
+        }
 
     @AfterTest
     fun tearDown() = Log.install()

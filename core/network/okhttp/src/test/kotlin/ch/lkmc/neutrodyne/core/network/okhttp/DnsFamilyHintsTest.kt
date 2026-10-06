@@ -4,9 +4,9 @@ package ch.lkmc.neutrodyne.core.network.okhttp
 
 import ch.lkmc.neutrodyne.core.model.IpFamily
 import com.google.common.truth.Truth.assertThat
-import java.net.InetAddress
 import okhttp3.Dns
 import org.junit.Test
+import java.net.InetAddress
 
 class DnsFamilyHintsTest {
     private val v4a = InetAddress.getByName("93.184.216.34")
@@ -76,9 +76,12 @@ class DnsFamilyHintsTest {
 
     @Test
     fun `pinnedToFamily filters every host to the family`() {
-        val base = newNetworkClients().api.newBuilder()
-            .dns(dnsReturning(v4a, v6a))
-            .build()
+        val base =
+            newNetworkClients()
+                .api
+                .newBuilder()
+                .dns(dnsReturning(v4a, v6a))
+                .build()
         val pinned = base.pinnedToFamily(IpFamily.V4)
         assertThat(pinned.dns.lookup("anything.example")).containsExactly(v4a)
         assertThat(base.pinnedToFamily(IpFamily.V6).dns.lookup("anything.example"))

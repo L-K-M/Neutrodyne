@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.ui.root
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -65,14 +66,21 @@ public fun StartupGate(
                     Spacer(Modifier.height(GATE_GAP))
                     NdLoading()
                 }
-                is StartupGateState.Failed -> GateFailed(state.reason, actions)
+
+                is StartupGateState.Failed -> {
+                    GateFailed(state.reason, actions)
+                }
             }
         }
     }
 }
 
+/** Emits into the gate's column, so it extends [ColumnScope] (compose-rules: one emitter per composable). */
 @Composable
-private fun GateFailed(reason: StartupFailure, actions: RootActions) {
+private fun ColumnScope.GateFailed(
+    reason: StartupFailure,
+    actions: RootActions,
+) {
     Text(
         when (reason) {
             StartupFailure.DISK_FULL -> stringResource(Res.string.startup_failed_disk_full)
@@ -85,11 +93,16 @@ private fun GateFailed(reason: StartupFailure, actions: RootActions) {
     Spacer(Modifier.height(GATE_GAP))
     Row(horizontalArrangement = Arrangement.spacedBy(GATE_BUTTON_GAP)) {
         when (reason) {
-            StartupFailure.DISK_FULL -> actions.manageStorage?.let {
-                NdOutlinedButton(label = stringResource(Res.string.manage_storage), onClick = it)
+            StartupFailure.DISK_FULL -> {
+                actions.manageStorage?.let {
+                    NdOutlinedButton(label = stringResource(Res.string.manage_storage), onClick = it)
+                }
             }
-            else -> actions.reportStartupFailure?.let {
-                NdOutlinedButton(label = stringResource(Res.string.send_report), onClick = it)
+
+            else -> {
+                actions.reportStartupFailure?.let {
+                    NdOutlinedButton(label = stringResource(Res.string.send_report), onClick = it)
+                }
             }
         }
         NdButton(label = stringResource(Res.string.try_again), onClick = actions.retryStartup)
@@ -97,9 +110,15 @@ private fun GateFailed(reason: StartupFailure, actions: RootActions) {
 }
 
 // Brand colours straight from 08 Brand assets: amber seed on navy, independent of the scheme.
-private val GATE_NAVY = androidx.compose.ui.graphics.Color(0xFF00192E)
-private val GATE_AMBER = androidx.compose.ui.graphics.Color(0xFFF3881C)
-private val GATE_TEXT = androidx.compose.ui.graphics.Color(0xFFE4F1FF)
+private val GATE_NAVY =
+    androidx.compose.ui.graphics
+        .Color(0xFF00192E)
+private val GATE_AMBER =
+    androidx.compose.ui.graphics
+        .Color(0xFFF3881C)
+private val GATE_TEXT =
+    androidx.compose.ui.graphics
+        .Color(0xFFE4F1FF)
 private const val GATE_BRAND = "N"
 private val GATE_PADDING = 32.dp
 private val GATE_GAP = 24.dp

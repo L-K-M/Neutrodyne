@@ -6,11 +6,11 @@ import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.model.IpFamily
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
+import okhttp3.Dns
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.InetAddress
 import java.util.concurrent.ConcurrentHashMap
-import okhttp3.Dns
 
 /**
  * In-memory `hostSuffix → IpFamily` map for 04's IP-family matching (01 Interceptors): the main
@@ -21,11 +21,13 @@ import okhttp3.Dns
 @SingleIn(AppScope::class)
 @Inject
 class DnsFamilyHints {
-
     private val hints = ConcurrentHashMap<String, IpFamily>()
 
     /** Records [family] for [hostSuffix]; `null` clears the hint. */
-    fun set(hostSuffix: String, family: IpFamily?) {
+    fun set(
+        hostSuffix: String,
+        family: IpFamily?,
+    ) {
         val key = hostSuffix.lowercase().trimStart('.')
         if (family == null) hints.remove(key) else hints[key] = family
     }
@@ -48,8 +50,10 @@ class DnsFamilyHints {
  * `Dns` returning only the A ([IpFamily.V4]) or only the AAAA ([IpFamily.V6]) records for a hinted
  * host, and every record when the hinted family has none or no hint exists (01 Interceptors).
  */
-internal class FamilyHintDns(private val delegate: Dns, private val familyFor: (String) -> IpFamily?) : Dns {
-
+internal class FamilyHintDns(
+    private val delegate: Dns,
+    private val familyFor: (String) -> IpFamily?,
+) : Dns {
     constructor(delegate: Dns, hints: DnsFamilyHints) : this(delegate, hints::familyFor)
 
     override fun lookup(hostname: String): List<InetAddress> {
@@ -59,7 +63,8 @@ internal class FamilyHintDns(private val delegate: Dns, private val familyFor: (
     }
 }
 
-private fun InetAddress.isFamily(family: IpFamily): Boolean = when (family) {
-    IpFamily.V4 -> this is Inet4Address
-    IpFamily.V6 -> this is Inet6Address
-}
+private fun InetAddress.isFamily(family: IpFamily): Boolean =
+    when (family) {
+        IpFamily.V4 -> this is Inet4Address
+        IpFamily.V6 -> this is Inet6Address
+    }

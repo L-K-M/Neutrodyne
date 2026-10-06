@@ -17,10 +17,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
-import kotlinx.coroutines.suspendCancellableCoroutine
 
 /**
  * The Android [PlatformActions] (08 Modules). `MainActivity` calls this in composition so the
@@ -34,9 +34,10 @@ public fun rememberAndroidPlatformActions(): PlatformActions {
     val createFile = remember { PendingResult<Uri?>() }
     val notification = remember { PendingResult<Boolean>() }
 
-    val openLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
-        openFile.complete(it)
-    }
+    val openLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
+            openFile.complete(it)
+        }
     val createLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) {
             createFile.complete(it)
@@ -47,7 +48,15 @@ public fun rememberAndroidPlatformActions(): PlatformActions {
         }
 
     return remember(context, openLauncher, createLauncher, notificationLauncher) {
-        AndroidPlatformActions(context, openFile, createFile, notification, openLauncher, createLauncher, notificationLauncher)
+        AndroidPlatformActions(
+            context,
+            openFile,
+            createFile,
+            notification,
+            openLauncher,
+            createLauncher,
+            notificationLauncher,
+        )
     }
 }
 
@@ -60,59 +69,75 @@ private class AndroidPlatformActions(
     private val createLauncher: ActivityResultLauncher<String>,
     private val notificationLauncher: ActivityResultLauncher<String>,
 ) : PlatformActions {
-    override val urls: ExternalUrlOpener = ExternalUrlOpener { url ->
-        val intent = if (url.startsWith("mailto:")) {
-            Intent(Intent.ACTION_SENDTO, Uri.parse(url))
-        } else {
-            Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                .addCategory(Intent.CATEGORY_BROWSABLE)
-        }
-        try {
-            context.startActivity(intent)
-            OpenResult.OPENED
-        } catch (e: ActivityNotFoundException) {
-            OpenResult.NO_HANDLER
-        }
-    }
-
-    override val share: ShareSheet = object : ShareSheet {
-        override fun shareText(text: String, subject: String?) {
-            val send = Intent(Intent.ACTION_SEND)
-                .setType("text/plain")
-                .putExtra(Intent.EXTRA_TEXT, text)
-                .putExtra(Intent.EXTRA_SUBJECT, subject)
-            context.startActivity(Intent.createChooser(send, null))
+    override val urls: ExternalUrlOpener =
+        ExternalUrlOpener { url ->
+            val intent =
+                if (url.startsWith("mailto:")) {
+                    Intent(Intent.ACTION_SENDTO, Uri.parse(url))
+                } else {
+                    Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                        .addCategory(Intent.CATEGORY_BROWSABLE)
+                }
+            try {
+                context.startActivity(intent)
+                OpenResult.OPENED
+            } catch (e: ActivityNotFoundException) {
+                OpenResult.NO_HANDLER
+            }
         }
 
-        override fun shareFile(uri: String, mimeType: String) {
-            val send = Intent(Intent.ACTION_SEND)
-                .setType(mimeType)
-                .putExtra(Intent.EXTRA_STREAM, Uri.parse(uri))
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            send.clipData = ClipData.newRawUri(null, Uri.parse(uri))
-            context.startActivity(Intent.createChooser(send, null))
-        }
-    }
-
-    override val files: FilePicker = object : FilePicker {
-        override suspend fun pickFile(mimeTypes: List<String>, extensions: List<String>): String? =
-            suspendCancellableCoroutine { cont ->
-                // An empty list means "any type"; OpenDocument still needs at least one MIME type.
-                val types = mimeTypes.ifEmpty { listOf("*/*") }.toTypedArray()
-                openFile.start(cont.contramap { it?.toString() }) { openLauncher.launch(types) }
+    override val share: ShareSheet =
+        object : ShareSheet {
+            override fun shareText(
+                text: String,
+                subject: String?,
+            ) {
+                val send =
+                    Intent(Intent.ACTION_SEND)
+                        .setType("text/plain")
+                        .putExtra(Intent.EXTRA_TEXT, text)
+                        .putExtra(Intent.EXTRA_SUBJECT, subject)
+                context.startActivity(Intent.createChooser(send, null))
             }
 
-        // SAF folder picking is v1.x (08 Platform actions); M0a picks files only.
-        override suspend fun pickFolder(title: String): String? = null
-    }
-
-    override val saver: FileSaver = FileSaver { suggestedName, _ ->
-        // CreateDocument's MIME type is fixed at construction; "*/*" is used and the document's
-        // real type is set by the writer (05's export writes zip/opml content regardless).
-        suspendCancellableCoroutine { cont ->
-            createFile.start(cont.contramap { it?.toString() }) { createLauncher.launch(suggestedName) }
+            override fun shareFile(
+                uri: String,
+                mimeType: String,
+            ) {
+                val send =
+                    Intent(Intent.ACTION_SEND)
+                        .setType(mimeType)
+                        .putExtra(Intent.EXTRA_STREAM, Uri.parse(uri))
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                send.clipData = ClipData.newRawUri(null, Uri.parse(uri))
+                context.startActivity(Intent.createChooser(send, null))
+            }
         }
-    }
+
+    override val files: FilePicker =
+        object : FilePicker {
+            override suspend fun pickFile(
+                mimeTypes: List<String>,
+                extensions: List<String>,
+            ): String? =
+                suspendCancellableCoroutine { cont ->
+                    // An empty list means "any type"; OpenDocument still needs at least one MIME type.
+                    val types = mimeTypes.ifEmpty { listOf("*/*") }.toTypedArray()
+                    openFile.start(cont.contramap { it?.toString() }) { openLauncher.launch(types) }
+                }
+
+            // SAF folder picking is v1.x (08 Platform actions); M0a picks files only.
+            override suspend fun pickFolder(title: String): String? = null
+        }
+
+    override val saver: FileSaver =
+        FileSaver { suggestedName, _ ->
+            // CreateDocument's MIME type is fixed at construction; "*/*" is used and the document's
+            // real type is set by the writer (05's export writes zip/opml content regardless).
+            suspendCancellableCoroutine { cont ->
+                createFile.start(cont.contramap { it?.toString() }) { createLauncher.launch(suggestedName) }
+            }
+        }
 
     // "Show in folder" is a desktop action (08 Modules).
     override val reveal: RevealInFolder? = null
@@ -123,10 +148,11 @@ private class AndroidPlatformActions(
         } else {
             object : NotificationPermissionRequester {
                 override val granted: Boolean
-                    get() = ContextCompat.checkSelfPermission(
-                        context,
-                        Manifest.permission.POST_NOTIFICATIONS,
-                    ) == PackageManager.PERMISSION_GRANTED
+                    get() =
+                        ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.POST_NOTIFICATIONS,
+                        ) == PackageManager.PERMISSION_GRANTED
 
                 override fun request(onResult: (Boolean) -> Unit) {
                     notification.start { granted -> onResult(granted) }
@@ -146,7 +172,10 @@ private const val NOTIFICATION_PERMISSION_SDK = 33
 private class PendingResult<T> {
     private var continuation: Continuation<T>? = null
 
-    fun start(continuation: Continuation<T>, launch: () -> Unit) {
+    fun start(
+        continuation: Continuation<T>,
+        launch: () -> Unit,
+    ) {
         this.continuation?.resumeWithException(kotlinx.coroutines.CancellationException("superseded"))
         this.continuation = continuation
         launch()
@@ -154,9 +183,10 @@ private class PendingResult<T> {
 
     fun start(onResult: (T) -> Unit) {
         continuation?.resumeWithException(kotlinx.coroutines.CancellationException("superseded"))
-        continuation = Continuation(kotlin.coroutines.EmptyCoroutineContext) { result ->
-            result.onSuccess(onResult)
-        }
+        continuation =
+            Continuation(kotlin.coroutines.EmptyCoroutineContext) { result ->
+                result.onSuccess(onResult)
+            }
     }
 
     fun complete(value: T) {

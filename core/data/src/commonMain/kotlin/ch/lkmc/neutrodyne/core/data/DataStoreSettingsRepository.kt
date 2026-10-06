@@ -39,7 +39,10 @@ internal class DataStoreSettingsRepository(
 
     override suspend fun <T : Any> get(key: SettingKey<T>): T = store(key).get(key)
 
-    override suspend fun <T : Any> set(key: SettingKey<T>, value: T): Outcome<Unit, SettingsError> {
+    override suspend fun <T : Any> set(
+        key: SettingKey<T>,
+        value: T,
+    ): Outcome<Unit, SettingsError> {
         if (rejectsValue(key, value)) {
             return Outcome.Failure(SettingsError.OutOfRange(key.name))
         }
@@ -63,20 +66,24 @@ internal class DataStoreSettingsRepository(
         val portableKeys = AllSettingKeys.list.filter { it.file == SettingsFile.PORTABLE }
         if (portableKeys.isEmpty()) return flowOf(emptyMap())
 
-        val values: List<Flow<Pair<String, Any>>> = portableKeys.map { key ->
-            settingsStore.observe(key).map { value -> key.name to value }
-        }
+        val values: List<Flow<Pair<String, Any>>> =
+            portableKeys.map { key ->
+                settingsStore.observe(key).map { value -> key.name to value }
+            }
         return combine(values) { entries -> entries.toMap() }.distinctUntilChanged()
     }
 
-    private fun store(key: SettingKey<*>): SettingStore = when (key.file) {
-        SettingsFile.PORTABLE -> settingsStore
-        SettingsFile.DEVICE -> deviceSettingsStore
-    }
+    private fun store(key: SettingKey<*>): SettingStore =
+        when (key.file) {
+            SettingsFile.PORTABLE -> settingsStore
+            SettingsFile.DEVICE -> deviceSettingsStore
+        }
 
     /** A `Choice` outside its declared values is the one value a key itself forbids. */
-    private fun rejectsValue(key: SettingKey<*>, value: Any): Boolean =
-        key is SettingKey.Choice<*> && key.values.none { it == value }
+    private fun rejectsValue(
+        key: SettingKey<*>,
+        value: Any,
+    ): Boolean = key is SettingKey.Choice<*> && key.values.none { it == value }
 
     private companion object {
         const val LOG_TAG = "Settings"

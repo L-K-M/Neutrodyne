@@ -84,6 +84,7 @@ public fun NdNavigationSuiteScaffold(
                     NavigationSuiteType.WideNavigationRailExpanded,
                     NavigationSuiteType.NavigationRail,
                     -> NdRail(items, selected, onSelect, footer, suiteType)
+
                     else -> NdBar(items, selected, onSelect, suiteType)
                 }
             },
@@ -116,9 +117,10 @@ private fun NdRail(
     suiteType: NavigationSuiteType,
 ) {
     val railExpanded = suiteType == NavigationSuiteType.WideNavigationRailExpanded
-    val railState = rememberWideNavigationRailState(
-        if (railExpanded) WideNavigationRailValue.Expanded else WideNavigationRailValue.Collapsed,
-    )
+    val railState =
+        rememberWideNavigationRailState(
+            if (railExpanded) WideNavigationRailValue.Expanded else WideNavigationRailValue.Collapsed,
+        )
 
     Box(Modifier.fillMaxHeight()) {
         WideNavigationRail(
@@ -214,15 +216,27 @@ private fun suiteInsets(
     return when (suiteType) {
         NavigationSuiteType.ShortNavigationBarCompact,
         NavigationSuiteType.ShortNavigationBarMedium,
-        -> ShortNavigationBarDefaults.windowInsets.only(WindowInsetsSides.Bottom)
+        -> {
+            ShortNavigationBarDefaults.windowInsets.only(WindowInsetsSides.Bottom)
+        }
+
         NavigationSuiteType.WideNavigationRailCollapsed,
         NavigationSuiteType.WideNavigationRailExpanded,
-        -> WideNavigationRailDefaults.windowInsets.only(WindowInsetsSides.Start)
-        NavigationSuiteType.NavigationBar ->
+        -> {
+            WideNavigationRailDefaults.windowInsets.only(WindowInsetsSides.Start)
+        }
+
+        NavigationSuiteType.NavigationBar -> {
             NavigationBarDefaults.windowInsets.only(WindowInsetsSides.Bottom)
-        NavigationSuiteType.NavigationRail ->
+        }
+
+        NavigationSuiteType.NavigationRail -> {
             NavigationRailDefaults.windowInsets.only(WindowInsetsSides.Start)
-        else -> WindowInsets(0, 0, 0, 0)
+        }
+
+        else -> {
+            WindowInsets(0, 0, 0, 0)
+        }
     }
 }
 

@@ -19,15 +19,17 @@ public fun NeutrodyneTheme(
     system: SystemUiState,
     content: @Composable () -> Unit,
 ) {
-    val dark = when (prefs.theme) {
-        ThemeMode.SYSTEM -> system.dark
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-    }
+    val dark =
+        when (prefs.theme) {
+            ThemeMode.SYSTEM -> system.dark
+            ThemeMode.LIGHT -> false
+            ThemeMode.DARK -> true
+        }
 
     // platformDynamicScheme returns null off Android 12+ (or when wallpaper colours are off).
-    val base = (if (prefs.dynamicColor) platformDynamicScheme(dark) else null)
-        ?: BrandColors.scheme(dark, system.contrast)
+    val base =
+        (if (prefs.dynamicColor) platformDynamicScheme(dark) else null)
+            ?: BrandColors.scheme(dark, system.contrast)
     val scheme = if (dark && prefs.pureBlack) base.toPureBlack() else base
 
     CompositionLocalProvider(

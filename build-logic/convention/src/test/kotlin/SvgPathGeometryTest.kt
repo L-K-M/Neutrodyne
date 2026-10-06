@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Unlicense
-import java.awt.geom.AffineTransform
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.awt.geom.AffineTransform
 
 /** Geometry of the parsed silhouette: bounds, the AWT shape, and reproducible `pathData` output. */
 class SvgPathGeometryTest {
@@ -45,12 +45,13 @@ class SvgPathGeometryTest {
     @Test
     fun fittedPathDataCentresTheSilhouetteInTheViewport() {
         val silhouette = SvgPathParser.parse("M0 0 L8 0 L8 8 Z")
-        val data = BrandAssets.fittedPathData(
-            silhouette,
-            FitTarget.BOUNDING_DIAGONAL,
-            targetSize = 4.0 * Math.sqrt(2.0),
-            viewportSize = 16.0,
-        )
+        val data =
+            BrandAssets.fittedPathData(
+                silhouette,
+                FitTarget.BOUNDING_DIAGONAL,
+                targetSize = 4.0 * Math.sqrt(2.0),
+                viewportSize = 16.0,
+            )
 
         // the 8x8 square's diagonal (8*sqrt2) maps to 4*sqrt2, so scale is 0.5 and the box centres at (8, 8)
         assertEquals("M6.00,6.00 L10.00,6.00 L10.00,10.00 Z", data)

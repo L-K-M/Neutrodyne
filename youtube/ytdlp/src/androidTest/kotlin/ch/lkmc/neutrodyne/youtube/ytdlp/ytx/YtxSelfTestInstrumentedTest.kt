@@ -10,15 +10,15 @@ import android.os.Process
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.google.common.truth.Truth.assertThat
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * S7's device check (01 Spikes): `Python.start` plus `selftest` in the `:ytx` process, reached
@@ -31,7 +31,6 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class YtxSelfTestInstrumentedTest {
-
     private lateinit var context: Context
     private var connection: ServiceConnection? = null
 
@@ -65,14 +64,18 @@ class YtxSelfTestInstrumentedTest {
     private fun bind(): IYtxEngine {
         val latch = CountDownLatch(1)
         val binder = AtomicReference<IBinder>()
-        val conn = object : ServiceConnection {
-            override fun onServiceConnected(name: ComponentName, service: IBinder) {
-                binder.set(service)
-                latch.countDown()
-            }
+        val conn =
+            object : ServiceConnection {
+                override fun onServiceConnected(
+                    name: ComponentName,
+                    service: IBinder,
+                ) {
+                    binder.set(service)
+                    latch.countDown()
+                }
 
-            override fun onServiceDisconnected(name: ComponentName) = Unit
-        }
+                override fun onServiceDisconnected(name: ComponentName) = Unit
+            }
         connection = conn
         val bound = context.bindService(Intent(context, YtxService::class.java), conn, Context.BIND_AUTO_CREATE)
         assertTrue("YtxService did not bind", bound)
@@ -80,7 +83,10 @@ class YtxSelfTestInstrumentedTest {
         return IYtxEngine.Stub.asInterface(binder.get())
     }
 
-    private fun call(engine: IYtxEngine, method: String): String {
+    private fun call(
+        engine: IYtxEngine,
+        method: String,
+    ): String {
         val latch = CountDownLatch(1)
         val result = AtomicReference<String>()
         val error = AtomicReference<String>()
@@ -90,12 +96,19 @@ class YtxSelfTestInstrumentedTest {
             "{}",
             System.currentTimeMillis() + CALL_TIMEOUT_MS,
             object : IYtxCallback.Stub() {
-                override fun onResult(callId: Long, resultJson: String) {
+                override fun onResult(
+                    callId: Long,
+                    resultJson: String,
+                ) {
                     result.set(resultJson)
                     latch.countDown()
                 }
 
-                override fun onError(callId: Long, code: String, message: String?) {
+                override fun onError(
+                    callId: Long,
+                    code: String,
+                    message: String?,
+                ) {
                     error.set("$code: $message")
                     latch.countDown()
                 }

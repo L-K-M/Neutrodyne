@@ -8,7 +8,6 @@ import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.composed
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -47,10 +46,12 @@ private const val ALPHA = 0.25f
 public val LocalScrollbars: androidx.compose.runtime.ProvidableCompositionLocal<NdScrollbarStyle?> =
     staticCompositionLocalOf { null }
 
-/** Vertical overlay scrollbar for a `LazyColumn`, drawn only when [LocalScrollbars] is enabled. */
-public fun Modifier.ndScrollbar(state: LazyListState): Modifier = composed {
-    val style = LocalScrollbars.current
-    val thumbColor = scrollbarColor(style)
+/** Vertical overlay scrollbar for a `LazyColumn`, drawn only when [style] is enabled (from [LocalScrollbars]). */
+public fun Modifier.ndScrollbar(
+    state: LazyListState,
+    style: NdScrollbarStyle?,
+    thumbColor: Color,
+): Modifier =
     drawWithContent {
         drawContent()
         if (style == null || !style.enabled) return@drawWithContent
@@ -67,12 +68,13 @@ public fun Modifier.ndScrollbar(state: LazyListState): Modifier = composed {
         val offset = (itemProgress / (total - visible).coerceAtLeast(1)) * travel
         drawThumb(thumbColor, style, viewport, thumb, offset.coerceIn(0f, travel))
     }
-}
 
 /** Vertical overlay scrollbar for a `LazyVerticalGrid`. */
-public fun Modifier.ndScrollbar(state: LazyGridState): Modifier = composed {
-    val style = LocalScrollbars.current
-    val thumbColor = scrollbarColor(style)
+public fun Modifier.ndScrollbar(
+    state: LazyGridState,
+    style: NdScrollbarStyle?,
+    thumbColor: Color,
+): Modifier =
     drawWithContent {
         drawContent()
         if (style == null || !style.enabled) return@drawWithContent
@@ -84,16 +86,18 @@ public fun Modifier.ndScrollbar(state: LazyGridState): Modifier = composed {
         val thumb = (track * visible / total).coerceAtLeast(style.minThumb.toPx())
         val travel = track - thumb
         val first = info.visibleItemsInfo.firstOrNull() ?: return@drawWithContent
-        val itemProgress = first.index + if (first.size.height > 0) -first.offset.y / first.size.height.toFloat() else 0f
+        val itemProgress =
+            first.index + if (first.size.height > 0) -first.offset.y / first.size.height.toFloat() else 0f
         val offset = (itemProgress / (total - visible).coerceAtLeast(1)) * travel
         drawThumb(thumbColor, style, size.height, thumb, offset.coerceIn(0f, travel))
     }
-}
 
 /** Vertical overlay scrollbar for `Modifier.verticalScroll`. */
-public fun Modifier.ndScrollbar(state: ScrollState): Modifier = composed {
-    val style = LocalScrollbars.current
-    val thumbColor = scrollbarColor(style)
+public fun Modifier.ndScrollbar(
+    state: ScrollState,
+    style: NdScrollbarStyle?,
+    thumbColor: Color,
+): Modifier =
     drawWithContent {
         drawContent()
         if (style == null || !style.enabled) return@drawWithContent
@@ -105,10 +109,14 @@ public fun Modifier.ndScrollbar(state: ScrollState): Modifier = composed {
         val offset = (state.value / state.maxValue.toFloat()) * travel
         drawThumb(thumbColor, style, track, thumb, offset.coerceIn(0f, travel))
     }
-}
 
+/**
+ * The thumb colour of [style] in the current theme (25 % `onSurface`), transparent when disabled. Callers pass it
+ * with `LocalScrollbars.current` to `Modifier.ndScrollbar`, which stays a plain draw modifier (compose-rules reject
+ * `composed {}` modifiers).
+ */
 @Composable
-private fun scrollbarColor(style: NdScrollbarStyle?): Color {
+public fun ndScrollbarColor(style: NdScrollbarStyle?): Color {
     if (style == null || !style.enabled) return Color.Transparent
     val base = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
     return base.copy(alpha = style.alpha)

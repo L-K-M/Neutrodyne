@@ -12,5 +12,11 @@ import okhttp3.Response
  */
 object IdentityEncodingInterceptor : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response =
-        chain.proceed(chain.request().newBuilder().header("Accept-Encoding", "identity").build())
+        chain.proceed(
+            chain
+                .request()
+                .newBuilder()
+                .header("Accept-Encoding", "identity")
+                .build(),
+        )
 }

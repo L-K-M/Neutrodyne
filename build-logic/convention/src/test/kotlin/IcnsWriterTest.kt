@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Unlicense
-import java.awt.image.BufferedImage
 import org.junit.Assert.assertEquals
-
 import org.junit.Test
+import java.awt.image.BufferedImage
 
 /** Header and entry bytes of our PNG-compressed ICNS writer (01 Brand-asset generator). */
 class IcnsWriterTest {
@@ -40,7 +39,10 @@ class IcnsWriterTest {
 
     private fun solid(size: Int): BufferedImage = BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB)
 
-    private fun u32(bytes: ByteArray, offset: Int): Int =
+    private fun u32(
+        bytes: ByteArray,
+        offset: Int,
+    ): Int =
         ((bytes[offset].toInt() and 0xFF) shl 24) or
             ((bytes[offset + 1].toInt() and 0xFF) shl 16) or
             ((bytes[offset + 2].toInt() and 0xFF) shl 8) or

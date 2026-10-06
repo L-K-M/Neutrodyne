@@ -21,7 +21,8 @@ import dev.zacsweers.metro.Provides
 public object FeedsNavigation {
     @Provides
     @IntoSet
-    public fun entries(): EntryProviderInstaller = {
-        entry<FeedsKey>(metadata = NdSceneMetadata.paneList()) { FeedsRoute() }
-    }
+    public fun entries(): EntryProviderInstaller =
+        {
+            entry<FeedsKey>(metadata = NdSceneMetadata.paneList()) { FeedsRoute() }
+        }
 }

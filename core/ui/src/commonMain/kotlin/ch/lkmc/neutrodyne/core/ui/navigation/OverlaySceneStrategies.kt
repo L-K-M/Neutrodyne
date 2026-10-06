@@ -30,7 +30,6 @@ private class NdSheetScene<T : Any>(
     override val overlaidEntries: List<NavEntry<T>>,
     private val onBack: () -> Unit,
 ) : OverlayScene<T> {
-
     override val entries: List<NavEntry<T>> = listOf(entry)
 
     override val content: @Composable (() -> Unit) = {
@@ -92,7 +91,6 @@ private class NdDialogScene<T : Any>(
     override val overlaidEntries: List<NavEntry<T>>,
     private val onBack: () -> Unit,
 ) : OverlayScene<T> {
-
     override val entries: List<NavEntry<T>> = listOf(entry)
 
     override val content: @Composable (() -> Unit) = {
@@ -136,5 +134,4 @@ public class NdDialogSceneStrategy<T : Any> : SceneStrategy<T> {
 }
 
 @Composable
-public fun <T : Any> rememberNdDialogSceneStrategy(): NdDialogSceneStrategy<T> =
-    remember { NdDialogSceneStrategy() }
+public fun <T : Any> rememberNdDialogSceneStrategy(): NdDialogSceneStrategy<T> = remember { NdDialogSceneStrategy() }

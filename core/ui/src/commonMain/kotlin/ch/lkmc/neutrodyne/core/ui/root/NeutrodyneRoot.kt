@@ -64,13 +64,13 @@ import ch.lkmc.neutrodyne.core.ui.navigation.NavigationState
 import ch.lkmc.neutrodyne.core.ui.navigation.NeutrodyneNavHost
 import ch.lkmc.neutrodyne.core.ui.navigation.rememberNavigationState
 import ch.lkmc.neutrodyne.core.ui.platform.testTagsAsResourceId
+import ch.lkmc.neutrodyne.core.ui.resolve
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.nav_discover
 import ch.lkmc.neutrodyne.core.ui.resources.nav_downloads
 import ch.lkmc.neutrodyne.core.ui.resources.nav_feeds
 import ch.lkmc.neutrodyne.core.ui.resources.nav_library
 import ch.lkmc.neutrodyne.core.ui.resources.nav_up_next
-import ch.lkmc.neutrodyne.core.ui.resolve
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -106,11 +106,12 @@ public fun NeutrodyneRoot(
     val navigation = rememberNavigationState(initialTab)
     val snackbarHost = remember { SnackbarHostState() }
 
-    val dark = when (prefs.theme) {
-        ThemeMode.SYSTEM -> systemUi.dark
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-    }
+    val dark =
+        when (prefs.theme) {
+            ThemeMode.SYSTEM -> systemUi.dark
+            ThemeMode.LIGHT -> false
+            ThemeMode.DARK -> true
+        }
     PlatformSystemBarAppearance(statusBarAppearanceFor(dark))
 
     NeutrodyneTheme(prefs = prefs, system = systemUi) {
@@ -120,9 +121,13 @@ public fun NeutrodyneRoot(
             LocalSettingsBadge provides state.settingsBadge,
         ) {
             when (val gate = state.startup) {
-                StartupGateState.Pending, is StartupGateState.Failed ->
+                StartupGateState.Pending, is StartupGateState.Failed -> {
                     StartupGate(gate, actions, modifier)
-                else -> ReadyRoot(state, actions, slots, installers, navigation, snackbarHost, platform, modifier)
+                }
+
+                else -> {
+                    ReadyRoot(state, actions, slots, installers, navigation, snackbarHost, platform, modifier)
+                }
             }
         }
     }
@@ -138,26 +143,32 @@ private fun ReadyRoot(
     navigation: NavigationState,
     snackbarHost: SnackbarHostState,
     platform: BuildInfo.Platform,
-    modifier: Modifier,
+    modifier: Modifier = Modifier,
 ) {
     val suiteType = defaultSuiteType()
     val windowInfo = currentWindowAdaptiveInfo(supportLargeAndXLargeWidth = true)
     val density = LocalDensity.current
-    val windowWidthDp = with(density) {
-        LocalWindowInfo.current.containerSize.width.toDp().value.toInt()
-    }
+    val windowWidthDp =
+        with(density) {
+            LocalWindowInfo.current.containerSize.width
+                .toDp()
+                .value
+                .toInt()
+        }
     val navChromeDp = if (isRailSuite(suiteType)) RAIL_WIDTH_DP else 0
-    val layout = ndPaneLayout(
-        windowWidthDp = windowWidthDp,
-        navChromeDp = navChromeDp,
-        hasNowPlaying = state.hasNowPlaying,
-        panelHidden = state.playerPanelHidden,
-    )
+    val layout =
+        ndPaneLayout(
+            windowWidthDp = windowWidthDp,
+            navChromeDp = navChromeDp,
+            hasNowPlaying = state.hasNowPlaying,
+            panelHidden = state.playerPanelHidden,
+        )
     // The pane directive keeps the library's spacing/hinge values; only the partition count is ours.
-    val directive = remember(windowInfo, layout.partitions) {
-        calculatePaneScaffoldDirective(windowInfo, verticalHingePolicy = HingePolicy.AvoidSeparating)
-            .copy(maxHorizontalPartitions = layout.partitions)
-    }
+    val directive =
+        remember(windowInfo, layout.partitions) {
+            calculatePaneScaffoldDirective(windowInfo, verticalHingePolicy = HingePolicy.AvoidSeparating)
+                .copy(maxHorizontalPartitions = layout.partitions)
+        }
     SideEffect { navigation.panePartitions = layout.partitions }
 
     // One startup-recovery snackbar per Recovered instance.
@@ -202,24 +213,25 @@ private fun ReadyRoot(
         LocalMiniPlayerInset provides miniInset,
     ) {
         Box(
-            modifier = modifier
-                .fillMaxSize()
-                .testTagsAsResourceId()
-                .onKeyEvent { event ->
-                    dispatchRootKey(
-                        event = event,
-                        platform = platform,
-                        navigation = navigation,
-                        desktopBack = {
-                            if (eventDispatcher != null && backInput.hasEnabledHandlers) {
-                                backInput.triggerBack()
-                            } else {
-                                navigation.pop()
-                            }
-                        },
-                        dispatch = actions.playbackKey,
-                    )
-                },
+            modifier =
+                modifier
+                    .fillMaxSize()
+                    .testTagsAsResourceId()
+                    .onKeyEvent { event ->
+                        dispatchRootKey(
+                            event = event,
+                            platform = platform,
+                            navigation = navigation,
+                            desktopBack = {
+                                if (eventDispatcher != null && backInput.hasEnabledHandlers) {
+                                    backInput.triggerBack()
+                                } else {
+                                    navigation.pop()
+                                }
+                            },
+                            dispatch = actions.playbackKey,
+                        )
+                    },
         ) {
             NdNavigationSuiteScaffold(
                 items = navItems(),
@@ -233,8 +245,9 @@ private fun ReadyRoot(
                         state = state,
                         actions = actions,
                         navigator = navigation,
-                        onFeedsOrLibrary = navigation.selectedTab == FeedsKey ||
-                            navigation.selectedTab == LibraryKey,
+                        onFeedsOrLibrary =
+                            navigation.selectedTab == FeedsKey ||
+                                navigation.selectedTab == LibraryKey,
                     )
                     Row(Modifier.fillMaxWidth().weight(1f)) {
                         Box(Modifier.weight(1f)) {
@@ -262,64 +275,69 @@ private fun ReadyRoot(
                 ContinueOnThisDeviceCard(
                     remoteSession = card,
                     actions = actions,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = miniInset),
+                    modifier =
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = miniInset),
                 )
             }
 
             SnackbarHost(
                 hostState = snackbarHost,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = miniInset + SNACKBAR_MARGIN),
+                modifier =
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = miniInset + SNACKBAR_MARGIN),
             )
         }
     }
 }
 
 /** Rail suite types take 96 dp off the window's content width (08 Adaptive layouts). */
-private fun isRailSuite(suiteType: NavigationSuiteType): Boolean = when (suiteType) {
-    NavigationSuiteType.WideNavigationRailCollapsed,
-    NavigationSuiteType.WideNavigationRailExpanded,
-    NavigationSuiteType.NavigationRail,
-    -> true
-    else -> false
-}
+private fun isRailSuite(suiteType: NavigationSuiteType): Boolean =
+    when (suiteType) {
+        NavigationSuiteType.WideNavigationRailCollapsed,
+        NavigationSuiteType.WideNavigationRailExpanded,
+        NavigationSuiteType.NavigationRail,
+        -> true
+
+        else -> false
+    }
 
 @Composable
-private fun navItems(): List<NdNavItem> = listOf(
-    NdNavItem(
-        label = stringResource(Res.string.nav_feeds),
-        icon = NdIcons.DynamicFeed,
-        iconSelected = NdIcons.DynamicFeedFilled,
-        testTag = "nav_feeds",
-    ),
-    NdNavItem(
-        label = stringResource(Res.string.nav_library),
-        icon = NdIcons.GridView,
-        iconSelected = NdIcons.GridViewFilled,
-        testTag = "nav_library",
-    ),
-    NdNavItem(
-        label = stringResource(Res.string.nav_up_next),
-        icon = NdIcons.QueueMusic,
-        iconSelected = NdIcons.QueueMusicFilled,
-        testTag = "nav_up_next",
-    ),
-    NdNavItem(
-        label = stringResource(Res.string.nav_downloads),
-        icon = NdIcons.Download,
-        iconSelected = NdIcons.DownloadFilled,
-        testTag = "nav_downloads",
-    ),
-    NdNavItem(
-        label = stringResource(Res.string.nav_discover),
-        icon = NdIcons.Explore,
-        iconSelected = NdIcons.ExploreFilled,
-        testTag = "nav_discover",
-    ),
-)
+private fun navItems(): List<NdNavItem> =
+    listOf(
+        NdNavItem(
+            label = stringResource(Res.string.nav_feeds),
+            icon = NdIcons.DynamicFeed,
+            iconSelected = NdIcons.DynamicFeedFilled,
+            testTag = "nav_feeds",
+        ),
+        NdNavItem(
+            label = stringResource(Res.string.nav_library),
+            icon = NdIcons.GridView,
+            iconSelected = NdIcons.GridViewFilled,
+            testTag = "nav_library",
+        ),
+        NdNavItem(
+            label = stringResource(Res.string.nav_up_next),
+            icon = NdIcons.QueueMusic,
+            iconSelected = NdIcons.QueueMusicFilled,
+            testTag = "nav_up_next",
+        ),
+        NdNavItem(
+            label = stringResource(Res.string.nav_downloads),
+            icon = NdIcons.Download,
+            iconSelected = NdIcons.DownloadFilled,
+            testTag = "nav_downloads",
+        ),
+        NdNavItem(
+            label = stringResource(Res.string.nav_discover),
+            icon = NdIcons.Explore,
+            iconSelected = NdIcons.ExploreFilled,
+            testTag = "nav_discover",
+        ),
+    )
 
 /**
  * The root key chords (08 Keyboard and mouse): the bubbling phase — after the focused element —
@@ -343,27 +361,64 @@ private fun dispatchRootKey(
 
     if (event.key == Key.Escape && desktop && !ctrl && !shift) return desktopBack()
 
-    val key: PlaybackKey = when {
-        event.key == Key.Spacebar && !ctrl && !shift -> PlaybackKey.TOGGLE
+    val key: PlaybackKey =
+        when {
+            event.key == Key.Spacebar && !ctrl && !shift -> {
+                PlaybackKey.TOGGLE
+            }
 
-        event.key == Key.DirectionLeft && ctrl && shift && desktop -> PlaybackKey.PREVIOUS_EPISODE
-        event.key == Key.DirectionRight && ctrl && shift && desktop -> PlaybackKey.NEXT_EPISODE
-        event.key == Key.DirectionLeft && shift && desktop -> PlaybackKey.PREVIOUS_CHAPTER
-        event.key == Key.DirectionRight && shift && desktop -> PlaybackKey.NEXT_CHAPTER
-        event.key == Key.DirectionLeft && ctrl -> PlaybackKey.SKIP_BACK
-        event.key == Key.DirectionRight && ctrl -> PlaybackKey.SKIP_FORWARD
-        event.key == Key.DirectionUp && ctrl && desktop -> PlaybackKey.VOLUME_UP
-        event.key == Key.DirectionDown && ctrl && desktop -> PlaybackKey.VOLUME_DOWN
-        event.key == Key.DirectionLeft && desktop -> PlaybackKey.SKIP_BACK
-        event.key == Key.DirectionRight && desktop -> PlaybackKey.SKIP_FORWARD
+            event.key == Key.DirectionLeft && ctrl && shift && desktop -> {
+                PlaybackKey.PREVIOUS_EPISODE
+            }
 
-        event.key == Key.Tab && ctrl && shift && navigation.selectedTab == FeedsKey ->
-            PlaybackKey.PREVIOUS_FEED_PAGE
-        event.key == Key.Tab && ctrl && navigation.selectedTab == FeedsKey ->
-            PlaybackKey.NEXT_FEED_PAGE
+            event.key == Key.DirectionRight && ctrl && shift && desktop -> {
+                PlaybackKey.NEXT_EPISODE
+            }
 
-        else -> return false
-    }
+            event.key == Key.DirectionLeft && shift && desktop -> {
+                PlaybackKey.PREVIOUS_CHAPTER
+            }
+
+            event.key == Key.DirectionRight && shift && desktop -> {
+                PlaybackKey.NEXT_CHAPTER
+            }
+
+            event.key == Key.DirectionLeft && ctrl -> {
+                PlaybackKey.SKIP_BACK
+            }
+
+            event.key == Key.DirectionRight && ctrl -> {
+                PlaybackKey.SKIP_FORWARD
+            }
+
+            event.key == Key.DirectionUp && ctrl && desktop -> {
+                PlaybackKey.VOLUME_UP
+            }
+
+            event.key == Key.DirectionDown && ctrl && desktop -> {
+                PlaybackKey.VOLUME_DOWN
+            }
+
+            event.key == Key.DirectionLeft && desktop -> {
+                PlaybackKey.SKIP_BACK
+            }
+
+            event.key == Key.DirectionRight && desktop -> {
+                PlaybackKey.SKIP_FORWARD
+            }
+
+            event.key == Key.Tab && ctrl && shift && navigation.selectedTab == FeedsKey -> {
+                PlaybackKey.PREVIOUS_FEED_PAGE
+            }
+
+            event.key == Key.Tab && ctrl && navigation.selectedTab == FeedsKey -> {
+                PlaybackKey.NEXT_FEED_PAGE
+            }
+
+            else -> {
+                return false
+            }
+        }
     return dispatch(key)
 }
 

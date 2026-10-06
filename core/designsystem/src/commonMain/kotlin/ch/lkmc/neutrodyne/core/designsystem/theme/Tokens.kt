@@ -4,8 +4,8 @@ package ch.lkmc.neutrodyne.core.designsystem.theme
 
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.FiniteAnimationSpec
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Shapes
@@ -26,13 +26,14 @@ public object NeutrodyneShapes {
     public val PlayerArt: RoundedCornerShape = RoundedCornerShape(24.dp)
     public val Sheet: RoundedCornerShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
 
-    public val material: Shapes = Shapes(
-        extraSmall = RoundedCornerShape(4.dp),
-        small = Thumbnail,
-        medium = Tile,
-        large = RoundedCornerShape(16.dp),
-        extraLarge = PlayerArt,
-    )
+    public val material: Shapes =
+        Shapes(
+            extraSmall = RoundedCornerShape(4.dp),
+            small = Thumbnail,
+            medium = Tile,
+            large = RoundedCornerShape(16.dp),
+            extraLarge = PlayerArt,
+        )
 }
 
 /** The M3 default type scale on the platform font; a brand typeface only if PO-17 asks (08 Tokens). */
@@ -53,22 +54,18 @@ public object NeutrodyneMotion {
     /** 200 ms tween for fades, tints and state layers. */
     @Composable
     @ReadOnlyComposable
-    public fun <T> effects(): FiniteAnimationSpec<T> =
-        if (LocalReducedMotion.current) snap() else tween(200)
+    public fun <T> effects(): FiniteAnimationSpec<T> = if (LocalReducedMotion.current) snap() else tween(200)
 
     /** 400 ms tween for emphasized transitions. */
     @Composable
     @ReadOnlyComposable
-    public fun <T> emphasized(): FiniteAnimationSpec<T> =
-        if (LocalReducedMotion.current) snap() else tween(400)
+    public fun <T> emphasized(): FiniteAnimationSpec<T> = if (LocalReducedMotion.current) snap() else tween(400)
 
     /** Non-composable variants for scopes without composition (physics values, draw code). */
     public fun <T> spatial(reducedMotion: Boolean): FiniteAnimationSpec<T> =
         if (reducedMotion) snap() else spring(dampingRatio = 0.8f, stiffness = 380f)
 
-    public fun <T> effects(reducedMotion: Boolean): AnimationSpec<T> =
-        if (reducedMotion) snap() else tween(200)
+    public fun <T> effects(reducedMotion: Boolean): AnimationSpec<T> = if (reducedMotion) snap() else tween(200)
 
-    public fun <T> emphasized(reducedMotion: Boolean): AnimationSpec<T> =
-        if (reducedMotion) snap() else tween(400)
+    public fun <T> emphasized(reducedMotion: Boolean): AnimationSpec<T> = if (reducedMotion) snap() else tween(400)
 }

@@ -8,7 +8,11 @@ package ch.lkmc.neutrodyne.core.common
  * Constructed by `Origin.of(url)` inside `:core:network:okhttp` — keep construction there so the
  * lowercase/port-default rules live next to the client islands.
  */
-data class Origin(val scheme: String, val host: String, val port: Int) {
+data class Origin(
+    val scheme: String,
+    val host: String,
+    val port: Int,
+) {
     companion object
 }
 

@@ -188,12 +188,18 @@ internal object PythonLicencePolicy {
             val targetOrigin = "maven:com.chaquo.python:target:$expectedTargetRuntime"
             val cpython = lock.components.find { it.name == "CPython" }
             when {
-                cpython == null ->
+                cpython == null -> {
                     problems += "lockfile has no CPython component to match $targetOrigin"
-                cpython.version != runtimeVersion ->
-                    problems += "component CPython version ${cpython.version} but the packaged runtime is $runtimeVersion"
-                cpython.origin != targetOrigin ->
+                }
+
+                cpython.version != runtimeVersion -> {
+                    problems +=
+                        "component CPython version ${cpython.version} but the packaged runtime is $runtimeVersion"
+                }
+
+                cpython.origin != targetOrigin -> {
                     problems += "component CPython origin ${cpython.origin} but the packaged runtime is $targetOrigin"
+                }
             }
             for (c in lock.components) {
                 val origin = c.origin ?: continue

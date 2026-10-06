@@ -11,6 +11,7 @@ package ch.lkmc.neutrodyne.core.common
  */
 interface DesktopNotifier {
     suspend fun post(n: DesktopNotification)
+
     fun cancel(id: String)
 }
 
@@ -27,5 +28,10 @@ data class DesktopNotification(
 )
 
 enum class NotificationKind {
-    NEW_EPISODES, DOWNLOAD_FAILED, STORAGE_FULL, APP_UPDATE, ENGINE_ALERT, SYNC_HELD,
+    NEW_EPISODES,
+    DOWNLOAD_FAILED,
+    STORAGE_FULL,
+    APP_UPDATE,
+    ENGINE_ALERT,
+    SYNC_HELD,
 }

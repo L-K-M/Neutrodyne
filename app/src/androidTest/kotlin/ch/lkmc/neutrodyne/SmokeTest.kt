@@ -80,12 +80,13 @@ class SmokeTest {
     private companion object {
         const val TAG_FEEDS = "nav_feeds"
 
-        val DESTINATIONS = listOf(
-            TAG_FEEDS to Res.string.nav_feeds,
-            "nav_library" to Res.string.nav_library,
-            "nav_up_next" to Res.string.nav_up_next,
-            "nav_downloads" to Res.string.nav_downloads,
-            "nav_discover" to Res.string.nav_discover,
-        )
+        val DESTINATIONS =
+            listOf(
+                TAG_FEEDS to Res.string.nav_feeds,
+                "nav_library" to Res.string.nav_library,
+                "nav_up_next" to Res.string.nav_up_next,
+                "nav_downloads" to Res.string.nav_downloads,
+                "nav_discover" to Res.string.nav_discover,
+            )
     }
 }

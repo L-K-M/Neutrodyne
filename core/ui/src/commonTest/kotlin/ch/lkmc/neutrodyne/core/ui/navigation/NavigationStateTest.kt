@@ -25,7 +25,6 @@ import kotlin.test.assertTrue
  * root back returns to Feeds, Feeds root back returns false.
  */
 class NavigationStateTest {
-
     private fun state(initial: TopLevelKey = FeedsKey): NavigationState {
         val stacks = TOP_LEVEL_TABS.associateWith { tab -> NavBackStack<NavKey>().apply { add(tab) } }
         return NavigationState(stacks, mutableStateOf(initial))

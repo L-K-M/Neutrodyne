@@ -11,5 +11,7 @@ sealed interface SettingsError {
     data object WriteFailed : SettingsError
 
     /** The value was rejected by the key's own validator (for example a `Choice` not in its values). */
-    data class OutOfRange(val key: String) : SettingsError
+    data class OutOfRange(
+        val key: String,
+    ) : SettingsError
 }

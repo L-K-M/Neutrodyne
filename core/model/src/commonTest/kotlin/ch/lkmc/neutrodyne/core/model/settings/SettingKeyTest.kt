@@ -2,11 +2,11 @@
 
 package ch.lkmc.neutrodyne.core.model.settings
 
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.persistentSetOf
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import kotlinx.collections.immutable.persistentListOf
-import kotlinx.collections.immutable.persistentSetOf
 
 /**
  * Registry rules from 01 DataStore files and typed setting keys. `AllSettingKeys.list` is empty in
@@ -89,12 +89,13 @@ class SettingKeyTest {
 
     @Test
     fun `choice falls back to its default for unknown stored names`() {
-        val key = SettingKey.Choice(
-            "appearance.theme",
-            Theme.SYSTEM,
-            persistentListOf(Theme.LIGHT, Theme.DARK, Theme.SYSTEM),
-            synced = true,
-        )
+        val key =
+            SettingKey.Choice(
+                "appearance.theme",
+                Theme.SYSTEM,
+                persistentListOf(Theme.LIGHT, Theme.DARK, Theme.SYSTEM),
+                synced = true,
+            )
 
         assertEquals(Theme.DARK, key.fromStored("DARK"))
         assertEquals(Theme.SYSTEM, key.fromStored("MISSING"))
@@ -118,11 +119,12 @@ class SettingKeyTest {
 
     @Test
     fun `text set defaults are immutable`() {
-        val key = SettingKey.TextSet(
-            "groups.expanded",
-            persistentSetOf("news"),
-            SettingsFile.DEVICE,
-        )
+        val key =
+            SettingKey.TextSet(
+                "groups.expanded",
+                persistentSetOf("news"),
+                SettingsFile.DEVICE,
+            )
         assertEquals(setOf("news"), key.default)
     }
 }

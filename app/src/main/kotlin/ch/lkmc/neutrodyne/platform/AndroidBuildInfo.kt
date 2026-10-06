@@ -28,7 +28,11 @@ internal object AndroidBuildInfo {
             engineManifestUrl = BuildConfig.ENGINE_MANIFEST_URL,
             youTubeEngineBundled = BuildConfig.YOUTUBE_ENGINE && is64Bit,
             apkAbi = abi,
-            shippedLocales = BuildConfig.SHIPPED_LOCALES.split(',').filter { it.isNotBlank() }.toImmutableList(),
+            shippedLocales =
+                BuildConfig.SHIPPED_LOCALES
+                    .split(',')
+                    .filter { it.isNotBlank() }
+                    .toImmutableList(),
             podcastIndexKey = BuildConfig.PODCASTINDEX_KEY,
             podcastIndexSecret = BuildConfig.PODCASTINDEX_SECRET,
         )

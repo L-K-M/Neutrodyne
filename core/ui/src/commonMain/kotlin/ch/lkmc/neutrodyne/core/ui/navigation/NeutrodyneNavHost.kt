@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.ui.navigation
 
+import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.layout.PaneScaffoldDirective
 import androidx.compose.material3.adaptive.navigation3.ListDetailSceneStrategy
@@ -18,7 +19,6 @@ import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberDecoratedNavEntries
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
-import androidx.compose.animation.SharedTransitionLayout
 import androidx.navigation3.ui.NavDisplay
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.LocalNavTab
@@ -40,22 +40,24 @@ public fun NeutrodyneNavHost(
     directive: PaneScaffoldDirective,
     modifier: Modifier = Modifier,
 ) {
-    val provider = remember(installers) {
-        entryProvider<NavKey> {
-            installers.forEach { install -> install() }
+    val provider =
+        remember(installers) {
+            entryProvider<NavKey> {
+                installers.forEach { install -> install() }
+            }
         }
-    }
 
     val decoratedByTab: Map<TopLevelKey, List<NavEntry<NavKey>>> =
         state.tabs.associateWith { tab ->
             key(tab) {
                 rememberDecoratedNavEntries(
                     backStack = state.stack(tab),
-                    entryDecorators = listOf(
-                        rememberSaveableStateHolderNavEntryDecorator(),
-                        rememberViewModelStoreNavEntryDecorator(),
-                        rememberTabLocalNavEntryDecorator(tab),
-                    ),
+                    entryDecorators =
+                        listOf(
+                            rememberSaveableStateHolderNavEntryDecorator(),
+                            rememberViewModelStoreNavEntryDecorator(),
+                            rememberTabLocalNavEntryDecorator(tab),
+                        ),
                     entryProvider = { key -> withPaneRole(key, provider(key), tab) },
                 )
             }
@@ -68,11 +70,12 @@ public fun NeutrodyneNavHost(
             entries = entries,
             modifier = modifier,
             onBack = { state.pop() },
-            sceneStrategies = listOf(
-                rememberNdBottomSheetSceneStrategy(),
-                rememberNdDialogSceneStrategy(),
-                rememberListDetailSceneStrategy(directive = directive),
-            ),
+            sceneStrategies =
+                listOf(
+                    rememberNdBottomSheetSceneStrategy(),
+                    rememberNdDialogSceneStrategy(),
+                    rememberListDetailSceneStrategy(directive = directive),
+                ),
             sharedTransitionScope = this,
         )
     }
@@ -83,15 +86,14 @@ public fun NeutrodyneNavHost(
  * the same podcast under Feeds know which stack they belong to (shared-element keys include it).
  */
 @Composable
-public fun rememberTabLocalNavEntryDecorator(
-    tab: TopLevelKey,
-): NavEntryDecorator<NavKey> = remember(tab) {
-    NavEntryDecorator { entry ->
-        CompositionLocalProvider(LocalNavTab provides tab) {
-            entry.Content()
+public fun rememberTabLocalNavEntryDecorator(tab: TopLevelKey): NavEntryDecorator<NavKey> =
+    remember(tab) {
+        NavEntryDecorator { entry ->
+            CompositionLocalProvider(LocalNavTab provides tab) {
+                entry.Content()
+            }
         }
     }
-}
 
 /**
  * Translates our platform-neutral [NdSceneMetadata.KEY_PANE] marker into
@@ -104,17 +106,27 @@ private fun withPaneRole(
     tab: TopLevelKey,
 ): NavEntry<NavKey> {
     val role = entry.metadata[NdSceneMetadata.KEY_PANE] as? String ?: return entry
-    val placeholder = entry.metadata[NdSceneMetadata.KEY_DETAIL_PLACEHOLDER]
-        as? (@Composable () -> Unit)
-    val pane: Map<String, Any> = when (role) {
-        NdSceneMetadata.PANE_LIST -> if (placeholder != null) {
-            ListDetailSceneStrategy.listPane(sceneKey = tab, detailPlaceholder = { placeholder() })
-        } else {
-            ListDetailSceneStrategy.listPane(sceneKey = tab)
+    val placeholder =
+        entry.metadata[NdSceneMetadata.KEY_DETAIL_PLACEHOLDER]
+            as? (@Composable () -> Unit)
+    val pane: Map<String, Any> =
+        when (role) {
+            NdSceneMetadata.PANE_LIST -> {
+                if (placeholder != null) {
+                    ListDetailSceneStrategy.listPane(sceneKey = tab, detailPlaceholder = { placeholder() })
+                } else {
+                    ListDetailSceneStrategy.listPane(sceneKey = tab)
+                }
+            }
+
+            NdSceneMetadata.PANE_DETAIL -> {
+                ListDetailSceneStrategy.detailPane(sceneKey = tab)
+            }
+
+            else -> {
+                ListDetailSceneStrategy.extraPane(sceneKey = tab)
+            }
         }
-        NdSceneMetadata.PANE_DETAIL -> ListDetailSceneStrategy.detailPane(sceneKey = tab)
-        else -> ListDetailSceneStrategy.extraPane(sceneKey = tab)
-    }
     return NavEntry(
         key = key,
         contentKey = entry.contentKey,

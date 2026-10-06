@@ -21,7 +21,8 @@ import dev.zacsweers.metro.Provides
 public object LibraryNavigation {
     @Provides
     @IntoSet
-    public fun entries(): EntryProviderInstaller = {
-        entry<LibraryKey>(metadata = NdSceneMetadata.paneList()) { LibraryRoute() }
-    }
+    public fun entries(): EntryProviderInstaller =
+        {
+            entry<LibraryKey>(metadata = NdSceneMetadata.paneList()) { LibraryRoute() }
+        }
 }

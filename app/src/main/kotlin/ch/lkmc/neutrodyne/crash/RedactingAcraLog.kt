@@ -13,50 +13,114 @@ import org.acra.log.ACRALog
 internal object RedactingAcraLog : ACRALog {
     private const val LOGGED = 0
 
-    override fun v(tag: String, msg: String): Int = debug(tag, msg, null)
+    override fun v(
+        tag: String,
+        msg: String,
+    ): Int = debug(tag, msg, null)
 
-    override fun v(tag: String, msg: String, tr: Throwable): Int = debug(tag, msg, tr)
+    override fun v(
+        tag: String,
+        msg: String,
+        tr: Throwable,
+    ): Int = debug(tag, msg, tr)
 
-    override fun d(tag: String, msg: String): Int = debug(tag, msg, null)
+    override fun d(
+        tag: String,
+        msg: String,
+    ): Int = debug(tag, msg, null)
 
-    override fun d(tag: String, msg: String, tr: Throwable): Int = debug(tag, msg, tr)
+    override fun d(
+        tag: String,
+        msg: String,
+        tr: Throwable,
+    ): Int = debug(tag, msg, tr)
 
-    override fun i(tag: String, msg: String): Int = info(tag, msg, null)
+    override fun i(
+        tag: String,
+        msg: String,
+    ): Int = info(tag, msg, null)
 
-    override fun i(tag: String, msg: String, tr: Throwable): Int = info(tag, msg, tr)
+    override fun i(
+        tag: String,
+        msg: String,
+        tr: Throwable,
+    ): Int = info(tag, msg, tr)
 
-    override fun w(tag: String, msg: String): Int = warn(tag, msg, null)
+    override fun w(
+        tag: String,
+        msg: String,
+    ): Int = warn(tag, msg, null)
 
-    override fun w(tag: String, msg: String, tr: Throwable): Int = warn(tag, msg, tr)
+    override fun w(
+        tag: String,
+        msg: String,
+        tr: Throwable,
+    ): Int = warn(tag, msg, tr)
 
-    override fun w(tag: String, tr: Throwable): Int = warn(tag, "", tr)
+    override fun w(
+        tag: String,
+        tr: Throwable,
+    ): Int = warn(tag, "", tr)
 
-    override fun e(tag: String, msg: String): Int = error(tag, msg, null)
+    override fun e(
+        tag: String,
+        msg: String,
+    ): Int = error(tag, msg, null)
 
-    override fun e(tag: String, msg: String, tr: Throwable): Int = error(tag, msg, tr)
+    override fun e(
+        tag: String,
+        msg: String,
+        tr: Throwable,
+    ): Int = error(tag, msg, tr)
 
     override fun getStackTraceString(tr: Throwable): String = Redactor.text(tr.stackTraceToString())
 
-    private fun debug(tag: String, msg: String, tr: Throwable?): Int {
+    private fun debug(
+        tag: String,
+        msg: String,
+        tr: Throwable?,
+    ): Int {
         Log.d(tag) { withStack(msg, tr) }
         return LOGGED
     }
 
-    private fun info(tag: String, msg: String, tr: Throwable?): Int {
+    private fun info(
+        tag: String,
+        msg: String,
+        tr: Throwable?,
+    ): Int {
         Log.i(tag) { withStack(msg, tr) }
         return LOGGED
     }
 
-    private fun warn(tag: String, msg: String, tr: Throwable?): Int {
+    private fun warn(
+        tag: String,
+        msg: String,
+        tr: Throwable?,
+    ): Int {
         Log.w(tag, tr) { msg }
         return LOGGED
     }
 
-    private fun error(tag: String, msg: String, tr: Throwable?): Int {
+    private fun error(
+        tag: String,
+        msg: String,
+        tr: Throwable?,
+    ): Int {
         Log.e(tag, tr) { msg }
         return LOGGED
     }
 
     /** Debug and info calls have no throwable slot in [Log]; the stack is appended to the text (redacted there). */
-    private fun withStack(msg: String, tr: Throwable?): String = if (tr == null) msg else msg + "\n" + tr.stackTraceToString()
+    private fun withStack(
+        msg: String,
+        tr: Throwable?,
+    ): String =
+        if (tr ==
+            null
+        ) {
+            msg
+        } else {
+            msg + "\n" + tr.stackTraceToString()
+        }
 }

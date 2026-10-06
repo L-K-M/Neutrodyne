@@ -23,10 +23,14 @@ public sealed interface StartupGateState {
     public data object Ready : StartupGateState
 
     /** The database was repaired or restored while opening; the gate opens once and [cause] shows once. */
-    public data class Recovered(val cause: UiText) : StartupGateState
+    public data class Recovered(
+        val cause: UiText,
+    ) : StartupGateState
 
     /** Opening failed; the gate keeps the error variant and "Try again" re-runs `awaitOpen()`. */
-    public data class Failed(val reason: StartupFailure) : StartupGateState
+    public data class Failed(
+        val reason: StartupFailure,
+    ) : StartupGateState
 }
 
 /** The failure kinds the gate can word (02 `DatabaseOpenException.Reason`, mapped by the shell). */
@@ -157,12 +161,13 @@ public data class RootUiState(
 ) {
     public companion object {
         /** A ready gate with no badge or notices; the M0a default and the tests' base. */
-        public val READY: RootUiState = RootUiState(
-            startup = StartupGateState.Ready,
-            settingsBadge = false,
-            notice = null,
-            heldChanges = null,
-            remoteSession = null,
-        )
+        public val READY: RootUiState =
+            RootUiState(
+                startup = StartupGateState.Ready,
+                settingsBadge = false,
+                notice = null,
+                heldChanges = null,
+                remoteSession = null,
+            )
     }
 }

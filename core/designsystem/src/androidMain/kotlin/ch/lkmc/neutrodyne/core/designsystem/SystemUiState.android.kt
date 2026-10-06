@@ -32,11 +32,12 @@ public fun rememberAndroidSystemUiState(): SystemUiState {
     var reducedMotion by remember { mutableStateOf(readAnimatorOff(context)) }
     DisposableEffect(context) {
         val uri: Uri = Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE)
-        val observer = object : ContentObserver(null) {
-            override fun onChange(selfChange: Boolean) {
-                reducedMotion = readAnimatorOff(context)
+        val observer =
+            object : ContentObserver(null) {
+                override fun onChange(selfChange: Boolean) {
+                    reducedMotion = readAnimatorOff(context)
+                }
             }
-        }
         context.contentResolver.registerContentObserver(uri, false, observer)
         onDispose { context.contentResolver.unregisterContentObserver(observer) }
     }

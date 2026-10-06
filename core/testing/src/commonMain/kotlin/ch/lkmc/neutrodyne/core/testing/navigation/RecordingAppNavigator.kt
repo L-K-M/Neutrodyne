@@ -12,17 +12,28 @@ import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
  */
 public class RecordingAppNavigator : AppNavigator {
     public sealed interface Call {
-        public data class Push(val key: NavKey) : Call
+        public data class Push(
+            val key: NavKey,
+        ) : Call
 
-        public data class SelectTab(val key: TopLevelKey) : Call
+        public data class SelectTab(
+            val key: TopLevelKey,
+        ) : Call
 
         public data object Pop : Call
 
-        public data class ResetTab(val key: TopLevelKey) : Call
+        public data class ResetTab(
+            val key: TopLevelKey,
+        ) : Call
 
-        public data class Open(val tab: TopLevelKey, val stack: List<NavKey>) : Call
+        public data class Open(
+            val tab: TopLevelKey,
+            val stack: List<NavKey>,
+        ) : Call
 
-        public data class PushDetail(val key: NavKey) : Call
+        public data class PushDetail(
+            val key: NavKey,
+        ) : Call
     }
 
     public val calls: MutableList<Call> = mutableListOf()
@@ -47,7 +58,10 @@ public class RecordingAppNavigator : AppNavigator {
         calls += Call.ResetTab(key)
     }
 
-    override fun open(tab: TopLevelKey, stack: List<NavKey>) {
+    override fun open(
+        tab: TopLevelKey,
+        stack: List<NavKey>,
+    ) {
         calls += Call.Open(tab, stack)
     }
 

@@ -21,7 +21,8 @@ import dev.zacsweers.metro.Provides
 public object DownloadsNavigation {
     @Provides
     @IntoSet
-    public fun entries(): EntryProviderInstaller = {
-        entry<DownloadsKey>(metadata = NdSceneMetadata.paneList()) { DownloadsRoute() }
-    }
+    public fun entries(): EntryProviderInstaller =
+        {
+            entry<DownloadsKey>(metadata = NdSceneMetadata.paneList()) { DownloadsRoute() }
+        }
 }

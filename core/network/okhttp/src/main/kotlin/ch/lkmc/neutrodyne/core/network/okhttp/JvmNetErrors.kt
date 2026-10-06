@@ -25,7 +25,6 @@ import kotlin.coroutines.cancellation.CancellationException
  * deadline expired.
  */
 object JvmNetErrors {
-
     /** Max cause-chain hops — enough for real chains, immune to a cyclic `cause`. */
     private const val MAX_CAUSE_DEPTH = 32
 
@@ -35,13 +34,17 @@ object JvmNetErrors {
      * `SocketTimeoutException` subclasses `java.net.SocketTimeoutException`, so they must match
      * by name **before** the socket rows below.
      */
-    private val ktorTimeoutNames = setOf(
-        "HttpRequestTimeoutException",
-        "ConnectTimeoutException",
-        "SocketTimeoutException",
-    )
+    private val ktorTimeoutNames =
+        setOf(
+            "HttpRequestTimeoutException",
+            "ConnectTimeoutException",
+            "SocketTimeoutException",
+        )
 
-    fun classify(e: Throwable, connected: Boolean): NetError {
+    fun classify(
+        e: Throwable,
+        connected: Boolean,
+    ): NetError {
         if (e is CancellationException) throw e
         var cause: Throwable? = e
         var depth = 0
@@ -55,28 +58,53 @@ object JvmNetErrors {
     }
 
     /** The single-hop classifier; `null` when [cause] is unclassifiable and the walk continues. */
-    private fun classifyOne(cause: Throwable, connected: Boolean): NetError? = when {
-        // Must precede UnknownHostException: it subclasses it.
-        cause is LocalNetworkUnsupportedException -> NetError.LocalNetworkUnsupported
+    private fun classifyOne(
+        cause: Throwable,
+        connected: Boolean,
+    ): NetError? =
+        when {
+            // Must precede UnknownHostException: it subclasses it.
+            cause is LocalNetworkUnsupportedException -> {
+                NetError.LocalNetworkUnsupported
+            }
 
-        cause.javaClass.simpleName in ktorTimeoutNames -> NetError.Timeout
+            cause.javaClass.simpleName in ktorTimeoutNames -> {
+                NetError.Timeout
+            }
 
-        cause is SocketTimeoutException -> NetError.Timeout
-        cause is InterruptedIOException && cause.message?.contains("timeout") == true ->
-            NetError.Timeout
+            cause is SocketTimeoutException -> {
+                NetError.Timeout
+            }
 
-        cause is UnknownHostException -> if (connected) NetError.DnsFailure else NetError.Offline
+            cause is InterruptedIOException && cause.message?.contains("timeout") == true -> {
+                NetError.Timeout
+            }
 
-        // ConnectException and NoRouteToHostException both subclass SocketException.
-        cause is SocketException -> if (connected) NetError.ConnectionFailed else NetError.Offline
+            cause is UnknownHostException -> {
+                if (connected) NetError.DnsFailure else NetError.Offline
+            }
 
-        cause is SSLHandshakeException -> NetError.Tls(tlsKind(cause))
-        cause is SSLException -> NetError.Tls(TlsKind.HANDSHAKE)
+            // ConnectException and NoRouteToHostException both subclass SocketException.
+            cause is SocketException -> {
+                if (connected) NetError.ConnectionFailed else NetError.Offline
+            }
 
-        cause is IOException && cause.message == "Canceled" -> NetError.Cancelled
+            cause is SSLHandshakeException -> {
+                NetError.Tls(tlsKind(cause))
+            }
 
-        else -> null
-    }
+            cause is SSLException -> {
+                NetError.Tls(TlsKind.HANDSHAKE)
+            }
+
+            cause is IOException && cause.message == "Canceled" -> {
+                NetError.Cancelled
+            }
+
+            else -> {
+                null
+            }
+        }
 
     /**
      * Distinguishes the TLS kinds (01): Certificate-Transparency policy failures carry

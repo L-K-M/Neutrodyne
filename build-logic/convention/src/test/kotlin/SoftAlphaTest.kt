@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Unlicense
-import java.awt.Color
-import java.awt.Graphics2D
-import java.awt.image.BufferedImage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.awt.Color
+import java.awt.Graphics2D
+import java.awt.image.BufferedImage
 
 /** The soft-alpha separation against the measured navy (08 Brand assets: divisor 96, cut-off 0.10). */
 class SoftAlphaTest {
@@ -26,7 +26,8 @@ class SoftAlphaTest {
         // an increase of 3 is 0.03125 < 0.10, so the pixel is dropped
         assertTrue(BrandAssets.softAlphaAgainstNavy(3, 25, 46) < BrandAssets.ALPHA_CUTOFF)
         assertTrue(BrandAssets.softAlphaAgainstNavy(0, 25, 56) >= BrandAssets.ALPHA_CUTOFF) // 10/96 >= 0.10
-        assertTrue(BrandAssets.softAlphaAgainstNavy(5, 13, 19) < BrandAssets.ALPHA_CUTOFF) // darker vignette is background
+        // The darker vignette around the mark is background
+        assertTrue(BrandAssets.softAlphaAgainstNavy(5, 13, 19) < BrandAssets.ALPHA_CUTOFF)
     }
 
     @Test

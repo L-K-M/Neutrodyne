@@ -22,8 +22,8 @@ import ch.lkmc.neutrodyne.feature.settings.resources.settings_appearance
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_appearance_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_licences
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_licences_summary
-import ch.lkmc.neutrodyne.feature.settings.resources.Res as SettingsRes
 import org.jetbrains.compose.resources.stringResource
+import ch.lkmc.neutrodyne.feature.settings.resources.Res as SettingsRes
 
 /**
  * The Settings home list (08 Settings screens; M0a shows the three rows whose pages exist).

@@ -21,7 +21,8 @@ import dev.zacsweers.metro.Provides
 public object DiscoverNavigation {
     @Provides
     @IntoSet
-    public fun entries(): EntryProviderInstaller = {
-        entry<DiscoverKey>(metadata = NdSceneMetadata.paneList()) { DiscoverRoute() }
-    }
+    public fun entries(): EntryProviderInstaller =
+        {
+            entry<DiscoverKey>(metadata = NdSceneMetadata.paneList()) { DiscoverRoute() }
+        }
 }

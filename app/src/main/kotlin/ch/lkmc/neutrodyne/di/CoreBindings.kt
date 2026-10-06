@@ -51,10 +51,11 @@ object CoreBindings {
         @Dispatcher(NeutrodyneDispatchers.Default) dispatcher: CoroutineDispatcher,
         buildInfo: BuildInfo,
     ): CoroutineScope {
-        val handler = CoroutineExceptionHandler { _, throwable ->
-            Log.e(TAG, throwable) { "uncaught failure in the application scope" }
-            if (buildInfo.debug) Handler(Looper.getMainLooper()).post { throw throwable }
-        }
+        val handler =
+            CoroutineExceptionHandler { _, throwable ->
+                Log.e(TAG, throwable) { "uncaught failure in the application scope" }
+                if (buildInfo.debug) Handler(Looper.getMainLooper()).post { throw throwable }
+            }
         return CoroutineScope(SupervisorJob() + dispatcher + handler)
     }
 

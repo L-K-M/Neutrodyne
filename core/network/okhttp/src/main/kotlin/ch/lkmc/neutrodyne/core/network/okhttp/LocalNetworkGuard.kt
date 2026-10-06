@@ -8,18 +8,20 @@ import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
-import java.net.InetAddress
-import java.net.UnknownHostException
 import okhttp3.Dns
 import okhttp3.Interceptor
 import okhttp3.Response
+import java.net.InetAddress
+import java.net.UnknownHostException
 
 /**
  * Thrown by the LAN guard for a request or lookup that can only reach a local-network host on
  * Android API 37+ (01 Interceptors). An `UnknownHostException` so callers treat it like DNS
  * failure; `JvmNetErrors` maps it to `NetError.LocalNetworkUnsupported`.
  */
-class LocalNetworkUnsupportedException(host: String) : UnknownHostException(host)
+class LocalNetworkUnsupportedException(
+    host: String,
+) : UnknownHostException(host)
 
 /**
  * Fails fast on LAN hosts on Android API 37+, where the OS would otherwise let connections time
@@ -37,23 +39,27 @@ class LocalNetworkUnsupportedException(host: String) : UnknownHostException(host
  */
 @SingleIn(AppScope::class)
 @Inject
-class LocalNetworkGuard(private val access: LocalNetworkAccess, private val platform: PlatformInfo) {
-
+class LocalNetworkGuard(
+    private val access: LocalNetworkAccess,
+    private val platform: PlatformInfo,
+) {
     /** Which guard behaviour a client gets: [STRICT] for everything, [SYNC] for the sync client. */
     enum class Mode { STRICT, SYNC }
 
     /** The LAN guard engages only on Android API 37+ (`ACCESS_LOCAL_NETWORK`'s platform). */
     val active: Boolean
-        get() = platform.kind == PlatformKind.ANDROID &&
-            (platform.androidSdkInt ?: 0) >= LOCAL_NETWORK_PERMISSION_SDK
+        get() =
+            platform.kind == PlatformKind.ANDROID &&
+                (platform.androidSdkInt ?: 0) >= LOCAL_NETWORK_PERMISSION_SDK
 
     /** The outermost `Dns`: LAN guard first, [inner] (04's `FamilyHintDns`) next. */
-    fun dns(inner: Dns, mode: Mode): Dns =
-        if (active) LocalNetworkGuardDns(inner, mode, access) else inner
+    fun dns(
+        inner: Dns,
+        mode: Mode,
+    ): Dns = if (active) LocalNetworkGuardDns(inner, mode, access) else inner
 
     /** The first application interceptor of every client. */
-    fun interceptor(mode: Mode): Interceptor =
-        if (active) LocalNetworkGuardInterceptor(mode, access) else PASS_THROUGH
+    fun interceptor(mode: Mode): Interceptor = if (active) LocalNetworkGuardInterceptor(mode, access) else PASS_THROUGH
 
     internal companion object {
         /** `Build.VERSION_CODES`-style level at which Android gates LAN traffic (targetSdk 37). */
@@ -124,7 +130,10 @@ private const val IPV4_BYTES = 4
 private const val IPV6_BYTES = 16
 private const val V4_MAPPED_PREFIX_BYTES = 10
 
-private fun isLanV4(b: ByteArray, offset: Int): Boolean {
+private fun isLanV4(
+    b: ByteArray,
+    offset: Int,
+): Boolean {
     val b0 = b[offset].toInt() and 0xFF
     val b1 = b[offset + 1].toInt() and 0xFF
     return b0 == 10 || (b0 == 172 && b1 in 16..31) || (b0 == 192 && b1 == 168) || (b0 == 169 && b1 == 254)
@@ -132,8 +141,9 @@ private fun isLanV4(b: ByteArray, offset: Int): Boolean {
 
 private fun isLanV6(b: ByteArray): Boolean {
     // An IPv4-mapped IPv6 address (::ffff:a.b.c.d) is judged by the mapped IPv4 address.
-    val v4Mapped = (0 until V4_MAPPED_PREFIX_BYTES).all { b[it].toInt() == 0 } &&
-        b[V4_MAPPED_PREFIX_BYTES].toInt() == 0xFF && b[V4_MAPPED_PREFIX_BYTES + 1].toInt() == 0xFF
+    val v4Mapped =
+        (0 until V4_MAPPED_PREFIX_BYTES).all { b[it].toInt() == 0 } &&
+            b[V4_MAPPED_PREFIX_BYTES].toInt() == 0xFF && b[V4_MAPPED_PREFIX_BYTES + 1].toInt() == 0xFF
     if (v4Mapped) return isLanV4(b, V4_MAPPED_PREFIX_BYTES + 2)
 
     val b0 = b[0].toInt() and 0xFF
@@ -149,9 +159,11 @@ private fun isLanV6(b: ByteArray): Boolean {
 private fun parseIpLiteral(host: String): InetAddress? {
     if (':' in host) return runCatching { InetAddress.getByName(host.substringBefore('%')) }.getOrNull()
     val parts = host.split('.')
-    val isV4 = parts.size == IPV4_PARTS && parts.all { part ->
-        part.isNotEmpty() && part.length <= IPV4_PART_DIGITS && part.all(Char::isDigit) && part.toInt() <= 255
-    }
+    val isV4 =
+        parts.size == IPV4_PARTS &&
+            parts.all { part ->
+                part.isNotEmpty() && part.length <= IPV4_PART_DIGITS && part.all(Char::isDigit) && part.toInt() <= 255
+            }
     if (!isV4) return null
     return runCatching { InetAddress.getByName(host) }.getOrNull()
 }

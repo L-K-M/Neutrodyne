@@ -25,36 +25,44 @@ class KtorUserAgentTest {
     private val agent = "Neutrodyne/0.1.0 (Linux; x64; +https://example.com/repo)"
 
     @Test
-    fun `ktor request without a user agent gets the app agent`() = runBlocking {
-        server.enqueue(mockResponse())
-        val clients = newHttpClients()
-        try {
-            clients.client(HttpClientKind.FEED).get(server.url("/").toString()).bodyAsText()
-        } finally {
-            clients.closeAll()
+    fun `ktor request without a user agent gets the app agent`() =
+        runBlocking {
+            server.enqueue(mockResponse())
+            val clients = newHttpClients()
+            try {
+                clients.client(HttpClientKind.FEED).get(server.url("/").toString()).bodyAsText()
+            } finally {
+                clients.closeAll()
+            }
+            assertThat(server.takeRequest().headers["User-Agent"]).isEqualTo(agent)
         }
-        assertThat(server.takeRequest().headers["User-Agent"]).isEqualTo(agent)
-    }
 
     @Test
-    fun `a per-request user agent is left alone by the plugin`() = runBlocking {
-        server.enqueue(mockResponse())
-        val clients = newHttpClients()
-        try {
-            clients.client(HttpClientKind.FEED).get(server.url("/").toString()) {
-                header("User-Agent", "yt-dlp/2025.09.26")
-            }.bodyAsText()
-        } finally {
-            clients.closeAll()
+    fun `a per-request user agent is left alone by the plugin`() =
+        runBlocking {
+            server.enqueue(mockResponse())
+            val clients = newHttpClients()
+            try {
+                clients
+                    .client(HttpClientKind.FEED)
+                    .get(server.url("/").toString()) {
+                        header("User-Agent", "yt-dlp/2025.09.26")
+                    }.bodyAsText()
+            } finally {
+                clients.closeAll()
+            }
+            assertThat(server.takeRequest().headers["User-Agent"]).isEqualTo("yt-dlp/2025.09.26")
         }
-        assertThat(server.takeRequest().headers["User-Agent"]).isEqualTo("yt-dlp/2025.09.26")
-    }
 
     @Test
-    fun `the underlying okhttp client gets the same treatment`() = runBlocking {
-        server.enqueue(mockResponse())
-        val networkClients = newNetworkClients()
-        networkClients.feed.newCall(Request.Builder().url(server.url("/")).build()).execute().close()
-        assertThat(server.takeRequest().headers["User-Agent"]).isEqualTo(agent)
-    }
+    fun `the underlying okhttp client gets the same treatment`() =
+        runBlocking {
+            server.enqueue(mockResponse())
+            val networkClients = newNetworkClients()
+            networkClients.feed
+                .newCall(Request.Builder().url(server.url("/")).build())
+                .execute()
+                .close()
+            assertThat(server.takeRequest().headers["User-Agent"]).isEqualTo(agent)
+        }
 }

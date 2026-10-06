@@ -14,7 +14,11 @@ enum class LogLevel { DEBUG, INFO, WARN, ERROR }
  * exceptions unredacted (`IOException("GET https://u:password@host/feed?token=…")`).
  */
 fun interface LogSink {
-    fun log(level: LogLevel, tag: String, message: String)
+    fun log(
+        level: LogLevel,
+        tag: String,
+        message: String,
+    )
 }
 
 /**
@@ -33,12 +37,34 @@ object Log {
         this.sinks = sinks.toList()
     }
 
-    fun d(tag: String, msg: () -> String) = emit(LogLevel.DEBUG, tag, null, msg)
-    fun i(tag: String, msg: () -> String) = emit(LogLevel.INFO, tag, null, msg)
-    fun w(tag: String, t: Throwable? = null, msg: () -> String) = emit(LogLevel.WARN, tag, t, msg)
-    fun e(tag: String, t: Throwable? = null, msg: () -> String) = emit(LogLevel.ERROR, tag, t, msg)
+    fun d(
+        tag: String,
+        msg: () -> String,
+    ) = emit(LogLevel.DEBUG, tag, null, msg)
 
-    private fun emit(level: LogLevel, tag: String, t: Throwable?, msg: () -> String) {
+    fun i(
+        tag: String,
+        msg: () -> String,
+    ) = emit(LogLevel.INFO, tag, null, msg)
+
+    fun w(
+        tag: String,
+        t: Throwable? = null,
+        msg: () -> String,
+    ) = emit(LogLevel.WARN, tag, t, msg)
+
+    fun e(
+        tag: String,
+        t: Throwable? = null,
+        msg: () -> String,
+    ) = emit(LogLevel.ERROR, tag, t, msg)
+
+    private fun emit(
+        level: LogLevel,
+        tag: String,
+        t: Throwable?,
+        msg: () -> String,
+    ) {
         val current = sinks
         if (current.isEmpty()) return
 

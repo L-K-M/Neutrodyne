@@ -3,10 +3,10 @@
 package ch.lkmc.neutrodyne.core.network.okhttp
 
 import ch.lkmc.neutrodyne.core.model.IpFamily
+import okhttp3.OkHttpClient
 import java.util.Collections
 import java.util.EnumMap
 import java.util.WeakHashMap
-import okhttp3.OkHttpClient
 
 // Keyed weakly: a pinned clone never outlives the client that produced it, and a dead
 // CoreClients leaves nothing behind. Two-level so one call per family per client returns
@@ -22,6 +22,7 @@ private val pinCache = Collections.synchronizedMap(WeakHashMap<OkHttpClient, Enu
 fun OkHttpClient.pinnedToFamily(family: IpFamily): OkHttpClient =
     // `synchronizedMap.getOrPut` is not atomic — two concurrent pins for one family would race.
     synchronized(pinCache) {
-        pinCache.getOrPut(this) { EnumMap(IpFamily::class.java) }
+        pinCache
+            .getOrPut(this) { EnumMap(IpFamily::class.java) }
             .getOrPut(family) { newBuilder().dns(FamilyHintDns(dns) { family }).build() }
     }

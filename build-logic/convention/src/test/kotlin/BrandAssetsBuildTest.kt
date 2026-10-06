@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Unlicense
-import java.awt.Color
-import java.io.ByteArrayOutputStream
-import javax.imageio.ImageIO
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.awt.Color
+import java.io.ByteArrayOutputStream
+import javax.imageio.ImageIO
 
 /**
  * End-to-end smoke test of the generator on synthetic sources: every declared output is produced, and two
@@ -14,17 +14,22 @@ class BrandAssetsBuildTest {
     @Test
     fun producesEveryDeclaredOutputAndIsByteReproducible() {
         val iconPng = syntheticIconPng()
-        val svg = """
+        val svg =
+            """
             <svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254">
               <path fill="#000000" d="M300 300 L300 1000 L450 1000 L450 300 Z M800 300 L800 1000 L950 1000 L950 300 Z"/>
             </svg>
-        """.trimIndent()
+            """.trimIndent()
 
         val first = BrandAssets.build(iconPng, svg)
         val second = BrandAssets.build(iconPng, svg)
 
         assertEquals(BrandAssets.OUTPUT_PATHS.toSet(), first.files.keys)
-        assertTrue(first.files.keys.all { path -> first.files.getValue(path).contentEquals(second.files.getValue(path)) })
+        assertTrue(
+            first.files.keys.all { path ->
+                first.files.getValue(path).contentEquals(second.files.getValue(path))
+            },
+        )
         assertTrue(first.files.values.all { it.isNotEmpty() })
         // the raster outputs really are PNGs
         assertTrue((first.files.getValue(BrandAssets.BRAND_MARK_PATH)[0].toInt() and 0xFF) == 0x89)

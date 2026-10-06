@@ -5,13 +5,13 @@ package ch.lkmc.neutrodyne.core.network.okhttp
 import ch.lkmc.neutrodyne.core.common.LocalNetworkAccess
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import com.google.common.truth.Truth.assertThat
-import java.net.InetAddress
 import mockwebserver3.junit4.MockWebServerRule
 import okhttp3.Dns
 import okhttp3.Request
 import org.junit.Assert.assertThrows
 import org.junit.Rule
 import org.junit.Test
+import java.net.InetAddress
 
 class LocalNetworkGuardTest {
     @get:Rule val serverRule = MockWebServerRule()
@@ -25,8 +25,7 @@ class LocalNetworkGuardTest {
         access: LocalNetworkAccess = LocalNetworkAccess(),
     ) = LocalNetworkGuardDns({ addresses.toList() }, mode, access)
 
-    private fun addr(vararg bytes: Int): InetAddress =
-        InetAddress.getByAddress(bytes.map { it.toByte() }.toByteArray())
+    private fun addr(vararg bytes: Int): InetAddress = InetAddress.getByAddress(bytes.map { it.toByte() }.toByteArray())
 
     @Test
     fun `activates only on Android API 37 and up`() {
@@ -42,9 +41,10 @@ class LocalNetworkGuardTest {
     @Test
     fun `strict client rejects an RFC 1918 IP literal before connecting`() {
         val clients = newNetworkClients(platform = android37)
-        val e = assertThrows(LocalNetworkUnsupportedException::class.java) {
-            clients.feed.newCall(Request.Builder().url("http://10.1.2.3/").build()).execute()
-        }
+        val e =
+            assertThrows(LocalNetworkUnsupportedException::class.java) {
+                clients.feed.newCall(Request.Builder().url("http://10.1.2.3/").build()).execute()
+            }
         assertThat(e).isInstanceOf(java.net.UnknownHostException::class.java)
     }
 
@@ -62,8 +62,10 @@ class LocalNetworkGuardTest {
     fun `loopback literals always pass`() {
         server.enqueue(mockResponse())
         val clients = newNetworkClients(platform = android37)
-        clients.feed.newCall(Request.Builder().url("http://127.0.0.1:${server.port}/").build())
-            .execute().close()
+        clients.feed
+            .newCall(Request.Builder().url("http://127.0.0.1:${server.port}/").build())
+            .execute()
+            .close()
         assertThat(server.takeRequest()).isNotNull()
     }
 
@@ -72,8 +74,11 @@ class LocalNetworkGuardTest {
         server.enqueue(mockResponse())
         server.enqueue(mockResponse())
         for (platform in listOf(fakePlatform(), fakePlatform(PlatformKind.ANDROID, 36))) {
-            newNetworkClients(platform = platform).feed
-                .newCall(Request.Builder().url(server.url("/")).build()).execute().close()
+            newNetworkClients(platform = platform)
+                .feed
+                .newCall(Request.Builder().url(server.url("/")).build())
+                .execute()
+                .close()
             assertThat(server.takeRequest()).isNotNull()
         }
     }
@@ -140,14 +145,16 @@ class LocalNetworkGuardTest {
         // … and passes the guard once the gate grants access. The extra interceptor answers the
         // call before the connect, so the test never touches the network.
         access.setSyncAllowed(true)
-        val shortCircuit = okhttp3.Interceptor { chain ->
-            okhttp3.Response.Builder()
-                .request(chain.request())
-                .protocol(okhttp3.Protocol.HTTP_1_1)
-                .code(200)
-                .message("OK")
-                .build()
-        }
+        val shortCircuit =
+            okhttp3.Interceptor { chain ->
+                okhttp3.Response
+                    .Builder()
+                    .request(chain.request())
+                    .protocol(okhttp3.Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .build()
+            }
         val allowed = sync.newBuilder().addInterceptor(shortCircuit).build()
         allowed.newCall(Request.Builder().url(url).build()).execute().close()
     }

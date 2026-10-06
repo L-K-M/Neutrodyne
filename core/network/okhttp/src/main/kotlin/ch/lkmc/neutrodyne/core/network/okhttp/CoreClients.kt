@@ -3,12 +3,12 @@
 package ch.lkmc.neutrodyne.core.network.okhttp
 
 import dev.zacsweers.metro.Inject
-import java.util.concurrent.TimeUnit
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
 import okhttp3.Dns
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 
 /**
  * The three clients all others derive from (01 Networking baseline): [core] everything,
@@ -30,16 +30,17 @@ class CoreClients(
     private val hints: DnsFamilyHints,
     @param:DebugInterceptors private val debugInterceptors: Set<Interceptor>,
 ) {
-
     // Declared before the clients: property initializers run in order, and `coreBuilder` reads them.
-    private val dispatcher = Dispatcher().apply {
-        maxRequests = MAX_REQUESTS
-        maxRequestsPerHost = MAX_REQUESTS_PER_HOST
-    }
+    private val dispatcher =
+        Dispatcher().apply {
+            maxRequests = MAX_REQUESTS
+            maxRequestsPerHost = MAX_REQUESTS_PER_HOST
+        }
     private val pool = ConnectionPool(POOL_MAX_IDLE, POOL_KEEP_ALIVE_MINUTES, TimeUnit.MINUTES)
 
     private fun coreBuilder(mode: LocalNetworkGuard.Mode): OkHttpClient.Builder =
-        OkHttpClient.Builder()
+        OkHttpClient
+            .Builder()
             .dispatcher(dispatcher)
             .connectionPool(pool)
             .dns(lanGuard.dns(FamilyHintDns(Dns.SYSTEM, hints), mode))
@@ -54,15 +55,18 @@ class CoreClients(
 
     // YouTube's engine has its own retry policy (04), so it skips `base`'s auth interceptor and
     // call timeout. PyHttp re-derives per family — the derived client keeps the shared pool.
-    val youtube: OkHttpClient = core.newBuilder()
-        .callTimeout(YOUTUBE_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        .build()
+    val youtube: OkHttpClient =
+        core
+            .newBuilder()
+            .callTimeout(YOUTUBE_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .build()
 
     // Sync keeps a strict-by-default LAN guard that `LocalNetworkAccess` unlocks, and no `base`
     // auth: `SyncClient` adds its sync token per request (10).
-    val sync: OkHttpClient = coreBuilder(LocalNetworkGuard.Mode.SYNC)
-        .callTimeout(SYNC_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        .build()
+    val sync: OkHttpClient =
+        coreBuilder(LocalNetworkGuard.Mode.SYNC)
+            .callTimeout(SYNC_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .build()
 
     private companion object {
         const val CONNECT_TIMEOUT_SECONDS = 15L

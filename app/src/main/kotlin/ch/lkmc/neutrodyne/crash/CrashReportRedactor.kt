@@ -17,7 +17,11 @@ import org.json.JSONObject
  * through `META-INF/services/org.acra.config.ReportingAdministrator`.
  */
 class CrashReportRedactor : ReportingAdministrator {
-    override fun shouldSendReport(context: Context, config: CoreConfiguration, crashReportData: CrashReportData): Boolean {
+    override fun shouldSendReport(
+        context: Context,
+        config: CoreConfiguration,
+        crashReportData: CrashReportData,
+    ): Boolean {
         redact(crashReportData)
         return true
     }

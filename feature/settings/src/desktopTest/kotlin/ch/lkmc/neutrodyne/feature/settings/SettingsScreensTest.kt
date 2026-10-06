@@ -42,14 +42,14 @@ import ch.lkmc.neutrodyne.core.ui.root.RootUiState
 import com.mikepenz.aboutlibraries.Libs
 import com.mikepenz.aboutlibraries.entity.Library
 import com.mikepenz.aboutlibraries.entity.License
-import java.util.Locale
-import kotlin.test.AfterTest
-import kotlin.test.BeforeTest
-import kotlin.test.Test
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentSetOf
 import kotlinx.coroutines.flow.emptyFlow
 import org.jetbrains.compose.resources.stringResource
+import java.util.Locale
+import kotlin.test.AfterTest
+import kotlin.test.BeforeTest
+import kotlin.test.Test
 
 /**
  * The M0a Settings screens driven through `NeutrodyneRoot` on the desktop JVM (01 S9 method): the
@@ -59,7 +59,6 @@ import org.jetbrains.compose.resources.stringResource
  */
 @OptIn(ExperimentalTestApi::class)
 class SettingsScreensTest {
-
     private lateinit var previousLocale: Locale
 
     @BeforeTest
@@ -74,52 +73,56 @@ class SettingsScreensTest {
     }
 
     @Test
-    fun settingsHomeShowsM0aRows() = runComposeUiTest {
-        setSettingsRoot()
-        openSettings()
-        // "Appearance" is also the detail placeholder's title, so the row is told by its summary.
-        onAllNodesWithText("Appearance").onFirst().assertExists()
-        onNodeWithText("Theme, dynamic colour and contrast").assertExists()
-        onNodeWithText("About").assertExists()
-        onNodeWithText("Licences").assertExists()
-    }
+    fun settingsHomeShowsM0aRows() =
+        runComposeUiTest {
+            setSettingsRoot()
+            openSettings()
+            // "Appearance" is also the detail placeholder's title, so the row is told by its summary.
+            onAllNodesWithText("Appearance").onFirst().assertExists()
+            onNodeWithText("Theme, dynamic colour and contrast").assertExists()
+            onNodeWithText("About").assertExists()
+            onNodeWithText("Licences").assertExists()
+        }
 
     @Test
-    fun aboutShowsVersionIdentityAndLicence() = runComposeUiTest {
-        setSettingsRoot()
-        openSettings()
-        onAllNodesWithText("About").onFirst().performClick()
+    fun aboutShowsVersionIdentityAndLicence() =
+        runComposeUiTest {
+            setSettingsRoot()
+            openSettings()
+            onAllNodesWithText("About").onFirst().performClick()
 
-        onNodeWithText("Neutrodyne").assertExists()
-        onNodeWithText("Version 1.2.3 · macOS arm64 · DMG").assertIsDisplayed()
-        onNodeWithText("Debug build").assertExists()
-        onNodeWithText("GNU LGPL 2.1", substring = true).assertExists()
-        onNodeWithText("Source code and releases").performScrollTo().assertIsDisplayed()
-    }
-
-    @Test
-    fun licencesListsLibrariesFromSource() = runComposeUiTest {
-        setSettingsRoot()
-        openSettings()
-        onAllNodesWithText("Licences").onFirst().performClick()
-        waitForIdle()
-        onNodeWithText("kotlinx-coroutines-core").assertExists()
-        onNodeWithText("Libraries · 1 library").assertExists()
-        onNodeWithText("kotlinx-coroutines-core").performClick()
-        waitForIdle()
-        onNodeWithText("Apache License test body", substring = true).assertExists()
-        onNodeWithText("Close").performClick()
-        onNodeWithText("Apache License test body", substring = true).assertDoesNotExist()
-    }
+            onNodeWithText("Neutrodyne").assertExists()
+            onNodeWithText("Version 1.2.3 · macOS arm64 · DMG").assertIsDisplayed()
+            onNodeWithText("Debug build").assertExists()
+            onNodeWithText("GNU LGPL 2.1", substring = true).assertExists()
+            onNodeWithText("Source code and releases").performScrollTo().assertIsDisplayed()
+        }
 
     @Test
-    fun licencesEmptyWithoutSource() = runComposeUiTest {
-        setSettingsRoot(licencesSource = null)
-        openSettings()
-        onAllNodesWithText("Licences").onFirst().performClick()
+    fun licencesListsLibrariesFromSource() =
+        runComposeUiTest {
+            setSettingsRoot()
+            openSettings()
+            onAllNodesWithText("Licences").onFirst().performClick()
+            waitForIdle()
+            onNodeWithText("kotlinx-coroutines-core").assertExists()
+            onNodeWithText("Libraries · 1 library").assertExists()
+            onNodeWithText("kotlinx-coroutines-core").performClick()
+            waitForIdle()
+            onNodeWithText("Apache License test body", substring = true).assertExists()
+            onNodeWithText("Close").performClick()
+            onNodeWithText("Apache License test body", substring = true).assertDoesNotExist()
+        }
 
-        onNodeWithText("No licence information in this build.").assertIsDisplayed()
-    }
+    @Test
+    fun licencesEmptyWithoutSource() =
+        runComposeUiTest {
+            setSettingsRoot(licencesSource = null)
+            openSettings()
+            onAllNodesWithText("Licences").onFirst().performClick()
+
+            onNodeWithText("No licence information in this build.").assertIsDisplayed()
+        }
 
     private fun ComposeUiTest.openSettings() {
         onAllNodesWithContentDescription("Settings").onFirst().performClick()
@@ -131,13 +134,14 @@ class SettingsScreensTest {
             CompositionLocalProvider(LocalPlatformActions provides TestPlatformActions) {
                 NeutrodyneRoot(
                     state = RootUiState.READY,
-                    actions = RootActions(
-                        retryStartup = {},
-                        dismissNotice = {},
-                        continueHere = {},
-                        dismissRemoteSession = {},
-                        playbackKey = { false },
-                    ),
+                    actions =
+                        RootActions(
+                            retryStartup = {},
+                            dismissNotice = {},
+                            continueHere = {},
+                            dismissRemoteSession = {},
+                            playbackKey = { false },
+                        ),
                     slots = RootSlots(player = {}, userMessages = emptyFlow()),
                     installers = StubInstallers + SettingsNavigation.entries(FakeBuildInfo, licencesSource),
                     platform = BuildInfo.Platform.DESKTOP,
@@ -147,81 +151,94 @@ class SettingsScreensTest {
     }
 }
 
-private val FakeBuildInfo = BuildInfo(
-    versionName = "1.2.3",
-    versionCode = 42,
-    debug = true,
-    platform = BuildInfo.Platform.DESKTOP,
-    repoUrl = "https://github.com/lkmc/neutrodyne",
-    updateManifestUrl = "https://example.invalid/updates.json",
-    engineManifestUrl = "https://example.invalid/engine.json",
-    youTubeEngineBundled = false,
-    desktop = BuildInfo.Desktop(
-        os = DesktopOs.MACOS,
-        arch = DesktopArch.ARM64,
-        installKind = InstallKind.DMG,
-        runtime = "bundled",
-    ),
-    shippedLocales = persistentListOf("en", "de"),
-    podcastIndexKey = "",
-    podcastIndexSecret = "",
-)
-
-private val Apache = License(
-    name = "Apache-2.0",
-    url = "https://www.apache.org/licenses/LICENSE-2.0",
-    year = "",
-    spdxId = "Apache-2.0",
-    licenseContent = "Apache License test body",
-    hash = "",
-)
-
-private val FakeLicencesSource = LicencesSource {
-    Libs(
-        libraries = persistentListOf(
-            Library(
-                uniqueId = "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2",
-                artifactVersion = "1.10.2",
-                name = "kotlinx-coroutines-core",
-                description = "",
-                website = "https://github.com/Kotlin/kotlinx.coroutines",
-                developers = persistentListOf(),
-                organization = null,
-                scm = null,
-                licenses = persistentSetOf(Apache),
-                funding = persistentSetOf(),
-                tag = "",
-                targets = persistentSetOf(),
+private val FakeBuildInfo =
+    BuildInfo(
+        versionName = "1.2.3",
+        versionCode = 42,
+        debug = true,
+        platform = BuildInfo.Platform.DESKTOP,
+        repoUrl = "https://github.com/lkmc/neutrodyne",
+        updateManifestUrl = "https://example.invalid/updates.json",
+        engineManifestUrl = "https://example.invalid/engine.json",
+        youTubeEngineBundled = false,
+        desktop =
+            BuildInfo.Desktop(
+                os = DesktopOs.MACOS,
+                arch = DesktopArch.ARM64,
+                installKind = InstallKind.DMG,
+                runtime = "bundled",
             ),
-        ),
-        licenses = persistentSetOf(Apache),
+        shippedLocales = persistentListOf("en", "de"),
+        podcastIndexKey = "",
+        podcastIndexSecret = "",
     )
-}
+
+private val Apache =
+    License(
+        name = "Apache-2.0",
+        url = "https://www.apache.org/licenses/LICENSE-2.0",
+        year = "",
+        spdxId = "Apache-2.0",
+        licenseContent = "Apache License test body",
+        hash = "",
+    )
+
+private val FakeLicencesSource =
+    LicencesSource {
+        Libs(
+            libraries =
+                persistentListOf(
+                    Library(
+                        uniqueId = "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2",
+                        artifactVersion = "1.10.2",
+                        name = "kotlinx-coroutines-core",
+                        description = "",
+                        website = "https://github.com/Kotlin/kotlinx.coroutines",
+                        developers = persistentListOf(),
+                        organization = null,
+                        scm = null,
+                        licenses = persistentSetOf(Apache),
+                        funding = persistentSetOf(),
+                        tag = "",
+                        targets = persistentSetOf(),
+                    ),
+                ),
+            licenses = persistentSetOf(Apache),
+        )
+    }
 
 /** The minimal `PlatformActions` the settings screens read (share = null means desktop, D83). */
-private val TestPlatformActions = object : PlatformActions {
-    override val urls: ExternalUrlOpener = ExternalUrlOpener { OpenResult.OPENED }
-    override val share = null
-    override val files: FilePicker = object : FilePicker {
-        override suspend fun pickFile(mimeTypes: List<String>, extensions: List<String>): String? = null
-        override suspend fun pickFolder(title: String): String? = null
+private val TestPlatformActions =
+    object : PlatformActions {
+        override val urls: ExternalUrlOpener = ExternalUrlOpener { OpenResult.OPENED }
+        override val share = null
+        override val files: FilePicker =
+            object : FilePicker {
+                override suspend fun pickFile(
+                    mimeTypes: List<String>,
+                    extensions: List<String>,
+                ): String? = null
+
+                override suspend fun pickFolder(title: String): String? = null
+            }
+        override val saver: FileSaver = FileSaver { _, _ -> null }
+        override val reveal = null
+        override val notifications = null
     }
-    override val saver: FileSaver = FileSaver { _, _ -> null }
-    override val reveal = null
-    override val notifications = null
-}
 
 private val TOP_LEVEL_STUB_TABS: List<TopLevelKey> =
     listOf(FeedsKey, LibraryKey, UpNextKey, DownloadsKey, DiscoverKey)
 
-private val StubInstallers: Set<EntryProviderInstaller> = TOP_LEVEL_STUB_TABS.map { tab ->
-    val installer: EntryProviderInstaller = {
-        entry(tab, metadata = NdSceneMetadata.paneList()) {
-            TopBarStub(tab)
-        }
-    }
-    installer
-}.toSet()
+private val StubInstallers: Set<EntryProviderInstaller> =
+    TOP_LEVEL_STUB_TABS
+        .map { tab ->
+            val installer: EntryProviderInstaller = {
+                entry(tab, metadata = NdSceneMetadata.paneList()) {
+                    TopBarStub(tab)
+                }
+            }
+            installer
+        }.toSet()
 
 @Composable
 private fun TopBarStub(tab: TopLevelKey) {

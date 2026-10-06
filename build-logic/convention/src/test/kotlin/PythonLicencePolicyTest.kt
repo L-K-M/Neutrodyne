@@ -117,6 +117,7 @@ class PythonLicencePolicyTest {
                     "origin = \"maven:com.chaquo.python:target:3.14.0-0\"\n" +
                     "licence = \"Python-2.0\"\nkind = \"runtime\"\naboutLibrariesId = \"x\"\n",
             )
+
         fun v(
             lock: PythonLicencePolicy.Lock,
             chaquopy: String?,
@@ -160,6 +161,7 @@ class PythonLicencePolicyTest {
     @Test
     fun `pip requirement files and file flags are rejected`() {
         val l = PythonLicencePolicy.parse("schema = 1\npip = []\n")
+
         fun v(
             reqs: List<String>?,
             options: List<String>?,

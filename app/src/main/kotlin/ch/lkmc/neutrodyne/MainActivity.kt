@@ -48,13 +48,14 @@ class MainActivity : AppCompatActivity() {
 
     private companion object {
         /** Nothing to retry, dismiss or play before M1/M4: the root's callbacks are inert. */
-        val M0_ROOT_ACTIONS = RootActions(
-            retryStartup = {},
-            dismissNotice = {},
-            continueHere = {},
-            dismissRemoteSession = {},
-            playbackKey = { false },
-        )
+        val M0_ROOT_ACTIONS =
+            RootActions(
+                retryStartup = {},
+                dismissNotice = {},
+                continueHere = {},
+                dismissRemoteSession = {},
+                playbackKey = { false },
+            )
 
         /** No player (M4) and no user messages yet. */
         val M0_ROOT_SLOTS = RootSlots(player = {}, userMessages = emptyFlow())

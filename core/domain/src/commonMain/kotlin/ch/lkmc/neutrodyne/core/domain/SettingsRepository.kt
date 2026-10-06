@@ -27,7 +27,10 @@ interface SettingsRepository {
      * by the key's own validator (for example a `Choice` outside its values) and with
      * [SettingsError.WriteFailed] when the DataStore write fails; both leave the old value intact.
      */
-    suspend fun <T : Any> set(key: SettingKey<T>, value: T): Outcome<Unit, SettingsError>
+    suspend fun <T : Any> set(
+        key: SettingKey<T>,
+        value: T,
+    ): Outcome<Unit, SettingsError>
 
     /** Removes the key's stored value so reads fall back to [SettingKey.default]. */
     suspend fun reset(key: SettingKey<*>)

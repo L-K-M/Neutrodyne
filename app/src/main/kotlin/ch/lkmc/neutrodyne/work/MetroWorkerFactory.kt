@@ -14,7 +14,9 @@ import kotlin.reflect.KClass
  * WorkManager falls back to reflection only for workers we do not own (none today).
  */
 @Inject
-class MetroWorkerFactory(private val creators: Map<KClass<out ListenableWorker>, WorkerCreator>) : WorkerFactory() {
+class MetroWorkerFactory(
+    private val creators: Map<KClass<out ListenableWorker>, WorkerCreator>,
+) : WorkerFactory() {
     override fun createWorker(
         appContext: Context,
         workerClassName: String,

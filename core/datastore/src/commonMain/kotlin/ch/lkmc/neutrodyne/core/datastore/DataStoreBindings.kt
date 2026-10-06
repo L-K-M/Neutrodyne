@@ -28,8 +28,7 @@ object DataStoreBindings {
     @Provides
     @SingleIn(AppScope::class)
     @SettingsDataStore(SettingsFile.DEVICE)
-    fun deviceDataStore(factory: SettingsDataStoreFactory): DataStore<Preferences> =
-        factory.create(SettingsFile.DEVICE)
+    fun deviceDataStore(factory: SettingsDataStoreFactory): DataStore<Preferences> = factory.create(SettingsFile.DEVICE)
 
     @Provides
     @SingleIn(AppScope::class)

@@ -34,31 +34,55 @@ internal fun Project.configureNeutrodyneTestTasks() {
         if (path in CROSS_DEVICE_HOSTS && !providers.gradleProperty("crossDevice").isPresent) {
             (options as? JUnitOptions)?.excludeCategories(CROSS_DEVICE_CATEGORY)
         }
-        testLogging { events("failed"); exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
+        testLogging {
+            events("failed")
+            exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        }
         // Robolectric's instrumented Android classes reach into JDK internals (SharedSecrets and
         // friends); without these opens every host test dies with IllegalAccessException on JDK 21.
         jvmArgs(
-            "--add-opens", "java.base/java.lang=ALL-UNNAMED",
-            "--add-opens", "java.base/java.util=ALL-UNNAMED",
-            "--add-opens", "java.base/java.io=ALL-UNNAMED",
-            "--add-opens", "java.base/java.lang.reflect=ALL-UNNAMED",
-            "--add-opens", "java.base/java.text=ALL-UNNAMED",
-            "--add-opens", "java.base/java.nio=ALL-UNNAMED",
-            "--add-opens", "java.base/java.net=ALL-UNNAMED",
-            "--add-opens", "java.base/java.util.concurrent=ALL-UNNAMED",
-            "--add-opens", "java.base/java.util.concurrent.atomic=ALL-UNNAMED",
-            "--add-opens", "java.base/java.security=ALL-UNNAMED",
-            "--add-opens", "java.base/java.time=ALL-UNNAMED",
-            "--add-opens", "java.base/java.util.zip=ALL-UNNAMED",
-            "--add-opens", "java.base/jdk.internal.loader=ALL-UNNAMED",
-            "--add-opens", "java.base/sun.nio.ch=ALL-UNNAMED",
-            "--add-opens", "java.base/sun.security.ssl=ALL-UNNAMED",
-            "--add-opens", "java.base/sun.security.util=ALL-UNNAMED",
-            "--add-opens", "java.base/sun.util.calendar=ALL-UNNAMED",
-            "--add-opens", "java.base/sun.util.locale=ALL-UNNAMED",
-            "--add-opens", "java.desktop/java.awt.font=ALL-UNNAMED",
-            "--add-opens", "jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED",
-            "--add-exports", "java.base/jdk.internal.access=ALL-UNNAMED",
+            "--add-opens",
+            "java.base/java.lang=ALL-UNNAMED",
+            "--add-opens",
+            "java.base/java.util=ALL-UNNAMED",
+            "--add-opens",
+            "java.base/java.io=ALL-UNNAMED",
+            "--add-opens",
+            "java.base/java.lang.reflect=ALL-UNNAMED",
+            "--add-opens",
+            "java.base/java.text=ALL-UNNAMED",
+            "--add-opens",
+            "java.base/java.nio=ALL-UNNAMED",
+            "--add-opens",
+            "java.base/java.net=ALL-UNNAMED",
+            "--add-opens",
+            "java.base/java.util.concurrent=ALL-UNNAMED",
+            "--add-opens",
+            "java.base/java.util.concurrent.atomic=ALL-UNNAMED",
+            "--add-opens",
+            "java.base/java.security=ALL-UNNAMED",
+            "--add-opens",
+            "java.base/java.time=ALL-UNNAMED",
+            "--add-opens",
+            "java.base/java.util.zip=ALL-UNNAMED",
+            "--add-opens",
+            "java.base/jdk.internal.loader=ALL-UNNAMED",
+            "--add-opens",
+            "java.base/sun.nio.ch=ALL-UNNAMED",
+            "--add-opens",
+            "java.base/sun.security.ssl=ALL-UNNAMED",
+            "--add-opens",
+            "java.base/sun.security.util=ALL-UNNAMED",
+            "--add-opens",
+            "java.base/sun.util.calendar=ALL-UNNAMED",
+            "--add-opens",
+            "java.base/sun.util.locale=ALL-UNNAMED",
+            "--add-opens",
+            "java.desktop/java.awt.font=ALL-UNNAMED",
+            "--add-opens",
+            "jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED",
+            "--add-exports",
+            "java.base/jdk.internal.access=ALL-UNNAMED",
         )
     }
     registerMutationTest()
@@ -71,7 +95,12 @@ private const val CROSS_DEVICE_CATEGORY = "ch.lkmc.neutrodyne.core.testing.Cross
 private val CROSS_DEVICE_HOSTS = setOf(":desktopApp")
 
 /** The modules that own `MutationRobustnessTest`, and the test task it lives in (09 Untrusted-input robustness). */
-private val MUTATION_OWNERS = mapOf(":feeds:jvm" to "test", ":youtube:api" to "desktopTest", ":sync:protocol" to "desktopTest")
+private val MUTATION_OWNERS =
+    mapOf(
+        ":feeds:jvm" to "test",
+        ":youtube:api" to "desktopTest",
+        ":sync:protocol" to "desktopTest",
+    )
 private val CAPPED_TESTS = listOf("*MutationRobustnessTest", "*HostileInputTest")
 
 /**
@@ -83,13 +112,14 @@ private fun Project.registerMutationTest() {
     afterEvaluate {
         val base = tasks.named<Test>(owner)
         base.configure { CAPPED_TESTS.forEach(filter::excludeTestsMatching) }
-        val mutation = tasks.register<Test>(MUTATION_TASK) {
-            testClassesDirs = base.get().testClassesDirs
-            classpath = base.get().classpath
-            useJUnit()
-            CAPPED_TESTS.forEach(filter::includeTestsMatching)
-            filter.isFailOnNoMatchingTests = false
-        }
+        val mutation =
+            tasks.register<Test>(MUTATION_TASK) {
+                testClassesDirs = base.get().testClassesDirs
+                classpath = base.get().classpath
+                useJUnit()
+                CAPPED_TESTS.forEach(filter::includeTestsMatching)
+                filter.isFailOnNoMatchingTests = false
+            }
         tasks.named("check") { dependsOn(mutation) }
     }
 }

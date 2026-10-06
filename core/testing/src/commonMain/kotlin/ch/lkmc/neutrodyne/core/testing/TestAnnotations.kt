@@ -21,4 +21,8 @@ expect annotation class AfterTest()
 expect annotation class Test()
 
 /** See [BeforeTest]; `org.junit.Assert.assertEquals`. */
-expect fun <T> assertEquals(expected: T, actual: T, message: String? = null)
+expect fun <T> assertEquals(
+    expected: T,
+    actual: T,
+    message: String? = null,
+)

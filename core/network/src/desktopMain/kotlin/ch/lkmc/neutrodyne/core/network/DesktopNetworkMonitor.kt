@@ -12,15 +12,15 @@ import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.SingleIn
-import java.net.InetAddress
-import java.net.NetworkInterface
-import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.net.InetAddress
+import java.net.NetworkInterface
+import kotlin.time.Duration.Companion.seconds
 
 /** One network interface, reduced to the facts the monitor needs (tests fake it directly). */
 internal data class NdInterface(
@@ -65,7 +65,6 @@ class DesktopNetworkMonitor internal constructor(
     powerMonitor: PowerMonitor,
     private val source: NetworkInterfaceSource,
 ) : NetworkMonitor {
-
     private val flow = MutableStateFlow(inspect())
 
     init {

@@ -18,7 +18,9 @@ typealias WorkerCreator = (Context, WorkerParameters) -> ListenableWorker
  * binding container of the module that owns the worker (`:core:data`, `:download:impl`, … `androidMain`).
  */
 @MapKey
-annotation class WorkerKey(val value: KClass<out ListenableWorker>)
+annotation class WorkerKey(
+    val value: KClass<out ListenableWorker>,
+)
 
 /** Declares the worker map so the graph compiles before any module contributes a worker (01 DI rule 5). */
 @ContributesTo(AppScope::class)

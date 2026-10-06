@@ -14,8 +14,8 @@ import org.gradle.api.tasks.OutputFiles
 import org.gradle.api.tasks.TaskAction
 import org.gradle.api.tasks.options.Option
 import org.gradle.kotlin.dsl.register
-import java.io.File
 import java.awt.image.BufferedImage
+import java.io.File
 import javax.imageio.ImageIO
 
 /**
@@ -87,8 +87,9 @@ abstract class CheckBrandAssetsTask : DefaultTask() {
         val assetSet = BrandAssets.build(iconSource.get().asFile.readBytes(), svgSource.get().asFile.readText())
         val problems = mutableListOf<String>()
         for ((relativePath, bytes) in assetSet.files) {
-            val generated = generatedOutputs.get()[relativePath]
-                ?: error("no generated-output location declared for '$relativePath'")
+            val generated =
+                generatedOutputs.get()[relativePath]
+                    ?: error("no generated-output location declared for '$relativePath'")
             generated.asFile.parentFile.mkdirs()
             generated.asFile.writeBytes(bytes)
             val committed = repoRoot.get().file(relativePath).asFile
@@ -111,34 +112,37 @@ internal fun Project.registerBrandAssetTasks() {
     val svgFile = rootDirectory.file("media-sources/neutrodyne-mono.svg")
     val outputLocations = BrandAssets.OUTPUT_PATHS.associateWith { rootDirectory.file(it) }
 
-    val generateTask = tasks.register<GenerateBrandAssetsTask>("generateBrandAssets") {
-        iconSource.set(iconFile)
-        svgSource.set(svgFile)
-        outputFiles.set(outputLocations)
-    }
-
-    val brandAssetsCheck = tasks.register<CheckBrandAssetsTask>("checkBrandAssets") {
-        iconSource.set(iconFile)
-        svgSource.set(svgFile)
-        committedOutputs.setFrom(outputLocations.values.map { it.asFile })
-        repoRoot.set(rootDirectory)
-        val generatedDirectory = layout.buildDirectory.dir("brand-assets")
-        for (path in BrandAssets.OUTPUT_PATHS) {
-            generatedOutputs.put(path, generatedDirectory.map { it.file(path) })
+    val generateTask =
+        tasks.register<GenerateBrandAssetsTask>("generateBrandAssets") {
+            iconSource.set(iconFile)
+            svgSource.set(svgFile)
+            outputFiles.set(outputLocations)
         }
-        // the check compares the committed files as they are; when both tasks run, generate goes first
-        // (also satisfies Gradle's implicit-dependency validation on the shared paths)
-        mustRunAfter(generateTask)
-    }
 
-    val rootCheck = try {
-        tasks.named("check")
-    } catch (_: UnknownTaskException) {
-        null
-    } ?: tasks.register("check") {
-        group = "verification"
-        description = "Runs the root project's verification checks"
-    }
+    val brandAssetsCheck =
+        tasks.register<CheckBrandAssetsTask>("checkBrandAssets") {
+            iconSource.set(iconFile)
+            svgSource.set(svgFile)
+            committedOutputs.setFrom(outputLocations.values.map { it.asFile })
+            repoRoot.set(rootDirectory)
+            val generatedDirectory = layout.buildDirectory.dir("brand-assets")
+            for (path in BrandAssets.OUTPUT_PATHS) {
+                generatedOutputs.put(path, generatedDirectory.map { it.file(path) })
+            }
+            // the check compares the committed files as they are; when both tasks run, generate goes first
+            // (also satisfies Gradle's implicit-dependency validation on the shared paths)
+            mustRunAfter(generateTask)
+        }
+
+    val rootCheck =
+        try {
+            tasks.named("check")
+        } catch (_: UnknownTaskException) {
+            null
+        } ?: tasks.register("check") {
+            group = "verification"
+            description = "Runs the root project's verification checks"
+        }
     rootCheck.configure { dependsOn(brandAssetsCheck) }
 }
 
@@ -158,7 +162,10 @@ internal object BrandAssetsPreviews {
     private val SHEET_BACKGROUND = java.awt.Color(0xFFFFFF)
     private val SHEET_TEXT = java.awt.Color(0x333333)
 
-    fun render(assetSet: BrandAssetSet, directory: File) {
+    fun render(
+        assetSet: BrandAssetSet,
+        directory: File,
+    ) {
         directory.mkdirs()
         val mark = assetSet.mark
         val silhouette = assetSet.silhouette
@@ -173,18 +180,19 @@ internal object BrandAssetsPreviews {
 
         // The monochrome layer as a themed icon: tinted, on navy, circle-masked
         writePng(directory, "monochrome-tinted-432.png") {
-            val image = BrandAssets.canvas(ADAPTIVE_PREVIEW_PX) {
-                color = java.awt.Color(BrandAssets.NAVY_RGB)
-                fillRect(0, 0, ADAPTIVE_PREVIEW_PX, ADAPTIVE_PREVIEW_PX)
-                BrandAssets.fillSilhouette(
-                    this,
-                    silhouette,
-                    TINT,
-                    FitTarget.BOUNDING_DIAGONAL,
-                    BrandAssets.SAFE_CIRCLE_DP / BrandAssets.ADAPTIVE_LAYER_DP * ADAPTIVE_PREVIEW_PX,
-                    ADAPTIVE_PREVIEW_PX,
-                )
-            }
+            val image =
+                BrandAssets.canvas(ADAPTIVE_PREVIEW_PX) {
+                    color = java.awt.Color(BrandAssets.NAVY_RGB)
+                    fillRect(0, 0, ADAPTIVE_PREVIEW_PX, ADAPTIVE_PREVIEW_PX)
+                    BrandAssets.fillSilhouette(
+                        this,
+                        silhouette,
+                        TINT,
+                        FitTarget.BOUNDING_DIAGONAL,
+                        BrandAssets.SAFE_CIRCLE_DP / BrandAssets.ADAPTIVE_LAYER_DP * ADAPTIVE_PREVIEW_PX,
+                        ADAPTIVE_PREVIEW_PX,
+                    )
+                }
             applyMask(image, circle(ADAPTIVE_PREVIEW_PX))
         }
 
@@ -208,23 +216,30 @@ internal object BrandAssetsPreviews {
         writePng(directory, "desktop-contact-sheet.png") { contactSheet(assetSet) }
     }
 
-    private fun maskedAdaptivePreview(mark: SeparatedMark, mask: java.awt.Shape): BufferedImage {
+    private fun maskedAdaptivePreview(
+        mark: SeparatedMark,
+        mask: java.awt.Shape,
+    ): BufferedImage {
         val size = ADAPTIVE_PREVIEW_PX
-        val icon = BrandAssets.canvas(size) {
-            color = java.awt.Color(BrandAssets.NAVY_RGB)
-            fillRect(0, 0, size, size)
-            BrandAssets.drawMark(
-                this,
-                mark,
-                FitTarget.BOUNDING_DIAGONAL,
-                BrandAssets.SAFE_CIRCLE_DP / BrandAssets.ADAPTIVE_LAYER_DP * size,
-                size,
-            )
-        }
+        val icon =
+            BrandAssets.canvas(size) {
+                color = java.awt.Color(BrandAssets.NAVY_RGB)
+                fillRect(0, 0, size, size)
+                BrandAssets.drawMark(
+                    this,
+                    mark,
+                    FitTarget.BOUNDING_DIAGONAL,
+                    BrandAssets.SAFE_CIRCLE_DP / BrandAssets.ADAPTIVE_LAYER_DP * size,
+                    size,
+                )
+            }
         return applyMask(icon, mask)
     }
 
-    private fun applyMask(image: BufferedImage, mask: java.awt.Shape): BufferedImage {
+    private fun applyMask(
+        image: BufferedImage,
+        mask: java.awt.Shape,
+    ): BufferedImage {
         // the mask as a full-canvas image: DstIn applied by fill() would leave the area outside the shape
         // untouched instead of clearing it (Java2D only composites within the filled shape's bounds)
         val maskImage = BufferedImage(image.width, image.height, BufferedImage.TYPE_INT_ARGB)
@@ -261,7 +276,9 @@ internal object BrandAssetsPreviews {
     private fun squircle(sizePx: Int): java.awt.Shape {
         val half = sizePx * MASK_DIAMETER_FRACTION / 2.0
         val center = sizePx / 2.0
-        val path = java.awt.geom.Path2D.Double()
+        val path =
+            java.awt.geom.Path2D
+                .Double()
         for (step in 0 until SQUIRCLE_STEPS) {
             val angle = 2.0 * Math.PI * step / SQUIRCLE_STEPS
             val cosine = Math.cos(angle)
@@ -281,13 +298,18 @@ internal object BrandAssetsPreviews {
         val labelHeight = 30
         val rowHeight = 256
         val tile = 44
+
         fun hicolor(size: Int) = ImageIO.read(byteInputStream(assetSet, "desktopApp/icons/png/neutrodyne-$size.png"))
 
-        val sheetWidth = margin * 2 + listOf(
-            BrandAssets.HICOLOR_SIZES_PX.filter { it < 512 }.sum() + gap * BrandAssets.HICOLOR_SIZES_PX.size + 256,
-            256 + gap + 256 + gap + 128,
-            (BrandAssets.TRAY_SIZES_PX.size * 2 + 1) * (tile + gap),
-        ).max()
+        val sheetWidth =
+            margin * 2 +
+                listOf(
+                    BrandAssets.HICOLOR_SIZES_PX.filter { it < 512 }.sum() +
+                        gap * BrandAssets.HICOLOR_SIZES_PX.size +
+                        256,
+                    256 + gap + 256 + gap + 128,
+                    (BrandAssets.TRAY_SIZES_PX.size * 2 + 1) * (tile + gap),
+                ).max()
         val sheetHeight = margin * 2 + 2 * (labelHeight + rowHeight) + labelHeight + tile + 2 * gap
         val sheet = BufferedImage(sheetWidth, sheetHeight, BufferedImage.TYPE_INT_ARGB)
         val g = sheet.createGraphics()
@@ -297,6 +319,7 @@ internal object BrandAssetsPreviews {
             g.fillRect(0, 0, sheetWidth, sheetHeight)
 
             var y = margin
+
             fun label(text: String) {
                 try {
                     g.color = SHEET_TEXT
@@ -322,10 +345,11 @@ internal object BrandAssetsPreviews {
             x = margin
             for (size in listOf(1024, 256, 128)) {
                 val image = BrandAssets.icnsImage(assetSet.mark, size)
-                val shown = when (size) {
-                    1024 -> 256
-                    else -> size
-                }
+                val shown =
+                    when (size) {
+                        1024 -> 256
+                        else -> size
+                    }
                 g.drawImage(image, x, y + rowHeight - shown, shown, shown, null)
                 x += shown + gap
             }
@@ -334,9 +358,10 @@ internal object BrandAssetsPreviews {
             label("Tray (dark / light tiles) and macOS menu-bar template")
             x = margin
             for (size in BrandAssets.TRAY_SIZES_PX) {
-                val image = ImageIO.read(
-                    byteInputStream(assetSet, "desktopApp/icons/tray/neutrodyne-tray-$size.png"),
-                )
+                val image =
+                    ImageIO.read(
+                        byteInputStream(assetSet, "desktopApp/icons/tray/neutrodyne-tray-$size.png"),
+                    )
                 drawTile(g, image, x, y, tile, TILE_DARK)
                 drawTile(g, image, x + tile + gap / 2, y, tile, TILE_LIGHT)
                 x += 2 * tile + gap + gap / 2
@@ -350,16 +375,29 @@ internal object BrandAssetsPreviews {
         return sheet
     }
 
-    private fun drawTile(g: java.awt.Graphics2D, image: BufferedImage, x: Int, y: Int, tile: Int, background: java.awt.Color) {
+    private fun drawTile(
+        g: java.awt.Graphics2D,
+        image: BufferedImage,
+        x: Int,
+        y: Int,
+        tile: Int,
+        background: java.awt.Color,
+    ) {
         g.color = background
         g.fillRect(x, y, tile, tile)
         g.drawImage(image, x + (tile - image.width) / 2, y + (tile - image.height) / 2, null)
     }
 
-    private fun byteInputStream(assetSet: BrandAssetSet, path: String) =
-        assetSet.files.getValue(path).inputStream()
+    private fun byteInputStream(
+        assetSet: BrandAssetSet,
+        path: String,
+    ) = assetSet.files.getValue(path).inputStream()
 
-    private fun writePng(directory: File, name: String, image: () -> BufferedImage) {
+    private fun writePng(
+        directory: File,
+        name: String,
+        image: () -> BufferedImage,
+    ) {
         ImageIO.write(image(), "png", File(directory, name))
     }
 }

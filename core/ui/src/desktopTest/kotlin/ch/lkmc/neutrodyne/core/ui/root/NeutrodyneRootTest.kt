@@ -15,6 +15,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
@@ -25,7 +26,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.runComposeUiTest
-import androidx.compose.ui.platform.testTag
 import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdEmptyState
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
@@ -52,13 +52,13 @@ import ch.lkmc.neutrodyne.core.ui.platform.PlatformActions
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.nav_feeds
 import ch.lkmc.neutrodyne.core.ui.resources.nav_library
-import java.util.Locale
+import kotlinx.coroutines.flow.emptyFlow
 import org.jetbrains.compose.resources.StringResource
+import org.jetbrains.compose.resources.stringResource
+import java.util.Locale
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
-import kotlinx.coroutines.flow.emptyFlow
-import org.jetbrains.compose.resources.stringResource
 
 /**
  * S9's `runComposeUiTest` checks of `NeutrodyneRoot` on the desktop JVM (01 S9): the five labelled
@@ -68,7 +68,6 @@ import org.jetbrains.compose.resources.stringResource
  */
 @OptIn(ExperimentalTestApi::class)
 class NeutrodyneRootTest {
-
     private lateinit var previousLocale: Locale
 
     @BeforeTest
@@ -84,85 +83,92 @@ class NeutrodyneRootTest {
     }
 
     @Test
-    fun fiveDestinationsAreLabelled() = runComposeUiTest {
-        setRootContent()
-        // The labels appear in the rail items (tagged nav_*) and again in the stubs' top bars.
-        for (tag in listOf("nav_feeds", "nav_library", "nav_up_next", "nav_downloads", "nav_discover")) {
-            onNodeWithTag(tag).assertIsDisplayed()
+    fun fiveDestinationsAreLabelled() =
+        runComposeUiTest {
+            setRootContent()
+            // The labels appear in the rail items (tagged nav_*) and again in the stubs' top bars.
+            for (tag in listOf("nav_feeds", "nav_library", "nav_up_next", "nav_downloads", "nav_discover")) {
+                onNodeWithTag(tag).assertIsDisplayed()
+            }
+            onNodeWithText("feeds-content").assertIsDisplayed()
         }
-        onNodeWithText("feeds-content").assertIsDisplayed()
-    }
 
     @Test
-    fun tabSwitchKeepsEntryState() = runComposeUiTest {
-        setRootContent()
-        onNodeWithTag("nav_library").performClick()
-        onNodeWithText("inc").performClick()
-        onNodeWithText("count:1").assertIsDisplayed()
+    fun tabSwitchKeepsEntryState() =
+        runComposeUiTest {
+            setRootContent()
+            onNodeWithTag("nav_library").performClick()
+            onNodeWithText("inc").performClick()
+            onNodeWithText("count:1").assertIsDisplayed()
 
-        // Library's entries leave composition entirely; rememberSaveable must restore the count.
-        onNodeWithTag("nav_feeds").performClick()
-        onNodeWithText("count:1").assertDoesNotExist()
+            // Library's entries leave composition entirely; rememberSaveable must restore the count.
+            onNodeWithTag("nav_feeds").performClick()
+            onNodeWithText("count:1").assertDoesNotExist()
 
-        onNodeWithTag("nav_library").performClick()
-        onNodeWithText("count:1").assertIsDisplayed()
-    }
-
-    @Test
-    fun settingsOpensAndBackReturns() = runComposeUiTest {
-        setRootContent()
-        // Two gears exist in a rail suite: the footer gear and the stub's top-bar one.
-        onAllNodesWithContentDescription("Settings").onFirst().performClick()
-        onNodeWithText("settings-home").assertIsDisplayed()
-
-        pressEscape()
-        onNodeWithText("settings-home").assertDoesNotExist()
-        onNodeWithText("feeds-content").assertIsDisplayed()
-    }
-
-    @Test
-    fun sheetRendersAboveContent() = runComposeUiTest {
-        setRootContent()
-        onNodeWithText("open-sheet").performClick()
-        onNodeWithText("add-podcast-sheet").assertIsDisplayed()
-        onNodeWithText("feeds-content").assertIsDisplayed()
-    }
-
-    @Test
-    fun dialogRendersAboveContent() = runComposeUiTest {
-        setRootContent()
-        onNodeWithText("open-dialog").performClick()
-        onNodeWithText("export-dialog").assertIsDisplayed()
-        onNodeWithText("feeds-content").assertIsDisplayed()
-    }
-
-    @Test
-    fun escapePopsAnEntry() = runComposeUiTest {
-        setRootContent()
-        onNodeWithText("open-podcast").performClick()
-        waitForIdle()
-        onNodeWithText("podcast-3").assertIsDisplayed()
-
-        pressEscape()
-        onNodeWithText("podcast-3").assertDoesNotExist()
-        onNodeWithText("feeds-content").assertIsDisplayed()
-    }
-
-    @Test
-    fun localeSwitchRelabelsTheSuite() = runComposeUiTest {
-        var localeTag by mutableStateOf("")
-        setContent {
-            key(localeTag) { TestRoot() }
+            onNodeWithTag("nav_library").performClick()
+            onNodeWithText("count:1").assertIsDisplayed()
         }
-        onNodeWithText("Library").assertIsDisplayed()
 
-        runOnIdle {
-            Locale.setDefault(Locale.GERMAN)
-            localeTag = "de"
+    @Test
+    fun settingsOpensAndBackReturns() =
+        runComposeUiTest {
+            setRootContent()
+            // Two gears exist in a rail suite: the footer gear and the stub's top-bar one.
+            onAllNodesWithContentDescription("Settings").onFirst().performClick()
+            onNodeWithText("settings-home").assertIsDisplayed()
+
+            pressEscape()
+            onNodeWithText("settings-home").assertDoesNotExist()
+            onNodeWithText("feeds-content").assertIsDisplayed()
         }
-        onNodeWithText("Bibliothek").assertIsDisplayed()
-        onNodeWithText("Als Nächstes").assertIsDisplayed()
-    }
+
+    @Test
+    fun sheetRendersAboveContent() =
+        runComposeUiTest {
+            setRootContent()
+            onNodeWithText("open-sheet").performClick()
+            onNodeWithText("add-podcast-sheet").assertIsDisplayed()
+            onNodeWithText("feeds-content").assertIsDisplayed()
+        }
+
+    @Test
+    fun dialogRendersAboveContent() =
+        runComposeUiTest {
+            setRootContent()
+            onNodeWithText("open-dialog").performClick()
+            onNodeWithText("export-dialog").assertIsDisplayed()
+            onNodeWithText("feeds-content").assertIsDisplayed()
+        }
+
+    @Test
+    fun escapePopsAnEntry() =
+        runComposeUiTest {
+            setRootContent()
+            onNodeWithText("open-podcast").performClick()
+            waitForIdle()
+            onNodeWithText("podcast-3").assertIsDisplayed()
+
+            pressEscape()
+            onNodeWithText("podcast-3").assertDoesNotExist()
+            onNodeWithText("feeds-content").assertIsDisplayed()
+        }
+
+    @Test
+    fun localeSwitchRelabelsTheSuite() =
+        runComposeUiTest {
+            var localeTag by mutableStateOf("")
+            setContent {
+                key(localeTag) { TestRoot() }
+            }
+            onNodeWithText("Library").assertIsDisplayed()
+
+            runOnIdle {
+                Locale.setDefault(Locale.GERMAN)
+                localeTag = "de"
+            }
+            onNodeWithText("Bibliothek").assertIsDisplayed()
+            onNodeWithText("Als Nächstes").assertIsDisplayed()
+        }
 
     private fun ComposeUiTest.setRootContent() {
         setContent { TestRoot() }
@@ -179,25 +185,32 @@ class NeutrodyneRootTest {
 }
 
 /** Minimal `PlatformActions` for the desktop test composition (the shells' contract). */
-private val TestPlatformActions = object : PlatformActions {
-    override val urls: ExternalUrlOpener = ExternalUrlOpener { OpenResult.OPENED }
-    override val share = null
-    override val files: FilePicker = object : FilePicker {
-        override suspend fun pickFile(mimeTypes: List<String>, extensions: List<String>): String? = null
-        override suspend fun pickFolder(title: String): String? = null
-    }
-    override val saver: FileSaver = FileSaver { _, _ -> null }
-    override val reveal = null
-    override val notifications = null
-}
+private val TestPlatformActions =
+    object : PlatformActions {
+        override val urls: ExternalUrlOpener = ExternalUrlOpener { OpenResult.OPENED }
+        override val share = null
+        override val files: FilePicker =
+            object : FilePicker {
+                override suspend fun pickFile(
+                    mimeTypes: List<String>,
+                    extensions: List<String>,
+                ): String? = null
 
-private fun testActions(): RootActions = RootActions(
-    retryStartup = {},
-    dismissNotice = {},
-    continueHere = {},
-    dismissRemoteSession = {},
-    playbackKey = { false },
-)
+                override suspend fun pickFolder(title: String): String? = null
+            }
+        override val saver: FileSaver = FileSaver { _, _ -> null }
+        override val reveal = null
+        override val notifications = null
+    }
+
+private fun testActions(): RootActions =
+    RootActions(
+        retryStartup = {},
+        dismissNotice = {},
+        continueHere = {},
+        dismissRemoteSession = {},
+        playbackKey = { false },
+    )
 
 private val TestSlots = RootSlots(player = {}, userMessages = emptyFlow())
 
@@ -219,17 +232,34 @@ private fun TestRoot() {
     }
 }
 
-private val TestInstallers: Set<EntryProviderInstaller> = setOf(
-    { entry<FeedsKey>(metadata = NdSceneMetadata.paneList()) { FeedsStub() } },
-    { entry<LibraryKey>(metadata = NdSceneMetadata.paneList()) { LibraryStub() } },
-    { entry<UpNextKey>(metadata = NdSceneMetadata.paneList()) { TabStub("up-next-content", NdIcons.QueueMusic) } },
-    { entry<DownloadsKey>(metadata = NdSceneMetadata.paneList()) { TabStub("downloads-content", NdIcons.Download) } },
-    { entry<DiscoverKey>(metadata = NdSceneMetadata.paneList()) { TabStub("discover-content", NdIcons.Explore) } },
-    { entry<SettingsHomeKey>(metadata = NdSceneMetadata.paneList()) { Text("settings-home") } },
-    { entry<PodcastKey>(metadata = NdSceneMetadata.paneDetail()) { key -> Text("podcast-${key.podcastId}") } },
-    { entry<AddPodcastKey>(metadata = NdSceneMetadata.bottomSheet()) { Text("add-podcast-sheet") } },
-    { entry<ExportKey>(metadata = NdSceneMetadata.dialog()) { Text("export-dialog") } },
-)
+private val TestInstallers: Set<EntryProviderInstaller> =
+    buildSet {
+        add { entry<FeedsKey>(metadata = NdSceneMetadata.paneList()) { FeedsStub() } }
+        add { entry<LibraryKey>(metadata = NdSceneMetadata.paneList()) { LibraryStub() } }
+        add {
+            entry<UpNextKey>(metadata = NdSceneMetadata.paneList()) {
+                TabStub("up-next-content", NdIcons.QueueMusic)
+            }
+        }
+        add {
+            entry<DownloadsKey>(metadata = NdSceneMetadata.paneList()) {
+                TabStub("downloads-content", NdIcons.Download)
+            }
+        }
+        add {
+            entry<DiscoverKey>(metadata = NdSceneMetadata.paneList()) {
+                TabStub("discover-content", NdIcons.Explore)
+            }
+        }
+        add { entry<SettingsHomeKey>(metadata = NdSceneMetadata.paneList()) { Text("settings-home") } }
+        add {
+            entry<PodcastKey>(metadata = NdSceneMetadata.paneDetail()) { key ->
+                Text("podcast-${key.podcastId}")
+            }
+        }
+        add { entry<AddPodcastKey>(metadata = NdSceneMetadata.bottomSheet()) { Text("add-podcast-sheet") } }
+        add { entry<ExportKey>(metadata = NdSceneMetadata.dialog()) { Text("export-dialog") } }
+    }
 
 @Composable
 private fun FeedsStub() {
@@ -254,7 +284,10 @@ private fun LibraryStub() {
 }
 
 @Composable
-private fun TabStub(text: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
+private fun TabStub(
+    text: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+) {
     Column(Modifier.fillMaxSize()) {
         NdEmptyState(icon = icon, title = text, body = text)
     }

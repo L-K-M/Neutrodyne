@@ -12,8 +12,9 @@ import com.chaquo.python.android.AndroidPlatform
  * `selftest`. M9a turns this into `YtxPython` proper (sys.path over `EngineStore.hostLibDir()`,
  * `compileall` on first import, `NeutrodyneOkHttpRH`, one `YoutubeDL` per worker and `hl`).
  */
-internal class YtxPython(context: Context) {
-
+internal class YtxPython(
+    context: Context,
+) {
     private val appContext = context.applicationContext
 
     @Volatile

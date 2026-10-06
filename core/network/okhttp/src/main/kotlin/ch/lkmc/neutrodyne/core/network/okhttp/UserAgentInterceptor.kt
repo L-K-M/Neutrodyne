@@ -17,7 +17,9 @@ import okhttp3.Response
  */
 @SingleIn(AppScope::class)
 @Inject
-class UserAgentInterceptor(private val userAgent: UserAgentProvider) : Interceptor {
+class UserAgentInterceptor(
+    private val userAgent: UserAgentProvider,
+) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         if (request.header("User-Agent") != null) return chain.proceed(request)

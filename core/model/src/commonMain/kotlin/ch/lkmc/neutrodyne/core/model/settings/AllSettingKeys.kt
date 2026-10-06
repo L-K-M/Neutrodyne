@@ -19,21 +19,41 @@ object AllSettingKeys {
 }
 
 /** First segment of a key name — one per settings area plus the local/sync prefixes (01). */
-internal val KEY_AREAS: Set<String> = setOf(
-    "appearance", "feeds", "discover", "groups", "playback", "downloads",
-    "youtube", "updates", "backup", "privacy", "diagnostics", "ui", "sync", "desktop",
-)
+internal val KEY_AREAS: Set<String> =
+    setOf(
+        "appearance",
+        "feeds",
+        "discover",
+        "groups",
+        "playback",
+        "downloads",
+        "youtube",
+        "updates",
+        "backup",
+        "privacy",
+        "diagnostics",
+        "ui",
+        "sync",
+        "desktop",
+    )
 
 /** Prefixes that must live in the device-local store (01). */
 internal val DEVICE_ONLY_PREFIXES: Set<String> = setOf("ui.", "desktop.")
 
 /** Prefixes that may never set `synced` (01: ui/desktop device-local; the rest excluded). */
-internal val NO_SYNC_PREFIXES: Set<String> = setOf(
-    "ui.", "desktop.", "updates.", "downloads.", "sync.",
-)
+internal val NO_SYNC_PREFIXES: Set<String> =
+    setOf(
+        "ui.",
+        "desktop.",
+        "updates.",
+        "downloads.",
+        "sync.",
+    )
 
 internal val SETTING_KEY_NAME: Regex =
-    Regex("^(appearance|feeds|discover|groups|playback|downloads|youtube|updates|backup|privacy|diagnostics|ui|sync|desktop)\\.[a-z0-9_]+$")
+    Regex(
+        "^(appearance|feeds|discover|groups|playback|downloads|youtube|updates|backup|privacy|diagnostics|ui|sync|desktop)\\.[a-z0-9_]+$",
+    )
 
 /** Returns the list of registry-rule violations for [key]; empty means the key is well-formed. */
 internal fun validateSettingKey(key: SettingKey<*>): List<String> {

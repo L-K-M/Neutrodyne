@@ -10,13 +10,19 @@ interface CrashReporter {
     val isAvailable: Boolean
 
     /** Offers [t] to the user as a report: ACRA's dialog on Android, a crash file and mail prompt on the desktop. */
-    fun reportNonFatal(t: Throwable, where: String)
+    fun reportNonFatal(
+        t: Throwable,
+        where: String,
+    )
 }
 
 /** Key-value context attached to the next crash report; every value passes [Redactor.text]. */
 interface CrashContext {
     /** Last write wins. */
-    fun put(key: CrashKey, value: String)
+    fun put(
+        key: CrashKey,
+        value: String,
+    )
 }
 
 /** The allow-listed context keys (09); nothing else reaches a report. */

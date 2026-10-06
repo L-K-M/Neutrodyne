@@ -14,7 +14,10 @@ import androidx.compose.ui.window.DialogProperties
 /**
  * One dialog action button: resolved [label] plus the callback.
  */
-public data class NdDialogAction(val label: String, val onClick: () -> Unit)
+public data class NdDialogAction(
+    val label: String,
+    val onClick: () -> Unit,
+)
 
 /**
  * `AlertDialog` wrapper (08 Nd wrappers). On desktop Compose `AlertDialog` is window-backed, so it

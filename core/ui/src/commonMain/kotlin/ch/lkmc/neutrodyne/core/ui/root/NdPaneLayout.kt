@@ -16,13 +16,21 @@ public fun ndPaneLayout(
     panelHidden: Boolean,
 ): PaneLayout {
     val panel = windowWidthDp >= PANEL_MIN_WINDOW_DP && hasNowPlaying && !panelHidden
-    val panelDp = if (!panel) 0 else if (windowWidthDp >= WIDE_PANEL_MIN_WINDOW_DP) WIDE_PANEL_DP else PANEL_DP
+    val panelDp =
+        if (!panel) {
+            0
+        } else if (windowWidthDp >= WIDE_PANEL_MIN_WINDOW_DP) {
+            WIDE_PANEL_DP
+        } else {
+            PANEL_DP
+        }
     val content = windowWidthDp - navChromeDp - panelDp
-    val partitions = when {
-        content >= THREE_PANE_MIN_CONTENT_DP -> 3
-        content >= TWO_PANE_MIN_CONTENT_DP -> 2
-        else -> 1
-    }
+    val partitions =
+        when {
+            content >= THREE_PANE_MIN_CONTENT_DP -> 3
+            content >= TWO_PANE_MIN_CONTENT_DP -> 2
+            else -> 1
+        }
     return PaneLayout(partitions, panel, content)
 }
 

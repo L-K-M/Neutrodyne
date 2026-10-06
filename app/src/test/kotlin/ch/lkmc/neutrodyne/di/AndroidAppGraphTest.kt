@@ -51,9 +51,16 @@ class AndroidAppGraphTest {
         const val FIRST_BAND = 0
 
         /** The five destinations and the Settings screens M0a renders (01 M0 checklist step 16). */
-        val M0A_KEYS: List<NavKey> = listOf(
-            FeedsKey, LibraryKey, UpNextKey, DownloadsKey, DiscoverKey,
-            SettingsHomeKey, SettingsKey(SettingsPage.ABOUT), LicencesKey,
-        )
+        val M0A_KEYS: List<NavKey> =
+            listOf(
+                FeedsKey,
+                LibraryKey,
+                UpNextKey,
+                DownloadsKey,
+                DiscoverKey,
+                SettingsHomeKey,
+                SettingsKey(SettingsPage.ABOUT),
+                LicencesKey,
+            )
     }
 }

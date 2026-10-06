@@ -7,7 +7,9 @@ package ch.lkmc.neutrodyne.core.model.settings
  * `PORTABLE -> "settings"`, `DEVICE -> "device_settings"`. [storeName] is the DataStore file
  * base name — the store factory writes `<storeName>.preferences_pb`.
  */
-enum class SettingsFile(val storeName: String) {
+enum class SettingsFile(
+    val storeName: String,
+) {
     /** `settings` — the portable store; what backup and sync carry. */
     PORTABLE("settings"),
 

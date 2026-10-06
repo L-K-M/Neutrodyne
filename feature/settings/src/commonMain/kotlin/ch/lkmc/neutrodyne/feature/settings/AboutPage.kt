@@ -84,56 +84,62 @@ internal fun AboutPage(buildInfo: BuildInfo) {
 
 /** The platform's version line (08 About): "Version 1.0.0 (1000095) · arm64-v8a" on Android. */
 @Composable
-private fun versionLine(buildInfo: BuildInfo): String = when (buildInfo.platform) {
-    BuildInfo.Platform.ANDROID -> {
-        val abi = buildInfo.apkAbi
-        if (abi != null) {
-            stringResource(Res.string.about_version_abi, buildInfo.versionName, buildInfo.versionCode, abi)
-        } else {
-            stringResource(Res.string.about_version, buildInfo.versionName, buildInfo.versionCode)
+private fun versionLine(buildInfo: BuildInfo): String =
+    when (buildInfo.platform) {
+        BuildInfo.Platform.ANDROID -> {
+            val abi = buildInfo.apkAbi
+            if (abi != null) {
+                stringResource(Res.string.about_version_abi, buildInfo.versionName, buildInfo.versionCode, abi)
+            } else {
+                stringResource(Res.string.about_version, buildInfo.versionName, buildInfo.versionCode)
+            }
+        }
+
+        BuildInfo.Platform.DESKTOP -> {
+            val desktop = buildInfo.desktop
+            if (desktop == null) {
+                stringResource(Res.string.about_version, buildInfo.versionName, buildInfo.versionCode)
+            } else {
+                stringResource(
+                    Res.string.about_version_desktop,
+                    buildInfo.versionName,
+                    osLabel(desktop.os),
+                    archLabel(desktop.arch),
+                    kindLabel(desktop.installKind),
+                )
+            }
         }
     }
-    BuildInfo.Platform.DESKTOP -> {
-        val desktop = buildInfo.desktop
-        if (desktop == null) {
-            stringResource(Res.string.about_version, buildInfo.versionName, buildInfo.versionCode)
-        } else {
-            stringResource(
-                Res.string.about_version_desktop,
-                buildInfo.versionName,
-                osLabel(desktop.os),
-                archLabel(desktop.arch),
-                kindLabel(desktop.installKind),
-            )
-        }
-    }
-}
 
 /** The licence statement is one per platform (01 About statements). */
-private fun licenceStatementFor(platform: BuildInfo.Platform) = when (platform) {
-    BuildInfo.Platform.ANDROID -> Res.string.about_licence_android
-    BuildInfo.Platform.DESKTOP -> Res.string.about_licence_desktop
-}
+private fun licenceStatementFor(platform: BuildInfo.Platform) =
+    when (platform) {
+        BuildInfo.Platform.ANDROID -> Res.string.about_licence_android
+        BuildInfo.Platform.DESKTOP -> Res.string.about_licence_desktop
+    }
 
 // OS/arch/install-kind labels are product names, not translated copy.
-private fun osLabel(os: DesktopOs): String = when (os) {
-    DesktopOs.WINDOWS -> "Windows"
-    DesktopOs.MACOS -> "macOS"
-    DesktopOs.LINUX -> "Linux"
-}
+private fun osLabel(os: DesktopOs): String =
+    when (os) {
+        DesktopOs.WINDOWS -> "Windows"
+        DesktopOs.MACOS -> "macOS"
+        DesktopOs.LINUX -> "Linux"
+    }
 
-private fun archLabel(arch: DesktopArch): String = when (arch) {
-    DesktopArch.X64 -> "x64"
-    DesktopArch.ARM64 -> "arm64"
-}
+private fun archLabel(arch: DesktopArch): String =
+    when (arch) {
+        DesktopArch.X64 -> "x64"
+        DesktopArch.ARM64 -> "arm64"
+    }
 
-private fun kindLabel(kind: InstallKind): String = when (kind) {
-    InstallKind.MSI -> "MSI"
-    InstallKind.ZIP -> "ZIP"
-    InstallKind.DMG -> "DMG"
-    InstallKind.MAC_ZIP -> "ZIP"
-    InstallKind.DEB -> "DEB"
-    InstallKind.RPM -> "RPM"
-    InstallKind.TAR_GZ -> "tar.gz"
-    InstallKind.DEV -> "dev build"
-}
+private fun kindLabel(kind: InstallKind): String =
+    when (kind) {
+        InstallKind.MSI -> "MSI"
+        InstallKind.ZIP -> "ZIP"
+        InstallKind.DMG -> "DMG"
+        InstallKind.MAC_ZIP -> "ZIP"
+        InstallKind.DEB -> "DEB"
+        InstallKind.RPM -> "RPM"
+        InstallKind.TAR_GZ -> "tar.gz"
+        InstallKind.DEV -> "dev build"
+    }

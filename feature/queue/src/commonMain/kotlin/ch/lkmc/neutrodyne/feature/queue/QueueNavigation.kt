@@ -21,7 +21,8 @@ import dev.zacsweers.metro.Provides
 public object QueueNavigation {
     @Provides
     @IntoSet
-    public fun entries(): EntryProviderInstaller = {
-        entry<UpNextKey>(metadata = NdSceneMetadata.paneList()) { UpNextRoute() }
-    }
+    public fun entries(): EntryProviderInstaller =
+        {
+            entry<UpNextKey>(metadata = NdSceneMetadata.paneList()) { UpNextRoute() }
+        }
 }

@@ -37,7 +37,6 @@ public class NavigationState internal constructor(
     private val stacks: Map<TopLevelKey, NavBackStack<NavKey>>,
     private val selected: MutableState<TopLevelKey>,
 ) : AppNavigator {
-
     /** The five tabs in suite order. */
     public val tabs: List<TopLevelKey> get() = TOP_LEVEL_TABS
 
@@ -82,7 +81,10 @@ public class NavigationState internal constructor(
         while (stack.size > 1) stack.removeAt(stack.size - 1)
     }
 
-    override fun open(tab: TopLevelKey, stack: List<NavKey>) {
+    override fun open(
+        tab: TopLevelKey,
+        stack: List<NavKey>,
+    ) {
         resetTab(tab)
         stack(tab).addAll(stack)
         selected.value = tab
@@ -104,10 +106,11 @@ public val TOP_LEVEL_TABS: List<TopLevelKey> =
 private val TOP_LEVEL_BY_NAME: Map<String, TopLevelKey> =
     TOP_LEVEL_TABS.associateBy { it::class.simpleName.orEmpty() }
 
-private val TopLevelKeySaver = listSaver<TopLevelKey, String>(
-    save = { listOf(it::class.simpleName.orEmpty()) },
-    restore = { TOP_LEVEL_BY_NAME[it.first()] },
-)
+private val TopLevelKeySaver =
+    listSaver<TopLevelKey, String>(
+        save = { listOf(it::class.simpleName.orEmpty()) },
+        restore = { TOP_LEVEL_BY_NAME[it.first()] },
+    )
 
 /**
  * Creates the shared [NavigationState]. Each stack is created in the fixed tab order so every
@@ -115,11 +118,13 @@ private val TopLevelKeySaver = listSaver<TopLevelKey, String>(
  */
 @Composable
 public fun rememberNavigationState(initialTab: TopLevelKey = FeedsKey): NavigationState {
-    val stacks = TOP_LEVEL_TABS.associateWith { tab ->
-        key(tab) { rememberNavBackStack(NavKeySerializers.savedStateConfiguration, tab) }
-    }
-    val selected = rememberSaveable(stateSaver = TopLevelKeySaver) {
-        mutableStateOf(initialTab)
-    }
+    val stacks =
+        TOP_LEVEL_TABS.associateWith { tab ->
+            key(tab) { rememberNavBackStack(NavKeySerializers.savedStateConfiguration, tab) }
+        }
+    val selected =
+        rememberSaveable(stateSaver = TopLevelKeySaver) {
+            mutableStateOf(initialTab)
+        }
     return remember(stacks) { NavigationState(stacks, selected) }
 }

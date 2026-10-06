@@ -47,8 +47,9 @@ internal fun SettingsRow(
         supportingContent = { if (summary != null) Text(summary) },
         leadingContent = { Icon(icon, contentDescription = null) },
         trailingContent = { Icon(NdIcons.ArrowForwardIos, contentDescription = null) },
-        modifier = modifier
-            .clickable(onClick = onClick)
-            .semantics { role = Role.Button },
+        modifier =
+            modifier
+                .clickable(onClick = onClick)
+                .semantics { role = Role.Button },
     )
 }

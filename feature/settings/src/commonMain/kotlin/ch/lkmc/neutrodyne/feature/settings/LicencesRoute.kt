@@ -60,7 +60,9 @@ private sealed interface LicenceData {
     data object Loading : LicenceData
 
     /** [libs] is null when the build carries no `aboutlibraries.json`. */
-    data class Loaded(val libs: Libs?) : LicenceData
+    data class Loaded(
+        val libs: Libs?,
+    ) : LicenceData
 }
 
 /**
@@ -106,9 +108,10 @@ private fun LicenceList(libs: Libs?) {
                 onValueChange = { query = it },
                 label = { Text(stringResource(Res.string.licences_search)) },
                 singleLine = true,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = SCREEN_PADDING, vertical = FIELD_GAP),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = SCREEN_PADDING, vertical = FIELD_GAP),
             )
             LicenceStatement()
             SectionHeader(
@@ -163,10 +166,11 @@ private fun LicenceEmpty() {
  */
 @Composable
 private fun LicenceStatement() {
-    val platform = when (LocalPlatformActions.current.share) {
-        null -> Res.string.about_licence_desktop
-        else -> Res.string.about_licence_android
-    }
+    val platform =
+        when (LocalPlatformActions.current.share) {
+            null -> Res.string.about_licence_desktop
+            else -> Res.string.about_licence_android
+        }
     Text(
         stringResource(platform),
         style = MaterialTheme.typography.bodyMedium,
@@ -176,7 +180,10 @@ private fun LicenceStatement() {
 }
 
 @Composable
-private fun SectionHeader(title: String, count: Int) {
+private fun SectionHeader(
+    title: String,
+    count: Int,
+) {
     val countText = pluralStringResource(Res.plurals.licences_library_count, count, count)
     Text(
         stringResource(Res.string.licences_section_header, title, countText),
@@ -186,7 +193,10 @@ private fun SectionHeader(title: String, count: Int) {
 }
 
 @Composable
-private fun LicenceRow(library: Library, onClick: () -> Unit) {
+private fun LicenceRow(
+    library: Library,
+    onClick: () -> Unit,
+) {
     ListItem(
         headlineContent = { Text(library.name) },
         supportingContent = {
@@ -194,31 +204,37 @@ private fun LicenceRow(library: Library, onClick: () -> Unit) {
             Text(listOfNotNull(library.artifactVersion, licences.ifBlank { null }).joinToString(" · "))
         },
         trailingContent = { Icon(NdIcons.ArrowForwardIos, contentDescription = null) },
-        modifier = Modifier
-            .clickable(onClick = onClick)
-            .semantics { role = Role.Button },
+        modifier =
+            Modifier
+                .clickable(onClick = onClick)
+                .semantics { role = Role.Button },
     )
 }
 
 /** The licence detail (08 About › Licences): name, version, source and the full licence text. */
 @Composable
-private fun LicenceDetail(library: Library, onDismiss: () -> Unit) {
+private fun LicenceDetail(
+    library: Library,
+    onDismiss: () -> Unit,
+) {
     NdDialog(
         onDismissRequest = onDismiss,
         icon = NdIcons.Article,
         title = library.name,
-        text = buildString {
-            append(stringResource(Res.string.licences_source, library.uniqueId))
-            library.website?.let { append('\n').append(it) }
-            for (licence in library.licenses) {
-                append("\n\n").append(licence.name)
-                licence.licenseContent?.let { append("\n\n").append(it) }
-            }
-        },
-        confirm = NdDialogAction(
-            label = stringResource(Res.string.licences_close),
-            onClick = onDismiss,
-        ),
+        text =
+            buildString {
+                append(stringResource(Res.string.licences_source, library.uniqueId))
+                library.website?.let { append('\n').append(it) }
+                for (licence in library.licenses) {
+                    append("\n\n").append(licence.name)
+                    licence.licenseContent?.let { append("\n\n").append(it) }
+                }
+            },
+        confirm =
+            NdDialogAction(
+                label = stringResource(Res.string.licences_close),
+                onClick = onDismiss,
+            ),
     )
 }
 

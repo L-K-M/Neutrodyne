@@ -17,37 +17,58 @@ import org.jetbrains.compose.resources.stringResource
  */
 public sealed interface UiText {
     /** `stringResource(id, *args)`; args are `String`/`Int`/`Long` or nested [UiText]. */
-    public data class Res(val id: StringResource, val args: List<Any> = emptyList()) : UiText
+    public data class Res(
+        val id: StringResource,
+        val args: List<Any> = emptyList(),
+    ) : UiText
 
     /** `pluralStringResource(id, count, *args)`; [count] selects the quantity string. */
-    public data class Plural(val id: PluralStringResource, val count: Int, val args: List<Any> = emptyList()) : UiText
+    public data class Plural(
+        val id: PluralStringResource,
+        val count: Int,
+        val args: List<Any> = emptyList(),
+    ) : UiText
 
     /** Literal user content. Never use for app copy. */
-    public data class Raw(val value: String) : UiText
+    public data class Raw(
+        val value: String,
+    ) : UiText
 }
 
 /** Resolves this text inside composition (`stringResource`/`pluralStringResource`). */
 @Composable
-public fun UiText.asString(): String = when (this) {
-    is UiText.Res -> stringResource(id, *composeArgs(args))
-    is UiText.Plural -> pluralStringResource(id, count, *composeArgs(args))
-    is UiText.Raw -> value
-}
+public fun UiText.asString(): String =
+    when (this) {
+        is UiText.Res -> stringResource(id, *composeArgs(args))
+        is UiText.Plural -> pluralStringResource(id, count, *composeArgs(args))
+        is UiText.Raw -> value
+    }
 
 /**
  * Resolves this text outside composition (notifications, workers, desktop lanes) with Compose
  * resources' suspend `getString`/`getPluralString`.
  */
-public suspend fun UiText.resolve(): String = when (this) {
-    is UiText.Res -> getString(id, *suspendArgs(args))
-    is UiText.Plural -> getPluralString(id, count, *suspendArgs(args))
-    is UiText.Raw -> value
-}
+public suspend fun UiText.resolve(): String =
+    when (this) {
+        is UiText.Res -> getString(id, *suspendArgs(args))
+        is UiText.Plural -> getPluralString(id, count, *suspendArgs(args))
+        is UiText.Raw -> value
+    }
 
 // Args flatten nested UiText; primitives pass through to the platform formatter.
 @Composable
 private fun composeArgs(args: List<Any>): Array<Any> =
-    Array(args.size) { i -> when (val a = args[i]) { is UiText -> a.asString(); else -> a } }
+    Array(args.size) { i ->
+        when (val a = args[i]) {
+            is UiText -> a.asString()
+            else -> a
+        }
+    }
 
 private suspend fun suspendArgs(args: List<Any>): Array<Any> =
-    Array(args.size) { i -> when (val a = args[i]) { is UiText -> a.resolve(); else -> a } }
+    Array(args.size) { i ->
+        when (val a = args[i]) {
+            is UiText -> a.resolve()
+            else -> a
+        }
+    }

@@ -12,15 +12,23 @@ sealed interface NetError {
     data object Offline : NetError
 
     data object Timeout : NetError
+
     data object DnsFailure : NetError
+
     data object ConnectionFailed : NetError
 
     /** Direct LAN HTTP needs the Android Local Network permission (10; sync only). */
     data object LocalNetworkUnsupported : NetError
 
-    data class Tls(val kind: TlsKind) : NetError
+    data class Tls(
+        val kind: TlsKind,
+    ) : NetError
+
     data object Cancelled : NetError
-    data class Other(val type: String) : NetError
+
+    data class Other(
+        val type: String,
+    ) : NetError
 }
 
 enum class TlsKind { UNTRUSTED_CERTIFICATE, CERTIFICATE_TRANSPARENCY, HANDSHAKE }

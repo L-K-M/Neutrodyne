@@ -12,7 +12,9 @@ enum class NeutrodyneDispatchers { IO, Default }
 
 /** Metro qualifier carrying a [NeutrodyneDispatchers] value: `@Dispatcher(IO)` / `@Dispatcher(Default)`. */
 @Qualifier
-annotation class Dispatcher(val dispatcher: NeutrodyneDispatchers)
+annotation class Dispatcher(
+    val dispatcher: NeutrodyneDispatchers,
+)
 
 /**
  * Process-wide Metro scope: `@ContributesTo(AppScope::class)`, `@SingleIn(AppScope::class)`,

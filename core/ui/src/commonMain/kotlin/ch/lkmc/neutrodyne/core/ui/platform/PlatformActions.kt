@@ -44,9 +44,15 @@ public fun interface ExternalUrlOpener {
 
 /** Android `ACTION_SEND` sheet. Not available on the desktop. */
 public interface ShareSheet {
-    public fun shareText(text: String, subject: String?)
+    public fun shareText(
+        text: String,
+        subject: String?,
+    )
 
-    public fun shareFile(uri: String, mimeType: String)
+    public fun shareFile(
+        uri: String,
+        mimeType: String,
+    )
 }
 
 /**
@@ -54,14 +60,20 @@ public interface ShareSheet {
  * cancelled. [pickFolder] is a desktop action; Android returns `null` at M0a (SAF folders are v1.x).
  */
 public interface FilePicker {
-    public suspend fun pickFile(mimeTypes: List<String>, extensions: List<String>): String?
+    public suspend fun pickFile(
+        mimeTypes: List<String>,
+        extensions: List<String>,
+    ): String?
 
     public suspend fun pickFolder(title: String): String?
 }
 
 /** Creates a document the caller then writes to; `null` = the user cancelled. */
 public fun interface FileSaver {
-    public suspend fun create(suggestedName: String, mimeType: String): String?
+    public suspend fun create(
+        suggestedName: String,
+        mimeType: String,
+    ): String?
 }
 
 /** Reveals [path] in the platform file manager; desktop only. */

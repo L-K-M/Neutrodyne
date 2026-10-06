@@ -39,7 +39,10 @@ class FakeSettingsRepository : SettingsRepository {
         return values.value.storedValue(key)
     }
 
-    override suspend fun <T : Any> set(key: SettingKey<T>, value: T): Outcome<Unit, SettingsError> {
+    override suspend fun <T : Any> set(
+        key: SettingKey<T>,
+        value: T,
+    ): Outcome<Unit, SettingsError> {
         loggedCalls += "set(${key.name})"
         if (rejectsValue(key, value)) {
             return Outcome.Failure(SettingsError.OutOfRange(key.name))
@@ -67,9 +70,10 @@ class FakeSettingsRepository : SettingsRepository {
         val portableKeys = AllSettingKeys.list.filter { it.file == SettingsFile.PORTABLE }
         if (portableKeys.isEmpty()) return flowOf(emptyMap())
 
-        val entries: List<Flow<Pair<String, Any>>> = portableKeys.map { key ->
-            observe(key).map { value -> key.name to value }
-        }
+        val entries: List<Flow<Pair<String, Any>>> =
+            portableKeys.map { key ->
+                observe(key).map { value -> key.name to value }
+            }
         return combine(entries) { pairs -> pairs.toMap() }.distinctUntilChanged()
     }
 
@@ -79,6 +83,8 @@ class FakeSettingsRepository : SettingsRepository {
         this[key.file]?.get(key.name) as? T ?: key.default
 
     /** A `Choice` outside its declared values is the one value a key itself forbids. */
-    private fun rejectsValue(key: SettingKey<*>, value: Any): Boolean =
-        key is SettingKey.Choice<*> && key.values.none { it == value }
+    private fun rejectsValue(
+        key: SettingKey<*>,
+        value: Any,
+    ): Boolean = key is SettingKey.Choice<*> && key.values.none { it == value }
 }

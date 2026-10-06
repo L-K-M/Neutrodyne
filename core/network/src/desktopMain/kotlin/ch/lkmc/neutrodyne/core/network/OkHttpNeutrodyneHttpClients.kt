@@ -26,29 +26,31 @@ import io.ktor.serialization.kotlinx.json.json
  */
 @SingleIn(AppScope::class)
 @ContributesBinding(AppScope::class)
-internal class OkHttpNeutrodyneHttpClients @Inject constructor(
-    networkClients: NetworkClients,
-    userAgent: UserAgentProvider,
-) : NeutrodyneHttpClients {
-
-    private val clients = HttpClientKind.entries.associateWith { kind ->
-        HttpClient(OkHttp) {
-            engine { preconfigured = networkClients[kind] }
-            // Status codes are data for 03's fetch pipeline, not exceptions.
-            expectSuccess = false
-            // The engine level keeps the island's per-kind redirect policy; Ktor's plugin must
-            // not add a second opinion for FEED.
-            followRedirects = kind != HttpClientKind.FEED
-            // 05's downloads may follow an https → http hop (publishers' CDN hand-offs).
-            if (kind == HttpClientKind.DOWNLOAD) {
-                install(HttpRedirect) { allowHttpsDowngrade = true }
+internal class OkHttpNeutrodyneHttpClients
+    @Inject
+    constructor(
+        networkClients: NetworkClients,
+        userAgent: UserAgentProvider,
+    ) : NeutrodyneHttpClients {
+        private val clients =
+            HttpClientKind.entries.associateWith { kind ->
+                HttpClient(OkHttp) {
+                    engine { preconfigured = networkClients[kind] }
+                    // Status codes are data for 03's fetch pipeline, not exceptions.
+                    expectSuccess = false
+                    // The engine level keeps the island's per-kind redirect policy; Ktor's plugin must
+                    // not add a second opinion for FEED.
+                    followRedirects = kind != HttpClientKind.FEED
+                    // 05's downloads may follow an https → http hop (publishers' CDN hand-offs).
+                    if (kind == HttpClientKind.DOWNLOAD) {
+                        install(HttpRedirect) { allowHttpsDowngrade = true }
+                    }
+                    // 10's long-lived sync stream.
+                    if (kind == HttpClientKind.SYNC) install(SSE)
+                    install(ContentNegotiation) { json(NeutrodyneJson) }
+                    install(UserAgent) { agent = userAgent.value }
+                }
             }
-            // 10's long-lived sync stream.
-            if (kind == HttpClientKind.SYNC) install(SSE)
-            install(ContentNegotiation) { json(NeutrodyneJson) }
-            install(UserAgent) { agent = userAgent.value }
-        }
-    }
 
-    override fun client(kind: HttpClientKind): HttpClient = clients.getValue(kind)
-}
+        override fun client(kind: HttpClientKind): HttpClient = clients.getValue(kind)
+    }

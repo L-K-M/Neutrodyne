@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Unlicense
+import javax.xml.parsers.DocumentBuilderFactory
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import javax.xml.parsers.DocumentBuilderFactory
 
 /**
  * `verifyManifestPermissions`' permission set: `uses-permission-sdk-23` declarations apply on

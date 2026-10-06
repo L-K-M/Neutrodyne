@@ -106,12 +106,13 @@ class RedactorTest {
 
     @Test
     fun `url redaction is idempotent`() {
-        val inputs = listOf(
-            "https://u:p@example.com:8443/rss/a8F3kq09ZpLm2xQ?token=abc#frag",
-            "http://example.com/feed/podcast",
-            "feed:https://u:p@example.com/f?t=9",
-            "not a url",
-        )
+        val inputs =
+            listOf(
+                "https://u:p@example.com:8443/rss/a8F3kq09ZpLm2xQ?token=abc#frag",
+                "http://example.com/feed/podcast",
+                "feed:https://u:p@example.com/f?t=9",
+                "not a url",
+            )
         for (input in inputs) {
             val once = Redactor.url(input)
             assertEquals(once, Redactor.url(once), "not idempotent for $input")
