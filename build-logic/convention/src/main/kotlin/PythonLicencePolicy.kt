@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Unlicense
 import com.chaquo.python.ChaquopyExtension
+import com.chaquo.python.internal.Common
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.Project
@@ -18,6 +19,7 @@ import org.gradle.api.tasks.TaskAction
 import org.gradle.kotlin.dsl.getByType
 import org.gradle.kotlin.dsl.register
 import org.tomlj.Toml
+import org.tomlj.TomlArray
 import org.tomlj.TomlTable
 import java.io.File
 import java.util.TreeSet
@@ -58,6 +60,12 @@ internal object PythonLicencePolicy {
     /** Anything matching this is rejected outright unless it is an allowed OR-elected alternative. */
     val BANNED_LICENCE = Regex("GPL|LGPL|AGPL|Sleepycat")
 
+    /** Maven origin prefix of the Chaquopy-packaged CPython runtime artifact. */
+    val TARGET_PREFIX = "maven:com.chaquo.python:target:"
+
+    /** pip flags that read their package list from a file or URL, bypassing the lock's `pip` list. */
+    val PIP_FILE_OPTION = Regex("(-r|--requirement(=.*)?|-e|--editable(=.*)?)")
+
     data class Component(
         val name: String,
         val version: String?,
@@ -86,13 +94,27 @@ internal object PythonLicencePolicy {
 
     fun parse(text: String): Lock {
         val parsed = Toml.parse(text)
+        // Tomlj collects recoverable errors (duplicate keys, truncated values) instead of throwing;
+        // a lock that only half-parsed must not pass the gate.
+        if (parsed.hasErrors()) {
+            throw GradleException(
+                "python-components.lock is not valid TOML: " +
+                    parsed.errors().joinToString("; ") { "${it.position()}: ${it.message}" },
+            )
+        }
         val schema =
             parsed.getLong("schema")
                 ?: throw GradleException("python-components.lock: missing `schema`")
         if (schema != SCHEMA) throw GradleException("python-components.lock: unsupported schema $schema")
 
-        val pbsTable = parsed.getTable("pbsSource")
-        val components = parsed.getArray("component")?.toList() ?: emptyList()
+        if (parsed.contains("pbsSource") && parsed.get("pbsSource") !is TomlTable) {
+            throw GradleException("python-components.lock: `pbsSource` is not a table")
+        }
+        val pbsTable: TomlTable? = parsed.getTable("pbsSource")
+        if (parsed.contains("component") && parsed.get("component") !is TomlArray) {
+            throw GradleException("python-components.lock: `component` must be an array of tables")
+        }
+        val components: List<Any?> = parsed.getArray("component")?.toList() ?: emptyList()
         return Lock(
             chaquopy = parsed.getString("chaquopy"),
             python = parsed.getString("python"),
@@ -108,7 +130,10 @@ internal object PythonLicencePolicy {
                     )
                 },
             components =
-                components.filterIsInstance<TomlTable>().map { c ->
+                components.map { c ->
+                    if (c !is TomlTable) {
+                        throw GradleException("python-components.lock: [[component]] entry is not a table")
+                    }
                     val name = c.getString("name") ?: throw GradleException("lock component without `name`")
                     Component(
                         name = name,
@@ -129,15 +154,21 @@ internal object PythonLicencePolicy {
 
     /**
      * Returns the list of policy violations. `desktopLock` gates the `kind = "pbs-patches"` MPL-2.0 exception.
-     * `expectedChaquopy`/`expectedPython`/`expectedPip` carry the build-side values while `:youtube:ytdlp`
-     * applies Chaquopy (S7); null means "not checked".
+     * `expectedChaquopy`/`expectedTargetRuntime`/`expectedPip` carry the build-side values while
+     * `:youtube:ytdlp` applies Chaquopy (S7); null means "not checked". `expectedTargetRuntime` is the
+     * resolved `com.chaquo.python:target` version (`"3.14.0-0"`), not the DSL's short `version` — the
+     * lock's `python` and its CPython component must match that exact runtime. `declaredReqFiles` and
+     * `declaredPipOptions` carry Chaquopy's `install("-r", …)`/`options(…)` slots: the no-pip policy
+     * bans requirement files outright because their resolved inventory never enters the lock.
      */
     fun violations(
         lock: Lock,
         desktopLock: Boolean,
         expectedChaquopy: String?,
-        expectedPython: String?,
+        expectedTargetRuntime: String?,
         expectedPip: List<String>?,
+        declaredReqFiles: List<String>?,
+        declaredPipOptions: List<String>?,
         aboutLibrariesIds: Set<String>,
     ): List<String> {
         val problems = mutableListOf<String>()
@@ -145,13 +176,45 @@ internal object PythonLicencePolicy {
         if (expectedChaquopy != null && lock.chaquopy != expectedChaquopy) {
             problems += "lockfile chaquopy = ${lock.chaquopy} but the build applies $expectedChaquopy"
         }
-        if (expectedPython != null &&
-            (lock.python == null || (lock.python != expectedPython && !lock.python.startsWith("$expectedPython.")))
-        ) {
-            problems += "lockfile python = ${lock.python} but chaquopy.defaultConfig.version = $expectedPython"
+        if (expectedTargetRuntime != null) {
+            val runtimeVersion = expectedTargetRuntime.substringBeforeLast('-')
+            if (lock.python != runtimeVersion) {
+                problems +=
+                    "lockfile python = ${lock.python} but chaquopy resolves " +
+                    "com.chaquo.python:target:$expectedTargetRuntime"
+            }
+            // The packaged runtime's component entry must name the same artifact — a lock recording an
+            // older/newer CPython than the one the plugin packages is stale inventory.
+            val targetOrigin = "maven:com.chaquo.python:target:$expectedTargetRuntime"
+            val cpython = lock.components.find { it.name == "CPython" }
+            when {
+                cpython == null ->
+                    problems += "lockfile has no CPython component to match $targetOrigin"
+                cpython.version != runtimeVersion ->
+                    problems += "component CPython version ${cpython.version} but the packaged runtime is $runtimeVersion"
+                cpython.origin != targetOrigin ->
+                    problems += "component CPython origin ${cpython.origin} but the packaged runtime is $targetOrigin"
+            }
+            for (c in lock.components) {
+                val origin = c.origin ?: continue
+                if (origin.startsWith(TARGET_PREFIX) && origin != targetOrigin) {
+                    problems +=
+                        "component ${c.name} pins $origin but the packaged runtime is $targetOrigin"
+                }
+            }
         }
         if (expectedPip != null && lock.pip.sorted() != expectedPip.sorted()) {
             problems += "lockfile pip = ${lock.pip} but the build's pip requirements are $expectedPip"
+        }
+        // install("-r", f) lands in reqFiles and "-r"/"--requirement"/"-e" can hide inside options();
+        // both bypass the lock's pip list, so the no-pip policy rejects every such declaration.
+        for (reqFile in declaredReqFiles.orEmpty()) {
+            problems += "pip install('-r', '$reqFile') bypasses the lockfile's pip list (no-pip policy)"
+        }
+        for (option in declaredPipOptions.orEmpty()) {
+            if (PIP_FILE_OPTION.matches(option)) {
+                problems += "pip option '$option' injects packages outside the lockfile's pip list (no-pip policy)"
+            }
         }
 
         for (c in lock.components) {
@@ -266,13 +329,24 @@ abstract class CheckPythonLicencesTask : DefaultTask() {
     @get:Optional
     abstract val expectedChaquopy: Property<String>
 
+    /** The resolved `com.chaquo.python:target` version (`"3.14.0-0"`); null when Chaquopy is absent. */
     @get:Input
     @get:Optional
-    abstract val expectedPython: Property<String>
+    abstract val expectedTargetRuntime: Property<String>
 
     @get:Input
     @get:Optional
     abstract val expectedPip: ListProperty<String>
+
+    /** The `install("-r", …)` requirement files Chaquopy declared; the no-pip policy wants none. */
+    @get:Input
+    @get:Optional
+    abstract val declaredReqFiles: ListProperty<String>
+
+    /** The `options(…)` pip flags Chaquopy declared; requirement/editable flags are rejected. */
+    @get:Input
+    @get:Optional
+    abstract val declaredPipOptions: ListProperty<String>
 
     init {
         group = "verification"
@@ -290,8 +364,10 @@ abstract class CheckPythonLicencesTask : DefaultTask() {
                 lock,
                 desktopLock = desktopLock.get(),
                 expectedChaquopy = expectedChaquopy.orNull,
-                expectedPython = expectedPython.orNull,
+                expectedTargetRuntime = expectedTargetRuntime.orNull,
                 expectedPip = if (expectedPip.isPresent) expectedPip.get() else null,
+                declaredReqFiles = if (declaredReqFiles.isPresent) declaredReqFiles.get() else null,
+                declaredPipOptions = if (declaredPipOptions.isPresent) declaredPipOptions.get() else null,
                 aboutLibrariesIds = definedIds,
             )
         if (problems.isNotEmpty()) {
@@ -332,6 +408,18 @@ abstract class VerifyBundledYtDlpTask : DefaultTask() {
 }
 
 /**
+ * Mirrors Chaquopy's `pythonVersionInfo`: the DSL `version` ("3.14") selects the first
+ * `PYTHON_VERSIONS` key it prefixes ("3.14.0"), and the packaged `com.chaquo.python:target`
+ * version is `"<key>-<build>"` ("3.14.0-0"). Null when the DSL never set a version.
+ */
+private fun resolvedTargetRuntime(dslVersion: String?): String? =
+    dslVersion?.let { v ->
+        Common.PYTHON_VERSIONS.entries
+            .firstOrNull { it.key.startsWith(v) }
+            ?.let { "${it.key}-${it.value}" }
+    }
+
+/**
  * Registers `checkPythonLicences` and `verifyBundledYtDlp` for one engine host. `aboutLibrariesDir` is the
  * owning shell's manual-definition directory (`app/config/libraries`, `desktopApp/config/libraries`).
  */
@@ -352,24 +440,31 @@ internal fun Project.registerPythonPolicy(desktopLock: Boolean) {
             afterEvaluate {
                 val chaquopy = extensions.getByType<ChaquopyExtension>()
                 val expected = chaquopy.defaultConfig
+                val pipClass = expected.pip.javaClass
 
                 @Suppress("UNCHECKED_CAST")
-                val pipReqs =
-                    expected.pip.javaClass
-                        .getMethod("getReqs\$gradle") // internal Chaquopy API; no public getter exists
-                        .invoke(expected.pip) as? List<*> ?: emptyList<Any>()
+                fun <T> pipSlot(name: String): List<T> =
+                    pipClass
+                        .getMethod("$name\$gradle") // internal Chaquopy API; no public getters exist
+                        .invoke(expected.pip) as? List<T> ?: emptyList()
+
                 checkTask.configure {
                     expectedChaquopy.set(libs.version("chaquopy"))
-                    expected.version?.let { expectedPython.set(it) }
-                    expectedPip.set(pipReqs.map { it.toString() })
+                    // `version` ("3.14") is only the selector; the packaged runtime is the full
+                    // "3.14.0-0" the plugin resolves — the lock must match that exactly.
+                    resolvedTargetRuntime(expected.version)?.let { expectedTargetRuntime.set(it) }
+                    expectedPip.set(pipSlot<Any>("getReqs").map { it.toString() })
+                    declaredReqFiles.set(pipSlot<Any>("getReqFiles").map { it.toString() })
+                    declaredPipOptions.set(pipSlot<Any>("getOptions").map { it.toString() })
                 }
             }
         }
     }
 
-    tasks.register<VerifyBundledYtDlpTask>("verifyBundledYtDlp") {
-        engineDir.set(layout.projectDirectory.dir("engine"))
-    }
+    val bundleTask =
+        tasks.register<VerifyBundledYtDlpTask>("verifyBundledYtDlp") {
+            engineDir.set(layout.projectDirectory.dir("engine"))
+        }
 
-    tasks.matching { it.name == "check" }.configureEach { dependsOn(checkTask) }
+    tasks.matching { it.name == "check" }.configureEach { dependsOn(checkTask, bundleTask) }
 }

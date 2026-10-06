@@ -29,7 +29,7 @@ class PythonLicencePolicyTest {
         l: PythonLicencePolicy.Lock,
         desktop: Boolean = false,
         ids: Set<String> = setOf("x"),
-    ) = PythonLicencePolicy.violations(l, desktop, null, null, null, ids)
+    ) = PythonLicencePolicy.violations(l, desktop, null, null, null, null, null, ids)
 
     @Test
     fun `allow-listed licences pass`() {
@@ -112,20 +112,112 @@ class PythonLicencePolicyTest {
     fun `build cross-checks`() {
         val l =
             PythonLicencePolicy.parse(
-                "schema = 1\nchaquopy = \"17.1.0\"\npython = \"3.14.0\"\npip = [\"yt-dlp\"]\n",
+                "schema = 1\nchaquopy = \"17.1.0\"\npython = \"3.14.0\"\npip = [\"yt-dlp\"]\n" +
+                    "[[component]]\nname = \"CPython\"\nversion = \"3.14.0\"\n" +
+                    "origin = \"maven:com.chaquo.python:target:3.14.0-0\"\n" +
+                    "licence = \"Python-2.0\"\nkind = \"runtime\"\naboutLibrariesId = \"x\"\n",
             )
-        assertEquals(
+        fun v(
+            lock: PythonLicencePolicy.Lock,
+            chaquopy: String?,
+            target: String?,
+            pip: List<String>?,
+        ) = PythonLicencePolicy.violations(
+            lock,
+            false,
+            chaquopy,
+            target,
+            pip,
             emptyList(),
-            PythonLicencePolicy.violations(l, false, "17.1.0", "3.14", listOf("yt-dlp"), emptySet()),
+            emptyList(),
+            setOf("x"),
         )
-        assertTrue(
-            PythonLicencePolicy.violations(l, false, "17.0.0", "3.14", listOf("yt-dlp"), emptySet()).isNotEmpty(),
+        assertEquals(emptyList(), v(l, "17.1.0", "3.14.0-0", listOf("yt-dlp")))
+        assertTrue(v(l, "17.0.0", "3.14.0-0", listOf("yt-dlp")).isNotEmpty())
+        assertTrue(v(l, "17.1.0", "3.13.9-0", listOf("yt-dlp")).isNotEmpty())
+        assertTrue(v(l, "17.1.0", "3.14.0-0", emptyList()).isNotEmpty())
+    }
+
+    @Test
+    fun `invalid toml and malformed entries are rejected`() {
+        // duplicate keys are recoverable errors for Tomlj — previously the first value was kept
+        // silently, so `licence = "MIT"` before `licence = "GPL-3.0-only"` passed the gate
+        assertFails {
+            PythonLicencePolicy.parse(
+                "schema = 1\n[[component]]\nname = \"c\"\nversion = \"1\"\norigin = \"o\"\n" +
+                    "licence = \"MIT\"\nlicence = \"GPL-3.0-only\"\nkind = \"native\"\n" +
+                    "aboutLibrariesId = \"x\"\n",
+            )
+        }
+        // a truncated document is rejected, not half-read
+        assertFails { PythonLicencePolicy.parse("schema = 1\nchaquopy = ") }
+        // `component` must be an array of tables; non-table entries were silently filtered out
+        assertFails { PythonLicencePolicy.parse("schema = 1\ncomponent = \"x\"\n") }
+        assertFails { PythonLicencePolicy.parse("schema = 1\ncomponent = [1]\n") }
+        assertFails { PythonLicencePolicy.parse("schema = 1\npbsSource = \"x\"\n") }
+    }
+
+    @Test
+    fun `pip requirement files and file flags are rejected`() {
+        val l = PythonLicencePolicy.parse("schema = 1\npip = []\n")
+        fun v(
+            reqs: List<String>?,
+            options: List<String>?,
+        ) = PythonLicencePolicy.violations(
+            l,
+            false,
+            null,
+            null,
+            emptyList(),
+            reqs,
+            options,
+            emptySet(),
         )
-        assertTrue(
-            PythonLicencePolicy.violations(l, false, "17.1.0", "3.13", listOf("yt-dlp"), emptySet()).isNotEmpty(),
+        assertEquals(emptyList(), v(emptyList(), emptyList()))
+        // install("-r", f) lands in Chaquopy's reqFiles, not reqs — the pip = [] compare alone passed it
+        assertTrue(v(listOf("requirements.txt"), emptyList()).isNotEmpty())
+        // the same bypass through options() is rejected as well
+        assertTrue(v(emptyList(), listOf("-r", "requirements.txt")).isNotEmpty())
+        assertTrue(v(emptyList(), listOf("--requirement=requirements.txt")).isNotEmpty())
+        assertTrue(v(emptyList(), listOf("-e", "./local-pkg")).isNotEmpty())
+        assertEquals(emptyList(), v(emptyList(), listOf("--no-cache-dir"))) // a benign flag passes
+    }
+
+    @Test
+    fun `the runtime patch version is verified against the resolved target`() {
+        fun parseLock(
+            python: String,
+            cpythonVersion: String = python,
+            cpythonOrigin: String = "maven:com.chaquo.python:target:$python-0",
+            components: Boolean = true,
+        ) = PythonLicencePolicy.parse(
+            "schema = 1\npython = \"$python\"\npip = []\n" +
+                if (components) {
+                    "[[component]]\nname = \"CPython\"\nversion = \"$cpythonVersion\"\n" +
+                        "origin = \"$cpythonOrigin\"\nlicence = \"Python-2.0\"\n" +
+                        "kind = \"runtime\"\naboutLibrariesId = \"x\"\n"
+                } else {
+                    ""
+                },
         )
-        assertTrue(
-            PythonLicencePolicy.violations(l, false, "17.1.0", "3.14", emptyList(), emptySet()).isNotEmpty(),
-        )
+
+        fun v(lock: PythonLicencePolicy.Lock) =
+            PythonLicencePolicy.violations(
+                lock,
+                false,
+                null,
+                "3.14.0-0",
+                emptyList(),
+                emptyList(),
+                emptyList(),
+                setOf("x"),
+            )
+        assertEquals(emptyList(), v(parseLock("3.14.0")))
+        // previously any 3.14.* passed because only the DSL minor version was compared
+        assertTrue(v(parseLock("3.14.999", cpythonOrigin = "maven:com.chaquo.python:target:3.14.999-0")).isNotEmpty())
+        // and the CPython component entry is checked the same way
+        assertTrue(v(parseLock("3.14.0", cpythonVersion = "3.14.1")).isNotEmpty())
+        assertTrue(v(parseLock("3.14.0", cpythonOrigin = "maven:com.chaquo.python:target:3.14.0-9")).isNotEmpty())
+        assertTrue(v(parseLock("3.14.0", components = false)).isNotEmpty())
     }
 }

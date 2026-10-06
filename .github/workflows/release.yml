@@ -122,6 +122,16 @@ jobs:
     environment: release # required reviewer; holds no signing secret (09)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    # one publisher at a time across ALL tags: two releases may build in parallel,
+    # but only one creates/uploads/flips latest, so an older tag can never publish
+    # last and take "latest" backwards (make_latest is recomputed in this job).
+    concurrency:
+      group: release-publish
+      cancel-in-progress: false
+    outputs:
+      # the value computed inside the serialized job — downstream jobs (image-tags, MS1)
+      # must consume this, never verify-tag's make_latest, which predates the queue
+      make_latest: ${{ steps.publish.outputs.make_latest }}
     permissions:
       contents: write        # gh release create/edit
       id-token: write        # actions/attest
@@ -183,14 +193,31 @@ jobs:
         with:
           subject-path: dist/**
       - name: Draft release, upload assets, publish
+        id: publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
-          MAKE_LATEST: ${{ needs.verify-tag.outputs.make_latest }}
+          VERSION_CODE: ${{ needs.verify-tag.outputs.versionCode }}
         run: |
+          # make_latest is decided here, not in verify-tag: this job is serialized across
+          # tags, so compare against the latest release as it stands now (verify-tag's value
+          # was computed before builds and approval and may be stale).
+          latest_err="$(mktemp)"
+          if latest_tag="$(gh api "repos/${{ github.repository }}/releases/latest" --jq .tag_name 2>"$latest_err")"; then
+            lv="${latest_tag#v}"; lm="${lv%%.*}"; lr="${lv#*.}"; ln="${lr%%.*}"; lp="${lr#*.}"
+            latest_code=$((lm * 1000000 + ln * 10000 + lp * 100 + 95))
+            [ "$VERSION_CODE" -gt "$latest_code" ] && make_latest=true || make_latest=false
+          elif grep -qE '404|Not Found' "$latest_err"; then
+            make_latest=true # no published release yet: the first release is latest
+          else
+            cat "$latest_err" >&2
+            exit 1
+          fi
+          rm -f "$latest_err"
+          echo "make_latest=$make_latest" >> "$GITHUB_OUTPUT"
           gh release create "$TAG" --draft --verify-tag --title "Neutrodyne ${TAG#v}" --notes-file body.md
           gh release upload "$TAG" dist/*
-          gh release edit "$TAG" --draft=false --latest="$MAKE_LATEST"
+          gh release edit "$TAG" --draft=false --latest="$make_latest"
       - name: Verify the immutable release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -198,5 +225,7 @@ jobs:
         run: |
           gh release verify "$TAG"
           for f in dist/*; do
-            gh release verify-asset "$TAG" "$(basename "$f")"
+            # verify-asset hashes the local file — it needs the real path under dist/,
+            # not the basename relative to the repository root
+            gh release verify-asset "$TAG" "$f"
           done

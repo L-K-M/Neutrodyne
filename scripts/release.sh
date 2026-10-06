@@ -78,26 +78,46 @@ else
     [ "$BRANCH" = "main" ] || fail "releases run on main (or release/X.Y with --hotfix); got '${BRANCH:-detached}'"
 fi
 [ -z "$(git status --porcelain)" ] || fail "working tree is not clean"
-[ "$(git rev-parse HEAD)" = "$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo none)" ] \
+HEAD_SHA="$(git rev-parse HEAD)"
+[ "$HEAD_SHA" = "$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo none)" ] \
     || fail "HEAD != origin/$BRANCH — push or rebase first"
 
 command -v gh >/dev/null 2>&1 || fail "gh is needed for the preconditions"
 REPO="$(prop neutrodyne.repoUrl | sed 's|https://github.com/||')"
-ci_ok="$(gh run list --repo "$REPO" --branch "$BRANCH" --workflow ci.yml --commit HEAD --limit 5 \
+# --commit is forwarded to the API as head_sha, which does not resolve ref names —
+# the literal "HEAD" would never match a run.
+ci_ok="$(gh run list --repo "$REPO" --branch "$BRANCH" --workflow ci.yml --commit "$HEAD_SHA" --limit 5 \
     --json conclusion --jq '[.[] | select(.conclusion == "success")] | length' 2>/dev/null || echo 0)"
 [ "$ci_ok" -ge 1 ] || fail "no green ci.yml run for HEAD (09 release.sh step 1)"
 blockers="$(gh issue list --repo "$REPO" --label release-blocker --state open --json number --jq length 2>/dev/null || echo '?')"
 [ "$blockers" = "0" ] || fail "open release-blocker issues: $blockers"
 
-# the latest scheduled nightly is green — or, for a PATCH hotfix, a green
-# dispatched run (scope: youtube-smoke) on this branch (09 release.sh step 1)
+# the latest scheduled nightly is green — or, for a PATCH hotfix, a dispatched
+# nightly whose checkout IS this commit and whose youtube-smoke jobs
+# (instrumented-full + release-build-smoke, nightly.yml's scope filter) ran
+# green on it. A green run for another sha or a narrower scope proves nothing.
 nightly="$(gh run list --repo "$REPO" --workflow nightly.yml --branch "$BRANCH" --limit 5 \
     --json conclusion,event --jq '[.[] | select(.event == "schedule" and .conclusion != null)] | .[0].conclusion' 2>/dev/null || echo '')"
 if [ "$nightly" != "success" ]; then
-    dispatched="$(gh run list --repo "$REPO" --workflow nightly.yml --branch "$BRANCH" --limit 20 \
-        --json conclusion,event --jq '[.[] | select(.event == "workflow_dispatch" and .conclusion == "success")] | length' 2>/dev/null || echo 0)"
-    if [ "$HOTFIX" -eq 1 ] && [ "$dispatched" -ge 1 ]; then
-        echo "release: no scheduled green nightly; accepting a green dispatched run (hotfix path)"
+    smoke_ok=0
+    if [ "$HOTFIX" -eq 1 ]; then
+        # workflow_dispatch runs on this branch checked out at HEAD; their run's
+        # head_sha is the dispatch ref, so --commit keeps the wrong-ref case out
+        dispatched="$(gh run list --repo "$REPO" --workflow nightly.yml --branch "$BRANCH" \
+            --commit "$HEAD_SHA" --limit 10 --json databaseId,conclusion,event \
+            --jq '[.[] | select(.event == "workflow_dispatch" and .conclusion == "success")] | .[].databaseId' \
+            2>/dev/null || true)"
+        for run_id in $dispatched; do
+            jobs="$(gh api "repos/$REPO/actions/runs/$run_id/jobs?per_page=100" \
+                --jq '[.jobs[] | select(.conclusion == "success") | .name] | join(" ")' 2>/dev/null || echo '')"
+            if grep -qw "instrumented-full" <<< "$jobs" && grep -qw "release-build-smoke" <<< "$jobs"; then
+                smoke_ok=1
+                break
+            fi
+        done
+    fi
+    if [ "$smoke_ok" -eq 1 ]; then
+        echo "release: no scheduled green nightly; accepting dispatched youtube-smoke green on $HEAD_SHA"
     else
         fail "latest scheduled nightly.yml on $BRANCH is not green (${nightly:-none})"
     fi
