@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.os.Build
 import android.os.IBinder
 import android.os.Process
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -13,6 +14,7 @@ import com.google.common.truth.Truth.assertThat
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeFalse
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -36,6 +38,12 @@ class YtxSelfTestInstrumentedTest {
 
     @Before
     fun setUp() {
+        // S7 finding (2026-10-06): libpython 3.14's load-time constructor uses the legacy `open` syscall,
+        // which Android 8.0/8.1's seccomp filter forbids for x86_64 apps (SIGSYS before `ping`). AArch64 has
+        // no `open` syscall and x86_64 allows it from API 28, so only x86_64 on API 26–27 is affected (01 S7).
+        val x86OnOreo = Build.SUPPORTED_ABIS.first() == X86_64 && Build.VERSION.SDK_INT < Build.VERSION_CODES.P
+        assumeFalse("CPython 3.14 cannot load on x86_64 Android 8.x (seccomp)", x86OnOreo)
+
         context = InstrumentationRegistry.getInstrumentation().targetContext
     }
 
@@ -121,6 +129,7 @@ class YtxSelfTestInstrumentedTest {
     }
 
     private companion object {
+        const val X86_64 = "x86_64"
         const val CALL_ID = 1L
         const val BIND_TIMEOUT_MS = 30_000L
         const val CALL_TIMEOUT_MS = 120_000L // 04's first-compile cap; covers Chaquopy extraction

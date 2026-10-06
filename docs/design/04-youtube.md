@@ -1045,6 +1045,7 @@ The first week of M9a, on the reference device ([PO-28](../PLAN.md#48-further-pr
 |---|---|---|
 | `arm64-v8a` release APK size, default and legacy native packaging | PB12 < 40 MB | pass at S7's first measurement (2026-10-06): 25,138,602 B default, 15,300,262 B legacy packaging — before yt-dlp is vendored (M9a adds ≈ 3.1 MB) |
 | Foreign-ABI Chaquopy assets per 64-bit split; unusable Python assets in the `armeabi-v7a` APK (from S7) | ≤ 5 MB per 64-bit APK; `armeabi-v7a` within PB13 with them counted (estimate ≈ 12–13 MB); else [D2](../PLAN.md#3-key-decisions)'s ABI-flavor fallback ([01 S7](01-foundation.md#s7-chaquopy-under-agp-941)) | pass (S7, 2026-10-06): 3,550,162 B foreign (`x86_64`) in the `arm64-v8a` APK, 3,505,248 B foreign (`arm64-v8a`) in `x86_64`; `armeabi-v7a` carries 12,390,356 B of unusable Python in a 13.83 MB APK — inside PB13 |
+| `selftest` in `:ytx` on API 26 (from S7) | must pass on `arm64-v8a` | x86_64 API 26–27 fails (2026-10-06): seccomp forbids libpython 3.14's legacy `open` syscall there; the engine reports unavailable and YouTube uses external mode ([01 S7](01-foundation.md#s7-chaquopy-under-agp-941)). M9a: detect before starting `:ytx`, report upstream; arm64 API 26 is a device check on each release issue |
 | Cold resolve (`:ytx` not running), p50 / p95 over 20 videos | PB18 p50 ≤ 3 s | pending |
 | Warm resolve, p50 / p95 | PB19 p50 ≤ 1.5 s | pending |
 | `:ytx` PSS idle and during a resolve | PB20 ≤ 90 MB | pending |
