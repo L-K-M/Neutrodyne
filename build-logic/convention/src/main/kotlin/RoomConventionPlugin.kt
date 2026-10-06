@@ -26,6 +26,16 @@ class RoomConventionPlugin : Plugin<Project> {
             kotlin.sourceSets.getByName("desktopTest").dependencies {
                 implementation(libs.lib("androidx-room3-testing"))
             }
+            // Created only when the module opts into Android host tests (withHostTest, S4 2026-10-06);
+            // the task is `testAndroidHostTest` (09 Unverified note confirmed).
+            kotlin.sourceSets.configureEach {
+                if (name == "androidHostTest") {
+                    dependencies {
+                        implementation(libs.lib("androidx-room3-testing"))
+                        implementation(libs.lib("androidx-sqlite-framework"))
+                    }
+                }
+            }
             dependencies {
                 add("kspAndroid", libs.lib("androidx-room3-compiler"))
                 add("kspDesktop", libs.lib("androidx-room3-compiler"))
