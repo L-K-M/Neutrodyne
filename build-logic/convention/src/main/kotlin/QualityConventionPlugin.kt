@@ -35,6 +35,7 @@ class QualityConventionPlugin : Plugin<Project> {
             }
 
             registerSourceScanTasks()
+            registerBrandAssetTasks()
             // The root project gets verifyDependencyPolicy like every module (01 Gradle-side policy tasks).
             registerDependencyPolicy()
 
