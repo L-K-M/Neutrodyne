@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
@@ -30,7 +29,6 @@ import org.jetbrains.compose.resources.stringResource
  * The Settings home list (08 Settings screens; M0a shows the three rows whose pages exist).
  * It is the gear's target, pushed on the selected tab's stack, so it keeps a back arrow.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SettingsHomeRoute() {
     val navigator = LocalAppNavigator.current

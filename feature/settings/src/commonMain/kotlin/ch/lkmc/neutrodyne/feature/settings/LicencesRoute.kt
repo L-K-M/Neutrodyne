@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
@@ -42,6 +41,7 @@ import ch.lkmc.neutrodyne.feature.settings.resources.licences_empty
 import ch.lkmc.neutrodyne.feature.settings.resources.licences_library_count
 import ch.lkmc.neutrodyne.feature.settings.resources.licences_search
 import ch.lkmc.neutrodyne.feature.settings.resources.licences_section_bundled
+import ch.lkmc.neutrodyne.feature.settings.resources.licences_section_header
 import ch.lkmc.neutrodyne.feature.settings.resources.licences_section_libraries
 import ch.lkmc.neutrodyne.feature.settings.resources.licences_source
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_licences
@@ -69,7 +69,6 @@ private sealed interface LicenceData {
  * is provided by the shells' graphs (nullable so the page still works where the shell binds
  * nothing); tests pass a fake.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun LicencesRoute(source: LicencesSource?) {
     val data by produceState<LicenceData>(LicenceData.Loading, source) {
@@ -178,8 +177,9 @@ private fun LicenceStatement() {
 
 @Composable
 private fun SectionHeader(title: String, count: Int) {
+    val countText = pluralStringResource(Res.plurals.licences_library_count, count, count)
     Text(
-        "$title · " + pluralStringResource(Res.plurals.licences_library_count, count, count),
+        stringResource(Res.string.licences_section_header, title, countText),
         style = MaterialTheme.typography.titleSmall,
         modifier = Modifier.padding(horizontal = SCREEN_PADDING, vertical = HEADER_GAP),
     )

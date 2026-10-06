@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,7 +37,6 @@ import org.jetbrains.compose.resources.stringResource
  * the platform, the platform's licence statement, the Licences row and the source link. All facts
  * come from the shell-bound [BuildInfo]; links open through `LocalPlatformActions`.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun AboutPage(buildInfo: BuildInfo) {
     val navigator = LocalAppNavigator.current

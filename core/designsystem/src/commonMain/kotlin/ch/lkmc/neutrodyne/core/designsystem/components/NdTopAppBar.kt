@@ -3,20 +3,20 @@
 package ch.lkmc.neutrodyne.core.designsystem.components
 
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarColors
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 
 /**
  * Standard top app bar (08 Nd wrappers): flat `surface` until [elevated] (scrolled) raises it to
- * `surfaceContainer`. [title] is a resolved resource string.
+ * `surfaceContainer`. [title] is a resolved resource string. The signature carries no experimental
+ * Material 3 type (scroll behaviour, top-bar defaults), so callers need no opt-in (08 Theming and colour);
+ * scroll-linked behaviour arrives with the first scrolling screen.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -26,8 +26,6 @@ public fun NdTopAppBar(
     navigation: @Composable () -> Unit = {},
     actions: @Composable RowScope.() -> Unit = {},
     elevated: Boolean = false,
-    scrollBehavior: TopAppBarScrollBehavior? = null,
-    windowInsets: WindowInsets = TopAppBarDefaults.windowInsets,
 ) {
     TopAppBar(
         title = { Text(title, style = MaterialTheme.typography.titleLarge) },
@@ -35,8 +33,6 @@ public fun NdTopAppBar(
         navigationIcon = navigation,
         actions = actions,
         colors = ndTopAppBarColors(elevated),
-        scrollBehavior = scrollBehavior,
-        windowInsets = windowInsets,
     )
 }
 

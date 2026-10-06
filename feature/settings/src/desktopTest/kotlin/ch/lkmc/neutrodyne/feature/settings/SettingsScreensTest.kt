@@ -2,7 +2,6 @@
 
 package ch.lkmc.neutrodyne.feature.settings
 
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.ComposeUiTest
@@ -224,7 +223,6 @@ private val StubInstallers: Set<EntryProviderInstaller> = TOP_LEVEL_STUB_TABS.ma
     installer
 }.toSet()
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TopBarStub(tab: TopLevelKey) {
     val title = if (tab == FeedsKey) stringResource(Res.string.nav_feeds) else tab.toString()

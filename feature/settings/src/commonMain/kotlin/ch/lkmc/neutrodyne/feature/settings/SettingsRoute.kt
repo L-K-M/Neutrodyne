@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import ch.lkmc.neutrodyne.core.designsystem.components.NdEmptyState
@@ -25,7 +24,6 @@ import org.jetbrains.compose.resources.stringResource
  * Appearance placeholder (which also serves the desktop's detail placeholder); pages without an
  * M0a row share the placeholder until their milestone lands.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SettingsRoute(key: SettingsKey, buildInfo: BuildInfo) {
     when (key.page) {
@@ -39,7 +37,6 @@ internal fun SettingsRoute(key: SettingsKey, buildInfo: BuildInfo) {
  * settings milestone. Also rendered as `SettingsHomeKey`'s two-pane detail placeholder
  * (08 Settings screens).
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun AppearancePage() {
     Column(Modifier.fillMaxSize()) {

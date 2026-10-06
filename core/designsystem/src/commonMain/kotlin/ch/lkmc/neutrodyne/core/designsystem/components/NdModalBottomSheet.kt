@@ -7,7 +7,6 @@ import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalBottomSheetProperties
-import androidx.compose.material3.SheetState
 import androidx.compose.material3.contentColorFor
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -20,14 +19,15 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 /**
  * `ModalBottomSheet` with the Neutrodyne sheet top corners (28 dp, `NeutrodyneShapes.Sheet`). On
  * desktop this is window-backed (Compose `Dialog`), so navigation-level sheets render above the
- * expanded player — that is what the shared `NdSheetSceneStrategy` relies on.
+ * expanded player — that is what the shared `NdSheetSceneStrategy` relies on. The sheet state stays
+ * inside: `SheetState` is an experimental Material 3 type, and `Nd*` wrappers never expose those
+ * (08 Theming and colour); app sheets never use the partially expanded detent (08 Player sheet).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 public fun NdModalBottomSheet(
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
-    sheetState: SheetState = rememberModalBottomSheetState(),
     shape: Shape = NeutrodyneShapes.Sheet,
     containerColor: Color = BottomSheetDefaults.ContainerColor,
     sheetMaxWidth: Dp = BottomSheetDefaults.SheetMaxWidth,
@@ -37,7 +37,7 @@ public fun NdModalBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         modifier = modifier,
-        sheetState = sheetState,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         shape = shape,
         containerColor = containerColor,
         contentColor = contentColorFor(containerColor),
@@ -46,9 +46,3 @@ public fun NdModalBottomSheet(
         content = content,
     )
 }
-
-/** Convenience: the partially-expanded detent is never used for app sheets (08 Player sheet). */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-public fun rememberNdSheetState(): SheetState =
-    rememberModalBottomSheetState(skipPartiallyExpanded = true)

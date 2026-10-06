@@ -4,7 +4,6 @@ package ch.lkmc.neutrodyne.feature.queue
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import ch.lkmc.neutrodyne.core.designsystem.components.NdEmptyState
@@ -21,7 +20,6 @@ import org.jetbrains.compose.resources.stringResource
  * The M0a Up next destination (01 M0 checklist step 16): a top bar with the Settings gear and the
  * empty state. M4 delivers the queue and the play context (08 Up next).
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun UpNextRoute() {
     Column(Modifier.fillMaxSize()) {

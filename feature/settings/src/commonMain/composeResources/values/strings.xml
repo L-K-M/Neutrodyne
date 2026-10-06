@@ -25,6 +25,7 @@
 
     <!-- Licences screen (AboutLibraries data rendered with Nd* components). -->
     <string name="licences_section_libraries">Libraries</string>
+    <string name="licences_section_header">%1$s · %2$s</string>
     <string name="licences_section_bundled">Bundled components</string>
     <string name="licences_search">Search</string>
     <string name="licences_empty">No licence information in this build.</string>

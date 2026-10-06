@@ -4,7 +4,6 @@ package ch.lkmc.neutrodyne.core.ui.root
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -261,7 +260,6 @@ private fun TabStub(text: String, icon: androidx.compose.ui.graphics.vector.Imag
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TestTopBar(title: StringResource) {
     NdTopAppBar(

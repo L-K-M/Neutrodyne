@@ -19,6 +19,7 @@
     <string name="about_debug_build">Debug-Build</string>
 
     <string name="licences_section_libraries">Bibliotheken</string>
+    <string name="licences_section_header">%1$s · %2$s</string>
     <string name="licences_section_bundled">Mitgelieferte Komponenten</string>
     <string name="licences_search">Suchen</string>
     <string name="licences_empty">Dieser Build enthält keine Lizenzinformationen.</string>

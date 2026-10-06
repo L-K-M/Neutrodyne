@@ -23,7 +23,6 @@ import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
  * bottom-sheet strategy, so this is ours (the nav3-recipes recipe adapted to `NdModalBottomSheet`).
  * `onRemove` is not overridden at M0a: the window closes without an exit animation.
  */
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 private class NdSheetScene<T : Any>(
     override val key: Any,
     private val entry: NavEntry<T>,
