@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Unlicense
+#
+# The WiX Toolset build jpackage's MSI step uses on the Windows runner (11 Lockfiles,
+# PO-48's MS-RL named case). Compose 1.12.1 downloads and unzips WiX itself (its
+# downloadWix/unzipWix tasks, pinned to wix3112rtm — recorded 2026-10-06 as a deviation
+# from "WiX 3.14 or 5.x found by jpackage" in 11 and 01, because the plugin brings its
+# own pinned WiX 3.11.2), so this lock pins exactly that: the binaries zip it downloads
+# and the wix3 source archive at the same tag, which the release attaches as
+# wix-{version}-src.tar.gz (sources job, 09 release.yml step 4).
+#
+# binaryTable lists the MSI Binary-table entries a Neutrodyne MSI may carry (11 Image
+# scan rules): jpackage's wixhelper.dll, WiX Util's custom action behind RemoveFolderEx
+# and the WixUI resources of the licence dialog. Exact ids are confirmed by the first
+# Windows build (S13); patterns match by fnmatch.
+version=3.11.2
+tag=wix3112rtm
+
+installer.url=https://github.com/wixtoolset/wix3/releases/download/wix3112rtm/wix311-binaries.zip
+installer.sha256=2c1888d5d1dba377fc7fa14444cf556963747ff9a0a289a3599cf09da03b9e2e
+
+source.name=wix-3.11.2-src.tar.gz
+source.url=https://codeload.github.com/wixtoolset/wix3/tar.gz/refs/tags/wix3112rtm
+source.sha256=cfc434f1ecd65d7274da35593aab792117821a22037af2a8ef42ba24673297aa
+
+binaryTable=wixhelper.dll
+binaryTable=WixHelper*
+binaryTable=bannrbmp
+binaryTable=dlgbmp

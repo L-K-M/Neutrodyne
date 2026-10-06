@@ -25,7 +25,8 @@ class SmokeModeTest {
         val json = Json.parseToJsonElement(lines.single().removePrefix("SMOKE ")).jsonObject
         assertThat(json["versionName"]!!.jsonPrimitive.content).isEqualTo(BuildInfoLoader.load().versionName)
         assertThat(json["versionCode"]!!.jsonPrimitive.content).isEqualTo("${BuildInfoLoader.load().versionCode}")
-        assertThat(json["installKind"]!!.jsonPrimitive.content).isEqualTo("dev")
+        assertThat(json["installKind"]!!.jsonPrimitive.content)
+            .isEqualTo(BuildInfoLoader.load().desktop!!.installKind.wire)
         assertThat(json["javaVendor"]!!.jsonPrimitive.content).isNotEmpty()
         assertThat(json["javaVendorVersion"]!!.jsonPrimitive.content).isNotEmpty()
         assertThat(json["javaRuntimeVersion"]!!.jsonPrimitive.content).isNotEmpty()

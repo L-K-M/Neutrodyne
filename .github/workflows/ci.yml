@@ -126,12 +126,11 @@ jobs:
         with:
           cache-provider: basic
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
-      # :sync:server:fatJar keeps the server's packaging task green from M0a.
-      # TODO(M0b): add :desktopApp:createDistributable — the desktop image needs
-      # the runtime.lock/jlink setup that lands with the desktop package (it
-      # fails at createRuntimeImage today).
-      - name: Build the APKs and the server JAR
-        run: ./gradlew assembleRelease assembleDebug :sync:server:fatJar -Pneutrodyne.abiSplits=true
+      # jlink's --strip-debug runs objcopy on the image's native files.
+      - name: binutils for the jlink step
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq binutils
+      - name: Build the APKs, the desktop image and the server JAR
+        run: ./gradlew assembleRelease assembleDebug :desktopApp:createDistributable :sync:server:fatJar -Pneutrodyne.abiSplits=true
       # PR builds are signed with the committed public key, so a PR build is
       # signed exactly like a release and needs no secret (09 Hardening).
       - name: Build-output checks on the release APKs
@@ -147,6 +146,21 @@ jobs:
           name: debug-apks
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 5
+      # The image plus the files its checks need: the Licensee classpath manifest
+      # and the pinned Temurin tree the runtime files are compared against.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-image-linux-x64
+          path: |
+            desktopApp/build/compose/binaries/main/app/Neutrodyne
+            desktopApp/build/desktop-packaging/runtime-classpath.txt
+            desktopApp/build/bundled-runtime/linux-x64/jdk
+          retention-days: 1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: server-jar
+          path: sync/server/build/libs/neutrodyne-server-*.jar
+          retention-days: 1
 
   instrumented:
     runs-on: ubuntu-24.04
@@ -189,7 +203,66 @@ jobs:
           name: androidTest-results
           path: "**/build/outputs/androidTest-results/"
 
-  # TODO (M0b): `desktop-smoke` (xvfb-run smoke start of the Linux x64 image +
-  # check-desktop-image.sh + check-runtime-sources.sh --image) and `server`
-  # (fat-JAR smoke on 127.0.0.1:8787 and the 0.0.0.0 listen refusal, PLAN M0
-  # AC16) — both `needs: assemble` per 09.
+  desktop-smoke:
+    needs: assemble
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: desktop-image-linux-x64
+      # xvfb-run and dbus-run-session wrap the packaged smoke start (11 Smoke
+      # mode); objdump/ar serve the image scan's glibc and package rules.
+      - name: Smoke and scan tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb dbus-x11 binutils
+      - name: Smoke start the packaged image
+        run: |
+          img=desktopApp/build/compose/binaries/main/app/Neutrodyne
+          xvfb-run -a dbus-run-session scripts/desktop/smoke-start.sh "$img" | tee smoke.txt
+          grep -q '^SMOKE {' smoke.txt
+      - name: Image scan rules
+        run: |
+          img=desktopApp/build/compose/binaries/main/app/Neutrodyne
+          scripts/ci/check-desktop-image.sh "$img"
+      - name: Runtime exception checks
+        run: |
+          img=desktopApp/build/compose/binaries/main/app/Neutrodyne
+          scripts/ci/check-runtime-sources.sh --image "$img" --smoke smoke.txt
+
+  server:
+    needs: assemble
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: server-jar
+      - name: Start the fat JAR and check the endpoints
+        run: |
+          jar="$(echo sync/server/build/libs/neutrodyne-server-*.jar)"
+          export NEUTRODYNE_SERVER_DATA="$(mktemp -d)"
+          java -jar "$jar" serve &
+          pid=$!
+          trap 'kill $pid 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            sleep 1
+            curl -fsS http://127.0.0.1:8787/healthz >/dev/null 2>&1 && break
+          done
+          curl -fsS http://127.0.0.1:8787/healthz | grep -q ok
+          curl -fsS http://127.0.0.1:8787/readyz
+          curl -fsS http://127.0.0.1:8787/.well-known/neutrodyne-sync
+          kill $pid 2>/dev/null || true
+      - name: A non-loopback listen is refused (PLAN M0 AC16)
+        run: |
+          jar="$(echo sync/server/build/libs/neutrodyne-server-*.jar)"
+          export NEUTRODYNE_SERVER_DATA="$(mktemp -d)" NEUTRODYNE_SERVER_LISTEN=0.0.0.0:8787
+          if java -jar "$jar" serve; then
+            echo "::error::server accepted a non-loopback listen without the opt-in"
+            exit 1
+          fi

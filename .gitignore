@@ -37,3 +37,8 @@ __pycache__/
 
 # Node (doc checker only)
 node_modules/
+
+# CI working directories (release.yml/nightly.yml write assets here)
+dist/
+smoke.txt
+body.md

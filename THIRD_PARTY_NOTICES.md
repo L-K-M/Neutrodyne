@@ -61,6 +61,12 @@ C++/WinRT headers under `playback/native/src/`.
 - **OpenJDK** (desktop installers and the server container image) — GPL-2.0 with the Classpath
   Exception and the GCC Runtime Library Exception; bundled unmodified from M0b/MS1 on, exact source
   attached to each release ([01](docs/design/01-foundation.md) D3 exception, 11 runtime.lock).
+- **WiX Toolset components** (Windows MSI only) — MS-RL: WiX Util's custom action behind
+  `RemoveFolderEx` and the WixUI dialog resources jpackage embeds in every MSI, unmodified;
+  the `wix-{version}-src.tar.gz` source archive is attached to each release that ships an MSI
+  (`desktopApp/wix.lock`, PO-48's named case).
+- **jpackage launcher** — GPL-2.0 with the Classpath Exception, part of the bundled OpenJDK
+  runtime above (`wixhelper.dll` in the MSI likewise).
 
 ## Copied or ported code
 

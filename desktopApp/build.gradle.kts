@@ -123,35 +123,71 @@ abstract class WriteBuildInfoProperties : DefaultTask() {
 
 val buildInfoDir = layout.buildDirectory.dir("generated/build-info")
 
-val generateBuildInfoProperties = tasks.register<WriteBuildInfoProperties>("generateBuildInfoProperties") {
-    values.putAll(
-        mapOf(
-            "versionName" to providers.gradleProperty("neutrodyne.versionName").get(),
-            "versionCode" to providers.gradleProperty("neutrodyne.versionCode").get(),
-            "repoUrl" to providers.gradleProperty("neutrodyne.repoUrl").get(),
-            "engineManifestUrl" to providers.gradleProperty("neutrodyne.engineManifestUrl").get(),
-            "youtubeEngine" to youtubeEngine.toString(),
-            "installKind" to "dev",
-            "acraMailto" to providers.gradleProperty("neutrodyne.acraMailto").orElse("").get(),
-        ),
-    )
-    outputFile.convention(buildInfoDir.map { it.file("build-info.properties") })
+// The packaging pipeline selects the image's install kind per package (11 Resources layout):
+// one `createDistributable` run per kind, e.g. `:desktopApp:packageDeb
+// -Pneutrodyne.installKind=deb`; unset means `dev` (run, tests).
+val packaging = extensions.getByType<NeutrodyneDesktopPackagingExtension>()
+val packagingInstallKind = providers.gradleProperty("neutrodyne.installKind")
+if (packagingInstallKind.isPresent) {
+    val kind = packagingInstallKind.get()
+    val allowed =
+        packaging.installKinds
+            .get()
+            .split(',')
+            .filter(String::isNotEmpty)
+    check(kind in allowed) {
+        "neutrodyne.installKind='$kind' is not one of this target's install kinds $allowed " +
+            "(packaging target '${packaging.targetId.get()}'; 11 Packaging pipeline)"
+    }
 }
+
+val generateBuildInfoProperties =
+    tasks.register<WriteBuildInfoProperties>("generateBuildInfoProperties") {
+        val installKind = packagingInstallKind.getOrElse("dev")
+        values.putAll(
+            buildMap {
+                put("versionName", providers.gradleProperty("neutrodyne.versionName").get())
+                put("versionCode", providers.gradleProperty("neutrodyne.versionCode").get())
+                put("repoUrl", providers.gradleProperty("neutrodyne.repoUrl").get())
+                put("engineManifestUrl", providers.gradleProperty("neutrodyne.engineManifestUrl").get())
+                put("youtubeEngine", youtubeEngine.toString())
+                put("installKind", installKind)
+                put("acraMailto", providers.gradleProperty("neutrodyne.acraMailto").orElse("").get())
+                // The packaging target's identity: os/arch/runtime of the image, absent in dev builds
+                // so BuildInfoLoader derives them from the running JVM (11 DesktopAppGraph).
+                if (installKind != "dev") {
+                    put("os", packaging.os.get())
+                    put("arch", packaging.arch.get())
+                    put("runtime", packaging.runtime.get())
+                }
+            },
+        )
+        outputFile.convention(buildInfoDir.map { it.file("build-info.properties") })
+    }
 
 sourceSets.named("main") {
     // Deriving the resource dir from the task output wires processResources → generate task.
-    resources.srcDir(generateBuildInfoProperties.map { it.outputFile.get().asFile.parentFile })
+    resources.srcDir(
+        generateBuildInfoProperties.map {
+            it.outputFile
+                .get()
+                .asFile.parentFile
+        },
+    )
 }
 
 // `-Pneutrodyne.smoke` (=true) forwards -Dneutrodyne.smoke=true to the application JVM through
 // compose.desktop.application.jvmArgs (11 Smoke mode); the recommended invocation is
-// `./gradlew :desktopApp:run -Pneutrodyne.smoke=true`. Packaging (a later milestone) passes the
-// switch on the launcher command line instead, so no packaged image ever carries it.
-val smokeRun = providers.gradleProperty("neutrodyne.smoke")
-    .map { it.isBlank() || it.toBoolean() }
-    .orElse(false)
+// `./gradlew :desktopApp:run -Pneutrodyne.smoke=true`. Packaged images get the switch through
+// their launcher `.cfg` via `scripts/desktop/smoke-start.sh` — never shipped enabled.
+val smokeRun =
+    providers
+        .gradleProperty("neutrodyne.smoke")
+        .map { it.isBlank() || it.toBoolean() }
+        .orElse(false)
 
-extensions.getByType<ComposeExtension>()
+extensions
+    .getByType<ComposeExtension>()
     .let { it as ExtensionAware }
     .let { it.extensions.getByType<DesktopExtension>() }
     .application {

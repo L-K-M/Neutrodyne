@@ -50,7 +50,7 @@ jobs:
         id: verify
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: scripts/ci/verify-tag.sh "${{ github.ref_name }}" --products=android
+        run: scripts/ci/verify-tag.sh "${{ github.ref_name }}" --products=android,desktop,sources
 
   android:
     needs: verify-tag
@@ -110,15 +110,144 @@ jobs:
           path: dist/
           retention-days: 5
 
-  # TODO (M0b): `desktop` (matrix windows-x64 / macos-arm64 / linux-x64 /
-  # linux-arm64 with the two-attempt build loop and mac_kind from verify-tag)
-  # and `sources` (openjdk-{jdk}-temurin-sources.tar.gz + RUNTIME-SOURCES.md;
-  # MD1b ffmpeg sources; MD3 PBS sources; WiX sources with each MSI).
-  # TODO (MS1): `server-jar`, `server-image` (matrix, push-by-digest),
-  # `server-image-manifest`, and `image-tags` after publish.
+  desktop:
+    needs: verify-tag
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x64
+            runs-on: windows-2025
+          - target: macos-arm64
+            runs-on: macos-15
+          - target: linux-x64
+            runs-on: ubuntu-24.04
+          - target: linux-arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: |
+            25
+            21
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Android SDK (AGP configures in every module)
+        run: scripts/ci/install-android-sdk.sh "$HOME/android-sdk" && echo "ANDROID_HOME=$HOME/android-sdk" >> "$GITHUB_ENV"
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-disabled: true
+      - name: Packaging tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq binutils fakeroot rpm xvfb dbus-x11
+      # The build, the packaged smoke starts and the checks run in a two-attempt
+      # loop — an immutable release cannot gain assets later, so a runner flake
+      # gets one retry while a deterministic failure fails twice (09 release.yml
+      # step 3, risk P15). The attempt lives in a script because `set -e` does
+      # not apply inside a shell function called under `||`.
+      - name: Build, smoke and check the target's packages
+        shell: bash
+        run: |
+          args="${{ matrix.target }} ${{ needs.verify-tag.outputs.version }} ${{ needs.verify-tag.outputs.mac_kind }}"
+          scripts/ci/build-desktop-release.sh $args \
+            || { echo "::warning::attempt 1 failed — retrying once (09 two-attempt loop)"; \
+                 scripts/ci/build-desktop-release.sh $args; }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-${{ matrix.target }}
+          path: dist/
+          retention-days: 5
+
+  sources:
+    needs: verify-tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # GPL-2.0 §3: the exact source of the exact runtime, verified and renamed
+      # for the release (09 release.yml step 4); WiX's source rides with every
+      # MSI (MS-RL). {ffmpeg} and {pbsTag} sources join in MD1b/MD3.
+      - name: Download and verify the source tarballs
+        run: |
+          set -e
+          mkdir -p dist
+          lock_prop() { grep -E "^$2=" "$1" | tail -1 | cut -d= -f2-; }
+          v="$(lock_prop desktopApp/runtime.lock version)"
+          url="$(lock_prop desktopApp/runtime.lock sourceTarball.url)"
+          sha="$(lock_prop desktopApp/runtime.lock sourceTarball.sha256)"
+          curl -fsSL -o "dist/openjdk-$v-temurin-sources.tar.gz" "$url"
+          echo "$sha  dist/openjdk-$v-temurin-sources.tar.gz" | sha256sum -c -
+          wv="$(lock_prop desktopApp/wix.lock version)"
+          wurl="$(lock_prop desktopApp/wix.lock source.url)"
+          wsha="$(lock_prop desktopApp/wix.lock source.sha256)"
+          curl -fsSL -o "dist/wix-$wv-src.tar.gz" "$wurl"
+          echo "$wsha  dist/wix-$wv-src.tar.gz" | sha256sum -c -
+      - name: RUNTIME-SOURCES.md
+        run: scripts/ci/make-runtime-sources-md.sh --out dist/RUNTIME-SOURCES.md
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sources
+          path: dist/
+          retention-days: 5
+
+  server-jar:
+    needs: verify-tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Android SDK (AGP configures in every module)
+        run: scripts/ci/install-android-sdk.sh "$HOME/android-sdk" && echo "ANDROID_HOME=$HOME/android-sdk" >> "$GITHUB_ENV"
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-disabled: true
+      - name: Build the server JAR
+        run: |
+          v="${{ needs.verify-tag.outputs.version }}"
+          mkdir -p dist
+          ./gradlew :sync:server:fatJar
+          cp "sync/server/build/libs/neutrodyne-server-$v.jar" dist/ || \
+            cp sync/server/build/libs/neutrodyne-server-*.jar "dist/neutrodyne-server-$v.jar"
+      - name: Smoke the JAR (loopback serve + /healthz)
+        run: |
+          v="${{ needs.verify-tag.outputs.version }}"
+          export NEUTRODYNE_SERVER_DATA="$(mktemp -d)"
+          java -jar "dist/neutrodyne-server-$v.jar" serve &
+          pid=$!
+          trap 'kill $pid 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            sleep 1
+            curl -fsS http://127.0.0.1:8787/healthz >/dev/null 2>&1 && break
+          done
+          curl -fsS http://127.0.0.1:8787/healthz | grep -q ok
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: server-jar
+          path: dist/
+          retention-days: 5
+
+  # TODO (MS1): `server-image` (matrix, push-by-digest), `server-image-manifest`,
+  # and `image-tags` after publish; the server-jar artifact then joins the
+  # release's asset set (release-assets.json server group, --products).
 
   publish:
-    needs: [verify-tag, android]
+    needs: [verify-tag, android, desktop, sources, server-jar] # 09: needs every build job
+    # server-jar's artifact is not downloaded: the JAR becomes a release asset in
+    # MS1 together with the image (release-assets.json server group, --products).
     environment: release # required reviewer; holds no signing secret (09)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -138,6 +267,15 @@ jobs:
         with:
           pattern: android
           path: dist
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          pattern: desktop-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          pattern: sources
+          path: dist
       - name: Compare the asset set with verify-tag's expected list
         env:
           EXPECTED: ${{ needs.verify-tag.outputs.expected_assets }}
@@ -147,6 +285,11 @@ jobs:
           expected="$(printf '%s\n' "$EXPECTED" | grep -vE 'neutrodyne-update.json|SHA256SUMS' | sort)"
           actual="$(find . -type f -printf '%P\n' | sort)"
           [ "$expected" = "$actual" ] || { echo "::error::asset set differs"; diff <(echo "$expected") <(echo "$actual"); exit 1; }
+      # The runtime exception's release checks (09 step 8): the OpenJDK and WiX
+      # source assets against their locks, RUNTIME-SOURCES.md naming vendor and
+      # version, and the sources present whenever an MSI ships.
+      - name: Runtime exception checks
+        run: scripts/ci/check-runtime-sources.sh --release dist
       - name: Update manifest + checksums
         env:
           TAG: ${{ github.ref_name }}
@@ -158,7 +301,10 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
           V: ${{ needs.verify-tag.outputs.version }}
+          MAC_EXT: ${{ needs.verify-tag.outputs.mac_kind == 'dmg' && 'dmg' || 'zip' }}
         run: |
+          JDK="$(grep -E '^version=' desktopApp/runtime.lock | cut -d= -f2)"
+          WIX="$(grep -E '^version=' desktopApp/wix.lock | cut -d= -f2)"
           cat "changelogs/${{ needs.verify-tag.outputs.versionCode }}.txt" > body.md
           cat >> body.md <<EOF
 
@@ -169,15 +315,29 @@ jobs:
           These APKs are release builds signed with a key that is public in this repository
           (signing/neutrodyne-public.keystore), so the signature does not show who built a file.
 
+          Windows, macOS, Linux — pick the file for your computer:
+            Windows 10/11 x64, also Windows 11 on Arm:  neutrodyne-$V-windows-x64.msi (or the portable .zip)
+            Mac with Apple silicon, macOS 13 or later:  neutrodyne-$V-macos-arm64.$MAC_EXT
+            Linux x64 or arm64:                         neutrodyne-$V-linux-{x64|arm64}.{deb|rpm|tar.gz}
+          The desktop builds are not signed by a registered developer. macOS: after installing and after
+          every update, open System Settings › Privacy & Security and click "Open Anyway". Windows: choose
+          "More info", then "Run anyway"; Smart App Control must be off. They bundle an unmodified OpenJDK
+          runtime (GPL-2.0 with the Classpath Exception; source: openjdk-$JDK-temurin-sources.tar.gz,
+          RUNTIME-SOURCES.md). The MSI embeds unmodified WiX components (MS-RL; source:
+          wix-$WIX-src.tar.gz).
+          EOF
+          # The FFmpeg, PBS and server blocks of 09's release-body template join
+          # with their assets (MD1b, MD3, MS1) — their source names would have
+          # unresolved placeholders until then.
+          cat >> body.md <<EOF
+
           Download only from this page and check the file:
             sha256sum --check --ignore-missing SHA256SUMS        (macOS: shasum -a 256 <file>; Windows: Get-FileHash -Algorithm SHA256 <file>)
             gh release verify-asset $TAG <file> -R L-K-M/Neutrodyne
             gh attestation verify <file> -R L-K-M/Neutrodyne
 
-          Guides: https://github.com/L-K-M/Neutrodyne#install-and-update
+          Guides: https://github.com/L-K-M/Neutrodyne#install-and-update · https://github.com/L-K-M/Neutrodyne#install-on-windows-macos-or-linux
           EOF
-          # TODO (M0b/MS1): desktop-packages block, source bundles and the
-          # server block of 09's release-body template join with their assets.
       - name: Attest every asset
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
