@@ -3,6 +3,7 @@ import org.gradle.api.provider.MapProperty
 import org.gradle.kotlin.dsl.getByType
 import org.jetbrains.compose.ComposeExtension
 import org.jetbrains.compose.desktop.DesktopExtension
+import org.jetbrains.compose.resources.ResourcesExtension
 
 plugins {
     alias(libs.plugins.neutrodyne.desktop.application)
@@ -11,13 +12,19 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
-// Offline and reproducible, same convention as :app (01 AboutLibraries).
+// Offline and reproducible, same convention as :app (01 AboutLibraries). The plain-JVM plugin
+// shape (recorded in 01 M0 checklist step 33, 2026-10-06): `exportLibraryDefinitions` writes
+// aboutlibraries.json into build/generated/aboutLibraries, wired into the main resources below;
+// the manual definitions (the OpenJDK runtime entry) live in config/libraries + config/licenses.
 aboutLibraries {
     offlineMode.set(true)
     collect {
         configPath.set(layout.projectDirectory.dir("config"))
         fetchRemoteLicense.set(false)
         fetchRemoteFunding.set(false)
+    }
+    export {
+        outputFile.set(layout.buildDirectory.file("generated/aboutLibraries/aboutlibraries.json"))
     }
 }
 
@@ -77,21 +84,28 @@ dependencies {
     if (youtubeEngine) implementation(project(":youtube:ytdlp-desktop"))
 
     implementation(compose.desktop.currentOs)
+    // The generated Res class of the shell's own Compose resources (see below)
+    implementation(libs.cmp.resources)
     implementation(libs.kotlinx.coroutines.swing)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.collections.immutable)
     // Metro re-processes :core:datastore's contributed bindings when the graph resolves the
     // DataStore types, so the DataStore API must be on this module's own compile classpath.
     implementation(libs.androidx.datastore.preferences.core)
+    // Licences screen data: the desktop's own aboutlibraries.json (01 AboutLibraries)
+    implementation(libs.aboutlibraries.core)
     // AllowSetForegroundWindow (ASFW_ANY) before handing off to the owner (11 Single instance)
     implementation(libs.jna)
     implementation(libs.jna.platform)
     runtimeOnly(libs.kxml2)
 
-    // The desktop graph test (01 Testing)
+    // The desktop graph test and the window-content Compose UI test (01 Testing, 11 Testing)
     testImplementation(project(":core:testing"))
     testImplementation(libs.junit4)
     testImplementation(libs.truth)
+    testImplementation(libs.cmp.ui.test)
+    // Skiko natives so runComposeUiTest can render on this machine's OS
+    testImplementation(compose.desktop.currentOs)
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +188,39 @@ sourceSets.named("main") {
                 .asFile.parentFile
         },
     )
+    // The AboutLibraries export lands beside it; processResources depends on the export task.
+    resources.srcDir(layout.buildDirectory.dir("generated/aboutLibraries"))
+}
+
+tasks.named("processResources") { dependsOn("exportLibraryDefinitions") }
+
+// The shell's own strings (window title, menu and tray labels — 11 Desktop UX) come from
+// Compose resources like every KMP module's; the JVM plugin picks src/main/composeResources up
+// but generates no Res class unless asked to.
+extensions
+    .getByType<ComposeExtension>()
+    .let { it as ExtensionAware }
+    .let { it.extensions.getByType<ResourcesExtension>() }
+    .apply {
+        packageOfResClass = "ch.lkmc.neutrodyne.desktop.resources"
+        generateResClass = ResourcesExtension.ResourceClassGeneration.Always
+    }
+
+// The window and tray icons travel into packaged images through appResourcesRootDir (11
+// Resources layout): the Compose merge picks them up from common/icons, so a packaged window
+// and tray load the same committed PNGs a dev run reads from icons/ in the project directory.
+if (packaging.targetId.isPresent && packaging.targetId.get().isNotEmpty()) {
+    val syncWindowIcons =
+        tasks.register<Sync>("syncWindowIcons") {
+            // Same output root as build-logic's syncDesktopIntegrationResources: this one must
+            // run after it, or Gradle flags the shared directory as an overlapping output.
+            mustRunAfter("syncDesktopIntegrationResources")
+            into(layout.buildDirectory.dir("desktop-resources"))
+            from("icons/png") { into("common/icons/png") }
+            from("icons/tray") { into("common/icons/tray") }
+        }
+    tasks.matching { it.name == "createDistributable" }.configureEach { dependsOn(syncWindowIcons) }
+    tasks.matching { it.name == "prepareAppResources" }.configureEach { dependsOn(syncWindowIcons) }
 }
 
 // `-Pneutrodyne.smoke` (=true) forwards -Dneutrodyne.smoke=true to the application JVM through

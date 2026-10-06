@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.common.CrashReporter
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.youtube.DesktopYouTubeBindingsModule
 import dev.zacsweers.metro.Binds
@@ -38,6 +39,9 @@ interface DesktopAppGraph {
     val appScope: CoroutineScope
 
     val initializers: Set<AppInitializer>
+
+    /** Every feature's navigation entries (01 Feature entry installers). */
+    val entryInstallers: Set<EntryProviderInstaller>
 
     /** The shell's shared bindings (the M0b graph test resolves these; 01 Graph tests). */
     val settingsRepository: SettingsRepository

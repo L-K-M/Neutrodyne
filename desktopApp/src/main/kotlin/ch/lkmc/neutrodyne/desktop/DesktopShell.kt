@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop
 
+import androidx.compose.ui.window.application
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.LogLevel
 import ch.lkmc.neutrodyne.core.common.runInitializers
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.model.DesktopOs
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.di.createDesktopGraph
@@ -18,7 +20,12 @@ import ch.lkmc.neutrodyne.desktop.shell.HandoffRequest
 import ch.lkmc.neutrodyne.desktop.shell.InstanceHandshake
 import ch.lkmc.neutrodyne.desktop.shell.SessionFile
 import ch.lkmc.neutrodyne.desktop.shell.SessionState
+import ch.lkmc.neutrodyne.desktop.shell.ShellDialogs
+import ch.lkmc.neutrodyne.desktop.shell.ShutdownCoordinator
 import ch.lkmc.neutrodyne.desktop.shell.SingleInstanceLock
+import ch.lkmc.neutrodyne.desktop.window.DesktopMenuActions
+import ch.lkmc.neutrodyne.desktop.window.NeutrodyneWindow
+import ch.lkmc.neutrodyne.desktop.window.WindowActivator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -30,17 +37,16 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.SecureRandom
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
- * The shell start-up in 11's order, up to the point where the window would open. The M0b process
- * owns the lock, serves hand-offs and stays alive until it receives SIGTERM (a JVM shutdown hook
- * performs the clean shutdown); the window, the AWT "not responding"/"has to close" dialogs,
- * `ShutdownCoordinator`, the queued-input routing through `IntentRouter`, the Windows
- * AppUserModelID call and the `desktop.language` locale all arrive with the window milestone —
- * recorded in 11's implementation notes (2026-10-06).
+ * The shell start-up in 11's order: `AppDirs` → `SingleInstanceLock` → directories, log, crash
+ * files, session → the graph and initializer bands → the window (the AWT event thread) → the
+ * clean shutdown when it closes. The owner serves hand-offs for the whole process life; SIGTERM
+ * runs the same [ShutdownCoordinator] through its shutdown hook. Input routing through
+ * `DesktopOpenHandler`/`IntentRouter`, the Windows AppUserModelID call and the `desktop.language`
+ * locale of step 4 arrive with their milestones (11's implementation notes, 2026-10-06).
  */
 internal object DesktopShell {
     private const val TAG = "Main"
@@ -54,6 +60,10 @@ internal object DesktopShell {
     private const val FLAG_PREFIX = "--"
     private const val HS_ERR_GLOB = "hs_err_pid*.log"
     private const val SHUTDOWN_THREAD = "nd-shutdown"
+
+    /** The two [ShutdownCoordinator] callers; both mean a normal exit. */
+    private const val REASON_SIGNAL = "signal"
+    private const val REASON_WINDOW_CLOSED = "window closed"
 
     fun start(rawArgs: Array<String>): Int {
         // Step 1: split `--background` (start at login) from inputs; unknown flags ignored.
@@ -109,11 +119,7 @@ internal object DesktopShell {
         return if (handshake.send(request) == HandoffOutcome.Delivered) {
             EXIT_OK
         } else {
-            // 11's AWT dialog arrives with the window; stderr stands in until then.
-            System.err.println(
-                "Neutrodyne is already running but is not responding. Wait a moment and try again, " +
-                    "or end it in Task Manager / Activity Monitor / your system monitor.",
-            )
+            ShellDialogs.showError(ShellDialogs.OWNER_UNREACHABLE)
             EXIT_OWNER_UNREACHABLE
         }
     }
@@ -132,7 +138,7 @@ internal object DesktopShell {
         } catch (e: IOException) {
             return dataDirFailure(dirs.data, e)
         }
-        if (background) Log.i(TAG) { "--background start; the window milestone starts iconified" }
+        if (background) Log.i(TAG) { "--background start; the window starts iconified" }
 
         val recentLogs = RecentLogBuffer()
         val fileSink = RollingFileSink(dirs.logs, if (buildInfo.debug) LogLevel.DEBUG else LogLevel.INFO)
@@ -155,8 +161,11 @@ internal object DesktopShell {
             ),
         )
 
-        // Steps 5–6 (M0b shape): the graph, the initializer bands, the hand-off server. The
-        // database open on IO and the window join at their milestones.
+        // Step 4's macOS AWT facts: the menu bar lives in the screen, the app menu carries our
+        // name and tray images may be template images. Before any AWT class initialises.
+        installMacosAwtProperties(buildInfo)
+
+        // Step 5: the graph, the initializer bands and the hand-off server.
         val graph = createDesktopGraph(dirs, buildInfo, crashReporter)
         graph.appScope.launch { runInitializers(graph.initializers) }
 
@@ -166,54 +175,71 @@ internal object DesktopShell {
                 .asCoroutineDispatcher()
         val handshakeScope = CoroutineScope(SupervisorJob() + handshakeDispatcher)
         val handshake = InstanceHandshake(dirs, SecureRandom(), buildInfo.versionName)
+        val activator = WindowActivator()
         val serveJob =
             handshakeScope.launch {
-                handshake.serve { request -> onHandoff(request) }
+                handshake.serve { request -> onHandoff(request, activator) }
             }
         if (inputs.isNotEmpty()) {
             Log.i(TAG) { "${inputs.size} first-launch input(s) queued for the window" }
         }
 
-        // No window yet (11 step 6 is pending): stay alive serving hand-offs until SIGTERM. The
-        // shutdown hook runs the clean shutdown; main parks for the rest of the process's life.
-        Runtime.getRuntime().addShutdownHook(
-            Thread(
-                {
-                    Log.i(TAG) { "shutdown signal received" }
-                    try {
-                        runBlocking { serveJob.cancelAndJoin() } // serve's finally removes port/token files
-                    } catch (_: CancellationException) {
-                        // The hook's own cancellation: the files were removed by serve's finally either way.
-                    }
+        // One clean-shutdown path for the window close and SIGTERM (11 Shutdown).
+        val coordinator =
+            ShutdownCoordinator(
+                dirs = dirs,
+                versionName = buildInfo.versionName,
+                lock = lock,
+                fileSink = fileSink,
+                stopServices = {
+                    runBlocking { serveJob.cancelAndJoin() } // serve's finally removes port/token files
                     handshakeScope.cancel()
                     handshakeDispatcher.close()
                     graph.appScope.cancel()
-                    SessionFile.write(
-                        dirs.state,
-                        SessionState(
-                            pid = ProcessHandle.current().pid(),
-                            startedAtMs = DesktopClock.now(),
-                            versionName = buildInfo.versionName,
-                            cleanExit = true,
-                        ),
-                    )
-                    lock.close()
-                    fileSink.close()
                 },
+            )
+        Runtime.getRuntime().addShutdownHook(
+            Thread(
+                { coordinator.shutdown(REASON_SIGNAL) },
                 SHUTDOWN_THREAD,
             ),
         )
-        CountDownLatch(1).await()
+
+        // Step 6: the window on the AWT event thread. `application` returns when the window
+        // closes — the M0b close rule: nothing is busy, so a close request quits — and the
+        // clean shutdown runs before main returns.
+        application {
+            NeutrodyneWindow(
+                installers = graph.entryInstallers,
+                menuActions = DesktopMenuActions(),
+                activator = activator,
+                background = background,
+                onQuitRequest = ::exitApplication,
+            )
+        }
+        coordinator.shutdown(REASON_WINDOW_CLOSED)
         return EXIT_OK
     }
 
+    /** macOS-only AWT properties, all of which must be set before AWT initialises. */
+    private fun installMacosAwtProperties(buildInfo: BuildInfo) {
+        if (buildInfo.desktop?.os != DesktopOs.MACOS) return
+        System.setProperty("apple.laf.useScreenMenuBar", "true")
+        System.setProperty("apple.awt.application.name", ShellDialogs.APP_TITLE)
+        System.setProperty("apple.awt.enableTemplateImages", "true")
+    }
+
     /**
-     * The owner's hand-off application: relative paths resolve against `cwd`; the inputs go to
-     * `DesktopOpenHandler` and `IntentRouter` once the window exists (11 Hand-off row) — M0b
-     * records them in the log.
+     * The owner's hand-off application (11 Hand-off row): the inputs go to `DesktopOpenHandler`
+     * and `IntentRouter` with their milestone — M0b records them in the log; `activate` shows
+     * the window (de-iconified, `toFront()`).
      */
-    private fun onHandoff(request: HandoffRequest) {
+    private fun onHandoff(
+        request: HandoffRequest,
+        activator: WindowActivator,
+    ) {
         Log.i(TAG) { "hand-off: ${request.args.size} input(s) from ${request.cwd}, queued for the window" }
+        if (request.activate) activator.bringToFront()
     }
 
     /** 11 Crash files table: an unclean previous session with an `hs_err` file is a JVM crash. */
@@ -248,7 +274,7 @@ internal object DesktopShell {
         dir: Path,
         e: IOException,
     ): Int {
-        System.err.println("Neutrodyne cannot create or write its directory $dir: ${e.message}")
+        ShellDialogs.showError("${ShellDialogs.DATA_DIR_FAILURE_PREFIX} $dir: ${e.message}")
         return EXIT_DATA_DIR_FAILURE
     }
 }

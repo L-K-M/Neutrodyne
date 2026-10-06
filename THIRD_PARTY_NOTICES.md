@@ -59,8 +59,12 @@ C++/WinRT headers under `playback/native/src/`.
 ## Bundled runtimes
 
 - **OpenJDK** (desktop installers and the server container image) — GPL-2.0 with the Classpath
-  Exception and the GCC Runtime Library Exception; bundled unmodified from M0b/MS1 on, exact source
-  attached to each release ([01](docs/design/01-foundation.md) D3 exception, 11 runtime.lock).
+  Exception and the GCC Runtime Library Exception; bundled unmodified from M0b/MS1 on, exact
+  source attached to each release as `openjdk-{jdk}-temurin-sources.tar.gz` (this release's
+  exact name follows `desktopApp/runtime.lock`; [01](docs/design/01-foundation.md) D3
+  exception, 11 runtime.lock). The desktop Licences screen lists it with the full GPL-2.0,
+  Classpath-exception-2.0 and GCC-Runtime-exception-3.1 texts and the source-asset name
+  (`desktopApp/config/libraries/openjdk-runtime.json`, M0 AC5).
 - **WiX Toolset components** (Windows MSI only) — MS-RL: WiX Util's custom action behind
   `RemoveFolderEx` and the WixUI dialog resources jpackage embeds in every MSI, unmodified;
   the `wix-{version}-src.tar.gz` source archive is attached to each release that ships an MSI

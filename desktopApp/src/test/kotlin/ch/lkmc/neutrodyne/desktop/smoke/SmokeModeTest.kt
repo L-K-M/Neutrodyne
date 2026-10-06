@@ -9,15 +9,21 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Test
 
 /**
- * [SmokeMode]'s skeleton (11 Smoke mode): one `SMOKE {json}` line with the versions, the runtime
- * facts, the step timings and the pending steps, and exit code 0 — through the testable entry
- * point, against the real graph under a temporary `AppDirs`.
+ * [SmokeMode]'s skeleton (11 Smoke mode): one `SMOKE {json}` line with the versions, the
+ * runtime facts, the step timings — including the window step's `firstFrameMs` — and the
+ * pending steps, and exit code 0 — through the testable entry point, against the real graph
+ * under a temporary `AppDirs` (the window step is faked; a real window needs a display, which
+ * only CI's `desktop-smoke` job has).
  */
 class SmokeModeTest {
     @Test
     fun `prints one SMOKE json line and exits 0`() {
         val lines = mutableListOf<String>()
-        val exitCode = SmokeMode(output = lines::add).run()
+        val exitCode =
+            SmokeMode(
+                output = lines::add,
+                windowStep = { FIRST_FRAME_MS },
+            ).run()
 
         assertThat(exitCode).isEqualTo(0)
         assertThat(lines).hasSize(1)
@@ -36,12 +42,31 @@ class SmokeModeTest {
         assertThat(json["javaVendorVersion"]!!.jsonPrimitive.content).isNotEmpty()
         assertThat(json["javaRuntimeVersion"]!!.jsonPrimitive.content).isNotEmpty()
 
-        val steps = json["steps"]!!.jsonObject.keys
-        assertThat(steps).containsAtLeast("appDirs", "buildInfo", "graph", "initializers")
+        val steps = json["steps"]!!.jsonObject
+        assertThat(steps.keys).containsAtLeast("appDirs", "buildInfo", "graph", "initializers", "window")
+        assertThat(steps["firstFrameMs"]!!.jsonPrimitive.content).isEqualTo("$FIRST_FRAME_MS")
+        assertThat(json["window"]!!.jsonPrimitive.content).isEqualTo(SmokeMode.WINDOW_OPENED)
 
         val pending = json["pending"]!!.jsonPrimitive.content
-        assertThat(pending).contains("window")
         assertThat(pending).contains("engine")
+        assertThat(pending).doesNotContain("window")
+        assertThat(json.keys).doesNotContain("failed")
+    }
+
+    @Test
+    fun `a headless window step says so in the json`() {
+        val lines = mutableListOf<String>()
+        val exitCode =
+            SmokeMode(
+                output = lines::add,
+                windowStep = { null },
+            ).run()
+
+        assertThat(exitCode).isEqualTo(0)
+
+        val json = Json.parseToJsonElement(lines.single().removePrefix("SMOKE ")).jsonObject
+        assertThat(json["window"]!!.jsonPrimitive.content).isEqualTo(SmokeMode.WINDOW_SKIPPED_HEADLESS)
+        assertThat(json["steps"]!!.jsonObject.keys).doesNotContain(SmokeMode.FIRST_FRAME_STEP)
         assertThat(json.keys).doesNotContain("failed")
     }
 
@@ -51,5 +76,9 @@ class SmokeModeTest {
         assertThat(SmokeMode.isEnabled("TRUE")).isFalse()
         assertThat(SmokeMode.isEnabled("false")).isFalse()
         assertThat(SmokeMode.isEnabled(null)).isFalse()
+    }
+
+    private companion object {
+        const val FIRST_FRAME_MS = 42L
     }
 }
