@@ -1,39 +1,38 @@
-# Gradle
-.gradle/
+# Build outputs
 build/
+dist/
+.gradle/
+out/
+
+# IDE / editor
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+
+# Android / local machine config
+local.properties
+.cxx/
+
+# Node (tools/doccheck mermaid check)
+node_modules/
+tools/doccheck/node_modules/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Gradle and Kotlin extras
 !gradle/wrapper/gradle-wrapper.jar
 .kotlin/
-
-# Android Studio / IntelliJ (the owner's shared project files stay tracked)
-local.properties
 captures/
 .externalNativeBuild/
-.cxx/
-*.iml
-!.idea/Neutrodyne.iml
-.idea/workspace.xml
-.idea/tasks.xml
-.idea/caches/
-.idea/libraries/
-.idea/gradle.xml
-.idea/deploymentTargetSelector.xml
-.idea/androidTestResultsUserPreferences.xml
-.idea/appInsightsSettings.xml
-.idea/kotlinc.xml
-.idea/migrations.xml
-.idea/runConfigurations.xml
 
 # Private keys never belong here; the committed public keystore is signing/neutrodyne-public.keystore
 *.jks
 
-# OS
-.DS_Store
+# OS and Python extras
 Thumbs.db
-
-# Python
-__pycache__/
-*.pyc
 .venv/
-
-# Node (doc checker only)
-node_modules/
