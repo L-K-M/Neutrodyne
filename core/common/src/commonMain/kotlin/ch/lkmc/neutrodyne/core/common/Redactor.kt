@@ -40,15 +40,15 @@ object Redactor {
     private val SCHEME = Regex("""^([A-Za-z][A-Za-z0-9+.-]*):""")
 
     /**
-     * A `scheme:run` inside free text — stops at whitespace and obvious delimiters. One bracketed
-     * IPv6 literal is part of the run *wherever* it sits in the authority
-     * (`https://alice:pass@[2001:db8::1]/rss?token=…`, `feed:https://u:p@[::1]/f?key=…`); without it
-     * the brackets end the match at the user-info and leave path and query unredacted (review
-     * 2026-10-06). The lookahead keeps a bare scheme word ("expected https: here") out of the run.
+     * A `scheme:run` inside free text — stops at whitespace and obvious delimiters. A bracketed
+     * IPv6 literal belongs to the run only as a host, right after `//` or a user-info `@`
+     * (`https://alice:pass@[2001:db8::1]/rss?token=…`); any other bracket ends the run, so a label
+     * cannot swallow a bracketed URL (`URL:[https://…]`). The run needs at least one character, so
+     * a bare scheme word ("expected https: here") stays prose (reviews 2026-10-06).
      */
     private val URL_IN_TEXT =
         Regex(
-            """[A-Za-z][A-Za-z0-9+.-]*:(?=[^\s"'<>\]{}|\\^`])[^\s"'<>\[\]{}|\\^`]*(?:\[[^\s\]]+\])?[^\s"'<>\[\]{}|\\^`]*""",
+            """[A-Za-z][A-Za-z0-9+.-]*:(?:[^\s"'<>\[\]{}|\\^`]|(?<=//|@)\[[0-9A-Fa-f:.]+(?:%[\w.~-]+)?\])+""",
         )
 
     /** Sentence punctuation that clings to a URL at the end of free text ("…see https://a/b.") */
@@ -83,8 +83,13 @@ object Redactor {
         val urlsRedacted =
             URL_IN_TEXT.replace(s) { match ->
                 val candidate = match.value
-                val scheme = candidate.substring(0, candidate.indexOf(':')).lowercase()
-                if (scheme !in TEXT_SCHEMES) return@replace candidate
+                val colon = candidate.indexOf(':')
+                val scheme = candidate.substring(0, colon).lowercase()
+                // A label glued to a URL ("Error:https://u:p@h/…") is no scheme of ours: keep the
+                // label and scan the rest again, so the URL inside is still redacted.
+                if (scheme !in TEXT_SCHEMES) {
+                    return@replace candidate.substring(0, colon + 1) + text(candidate.substring(colon + 1))
+                }
 
                 var trimmed = candidate.trimEnd(*TRAILING_PUNCT)
                 // An unmatched ')' is a prose paren, not part of the URL ("(see https://a/f)").

@@ -184,6 +184,20 @@ class RedactorTest {
     }
 
     @Test
+    fun `free text redacts a url bracketed after a label`() {
+        val text = Redactor.text("URL:[https://alice:pass@example.test/feed?token=SECRET]")
+
+        assertEquals("URL:[https://***@example.test/feed?token=…]", text)
+    }
+
+    @Test
+    fun `free text redacts a url glued to a label`() {
+        val text = Redactor.text("Error:https://alice:pass@example.test/feed?token=SECRET")
+
+        assertEquals("Error:https://***@example.test/feed?token=…", text)
+    }
+
+    @Test
     fun `free text keeps a bare scheme word with nothing after its colon`() {
         val text = Redactor.text("expected https: or feed: here")
 

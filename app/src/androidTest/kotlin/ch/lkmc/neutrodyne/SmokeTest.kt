@@ -6,6 +6,7 @@ import android.os.Process
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.accessibility.enableAccessibilityChecks
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -14,6 +15,7 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.test.espresso.Espresso.pressBack
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import ch.lkmc.neutrodyne.core.testing.ReleaseSmoke
@@ -100,9 +102,16 @@ class SmokeTest {
 
         // A non-empty list shows its section headers (a default build always has both).
         // The labels are the en defaults; `:feature:settings`'s generated Res stays internal
-        // (only `:core:ui` exports one), so the smoke test pins the English literals.
-        compose.onNodeWithText("Libraries", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("Bundled components", substring = true).assertIsDisplayed()
+        // (only `:core:ui` exports one), so the smoke test pins the English literals. The list
+        // loads asynchronously, and the bundled section follows every library, so it is scrolled to.
+        compose.waitUntil(LICENCES_LOAD_TIMEOUT_MS) {
+            compose.onAllNodes(hasText(LIBRARIES_HEADER, substring = true)).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText(LIBRARIES_HEADER, substring = true).assertIsDisplayed()
+        compose
+            .onNode(hasScrollToNodeAction())
+            .performScrollToNode(hasText(BUNDLED_HEADER, substring = true))
+        compose.onNodeWithText(BUNDLED_HEADER, substring = true).assertIsDisplayed()
     }
 
     private fun openSettings() {
@@ -129,6 +138,12 @@ class SmokeTest {
 
     private companion object {
         const val TAG_FEEDS = "nav_feeds"
+
+        // Section headers render "<title> · <count>"; the separator keeps library names such as
+        // "AboutLibraries" from matching.
+        const val LIBRARIES_HEADER = "Libraries · "
+        const val BUNDLED_HEADER = "Bundled components · "
+        const val LICENCES_LOAD_TIMEOUT_MS = 10_000L
 
         val DESTINATIONS =
             listOf(
