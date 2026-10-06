@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.work.MetroWorkerFactory
 import ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule
 import dev.zacsweers.metro.Binds
@@ -30,6 +31,9 @@ interface AndroidAppGraph {
     val workerFactory: WorkerFactory
 
     val buildInfo: BuildInfo
+
+    /** Every feature's navigation entries (01 Feature entry installers). */
+    val entryInstallers: Set<EntryProviderInstaller>
 
     @Binds
     val MetroWorkerFactory.bindWorkerFactory: WorkerFactory

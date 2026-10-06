@@ -102,6 +102,9 @@ dependencies {
     implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.activity.compose)
+    implementation(libs.cmp.runtime)
+    implementation(libs.cmp.foundation)
+    implementation(libs.aboutlibraries.core)
     implementation(libs.androidx.lifecycle.process)
     implementation(libs.androidx.profileinstaller)
     implementation(libs.androidx.work.runtime)
@@ -111,4 +114,9 @@ dependencies {
     implementation(libs.acra.dialog)
 
     debugImplementation(libs.leakcanary.android)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
+
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.test.espresso.core)
+    androidTestImplementation(libs.cmp.resources)
 }
