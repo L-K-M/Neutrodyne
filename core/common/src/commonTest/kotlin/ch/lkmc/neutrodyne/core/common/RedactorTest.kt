@@ -184,6 +184,13 @@ class RedactorTest {
     }
 
     @Test
+    fun `free text keeps a bare scheme word with nothing after its colon`() {
+        val text = Redactor.text("expected https: or feed: here")
+
+        assertEquals("expected https: or feed: here", text)
+    }
+
+    @Test
     fun `url masks user info on a bracketed ipv6 host with port`() {
         assertEquals(
             "https://***@[::1]:8443/f?a=…",

@@ -44,11 +44,11 @@ object Redactor {
      * IPv6 literal is part of the run *wherever* it sits in the authority
      * (`https://alice:pass@[2001:db8::1]/rss?token=…`, `feed:https://u:p@[::1]/f?key=…`); without it
      * the brackets end the match at the user-info and leave path and query unredacted (review
-     * 2026-10-06).
+     * 2026-10-06). The lookahead keeps a bare scheme word ("expected https: here") out of the run.
      */
     private val URL_IN_TEXT =
         Regex(
-            """[A-Za-z][A-Za-z0-9+.-]*:[^\s"'<>\[\]{}|\\^`]*(?:\[[^\s\]]+\])?[^\s"'<>\[\]{}|\\^`]*""",
+            """[A-Za-z][A-Za-z0-9+.-]*:(?=[^\s"'<>\]{}|\\^`])[^\s"'<>\[\]{}|\\^`]*(?:\[[^\s\]]+\])?[^\s"'<>\[\]{}|\\^`]*""",
         )
 
     /** Sentence punctuation that clings to a URL at the end of free text ("…see https://a/b.") */
