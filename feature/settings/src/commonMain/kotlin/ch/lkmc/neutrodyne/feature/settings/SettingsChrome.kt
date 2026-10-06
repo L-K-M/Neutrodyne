@@ -3,8 +3,10 @@
 package ch.lkmc.neutrodyne.feature.settings
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -51,5 +53,31 @@ internal fun SettingsRow(
             modifier
                 .clickable(onClick = onClick)
                 .semantics { role = Role.Button },
+    )
+}
+
+/**
+ * A switch row (08 Settings: `NdSwitchRow` with the current state as subtitle). The whole row is
+ * the toggle target, so touch targets stay accessible.
+ */
+@Composable
+internal fun SettingsSwitchRow(
+    title: String,
+    summary: String?,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    ListItem(
+        headlineContent = { Text(title) },
+        supportingContent = { if (summary != null) Text(summary) },
+        trailingContent = { Switch(checked = checked, onCheckedChange = null) },
+        modifier =
+            modifier
+                .toggleable(
+                    value = checked,
+                    role = Role.Switch,
+                    onValueChange = onCheckedChange,
+                ),
     )
 }

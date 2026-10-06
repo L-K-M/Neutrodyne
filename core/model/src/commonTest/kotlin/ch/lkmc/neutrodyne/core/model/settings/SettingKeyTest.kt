@@ -9,9 +9,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Registry rules from 01 DataStore files and typed setting keys. `AllSettingKeys.list` is empty in
- * M0a, so the tests exercise [validateSettingKey] directly plus the empty-list invariants — the
- * same assertions keep working as areas land their `ALL` lists.
+ * Registry rules from 01 DataStore files and typed setting keys. M0a registers the `appearance.*`
+ * keys; the tests exercise every registry entry plus [validateSettingKey] directly, and keep
+ * working as further areas land their `ALL` lists.
  */
 class SettingKeyTest {
     @Test

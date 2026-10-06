@@ -22,5 +22,13 @@ kotlin {
             // WindowCompat for the status-bar appearance actual.
             implementation(libs.androidx.core.ktx)
         }
+        commonTest.dependencies {
+            implementation(libs.cmp.ui.test)
+        }
+        desktopTest.dependencies {
+            implementation(libs.cmp.ui.test)
+            // Skiko natives so runComposeUiTest can render on this machine's OS.
+            implementation(compose.desktop.currentOs)
+        }
     }
 }

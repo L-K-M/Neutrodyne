@@ -40,13 +40,15 @@ object Redactor {
     private val SCHEME = Regex("""^([A-Za-z][A-Za-z0-9+.-]*):""")
 
     /**
-     * A `scheme:run` inside free text — stops at whitespace and obvious delimiters. A bracketed IPv6 authority
-     * (`https://[2001:db8::1]/rss?token=…`) is part of the run; without that branch the brackets would end the
-     * match after `https://` and leave the query unredacted (review 2026-10-06).
+     * A `scheme:run` inside free text — stops at whitespace and obvious delimiters. One bracketed
+     * IPv6 literal is part of the run *wherever* it sits in the authority
+     * (`https://alice:pass@[2001:db8::1]/rss?token=…`, `feed:https://u:p@[::1]/f?key=…`); without it
+     * the brackets end the match at the user-info and leave path and query unredacted (review
+     * 2026-10-06).
      */
     private val URL_IN_TEXT =
         Regex(
-            """[A-Za-z][A-Za-z0-9+.-]*:(?://\[[^\]\s]+\][^\s"'<>\[\]{}|\\^`]*|[^\s"'<>\[\]{}|\\^`]+)""",
+            """[A-Za-z][A-Za-z0-9+.-]*:[^\s"'<>\[\]{}|\\^`]*(?:\[[^\s\]]+\])?[^\s"'<>\[\]{}|\\^`]*""",
         )
 
     /** Sentence punctuation that clings to a URL at the end of free text ("…see https://a/b.") */

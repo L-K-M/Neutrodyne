@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.NavigationBarItem
@@ -21,6 +22,7 @@ import androidx.compose.material3.NavigationRailDefaults
 import androidx.compose.material3.ShortNavigationBar
 import androidx.compose.material3.ShortNavigationBarDefaults
 import androidx.compose.material3.ShortNavigationBarItem
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.WideNavigationRail
 import androidx.compose.material3.WideNavigationRailDefaults
@@ -76,7 +78,9 @@ public fun NdNavigationSuiteScaffold(
     content: @Composable () -> Unit,
 ) {
     // NavigationSuiteScaffoldLayout takes no modifier in m3 1.9.0, so it is applied to the wrapper.
-    Box(modifier) {
+    // The Surface gives every uncoloured content node the themed background and content colour
+    // (08 Contrast: no black-on-default-black text in dark mode).
+    Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         NavigationSuiteScaffoldLayout(
             navigationSuite = {
                 when (suiteType) {

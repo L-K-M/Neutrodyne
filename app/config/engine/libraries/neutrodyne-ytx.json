@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:neutrodyne-ytx",
+  "name": "neutrodyne_ytx shim",
+  "description": "Neutrodyne's shared Python engine shim (own code)",
+  "website": "https://github.com/L-K-M/Neutrodyne",
+  "developers": [],
+  "licenses": [
+    "Unlicense"
+  ],
+  "artifactVersion": "SHIM_API_VERSION 1",
+  "tag": "bundled"
+}

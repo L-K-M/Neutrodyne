@@ -5,23 +5,24 @@ plugins {
     id("com.mikepenz.aboutlibraries.plugin.android")
 }
 
-// Offline and reproducible: no remote licence/funding fetches; the engine stack's manual definitions
-// live in config/libraries + config/licenses (01 AboutLibraries).
-aboutLibraries {
-    offlineMode.set(true)
-    collect {
-        configPath.set(layout.projectDirectory.dir("config"))
-        fetchRemoteLicense.set(false)
-        fetchRemoteFunding.set(false)
-    }
-}
-
 val youtubeEngine =
     providers
         .gradleProperty("neutrodyne.youtubeEngine")
         .orElse("true")
         .get()
         .toBoolean()
+
+// Offline and reproducible: no remote licence/funding fetches. The engine stack's manual
+// definitions live in their own config root, config/engine (01: the emergency build leaves it
+// out, so its Licences screen omits the engine components).
+aboutLibraries {
+    offlineMode.set(true)
+    collect {
+        configPath.set(layout.projectDirectory.dir(if (youtubeEngine) "config/engine" else "config"))
+        fetchRemoteLicense.set(false)
+        fetchRemoteFunding.set(false)
+    }
+}
 
 // Shipped locales of both apps (09 Shipped locales and per-app language)
 val shippedLocales =
@@ -106,6 +107,7 @@ dependencies {
     implementation(libs.cmp.foundation)
     implementation(libs.aboutlibraries.core)
     implementation(libs.androidx.lifecycle.process)
+    implementation(libs.lifecycle.runtime.compose)
     implementation(libs.androidx.profileinstaller)
     implementation(libs.androidx.work.runtime)
     implementation(libs.kotlinx.coroutines.android)
@@ -117,6 +119,7 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4.accessibility)
     androidTestImplementation(libs.androidx.test.espresso.core)
     androidTestImplementation(libs.cmp.resources)
 }

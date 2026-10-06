@@ -14,11 +14,15 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.runComposeUiTest
+import ch.lkmc.neutrodyne.core.common.PlatformInfo
+import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.DesktopArch
 import ch.lkmc.neutrodyne.core.model.DesktopOs
 import ch.lkmc.neutrodyne.core.model.InstallKind
+import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
@@ -27,6 +31,7 @@ import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.ui.platform.ExternalUrlOpener
 import ch.lkmc.neutrodyne.core.ui.platform.FilePicker
 import ch.lkmc.neutrodyne.core.ui.platform.FileSaver
@@ -45,11 +50,13 @@ import com.mikepenz.aboutlibraries.entity.License
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentSetOf
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.runBlocking
 import org.jetbrains.compose.resources.stringResource
 import java.util.Locale
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import kotlin.test.assertEquals
 
 /**
  * The M0a Settings screens driven through `NeutrodyneRoot` on the desktop JVM (01 S9 method): the
@@ -124,14 +131,101 @@ class SettingsScreensTest {
             onNodeWithText("No licence information in this build.").assertIsDisplayed()
         }
 
+    @Test
+    fun licencesDisclosesEngineAbiOnEngineFreeApk() =
+        runComposeUiTest {
+            setSettingsRoot(
+                licencesSource = BundledLicencesSource,
+                buildInfo =
+                    FakeBuildInfo.copy(
+                        platform = BuildInfo.Platform.ANDROID,
+                        apkAbi = "armeabi-v7a",
+                        youTubeEngineBundled = false,
+                    ),
+            )
+            openSettings()
+            onAllNodesWithText("Licences").onFirst().performClick()
+            waitForIdle()
+
+            onNodeWithText("Bundled components", substring = true).assertExists()
+            onNodeWithText("Used by the YouTube engine of the 64-bit versions").assertExists()
+        }
+
+    @Test
+    fun aboutLinkWithoutHandlerOffersCopyLink() =
+        runComposeUiTest {
+            setSettingsRoot(platformActions = NoHandlerActions)
+            openSettings()
+            onAllNodesWithText("About").onFirst().performClick()
+            onNodeWithText("Source code and releases").performScrollTo().performClick()
+            waitForIdle()
+
+            onNodeWithText("No app can open this link").assertIsDisplayed()
+            onNodeWithText("Copy link").assertIsDisplayed()
+        }
+
+    @Test
+    fun appearanceChoosesAndPersistsTheme() =
+        runComposeUiTest {
+            val settings = FakeSettingsRepository()
+            setSettingsRoot(settingsRepository = settings)
+            openSettings()
+            onAllNodesWithText("Appearance").onFirst().performClick()
+            waitForIdle()
+
+            onNodeWithText("System default").assertIsDisplayed()
+            onNodeWithText("Theme").performClick()
+            waitForIdle()
+            onNodeWithText("Dark").performClick()
+            waitForIdle()
+
+            onNodeWithText("Dark").assertIsDisplayed()
+            assertEquals(ThemeMode.DARK, runBlocking { settings.get(AppearanceSettingKeys.THEME) })
+        }
+
+    @Test
+    fun appearanceHidesWallpaperRowWithoutPlatformSupport() =
+        runComposeUiTest {
+            setSettingsRoot()
+            openSettings()
+            onAllNodesWithText("Appearance").onFirst().performClick()
+            waitForIdle()
+
+            onNodeWithText("Use wallpaper colours").assertDoesNotExist()
+        }
+
+    @Test
+    fun appearanceWallpaperRowWritesOnSupportedAndroid() =
+        runComposeUiTest {
+            val settings = FakeSettingsRepository()
+            setSettingsRoot(
+                settingsRepository = settings,
+                platformInfo = FakePlatformInfo.ANDROID,
+            )
+            openSettings()
+            onAllNodesWithText("Appearance").onFirst().performClick()
+            waitForIdle()
+
+            onNodeWithText("Use wallpaper colours").performClick()
+            waitForIdle()
+
+            assertEquals(false, runBlocking { settings.get(AppearanceSettingKeys.DYNAMIC_COLOR) })
+        }
+
     private fun ComposeUiTest.openSettings() {
         onAllNodesWithContentDescription("Settings").onFirst().performClick()
         onNodeWithText("About").assertExists()
     }
 
-    private fun ComposeUiTest.setSettingsRoot(licencesSource: LicencesSource? = FakeLicencesSource) {
+    private fun ComposeUiTest.setSettingsRoot(
+        licencesSource: LicencesSource? = FakeLicencesSource,
+        buildInfo: BuildInfo = FakeBuildInfo,
+        settingsRepository: FakeSettingsRepository = FakeSettingsRepository(),
+        platformInfo: PlatformInfo = FakePlatformInfo.DESKTOP,
+        platformActions: PlatformActions = TestPlatformActions,
+    ) {
         setContent {
-            CompositionLocalProvider(LocalPlatformActions provides TestPlatformActions) {
+            CompositionLocalProvider(LocalPlatformActions provides platformActions) {
                 NeutrodyneRoot(
                     state = RootUiState.READY,
                     actions =
@@ -143,7 +237,14 @@ class SettingsScreensTest {
                             playbackKey = { false },
                         ),
                     slots = RootSlots(player = {}, userMessages = emptyFlow()),
-                    installers = StubInstallers + SettingsNavigation.entries(FakeBuildInfo, licencesSource),
+                    installers =
+                        StubInstallers +
+                            SettingsNavigation.entries(
+                                buildInfo,
+                                licencesSource,
+                                settingsRepository,
+                                platformInfo,
+                            ),
                     platform = BuildInfo.Platform.DESKTOP,
                 )
             }
@@ -207,6 +308,46 @@ private val FakeLicencesSource =
         )
     }
 
+/** One `bundled`-tagged library so the engine section renders (F10). */
+private val BundledLicencesSource =
+    LicencesSource {
+        Libs(
+            libraries =
+                persistentListOf(
+                    Library(
+                        uniqueId = "org.example:engine-stub:1.0",
+                        artifactVersion = "1.0",
+                        name = "engine-stub",
+                        description = "",
+                        website = "",
+                        developers = persistentListOf(),
+                        organization = null,
+                        scm = null,
+                        licenses = persistentSetOf(Apache),
+                        funding = persistentSetOf(),
+                        tag = "bundled",
+                        targets = persistentSetOf(),
+                    ),
+                ),
+            licenses = persistentSetOf(Apache),
+        )
+    }
+
+private object FakePlatformInfo {
+    val DESKTOP = platformInfo(PlatformKind.DESKTOP)
+    val ANDROID = platformInfo(PlatformKind.ANDROID, sdkInt = 34)
+
+    private fun platformInfo(
+        kind: PlatformKind,
+        sdkInt: Int? = null,
+    ) = object : PlatformInfo {
+        override val kind = kind
+        override val userAgentPlatform = kind.name.lowercase()
+        override val androidSdkInt = sdkInt
+        override val regionCode = "CH"
+    }
+}
+
 /** The minimal `PlatformActions` the settings screens read (share = null means desktop, D83). */
 private val TestPlatformActions =
     object : PlatformActions {
@@ -224,6 +365,12 @@ private val TestPlatformActions =
         override val saver: FileSaver = FileSaver { _, _ -> null }
         override val reveal = null
         override val notifications = null
+    }
+
+/** Every external-open call reports `NO_HANDLER` (F11: About's copy-link fallback). */
+private val NoHandlerActions =
+    object : PlatformActions by TestPlatformActions {
+        override val urls: ExternalUrlOpener = ExternalUrlOpener { OpenResult.NO_HANDLER }
     }
 
 private val TOP_LEVEL_STUB_TABS: List<TopLevelKey> =

@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne
 
+import android.os.Build
+import android.os.Process
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.junit4.accessibility.enableAccessibilityChecks
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.espresso.Espresso.pressBack
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -46,11 +50,13 @@ class SmokeTest {
 
     @Test
     fun fiveLabelledDestinations() {
+        compose.enableAccessibilityChecks()
         assertDestinations()
     }
 
     @Test
     fun destinationsSurviveRotationAndDarkMode() {
+        compose.enableAccessibilityChecks()
         compose.activityRule.scenario.recreate()
         assertDestinations()
 
@@ -61,13 +67,56 @@ class SmokeTest {
 
     @Test
     fun settingsOpensAndBackReturnsToTheTab() {
-        compose.onAllNodesWithContentDescription(text(Res.string.settings)).onFirst().performClick()
-        compose.waitForIdle()
+        compose.enableAccessibilityChecks()
+        openSettings()
 
         pressBack()
         compose.waitForIdle()
         compose.onNodeWithTag(TAG_FEEDS).assertIsDisplayed()
     }
+
+    @Test
+    fun aboutShowsVersionAndAbi() {
+        compose.enableAccessibilityChecks()
+        openSettings()
+        compose.onNodeWithText("About").performClick()
+        compose.waitForIdle()
+
+        compose
+            .onNodeWithText("Version", substring = true)
+            .assertIsDisplayed()
+            .assert(hasText(BuildConfig.VERSION_NAME, substring = true))
+        apkAbi()?.let {
+            compose.onNodeWithText(it, substring = true).assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun licencesListsLibraries() {
+        compose.enableAccessibilityChecks()
+        openSettings()
+        compose.onNodeWithText("Licences").performClick()
+        compose.waitForIdle()
+
+        // A non-empty list shows its section headers (a default build always has both).
+        // The labels are the en defaults; `:feature:settings`'s generated Res stays internal
+        // (only `:core:ui` exports one), so the smoke test pins the English literals.
+        compose.onNodeWithText("Libraries", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Bundled components", substring = true).assertIsDisplayed()
+    }
+
+    private fun openSettings() {
+        compose.onAllNodesWithContentDescription(text(Res.string.settings)).onFirst().performClick()
+        compose.waitForIdle()
+    }
+
+    /** The APK's ABI, resolved like `AndroidBuildInfo`. */
+    private fun apkAbi(): String? =
+        if (Process.is64Bit()) {
+            Build.SUPPORTED_64_BIT_ABIS.firstOrNull()
+        } else {
+            Build.SUPPORTED_32_BIT_ABIS.firstOrNull()
+        }
 
     private fun assertDestinations() {
         for ((tag, label) in DESTINATIONS) {

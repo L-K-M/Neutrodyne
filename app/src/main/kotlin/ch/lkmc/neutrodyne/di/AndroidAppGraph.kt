@@ -6,6 +6,7 @@ import androidx.work.WorkerFactory
 import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
+import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.work.MetroWorkerFactory
@@ -31,6 +32,9 @@ interface AndroidAppGraph {
     val workerFactory: WorkerFactory
 
     val buildInfo: BuildInfo
+
+    /** `MainActivity` collects `appearance.*` through it into `AppearancePrefs` (08 App scheme). */
+    val settingsRepository: SettingsRepository
 
     /** Every feature's navigation entries (01 Feature entry installers). */
     val entryInstallers: Set<EntryProviderInstaller>

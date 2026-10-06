@@ -165,4 +165,29 @@ class RedactorTest {
 
         assertEquals("GET https://***@[::1]/feed", text)
     }
+
+    @Test
+    fun `free text redacts credentials and query around a bracketed ipv6 host`() {
+        val text =
+            Redactor.text(
+                "GET https://alice:password@[2001:db8::1]:8443/rss/a8F3kq09ZpLm2xQ?token=SECRET failed",
+            )
+
+        assertEquals("GET https://***@[2001:db8::1]:8443/rss/…xQ?token=… failed", text)
+    }
+
+    @Test
+    fun `free text redacts an ipv6 literal inside a feed-wrapped url`() {
+        val text = Redactor.text("sub feed:https://u:p@[2001:db8::1]/f?key=sekrit")
+
+        assertEquals("sub feed:https://***@[2001:db8::1]/f?key=…", text)
+    }
+
+    @Test
+    fun `url masks user info on a bracketed ipv6 host with port`() {
+        assertEquals(
+            "https://***@[::1]:8443/f?a=…",
+            Redactor.url("https://u:p@[::1]:8443/f?a=1"),
+        )
+    }
 }

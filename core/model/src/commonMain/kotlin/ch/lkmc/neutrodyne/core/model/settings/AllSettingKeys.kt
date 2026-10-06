@@ -4,8 +4,8 @@ package ch.lkmc.neutrodyne.core.model.settings
 
 /**
  * The registry `exportSyncSet` and the sync diff walk to know which keys are portable (01 DataStore
- * files and typed setting keys). Concatenates every area's `ALL` list — populated when the areas
- * land (01 Test rigging: "for M0a the list is empty").
+ * files and typed setting keys). Concatenates every area's `ALL` list — M0a registers the
+ * `appearance.*` keys (08), the rest populate with their milestones.
  *
  * Registry rules enforced by the unit test in this module:
  * - every name matches `^(area)\.[a-z0-9_]+$` with an area from [KEY_AREAS];
@@ -15,7 +15,7 @@ package ch.lkmc.neutrodyne.core.model.settings
  * - `sync.server_url` is [SettingsFile.PORTABLE] and never `synced`.
  */
 object AllSettingKeys {
-    val list: List<SettingKey<*>> = emptyList()
+    val list: List<SettingKey<*>> = AppearanceSettingKeys.ALL
 }
 
 /** First segment of a key name — one per settings area plus the local/sync prefixes (01). */

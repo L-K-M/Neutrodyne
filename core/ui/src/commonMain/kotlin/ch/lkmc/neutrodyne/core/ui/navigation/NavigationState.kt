@@ -60,6 +60,9 @@ public class NavigationState internal constructor(
     }
 
     override fun selectTab(key: TopLevelKey) {
+        // 08 Re-tap behaviour: re-selecting the shown destination pops its stack back to the
+        // root; the root entry itself stays, so its saved scroll position survives.
+        if (key == selected.value) resetTab(key)
         selected.value = key
     }
 

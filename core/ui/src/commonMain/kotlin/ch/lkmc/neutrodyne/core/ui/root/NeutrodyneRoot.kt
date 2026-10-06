@@ -48,8 +48,8 @@ import ch.lkmc.neutrodyne.core.designsystem.statusBarAppearanceFor
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
-import ch.lkmc.neutrodyne.core.designsystem.theme.ThemeMode
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller

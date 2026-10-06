@@ -123,6 +123,21 @@ class NeutrodyneRootTest {
         }
 
     @Test
+    fun reTappingTheSelectedDestinationReturnsToItsRoot() =
+        runComposeUiTest {
+            setRootContent()
+            onNodeWithText("open-podcast").performClick()
+            waitForIdle()
+            onNodeWithText("podcast-3").assertIsDisplayed()
+
+            // 08 Re-tap: the second tap on the shown destination pops its stack to the root.
+            onNodeWithTag("nav_feeds").performClick()
+            waitForIdle()
+            onNodeWithText("podcast-3").assertDoesNotExist()
+            onNodeWithText("feeds-content").assertIsDisplayed()
+        }
+
+    @Test
     fun sheetRendersAboveContent() =
         runComposeUiTest {
             setRootContent()

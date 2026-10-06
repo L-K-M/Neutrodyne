@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:xz",
+  "name": "xz (liblzma)",
+  "description": "LZMA compression (CPython _lzma)",
+  "website": "https://tukaani.org/xz",
+  "developers": [],
+  "licenses": [
+    "0BSD"
+  ],
+  "artifactVersion": "5.4.6",
+  "tag": "bundled"
+}
