@@ -53,20 +53,25 @@ jobs:
         with:
           cache-provider: basic
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
-      # TODO(M0a.x/M0b): fold the remaining 09 `static` tasks in as their
-      # milestones land — spotlessCheck, assertModuleGraph,
-      # verifyDependencyPolicy, :app:verifyManifestPermissions, checkSpdxHeaders,
-      # checkBannedApis, checkBrandAssets, checkTranslations,
-      # :youtube:ytdlp:checkPythonLicences, :youtube:ytdlp-desktop:checkPythonLicences,
-      # :playback:native:checkNativeLicences, :youtube:ytdlp:verifyBundledYtDlp
-      # --continue; clang-format over playback/native/src/native/ (MD0); detekt
-      # SARIF upload with continue-on-error (non-blocking until a stable detekt
+      # Every implemented 09 `static` gate runs here explicitly — attaching them
+      # to `check` alone never ran them in CI (finding: policy gates must be
+      # invoked, not just wired). Still TODO as their milestones land:
+      # checkBrandAssets (M0b), checkTranslations, :playback:native:checkNativeLicences
+      # (MD0), clang-format over playback/native/src/native/ (MD0), detekt SARIF
+      # upload with continue-on-error (non-blocking until a stable detekt
       # supports this toolchain).
       - name: KGP assertion (PLAN M0 AC3)
         # The root project's buildEnvironment: plugins load through the included build, so :app's lists none (01 S1)
         run: ./gradlew -q buildEnvironment | grep -E 'kotlin-gradle-plugin:.*2\.4\.20'
       - name: Static checks (M0a)
-        run: ./gradlew :app:lintRelease :app:licenseeAndroidRelease :desktopApp:licensee :sync:server:licensee --continue
+        run: >-
+          ./gradlew spotlessCheck :app:lintRelease assertModuleGraph
+          :app:licenseeRelease :desktopApp:licensee :sync:server:licensee
+          verifyDependencyPolicy :app:verifyManifestPermissions checkSpdxHeaders
+          checkBannedApis :youtube:ytdlp:checkPythonLicences
+          :youtube:ytdlp-desktop:checkPythonLicences
+          :youtube:ytdlp:verifyBundledYtDlp :youtube:ytdlp-desktop:verifyBundledYtDlp
+          --continue
       - name: Frozen schemas
         run: scripts/ci/check-frozen-schemas.sh
 
