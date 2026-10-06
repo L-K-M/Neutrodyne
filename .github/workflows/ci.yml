@@ -184,6 +184,9 @@ jobs:
         with:
           path: ~/.android/avd/gradle-managed
           key: gmd-ci-${{ hashFiles('**/build.gradle.kts', 'gradle/libs.versions.toml') }}
+      # The runner image no longer ships the emulator package; GMD needs it to boot devices
+      - name: Install the Android emulator
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools > /dev/null
       # GMD `ci` group (API 26 + 36, debug) — the group task resolves in every
       # module that defines it (:app plus the opted-in device-test modules such
       # as :core:database; 09, Unverified KMP task name).

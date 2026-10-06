@@ -24,8 +24,14 @@ val youtubeEngine =
         .toBoolean()
 
 // Shipped locales of both apps (09 Shipped locales and per-app language)
-val shippedLocales = providers.fileContents(layout.projectDirectory.file("policy/locales.txt")).asText.get()
-    .lines().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }
+val shippedLocales =
+    providers
+        .fileContents(layout.projectDirectory.file("policy/locales.txt"))
+        .asText
+        .get()
+        .lines()
+        .map { it.trim() }
+        .filter { it.isNotEmpty() && !it.startsWith("#") }
 
 android {
     defaultConfig {
