@@ -10,6 +10,12 @@
 # A failing job runs scripts/ci/report-nightly.sh, which opens or updates one
 # issue per job (label `nightly-failure`) and closes it after the next green
 # run; `repro` reports under the `repro` label and never blocks a release.
+#
+# Every job checks out github.sha — the exact commit the run's head_sha records
+# — and never a dispatch input ref: release.sh accepts a dispatched youtube-smoke
+# run as the hotfix gate by head_sha, so a checkout of anything else would let
+# green jobs prove the wrong commit (fixed 2026-10-06; the `ref` input with its
+# `main` default is gone — dispatch on a branch through the native ref selector).
 
 name: nightly
 
@@ -21,9 +27,6 @@ on:
       scope:
         description: "full | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | desktop (M0b)"
         default: full
-      ref:
-        description: "branch or tag to run on"
-        default: main
 
 permissions:
   contents: read
@@ -47,7 +50,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ github.sha }}
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
@@ -65,6 +68,9 @@ jobs:
         with:
           cache-provider: basic
           cache-read-only: true
+      # The runner image no longer ships the emulator package; GMD needs it to boot devices
+      - name: Install the Android emulator
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools > /dev/null
       # Debug leg: every device module's suite on api26/api33/api34/api36 GMDs
       # (09). youtube-smoke narrows it to the YouTube smoke tests on api36.
       - name: GMD nightly group (debug)
@@ -108,7 +114,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ github.sha }}
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
@@ -173,7 +179,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ github.sha }}
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
@@ -191,6 +197,9 @@ jobs:
         with:
           cache-provider: basic
           cache-read-only: true
+      # The runner image no longer ships the emulator package; GMD needs it to boot devices
+      - name: Install the Android emulator
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools > /dev/null
       # E0 (and from M9a E7) on the published release build — a GMD api36 run of
       # the release variant's tests (PLAN M0 AC4).
       - name: api36 release smoke
@@ -198,8 +207,16 @@ jobs:
       - name: The tested release build is not debuggable
         run: |
           BT=$(find "$ANDROID_HOME/build-tools" -name aapt2 -type f | sort -V | tail -1)
-          "$BT" dump badging app/build/outputs/apk/release/app-x86_64-release.apk | grep -q application-debuggable \
-            && { echo "::error::release APK is debuggable"; exit 1; } || echo "release APK is not debuggable"
+          APK=app/build/outputs/apk/release/app-x86_64-release.apk
+          [ -n "$BT" ] || { echo "::error::no aapt2 under $ANDROID_HOME/build-tools"; exit 1; }
+          [ -f "$APK" ] || { echo "::error::missing release APK: $APK"; exit 1; }
+          # a failed dump aborts the step (bash -e); only its output can clear the flag
+          BADGING="$($BT dump badging "$APK")"
+          if grep -q application-debuggable <<<"$BADGING"; then
+            echo "::error::release APK is debuggable"
+            exit 1
+          fi
+          echo "release APK is not debuggable"
       - name: Report failure
         if: failure()
         env:
@@ -221,7 +238,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ github.sha }}
       # Two builds, different checkout paths / CPU counts / umasks (09). Both
       # signed with the committed key, so the APKs compare byte for byte.
       - name: Build A

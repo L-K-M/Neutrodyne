@@ -182,7 +182,17 @@ class PythonLicencePolicyTest {
         assertTrue(v(emptyList(), listOf("-r", "requirements.txt")).isNotEmpty())
         assertTrue(v(emptyList(), listOf("--requirement=requirements.txt")).isNotEmpty())
         assertTrue(v(emptyList(), listOf("-e", "./local-pkg")).isNotEmpty())
-        assertEquals(emptyList(), v(emptyList(), listOf("--no-cache-dir"))) // a benign flag passes
+        // attached short-option arguments (-rFILE, -ePATH) install unlisted packages the same
+        // way; whole-string matching used to let them through
+        assertTrue(v(emptyList(), listOf("-rrequirements.txt")).isNotEmpty())
+        assertTrue(v(emptyList(), listOf("-e./local-pkg")).isNotEmpty())
+        assertTrue(v(emptyList(), listOf("--editable=./local-pkg")).isNotEmpty())
+        // benign flags pass, including look-alikes of the banned spellings
+        assertEquals(emptyList(), v(emptyList(), listOf("--no-cache-dir")))
+        assertEquals(
+            emptyList(),
+            v(emptyList(), listOf("--require-hashes", "--resume-retries", "--no-deps", "-i")),
+        )
     }
 
     @Test

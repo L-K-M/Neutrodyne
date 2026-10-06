@@ -10,8 +10,8 @@
 # every KMP module's commonTest; :sync:server:test covers the server). Tasks
 # the design's command lines list but that their owning milestones have not
 # created yet are TODO comments below — they join the command as they land
-# (checkBrandAssets M0b, checkNativeLicences MD0, shimTestStdio MD3, the
-# desktop/server jobs M0b/MS1).
+# (checkNativeLicences MD0, shimTestStdio MD3, the desktop/server jobs M0b/MS1;
+# checkBrandAssets arrived early with M0a.1 and runs in `static`).
 
 name: ci
 
@@ -73,9 +73,11 @@ jobs:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
       # Every implemented 09 `static` gate runs here explicitly — attaching them
       # to `check` alone never ran them in CI (finding: policy gates must be
-      # invoked, not just wired). Still TODO as their milestones land:
-      # checkBrandAssets (M0b), checkTranslations, :playback:native:checkNativeLicences
-      # (MD0), clang-format over playback/native/src/native/ (MD0), detekt SARIF
+      # invoked, not just wired). `checkBrandAssets` joined 2026-10-06: it was
+      # delivered early with M0a.1, so a hand-edited generated asset must fail
+      # here, not only on a local `check`. Still TODO as their milestones land:
+      # checkTranslations, :playback:native:checkNativeLicences (MD0),
+      # clang-format over playback/native/src/native/ (MD0), detekt SARIF
       # upload with continue-on-error (non-blocking until a stable detekt
       # supports this toolchain).
       - name: KGP assertion (PLAN M0 AC3)
@@ -86,7 +88,7 @@ jobs:
           ./gradlew spotlessCheck :app:lintRelease assertModuleGraph
           :app:licenseeRelease :desktopApp:licensee :sync:server:licensee
           verifyDependencyPolicy :app:verifyManifestPermissions checkSpdxHeaders
-          checkBannedApis :youtube:ytdlp:checkPythonLicences
+          checkBannedApis checkBrandAssets :youtube:ytdlp:checkPythonLicences
           :youtube:ytdlp-desktop:checkPythonLicences
           :youtube:ytdlp:verifyBundledYtDlp :youtube:ytdlp-desktop:verifyBundledYtDlp
           --continue

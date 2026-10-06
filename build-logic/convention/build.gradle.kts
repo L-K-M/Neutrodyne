@@ -30,6 +30,8 @@ dependencies {
 
     testImplementation(libs.kotlin.test)
     testImplementation(libs.junit4)
+    // ProjectBuilder for the source-scan fixture tests (a real file tree, no build execution)
+    testImplementation(gradleTestKit())
 }
 
 tasks.withType<Test>().configureEach {

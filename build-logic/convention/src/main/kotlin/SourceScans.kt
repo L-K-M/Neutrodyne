@@ -21,9 +21,9 @@ import java.io.File
  * republished Chaquopy metadata, the `youtube/ytdlp/engine/` and `playback/native/…` paths are the approved
  * vendored trees (miniaudio, FFmpeg source, C++/WinRT headers, yt-dlp) that carry their own licences.
  */
-private fun Project.scannedTree(include: Array<String>): FileTree =
+private fun Project.scannedTree(include: List<String>): FileTree =
     fileTree(layout.projectDirectory) {
-        include(*include)
+        include(*include.toTypedArray())
         exclude(
             "**/build/**",
             ".git/**",
@@ -444,29 +444,36 @@ internal val PLATFORM_ONLY_MODULES =
         "youtube:ytdlp-desktop",
     )
 
+/**
+ * The source kinds `checkSpdxHeaders` scans (each as a recursive `**` glob): the design's list of
+ * source kinds (01 Gradle-side policy tasks: kt, java, kts, py, aidl, c, cpp, h, m, mm) plus the
+ * script and configuration kinds. The aidl kind was missing from the scan until 2026-10-06, so a
+ * restricted SPDX header on an AIDL interface passed the gate.
+ */
+internal val SPDX_TREE_INCLUDES: List<String> =
+    listOf(
+        "**/*.kt",
+        "**/*.kts",
+        "**/*.java",
+        "**/*.aidl",
+        "**/*.c",
+        "**/*.cpp",
+        "**/*.h",
+        "**/*.m",
+        "**/*.mm",
+        "**/*.py",
+        "**/*.sh",
+        "**/*.xml",
+        "**/*.yml",
+        "**/*.yaml",
+        "**/*.properties",
+        "**/*.toml",
+        "**/*.lock",
+    )
+
 /** Registers the two root scan tasks; called by `neutrodyne.quality` on the root project only. */
 internal fun Project.registerSourceScanTasks() {
-    val spdxTree =
-        scannedTree(
-            arrayOf(
-                "**/*.kt",
-                "**/*.kts",
-                "**/*.java",
-                "**/*.c",
-                "**/*.cpp",
-                "**/*.h",
-                "**/*.m",
-                "**/*.mm",
-                "**/*.py",
-                "**/*.sh",
-                "**/*.xml",
-                "**/*.yml",
-                "**/*.yaml",
-                "**/*.properties",
-                "**/*.toml",
-                "**/*.lock",
-            ),
-        )
+    val spdxTree = scannedTree(SPDX_TREE_INCLUDES)
     // build-logic is the tooling source; checkBannedApis' "module build scripts" excludes it per design.
     val bannedApiWithoutBuildLogic =
         fileTree(layout.projectDirectory) {
