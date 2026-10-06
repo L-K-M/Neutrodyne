@@ -28,29 +28,6 @@
     <string name="discover_empty_title">Find something new</string>
     <string name="discover_empty_body">Search the podcast directories, charts or add a feed by URL.</string>
 
-    <!-- Settings home rows (M0a subset of 08 Settings). -->
-    <string name="settings_home_subtitle">Appearance, About and Licences</string>
-    <string name="settings_appearance">Appearance</string>
-    <string name="settings_appearance_summary">Theme, dynamic colour and contrast</string>
-    <string name="settings_about">About</string>
-    <string name="settings_about_summary">Version and build</string>
-    <string name="settings_licences">Licences</string>
-    <string name="settings_licences_summary">Open-source licences of bundled components</string>
-
-    <!-- Settings › Appearance (M0a placeholder). -->
-    <string name="appearance_placeholder_title">Appearance</string>
-    <string name="appearance_placeholder_body">Theme options arrive with the appearance settings milestone.</string>
-
-    <!-- Settings › About (08 About statements). -->
-    <string name="about_version">Version %1$s (%2$d)</string>
-    <string name="about_licence">Neutrodyne is free software, released into the public domain under the Unlicense.</string>
-    <string name="about_source">Source code and releases</string>
-    <string name="about_debug_build">Debug build</string>
-
-    <!-- Licences screen. -->
-    <string name="licences_empty">No licence information in this build.</string>
-    <string name="licences_open_source">Source: %1$s</string>
-
     <!-- Startup gate (08 Banners and the startup gate). -->
     <string name="startup_updating">Updating your library…</string>
     <string name="startup_failed_disk_full">Not enough storage to open your library.</string>
@@ -68,7 +45,15 @@
     <string name="notice_first_run_off">Turn off</string>
     <string name="notice_verification_title">Developer verification</string>
     <string name="notice_verification_body">This device could not verify Neutrodyne's developer. Install the app from the project's GitHub releases page.</string>
-    <string name="held_changes_message">%1$s removed %2$d podcasts and %3$d groups. Apply here too?</string>
+    <plurals name="podcast_count">
+        <item quantity="one">%1$d podcast</item>
+        <item quantity="other">%1$d podcasts</item>
+    </plurals>
+    <plurals name="group_count">
+        <item quantity="one">%1$d group</item>
+        <item quantity="other">%1$d groups</item>
+    </plurals>
+    <string name="held_changes_message">%1$s removed %2$s and %3$s. Apply here too?</string>
     <string name="held_changes_unknown_device">Another device</string>
     <string name="review">Review</string>
     <string name="remote_session_title">Continue on this device</string>

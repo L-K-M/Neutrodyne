@@ -17,6 +17,7 @@ import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
@@ -35,6 +36,9 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
+import androidx.navigationevent.NavigationEvent
+import androidx.navigationevent.NavigationEventInput
+import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import ch.lkmc.neutrodyne.core.designsystem.PlatformSystemBarAppearance
 import ch.lkmc.neutrodyne.core.designsystem.components.NdNavItem
 import ch.lkmc.neutrodyne.core.designsystem.components.NdNavigationSuiteScaffold
@@ -180,6 +184,18 @@ private fun ReadyRoot(
         }
     }
 
+    // Escape-as-back on the desktop (08 Back handling order): nothing feeds the NavigationEvent
+    // dispatcher there, so the root turns Escape into a completed back event through a
+    // DesktopBackInput — when a handler (NavDisplay, or a future expanded PlayerSheet ahead of
+    // it) is enabled on the host dispatcher, it claims the event; otherwise the root pops the
+    // selected tab's stack itself.
+    val eventDispatcher = LocalNavigationEventDispatcherOwner.current?.navigationEventDispatcher
+    val backInput = remember { DesktopBackInput() }
+    DisposableEffect(eventDispatcher) {
+        if (eventDispatcher != null) eventDispatcher.addInput(backInput)
+        onDispose { if (eventDispatcher != null) eventDispatcher.removeInput(backInput) }
+    }
+
     val miniInset = if (!layout.playerPanel && state.hasNowPlaying) MINI_PLAYER_HEIGHT else 0.dp
     CompositionLocalProvider(
         LocalPaneLayout provides layout,
@@ -190,7 +206,19 @@ private fun ReadyRoot(
                 .fillMaxSize()
                 .testTagsAsResourceId()
                 .onKeyEvent { event ->
-                    dispatchRootKey(event, platform, navigation, actions.playbackKey)
+                    dispatchRootKey(
+                        event = event,
+                        platform = platform,
+                        navigation = navigation,
+                        desktopBack = {
+                            if (eventDispatcher != null && backInput.hasEnabledHandlers) {
+                                backInput.triggerBack()
+                            } else {
+                                navigation.pop()
+                            }
+                        },
+                        dispatch = actions.playbackKey,
+                    )
                 },
         ) {
             NdNavigationSuiteScaffold(
@@ -296,19 +324,24 @@ private fun navItems(): List<NdNavItem> = listOf(
 /**
  * The root key chords (08 Keyboard and mouse): the bubbling phase — after the focused element —
  * maps hardware keys to [PlaybackKey]; the shell's dispatch decides whether the action ran (and so
- * whether the event is consumed). Escape is absent on purpose: `NavDisplay`'s shared back chain
- * owns it (S9). Plain arrows skip only on the desktop, where they do not traverse focus.
+ * whether the event is consumed). Escape is the exception: on the desktop it completes a back
+ * event through [desktopBack] instead of becoming a playback chord (S9: the desktop NavDisplay
+ * ships no Escape input of its own). Plain arrows skip only on the desktop, where they do not
+ * traverse focus.
  */
 private fun dispatchRootKey(
     event: KeyEvent,
     platform: BuildInfo.Platform,
     navigation: NavigationState,
+    desktopBack: () -> Boolean,
     dispatch: (PlaybackKey) -> Boolean,
 ): Boolean {
     if (event.type != KeyEventType.KeyDown || event.isAltPressed) return false
     val ctrl = event.isCtrlPressed || event.isMetaPressed
     val shift = event.isShiftPressed
     val desktop = platform == BuildInfo.Platform.DESKTOP
+
+    if (event.key == Key.Escape && desktop && !ctrl && !shift) return desktopBack()
 
     val key: PlaybackKey = when {
         event.key == Key.Spacebar && !ctrl && !shift -> PlaybackKey.TOGGLE
@@ -332,6 +365,27 @@ private fun dispatchRootKey(
         else -> return false
     }
     return dispatch(key)
+}
+
+/**
+ * A [NavigationEventInput] that reports whether the host dispatcher currently has an enabled
+ * back handler (see [hasEnabledHandlers]) and injects a completed back event on demand. The
+ * root needs the flag because a dispatcher with no enabled handler swallows the event — the
+ * selected tab's stack is then popped directly instead.
+ */
+private class DesktopBackInput : NavigationEventInput() {
+    var hasEnabledHandlers = false
+        private set
+
+    override fun onHasEnabledHandlersChanged(hasEnabledHandlers: Boolean) {
+        this.hasEnabledHandlers = hasEnabledHandlers
+    }
+
+    fun triggerBack(): Boolean {
+        dispatchOnBackStarted(NavigationEvent())
+        dispatchOnBackCompleted()
+        return true
+    }
 }
 
 private val RAIL_WIDTH_DP = 96

@@ -25,25 +25,6 @@
     <string name="discover_empty_title">Finde etwas Neues</string>
     <string name="discover_empty_body">Suche in den Podcast-Verzeichnissen und Charts oder füge einen Feed per URL hinzu.</string>
 
-    <string name="settings_home_subtitle">Darstellung, Info und Lizenzen</string>
-    <string name="settings_appearance">Darstellung</string>
-    <string name="settings_appearance_summary">Design, dynamische Farben und Kontrast</string>
-    <string name="settings_about">Über</string>
-    <string name="settings_about_summary">Version und Build</string>
-    <string name="settings_licences">Lizenzen</string>
-    <string name="settings_licences_summary">Open-Source-Lizenzen der mitgelieferten Komponenten</string>
-
-    <string name="appearance_placeholder_title">Darstellung</string>
-    <string name="appearance_placeholder_body">Designoptionen kommen mit dem Darstellungs-Meilenstein.</string>
-
-    <string name="about_version">Version %1$s (%2$d)</string>
-    <string name="about_licence">Neutrodyne ist freie Software, gemeinfrei unter der Unlicense veröffentlicht.</string>
-    <string name="about_source">Quelltext und Releases</string>
-    <string name="about_debug_build">Debug-Build</string>
-
-    <string name="licences_empty">Dieser Build enthält keine Lizenzinformationen.</string>
-    <string name="licences_open_source">Quelle: %1$s</string>
-
     <string name="startup_updating">Bibliothek wird aktualisiert…</string>
     <string name="startup_failed_disk_full">Nicht genug Speicherplatz, um die Bibliothek zu öffnen.</string>
     <string name="startup_failed_generic">Neutrodyne konnte die Bibliothek nicht öffnen.</string>
@@ -59,7 +40,15 @@
     <string name="notice_first_run_off">Ausschalten</string>
     <string name="notice_verification_title">Entwickler-Verifizierung</string>
     <string name="notice_verification_body">Dieses Gerät konnte den Entwickler von Neutrodyne nicht verifizieren. Installiere die App von der GitHub-Releases-Seite des Projekts.</string>
-    <string name="held_changes_message">%1$s hat %2$d Podcasts und %3$d Gruppen entfernt. Hier auch übernehmen?</string>
+    <plurals name="podcast_count">
+        <item quantity="one">%1$d Podcast</item>
+        <item quantity="other">%1$d Podcasts</item>
+    </plurals>
+    <plurals name="group_count">
+        <item quantity="one">%1$d Gruppe</item>
+        <item quantity="other">%1$d Gruppen</item>
+    </plurals>
+    <string name="held_changes_message">%1$s hat %2$s und %3$s entfernt. Hier auch übernehmen?</string>
     <string name="held_changes_unknown_device">Ein anderes Gerät</string>
     <string name="review">Prüfen</string>
     <string name="remote_session_title">Auf diesem Gerät fortsetzen</string>

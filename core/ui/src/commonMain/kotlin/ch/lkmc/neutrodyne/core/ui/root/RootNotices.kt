@@ -23,13 +23,16 @@ import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.dismiss
 import ch.lkmc.neutrodyne.core.ui.resources.held_changes_message
 import ch.lkmc.neutrodyne.core.ui.resources.held_changes_unknown_device
+import ch.lkmc.neutrodyne.core.ui.resources.group_count
 import ch.lkmc.neutrodyne.core.ui.resources.notice_first_run_body
 import ch.lkmc.neutrodyne.core.ui.resources.notice_first_run_off
 import ch.lkmc.neutrodyne.core.ui.resources.notice_first_run_ok
 import ch.lkmc.neutrodyne.core.ui.resources.play
+import ch.lkmc.neutrodyne.core.ui.resources.podcast_count
 import ch.lkmc.neutrodyne.core.ui.resources.remote_session_detail
 import ch.lkmc.neutrodyne.core.ui.resources.remote_session_title
 import ch.lkmc.neutrodyne.core.ui.resources.review
+import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -47,8 +50,11 @@ internal fun RootBanners(
     val held = state.heldChanges
     if (held != null && onFeedsOrLibrary) {
         val device = held.deviceName ?: stringResource(Res.string.held_changes_unknown_device)
+        // The counts are real plurals so e.g. "1 podcast" reads correctly in every locale.
+        val podcasts = pluralStringResource(Res.plurals.podcast_count, held.podcastCount, held.podcastCount)
+        val groups = pluralStringResource(Res.plurals.group_count, held.groupCount, held.groupCount)
         NdBanner(
-            message = stringResource(Res.string.held_changes_message, device, held.podcastCount, held.groupCount),
+            message = stringResource(Res.string.held_changes_message, device, podcasts, groups),
             primary = NdDialogAction(
                 label = stringResource(Res.string.review),
                 onClick = { navigator.push(SyncHeldChangesKey(held.id)) },

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 plugins {
     alias(libs.plugins.neutrodyne.kmp.compose)
+    alias(libs.plugins.neutrodyne.metro)
 }
 
 kotlin {
@@ -40,6 +41,8 @@ kotlin {
         }
         desktopTest.dependencies {
             implementation(libs.cmp.ui.test)
+            // Skiko natives so runComposeUiTest can render on this machine's OS.
+            implementation(compose.desktop.currentOs)
         }
     }
 }
