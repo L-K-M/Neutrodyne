@@ -5,6 +5,7 @@ import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.Project
 import org.gradle.api.artifacts.ExternalDependency
+import org.gradle.api.artifacts.ProjectDependency
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.component.ModuleComponentSelector
 import org.gradle.api.artifacts.result.ResolvedComponentResult
@@ -38,6 +39,14 @@ abstract class VerifyDependencyPolicyTask : DefaultTask() {
     @get:Input
     abstract val declaredCoordinates: MapProperty<String, List<String>>
 
+    /** configuration name -> declared `project(":x")` paths (source-set edges, rules 2 and 15). */
+    @get:Input
+    abstract val declaredProjectEdges: MapProperty<String, List<String>>
+
+    /** True when the project applies `org.jetbrains.kotlin.multiplatform`: rule 15 applies to it. */
+    @get:Input
+    abstract val kmpModule: Property<Boolean>
+
     /** configuration name -> resolved root component (shells' runtime classpaths and Android test classpaths). */
     @get:Input
     abstract val resolvedRoots: MapProperty<String, ResolvedComponentResult>
@@ -69,6 +78,24 @@ abstract class VerifyDependencyPolicyTask : DefaultTask() {
             for (coord in coords) {
                 val rule = BANNED_COORDINATES.firstOrNull { it.matches(coord) } ?: continue
                 problems += "$path configuration $configuration declares banned $coord (${rule.reason})"
+            }
+        }
+
+        // Rules 2/15 on the declared project edges: `commonMain { dependencies { } }`, `by getting`
+        // and `getByName().apply` are valid KMP DSL forms a build-script regex cannot isolate, so the
+        // configurations themselves are checked here (checkBannedApis stays the second line).
+        for ((configuration, edges) in declaredProjectEdges.get().toSortedMap()) {
+            for (dep in edges) {
+                val module = dep.removePrefix(":")
+                if (configuration.startsWith("commonMain") && module in JVM_ISLANDS) {
+                    problems +=
+                        "$path configuration $configuration adds JVM island :$module " +
+                        "(rule 2/14: islands only from androidMain/desktopMain/platform modules)"
+                }
+                if (kmpModule.get() && module in PLATFORM_ONLY_MODULES) {
+                    problems +=
+                        "$path configuration $configuration adds platform-only :$module to a KMP module (rule 15)"
+                }
             }
         }
 
@@ -281,6 +308,7 @@ internal fun Project.registerDependencyPolicy() {
     // Declared coordinates are read once the build script has finished; nothing is resolved at configuration time.
     afterEvaluate {
         val declared = mutableMapOf<String, MutableList<String>>()
+        val projectEdges = mutableMapOf<String, MutableList<String>>()
         configurations.forEach { configuration ->
             val deps =
                 configuration.dependencies
@@ -291,8 +319,17 @@ internal fun Project.registerDependencyPolicy() {
                     .map { "${it.group}:${it.name}:${it.version.orEmpty()}" }
             val coords = deps + constraints
             if (coords.isNotEmpty()) declared.getOrPut(configuration.name) { mutableListOf() } += coords
+            val edges =
+                configuration.dependencies
+                    .filterIsInstance<ProjectDependency>()
+                    .map { it.path }
+            if (edges.isNotEmpty()) projectEdges.getOrPut(configuration.name) { mutableListOf() } += edges
         }
-        policy.configure { declaredCoordinates.set(declared.mapValues { it.value.sorted() }) }
+        policy.configure {
+            declaredCoordinates.set(declared.mapValues { it.value.sorted() })
+            declaredProjectEdges.set(projectEdges.mapValues { it.value.sorted().distinct() })
+            kmpModule.set(pluginManager.hasPlugin("org.jetbrains.kotlin.multiplatform"))
+        }
 
         // Resolved runtime classpaths of the shells plus every *AndroidTestRuntimeClasspath (the MockK ban).
         configurations.forEach { configuration ->

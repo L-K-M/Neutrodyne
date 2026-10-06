@@ -6,8 +6,8 @@ import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.DesktopArch
 import ch.lkmc.neutrodyne.core.model.DesktopOs
 import ch.lkmc.neutrodyne.core.model.InstallKind
-import java.util.Properties
 import kotlinx.collections.immutable.toImmutableList
+import java.util.Properties
 
 /**
  * Builds the desktop [BuildInfo] (11 DesktopAppGraph) from the `build-info.properties` resource
@@ -61,7 +61,10 @@ internal object BuildInfoLoader {
     fun load(): BuildInfo = load(resourceContent(), JVM_HOST)
 
     /** Pure form for tests: [resource] is the properties file's text, `null` when absent. */
-    fun load(resource: String?, host: Host = JVM_HOST): BuildInfo {
+    fun load(
+        resource: String?,
+        host: Host = JVM_HOST,
+    ): BuildInfo {
         val properties = Properties()
         if (resource != null) {
             properties.load(java.io.StringReader(resource))
@@ -78,23 +81,26 @@ internal object BuildInfoLoader {
             engineManifestUrl = properties.getProperty(KEY_ENGINE_MANIFEST_URL).orEmpty(),
             youTubeEngineBundled = properties.getProperty(KEY_YOUTUBE_ENGINE)?.toBooleanStrictOrNull() ?: false,
             apkAbi = null,
-            desktop = BuildInfo.Desktop(
-                os = properties.getProperty(KEY_OS)?.let(::osOf) ?: hostOs(host),
-                arch = properties.getProperty(KEY_ARCH)?.let(::archOf) ?: hostArch(host),
-                installKind = installKind,
-                runtime = properties.getProperty(KEY_RUNTIME) ?: hostRuntime(host),
-            ),
-            shippedLocales = (properties.getProperty(KEY_SHIPPED_LOCALES) ?: DEFAULT_LOCALE)
-                .split(',')
-                .filter(String::isNotBlank)
-                .toImmutableList(),
+            desktop =
+                BuildInfo.Desktop(
+                    os = properties.getProperty(KEY_OS)?.let(::osOf) ?: hostOs(host),
+                    arch = properties.getProperty(KEY_ARCH)?.let(::archOf) ?: hostArch(host),
+                    installKind = installKind,
+                    runtime = properties.getProperty(KEY_RUNTIME) ?: hostRuntime(host),
+                ),
+            shippedLocales =
+                (properties.getProperty(KEY_SHIPPED_LOCALES) ?: DEFAULT_LOCALE)
+                    .split(',')
+                    .filter(String::isNotBlank)
+                    .toImmutableList(),
             podcastIndexKey = properties.getProperty(KEY_PODCASTINDEX_KEY).orEmpty(),
             podcastIndexSecret = properties.getProperty(KEY_PODCASTINDEX_SECRET).orEmpty(),
         )
     }
 
     private fun resourceContent(): String? =
-        BuildInfoLoader::class.java.classLoader?.getResourceAsStream(RESOURCE_PATH)
+        BuildInfoLoader::class.java.classLoader
+            ?.getResourceAsStream(RESOURCE_PATH)
             ?.use { it.readBytes().toString(Charsets.UTF_8) }
 
     private fun installKindOf(wire: String): InstallKind =
@@ -109,17 +115,19 @@ internal object BuildInfoLoader {
         DesktopArch.entries.firstOrNull { it.wire == wire }
             ?: error("build-info.properties carries an unknown arch '$wire'")
 
-    private fun hostOs(host: Host): DesktopOs = when (AppDirs.DesktopOs.current(osName(host))) {
-        AppDirs.DesktopOs.WINDOWS -> DesktopOs.WINDOWS
-        AppDirs.DesktopOs.MACOS -> DesktopOs.MACOS
-        AppDirs.DesktopOs.LINUX -> DesktopOs.LINUX
-    }
+    private fun hostOs(host: Host): DesktopOs =
+        when (AppDirs.DesktopOs.current(osName(host))) {
+            AppDirs.DesktopOs.WINDOWS -> DesktopOs.WINDOWS
+            AppDirs.DesktopOs.MACOS -> DesktopOs.MACOS
+            AppDirs.DesktopOs.LINUX -> DesktopOs.LINUX
+        }
 
-    private fun hostArch(host: Host): DesktopArch = when (host.property("os.arch")?.lowercase()) {
-        "amd64", "x86_64" -> DesktopArch.X64
-        "aarch64", "arm64" -> DesktopArch.ARM64
-        else -> error("this JVM runs on an architecture Neutrodyne does not ship: ${host.property("os.arch")}")
-    }
+    private fun hostArch(host: Host): DesktopArch =
+        when (host.property("os.arch")?.lowercase()) {
+            "amd64", "x86_64" -> DesktopArch.X64
+            "aarch64", "arm64" -> DesktopArch.ARM64
+            else -> error("this JVM runs on an architecture Neutrodyne does not ship: ${host.property("os.arch")}")
+        }
 
     /** e.g. "Eclipse Adoptium 25+36" — the smoke line's `java.vendor`/`java.runtime.version` pair. */
     private fun hostRuntime(host: Host): String =

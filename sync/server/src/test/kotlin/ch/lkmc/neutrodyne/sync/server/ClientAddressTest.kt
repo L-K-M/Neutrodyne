@@ -8,47 +8,50 @@ import kotlin.test.assertTrue
 
 /** Trusted-proxy resolution of the client address and scheme (10 Ktor setup, Request pipeline). */
 class ClientAddressTest {
-
     @Test
     fun `a peer outside the trusted list is the client and its headers are ignored`() {
-        val resolved = ClientAddress(IpCidr.parseAll("127.0.0.1/32")).resolve(
-            peerHost = "203.0.113.7",
-            forwardedFor = listOf("198.51.100.9"),
-            forwardedProto = listOf("https"),
-        )
+        val resolved =
+            ClientAddress(IpCidr.parseAll("127.0.0.1/32")).resolve(
+                peerHost = "203.0.113.7",
+                forwardedFor = listOf("198.51.100.9"),
+                forwardedProto = listOf("https"),
+            )
         assertEquals("203.0.113.7", resolved.address)
         assertFalse(resolved.secureTransport)
     }
 
     @Test
     fun `a loopback peer is a trusted proxy (N13 loopback-or-trusted)`() {
-        val resolved = ClientAddress(emptyList()).resolve(
-            peerHost = "127.0.0.1",
-            forwardedFor = listOf("203.0.113.7"),
-            forwardedProto = listOf("https"),
-        )
+        val resolved =
+            ClientAddress(emptyList()).resolve(
+                peerHost = "127.0.0.1",
+                forwardedFor = listOf("203.0.113.7"),
+                forwardedProto = listOf("https"),
+            )
         assertEquals("203.0.113.7", resolved.address)
         assertTrue(resolved.secureTransport)
     }
 
     @Test
     fun `a trusted proxy yields the right-most untrusted address`() {
-        val resolved = ClientAddress(IpCidr.parseAll("127.0.0.1/32")).resolve(
-            peerHost = "127.0.0.1",
-            forwardedFor = listOf("203.0.113.7, 127.0.0.1, 127.0.0.1"),
-            forwardedProto = listOf("http"),
-        )
+        val resolved =
+            ClientAddress(IpCidr.parseAll("127.0.0.1/32")).resolve(
+                peerHost = "127.0.0.1",
+                forwardedFor = listOf("203.0.113.7, 127.0.0.1, 127.0.0.1"),
+                forwardedProto = listOf("http"),
+            )
         assertEquals("203.0.113.7", resolved.address)
         assertFalse(resolved.secureTransport)
     }
 
     @Test
     fun `a chain of only trusted proxies falls back to the peer`() {
-        val resolved = ClientAddress(IpCidr.parseAll("127.0.0.1/32")).resolve(
-            peerHost = "127.0.0.1",
-            forwardedFor = listOf("127.0.0.1"),
-            forwardedProto = emptyList(),
-        )
+        val resolved =
+            ClientAddress(IpCidr.parseAll("127.0.0.1/32")).resolve(
+                peerHost = "127.0.0.1",
+                forwardedFor = listOf("127.0.0.1"),
+                forwardedProto = emptyList(),
+            )
         assertEquals("127.0.0.1", resolved.address)
         assertFalse(resolved.secureTransport)
     }
@@ -66,22 +69,24 @@ class ClientAddressTest {
 
     @Test
     fun `custom trusted CIDRs believe a proxy inside them`() {
-        val resolved = ClientAddress(IpCidr.parseAll("172.31.87.0/24")).resolve(
-            peerHost = "172.31.87.5",
-            forwardedFor = listOf("203.0.113.7"),
-            forwardedProto = listOf("https"),
-        )
+        val resolved =
+            ClientAddress(IpCidr.parseAll("172.31.87.0/24")).resolve(
+                peerHost = "172.31.87.5",
+                forwardedFor = listOf("203.0.113.7"),
+                forwardedProto = listOf("https"),
+            )
         assertEquals("203.0.113.7", resolved.address)
         assertTrue(resolved.secureTransport)
     }
 
     @Test
     fun `an unparseable peer is treated as untrusted`() {
-        val resolved = ClientAddress(IpCidr.parseAll("127.0.0.1/32")).resolve(
-            peerHost = "unknown",
-            forwardedFor = listOf("203.0.113.7"),
-            forwardedProto = listOf("https"),
-        )
+        val resolved =
+            ClientAddress(IpCidr.parseAll("127.0.0.1/32")).resolve(
+                peerHost = "unknown",
+                forwardedFor = listOf("203.0.113.7"),
+                forwardedProto = listOf("https"),
+            )
         assertEquals("unknown", resolved.address)
         assertFalse(resolved.secureTransport)
     }

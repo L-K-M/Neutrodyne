@@ -67,16 +67,16 @@ interface S12YtxGraph {
 }
 
 class NetworkGraphTest {
-
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    private fun appGraph(): S12AppGraph = createGraphFactory<S12AppGraph.Factory>().create(
-        platformInfo = fakePlatform(),
-        buildInfo = testBuildInfo(),
-        powerMonitor = FakePowerMonitor(),
-        credentials = CredentialLookup.None,
-        scope = scope,
-    )
+    private fun appGraph(): S12AppGraph =
+        createGraphFactory<S12AppGraph.Factory>().create(
+            platformInfo = fakePlatform(),
+            buildInfo = testBuildInfo(),
+            powerMonitor = FakePowerMonitor(),
+            credentials = CredentialLookup.None,
+            scope = scope,
+        )
 
     @Test
     fun `the app graph resolves every networking binding`() {
@@ -97,10 +97,11 @@ class NetworkGraphTest {
 
     @Test
     fun `the ytx graph resolves CoreClients through the island's YtxScope container`() {
-        val graph = createGraphFactory<S12YtxGraph.Factory>().create(
-            platformInfo = fakePlatform(),
-            buildInfo = testBuildInfo(),
-        )
+        val graph =
+            createGraphFactory<S12YtxGraph.Factory>().create(
+                platformInfo = fakePlatform(),
+                buildInfo = testBuildInfo(),
+            )
         assertThat(graph.coreClients).isSameInstanceAs(graph.coreClients)
         assertThat(graph.coreClients.youtube).isNotNull()
         // A YtxScope graph is its own instance — nothing shared with the AppScope graph.

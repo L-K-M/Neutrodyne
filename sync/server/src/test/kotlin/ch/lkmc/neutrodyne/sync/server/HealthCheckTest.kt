@@ -13,26 +13,27 @@ import kotlin.test.assertTrue
 
 /** `/healthz` and `/readyz` of the M0b skeleton (10 Account and health endpoints; AC16). */
 class HealthCheckTest {
+    @Test
+    fun `healthz answers 200 ok while the process serves`() =
+        testApplication {
+            application {
+                installTestModule(loadValidConfig())
+            }
+            val response = client.get(HealthRoutes.HEALTH_PATH)
+            assertEquals(HttpStatusCode.OK, response.status)
+            assertEquals(HealthRoutes.BODY_OK, response.bodyAsText())
+        }
 
     @Test
-    fun `healthz answers 200 ok while the process serves`() = testApplication {
-        application {
-            installTestModule(loadValidConfig())
+    fun `readyz answers 200 ok with a writable data directory`() =
+        testApplication {
+            application {
+                installTestModule(loadValidConfig())
+            }
+            val response = client.get(HealthRoutes.READY_PATH)
+            assertEquals(HttpStatusCode.OK, response.status)
+            assertEquals(HealthRoutes.BODY_OK, response.bodyAsText())
         }
-        val response = client.get(HealthRoutes.HEALTH_PATH)
-        assertEquals(HttpStatusCode.OK, response.status)
-        assertEquals(HealthRoutes.BODY_OK, response.bodyAsText())
-    }
-
-    @Test
-    fun `readyz answers 200 ok with a writable data directory`() = testApplication {
-        application {
-            installTestModule(loadValidConfig())
-        }
-        val response = client.get(HealthRoutes.READY_PATH)
-        assertEquals(HttpStatusCode.OK, response.status)
-        assertEquals(HealthRoutes.BODY_OK, response.bodyAsText())
-    }
 
     @Test
     fun `readiness fails below the free-space floor`() {

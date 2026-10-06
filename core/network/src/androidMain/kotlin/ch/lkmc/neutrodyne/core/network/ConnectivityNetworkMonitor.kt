@@ -30,49 +30,72 @@ import kotlinx.coroutines.flow.stateIn
  */
 @SingleIn(AppScope::class)
 @ContributesBinding(AppScope::class)
-internal class ConnectivityNetworkMonitor @Inject constructor(
-    app: Application,
-    @ApplicationScope scope: CoroutineScope,
-) : NetworkMonitor {
+internal class ConnectivityNetworkMonitor
+    @Inject
+    constructor(
+        app: Application,
+        @ApplicationScope scope: CoroutineScope,
+    ) : NetworkMonitor {
+        private val manager = checkNotNull(app.getSystemService(ConnectivityManager::class.java))
 
-    private val manager = checkNotNull(app.getSystemService(ConnectivityManager::class.java))
+        override val status: StateFlow<NetworkStatus> =
+            callbackFlow {
+                val callback =
+                    object : NetworkCallback() {
+                        override fun onAvailable(network: Network) {
+                            trySend(current())
+                        }
 
-    override val status: StateFlow<NetworkStatus> = callbackFlow {
-        val callback = object : NetworkCallback() {
-            override fun onAvailable(network: Network) { trySend(current()) }
-            override fun onLost(network: Network) { trySend(current()) }
-            override fun onUnavailable() { trySend(current()) }
-            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
-                trySend(current())
-            }
-            override fun onBlockedStatusChanged(network: Network, blocked: Boolean) {
-                trySend(current())
-            }
+                        override fun onLost(network: Network) {
+                            trySend(current())
+                        }
+
+                        override fun onUnavailable() {
+                            trySend(current())
+                        }
+
+                        override fun onCapabilitiesChanged(
+                            network: Network,
+                            caps: NetworkCapabilities,
+                        ) {
+                            trySend(current())
+                        }
+
+                        override fun onBlockedStatusChanged(
+                            network: Network,
+                            blocked: Boolean,
+                        ) {
+                            trySend(current())
+                        }
+                    }
+                manager.registerDefaultNetworkCallback(callback)
+                awaitClose { manager.unregisterNetworkCallback(callback) }
+            }.stateIn(scope, SharingStarted.Eagerly, current())
+
+        private fun current(): NetworkStatus {
+            val caps = manager.getNetworkCapabilities(manager.activeNetwork) ?: return DISCONNECTED
+            val unmetered =
+                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) ||
+                    (
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_TEMPORARILY_NOT_METERED)
+                    )
+            return NetworkStatus(
+                isConnected = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET),
+                isValidated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+                // NOT_METERED wins; on API 30+ a TEMPORARILY_NOT_METERED network is unmetered too.
+                isMetered = !unmetered,
+                isVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN),
+            )
         }
-        manager.registerDefaultNetworkCallback(callback)
-        awaitClose { manager.unregisterNetworkCallback(callback) }
-    }.stateIn(scope, SharingStarted.Eagerly, current())
 
-    private fun current(): NetworkStatus {
-        val caps = manager.getNetworkCapabilities(manager.activeNetwork) ?: return DISCONNECTED
-        val unmetered = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) ||
-            (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_TEMPORARILY_NOT_METERED))
-        return NetworkStatus(
-            isConnected = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET),
-            isValidated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
-            // NOT_METERED wins; on API 30+ a TEMPORARILY_NOT_METERED network is unmetered too.
-            isMetered = !unmetered,
-            isVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN),
-        )
+        private companion object {
+            val DISCONNECTED =
+                NetworkStatus(
+                    isConnected = false,
+                    isValidated = false,
+                    isMetered = false,
+                    isVpn = false,
+                )
+        }
     }
-
-    private companion object {
-        val DISCONNECTED = NetworkStatus(
-            isConnected = false,
-            isValidated = false,
-            isMetered = false,
-            isVpn = false,
-        )
-    }
-}

@@ -10,12 +10,12 @@ import java.util.Properties
  * then `dev` for plain `run` and tests.
  */
 internal object ServerVersion {
-
     fun current(): String = fromResource() ?: fromManifest() ?: DEV_VERSION
 
-    private fun fromResource(): String? = ServerVersion::class.java.getResourceAsStream(RESOURCE)?.use { stream ->
-        Properties().apply { load(stream) }.getProperty(VERSION_KEY)?.takeIf { version -> version.isNotBlank() }
-    }
+    private fun fromResource(): String? =
+        ServerVersion::class.java.getResourceAsStream(RESOURCE)?.use { stream ->
+            Properties().apply { load(stream) }.getProperty(VERSION_KEY)?.takeIf { version -> version.isNotBlank() }
+        }
 
     private fun fromManifest(): String? = ServerVersion::class.java.`package`?.implementationVersion
 

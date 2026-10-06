@@ -23,8 +23,8 @@ extensions.configure<LicenseeExtension> {
 // ServerVersion reads it from the classpath.
 val generateServerVersionResource = tasks.register("generateServerVersionResource", WriteProperties::class) {
     description = "Writes neutrodyne-server.properties carrying neutrodyne.versionName."
-    property(SERVER_VERSION_KEY, providers.gradleProperty(VERSION_NAME_PROPERTY))
-    destinationFile = layout.buildDirectory.file("generated/server-version/$SERVER_PROPERTIES_FILE")
+    property(serverVersionKey, providers.gradleProperty(versionNameProperty))
+    destinationFile = layout.buildDirectory.file("generated/server-version/$serverPropertiesFile")
 }
 
 tasks.named<Copy>("processResources") {
@@ -48,6 +48,6 @@ dependencies {
 }
 
 // Keys of the generated resource (read by ServerVersion).
-private val SERVER_PROPERTIES_FILE = "neutrodyne-server.properties"
-private val SERVER_VERSION_KEY = "serverVersion"
-private val VERSION_NAME_PROPERTY = "neutrodyne.versionName"
+private val serverPropertiesFile = "neutrodyne-server.properties"
+private val serverVersionKey = "serverVersion"
+private val versionNameProperty = "neutrodyne.versionName"

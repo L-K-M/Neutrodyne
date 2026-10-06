@@ -5,6 +5,8 @@ package ch.lkmc.neutrodyne.core.network.okhttp
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.model.TlsKind
 import com.google.common.truth.Truth.assertThat
+import org.junit.Assert.assertThrows
+import org.junit.Test
 import java.io.IOException
 import java.io.InterruptedIOException
 import java.net.ConnectException
@@ -17,17 +19,22 @@ import java.security.cert.CertificateException
 import javax.net.ssl.SSLException
 import javax.net.ssl.SSLHandshakeException
 import kotlin.coroutines.cancellation.CancellationException
-import org.junit.Assert.assertThrows
-import org.junit.Test
 
 // Ktor's timeout types are unreachable from the island, so it matches by simple name — these
 // fakes have the right names and superclass shapes to prove the mapping without Ktor.
-private class ConnectTimeoutException(message: String) : ConnectException(message)
-private class HttpRequestTimeoutException(message: String) : IOException(message)
+private class ConnectTimeoutException(
+    message: String,
+) : ConnectException(message)
+
+private class HttpRequestTimeoutException(
+    message: String,
+) : IOException(message)
 
 class JvmNetErrorsTest {
-    private fun classify(e: Throwable, connected: Boolean = true): NetError =
-        JvmNetErrors.classify(e, connected)
+    private fun classify(
+        e: Throwable,
+        connected: Boolean = true,
+    ): NetError = JvmNetErrors.classify(e, connected)
 
     @Test
     fun `lan guard maps to LocalNetworkUnsupported`() {
@@ -69,14 +76,18 @@ class JvmNetErrorsTest {
         assertThat(classify(SSLHandshakeException("Trust anchor for certification path not found.")))
             .isEqualTo(NetError.Tls(TlsKind.UNTRUSTED_CERTIFICATE))
         assertThat(
-            classify(SSLHandshakeException("cert").apply {
-                initCause(CertPathValidatorException("unable to find valid certification path"))
-            }),
+            classify(
+                SSLHandshakeException("cert").apply {
+                    initCause(CertPathValidatorException("unable to find valid certification path"))
+                },
+            ),
         ).isEqualTo(NetError.Tls(TlsKind.UNTRUSTED_CERTIFICATE))
         assertThat(
-            classify(SSLHandshakeException("cert").apply {
-                initCause(CertificateException("Certificate Transparency policy failed"))
-            }),
+            classify(
+                SSLHandshakeException("cert").apply {
+                    initCause(CertificateException("Certificate Transparency policy failed"))
+                },
+            ),
         ).isEqualTo(NetError.Tls(TlsKind.CERTIFICATE_TRANSPARENCY))
         // A non-handshake SSLException is still a handshake-kind failure.
         assertThat(classify(SSLException("engine closed"))).isEqualTo(NetError.Tls(TlsKind.HANDSHAKE))

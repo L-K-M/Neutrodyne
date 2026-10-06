@@ -15,7 +15,11 @@ class UserAgentInterceptorTest {
     @Test
     fun `sets the app user agent when the request has none`() {
         server.enqueue(mockResponse())
-        newNetworkClients().feed.newCall(Request.Builder().url(server.url("/")).build()).execute().close()
+        newNetworkClients()
+            .feed
+            .newCall(Request.Builder().url(server.url("/")).build())
+            .execute()
+            .close()
 
         assertThat(server.takeRequest().headers["User-Agent"])
             .isEqualTo("Neutrodyne/0.1.0 (Linux; x64; +https://example.com/repo)")
@@ -24,8 +28,17 @@ class UserAgentInterceptorTest {
     @Test
     fun `leaves an explicit user agent alone`() {
         server.enqueue(mockResponse())
-        val request = Request.Builder().url(server.url("/")).header("User-Agent", "yt-dlp/2025.1").build()
-        newNetworkClients().feed.newCall(request).execute().close()
+        val request =
+            Request
+                .Builder()
+                .url(server.url("/"))
+                .header("User-Agent", "yt-dlp/2025.1")
+                .build()
+        newNetworkClients()
+            .feed
+            .newCall(request)
+            .execute()
+            .close()
 
         assertThat(server.takeRequest().headers["User-Agent"]).isEqualTo("yt-dlp/2025.1")
     }

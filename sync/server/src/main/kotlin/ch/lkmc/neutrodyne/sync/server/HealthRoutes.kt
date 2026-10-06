@@ -19,7 +19,6 @@ internal class HealthRoutes(
     private val dataDir: Path,
     private val usableSpace: (Path) -> Long = { directory -> Files.getFileStore(directory).usableSpace },
 ) {
-
     fun install(routing: Routing) {
         routing.apply {
             get(HEALTH_PATH) {
@@ -36,9 +35,10 @@ internal class HealthRoutes(
     }
 
     /** Ready when the data volume has room; the database write check joins with MS1's storage. */
-    internal fun isReady(): Boolean = runCatching {
-        Files.isDirectory(dataDir) && usableSpace(dataDir) >= MIN_FREE_DISK_BYTES
-    }.getOrDefault(false)
+    internal fun isReady(): Boolean =
+        runCatching {
+            Files.isDirectory(dataDir) && usableSpace(dataDir) >= MIN_FREE_DISK_BYTES
+        }.getOrDefault(false)
 
     internal companion object {
         const val HEALTH_PATH = "/healthz"

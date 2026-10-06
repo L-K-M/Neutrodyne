@@ -20,7 +20,10 @@ class AuthInterceptorTest {
 
     private fun clients(credentials: CredentialLookup): NetworkClients = newNetworkClients(credentials)
 
-    private fun credentialFor(origin: Origin, value: String) = CredentialLookup { o ->
+    private fun credentialFor(
+        origin: Origin,
+        value: String,
+    ) = CredentialLookup { o ->
         if (o == origin) value else null
     }
 
@@ -29,7 +32,10 @@ class AuthInterceptorTest {
         server.enqueue(mockResponse())
         val origin = Origin("http", "localhost", server.port)
         val clients = clients(credentialFor(origin, "Basic abc"))
-        clients.api.newCall(Request.Builder().url(server.url("/feed.xml")).build()).execute().close()
+        clients.api
+            .newCall(Request.Builder().url(server.url("/feed.xml")).build())
+            .execute()
+            .close()
 
         assertThat(server.takeRequest().headers["Authorization"]).isEqualTo("Basic abc")
     }
@@ -38,7 +44,10 @@ class AuthInterceptorTest {
     fun `adds nothing when the lookup has no credential`() {
         server.enqueue(mockResponse())
         val clients = clients(CredentialLookup { null })
-        clients.api.newCall(Request.Builder().url(server.url("/")).build()).execute().close()
+        clients.api
+            .newCall(Request.Builder().url(server.url("/")).build())
+            .execute()
+            .close()
 
         assertThat(server.takeRequest().headers["Authorization"]).isNull()
     }
@@ -48,8 +57,16 @@ class AuthInterceptorTest {
         server.enqueue(mockResponse())
         val origin = Origin("http", "localhost", server.port)
         val clients = clients(credentialFor(origin, "Basic stored"))
-        val request = Request.Builder().url(server.url("/")).header("Authorization", "Bearer live").build()
-        clients.api.newCall(request).execute().close()
+        val request =
+            Request
+                .Builder()
+                .url(server.url("/"))
+                .header("Authorization", "Bearer live")
+                .build()
+        clients.api
+            .newCall(request)
+            .execute()
+            .close()
 
         assertThat(server.takeRequest().headers["Authorization"]).isEqualTo("Bearer live")
     }
@@ -64,7 +81,10 @@ class AuthInterceptorTest {
 
             val origin = Origin("http", "localhost", server.port)
             val clients = clients(credentialFor(origin, "Basic abc"))
-            clients.api.newCall(Request.Builder().url(server.url("/")).build()).execute().close()
+            clients.api
+                .newCall(Request.Builder().url(server.url("/")).build())
+                .execute()
+                .close()
 
             assertThat(server.takeRequest().headers["Authorization"]).isEqualTo("Basic abc")
             assertThat(second.takeRequest().headers["Authorization"]).isNull()
@@ -75,10 +95,12 @@ class AuthInterceptorTest {
 
     @Test
     fun `https to http on the same host is a different origin`() {
-        val held = HeldCertificate.Builder()
-            .commonName("localhost")
-            .addSubjectAlternativeName("localhost")
-            .build()
+        val held =
+            HeldCertificate
+                .Builder()
+                .commonName("localhost")
+                .addSubjectAlternativeName("localhost")
+                .build()
         val serverCerts = HandshakeCertificates.Builder().heldCertificate(held).build()
         val clientCerts = HandshakeCertificates.Builder().addTrustedCertificate(held.certificate).build()
 
@@ -93,9 +115,11 @@ class AuthInterceptorTest {
 
             val httpsOrigin = Origin("https", "localhost", https.port)
             val clients = clients(credentialFor(httpsOrigin, "Basic abc"))
-            val trusting = clients.api.newBuilder()
-                .sslSocketFactory(clientCerts.sslSocketFactory(), clientCerts.trustManager)
-                .build()
+            val trusting =
+                clients.api
+                    .newBuilder()
+                    .sslSocketFactory(clientCerts.sslSocketFactory(), clientCerts.trustManager)
+                    .build()
             trusting.newCall(Request.Builder().url(https.url("/")).build()).execute().close()
 
             assertThat(https.takeRequest().headers["Authorization"]).isEqualTo("Basic abc")

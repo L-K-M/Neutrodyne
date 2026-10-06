@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.log
 
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.LogLevel
 import com.google.common.truth.Truth.assertThat
+import org.junit.Test
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
-import org.junit.Test
 
 /**
  * [RollingFileSink] per 11 Logs and rotation: the level filter, the 2-MiB rotation keeping five
@@ -19,15 +20,16 @@ class RollingFileSinkTest {
 
     @Test
     fun `entries below the minimum level are not written`() {
-        val sink = RollingFileSink(
-            logsDir,
-            minLevel = LogLevel.INFO,
-            maxFileBytes = LARGE_CAP,
-            timeSource = { fixedInstant },
-        )
+        val sink =
+            RollingFileSink(
+                logsDir,
+                minLevel = LogLevel.INFO,
+                maxFileBytes = LARGE_CAP,
+                timeSource = { fixedInstant },
+            )
         sink.use {
-            it.log(LogLevel.DEBUG, "Tag", "hidden", null)
-            it.log(LogLevel.INFO, "Tag", "shown", null)
+            it.log(LogLevel.DEBUG, "Tag", "hidden")
+            it.log(LogLevel.INFO, "Tag", "shown")
         }
         val content = Files.readString(logsDir.resolve(RollingFileSink.CURRENT_NAME))
         assertThat(content).contains("shown")
@@ -37,14 +39,15 @@ class RollingFileSinkTest {
 
     @Test
     fun `rotation keeps five files and drops the oldest content`() {
-        val sink = RollingFileSink(
-            logsDir,
-            minLevel = LogLevel.DEBUG,
-            maxFileBytes = SMALL_CAP,
-            timeSource = { fixedInstant },
-        )
+        val sink =
+            RollingFileSink(
+                logsDir,
+                minLevel = LogLevel.DEBUG,
+                maxFileBytes = SMALL_CAP,
+                timeSource = { fixedInstant },
+            )
         sink.use {
-            repeat(LINE_COUNT) { index -> it.log(LogLevel.INFO, "T", "line $index", null) }
+            repeat(LINE_COUNT) { index -> it.log(LogLevel.INFO, "T", "line $index") }
         }
 
         assertThat(Files.exists(logsDir.resolve(RollingFileSink.CURRENT_NAME))).isTrue()
@@ -70,19 +73,20 @@ class RollingFileSinkTest {
 
     @Test
     fun `throwable stacks are written redacted`() {
-        val sink = RollingFileSink(
-            logsDir,
-            minLevel = LogLevel.INFO,
-            maxFileBytes = LARGE_CAP,
-            timeSource = { fixedInstant },
-        )
-        sink.use {
-            it.log(
-                LogLevel.ERROR,
-                "Fetch",
-                "enclosure failed",
-                RuntimeException("https://user:secret@example.org/rss/a8F3kq09ZpLm2xQ?auth=zebra"),
+        val sink =
+            RollingFileSink(
+                logsDir,
+                minLevel = LogLevel.INFO,
+                maxFileBytes = LARGE_CAP,
+                timeSource = { fixedInstant },
             )
+        // Throwables reach sinks only as text that Log has rendered and redacted
+        sink.use {
+            Log.install(it)
+            Log.e("Fetch", RuntimeException("https://user:secret@example.org/rss/a8F3kq09ZpLm2xQ?auth=zebra")) {
+                "enclosure failed"
+            }
+            Log.install()
         }
         val content = Files.readString(logsDir.resolve(RollingFileSink.CURRENT_NAME))
         assertThat(content).contains("enclosure failed")

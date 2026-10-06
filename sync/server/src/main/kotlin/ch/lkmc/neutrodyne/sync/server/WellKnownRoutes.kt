@@ -21,29 +21,31 @@ internal class WellKnownRoutes(
     private val serverVersion: String,
     private val clock: Clock,
 ) {
-
     fun install(routing: Routing) {
         routing.get(WELL_KNOWN_PATH) {
-            val document = buildJsonObject {
-                put("name", SERVER_DISPLAY_NAME)
-                put("serverVersion", serverVersion)
-                put("protocol", buildJsonObject {
-                    put("min", PROTOCOL_VERSION)
-                    put("max", PROTOCOL_VERSION)
-                })
-                // `sse`, `link` and `password` feature flags arrive with MS1 (10 Discovery).
-                put("features", JsonArray(emptyList()))
-                put("maxBatch", DiscoveryNumbers.MAX_BATCH)
-                put("maxSkewMs", DiscoveryNumbers.MAX_SKEW_MS)
-                put("serverTime", serverTime())
-            }
+            val document =
+                buildJsonObject {
+                    put("name", SERVER_DISPLAY_NAME)
+                    put("serverVersion", serverVersion)
+                    put(
+                        "protocol",
+                        buildJsonObject {
+                            put("min", PROTOCOL_VERSION)
+                            put("max", PROTOCOL_VERSION)
+                        },
+                    )
+                    // `sse`, `link` and `password` feature flags arrive with MS1 (10 Discovery).
+                    put("features", JsonArray(emptyList()))
+                    put("maxBatch", DiscoveryNumbers.MAX_BATCH)
+                    put("maxSkewMs", DiscoveryNumbers.MAX_SKEW_MS)
+                    put("serverTime", serverTime())
+                }
             call.respondText(document.toString(), ContentType.Application.Json)
         }
     }
 
     /** ISO-8601 UTC with milliseconds, truncated so the fraction never exceeds three digits. */
-    private fun serverTime(): String =
-        Instant.fromEpochMilliseconds(clock.now().toEpochMilliseconds()).toString()
+    private fun serverTime(): String = Instant.fromEpochMilliseconds(clock.now().toEpochMilliseconds()).toString()
 
     internal companion object {
         const val WELL_KNOWN_PATH = "/.well-known/neutrodyne-sync"

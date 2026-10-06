@@ -8,17 +8,17 @@ import com.google.common.truth.Truth.assertThat
 import io.ktor.client.network.sockets.ConnectTimeoutException
 import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.client.request.get
-import java.net.ConnectException
-import java.net.SocketException
-import java.net.SocketTimeoutException
-import java.net.UnknownHostException
-import kotlin.coroutines.cancellation.CancellationException
-import kotlin.coroutines.EmptyCoroutineContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertThrows
 import org.junit.Test
+import java.net.ConnectException
+import java.net.SocketException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * `NetErrorClassifier` (01 Testing): every taxonomy row through the real desktop binding —
@@ -26,7 +26,6 @@ import org.junit.Test
  * effect, and `CancellationException` escaping unclassified.
  */
 class NetErrorClassifierTest {
-
     private val connected = listOf(ndInterface("eth0", addresses = arrayOf("93.184.216.34")))
     private val disconnected = listOf(ndInterface("eth0", up = false, addresses = arrayOf("93.184.216.34")))
 
@@ -74,26 +73,28 @@ class NetErrorClassifierTest {
     }
 
     @Test
-    fun `a live refused connection classifies by monitor state`() = runBlocking {
-        val (classifier) = newClassifier(FakeInterfaceSource(connected))
-        val clients = newHttpClients()
-        val thrown = try {
-            runCatching { clients.client(HttpClientKind.FEED).get("http://127.0.0.1:1/") }
-                .exceptionOrNull()
-        } finally {
-            clients.closeAll()
-        }
-        assertThat(thrown).isNotNull()
-        val error = classifier.classify(thrown!!)
-        assertThat(error).isAnyOf(NetError.ConnectionFailed, NetError.Timeout)
+    fun `a live refused connection classifies by monitor state`() =
+        runBlocking {
+            val (classifier) = newClassifier(FakeInterfaceSource(connected))
+            val clients = newHttpClients()
+            val thrown =
+                try {
+                    runCatching { clients.client(HttpClientKind.FEED).get("http://127.0.0.1:1/") }
+                        .exceptionOrNull()
+                } finally {
+                    clients.closeAll()
+                }
+            assertThat(thrown).isNotNull()
+            val error = classifier.classify(thrown!!)
+            assertThat(error).isAnyOf(NetError.ConnectionFailed, NetError.Timeout)
 
-        // Same failure with a disconnected monitor is Offline — and the interface walk is real.
-        val offlineSource = FakeInterfaceSource(disconnected)
-        val (offline) = newClassifier(offlineSource)
-        val thrown2 = runCatching { java.net.Socket("127.0.0.1", 1).close() }.exceptionOrNull()
-        assertThat(thrown2).isInstanceOf(SocketException::class.java)
-        assertThat(offline.classify(thrown2!!)).isEqualTo(NetError.Offline)
-    }
+            // Same failure with a disconnected monitor is Offline — and the interface walk is real.
+            val offlineSource = FakeInterfaceSource(disconnected)
+            val (offline) = newClassifier(offlineSource)
+            val thrown2 = runCatching { java.net.Socket("127.0.0.1", 1).close() }.exceptionOrNull()
+            assertThat(thrown2).isInstanceOf(SocketException::class.java)
+            assertThat(offline.classify(thrown2!!)).isEqualTo(NetError.Offline)
+        }
 
     @Test
     fun `CancellationException is rethrown`() {

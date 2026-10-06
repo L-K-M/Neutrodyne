@@ -17,7 +17,9 @@ import kotlinx.coroutines.test.setMain
  * own names live in `kotlin-test-junit`, which main source sets never see.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-abstract class MainDispatcherTest(val dispatcher: TestDispatcher = StandardTestDispatcher()) {
+abstract class MainDispatcherTest(
+    val dispatcher: TestDispatcher = StandardTestDispatcher(),
+) {
     @BeforeTest
     fun setMainDispatcher() = Dispatchers.setMain(dispatcher)
 

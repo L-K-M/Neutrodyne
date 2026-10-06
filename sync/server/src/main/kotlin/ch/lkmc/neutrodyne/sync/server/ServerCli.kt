@@ -19,52 +19,65 @@ internal class ServerCli(
     private val out: PrintStream = System.out,
     private val err: PrintStream = System.err,
 ) {
+    fun run(): Int =
+        when (val command = args.firstOrNull()) {
+            null -> {
+                usage()
+            }
 
-    fun run(): Int {
-        return when (val command = args.firstOrNull()) {
-            null -> usage()
             VERSION_FLAG -> {
                 out.println(ServerVersion.current())
                 ExitCodes.OK
             }
-            SERVE_COMMAND -> serve()
+
+            SERVE_COMMAND -> {
+                serve()
+            }
+
             else -> {
                 err.println("unknown command '$command'")
                 usage()
             }
         }
-    }
 
     private fun serve(): Int {
-        val flags = when (val parsed = parseServeFlags(args.drop(1))) {
-            is FlagsParseResult.Ok -> parsed.flags
-            is FlagsParseResult.WrongUsage -> {
-                err.println(parsed.message)
-                printUsage(err)
-                return ExitCodes.USAGE
-            }
-        }
+        val flags =
+            when (val parsed = parseServeFlags(args.drop(1))) {
+                is FlagsParseResult.Ok -> {
+                    parsed.flags
+                }
 
-        val properties = flags.configFile?.let { configFile ->
-            try {
-                ServerConfigLoader.readPropertiesFile(configFile)
-            } catch (e: IOException) {
-                err.println("configuration error: --config $configFile: ${e.message}")
-                return ExitCodes.ERROR
+                is FlagsParseResult.WrongUsage -> {
+                    err.println(parsed.message)
+                    printUsage(err)
+                    return ExitCodes.USAGE
+                }
             }
-        } ?: emptyMap()
+
+        val properties =
+            flags.configFile?.let { configFile ->
+                try {
+                    ServerConfigLoader.readPropertiesFile(configFile)
+                } catch (e: IOException) {
+                    err.println("configuration error: --config $configFile: ${e.message}")
+                    return ExitCodes.ERROR
+                }
+            } ?: emptyMap()
 
         return when (val result = ServerConfigLoader.load(environment, properties, flags)) {
             is ServerConfigResult.Invalid -> {
                 result.errors.forEach { message -> err.println("configuration error: $message") }
                 ExitCodes.ERROR
             }
-            is ServerConfigResult.Valid -> try {
-                serverStarter(result.config)
-                ExitCodes.OK
-            } catch (e: Exception) {
-                err.println("serve failed: ${e.message}")
-                ExitCodes.ERROR
+
+            is ServerConfigResult.Valid -> {
+                try {
+                    serverStarter(result.config)
+                    ExitCodes.OK
+                } catch (e: Exception) {
+                    err.println("serve failed: ${e.message}")
+                    ExitCodes.ERROR
+                }
             }
         }
     }
@@ -75,7 +88,10 @@ internal class ServerCli(
         var index = 0
         while (index < tokens.size) {
             when (tokens[index]) {
-                INSECURE_LAN_FLAG -> insecureLan = true
+                INSECURE_LAN_FLAG -> {
+                    insecureLan = true
+                }
+
                 CONFIG_FLAG -> {
                     val value = tokens.getOrNull(index + 1)
                     if (value == null || value.startsWith("-")) {
@@ -84,7 +100,10 @@ internal class ServerCli(
                     configFile = Path(value)
                     index++
                 }
-                else -> return FlagsParseResult.WrongUsage("unknown option '${tokens[index]}' for $SERVE_COMMAND")
+
+                else -> {
+                    return FlagsParseResult.WrongUsage("unknown option '${tokens[index]}' for $SERVE_COMMAND")
+                }
             }
             index++
         }
@@ -101,8 +120,13 @@ internal class ServerCli(
     }
 
     private sealed interface FlagsParseResult {
-        data class Ok(val flags: ServeFlags) : FlagsParseResult
-        data class WrongUsage(val message: String) : FlagsParseResult
+        data class Ok(
+            val flags: ServeFlags,
+        ) : FlagsParseResult
+
+        data class WrongUsage(
+            val message: String,
+        ) : FlagsParseResult
     }
 
     internal companion object {
@@ -111,7 +135,8 @@ internal class ServerCli(
         const val INSECURE_LAN_FLAG = "--insecure-lan"
         const val CONFIG_FLAG = "--config"
 
-        val USAGE_TEXT = """
+        val USAGE_TEXT =
+            """
             Usage: neutrodyne-server <command> [options]
 
             Commands:
@@ -121,7 +146,7 @@ internal class ServerCli(
                   Print the version and exit.
 
             The account, backup, restore, migrate and doctor commands arrive with MS1.
-        """.trimIndent() + "\n"
+            """.trimIndent() + "\n"
     }
 }
 

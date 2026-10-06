@@ -106,12 +106,13 @@ class RedactorTest {
 
     @Test
     fun `url redaction is idempotent`() {
-        val inputs = listOf(
-            "https://u:p@example.com:8443/rss/a8F3kq09ZpLm2xQ?token=abc#frag",
-            "http://example.com/feed/podcast",
-            "feed:https://u:p@example.com/f?t=9",
-            "not a url",
-        )
+        val inputs =
+            listOf(
+                "https://u:p@example.com:8443/rss/a8F3kq09ZpLm2xQ?token=abc#frag",
+                "http://example.com/feed/podcast",
+                "feed:https://u:p@example.com/f?t=9",
+                "not a url",
+            )
         for (input in inputs) {
             val once = Redactor.url(input)
             assertEquals(once, Redactor.url(once), "not idempotent for $input")
@@ -149,5 +150,19 @@ class RedactorTest {
             "sent Cookie: …",
             Redactor.text("sent Cookie: session=abc123; theme=dark"),
         )
+    }
+
+    @Test
+    fun `free text redacts urls with a bracketed ipv6 host`() {
+        val text = Redactor.text("failed: https://[2001:db8::1]:8443/rss/a8F3kq09ZpLm2xQ?token=SECRET (retrying)")
+
+        assertEquals("failed: https://[2001:db8::1]:8443/rss/…xQ?token=… (retrying)", text)
+    }
+
+    @Test
+    fun `free text redacts user info before a bracketed ipv6 host`() {
+        val text = Redactor.text("GET https://alice:s3cret@[::1]/feed")
+
+        assertEquals("GET https://***@[::1]/feed", text)
     }
 }

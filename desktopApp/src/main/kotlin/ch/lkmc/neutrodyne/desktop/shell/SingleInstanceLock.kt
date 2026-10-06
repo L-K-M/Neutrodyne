@@ -2,12 +2,12 @@
 package ch.lkmc.neutrodyne.desktop.shell
 
 import ch.lkmc.neutrodyne.core.common.AppDirs
+import kotlinx.serialization.Serializable
 import java.nio.channels.FileChannel
 import java.nio.channels.OverlappingFileLockException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
-import kotlinx.serialization.Serializable
 
 /**
  * Exactly one process per user (11 Single instance and handshake; Room has no multi-instance
@@ -38,22 +38,28 @@ class SingleInstanceLock(
     }
 
     @Serializable
-    private data class OwnerInfo(val pid: Long, val startedAt: Long, val versionName: String)
+    private data class OwnerInfo(
+        val pid: Long,
+        val startedAt: Long,
+        val versionName: String,
+    )
 
     fun tryAcquire(): Acquire {
         Files.createDirectories(dirs.state)
-        val channel = FileChannel.open(
-            lockFile,
-            StandardOpenOption.CREATE,
-            StandardOpenOption.WRITE,
-            StandardOpenOption.READ,
-        )
-        val lock = try {
-            channel.tryLock()
-        } catch (_: OverlappingFileLockException) {
-            // A holder inside this JVM: not us (each instance uses its own channel).
-            null
-        }
+        val channel =
+            FileChannel.open(
+                lockFile,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.WRITE,
+                StandardOpenOption.READ,
+            )
+        val lock =
+            try {
+                channel.tryLock()
+            } catch (_: OverlappingFileLockException) {
+                // A holder inside this JVM: not us (each instance uses its own channel).
+                null
+            }
         if (lock == null) {
             channel.close()
             return Acquire.HeldByOther
@@ -67,10 +73,11 @@ class SingleInstanceLock(
 
     private fun writeOwnerInfo(channel: FileChannel) {
         try {
-            val info = SHELL_JSON.encodeToString(
-                OwnerInfo.serializer(),
-                OwnerInfo(pid = pid, startedAt = startedAtMs, versionName = versionName),
-            )
+            val info =
+                SHELL_JSON.encodeToString(
+                    OwnerInfo.serializer(),
+                    OwnerInfo(pid = pid, startedAt = startedAtMs, versionName = versionName),
+                )
             channel.truncate(0)
             channel.write(java.nio.ByteBuffer.wrap(info.toByteArray(Charsets.UTF_8)), 0)
             channel.force(false)

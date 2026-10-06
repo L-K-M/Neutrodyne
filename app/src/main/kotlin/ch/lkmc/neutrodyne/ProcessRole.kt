@@ -25,11 +25,12 @@ internal enum class ProcessRole {
         fun current(): ProcessRole = fromProcessName(processName())
 
         /** Pure classification, unit-tested: `ch.lkmc.neutrodyne.debug:ytx` → [YTX]. */
-        fun fromProcessName(name: String): ProcessRole = when {
-            name.endsWith(YTX_SUFFIX) -> YTX
-            name.endsWith(ACRA_SUFFIX) -> ACRA
-            else -> MAIN
-        }
+        fun fromProcessName(name: String): ProcessRole =
+            when {
+                name.endsWith(YTX_SUFFIX) -> YTX
+                name.endsWith(ACRA_SUFFIX) -> ACRA
+                else -> MAIN
+            }
 
         /** `Application.getProcessName()` on API 28+; the first NUL-terminated token of the cmdline on 26–27. */
         private fun processName(): String {

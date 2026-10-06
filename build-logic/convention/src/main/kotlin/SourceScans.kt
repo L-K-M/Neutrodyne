@@ -301,14 +301,10 @@ abstract class CheckBannedApisTask : DefaultTask() {
         if (relative != "app/build.gradle.kts" && DEBUG_CONFIG.containsMatchIn(text)) {
             problems += "$relative uses debugImplementation/debugApi (allowed only in :app, rule 9)"
         }
-        for (block in commonMainDependencyBlocks(text)) {
-            for (island in JVM_ISLANDS) {
-                if (block.contains("project(\":$island\")")) {
-                    problems +=
-                        "$relative adds JVM island :$island to commonMain " +
-                        "(rule 2/14: islands only from androidMain/desktopMain/platform modules)"
-                }
-            }
+        for (island in commonMainIslandEdges(text)) {
+            problems +=
+                "$relative adds JVM island :$island to commonMain " +
+                "(rule 2/14: islands only from androidMain/desktopMain/platform modules)"
         }
         val isKmpModule = text.contains("neutrodyne.kmp")
         if (isKmpModule) {
@@ -327,41 +323,6 @@ abstract class CheckBannedApisTask : DefaultTask() {
             return listOf("$relative is a non-app src/debug/ source (rule 9)")
         }
         return emptyList()
-    }
-
-    /**
-     * Extracts the body of each `commonMain` dependencies block of a build script: `commonMain.dependencies { }`,
-     * `getByName("commonMain").dependencies { }` or a `commonMain { dependencies { } }` form.
-     */
-    private fun commonMainDependencyBlocks(text: String): List<String> {
-        val blocks = mutableListOf<String>()
-        val matcher = COMMON_MAIN_DEPS.findAll(text)
-        for (match in matcher) {
-            val openBrace = text.indexOf('{', match.range.last)
-            if (openBrace < 0) continue
-            blocks += balancedBlock(text, openBrace)
-        }
-        return blocks
-    }
-
-    private fun balancedBlock(
-        text: String,
-        openBrace: Int,
-    ): String {
-        var depth = 0
-        for (i in openBrace until text.length) {
-            when (text[i]) {
-                '{' -> {
-                    depth++
-                }
-
-                '}' -> {
-                    depth--
-                    if (depth == 0) return text.substring(openBrace, i + 1)
-                }
-            }
-        }
-        return text.substring(openBrace)
     }
 
     private companion object {
@@ -414,25 +375,74 @@ abstract class CheckBannedApisTask : DefaultTask() {
         val COLLECT_AS_STATE = Regex("(?<![\\w])collectAsState\\s*\\(")
         val HARD_TEXT = Regex("(?<![\\w$])[A-Za-z]*Text\\s*\\(\\s*\"")
         val DEBUG_CONFIG = Regex("debugImplementation|debugApi")
-        val COMMON_MAIN_DEPS =
-            Regex(
-                "commonMain\\s*\\.\\s*dependencies|" +
-                    "getByName\\(\\s*\"commonMain\"\\s*\\)\\s*\\.?\\s*dependencies|" +
-                    "named\\(\\s*\"commonMain\"\\s*\\)\\s*\\.?\\s*dependencies",
-            )
-        val JVM_ISLANDS = listOf("feeds:jvm", "core:network:okhttp", "youtube:engine")
-        val PLATFORM_ONLY_MODULES =
-            listOf(
-                "playback:impl",
-                "playback:desktop",
-                "playback:engine",
-                "playback:native",
-                "desktop:system",
-                "youtube:ytdlp",
-                "youtube:ytdlp-desktop",
-            )
     }
 }
+
+// Each alternative ends at the `{` opening the block that contains the dependencies, so the match's
+// last index is always the block's brace. `commonMain { }` and the delegated `by getting`/`getByName`
+// forms are accepted KMP DSL (the Gradle-side check in VerifyDependencyPolicyTask is authoritative;
+// this scan is the second line of defence for the forms it can see).
+private val COMMON_MAIN_DEPS =
+    Regex(
+        "(?<![\\w$])commonMain\\s*(?:\\.\\s*dependencies\\s*)?\\{|" +
+            "(?<![\\w$])commonMain\\s+by\\s+getting\\s*\\{|" +
+            "(?<![\\w$])(?:getByName|named)\\(\\s*\"commonMain\"\\s*\\)" +
+            "\\s*(?:\\.\\s*(?:dependencies|apply|also)\\s*)?\\{",
+    )
+
+/**
+ * The body of each `commonMain` dependencies block of a build script, covering
+ * `commonMain.dependencies { }`, `commonMain { dependencies { } }`, `val commonMain by getting
+ * { dependencies { } }` and `getByName`/`named("commonMain")` followed by a block, a `.dependencies`
+ * block or an `.apply`/`.also` block.
+ */
+private fun commonMainDependencyBlocks(text: String): List<String> =
+    COMMON_MAIN_DEPS.findAll(text).map { balancedBlock(text, it.range.last) }.toList()
+
+private fun balancedBlock(
+    text: String,
+    openBrace: Int,
+): String {
+    var depth = 0
+    for (i in openBrace until text.length) {
+        when (text[i]) {
+            '{' -> {
+                depth++
+            }
+
+            '}' -> {
+                depth--
+                if (depth == 0) return text.substring(openBrace, i + 1)
+            }
+        }
+    }
+    return text.substring(openBrace)
+}
+
+/**
+ * Rule 2's text-scan half — `verifyDependencyPolicy` checks the declared `commonMain*` configurations
+ * directly and is authoritative; this returns the islands a `commonMain` block references for the
+ * DSL forms the scan can isolate.
+ */
+internal fun commonMainIslandEdges(text: String): List<String> =
+    commonMainDependencyBlocks(text)
+        .flatMap { block -> JVM_ISLANDS.filter { block.contains("project(\":$it\")") } }
+        .distinct()
+
+/** Modules whose bytecode assumes a JVM or Android classpath and must never be a `commonMain` edge (rule 14). */
+internal val JVM_ISLANDS = listOf("feeds:jvm", "core:network:okhttp", "youtube:engine")
+
+/** Modules that only exist on one platform; a KMP module may never depend on them (rule 15). */
+internal val PLATFORM_ONLY_MODULES =
+    listOf(
+        "playback:impl",
+        "playback:desktop",
+        "playback:engine",
+        "playback:native",
+        "desktop:system",
+        "youtube:ytdlp",
+        "youtube:ytdlp-desktop",
+    )
 
 /** Registers the two root scan tasks; called by `neutrodyne.quality` on the root project only. */
 internal fun Project.registerSourceScanTasks() {

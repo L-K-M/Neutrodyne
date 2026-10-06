@@ -12,5 +12,6 @@ import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
  * `desktop.*` keys — never backed up, never synced. Implementation modules may inject it
  * directly for their own `DEVICE` keys.
  */
-class DeviceSettingsStore internal constructor(dataStore: DataStore<Preferences>) :
-    SettingStore by SettingStoreImpl(SettingsFile.DEVICE, dataStore)
+class DeviceSettingsStore internal constructor(
+    dataStore: DataStore<Preferences>,
+) : SettingStore by SettingStoreImpl(SettingsFile.DEVICE, dataStore)

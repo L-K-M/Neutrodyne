@@ -1,21 +1,14 @@
 // SPDX-License-Identifier: Unlicense
-import java.io.File
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.security.MessageDigest
-import javax.inject.Inject
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.Project
+import org.gradle.api.artifacts.type.ArtifactTypeDefinition
 import org.gradle.api.file.ArchiveOperations
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.FileSystemOperations
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.file.RelativePath
-import org.gradle.api.artifacts.type.ArtifactTypeDefinition
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.Input
@@ -29,6 +22,13 @@ import org.gradle.api.tasks.bundling.Tar
 import org.gradle.api.tasks.bundling.Zip
 import org.gradle.kotlin.dsl.register
 import org.gradle.process.CommandLineArgumentProvider
+import java.io.File
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.security.MessageDigest
+import javax.inject.Inject
 
 /** The four desktop packaging targets of 11's platform matrix (D88, D89). */
 internal enum class DesktopPackagingTarget(
@@ -41,6 +41,7 @@ internal enum class DesktopPackagingTarget(
     val homeSubdir: String,
 ) {
     WINDOWS_X64("windows-x64", "windows", "x64", "windows", "amd64", ""),
+
     // Temurin's macOS tarball carries Contents/Home under the top directory.
     MACOS_ARM64("macos-arm64", "macos", "arm64", "macos", "aarch64", "Contents/Home"),
     LINUX_X64("linux-x64", "linux", "x64", "linux", "amd64", ""),
@@ -85,6 +86,7 @@ internal fun parseBundledRuntimeLock(
 ): BundledRuntimeLock {
     val props = java.util.Properties()
     lockFile.inputStream().use { props.load(it) }
+
     fun key(name: String): String =
         props.getProperty(name)
             ?: throw GradleException("runtime.lock: missing '$name' (11 Lockfiles)")
@@ -280,7 +282,10 @@ abstract class WindowsZipTask : Zip()
 /** The Linux tar.gz: the app image as `Neutrodyne/` (11 Linux DEB, RPM and tar.gz). */
 abstract class LinuxTarGzTask : Tar()
 
-internal fun Project.registerDesktopPackagingTasks(target: DesktopPackagingTarget, lock: BundledRuntimeLock) {
+internal fun Project.registerDesktopPackagingTasks(
+    target: DesktopPackagingTarget,
+    lock: BundledRuntimeLock,
+) {
     val versionName = providers.gradleProperty("neutrodyne.versionName").get()
     val setupRuntime = tasks.named("setupBundledRuntime", SetupBundledRuntime::class.java)
     val jpackage =
@@ -290,11 +295,20 @@ internal fun Project.registerDesktopPackagingTasks(target: DesktopPackagingTarge
 
     // The app image is createDistributable's destinationDir/<name>[.app]; taking it from the
     // task keeps this in step with the plugin's layout instead of hardcoding compose/binaries.
-    val appImageLeaf = if (target == DesktopPackagingTarget.MACOS_ARM64) "$DESKTOP_PACKAGE_NAME.app" else DESKTOP_PACKAGE_NAME
+    val appImageLeaf =
+        if (target ==
+            DesktopPackagingTarget.MACOS_ARM64
+        ) {
+            "$DESKTOP_PACKAGE_NAME.app"
+        } else {
+            DESKTOP_PACKAGE_NAME
+        }
     val appImage =
         tasks
-            .named("createDistributable", org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask::class.java)
-            .flatMap { it.destinationDir }
+            .named(
+                "createDistributable",
+                org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask::class.java,
+            ).flatMap { it.destinationDir }
             .map { it.dir(appImageLeaf) }
 
     // The desktop entry and hicolor icons the DEB/RPM scriptlets install travel inside the
@@ -313,7 +327,7 @@ internal fun Project.registerDesktopPackagingTasks(target: DesktopPackagingTarge
                     HICOLOR_ICON_NAME.matchEntire(icon.name)?.groupValues?.get(1)
                         ?: throw GradleException("unexpected icon name ${icon.name} (hicolor mapping)")
                 from(icon) {
-                    into("linux/desktop-integration/hicolor/${size}x${size}/apps")
+                    into("linux/desktop-integration/hicolor/${size}x$size/apps")
                     rename { "neutrodyne.png" }
                 }
             }
@@ -335,20 +349,29 @@ internal fun Project.registerDesktopPackagingTasks(target: DesktopPackagingTarge
     val licenseFile = rootProject.file("LICENSE")
     val debResourceDir = file("packaging/deb")
     val rpmResourceDir = file("packaging/rpm")
-    val debDest = layout.buildDirectory.dir("desktop-packaging/deb").get().asFile
-    val rpmDest = layout.buildDirectory.dir("desktop-packaging/rpm").get().asFile
+    val debDest =
+        layout.buildDirectory
+            .dir("desktop-packaging/deb")
+            .get()
+            .asFile
+    val rpmDest =
+        layout.buildDirectory
+            .dir("desktop-packaging/rpm")
+            .get()
+            .asFile
     val jpackagePath = jpackage.get().absolutePath
 
     /** Packaging tasks refuse when the image does not carry their install kind (11 Resources layout). */
-    fun org.gradle.api.Task.requireInstallKind(kind: String) = doFirst {
-        val actual = installKindProperty.orNull
-        if (actual != kind) {
-            throw GradleException(
-                "${this@requireInstallKind.name} needs -Pneutrodyne.installKind=$kind " +
-                    "(found ${actual ?: "dev"}), so the image carries its install kind (11 Resources layout)",
-            )
+    fun org.gradle.api.Task.requireInstallKind(kind: String) =
+        doFirst {
+            val actual = installKindProperty.orNull
+            if (actual != kind) {
+                throw GradleException(
+                    "${this@requireInstallKind.name} needs -Pneutrodyne.installKind=$kind " +
+                        "(found ${actual ?: "dev"}), so the image carries its install kind (11 Resources layout)",
+                )
+            }
         }
-    }
 
     // --- DEB: jpackage with our own control file and maintainer scripts -----------------------
     tasks.register<JPackageImageTask>("packageDeb") {
@@ -360,20 +383,34 @@ internal fun Project.registerDesktopPackagingTasks(target: DesktopPackagingTarge
         argumentProviders.add(
             CommandLineArgumentProvider {
                 listOf(
-                    "--type", "deb",
-                    "--name", DESKTOP_PACKAGE_NAME,
-                    "--app-image", appImage.get().asFile.absolutePath,
-                    "--app-version", versionName,
-                    "--description", DESKTOP_DESCRIPTION,
-                    "--vendor", DESKTOP_VENDOR,
-                    "--license-file", licenseFile.absolutePath,
-                    "--install-dir", LINUX_INSTALL_PARENT,
-                    "--linux-package-name", LINUX_PACKAGE_NAME,
-                    "--linux-app-release", "1",
-                    "--linux-app-category", "AudioVideo",
-                    "--linux-deb-maintainer", DESKTOP_DEB_MAINTAINER,
-                    "--resource-dir", debResourceDir.absolutePath,
-                    "--dest", debDest.absolutePath,
+                    "--type",
+                    "deb",
+                    "--name",
+                    DESKTOP_PACKAGE_NAME,
+                    "--app-image",
+                    appImage.get().asFile.absolutePath,
+                    "--app-version",
+                    versionName,
+                    "--description",
+                    DESKTOP_DESCRIPTION,
+                    "--vendor",
+                    DESKTOP_VENDOR,
+                    "--license-file",
+                    licenseFile.absolutePath,
+                    "--install-dir",
+                    LINUX_INSTALL_PARENT,
+                    "--linux-package-name",
+                    LINUX_PACKAGE_NAME,
+                    "--linux-app-release",
+                    "1",
+                    "--linux-app-category",
+                    "AudioVideo",
+                    "--linux-deb-maintainer",
+                    DESKTOP_DEB_MAINTAINER,
+                    "--resource-dir",
+                    debResourceDir.absolutePath,
+                    "--dest",
+                    debDest.absolutePath,
                 )
             },
         )
@@ -392,20 +429,34 @@ internal fun Project.registerDesktopPackagingTasks(target: DesktopPackagingTarge
         argumentProviders.add(
             CommandLineArgumentProvider {
                 listOf(
-                    "--type", "rpm",
-                    "--name", DESKTOP_PACKAGE_NAME,
-                    "--app-image", appImage.get().asFile.absolutePath,
-                    "--app-version", versionName,
-                    "--description", DESKTOP_DESCRIPTION,
-                    "--vendor", DESKTOP_VENDOR,
-                    "--license-file", licenseFile.absolutePath,
-                    "--install-dir", LINUX_INSTALL_PARENT,
-                    "--linux-package-name", LINUX_PACKAGE_NAME,
-                    "--linux-app-release", "1",
-                    "--linux-app-category", "AudioVideo",
-                    "--linux-rpm-license-type", "Unlicense",
-                    "--resource-dir", rpmResourceDir.absolutePath,
-                    "--dest", rpmDest.absolutePath,
+                    "--type",
+                    "rpm",
+                    "--name",
+                    DESKTOP_PACKAGE_NAME,
+                    "--app-image",
+                    appImage.get().asFile.absolutePath,
+                    "--app-version",
+                    versionName,
+                    "--description",
+                    DESKTOP_DESCRIPTION,
+                    "--vendor",
+                    DESKTOP_VENDOR,
+                    "--license-file",
+                    licenseFile.absolutePath,
+                    "--install-dir",
+                    LINUX_INSTALL_PARENT,
+                    "--linux-package-name",
+                    LINUX_PACKAGE_NAME,
+                    "--linux-app-release",
+                    "1",
+                    "--linux-app-category",
+                    "AudioVideo",
+                    "--linux-rpm-license-type",
+                    "Unlicense",
+                    "--resource-dir",
+                    rpmResourceDir.absolutePath,
+                    "--dest",
+                    rpmDest.absolutePath,
                 )
             },
         )
@@ -420,7 +471,7 @@ internal fun Project.registerDesktopPackagingTasks(target: DesktopPackagingTarge
         requireInstallKind("zip")
         archiveFileName.set("neutrodyne-$versionName-${target.id}.zip")
         destinationDirectory.set(layout.buildDirectory.dir("desktop-packaging/zip"))
-        from(appImage.map { it.asFile.parentFile }) { include("${appImageLeaf}/**") }
+        from(appImage.map { it.asFile.parentFile }) { include("$appImageLeaf/**") }
         isPreserveFileTimestamps = false
         isReproducibleFileOrder = true
     }
@@ -434,7 +485,7 @@ internal fun Project.registerDesktopPackagingTasks(target: DesktopPackagingTarge
         archiveFileName.set("neutrodyne-$versionName-${target.id}.tar.gz")
         destinationDirectory.set(layout.buildDirectory.dir("desktop-packaging/tar-gz"))
         compression = org.gradle.api.tasks.bundling.Compression.GZIP
-        from(appImage.map { it.asFile.parentFile }) { include("${appImageLeaf}/**") }
+        from(appImage.map { it.asFile.parentFile }) { include("$appImageLeaf/**") }
         // Gradle 9's replacement for dirMode/fileMode: the tar keeps the modes the image files
         // already have (jpackage writes the launcher and jspawnhelper with 0755).
         useFileSystemPermissions()
@@ -457,8 +508,7 @@ internal fun Project.registerDesktopPackagingTasks(target: DesktopPackagingTarge
                                 ArtifactTypeDefinition.JAR_TYPE,
                             )
                         }
-                    }
-                    .files
+                    }.files
             },
         )
         runtimeClasspath.from(tasks.named("jar"))

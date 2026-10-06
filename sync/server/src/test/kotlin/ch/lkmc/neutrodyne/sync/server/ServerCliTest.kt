@@ -11,13 +11,14 @@ import kotlin.test.assertTrue
 
 /** The `serve` / `--version` command line (10 CLI; M0b skeleton). */
 class ServerCliTest {
-
     private class Captured {
         val out = ByteArrayOutputStream()
         val err = ByteArrayOutputStream()
         val outStream = PrintStream(out, true)
         val errStream = PrintStream(err, true)
+
         fun outText() = out.toString("UTF-8")
+
         fun errText() = err.toString("UTF-8")
     }
 
@@ -27,7 +28,10 @@ class ServerCliTest {
         started: MutableList<ServerConfig> = mutableListOf(),
     ): Pair<Int, Captured> {
         val captured = Captured()
-        val cli = ServerCli(args.toTypedArray(), env, serverStarter = { config -> started.add(config) }, out = captured.outStream, err = captured.errStream)
+        val cli =
+            ServerCli(args.toTypedArray(), env, serverStarter = { config ->
+                started.add(config)
+            }, out = captured.outStream, err = captured.errStream)
         return cli.run() to captured
     }
 
@@ -70,11 +74,12 @@ class ServerCliTest {
     @Test
     fun `serve refuses an invalid configuration, reports the cause and exits 1`() {
         val started = mutableListOf<ServerConfig>()
-        val (exit, captured) = run(
-            listOf("serve"),
-            env = mapOf(ServerEnv.LISTEN to "0.0.0.0:8787"),
-            started = started,
-        )
+        val (exit, captured) =
+            run(
+                listOf("serve"),
+                env = mapOf(ServerEnv.LISTEN to "0.0.0.0:8787"),
+                started = started,
+            )
         assertEquals(ExitCodes.ERROR, exit)
         assertTrue(captured.errText().contains("refusing to listen on 0.0.0.0:8787"), captured.errText())
         assertTrue(started.isEmpty())
@@ -90,11 +95,12 @@ class ServerCliTest {
     @Test
     fun `serve --insecure-lan passes validation and starts`() {
         val started = mutableListOf<ServerConfig>()
-        val (exit, _) = run(
-            listOf("serve", "--insecure-lan"),
-            env = mapOf(ServerEnv.LISTEN to "0.0.0.0:8787"),
-            started = started,
-        )
+        val (exit, _) =
+            run(
+                listOf("serve", "--insecure-lan"),
+                env = mapOf(ServerEnv.LISTEN to "0.0.0.0:8787"),
+                started = started,
+            )
         assertEquals(ExitCodes.OK, exit)
         val config = started.single()
         assertEquals("0.0.0.0", config.listen.host)
@@ -114,11 +120,12 @@ class ServerCliTest {
             """.trimIndent() + "\n",
         )
         val started = mutableListOf<ServerConfig>()
-        val (exit, _) = run(
-            listOf("serve", "--config", properties.toString()),
-            env = mapOf(ServerEnv.LISTEN to "127.0.0.1:8788"),
-            started = started,
-        )
+        val (exit, _) =
+            run(
+                listOf("serve", "--config", properties.toString()),
+                env = mapOf(ServerEnv.LISTEN to "127.0.0.1:8788"),
+                started = started,
+            )
         assertEquals(ExitCodes.OK, exit)
         val config = started.single()
         assertEquals(8788, config.listen.port)
@@ -129,13 +136,14 @@ class ServerCliTest {
     @Test
     fun `a starter failure exits non-zero`() {
         val captured = Captured()
-        val cli = ServerCli(
-            arrayOf("serve"),
-            emptyMap(),
-            serverStarter = { throw IllegalStateException("port already in use") },
-            out = captured.outStream,
-            err = captured.errStream,
-        )
+        val cli =
+            ServerCli(
+                arrayOf("serve"),
+                emptyMap(),
+                serverStarter = { throw IllegalStateException("port already in use") },
+                out = captured.outStream,
+                err = captured.errStream,
+            )
         assertEquals(ExitCodes.ERROR, cli.run())
         assertTrue(captured.errText().contains("port already in use"), captured.errText())
     }

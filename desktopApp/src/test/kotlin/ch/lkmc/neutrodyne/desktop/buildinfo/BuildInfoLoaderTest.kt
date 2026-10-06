@@ -6,9 +6,9 @@ import ch.lkmc.neutrodyne.core.model.DesktopArch
 import ch.lkmc.neutrodyne.core.model.DesktopOs
 import ch.lkmc.neutrodyne.core.model.InstallKind
 import com.google.common.truth.Truth.assertThat
+import org.junit.Test
 import java.nio.file.Files
 import java.nio.file.Path
-import org.junit.Test
 
 /**
  * [BuildInfoLoader]: the generated resource matches `gradle.properties` (the resource is
@@ -31,9 +31,10 @@ class BuildInfoLoaderTest {
         assertThat(info.platform).isEqualTo(BuildInfo.Platform.DESKTOP)
         // The invocation decides the kind: `dev` for runs and tests, the package's kind under
         // -Pneutrodyne.installKind — the same jar is on the test classpath (11 Resources layout).
-        val expectedKind = InstallKind.entries.first {
-            it.wire == resource.getProperty("installKind", "dev")
-        }
+        val expectedKind =
+            InstallKind.entries.first {
+                it.wire == resource.getProperty("installKind", "dev")
+            }
         assertThat(info.debug).isEqualTo(expectedKind == InstallKind.DEV)
         assertThat(info.desktop!!.installKind).isEqualTo(expectedKind)
 
@@ -48,7 +49,8 @@ class BuildInfoLoaderTest {
 
     @Test
     fun `a packaged resource overrides the image identity`() {
-        val resource = """
+        val resource =
+            """
             versionName=1.2.3
             versionCode=200
             repoUrl=https://github.com/L-K-M/Neutrodyne
@@ -59,7 +61,7 @@ class BuildInfoLoaderTest {
             arch=arm64
             runtime=Temurin-25.0.4.1+1
             shippedLocales=en,de
-        """.trimIndent()
+            """.trimIndent()
 
         val info = BuildInfoLoader.load(resource, host = { null })
 
@@ -75,14 +77,15 @@ class BuildInfoLoaderTest {
 
     @Test
     fun `without a resource the dev defaults come from the host JVM`() {
-        val host = BuildInfoLoader.Host { name ->
-            mapOf(
-                "os.name" to "Linux",
-                "os.arch" to "amd64",
-                "java.vendor" to "Eclipse Adoptium",
-                "java.runtime.version" to "25.0.1+12",
-            )[name]
-        }
+        val host =
+            BuildInfoLoader.Host { name ->
+                mapOf(
+                    "os.name" to "Linux",
+                    "os.arch" to "amd64",
+                    "java.vendor" to "Eclipse Adoptium",
+                    "java.runtime.version" to "25.0.1+12",
+                )[name]
+            }
 
         val info = BuildInfoLoader.load(null, host)
 
@@ -97,16 +100,19 @@ class BuildInfoLoaderTest {
 
     private fun resourceProperties(): java.util.Properties =
         java.util.Properties().apply {
-            val stream = BuildInfoLoader::class.java.classLoader
-                .getResourceAsStream("build-info.properties")
-                ?: error("build-info.properties is not on the test classpath")
+            val stream =
+                BuildInfoLoader::class.java.classLoader
+                    .getResourceAsStream("build-info.properties")
+                    ?: error("build-info.properties is not on the test classpath")
             stream.use { load(it) }
         }
 
     private fun gradleProperties(): Map<String, String> {
-        val root = System.getProperty("neutrodyne.rootDir")
-            ?: error("the test tasks set neutrodyne.rootDir (build-logic TestConventions)")
-        return Files.readAllLines(Path.of(root, "gradle.properties"))
+        val root =
+            System.getProperty("neutrodyne.rootDir")
+                ?: error("the test tasks set neutrodyne.rootDir (build-logic TestConventions)")
+        return Files
+            .readAllLines(Path.of(root, "gradle.properties"))
             .filter { it.isNotBlank() && !it.startsWith("#") && it.contains('=') }
             .associate { line ->
                 val index = line.indexOf('=')

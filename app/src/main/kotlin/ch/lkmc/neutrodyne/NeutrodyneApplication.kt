@@ -20,7 +20,10 @@ import kotlinx.coroutines.launch
  * runs every `AppInitializer` in order; `:ytx` builds only [YtxGraph]; `:acra` builds nothing. The graph is lazy
  * so a `ContentProvider` or an early WorkManager call before `onCreate` still works.
  */
-class NeutrodyneApplication : Application(), Configuration.Provider, GraphHolder {
+class NeutrodyneApplication :
+    Application(),
+    Configuration.Provider,
+    GraphHolder {
     private lateinit var role: ProcessRole
 
     override val graph: AndroidAppGraph by lazy {
@@ -55,10 +58,12 @@ class NeutrodyneApplication : Application(), Configuration.Provider, GraphHolder
     }
 
     override val workManagerConfiguration: Configuration
-        get() = Configuration.Builder()
-            .setWorkerFactory(graph.workerFactory)
-            .setMinimumLoggingLevel(if (BuildConfig.DEBUG) android.util.Log.INFO else android.util.Log.ERROR)
-            .build()
+        get() =
+            Configuration
+                .Builder()
+                .setWorkerFactory(graph.workerFactory)
+                .setMinimumLoggingLevel(if (BuildConfig.DEBUG) android.util.Log.INFO else android.util.Log.ERROR)
+                .build()
 
     internal companion object {
         /** Set only by `NeutrodyneTestRunner` in `:app`'s instrumented tests. */

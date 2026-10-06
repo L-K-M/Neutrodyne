@@ -20,16 +20,24 @@ import org.acra.ACRA
  */
 @SingleIn(AppScope::class)
 @Inject
-class AcraCrashReporter : CrashReporter, CrashContext {
+class AcraCrashReporter :
+    CrashReporter,
+    CrashContext {
     override val isAvailable: Boolean
         get() = BuildConfig.ACRA_MAILTO.isNotEmpty() && ACRA.isInitialised
 
-    override fun reportNonFatal(t: Throwable, where: String) {
+    override fun reportNonFatal(
+        t: Throwable,
+        where: String,
+    ) {
         if (!isAvailable) return
         ACRA.errorReporter.handleException(t)
     }
 
-    override fun put(key: CrashKey, value: String) {
+    override fun put(
+        key: CrashKey,
+        value: String,
+    ) {
         if (!ACRA.isInitialised) return
         ACRA.errorReporter.putCustomData(key.name, Redactor.text(value))
     }

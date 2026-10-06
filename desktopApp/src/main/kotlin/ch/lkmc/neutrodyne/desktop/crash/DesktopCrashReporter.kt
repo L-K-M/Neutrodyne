@@ -38,17 +38,24 @@ class DesktopCrashReporter(
     private val recentLogs: RecentLogBuffer,
     private val processStartTimeMs: Long = ManagementFactory.getRuntimeMXBean().startTime,
     private val mainThread: Thread = Thread.currentThread(),
-) : CrashReporter, CrashContext {
+) : CrashReporter,
+    CrashContext {
     override val isAvailable: Boolean = false
 
     private val context = LinkedHashMap<String, String>()
     private val backgroundFiles = AtomicInteger(0)
 
-    override fun reportNonFatal(t: Throwable, where: String) {
+    override fun reportNonFatal(
+        t: Throwable,
+        where: String,
+    ) {
         writeCrashFile(t, threadName = null, where = where)
     }
 
-    override fun put(key: CrashKey, value: String) {
+    override fun put(
+        key: CrashKey,
+        value: String,
+    ) {
         synchronized(context) { context[key.name] = Redactor.text(value) }
     }
 
@@ -65,7 +72,10 @@ class DesktopCrashReporter(
      * "has to close" dialog and the quit through `ShutdownCoordinator` arrive with the window).
      * Background threads continue; at most [MAX_BACKGROUND_FILES] such files per session.
      */
-    fun recordUnhandled(thread: Thread, t: Throwable) {
+    fun recordUnhandled(
+        thread: Thread,
+        t: Throwable,
+    ) {
         System.err.println("Uncaught exception on thread ${thread.name}")
         t.printStackTrace()
 
@@ -86,7 +96,11 @@ class DesktopCrashReporter(
         writeCrashFile(HsErrSummary.of(hsErrFile), threadName = null, where = "jvm-crash")
     }
 
-    private fun writeCrashFile(t: Throwable, threadName: String?, where: String?) {
+    private fun writeCrashFile(
+        t: Throwable,
+        threadName: String?,
+        where: String?,
+    ) {
         try {
             Files.createDirectories(dirs.state)
             val file = nextCrashFile()
@@ -98,7 +112,11 @@ class DesktopCrashReporter(
         }
     }
 
-    private fun buildReport(t: Throwable, threadName: String?, where: String?): String {
+    private fun buildReport(
+        t: Throwable,
+        threadName: String?,
+        where: String?,
+    ): String {
         val desktop = checkNotNull(buildInfo.desktop) { "the desktop BuildInfo always carries a desktop block" }
         val report = StringBuilder()
         report.appendLine("Neutrodyne crash report")
@@ -142,20 +160,26 @@ class DesktopCrashReporter(
     private object HsErrSummary {
         fun of(file: Path): Throwable {
             val lines = runCatching { Files.readAllLines(file) }.getOrElse { emptyList() }
-            val brief = lines.filter { it.startsWith("#") || it.startsWith("Stack:") || stackFrame(it) }
-                .take(MAX_SUMMARY_LINES)
+            val brief =
+                lines
+                    .filter { it.startsWith("#") || it.startsWith("Stack:") || stackFrame(it) }
+                    .take(MAX_SUMMARY_LINES)
             return JvmCrash(
-                message = "hs_err file ${file.fileName}\n" +
-                    (if (brief.isEmpty()) "no summary lines readable" else Redactor.text(brief.joinToString("\n"))),
+                message =
+                    "hs_err file ${file.fileName}\n" +
+                        (if (brief.isEmpty()) "no summary lines readable" else Redactor.text(brief.joinToString("\n"))),
             )
         }
 
-        private fun stackFrame(line: String): Boolean = line.startsWith("j  ") || line.startsWith("C  ") || line.startsWith("V  ")
+        private fun stackFrame(line: String): Boolean =
+            line.startsWith("j  ") || line.startsWith("C  ") || line.startsWith("V  ")
 
         private const val MAX_SUMMARY_LINES = 40
     }
 
-    private class JvmCrash(message: String) : RuntimeException(message)
+    private class JvmCrash(
+        message: String,
+    ) : RuntimeException(message)
 
     private companion object {
         const val TAG = "Crash"

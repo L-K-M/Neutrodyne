@@ -33,20 +33,22 @@ internal fun serve(config: ServerConfig) {
         logger.warn("--insecure-lan: serving plain HTTP for a trusted LAN; tokens cross the LAN unencrypted")
     }
 
-    val server = embeddedServer(
-        CIO,
-        serverConfig {
-            module {
-                ServerModule(config, ServerVersion.current()).install(this)
-            }
-        },
-    ) {
-        connectors += EngineConnectorBuilder().apply {
-            host = config.listen.host
-            port = config.listen.port
+    val server =
+        embeddedServer(
+            CIO,
+            serverConfig {
+                module {
+                    ServerModule(config, ServerVersion.current()).install(this)
+                }
+            },
+        ) {
+            connectors +=
+                EngineConnectorBuilder().apply {
+                    host = config.listen.host
+                    port = config.listen.port
+                }
+            connectionIdleTimeoutSeconds = CIO_IDLE_TIMEOUT_SECONDS
         }
-        connectionIdleTimeoutSeconds = CIO_IDLE_TIMEOUT_SECONDS
-    }
     logger.info("neutrodyne-server {} listening on {}", ServerVersion.current(), config.listen)
     server.start(wait = true)
 }

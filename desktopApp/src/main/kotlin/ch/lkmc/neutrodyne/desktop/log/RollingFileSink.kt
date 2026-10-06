@@ -26,7 +26,8 @@ internal class RollingFileSink(
     private val minLevel: LogLevel,
     private val maxFileBytes: Long = MAX_FILE_BYTES,
     private val timeSource: () -> Instant = Instant::now,
-) : LogSink, AutoCloseable {
+) : LogSink,
+    AutoCloseable {
     private val currentFile = logsDir.resolve(CURRENT_NAME)
     private val lock = Any()
 
@@ -37,9 +38,13 @@ internal class RollingFileSink(
         writer = openWriter()
     }
 
-    override fun log(level: LogLevel, tag: String, message: String, t: Throwable?) {
+    override fun log(
+        level: LogLevel,
+        tag: String,
+        message: String,
+    ) {
         if (level.ordinal < minLevel.ordinal) return
-        val line = formatLogLine(level, tag, message, t, timeSource())
+        val line = formatLogLine(level, tag, message, timeSource())
         synchronized(lock) {
             val sink = writer ?: return
             try {

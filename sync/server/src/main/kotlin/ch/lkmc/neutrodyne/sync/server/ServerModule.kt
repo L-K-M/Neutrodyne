@@ -22,7 +22,6 @@ internal class ServerModule(
     private val serverVersion: String,
     private val clock: Clock = Clock.System,
 ) {
-
     fun install(application: Application) {
         with(application) {
             InsecureTransportGuard(config).install(this)
@@ -39,18 +38,26 @@ internal class ServerModule(
  * requests from peers that are neither loopback nor a trusted proxy reporting `https` are
  * answered with `421 insecure_transport`. Health routes still answer.
  */
-internal class InsecureTransportGuard(private val config: ServerConfig) {
-
+internal class InsecureTransportGuard(
+    private val config: ServerConfig,
+) {
     fun install(application: Application) {
         application.intercept(ApplicationCallPipeline.Plugins) {
             if (call.request.path() in HealthRoutes.PATHS) return@intercept
             if (!config.publicUrlIsHttps) return@intercept
 
-            val resolved = ClientAddress(config.trustedProxies).resolve(
-                peerHost = call.request.local.remoteHost,
-                forwardedFor = call.request.headers.getAll(HttpHeaders.XForwardedFor).orEmpty(),
-                forwardedProto = call.request.headers.getAll(HttpHeaders.XForwardedProto).orEmpty(),
-            )
+            val resolved =
+                ClientAddress(config.trustedProxies).resolve(
+                    peerHost = call.request.local.remoteHost,
+                    forwardedFor =
+                        call.request.headers
+                            .getAll(HttpHeaders.XForwardedFor)
+                            .orEmpty(),
+                    forwardedProto =
+                        call.request.headers
+                            .getAll(HttpHeaders.XForwardedProto)
+                            .orEmpty(),
+                )
             if (resolved.secureTransport || isLoopbackHost(resolved.address)) return@intercept
 
             call.respondText(

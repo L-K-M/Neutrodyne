@@ -19,9 +19,13 @@ class RecentLogBuffer(
     private val lines = ArrayDeque<String>(capacity)
 
     @Synchronized
-    override fun log(level: LogLevel, tag: String, message: String, t: Throwable?) {
+    override fun log(
+        level: LogLevel,
+        tag: String,
+        message: String,
+    ) {
         if (lines.size == capacity) lines.removeFirst()
-        lines.addLast(formatLogLine(level, tag, message, t, timeSource()))
+        lines.addLast(formatLogLine(level, tag, message, timeSource()))
     }
 
     /** The newest-last snapshot for the next crash file. */

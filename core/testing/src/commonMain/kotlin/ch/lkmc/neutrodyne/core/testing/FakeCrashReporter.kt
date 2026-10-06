@@ -37,7 +37,10 @@ class FakeCrashReporter(
         _isAvailable.value = available
     }
 
-    override fun reportNonFatal(t: Throwable, where: String) {
+    override fun reportNonFatal(
+        t: Throwable,
+        where: String,
+    ) {
         _calls.value = _calls.value + where
         _reported.value = _reported.value + t
     }
@@ -53,7 +56,10 @@ class FakeCrashContext : CrashContext {
     /** The context as the next crash report would read it. */
     val values: StateFlow<Map<CrashKey, String>> = _values.asStateFlow()
 
-    override fun put(key: CrashKey, value: String) {
+    override fun put(
+        key: CrashKey,
+        value: String,
+    ) {
         _values.value = _values.value + (key to value)
     }
 }

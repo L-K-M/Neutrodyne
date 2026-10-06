@@ -12,4 +12,6 @@ import dev.zacsweers.metro.Qualifier
  * `device_settings.preferences_pb`. Exactly one DataStore per file per process.
  */
 @Qualifier
-annotation class SettingsDataStore(val file: SettingsFile)
+annotation class SettingsDataStore(
+    val file: SettingsFile,
+)

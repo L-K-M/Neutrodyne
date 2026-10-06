@@ -2,31 +2,33 @@
 
 package ch.lkmc.neutrodyne.core.model
 
+import kotlinx.collections.immutable.persistentListOf
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
-import kotlinx.collections.immutable.persistentListOf
 
 class BuildInfoTest {
-    private val info = BuildInfo(
-        versionName = "0.1.0",
-        versionCode = 10095,
-        debug = true,
-        platform = BuildInfo.Platform.DESKTOP,
-        repoUrl = "https://github.com/L-K-M/Neutrodyne",
-        updateManifestUrl = "https://github.com/L-K-M/Neutrodyne/releases/latest/download/update.json",
-        engineManifestUrl = "https://l-k-m.github.io/Neutrodyne/engine/ytdlp-approved.json",
-        youTubeEngineBundled = true,
-        desktop = BuildInfo.Desktop(
-            os = DesktopOs.LINUX,
-            arch = DesktopArch.X64,
-            installKind = InstallKind.DEV,
-            runtime = "system",
-        ),
-        shippedLocales = persistentListOf("en", "de"),
-        podcastIndexKey = "SECRETKEY123",
-        podcastIndexSecret = "s3cr3t-value",
-    )
+    private val info =
+        BuildInfo(
+            versionName = "0.1.0",
+            versionCode = 10095,
+            debug = true,
+            platform = BuildInfo.Platform.DESKTOP,
+            repoUrl = "https://github.com/L-K-M/Neutrodyne",
+            updateManifestUrl = "https://github.com/L-K-M/Neutrodyne/releases/latest/download/update.json",
+            engineManifestUrl = "https://l-k-m.github.io/Neutrodyne/engine/ytdlp-approved.json",
+            youTubeEngineBundled = true,
+            desktop =
+                BuildInfo.Desktop(
+                    os = DesktopOs.LINUX,
+                    arch = DesktopArch.X64,
+                    installKind = InstallKind.DEV,
+                    runtime = "system",
+                ),
+            shippedLocales = persistentListOf("en", "de"),
+            podcastIndexKey = "SECRETKEY123",
+            podcastIndexSecret = "s3cr3t-value",
+        )
 
     /** Secrets must never reach log output through BuildInfo's toString (01). */
     @Test

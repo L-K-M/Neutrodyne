@@ -11,7 +11,6 @@ import java.net.InetAddress
  * name handled separately.
  */
 internal object IpLiterals {
-
     fun parse(text: String): InetAddress? {
         val value = text.trim().removePrefix("[").removeSuffix("]")
         if (value.isEmpty()) return null
@@ -48,7 +47,6 @@ internal class IpCidr private constructor(
     private val prefixBits: Int,
     private val ipv6: Boolean,
 ) {
-
     fun matches(address: InetAddress): Boolean {
         if (ipv6 != (address is Inet6Address)) return false
         val bytes = address.address
@@ -85,12 +83,13 @@ internal class IpCidr private constructor(
 
         fun parse(text: String): IpCidr? {
             val trimmed = text.trim()
-            val (addressText, prefixText) = if (trimmed.contains('/')) {
-                val parts = trimmed.split('/', limit = 2)
-                parts[0] to parts[1]
-            } else {
-                trimmed to null
-            }
+            val (addressText, prefixText) =
+                if (trimmed.contains('/')) {
+                    val parts = trimmed.split('/', limit = 2)
+                    parts[0] to parts[1]
+                } else {
+                    trimmed to null
+                }
             val address = IpLiterals.parse(addressText) ?: return null
             val addressBytes = address.address
             val maxBits = addressBytes.size * BITS_PER_BYTE

@@ -13,7 +13,11 @@ import java.nio.file.attribute.PosixFilePermissions
  * user-only ACL of `%LOCALAPPDATA%`.
  */
 internal object AtomicWrites {
-    fun write(path: Path, content: ByteArray, userOnly: Boolean = false) {
+    fun write(
+        path: Path,
+        content: ByteArray,
+        userOnly: Boolean = false,
+    ) {
         val temp = Files.createTempFile(path.parent, path.fileName.toString(), ".tmp")
         try {
             if (userOnly) {
@@ -34,7 +38,11 @@ internal object AtomicWrites {
         }
     }
 
-    fun write(path: Path, content: String, userOnly: Boolean = false) {
+    fun write(
+        path: Path,
+        content: String,
+        userOnly: Boolean = false,
+    ) {
         write(path, content.toByteArray(Charsets.UTF_8), userOnly)
     }
 }

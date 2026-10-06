@@ -26,7 +26,12 @@ class SmokeModeTest {
         assertThat(json["versionName"]!!.jsonPrimitive.content).isEqualTo(BuildInfoLoader.load().versionName)
         assertThat(json["versionCode"]!!.jsonPrimitive.content).isEqualTo("${BuildInfoLoader.load().versionCode}")
         assertThat(json["installKind"]!!.jsonPrimitive.content)
-            .isEqualTo(BuildInfoLoader.load().desktop!!.installKind.wire)
+            .isEqualTo(
+                BuildInfoLoader
+                    .load()
+                    .desktop!!
+                    .installKind.wire,
+            )
         assertThat(json["javaVendor"]!!.jsonPrimitive.content).isNotEmpty()
         assertThat(json["javaVendorVersion"]!!.jsonPrimitive.content).isNotEmpty()
         assertThat(json["javaRuntimeVersion"]!!.jsonPrimitive.content).isNotEmpty()

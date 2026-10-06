@@ -26,7 +26,9 @@ fun Origin.Companion.of(url: HttpUrl): Origin = Origin(url.scheme, url.host.lowe
  */
 @SingleIn(AppScope::class)
 @Inject
-class AuthInterceptor(private val lookup: CredentialLookup) : Interceptor {
+class AuthInterceptor(
+    private val lookup: CredentialLookup,
+) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         if (request.header("Authorization") != null) return chain.proceed(request)

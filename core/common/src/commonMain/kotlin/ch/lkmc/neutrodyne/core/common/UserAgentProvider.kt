@@ -8,10 +8,13 @@ package ch.lkmc.neutrodyne.core.common
  * (01 Networking baseline). Non-ASCII characters become `?` because OkHttp rejects them in
  * header values.
  */
-class UserAgentProvider(info: PlatformInfo, versionName: String, repoUrl: String) {
+class UserAgentProvider(
+    info: PlatformInfo,
+    versionName: String,
+    repoUrl: String,
+) {
     val value: String =
         "Neutrodyne/${versionName.asciiOnly()} (${info.userAgentPlatform.asciiOnly()}; +${repoUrl.asciiOnly()})"
 
-    private fun String.asciiOnly(): String =
-        map { if (it.code in 32..126) it else '?' }.joinToString("")
+    private fun String.asciiOnly(): String = map { if (it.code in 32..126) it else '?' }.joinToString("")
 }

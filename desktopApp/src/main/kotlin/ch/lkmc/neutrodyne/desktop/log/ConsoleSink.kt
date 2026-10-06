@@ -11,7 +11,11 @@ import java.time.Instant
  * tests, and distinguishing them needs a marker Gradle does not pass (noted in 11).
  */
 internal object ConsoleSink : LogSink {
-    override fun log(level: LogLevel, tag: String, message: String, t: Throwable?) {
-        println(formatLogLine(level, tag, message, t, Instant.now()))
+    override fun log(
+        level: LogLevel,
+        tag: String,
+        message: String,
+    ) {
+        println(formatLogLine(level, tag, message, Instant.now()))
     }
 }

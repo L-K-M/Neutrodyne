@@ -39,8 +39,15 @@ object Redactor {
     /** RFC 3986 scheme, anchored at the start of the string. */
     private val SCHEME = Regex("""^([A-Za-z][A-Za-z0-9+.-]*):""")
 
-    /** A `scheme:run` inside free text — stops at whitespace and obvious delimiters. */
-    private val URL_IN_TEXT = Regex("""[A-Za-z][A-Za-z0-9+.-]*:[^\s"'<>\[\]{}|\\^`]+""")
+    /**
+     * A `scheme:run` inside free text — stops at whitespace and obvious delimiters. A bracketed IPv6 authority
+     * (`https://[2001:db8::1]/rss?token=…`) is part of the run; without that branch the brackets would end the
+     * match after `https://` and leave the query unredacted (review 2026-10-06).
+     */
+    private val URL_IN_TEXT =
+        Regex(
+            """[A-Za-z][A-Za-z0-9+.-]*:(?://\[[^\]\s]+\][^\s"'<>\[\]{}|\\^`]*|[^\s"'<>\[\]{}|\\^`]+)""",
+        )
 
     /** Sentence punctuation that clings to a URL at the end of free text ("…see https://a/b.") */
     private val TRAILING_PUNCT = charArrayOf('.', ',', ';', ':', '!', '?', '\'', '"')
@@ -50,9 +57,10 @@ object Redactor {
      * token boundary is not reliably knowable ("Basic abc==", "a=b; c=d"). Applied after URL
      * redaction so a URL-valued credential is masked whole, not just inside-out.
      */
-    private val SENSITIVE_HEADER = Regex(
-        """(?i)\b(authorization|proxy-authorization|proxy-authenticate|x-api-key|x-auth-token|cookie|set-cookie)\s*:[^\r\n]*""",
-    )
+    private val SENSITIVE_HEADER =
+        Regex(
+            """(?i)\b(authorization|proxy-authorization|proxy-authenticate|x-api-key|x-auth-token|cookie|set-cookie)\s*:[^\r\n]*""",
+        )
 
     /** Redacts a string that is already known to be a URL. Idempotent. */
     fun url(raw: String): String {
@@ -70,20 +78,21 @@ object Redactor {
 
     /** Redacts every URL run and sensitive-header value inside free text. */
     fun text(s: String): String {
-        val urlsRedacted = URL_IN_TEXT.replace(s) { match ->
-            val candidate = match.value
-            val scheme = candidate.substring(0, candidate.indexOf(':')).lowercase()
-            if (scheme !in TEXT_SCHEMES) return@replace candidate
+        val urlsRedacted =
+            URL_IN_TEXT.replace(s) { match ->
+                val candidate = match.value
+                val scheme = candidate.substring(0, candidate.indexOf(':')).lowercase()
+                if (scheme !in TEXT_SCHEMES) return@replace candidate
 
-            var trimmed = candidate.trimEnd(*TRAILING_PUNCT)
-            // An unmatched ')' is a prose paren, not part of the URL ("(see https://a/f)").
-            while (trimmed.endsWith(')') &&
-                trimmed.count { it == '(' } < trimmed.count { it == ')' }
-            ) {
-                trimmed = trimmed.dropLast(1)
+                var trimmed = candidate.trimEnd(*TRAILING_PUNCT)
+                // An unmatched ')' is a prose paren, not part of the URL ("(see https://a/f)").
+                while (trimmed.endsWith(')') &&
+                    trimmed.count { it == '(' } < trimmed.count { it == ')' }
+                ) {
+                    trimmed = trimmed.dropLast(1)
+                }
+                url(trimmed) + candidate.substring(trimmed.length)
             }
-            url(trimmed) + candidate.substring(trimmed.length)
-        }
         return SENSITIVE_HEADER.replace(urlsRedacted) { m -> "${m.groupValues[1]}: $HEADER_MASK" }
     }
 
@@ -93,9 +102,14 @@ object Redactor {
     }
 
     /** `authority/path?query#fragment` — the part after `scheme://`. */
-    private fun redactHierarchical(scheme: String, hier: String): String {
-        val authorityEnd = hier.indexOfFirst { it == '/' || it == '?' || it == '#' }
-            .let { if (it < 0) hier.length else it }
+    private fun redactHierarchical(
+        scheme: String,
+        hier: String,
+    ): String {
+        val authorityEnd =
+            hier
+                .indexOfFirst { it == '/' || it == '?' || it == '#' }
+                .let { if (it < 0) hier.length else it }
         val authority = hier.substring(0, authorityEnd)
         if (authority.isEmpty()) return unparsable("$scheme://$hier")
 
@@ -112,21 +126,23 @@ object Redactor {
         val hasQuery = '?' in beforeFragment
         val query = if (hasQuery) beforeFragment.substringAfter('?') else ""
 
-        val maskedPath = path.split('/').joinToString("/") { segment ->
-            if (segment.isEmpty() || segment.length < SEGMENT_MIN_LENGTH_FOR_MASKING ||
-                segment.none { it.isDigit() }
-            ) {
-                segment
-            } else {
-                SEGMENT_MASK_PREFIX + segment.takeLast(SEGMENT_KEEP_TAIL)
+        val maskedPath =
+            path.split('/').joinToString("/") { segment ->
+                if (segment.isEmpty() || segment.length < SEGMENT_MIN_LENGTH_FOR_MASKING ||
+                    segment.none { it.isDigit() }
+                ) {
+                    segment
+                } else {
+                    SEGMENT_MASK_PREFIX + segment.takeLast(SEGMENT_KEEP_TAIL)
+                }
             }
-        }
         if (!hasQuery) return maskedPath
 
-        val maskedQuery = query.split('&').joinToString("&") { part ->
-            val eq = part.indexOf('=')
-            if (eq < 0) part else part.substring(0, eq + 1) + QUERY_VALUE_MASK
-        }
+        val maskedQuery =
+            query.split('&').joinToString("&") { part ->
+                val eq = part.indexOf('=')
+                if (eq < 0) part else part.substring(0, eq + 1) + QUERY_VALUE_MASK
+            }
         return "$maskedPath?$maskedQuery"
     }
 

@@ -6,7 +6,6 @@ import ch.lkmc.neutrodyne.core.common.HttpClientKind
 import ch.lkmc.neutrodyne.core.common.LocalNetworkAccess
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import com.google.common.truth.Truth.assertThat
-import java.util.concurrent.TimeUnit
 import mockwebserver3.junit4.MockWebServerRule
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
@@ -15,13 +14,13 @@ import okhttp3.Request
 import okhttp3.Response
 import org.junit.Rule
 import org.junit.Test
+import java.util.concurrent.TimeUnit
 
 class ClientFamilyTest {
     @get:Rule val serverRule = MockWebServerRule()
     private val server get() = serverRule.server
 
-    private fun allKinds(clients: NetworkClients): List<OkHttpClient> =
-        HttpClientKind.entries.map(clients::get)
+    private fun allKinds(clients: NetworkClients): List<OkHttpClient> = HttpClientKind.entries.map(clients::get)
 
     @Test
     fun `all seven kinds derive from one dispatcher and pool`() {
@@ -107,14 +106,16 @@ class ClientFamilyTest {
 
     @Test
     fun `debug interceptors are appended to the application chain`() {
-        val marker = Interceptor { chain ->
-            Response.Builder()
-                .request(chain.request())
-                .protocol(Protocol.HTTP_1_1)
-                .code(200)
-                .message("OK")
-                .build()
-        }
+        val marker =
+            Interceptor { chain ->
+                Response
+                    .Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .build()
+            }
         val clients = newCoreClients(debug = setOf(marker))
         assertThat(clients.core.interceptors).contains(marker)
     }

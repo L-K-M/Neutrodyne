@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.shell
 
+import kotlinx.serialization.Serializable
 import java.nio.file.Files
 import java.nio.file.Path
-import kotlinx.serialization.Serializable
 
 /**
  * `session.json` (11 Crash files and the email dialog): written with `cleanExit = false` while the
@@ -34,7 +34,10 @@ internal object SessionFile {
             .getOrNull()
     }
 
-    fun write(stateDir: Path, state: SessionState) {
+    fun write(
+        stateDir: Path,
+        state: SessionState,
+    ) {
         Files.createDirectories(stateDir)
         AtomicWrites.write(stateDir.resolve(FILE_NAME), SHELL_JSON.encodeToString(SessionState.serializer(), state))
     }

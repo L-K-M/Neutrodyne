@@ -18,29 +18,29 @@ import kotlin.test.assertTrue
 
 /** `GET /.well-known/neutrodyne-sync` (10 Protocol › Discovery). */
 class WellKnownRoutesTest {
-
     @Test
-    fun `the discovery document matches the protocol`() = testApplication {
-        application {
-            installTestModule(loadValidConfig())
+    fun `the discovery document matches the protocol`() =
+        testApplication {
+            application {
+                installTestModule(loadValidConfig())
+            }
+            val response = client.get(WellKnownRoutes.WELL_KNOWN_PATH)
+
+            assertEquals(HttpStatusCode.OK, response.status)
+            assertEquals("application/json", response.headers["Content-Type"])
+
+            val document = Json.parseToJsonElement(response.bodyAsText()).jsonObject
+            assertEquals(WellKnownRoutes.SERVER_DISPLAY_NAME, document.getValue("name").jsonPrimitive.content)
+            assertEquals(TEST_SERVER_VERSION, document.getValue("serverVersion").jsonPrimitive.content)
+
+            val protocol = document.getValue("protocol").jsonObject
+            assertEquals(PROTOCOL_VERSION, protocol.getValue("min").jsonPrimitive.int)
+            assertEquals(PROTOCOL_VERSION, protocol.getValue("max").jsonPrimitive.int)
+
+            // The sse, link and password feature flags arrive with MS1 (10 Discovery).
+            assertTrue(document.getValue("features").jsonArray.isEmpty())
+            assertEquals(DiscoveryNumbers.MAX_BATCH, document.getValue("maxBatch").jsonPrimitive.int)
+            assertEquals(DiscoveryNumbers.MAX_SKEW_MS, document.getValue("maxSkewMs").jsonPrimitive.long)
+            assertEquals("2026-10-06T10:15:30.250Z", document.getValue("serverTime").jsonPrimitive.content)
         }
-        val response = client.get(WellKnownRoutes.WELL_KNOWN_PATH)
-
-        assertEquals(HttpStatusCode.OK, response.status)
-        assertEquals("application/json", response.headers["Content-Type"])
-
-        val document = Json.parseToJsonElement(response.bodyAsText()).jsonObject
-        assertEquals(WellKnownRoutes.SERVER_DISPLAY_NAME, document.getValue("name").jsonPrimitive.content)
-        assertEquals(TEST_SERVER_VERSION, document.getValue("serverVersion").jsonPrimitive.content)
-
-        val protocol = document.getValue("protocol").jsonObject
-        assertEquals(PROTOCOL_VERSION, protocol.getValue("min").jsonPrimitive.int)
-        assertEquals(PROTOCOL_VERSION, protocol.getValue("max").jsonPrimitive.int)
-
-        // The sse, link and password feature flags arrive with MS1 (10 Discovery).
-        assertTrue(document.getValue("features").jsonArray.isEmpty())
-        assertEquals(DiscoveryNumbers.MAX_BATCH, document.getValue("maxBatch").jsonPrimitive.int)
-        assertEquals(DiscoveryNumbers.MAX_SKEW_MS, document.getValue("maxSkewMs").jsonPrimitive.long)
-        assertEquals("2026-10-06T10:15:30.250Z", document.getValue("serverTime").jsonPrimitive.content)
-    }
 }

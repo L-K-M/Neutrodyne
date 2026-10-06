@@ -18,8 +18,14 @@ class IdentityEncodingInterceptorTest {
         server.enqueue(mockResponse())
         val clients = newNetworkClients()
         val request = { Request.Builder().url(server.url("/")).build() }
-        clients.media.newCall(request()).execute().close()
-        clients.download.newCall(request()).execute().close()
+        clients.media
+            .newCall(request())
+            .execute()
+            .close()
+        clients.download
+            .newCall(request())
+            .execute()
+            .close()
 
         assertThat(server.takeRequest().headers["Accept-Encoding"]).isEqualTo("identity")
         assertThat(server.takeRequest().headers["Accept-Encoding"]).isEqualTo("identity")
@@ -28,7 +34,11 @@ class IdentityEncodingInterceptorTest {
     @Test
     fun `other clients keep OkHttp's gzip default`() {
         server.enqueue(mockResponse())
-        newNetworkClients().feed.newCall(Request.Builder().url(server.url("/")).build()).execute().close()
+        newNetworkClients()
+            .feed
+            .newCall(Request.Builder().url(server.url("/")).build())
+            .execute()
+            .close()
 
         // OkHttp's bridge adds gzip itself — the island must not have pinned identity here.
         assertThat(server.takeRequest().headers["Accept-Encoding"]).isEqualTo("gzip")

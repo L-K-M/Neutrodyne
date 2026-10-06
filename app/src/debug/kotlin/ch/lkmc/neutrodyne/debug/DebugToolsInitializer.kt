@@ -26,7 +26,8 @@ class DebugToolsInitializer : AppInitializer {
 
     override suspend fun run() {
         StrictMode.setVmPolicy(
-            StrictMode.VmPolicy.Builder()
+            StrictMode.VmPolicy
+                .Builder()
                 .detectLeakedClosableObjects()
                 .detectLeakedSqlLiteObjects()
                 .detectLeakedRegistrationObjects()
@@ -38,7 +39,8 @@ class DebugToolsInitializer : AppInitializer {
         )
         withContext(Dispatchers.Main) {
             StrictMode.setThreadPolicy(
-                StrictMode.ThreadPolicy.Builder()
+                StrictMode.ThreadPolicy
+                    .Builder()
                     .detectNetwork()
                     .penaltyDeathOnNetwork()
                     .detectDiskReads()

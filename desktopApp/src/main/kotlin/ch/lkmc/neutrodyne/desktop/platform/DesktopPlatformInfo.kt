@@ -19,20 +19,25 @@ internal class DesktopPlatformInfo(
 ) : PlatformInfo {
     override val kind: PlatformKind = PlatformKind.DESKTOP
 
-    override val userAgentPlatform: String = when (AppDirs.DesktopOs.current(osName)) {
-        AppDirs.DesktopOs.WINDOWS -> "$osName; ${archLabel()}" // os.name already reads "Windows 11"
-        AppDirs.DesktopOs.MACOS -> "macOS $osVersion; ${archLabel()}"
-        AppDirs.DesktopOs.LINUX -> "Linux; ${archLabel()}"
-    }
+    override val userAgentPlatform: String =
+        when (AppDirs.DesktopOs.current(osName)) {
+            AppDirs.DesktopOs.WINDOWS -> "$osName; ${archLabel()}"
+
+            // os.name already reads "Windows 11"
+            AppDirs.DesktopOs.MACOS -> "macOS $osVersion; ${archLabel()}"
+
+            AppDirs.DesktopOs.LINUX -> "Linux; ${archLabel()}"
+        }
 
     override val androidSdkInt: Int? = null
 
     override val regionCode: String
         get() = Locale.getDefault().country.uppercase(Locale.ROOT)
 
-    private fun archLabel(): String = when (osArch.lowercase(Locale.ROOT)) {
-        "amd64", "x86_64" -> "x64"
-        "aarch64", "arm64" -> "arm64"
-        else -> osArch
-    }
+    private fun archLabel(): String =
+        when (osArch.lowercase(Locale.ROOT)) {
+            "amd64", "x86_64" -> "x64"
+            "aarch64", "arm64" -> "arm64"
+            else -> osArch
+        }
 }

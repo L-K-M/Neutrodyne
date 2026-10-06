@@ -13,24 +13,34 @@ import org.gradle.kotlin.dsl.configure
  * `ProjectDependency`s of every project and asserts the subtree rooted at the module the plugin is applied to.
  * It sees KMP source-set edges through their configuration names (`commonMainImplementation` etc.), which is why
  * they are listed here; it cannot tell the two platforms' sets apart beyond the name, so the
- * islands-only-from-platform-code part of rule 14 stays with `checkBannedApis` rule 2.
+ * islands-only-from-platform-code part of rule 14 stays with `verifyDependencyPolicy`'s declared-edge check
+ * and `checkBannedApis` rule 2's text scan (2026-10-06).
  */
 internal fun Project.configureModuleGraphAssert() {
     pluginManager.apply("com.jraska.module.graph.assertion")
     extensions.configure<GraphRulesExtension> {
         maxHeight = 6
-        // Design list (01) plus the *Api variants so `api()` edges in platform source sets are covered too.
+        // Every main source set's four dependency scopes (Api, Implementation, CompileOnly,
+        // RuntimeOnly) plus the plain JVM/Android buckets, so compile- or runtime-scoped
+        // project edges cannot bypass the graph (KMP DSL reference, DependencyKinds).
         configurations +=
             setOf(
                 "api",
                 "implementation",
+                "compileOnly",
                 "runtimeOnly",
                 "commonMainApi",
                 "commonMainImplementation",
+                "commonMainCompileOnly",
+                "commonMainRuntimeOnly",
                 "androidMainApi",
                 "androidMainImplementation",
+                "androidMainCompileOnly",
+                "androidMainRuntimeOnly",
                 "desktopMainApi",
                 "desktopMainImplementation",
+                "desktopMainCompileOnly",
+                "desktopMainRuntimeOnly",
             )
         allowed =
             arrayOf(

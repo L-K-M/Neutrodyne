@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: Unlicense -->
-<network-security-config>
-    <!-- D28 / PO-13: cleartext allowed (many feeds, enclosures and covers are http://); system CAs only -->
-    <base-config cleartextTrafficPermitted="true">
+<network-security-config xmlns:tools="http://schemas.android.com/tools">
+    <!-- D28 / PO-13: cleartext allowed (many feeds, enclosures and covers are http://); system CAs only.
+         Lint's InsecureBaseConfiguration is ignored for that owner decision. -->
+    <base-config cleartextTrafficPermitted="true" tools:ignore="InsecureBaseConfiguration">
         <trust-anchors><certificates src="system" /></trust-anchors>
     </base-config>
     <!-- Applies only while android:debuggable is true, i.e. only in local debug builds (release builds are not debuggable, D96) -->

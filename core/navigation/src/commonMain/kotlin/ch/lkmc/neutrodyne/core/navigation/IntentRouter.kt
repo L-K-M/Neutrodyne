@@ -18,6 +18,7 @@ public data class RouteInput(
         LAUNCH,
         VIEW,
         SEND,
+
         /** A file the OS or the user handed the desktop app. */
         OPEN_FILE,
     }
@@ -29,13 +30,20 @@ public sealed interface Route {
     public data object None : Route
 
     /** Selects [tab] and replaces its stack above the root with [stack]. */
-    public data class Navigate(val tab: TopLevelKey, val stack: List<NavKey>) : Route
+    public data class Navigate(
+        val tab: TopLevelKey,
+        val stack: List<NavKey>,
+    ) : Route
 
     /** Pushes [key] onto the current tab (sheets, settings pages, notices). */
-    public data class Push(val key: NavKey) : Route
+    public data class Push(
+        val key: NavKey,
+    ) : Route
 
     /** Selects the Feeds tab and its pager source. A null [groupUuid] selects All. */
-    public data class SelectFeed(val groupUuid: String?) : Route
+    public data class SelectFeed(
+        val groupUuid: String?,
+    ) : Route
 
     /** Expands the player sheet (or reveals the side panel). */
     public data object ExpandPlayer : Route
@@ -110,10 +118,11 @@ public object IntentRouter {
             return emptyList()
         }
 
-        val path = afterScheme
-            .removePrefix(HOST_PREFIX)
-            .substringBefore(QUERY_SEPARATOR)
-            .substringBefore(FRAGMENT_SEPARATOR)
+        val path =
+            afterScheme
+                .removePrefix(HOST_PREFIX)
+                .substringBefore(QUERY_SEPARATOR)
+                .substringBefore(FRAGMENT_SEPARATOR)
 
         return path.split(PATH_SEPARATOR).filter { it.isNotEmpty() }
     }
@@ -141,30 +150,49 @@ public object IntentRouter {
         return Route.None
     }
 
-    private fun singleSegment(name: String): Route = when (name) {
-        DOWNLOADS_SEGMENT -> Route.Navigate(DownloadsKey, emptyList())
-        PLAYER_SEGMENT -> Route.ExpandPlayer
-        DIAGNOSTICS_SEGMENT -> Route.Push(DiagnosticsKey)
-        else -> Route.None
-    }
-
-    private fun doubleSegment(section: String, argument: String): Route = when (section) {
-        EPISODE_SEGMENT -> {
-            val id = argument.toLongOrNull() ?: return Route.None
-            Route.Push(EpisodeKey(id))
+    private fun singleSegment(name: String): Route =
+        when (name) {
+            DOWNLOADS_SEGMENT -> Route.Navigate(DownloadsKey, emptyList())
+            PLAYER_SEGMENT -> Route.ExpandPlayer
+            DIAGNOSTICS_SEGMENT -> Route.Push(DiagnosticsKey)
+            else -> Route.None
         }
 
-        PODCAST_SEGMENT -> {
-            val id = argument.toLongOrNull() ?: return Route.None
-            Route.Navigate(LibraryKey, listOf(PodcastKey(id)))
-        }
+    private fun doubleSegment(
+        section: String,
+        argument: String,
+    ): Route =
+        when (section) {
+            EPISODE_SEGMENT -> {
+                val id = argument.toLongOrNull() ?: return Route.None
+                Route.Push(EpisodeKey(id))
+            }
 
-        GROUP_SEGMENT -> Route.SelectFeed(argument)
-        IMPORT_SEGMENT -> Route.Navigate(LibraryKey, listOf(ImportKey(argument)))
-        SETTINGS_SEGMENT -> settingsRoute(argument)
-        HELP_SEGMENT -> if (argument == INSTALL_SEGMENT) Route.Push(InstallHelpKey()) else Route.None
-        else -> Route.None
-    }
+            PODCAST_SEGMENT -> {
+                val id = argument.toLongOrNull() ?: return Route.None
+                Route.Navigate(LibraryKey, listOf(PodcastKey(id)))
+            }
+
+            GROUP_SEGMENT -> {
+                Route.SelectFeed(argument)
+            }
+
+            IMPORT_SEGMENT -> {
+                Route.Navigate(LibraryKey, listOf(ImportKey(argument)))
+            }
+
+            SETTINGS_SEGMENT -> {
+                settingsRoute(argument)
+            }
+
+            HELP_SEGMENT -> {
+                if (argument == INSTALL_SEGMENT) Route.Push(InstallHelpKey()) else Route.None
+            }
+
+            else -> {
+                Route.None
+            }
+        }
 
     private fun settingsRoute(page: String): Route {
         if (page.lowercase() == SYNC_SEGMENT) {

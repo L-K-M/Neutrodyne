@@ -19,12 +19,6 @@ import ch.lkmc.neutrodyne.desktop.shell.InstanceHandshake
 import ch.lkmc.neutrodyne.desktop.shell.SessionFile
 import ch.lkmc.neutrodyne.desktop.shell.SessionState
 import ch.lkmc.neutrodyne.desktop.shell.SingleInstanceLock
-import java.io.IOException
-import java.nio.file.Files
-import java.nio.file.Path
-import java.security.SecureRandom
-import java.util.concurrent.CountDownLatch
-import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -32,7 +26,13 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.Path
+import java.security.SecureRandom
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * The shell start-up in 11's order, up to the point where the window would open. The M0b process
@@ -79,12 +79,13 @@ internal object DesktopShell {
         }
 
         // Step 3: lock, or hand off to the owner and exit before AWT is initialised.
-        val lock = SingleInstanceLock(
-            dirs = dirs,
-            pid = ProcessHandle.current().pid(),
-            startedAtMs = clock.now(),
-            versionName = buildInfo.versionName,
-        )
+        val lock =
+            SingleInstanceLock(
+                dirs = dirs,
+                pid = ProcessHandle.current().pid(),
+                startedAtMs = clock.now(),
+                versionName = buildInfo.versionName,
+            )
         return when (lock.tryAcquire()) {
             SingleInstanceLock.Acquire.HeldByOther -> handOffToOwner(dirs, inputs, buildInfo)
             SingleInstanceLock.Acquire.Acquired -> runOwner(dirs, inputs, background, buildInfo, lock)
@@ -92,14 +93,19 @@ internal object DesktopShell {
     }
 
     /** The second launch: deliver its inputs, then exit 0 — or 2 when the owner never answers. */
-    private fun handOffToOwner(dirs: AppDirs, inputs: List<String>, buildInfo: BuildInfo): Int {
+    private fun handOffToOwner(
+        dirs: AppDirs,
+        inputs: List<String>,
+        buildInfo: BuildInfo,
+    ): Int {
         val handshake = InstanceHandshake(dirs, SecureRandom(), buildInfo.versionName)
         val token = InstanceHandshake.readToken(dirs) ?: ""
-        val request = HandoffRequest.fromLaunchArgs(
-            token = token,
-            args = inputs,
-            cwd = System.getProperty("user.dir") ?: "",
-        )
+        val request =
+            HandoffRequest.fromLaunchArgs(
+                token = token,
+                args = inputs,
+                cwd = System.getProperty("user.dir") ?: "",
+            )
         return if (handshake.send(request) == HandoffOutcome.Delivered) {
             EXIT_OK
         } else {
@@ -132,7 +138,9 @@ internal object DesktopShell {
         val fileSink = RollingFileSink(dirs.logs, if (buildInfo.debug) LogLevel.DEBUG else LogLevel.INFO)
         val sinks = if (buildInfo.debug) arrayOf(recentLogs, fileSink, ConsoleSink) else arrayOf(recentLogs, fileSink)
         Log.install(*sinks)
-        Log.i(TAG) { "Neutrodyne ${buildInfo.versionName} starting (install kind ${buildInfo.desktop?.installKind?.wire})" }
+        Log.i(
+            TAG,
+        ) { "Neutrodyne ${buildInfo.versionName} starting (install kind ${buildInfo.desktop?.installKind?.wire})" }
 
         val crashReporter = DesktopCrashReporter(dirs, buildInfo, DesktopClock, recentLogs)
         crashReporter.installAsDefaultExceptionHandler()
@@ -152,45 +160,49 @@ internal object DesktopShell {
         val graph = createDesktopGraph(dirs, buildInfo, crashReporter)
         graph.appScope.launch { runInitializers(graph.initializers) }
 
-        val handshakeDispatcher = Executors
-            .newThreadPerTaskExecutor(Thread.ofVirtual().name("nd-handshake").factory())
-            .asCoroutineDispatcher()
+        val handshakeDispatcher =
+            Executors
+                .newThreadPerTaskExecutor(Thread.ofVirtual().name("nd-handshake").factory())
+                .asCoroutineDispatcher()
         val handshakeScope = CoroutineScope(SupervisorJob() + handshakeDispatcher)
         val handshake = InstanceHandshake(dirs, SecureRandom(), buildInfo.versionName)
-        val serveJob = handshakeScope.launch {
-            handshake.serve { request -> onHandoff(request) }
-        }
+        val serveJob =
+            handshakeScope.launch {
+                handshake.serve { request -> onHandoff(request) }
+            }
         if (inputs.isNotEmpty()) {
             Log.i(TAG) { "${inputs.size} first-launch input(s) queued for the window" }
         }
 
         // No window yet (11 step 6 is pending): stay alive serving hand-offs until SIGTERM. The
         // shutdown hook runs the clean shutdown; main parks for the rest of the process's life.
-        Runtime.getRuntime().addShutdownHook(Thread(
-            {
-                Log.i(TAG) { "shutdown signal received" }
-                try {
-                    runBlocking { serveJob.cancelAndJoin() } // serve's finally removes port/token files
-                } catch (_: CancellationException) {
-                    // The hook's own cancellation: the files were removed by serve's finally either way.
-                }
-                handshakeScope.cancel()
-                handshakeDispatcher.close()
-                graph.appScope.cancel()
-                SessionFile.write(
-                    dirs.state,
-                    SessionState(
-                        pid = ProcessHandle.current().pid(),
-                        startedAtMs = DesktopClock.now(),
-                        versionName = buildInfo.versionName,
-                        cleanExit = true,
-                    ),
-                )
-                lock.close()
-                fileSink.close()
-            },
-            SHUTDOWN_THREAD,
-        ))
+        Runtime.getRuntime().addShutdownHook(
+            Thread(
+                {
+                    Log.i(TAG) { "shutdown signal received" }
+                    try {
+                        runBlocking { serveJob.cancelAndJoin() } // serve's finally removes port/token files
+                    } catch (_: CancellationException) {
+                        // The hook's own cancellation: the files were removed by serve's finally either way.
+                    }
+                    handshakeScope.cancel()
+                    handshakeDispatcher.close()
+                    graph.appScope.cancel()
+                    SessionFile.write(
+                        dirs.state,
+                        SessionState(
+                            pid = ProcessHandle.current().pid(),
+                            startedAtMs = DesktopClock.now(),
+                            versionName = buildInfo.versionName,
+                            cleanExit = true,
+                        ),
+                    )
+                    lock.close()
+                    fileSink.close()
+                },
+                SHUTDOWN_THREAD,
+            ),
+        )
         CountDownLatch(1).await()
         return EXIT_OK
     }
@@ -205,7 +217,10 @@ internal object DesktopShell {
     }
 
     /** 11 Crash files table: an unclean previous session with an `hs_err` file is a JVM crash. */
-    private fun reviewPreviousSession(dirs: AppDirs, crashReporter: DesktopCrashReporter) {
+    private fun reviewPreviousSession(
+        dirs: AppDirs,
+        crashReporter: DesktopCrashReporter,
+    ) {
         val previous = SessionFile.read(dirs.state) ?: return
         if (previous.cleanExit) return
         val hsErr = newestHsErrFile(dirs.state)
@@ -220,14 +235,19 @@ internal object DesktopShell {
     private fun newestHsErrFile(stateDir: Path): Path? =
         try {
             Files.newDirectoryStream(stateDir, HS_ERR_GLOB).use { stream ->
-                stream.maxByOrNull { file -> runCatching { Files.getLastModifiedTime(file).toMillis() }.getOrDefault(0L) }
+                stream.maxByOrNull { file ->
+                    runCatching { Files.getLastModifiedTime(file).toMillis() }.getOrDefault(0L)
+                }
             }
         } catch (_: IOException) {
             null
         }
 
     /** 11 Shell failure modes: name the directory and the error; nothing is written elsewhere. */
-    private fun dataDirFailure(dir: Path, e: IOException): Int {
+    private fun dataDirFailure(
+        dir: Path,
+        e: IOException,
+    ): Int {
         System.err.println("Neutrodyne cannot create or write its directory $dir: ${e.message}")
         return EXIT_DATA_DIR_FAILURE
     }

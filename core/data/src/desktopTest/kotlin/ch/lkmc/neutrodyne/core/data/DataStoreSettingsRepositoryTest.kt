@@ -11,13 +11,6 @@ import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
 import ch.lkmc.neutrodyne.core.testing.SettingsRepositoryContract
-import java.io.File
-import kotlin.test.AfterTest
-import kotlin.test.BeforeTest
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertTrue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
@@ -25,6 +18,13 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import java.io.File
+import kotlin.test.AfterTest
+import kotlin.test.BeforeTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * The DataStore-backed [SettingsRepository] against the shared contract, plus what only the real
@@ -39,7 +39,10 @@ class DataStoreSettingsRepositoryTest : SettingsRepositoryContract() {
 
     @BeforeTest
     fun setUp() {
-        root = kotlin.io.path.createTempDirectory("nd-data-test").toFile()
+        root =
+            kotlin.io.path
+                .createTempDirectory("nd-data-test")
+                .toFile()
     }
 
     @AfterTest
@@ -53,28 +56,30 @@ class DataStoreSettingsRepositoryTest : SettingsRepositoryContract() {
         repositoryOver(root.resolve("repo-${repositoriesBuilt++}"))
 
     @Test
-    fun writesRouteToTheFileOfTheirKey() = runTest {
-        val repository = repositoryOver(root.resolve("repo-routing"))
-        val configDir = root.resolve("repo-routing/config")
+    fun writesRouteToTheFileOfTheirKey() =
+        runTest {
+            val repository = repositoryOver(root.resolve("repo-routing"))
+            val configDir = root.resolve("repo-routing/config")
 
-        repository.set(portableText, "https://sync.example.org")
-        assertTrue(File(configDir, "settings.preferences_pb").isFile)
-        assertFalse(File(configDir, "device_settings.preferences_pb").exists())
+            repository.set(portableText, "https://sync.example.org")
+            assertTrue(File(configDir, "settings.preferences_pb").isFile)
+            assertFalse(File(configDir, "device_settings.preferences_pb").exists())
 
-        repository.set(deviceText, "ungrouped")
-        assertTrue(File(configDir, "device_settings.preferences_pb").isFile)
-    }
+            repository.set(deviceText, "ungrouped")
+            assertTrue(File(configDir, "device_settings.preferences_pb").isFile)
+        }
 
     @Test
-    fun anUnwritablePathReportsWriteFailed() = runTest {
-        val brokenRoot = root.resolve("repo-broken").apply { mkdirs() }
-        // A regular file where the DataStore directory must go: every write must fail on IO.
-        File(brokenRoot, "config").writeText("in the way")
+    fun anUnwritablePathReportsWriteFailed() =
+        runTest {
+            val brokenRoot = root.resolve("repo-broken").apply { mkdirs() }
+            // A regular file where the DataStore directory must go: every write must fail on IO.
+            File(brokenRoot, "config").writeText("in the way")
 
-        val repository = repositoryOver(brokenRoot)
+            val repository = repositoryOver(brokenRoot)
 
-        assertEquals(Outcome.Failure(SettingsError.WriteFailed), repository.set(portableText, "x"))
-    }
+            assertEquals(Outcome.Failure(SettingsError.WriteFailed), repository.set(portableText, "x"))
+        }
 
     private fun TestScope.repositoryOver(dir: File): DataStoreSettingsRepository {
         if (!::scope.isInitialized) {
@@ -89,14 +94,15 @@ class DataStoreSettingsRepositoryTest : SettingsRepositoryContract() {
 
     /** Desktop [StoragePaths] over a temp root; DataStore files land under `config/`. */
     private fun storagePathsFor(root: File): StoragePaths {
-        val dirs = AppDirs(
-            data = root.resolve("data").toPath(),
-            config = root.resolve("config").toPath(),
-            cache = root.resolve("cache").toPath(),
-            state = root.resolve("state").toPath(),
-            logs = root.resolve("logs").toPath(),
-            downloadsDefault = root.resolve("downloads").toPath(),
-        )
+        val dirs =
+            AppDirs(
+                data = root.resolve("data").toPath(),
+                config = root.resolve("config").toPath(),
+                cache = root.resolve("cache").toPath(),
+                state = root.resolve("state").toPath(),
+                logs = root.resolve("logs").toPath(),
+                downloadsDefault = root.resolve("downloads").toPath(),
+            )
         return StoragePaths(dirs)
     }
 }

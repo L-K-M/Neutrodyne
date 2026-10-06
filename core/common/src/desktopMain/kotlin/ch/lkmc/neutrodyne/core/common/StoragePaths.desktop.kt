@@ -7,11 +7,12 @@ package ch.lkmc.neutrodyne.core.common
  * DataStore files → the config dir. Desktop has no backup exclusion — `noBackupDir` aliases the
  * data dir so excluded content still lands somewhere durable.
  */
-actual class StoragePaths(private val dirs: AppDirs) {
+actual class StoragePaths(
+    private val dirs: AppDirs,
+) {
     actual val filesDir: String = dirs.data.toString()
     actual val noBackupDir: String = dirs.data.toString()
     actual val cacheDir: String = dirs.cache.toString()
 
-    actual fun dataStoreFile(name: String): String =
-        dirs.config.resolve("$name.preferences_pb").toString()
+    actual fun dataStoreFile(name: String): String = dirs.config.resolve("$name.preferences_pb").toString()
 }

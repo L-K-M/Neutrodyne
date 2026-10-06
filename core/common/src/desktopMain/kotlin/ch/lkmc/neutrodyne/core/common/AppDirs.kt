@@ -53,7 +53,10 @@ data class AppDirs(
      * `:core:model`'s `DesktopOs` (01 module rules); values and names mirror it.
      */
     enum class DesktopOs {
-        WINDOWS, MACOS, LINUX;
+        WINDOWS,
+        MACOS,
+        LINUX,
+        ;
 
         companion object {
             /** Maps `os.name` onto the matrix; anything unrecognised resolves as Linux. */
@@ -97,22 +100,24 @@ data class AppDirs(
             env: Map<String, String> = System.getenv(),
             home: Path = Path.of(System.getProperty("user.home")),
             windowsLocalAppData: WindowsLocalAppData = WindowsLocalAppData { knownFolderLocalAppData() },
-        ): AppDirs = when (os) {
-            DesktopOs.WINDOWS -> resolveWindows(env, home, windowsLocalAppData)
-            DesktopOs.MACOS -> resolveMacOs(home)
-            DesktopOs.LINUX -> resolveLinux(env, home)
-        }
+        ): AppDirs =
+            when (os) {
+                DesktopOs.WINDOWS -> resolveWindows(env, home, windowsLocalAppData)
+                DesktopOs.MACOS -> resolveMacOs(home)
+                DesktopOs.LINUX -> resolveLinux(env, home)
+            }
 
         private fun resolveWindows(
             env: Map<String, String>,
             home: Path,
             windowsLocalAppData: WindowsLocalAppData,
         ): AppDirs {
-            val localAppData = env[LOCAL_APP_DATA]
-                ?.takeIf { WINDOWS_ABSOLUTE.containsMatchIn(it) }
-                ?.let(Path::of)
-                ?: windowsLocalAppData.resolve()
-                ?: error("$LOCAL_APP_DATA is unset or relative and the Windows known-folder lookup failed")
+            val localAppData =
+                env[LOCAL_APP_DATA]
+                    ?.takeIf { WINDOWS_ABSOLUTE.containsMatchIn(it) }
+                    ?.let(Path::of)
+                    ?: windowsLocalAppData.resolve()
+                    ?: error("$LOCAL_APP_DATA is unset or relative and the Windows known-folder lookup failed")
             val root = localAppData.resolve(APP_DIR_NAME)
             val state = root.resolve("Logs")
             return AppDirs(
@@ -139,8 +144,14 @@ data class AppDirs(
             )
         }
 
-        private fun resolveLinux(env: Map<String, String>, home: Path): AppDirs {
-            fun xdg(variable: String, defaultUnderHome: String): Path {
+        private fun resolveLinux(
+            env: Map<String, String>,
+            home: Path,
+        ): AppDirs {
+            fun xdg(
+                variable: String,
+                defaultUnderHome: String,
+            ): Path {
                 val value = env[variable]
                 return if (value != null && value.startsWith('/')) {
                     Path.of(value).resolve(LINUX_DIR_NAME)

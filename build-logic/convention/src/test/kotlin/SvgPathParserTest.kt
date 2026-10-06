@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Unlicense
 import org.junit.Assert.assertEquals
-
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -81,11 +80,12 @@ class SvgPathParserTest {
 
     @Test
     fun parseDocumentReadsTheSinglePathElement() {
-        val svg = """
+        val svg =
+            """
             <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10">
               <path fill="#000000" d="M0 0 L10 0 L10 10 Z"/>
             </svg>
-        """.trimIndent()
+            """.trimIndent()
 
         assertEquals(1, SvgPathParser.parseDocument(svg).subpaths.size)
         assertThrows<IllegalStateException> {

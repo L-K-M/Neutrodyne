@@ -65,9 +65,13 @@ class DesktopApplicationConventionPlugin : Plugin<Project> {
         // on a packaging host they use the pinned Temurin runtime instead (11 jlink modules)
         desktop.application {
             mainClass = "$BASE_PACKAGE.desktop.MainKt"
-            javaHome =
-                bundledRuntimeHome?.get()?.asFile?.resolve(hostTarget!!.homeSubdir)?.absolutePath
-                    ?: toolchainJdk25.get().metadata.installationPath.asFile.absolutePath
+            // Off the packaging matrix a missing JDK 25 must not fail configuration (the Android release
+            // container has only JDK 21; review 2026-10-06): the default then stays and only `run` fails
+            bundledRuntimeHome?.get()?.asFile?.resolve(hostTarget!!.homeSubdir)?.absolutePath
+                ?.let { javaHome = it }
+                ?: runCatching { toolchainJdk25.get().metadata.installationPath.asFile.absolutePath }
+                    .getOrNull()
+                    ?.let { javaHome = it }
             jvmArgs += desktopJvmOptions(hostTarget)
             // Compose resolves ProGuard (GPL-2.0, D3) through a detached configuration inside the release
             // task actions, so it never lands on a named configuration to scan. Disabling the release

@@ -8,8 +8,38 @@ import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 import org.gradle.kotlin.dsl.register
-import java.io.File
+import java.util.SortedSet
 import javax.xml.parsers.DocumentBuilderFactory
+
+private const val ANDROID_NS = "http://schemas.android.com/apk/res/android"
+
+/**
+ * All declaration forms a permission can reach the merged manifest through.
+ * `uses-permission-sdk-23` applies on every supported device (minSdk 26 >= 23).
+ */
+private val PERMISSION_TAGS = listOf("uses-permission", "uses-permission-sdk-23")
+
+/** ui-tooling's PreviewActivity, ui-test-manifest's ComponentActivity, androidx.test activities. */
+private val TOOLING_ACTIVITY =
+    Regex(
+        "androidx\\.compose\\.ui\\.(tooling|test)\\.|androidx\\.test\\.|" +
+            "androidx\\.activity\\.ComponentActivity|leakcanary",
+    )
+
+/** The manifest's declared `android:name` set across every supported permission tag. */
+internal fun org.w3c.dom.Document.permissionNames(): SortedSet<String> =
+    PERMISSION_TAGS
+        .flatMap { tag ->
+            val declared = getElementsByTagName(tag)
+            (0 until declared.length).map {
+                declared
+                    .item(it)
+                    .attributes
+                    .getNamedItemNS(ANDROID_NS, "name")
+                    ?.nodeValue
+            }
+        }.filterNotNull()
+        .toSortedSet()
 
 /**
  * `verifyManifestPermissions` (01 Gradle-side policy tasks, Manifest and permissions): the merged `release`
@@ -36,17 +66,7 @@ abstract class VerifyManifestPermissionsTask : DefaultTask() {
         val document = secureParser().parse(manifest)
         val problems = mutableListOf<String>()
 
-        val declared = document.getElementsByTagName("uses-permission")
-        val actual =
-            (0 until declared.length)
-                .map {
-                    declared
-                        .item(it)
-                        .attributes
-                        .getNamedItemNS(ANDROID_NS, "name")
-                        ?.nodeValue
-                }.filterNotNull()
-                .toSortedSet()
+        val actual = document.permissionNames()
         val expected =
             expectedPermissions
                 .get()
@@ -99,17 +119,6 @@ abstract class VerifyManifestPermissionsTask : DefaultTask() {
 
     private fun org.w3c.dom.Node.attributeTrue(name: String): Boolean =
         attributes?.getNamedItemNS(ANDROID_NS, name)?.nodeValue == "true"
-
-    private companion object {
-        const val ANDROID_NS = "http://schemas.android.com/apk/res/android"
-
-        /** ui-tooling's PreviewActivity, ui-test-manifest's ComponentActivity, androidx.test activities. */
-        val TOOLING_ACTIVITY =
-            Regex(
-                "androidx\\.compose\\.ui\\.(tooling|test)\\.|androidx\\.test\\.|" +
-                    "androidx\\.activity\\.ComponentActivity|leakcanary",
-            )
-    }
 }
 
 /** Wires `verifyManifestPermissions` to the release variant's `SingleArtifact.MERGED_MANIFEST` (CC-safe provider). */

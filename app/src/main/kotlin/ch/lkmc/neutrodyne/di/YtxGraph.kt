@@ -16,6 +16,8 @@ interface YtxGraph {
 
     @DependencyGraph.Factory
     fun interface Factory {
-        fun create(@Provides application: Application): YtxGraph
+        fun create(
+            @Provides application: Application,
+        ): YtxGraph
     }
 }

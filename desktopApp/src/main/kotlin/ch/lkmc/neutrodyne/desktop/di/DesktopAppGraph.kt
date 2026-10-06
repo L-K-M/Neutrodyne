@@ -8,8 +8,8 @@ import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.CrashContext
 import ch.lkmc.neutrodyne.core.common.CrashReporter
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
-import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.youtube.DesktopYouTubeBindingsModule
 import dev.zacsweers.metro.Binds
@@ -67,8 +67,9 @@ internal fun createDesktopGraph(
     dirs: AppDirs,
     buildInfo: BuildInfo,
     crashReporter: DesktopCrashReporter,
-): DesktopAppGraph = createGraphFactory<DesktopAppGraph.Factory>().create(
-    dirs = dirs,
-    buildInfo = buildInfo,
-    crashReporter = crashReporter,
-)
+): DesktopAppGraph =
+    createGraphFactory<DesktopAppGraph.Factory>().create(
+        dirs = dirs,
+        buildInfo = buildInfo,
+        crashReporter = crashReporter,
+    )

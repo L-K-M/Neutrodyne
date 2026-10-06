@@ -10,7 +10,11 @@ import androidx.test.runner.AndroidJUnitRunner
  * heap dumps stay off in instrumented runs (09 Gradle Managed Devices).
  */
 class NeutrodyneTestRunner : AndroidJUnitRunner() {
-    override fun newApplication(cl: ClassLoader?, className: String?, context: Context?): Application {
+    override fun newApplication(
+        cl: ClassLoader?,
+        className: String?,
+        context: Context?,
+    ): Application {
         System.setProperty(NeutrodyneApplication.INSTRUMENTED_TEST_PROPERTY, "true")
         return super.newApplication(cl, className, context)
     }

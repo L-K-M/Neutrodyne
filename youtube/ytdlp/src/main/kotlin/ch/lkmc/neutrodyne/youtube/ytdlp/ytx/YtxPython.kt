@@ -12,8 +12,9 @@ import com.chaquo.python.android.AndroidPlatform
  * `selftest`. M9a turns this into `YtxPython` proper (sys.path over `EngineStore.hostLibDir()`,
  * `compileall` on first import, `NeutrodyneOkHttpRH`, one `YoutubeDL` per worker and `hl`).
  */
-internal class YtxPython(context: Context) {
-
+internal class YtxPython(
+    context: Context,
+) {
     private val appContext = context.applicationContext
 
     @Volatile
@@ -29,8 +30,11 @@ internal class YtxPython(context: Context) {
         if (!Python.isStarted()) {
             Python.start(AndroidPlatform(appContext))
         }
-        val started = Python.getInstance().also { python = it }
+        val started = Python.getInstance()
         started.getModule(SHIM_PACKAGE) // throws PyException if the packaged shim is absent
+
+        // Cache only after the shim imported, so a failed import is retried, never reported ready
+        python = started
         return started
     }
 

@@ -26,7 +26,10 @@ public interface AppNavigator {
     public fun resetTab(key: TopLevelKey)
 
     /** Deep links: selects [tab] and replaces its stack above the root with [stack]. */
-    public fun open(tab: TopLevelKey, stack: List<NavKey>)
+    public fun open(
+        tab: TopLevelKey,
+        stack: List<NavKey>,
+    )
 
     /**
      * List-to-detail navigation: when the pane layout has two or more partitions and the top entry

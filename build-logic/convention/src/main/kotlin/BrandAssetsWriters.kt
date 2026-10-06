@@ -67,7 +67,10 @@ internal object IcoWriter {
 }
 
 /** One ICNS entry: a four-character type code (for example `ic07`) and its PNG payload. */
-internal data class IcnsEntry(val type: String, val image: BufferedImage)
+internal data class IcnsEntry(
+    val type: String,
+    val image: BufferedImage,
+)
 
 /**
  * Minimal ICNS writer with PNG-compressed entries (01 Brand-asset generator): the `icns` magic, the total

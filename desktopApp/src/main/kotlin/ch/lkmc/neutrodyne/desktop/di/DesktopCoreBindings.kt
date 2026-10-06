@@ -61,14 +61,15 @@ object DesktopCoreBindings {
         buildInfo: BuildInfo,
         crashReporter: DesktopCrashReporter,
     ): CoroutineScope {
-        val handler = CoroutineExceptionHandler { _, throwable ->
-            Log.e(TAG, throwable) { "uncaught failure in the application scope" }
-            if (buildInfo.debug) {
-                // Debug builds crash fast (01 Errors); the file records why, halt keeps the exit unclean.
-                crashReporter.recordUnhandled(Thread.currentThread(), throwable)
-                Runtime.getRuntime().halt(DEBUG_CRASH_EXIT)
+        val handler =
+            CoroutineExceptionHandler { _, throwable ->
+                Log.e(TAG, throwable) { "uncaught failure in the application scope" }
+                if (buildInfo.debug) {
+                    // Debug builds crash fast (01 Errors); the file records why, halt keeps the exit unclean.
+                    crashReporter.recordUnhandled(Thread.currentThread(), throwable)
+                    Runtime.getRuntime().halt(DEBUG_CRASH_EXIT)
+                }
             }
-        }
         return CoroutineScope(SupervisorJob() + dispatcher + handler)
     }
 

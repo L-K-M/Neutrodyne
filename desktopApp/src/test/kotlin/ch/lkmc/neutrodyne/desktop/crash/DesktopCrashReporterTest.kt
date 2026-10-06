@@ -8,11 +8,11 @@ import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
 import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
 import com.google.common.truth.Truth.assertThat
+import org.junit.Test
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
 import java.util.regex.Pattern
-import org.junit.Test
 
 /**
  * [DesktopCrashReporter] per 11 Crash files and the email dialog / 09 Crash reporting: the crash
@@ -28,7 +28,7 @@ class DesktopCrashReporterTest {
 
     @Test
     fun `an uncaught exception writes the field set, redacted`() {
-        recentLogs.log(LogLevel.INFO, "Feed", "refresh of https://casts.example.org/episodes/feed.xml done", null)
+        recentLogs.log(LogLevel.INFO, "Feed", "refresh of https://casts.example.org/episodes/feed.xml done")
         reporter.put(CrashKey.SCREEN, "PodcastsTab/PodcastKey")
         reporter.put(CrashKey.SYNC, "linked, https://sync.example.net:8443/devices?token=nd_s3cret")
 

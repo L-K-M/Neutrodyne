@@ -10,9 +10,15 @@ import java.util.Locale
  * (01 Brand-asset generator: `M`, `L`, `C`, `Z` only, so no SVG library is needed).
  */
 internal sealed interface SvgSegment {
-    data class MoveTo(val x: Double, val y: Double) : SvgSegment
+    data class MoveTo(
+        val x: Double,
+        val y: Double,
+    ) : SvgSegment
 
-    data class LineTo(val x: Double, val y: Double) : SvgSegment
+    data class LineTo(
+        val x: Double,
+        val y: Double,
+    ) : SvgSegment
 
     data class CurveTo(
         val x1: Double,
@@ -27,10 +33,14 @@ internal sealed interface SvgSegment {
 }
 
 /** A series of commands starting with `M`; the nonzero fill rule unions the silhouette's clockwise subpaths. */
-internal data class SvgSubpath(val segments: List<SvgSegment>)
+internal data class SvgSubpath(
+    val segments: List<SvgSegment>,
+)
 
 /** A parsed `d` attribute: every subpath of the silhouette in source-canvas coordinates. */
-internal data class SvgPath(val subpaths: List<SvgSubpath>) {
+internal data class SvgPath(
+    val subpaths: List<SvgSubpath>,
+) {
     /** Axis-aligned bounds over every endpoint and cubic control point (a slight superset of the true bounds). */
     fun bounds(): Bounds {
         var minX = Double.POSITIVE_INFINITY
@@ -46,15 +56,20 @@ internal data class SvgPath(val subpaths: List<SvgSubpath>) {
                         xs = doubleArrayOf(segment.x)
                         ys = doubleArrayOf(segment.y)
                     }
+
                     is SvgSegment.LineTo -> {
                         xs = doubleArrayOf(segment.x)
                         ys = doubleArrayOf(segment.y)
                     }
+
                     is SvgSegment.CurveTo -> {
                         xs = doubleArrayOf(segment.x1, segment.x2, segment.x)
                         ys = doubleArrayOf(segment.y1, segment.y2, segment.y)
                     }
-                    SvgSegment.Close -> continue
+
+                    SvgSegment.Close -> {
+                        continue
+                    }
                 }
                 for (x in xs) {
                     minX = minOf(minX, x)
@@ -76,11 +91,21 @@ internal data class SvgPath(val subpaths: List<SvgSubpath>) {
         for (subpath in subpaths) {
             for (segment in subpath.segments) {
                 when (segment) {
-                    is SvgSegment.MoveTo -> shape.moveTo(segment.x, segment.y)
-                    is SvgSegment.LineTo -> shape.lineTo(segment.x, segment.y)
-                    is SvgSegment.CurveTo ->
+                    is SvgSegment.MoveTo -> {
+                        shape.moveTo(segment.x, segment.y)
+                    }
+
+                    is SvgSegment.LineTo -> {
+                        shape.lineTo(segment.x, segment.y)
+                    }
+
+                    is SvgSegment.CurveTo -> {
                         shape.curveTo(segment.x1, segment.y1, segment.x2, segment.y2, segment.x, segment.y)
-                    SvgSegment.Close -> shape.closePath()
+                    }
+
+                    SvgSegment.Close -> {
+                        shape.closePath()
+                    }
                 }
             }
             shape.closePath()
@@ -92,27 +117,41 @@ internal data class SvgPath(val subpaths: List<SvgSubpath>) {
      * The path as Android `pathData` in a target viewport: absolute `M`/`L`/`C`/`Z`, every coordinate passed
      * through [transform] and formatted with [decimals] fixed digits so regeneration is byte-identical.
      */
-    fun toPathData(transform: AffineTransform, decimals: Int): String {
+    fun toPathData(
+        transform: AffineTransform,
+        decimals: Int,
+    ): String {
         val format = StringBuilder()
         for (subpath in subpaths) {
             for (segment in subpath.segments) {
                 when (segment) {
-                    is SvgSegment.MoveTo -> format.append(point("M", segment.x, segment.y, transform, decimals))
-                    is SvgSegment.LineTo -> format.append(point("L", segment.x, segment.y, transform, decimals))
-                    is SvgSegment.CurveTo -> format.append(
-                        point(
-                            "C",
-                            segment.x1,
-                            segment.y1,
-                            transform,
-                            decimals,
-                            segment.x2,
-                            segment.y2,
-                            segment.x,
-                            segment.y,
-                        ),
-                    )
-                    SvgSegment.Close -> format.append("Z")
+                    is SvgSegment.MoveTo -> {
+                        format.append(point("M", segment.x, segment.y, transform, decimals))
+                    }
+
+                    is SvgSegment.LineTo -> {
+                        format.append(point("L", segment.x, segment.y, transform, decimals))
+                    }
+
+                    is SvgSegment.CurveTo -> {
+                        format.append(
+                            point(
+                                "C",
+                                segment.x1,
+                                segment.y1,
+                                transform,
+                                decimals,
+                                segment.x2,
+                                segment.y2,
+                                segment.x,
+                                segment.y,
+                            ),
+                        )
+                    }
+
+                    SvgSegment.Close -> {
+                        format.append("Z")
+                    }
                 }
                 format.append(' ')
             }
@@ -133,7 +172,12 @@ internal data class SvgPath(val subpaths: List<SvgSubpath>) {
         var y = firstY
         var index = 0
         while (true) {
-            val point = transform.transform(java.awt.geom.Point2D.Double(x, y), null)
+            val point =
+                transform.transform(
+                    java.awt.geom.Point2D
+                        .Double(x, y),
+                    null,
+                )
             out.append(number(point.x, decimals)).append(',').append(number(point.y, decimals))
             if (index >= rest.size) break
             out.append(' ') // a separator between coordinate pairs keeps the numbers unambiguous
@@ -144,12 +188,19 @@ internal data class SvgPath(val subpaths: List<SvgSubpath>) {
         return out.toString()
     }
 
-    private fun number(value: Double, decimals: Int): String =
-        String.format(Locale.ROOT, "%.${decimals}f", value)
+    private fun number(
+        value: Double,
+        decimals: Int,
+    ): String = String.format(Locale.ROOT, "%.${decimals}f", value)
 }
 
 /** Axis-aligned bounding box in source pixels; [diagonal] drives the 66-dp safe-circle fit (08 Brand assets). */
-internal data class Bounds(val minX: Double, val minY: Double, val maxX: Double, val maxY: Double) {
+internal data class Bounds(
+    val minX: Double,
+    val minY: Double,
+    val maxX: Double,
+    val maxY: Double,
+) {
     val width: Double get() = maxX - minX
 
     val height: Double get() = maxY - minY
@@ -189,15 +240,22 @@ internal object SvgPathParser {
                         }
                     }
                 }
-                'L' -> for (pair in scanner.readNumberGroups(2)) {
-                    current?.let { it.add(SvgSegment.LineTo(pair[0], pair[1])) }
-                        ?: error("line-to before any moveto")
+
+                'L' -> {
+                    for (pair in scanner.readNumberGroups(2)) {
+                        current?.let { it.add(SvgSegment.LineTo(pair[0], pair[1])) }
+                            ?: error("line-to before any moveto")
+                    }
                 }
-                'C' -> for (sextet in scanner.readNumberGroups(6)) {
-                    current?.let {
-                        it.add(SvgSegment.CurveTo(sextet[0], sextet[1], sextet[2], sextet[3], sextet[4], sextet[5]))
-                    } ?: error("curve-to before any moveto")
+
+                'C' -> {
+                    for (sextet in scanner.readNumberGroups(6)) {
+                        current?.let {
+                            it.add(SvgSegment.CurveTo(sextet[0], sextet[1], sextet[2], sextet[3], sextet[4], sextet[5]))
+                        } ?: error("curve-to before any moveto")
+                    }
                 }
+
                 'Z' -> {
                     current?.let {
                         it.add(SvgSegment.Close)
@@ -205,7 +263,10 @@ internal object SvgPathParser {
                     } ?: error("closepath before any moveto")
                     current = null
                 }
-                else -> error("unsupported path command '$command' (the silhouette uses M, L, C, Z only)")
+
+                else -> {
+                    error("unsupported path command '$command' (the silhouette uses M, L, C, Z only)")
+                }
             }
         }
         current?.let { subpaths.add(SvgSubpath(it)) }
@@ -220,7 +281,9 @@ internal object SvgPathParser {
         return parse(matches[0].groupValues[1])
     }
 
-    private class Scanner(private val text: String) {
+    private class Scanner(
+        private val text: String,
+    ) {
         private var index = 0
 
         /** Skips whitespace and commas; returns the next command letter without consuming it, or null at the end. */

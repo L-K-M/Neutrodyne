@@ -352,7 +352,9 @@ for n in z.namelist():
             if i.endswith(".so"):
                 emit(inner.read(i), f"{n}!{i}")
 with open(listfile, "w") as f:
-    f.write("\n".join(rows))
+    # one record per line, final line included — `while read` below drops an
+    # unterminated last record, which would exempt the last library entirely
+    f.write("".join(f"{row}\n" for row in rows))
 PYEOF
     local bad=0 f orig out line
     while IFS=$'\t' read -r f orig; do

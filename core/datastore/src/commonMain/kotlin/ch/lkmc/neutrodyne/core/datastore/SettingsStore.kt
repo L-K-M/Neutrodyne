@@ -11,5 +11,6 @@ import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
  * keys): what a backup carries and sync may. Implementation modules may inject it directly for
  * their own `PORTABLE` keys.
  */
-class SettingsStore internal constructor(dataStore: DataStore<Preferences>) :
-    SettingStore by SettingStoreImpl(SettingsFile.PORTABLE, dataStore)
+class SettingsStore internal constructor(
+    dataStore: DataStore<Preferences>,
+) : SettingStore by SettingStoreImpl(SettingsFile.PORTABLE, dataStore)

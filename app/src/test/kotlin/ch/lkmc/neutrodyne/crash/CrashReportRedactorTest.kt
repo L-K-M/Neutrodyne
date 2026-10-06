@@ -28,10 +28,11 @@ class CrashReportRedactorTest {
 
     @Test
     fun customDataKeepsOnlyAllowListedKeysRedacted() {
-        val custom = JSONObject()
-            .put(CrashKey.SCREEN.name, "FeedsKey")
-            .put(CrashKey.SYNC.name, "failed for $FEED_WITH_SECRETS")
-            .put("DEVICE_ID", "abc")
+        val custom =
+            JSONObject()
+                .put(CrashKey.SCREEN.name, "FeedsKey")
+                .put(CrashKey.SYNC.name, "failed for $FEED_WITH_SECRETS")
+                .put("DEVICE_ID", "abc")
         val data = CrashReportData()
         data.put(ReportField.CUSTOM_DATA, custom)
 
@@ -41,6 +42,16 @@ class CrashReportRedactorTest {
         assertThat(result.has("DEVICE_ID")).isFalse()
         assertThat(result.getString(CrashKey.SCREEN.name)).isEqualTo("FeedsKey")
         assertThat(result.getString(CrashKey.SYNC.name)).doesNotContain(TOKEN)
+    }
+
+    @Test
+    fun stackTraceLosesSecretsBehindIpv6Hosts() {
+        val data = CrashReportData()
+        data.put(ReportField.STACK_TRACE, "IOException: https://[2001:db8::1]/rss?token=$TOKEN")
+
+        CrashReportRedactor.redact(data)
+
+        assertThat(data.getString(ReportField.STACK_TRACE)).doesNotContain(TOKEN)
     }
 
     private companion object {

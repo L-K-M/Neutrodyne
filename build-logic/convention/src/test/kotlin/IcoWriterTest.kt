@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Unlicense
-import java.awt.image.BufferedImage
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
-
 import org.junit.Test
+import java.awt.image.BufferedImage
 
 /** Header and directory bytes of our PNG-compressed ICO writer (01 Brand-asset generator; ICO is little-endian). */
 class IcoWriterTest {
@@ -68,9 +67,13 @@ class IcoWriterTest {
     }
 
     /** little-endian reads, as the ICO format defines them */
-    private fun u16(bytes: ByteArray, offset: Int): Int =
-        ((bytes[offset + 1].toInt() and 0xFF) shl 8) or (bytes[offset].toInt() and 0xFF)
+    private fun u16(
+        bytes: ByteArray,
+        offset: Int,
+    ): Int = ((bytes[offset + 1].toInt() and 0xFF) shl 8) or (bytes[offset].toInt() and 0xFF)
 
-    private fun u32(bytes: ByteArray, offset: Int): Int =
-        (u16(bytes, offset + 2) shl 16) or u16(bytes, offset)
+    private fun u32(
+        bytes: ByteArray,
+        offset: Int,
+    ): Int = (u16(bytes, offset + 2) shl 16) or u16(bytes, offset)
 }

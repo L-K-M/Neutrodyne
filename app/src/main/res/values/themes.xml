@@ -11,6 +11,7 @@
 
   <style name="Theme.Neutrodyne.Starting" parent="Theme.SplashScreen">
     <item name="windowSplashScreenBackground">@color/brand_navy</item>
+    <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_neutrodyne</item>
     <item name="postSplashScreenTheme">@style/Theme.Neutrodyne</item>
   </style>
 </resources>

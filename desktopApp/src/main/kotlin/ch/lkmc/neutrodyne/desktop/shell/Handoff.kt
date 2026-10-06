@@ -38,18 +38,25 @@ data class HandoffRequest(
             activate: Boolean = true,
             json: Json = SHELL_JSON,
         ): HandoffRequest {
-            var request = HandoffRequest(
-                token = token,
-                args = args.asSequence().take(MAX_ARGS).map { it.take(MAX_ARG_CHARS) }.toList(),
-                cwd = cwd,
-                activate = activate,
-            )
+            var request =
+                HandoffRequest(
+                    token = token,
+                    args =
+                        args
+                            .asSequence()
+                            .take(MAX_ARGS)
+                            .map { it.take(MAX_ARG_CHARS) }
+                            .toList(),
+                    cwd = cwd,
+                    activate = activate,
+                )
             while (request.serialisedBytes(json) + 1 > MAX_LINE_BYTES) {
-                request = when {
-                    request.args.isNotEmpty() -> request.copy(args = request.args.dropLast(1))
-                    request.cwd.isNotEmpty() -> request.copy(cwd = request.cwd.take(request.cwd.length / 2))
-                    else -> return request // token alone exceeds the cap: it cannot happen with a 43-char token
-                }
+                request =
+                    when {
+                        request.args.isNotEmpty() -> request.copy(args = request.args.dropLast(1))
+                        request.cwd.isNotEmpty() -> request.copy(cwd = request.cwd.take(request.cwd.length / 2))
+                        else -> return request // token alone exceeds the cap: it cannot happen with a 43-char token
+                    }
             }
             return request
         }
@@ -58,7 +65,11 @@ data class HandoffRequest(
 
 /** The owner's answer; `ok = false` is reserved for future refusals. */
 @Serializable
-data class HandoffResponse(val ok: Boolean, val pid: Long, val versionName: String)
+data class HandoffResponse(
+    val ok: Boolean,
+    val pid: Long,
+    val versionName: String,
+)
 
 /** Whether the owner accepted a hand-off. */
 sealed interface HandoffOutcome {

@@ -13,6 +13,7 @@ import dev.zacsweers.metro.Multibinds
  */
 interface AppInitializer {
     val order: Int
+
     suspend fun run()
 }
 
@@ -23,9 +24,10 @@ interface AppInitializer {
  * fully-qualified class name; a failure is logged and the rest still run; cancellation propagates.
  */
 suspend fun runInitializers(initializers: Set<AppInitializer>) {
-    val ordered = initializers.sortedWith(
-        compareBy({ it.order }, { it::class.qualifiedName ?: it::class.toString() }),
-    )
+    val ordered =
+        initializers.sortedWith(
+            compareBy({ it.order }, { it::class.qualifiedName ?: it::class.toString() }),
+        )
     for (initializer in ordered) {
         val name = initializer::class.qualifiedName ?: initializer::class.toString()
         suspendRunCatching { initializer.run() }

@@ -11,14 +11,14 @@ import ch.lkmc.neutrodyne.desktop.di.createDesktopGraph
 import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.appDirsUnder
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
-import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Smoke mode (11 Smoke mode): `-Dneutrodyne.smoke=true` is the only test entry point in a
@@ -30,7 +30,9 @@ import kotlinx.serialization.json.JsonPrimitive
  * FFmpeg, `ndmedia`, the engine child, the D-Bus step, the AOT-cache flag and the RSS line need
  * later milestones — the JSON lists them as pending (11 Delivery by milestone).
  */
-internal class SmokeMode(private val output: (String) -> Unit = ::println) {
+internal class SmokeMode(
+    private val output: (String) -> Unit = ::println,
+) {
     private val timings = LinkedHashMap<String, Long>()
 
     fun run(): Int {
@@ -42,10 +44,11 @@ internal class SmokeMode(private val output: (String) -> Unit = ::println) {
             root = tempRoot
             val dirs = step("appDirs") { appDirsUnder(tempRoot).also { it.ensureCreated() } }
             val buildInfo = step("buildInfo") { BuildInfoLoader.load() }
-            val graph = step("graph") {
-                val crashReporter = DesktopCrashReporter(dirs, buildInfo, DesktopClock, RecentLogBuffer())
-                createDesktopGraph(dirs, buildInfo, crashReporter)
-            }
+            val graph =
+                step("graph") {
+                    val crashReporter = DesktopCrashReporter(dirs, buildInfo, DesktopClock, RecentLogBuffer())
+                    createDesktopGraph(dirs, buildInfo, crashReporter)
+                }
             step("initializers") { runBlocking { runInitializers(graph.initializers) } }
 
             output("SMOKE ${smokeJson(buildInfo, timings, failure = null)}")
@@ -62,17 +65,21 @@ internal class SmokeMode(private val output: (String) -> Unit = ::println) {
 
     /** A daemon thread that ends a hanging run (11: the watchdog exits 1 after 60 s). */
     private fun armWatchdog() {
-        val watchdog = Thread({
-            sleepQuietly(WATCHDOG_TIMEOUT)
-            System.err.println("smoke run exceeded $WATCHDOG_TIMEOUT; exiting")
-            Runtime.getRuntime().halt(EXIT_FAILED_STEP)
-        }, THREAD_NAME)
+        val watchdog =
+            Thread({
+                sleepQuietly(WATCHDOG_TIMEOUT)
+                System.err.println("smoke run exceeded $WATCHDOG_TIMEOUT; exiting")
+                Runtime.getRuntime().halt(EXIT_FAILED_STEP)
+            }, THREAD_NAME)
         watchdog.isDaemon = true
         watchdog.start()
     }
 
     /** Runs [block], recording its wall time under [name] — also when it fails. */
-    private fun <T> step(name: String, block: () -> T): T {
+    private fun <T> step(
+        name: String,
+        block: () -> T,
+    ): T {
         val mark = TimeSource.Monotonic.markNow()
         return try {
             block()
@@ -106,9 +113,18 @@ internal class SmokeMode(private val output: (String) -> Unit = ::println) {
         const val SYSTEM_PROPERTY = "neutrodyne.smoke"
 
         /** Steps 11 defines that this milestone cannot run yet (11 Smoke mode; PB24's window). */
-        internal val PENDING_STEPS = listOf(
-            "database", "window", "destinations", "ffmpeg", "ndmedia", "engine", "dbus", "aotCache", "rss",
-        )
+        internal val PENDING_STEPS =
+            listOf(
+                "database",
+                "window",
+                "destinations",
+                "ffmpeg",
+                "ndmedia",
+                "engine",
+                "dbus",
+                "aotCache",
+                "rss",
+            )
 
         /** `-Dneutrodyne.smoke` is read exactly like this (11 Start-up sequence step 1). */
         fun isEnabled(property: String?): Boolean = property == "true"
@@ -120,17 +136,18 @@ internal class SmokeMode(private val output: (String) -> Unit = ::println) {
             failure: String?,
         ): String {
             val desktop = buildInfo?.desktop
-            val json = buildMap {
-                put("versionName", JsonPrimitive(buildInfo?.versionName ?: "unknown"))
-                put("versionCode", JsonPrimitive(buildInfo?.versionCode))
-                put("installKind", JsonPrimitive(desktop?.installKind?.wire ?: "unknown"))
-                put("javaVendor", JsonPrimitive(System.getProperty("java.vendor")))
-                put("javaVendorVersion", JsonPrimitive(System.getProperty("java.vendor.version")))
-                put("javaRuntimeVersion", JsonPrimitive(System.getProperty("java.runtime.version")))
-                put("steps", JsonObject(timings.mapValues { JsonPrimitive(it.value) }))
-                put("pending", JsonPrimitive(PENDING_STEPS.joinToString(",")))
-                if (failure != null) put("failed", JsonPrimitive(failure))
-            }
+            val json =
+                buildMap {
+                    put("versionName", JsonPrimitive(buildInfo?.versionName ?: "unknown"))
+                    put("versionCode", JsonPrimitive(buildInfo?.versionCode))
+                    put("installKind", JsonPrimitive(desktop?.installKind?.wire ?: "unknown"))
+                    put("javaVendor", JsonPrimitive(System.getProperty("java.vendor")))
+                    put("javaVendorVersion", JsonPrimitive(System.getProperty("java.vendor.version")))
+                    put("javaRuntimeVersion", JsonPrimitive(System.getProperty("java.runtime.version")))
+                    put("steps", JsonObject(timings.mapValues { JsonPrimitive(it.value) }))
+                    put("pending", JsonPrimitive(PENDING_STEPS.joinToString(",")))
+                    if (failure != null) put("failed", JsonPrimitive(failure))
+                }
             return JsonObject(json).toString()
         }
     }

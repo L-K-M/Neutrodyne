@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<!-- The notification small icon is generated in M0b (08 Brand assets) and first used by the playback and download
+     notifications (M4, M6); keep it until then so resource shrinking and Lint do not drop it. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+  tools:keep="@drawable/ic_stat_neutrodyne" />

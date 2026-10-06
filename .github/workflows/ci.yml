@@ -33,6 +33,24 @@ env:
   LANG: C.UTF-8
 
 jobs:
+  docs:
+    name: Documentation checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+      - name: Check links, anchors, fences and tables
+        run: python3 tools/doccheck/checkdocs.py .
+      - name: Parse every Mermaid diagram
+        run: |
+          npm --prefix tools/doccheck install --no-save mermaid@11 jsdom@25
+          node tools/doccheck/mmdcheck.mjs .
+
   static:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -53,19 +71,25 @@ jobs:
         with:
           cache-provider: basic
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
-      # TODO(M0a.x/M0b): fold the remaining 09 `static` tasks in as their
-      # milestones land — spotlessCheck, assertModuleGraph,
-      # verifyDependencyPolicy, :app:verifyManifestPermissions, checkSpdxHeaders,
-      # checkBannedApis, checkBrandAssets, checkTranslations,
-      # :youtube:ytdlp:checkPythonLicences, :youtube:ytdlp-desktop:checkPythonLicences,
-      # :playback:native:checkNativeLicences, :youtube:ytdlp:verifyBundledYtDlp
-      # --continue; clang-format over playback/native/src/native/ (MD0); detekt
-      # SARIF upload with continue-on-error (non-blocking until a stable detekt
+      # Every implemented 09 `static` gate runs here explicitly — attaching them
+      # to `check` alone never ran them in CI (finding: policy gates must be
+      # invoked, not just wired). Still TODO as their milestones land:
+      # checkBrandAssets (M0b), checkTranslations, :playback:native:checkNativeLicences
+      # (MD0), clang-format over playback/native/src/native/ (MD0), detekt SARIF
+      # upload with continue-on-error (non-blocking until a stable detekt
       # supports this toolchain).
       - name: KGP assertion (PLAN M0 AC3)
-        run: ./gradlew -q :app:buildEnvironment | grep -E 'kotlin-gradle-plugin:.*2\.4\.20'
+        # The root project's buildEnvironment: plugins load through the included build, so :app's lists none (01 S1)
+        run: ./gradlew -q buildEnvironment | grep -E 'kotlin-gradle-plugin:.*2\.4\.20'
       - name: Static checks (M0a)
-        run: ./gradlew :app:lintRelease :app:licenseeAndroidRelease :desktopApp:licensee :sync:server:licensee --continue
+        run: >-
+          ./gradlew spotlessCheck :app:lintRelease assertModuleGraph
+          :app:licenseeRelease :desktopApp:licensee :sync:server:licensee
+          verifyDependencyPolicy :app:verifyManifestPermissions checkSpdxHeaders
+          checkBannedApis :youtube:ytdlp:checkPythonLicences
+          :youtube:ytdlp-desktop:checkPythonLicences
+          :youtube:ytdlp:verifyBundledYtDlp :youtube:ytdlp-desktop:verifyBundledYtDlp
+          --continue
       - name: Frozen schemas
         run: scripts/ci/check-frozen-schemas.sh
 
@@ -192,6 +216,9 @@ jobs:
         with:
           path: ~/.android/avd/gradle-managed
           key: gmd-ci-${{ hashFiles('**/build.gradle.kts', 'gradle/libs.versions.toml') }}
+      # The runner image no longer ships the emulator package; GMD needs it to boot devices
+      - name: Install the Android emulator
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools > /dev/null
       # GMD `ci` group (API 26 + 36, debug) — the group task resolves in every
       # module that defines it (:app plus the opted-in device-test modules such
       # as :core:database; 09, Unverified KMP task name).
