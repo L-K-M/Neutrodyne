@@ -18,7 +18,7 @@ package ch.lkmc.neutrodyne.core.common
  * 5. Query parameter names are kept, every value becomes `…` (`token=abc` → `token=…`).
  * 6. The fragment is dropped, `#` included.
  * 7. In free text, `scheme:` runs with scheme ∈ {http, https, feed, pcast, podcast, itpc} are
- *    redacted; the feed-family schemes wrap an inner http(s) URL, which recurses.
+ *    redacted; feed-family wrappers (`feed:podcast:https://…`) are peeled to the inner URL.
  * 8. Sensitive header values in free text (`Authorization: Basic abc`, `Cookie: a=b`) are masked
  *    wholesale — "never log `Authorization`/`Cookie` values, credentials, tokens or API keys".
  * 9. Idempotent: `url(url(x)) == url(x)`.
@@ -39,17 +39,8 @@ object Redactor {
     /** RFC 3986 scheme, anchored at the start of the string. */
     private val SCHEME = Regex("""^([A-Za-z][A-Za-z0-9+.-]*):""")
 
-    /**
-     * A `scheme:run` inside free text — stops at whitespace and obvious delimiters. A bracketed
-     * IPv6 literal belongs to the run only as a host, right after `//` or a user-info `@`
-     * (`https://alice:pass@[2001:db8::1]/rss?token=…`); any other bracket ends the run, so a label
-     * cannot swallow a bracketed URL (`URL:[https://…]`). The run needs at least one character, so
-     * a bare scheme word ("expected https: here") stays prose (reviews 2026-10-06).
-     */
-    private val URL_IN_TEXT =
-        Regex(
-            """[A-Za-z][A-Za-z0-9+.-]*:(?:[^\s"'<>\[\]{}|\\^`]|(?<=//|@)\[[0-9A-Fa-f:.]+(?:%[\w.~-]+)?\])+""",
-        )
+    /** Characters that always end a URL run in free text: whitespace aside, RFC 3986 never allows them raw. */
+    private const val RUN_DELIMITERS = "\"<>{}|\\^`"
 
     /** Sentence punctuation that clings to a URL at the end of free text ("…see https://a/b.") */
     private val TRAILING_PUNCT = charArrayOf('.', ',', ';', ':', '!', '?', '\'', '"')
@@ -68,44 +59,147 @@ object Redactor {
     fun url(raw: String): String {
         // An earlier pass's marker (or any non-URL placeholder) must not nest inside a new marker.
         if (raw.startsWith(UNPARSABLE_PREFIX)) return raw
-        val schemeMatch = SCHEME.find(raw) ?: return unparsable(raw)
-        val scheme = schemeMatch.groupValues[1]
-        val rest = raw.substring(schemeMatch.range.last + 1)
-        if (rest.isEmpty()) return unparsable(raw)
 
-        if (rest.startsWith("//")) return redactHierarchical(scheme, rest.substring(2))
-        if (startsHierarchicalUrl(rest)) return "$scheme:${url(rest)}"
-        return "$scheme:${redactTail(rest)}"
-    }
+        // Feed-family wrappers peel off one by one (`feed:podcast:https://…`), iteratively so a
+        // long chain cannot exhaust the stack.
+        val wrappers = StringBuilder()
+        var rest = raw
+        while (true) {
+            val scheme = SCHEME.find(rest)?.groupValues?.get(1) ?: return unparsable(raw)
+            rest = rest.substring(scheme.length + 1)
+            if (rest.isEmpty()) return unparsable(raw)
 
-    /** Redacts every URL run and sensitive-header value inside free text. */
-    fun text(s: String): String {
-        val urlsRedacted =
-            URL_IN_TEXT.replace(s) { match ->
-                val candidate = match.value
-                val colon = candidate.indexOf(':')
-                val scheme = candidate.substring(0, colon).lowercase()
-                // A label glued to a URL ("Error:https://u:p@h/…") is no scheme of ours: keep the
-                // label and scan the rest again, so the URL inside is still redacted.
-                if (scheme !in TEXT_SCHEMES) {
-                    return@replace candidate.substring(0, colon + 1) + text(candidate.substring(colon + 1))
-                }
-
-                var trimmed = candidate.trimEnd(*TRAILING_PUNCT)
-                // An unmatched ')' is a prose paren, not part of the URL ("(see https://a/f)").
-                while (trimmed.endsWith(')') &&
-                    trimmed.count { it == '(' } < trimmed.count { it == ')' }
-                ) {
-                    trimmed = trimmed.dropLast(1)
-                }
-                url(trimmed) + candidate.substring(trimmed.length)
+            if (rest.startsWith("//")) return "$wrappers${redactHierarchical(scheme, rest.substring(2))}"
+            val inner = SCHEME.find(rest)?.groupValues?.get(1)
+            if (inner == null || inner.lowercase() !in TEXT_SCHEMES) {
+                return "$wrappers$scheme:${redactOpaque(rest)}"
             }
-        return SENSITIVE_HEADER.replace(urlsRedacted) { m -> "${m.groupValues[1]}: $HEADER_MASK" }
+            wrappers.append(scheme).append(':')
+        }
     }
 
-    private fun startsHierarchicalUrl(rest: String): Boolean {
-        val inner = SCHEME.find(rest) ?: return false
-        return rest.startsWith("//", startIndex = inner.range.last + 1)
+    /**
+     * Redacts every URL run and sensitive-header value inside free text. A single forward scan,
+     * no regex over the runs: a run starts wherever a [TEXT_SCHEMES] scheme and its colon begin
+     * (glued labels included: `Error:https://…`, `URL:[https://…]`) and ends at whitespace, a
+     * [RUN_DELIMITERS] character, or the next run's start outside an authority
+     * (`https://a/f,https://u:p@b/g`, `feed:podcast:https://…`). Reviews 3–4, 2026-10-06.
+     */
+    fun text(s: String): String {
+        val out = StringBuilder(s.length)
+        var copied = 0
+        var start = nextRunStart(s, 0)
+        while (start >= 0) {
+            val end = runEnd(s, start)
+            out.append(s, copied, start).append(redactRun(s.substring(start, end)))
+            copied = end
+            start = nextRunStart(s, end)
+        }
+        out.append(s, copied, s.length)
+        return SENSITIVE_HEADER.replace(out) { m -> "${m.groupValues[1]}: $HEADER_MASK" }
+    }
+
+    /** First index ≥ [from] where a run starts, or -1. */
+    private fun nextRunStart(
+        s: String,
+        from: Int,
+    ): Int {
+        for (i in from until s.length) {
+            if (runStartsAt(s, i)) return i
+        }
+        return -1
+    }
+
+    /** `scheme:` with a [TEXT_SCHEMES] scheme at [i], followed by at least one run character. */
+    private fun runStartsAt(
+        s: String,
+        i: Int,
+    ): Boolean {
+        for (scheme in TEXT_SCHEMES) {
+            val colon = i + scheme.length
+            if (colon + 1 >= s.length || s[colon] != ':') continue
+            if (!s.regionMatches(i, scheme, 0, scheme.length, ignoreCase = true)) continue
+            if (isRunChar(s[colon + 1])) return true
+        }
+        return false
+    }
+
+    /**
+     * End (exclusive) of the run starting at [start]. Inside an authority (after `//`, up to the
+     * first `/`, `?` or `#`) nothing splits the run, so user-info that looks like a scheme
+     * (`https://http:pass@h/`) and IPv6 literals with zone ids stay in one piece.
+     */
+    private fun runEnd(
+        s: String,
+        start: Int,
+    ): Int {
+        var i = s.indexOf(':', start) + 1
+        var inAuthority = s.startsWith("//", i)
+        if (inAuthority) i += 2
+        while (i < s.length) {
+            val c = s[i]
+            if (!isRunChar(c)) return i
+            if (inAuthority && (c == '/' || c == '?' || c == '#')) inAuthority = false
+            if (!inAuthority && runStartsAt(s, i)) return i
+            i++
+        }
+        return s.length
+    }
+
+    private fun isRunChar(c: Char): Boolean = !c.isWhitespace() && c !in RUN_DELIMITERS
+
+    /**
+     * Redacts one run after trimming what prose glues to its end: sentence punctuation and an
+     * unmatched `)` or `]` ("(see https://a/f).", "[https://a/f]"). A bare wrapper left by a split
+     * (`feed:` before `https://…`) is kept as is.
+     */
+    private fun redactRun(run: String): String {
+        val openParens = run.count { it == '(' }
+        var closeParens = run.count { it == ')' }
+        val openBrackets = run.count { it == '[' }
+        var closeBrackets = run.count { it == ']' }
+        // Never trim into `scheme:` itself, whose colon is also sentence punctuation.
+        val schemeEnd = run.indexOf(':') + 1
+        var end = run.length
+        while (end > schemeEnd) {
+            val c = run[end - 1]
+            when {
+                c in TRAILING_PUNCT -> {
+                    end--
+                }
+
+                c == ')' && closeParens > openParens -> {
+                    end--
+                    closeParens--
+                }
+
+                c == ']' && closeBrackets > openBrackets -> {
+                    end--
+                    closeBrackets--
+                }
+
+                else -> {
+                    break
+                }
+            }
+        }
+        val trimmed = run.substring(0, end)
+        if (trimmed.length == schemeEnd) return run
+        return url(trimmed) + run.substring(end)
+    }
+
+    /**
+     * The part after an opaque `scheme:`. User-info-like text before an `@` in its first segment
+     * is masked as in an authority (`https:alice:pass@h` → `https:***@h`); the rest is a tail.
+     */
+    private fun redactOpaque(rest: String): String {
+        val firstSegmentEnd =
+            rest
+                .indexOfFirst { it == '/' || it == '?' || it == '#' }
+                .let { if (it < 0) rest.length else it }
+        val at = rest.lastIndexOf('@', firstSegmentEnd - 1)
+        if (at < 0) return redactTail(rest)
+        return MASKED_USER_INFO + redactTail(rest.substring(at + 1))
     }
 
     /** `authority/path?query#fragment` — the part after `scheme://`. */
