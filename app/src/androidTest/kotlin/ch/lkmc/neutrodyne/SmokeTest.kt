@@ -2,12 +2,13 @@
 package ch.lkmc.neutrodyne
 
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.espresso.Espresso.pressBack
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -70,8 +71,8 @@ class SmokeTest {
 
     private fun assertDestinations() {
         for ((tag, label) in DESTINATIONS) {
-            compose.onNodeWithTag(tag).assertIsDisplayed()
-            compose.onNodeWithText(text(label), useUnmergedTree = true).assertExists()
+            // The label must belong to the destination itself; the selected tab's title repeats it in the top bar
+            compose.onNodeWithTag(tag).assertIsDisplayed().assert(hasText(text(label)))
         }
     }
 
