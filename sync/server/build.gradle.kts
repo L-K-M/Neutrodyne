@@ -3,8 +3,8 @@ import app.cash.licensee.LicenseeExtension
 import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.WriteProperties
 import org.gradle.kotlin.dsl.assign
-import org.gradle.kotlin.dsl.named
 import org.gradle.kotlin.dsl.configure
+import org.gradle.kotlin.dsl.named
 
 plugins {
     alias(libs.plugins.neutrodyne.server.application)
@@ -21,11 +21,12 @@ extensions.configure<LicenseeExtension> {
 // serverVersion of the discovery document: a resource generated at build time from
 // neutrodyne.versionName, with no timestamps (M0b; 10 Discovery, 10 Deployment).
 // ServerVersion reads it from the classpath.
-val generateServerVersionResource = tasks.register("generateServerVersionResource", WriteProperties::class) {
-    description = "Writes neutrodyne-server.properties carrying neutrodyne.versionName."
-    property(serverVersionKey, providers.gradleProperty(versionNameProperty))
-    destinationFile = layout.buildDirectory.file("generated/server-version/$serverPropertiesFile")
-}
+val generateServerVersionResource =
+    tasks.register("generateServerVersionResource", WriteProperties::class) {
+        description = "Writes neutrodyne-server.properties carrying neutrodyne.versionName."
+        property(serverVersionKey, providers.gradleProperty(versionNameProperty))
+        destinationFile = layout.buildDirectory.file("generated/server-version/$serverPropertiesFile")
+    }
 
 tasks.named<Copy>("processResources") {
     from(generateServerVersionResource)

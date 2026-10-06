@@ -19,105 +19,116 @@ import org.jetbrains.compose.desktop.application.dsl.TargetFormat
  * (11 Packaging and the runtime exception).
  */
 class DesktopApplicationConventionPlugin : Plugin<Project> {
-    override fun apply(target: Project) = with(target) {
-        installPluginGuards()
-        pluginManager.apply("org.jetbrains.kotlin.jvm")
-        pluginManager.apply("org.jetbrains.kotlin.plugin.compose")
-        pluginManager.apply("org.jetbrains.compose")
-        pluginManager.apply("neutrodyne.metro")
-        assertKotlinPluginVersion()
-        forbidDynamicVersions()
-        configureDesktopJvm()
+    override fun apply(target: Project) =
+        with(target) {
+            installPluginGuards()
+            pluginManager.apply("org.jetbrains.kotlin.jvm")
+            pluginManager.apply("org.jetbrains.kotlin.plugin.compose")
+            pluginManager.apply("org.jetbrains.compose")
+            pluginManager.apply("neutrodyne.metro")
+            assertKotlinPluginVersion()
+            forbidDynamicVersions()
+            configureDesktopJvm()
 
-        // --- the bundled runtime of runtime.lock and the packaging target this host serves -------
-        val hostTarget = desktopPackagingTargetOf(System.getProperty("os.name"), System.getProperty("os.arch"))
-        val runtimeLock = hostTarget?.let { parseBundledRuntimeLock(file("runtime.lock"), it) }
-        val packaging =
-            extensions.create("neutrodyneDesktopPackaging", NeutrodyneDesktopPackagingExtension::class.java)
-        packaging.targetId.set(hostTarget?.id ?: "")
-        packaging.os.set(hostTarget?.osWire ?: "")
-        packaging.arch.set(hostTarget?.archWire ?: "")
-        // 11 BuildInfo: `runtime` is the bundled runtime's vendor-version string ("Temurin-25.0.4.1+1")
-        packaging.runtime.set(runtimeLock?.vendorVersion ?: "")
-        packaging.installKinds.set(hostTarget?.installKinds?.joinToString(",") ?: "")
+            // --- the bundled runtime of runtime.lock and the packaging target this host serves -------
+            val hostTarget = desktopPackagingTargetOf(System.getProperty("os.name"), System.getProperty("os.arch"))
+            val runtimeLock = hostTarget?.let { parseBundledRuntimeLock(file("runtime.lock"), it) }
+            val packaging =
+                extensions.create("neutrodyneDesktopPackaging", NeutrodyneDesktopPackagingExtension::class.java)
+            packaging.targetId.set(hostTarget?.id ?: "")
+            packaging.os.set(hostTarget?.osWire ?: "")
+            packaging.arch.set(hostTarget?.archWire ?: "")
+            // 11 BuildInfo: `runtime` is the bundled runtime's vendor-version string ("Temurin-25.0.4.1+1")
+            packaging.runtime.set(runtimeLock?.vendorVersion ?: "")
+            packaging.installKinds.set(hostTarget?.installKinds?.joinToString(",") ?: "")
 
-        val toolchains = extensions.getByType<JavaToolchainService>()
-        val toolchainJdk25 = toolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(DESKTOP_JDK)) }
+            val toolchains = extensions.getByType<JavaToolchainService>()
+            val toolchainJdk25 = toolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(DESKTOP_JDK)) }
 
-        // Off the packaging matrix (a developer's Intel Mac, a Windows arm64 laptop) the toolchain
-        // JDK serves `run` and tests; every packaging task refuses instead (11 Platform matrix).
-        val bundledRuntimeHome = hostTarget?.let { layout.buildDirectory.dir("bundled-runtime/${it.id}/jdk") }
-        val setupBundledRuntime =
-            hostTarget?.let { targetKind ->
-                val lock = runtimeLock!!
-                tasks.register<SetupBundledRuntime>("setupBundledRuntime") {
-                    description = "Downloads the runtime.lock Temurin 25 archive, checks its SHA-256, unpacks it (11)."
-                    archiveUrl.set(lock.archiveUrl)
-                    sha256.set(lock.sha256)
-                    archive.set(layout.buildDirectory.file("bundled-runtime/${targetKind.id}/archive"))
-                    home.set(bundledRuntimeHome!!)
+            // Off the packaging matrix (a developer's Intel Mac, a Windows arm64 laptop) the toolchain
+            // JDK serves `run` and tests; every packaging task refuses instead (11 Platform matrix).
+            val bundledRuntimeHome = hostTarget?.let { layout.buildDirectory.dir("bundled-runtime/${it.id}/jdk") }
+            val setupBundledRuntime =
+                hostTarget?.let { targetKind ->
+                    val lock = runtimeLock!!
+                    tasks.register<SetupBundledRuntime>("setupBundledRuntime") {
+                        description = "Fetches, verifies and unpacks the runtime.lock Temurin 25 archive (11)."
+                        archiveUrl.set(lock.archiveUrl)
+                        sha256.set(lock.sha256)
+                        archive.set(layout.buildDirectory.file("bundled-runtime/${targetKind.id}/archive"))
+                        home.set(bundledRuntimeHome!!)
+                    }
                 }
-            }
 
-        val compose = extensions.getByType<ComposeExtension>()
-        val desktop = (compose as org.gradle.api.plugins.ExtensionAware).extensions.getByType<DesktopExtension>()
-        // run and the packaging tasks use the JDK 25 toolchain, not the JDK running Gradle (21);
-        // on a packaging host they use the pinned Temurin runtime instead (11 jlink modules)
-        desktop.application {
-            mainClass = "$BASE_PACKAGE.desktop.MainKt"
-            // Off the packaging matrix a missing JDK 25 must not fail configuration (the Android release
-            // container has only JDK 21; review 2026-10-06): the default then stays and only `run` fails
-            bundledRuntimeHome?.get()?.asFile?.resolve(hostTarget!!.homeSubdir)?.absolutePath
-                ?.let { javaHome = it }
-                ?: runCatching { toolchainJdk25.get().metadata.installationPath.asFile.absolutePath }
-                    .getOrNull()
+            val compose = extensions.getByType<ComposeExtension>()
+            val desktop = (compose as org.gradle.api.plugins.ExtensionAware).extensions.getByType<DesktopExtension>()
+            // run and the packaging tasks use the JDK 25 toolchain, not the JDK running Gradle (21);
+            // on a packaging host they use the pinned Temurin runtime instead (11 jlink modules)
+            desktop.application {
+                mainClass = "$BASE_PACKAGE.desktop.MainKt"
+                // Off the packaging matrix a missing JDK 25 must not fail configuration (the Android release
+                // container has only JDK 21; review 2026-10-06): the default then stays and only `run` fails
+                bundledRuntimeHome
+                    ?.get()
+                    ?.asFile
+                    ?.resolve(hostTarget!!.homeSubdir)
+                    ?.absolutePath
                     ?.let { javaHome = it }
-            jvmArgs += desktopJvmOptions(hostTarget)
-            // Compose resolves ProGuard (GPL-2.0, D3) through a detached configuration inside the release
-            // task actions, so it never lands on a named configuration to scan. Disabling the release
-            // build type's ProGuard is the enforceable gate; verifyDependencyPolicy asserts that no
-            // ProGuard task stays enabled (2026-10-06).
-            buildTypes.release.proguard.isEnabled.set(false)
-        }
-        desktop.application { configureNativeDistributions(this, target, hostTarget) }
-
-        setupBundledRuntime?.let { setup ->
-            tasks.matching {
-                it.name in RUNTIME_IMAGE_CONSUMERS
-            }.configureEach { dependsOn(setup) }
-        }
-
-        if (hostTarget != null && runtimeLock != null) {
-            // createDistributable exists only after Compose's own afterEvaluate has run, so the
-            // task wiring that reads it registers after evaluation too.
-            afterEvaluate { registerDesktopPackagingTasks(hostTarget, runtimeLock) }
-        } else {
-            // Off-matrix: producing an image would use the toolchain JDK (forbidden by 11:
-            // the bundled runtime comes only from runtime.lock) or the wrong target's arch.
-            tasks.matching {
-                it.name in PACKAGING_ONLY_TASKS ||
-                    (it.name in RUNTIME_IMAGE_CONSUMERS && it.name != "run") ||
-                    (
-                        it.name.startsWith("package") &&
-                            it.name !in listOf("packageUberJarForCurrentOS", "packageReleaseUberJarForCurrentOS")
-                    )
-            }.configureEach {
-                doFirst {
-                    throw org.gradle.api.GradleException(
-                        "this host is outside 11's packaging matrix; build the desktop packages on their own runner",
-                    )
-                }
+                    ?: runCatching {
+                        toolchainJdk25
+                            .get()
+                            .metadata.installationPath.asFile.absolutePath
+                    }.getOrNull()
+                        ?.let { javaHome = it }
+                jvmArgs += desktopJvmOptions(hostTarget)
+                // Compose resolves ProGuard (GPL-2.0, D3) through a detached configuration inside the release
+                // task actions, so it never lands on a named configuration to scan. Disabling the release
+                // build type's ProGuard is the enforceable gate; verifyDependencyPolicy asserts that no
+                // ProGuard task stays enabled (2026-10-06).
+                buildTypes.release.proguard.isEnabled
+                    .set(false)
             }
+            desktop.application { configureNativeDistributions(this, target, hostTarget) }
+
+            setupBundledRuntime?.let { setup ->
+                tasks
+                    .matching {
+                        it.name in RUNTIME_IMAGE_CONSUMERS
+                    }.configureEach { dependsOn(setup) }
+            }
+
+            if (hostTarget != null && runtimeLock != null) {
+                // createDistributable exists only after Compose's own afterEvaluate has run, so the
+                // task wiring that reads it registers after evaluation too.
+                afterEvaluate { registerDesktopPackagingTasks(hostTarget, runtimeLock) }
+            } else {
+                // Off-matrix: producing an image would use the toolchain JDK (forbidden by 11:
+                // the bundled runtime comes only from runtime.lock) or the wrong target's arch.
+                tasks
+                    .matching {
+                        it.name in PACKAGING_ONLY_TASKS ||
+                            (it.name in RUNTIME_IMAGE_CONSUMERS && it.name != "run") ||
+                            (
+                                it.name.startsWith("package") &&
+                                    it.name !in UBER_JAR_TASKS
+                            )
+                    }.configureEach {
+                        doFirst {
+                            throw org.gradle.api.GradleException(
+                                "this host is outside 11's packaging matrix; package on the matching runner",
+                            )
+                        }
+                    }
+            }
+
+            // Compose desktop's *Release* tasks run ProGuard (GPL-2.0); they are never part of any build (D3)
+            tasks.matching { it.name.contains("Release") }.configureEach { enabled = false }
+
+            configureLicensee()
+            registerDependencyPolicy()
+            configureModuleGraphAssert()
+            configureNeutrodyneTestTasks()
         }
-
-        // Compose desktop's *Release* tasks run ProGuard (GPL-2.0); they are never part of any build (D3)
-        tasks.matching { it.name.contains("Release") }.configureEach { enabled = false }
-
-        configureLicensee()
-        registerDependencyPolicy()
-        configureModuleGraphAssert()
-        configureNeutrodyneTestTasks()
-    }
 }
 
 /** The frozen packaging identity (11 Frozen identifiers; the MSI upgradeUuid was generated once in M0b). */
@@ -126,6 +137,7 @@ internal const val DESKTOP_DESCRIPTION = "Podcast player organised around groups
 internal const val DESKTOP_VENDOR = "Neutrodyne contributors"
 internal const val DESKTOP_DEB_MAINTAINER = "neutrodyne@users.noreply.github.com"
 internal const val LINUX_PACKAGE_NAME = "neutrodyne"
+
 /** jpackage appends the package name: `--install-dir /opt` lands the app at `/opt/neutrodyne`. */
 internal const val LINUX_INSTALL_PARENT = "/opt"
 
@@ -173,6 +185,14 @@ internal val RUNTIME_IMAGE_CONSUMERS =
 internal val PACKAGING_ONLY_TASKS =
     setOf("packageDeb", "packageRpm", "packageZip", "packageTarGz")
 
+/** Compose's uber-JAR tasks; host-independent, so never blocked. */
+private val UBER_JAR_TASKS = setOf("packageUberJarForCurrentOS", "packageReleaseUberJarForCurrentOS")
+
+// The OPML file association every installer registers (11 Links and files).
+private const val OPML_MIME_TYPE = "text/x-opml"
+private const val OPML_EXTENSION = "opml"
+private const val OPML_DESCRIPTION = "OPML subscription list"
+
 /** Per-OS launcher options (11 JVM options). The AOT cache is not shipped before MD5 (PO-42 fallback). */
 internal fun desktopJvmOptions(target: DesktopPackagingTarget?): List<String> =
     buildList {
@@ -186,10 +206,12 @@ internal fun desktopJvmOptions(target: DesktopPackagingTarget?): List<String> =
                 add("-XX:ErrorFile=\$LOCALAPPDATA/Neutrodyne/Logs/hs_err_pid%p.log")
                 add("-Djavax.accessibility.assistive_technologies=com.sun.java.accessibility.AccessBridge")
             }
+
             "macos" -> {
                 add("-XX:ErrorFile=\$HOME/Library/Logs/Neutrodyne/hs_err_pid%p.log")
                 add("-Dapple.awt.application.appearance=system")
             }
+
             else -> {
                 // Dev hosts outside the matrix get the Linux options: common case and harmless for `run`.
                 add("-XX:ErrorFile=\$HOME/.local/state/neutrodyne/hs_err_pid%p.log")
@@ -229,7 +251,12 @@ private fun configureNativeDistributions(
             // directory its uninstaller deletes (11 Windows MSI and ZIP).
             installationPath = "Programs\\$DESKTOP_PACKAGE_NAME"
             iconFile.set(project.file("icons/neutrodyne.ico"))
-            fileAssociation("text/x-opml", "opml", "OPML subscription list", project.file("icons/neutrodyne.ico"))
+            fileAssociation(
+                mimeType = OPML_MIME_TYPE,
+                extension = OPML_EXTENSION,
+                description = OPML_DESCRIPTION,
+                iconFile = project.file("icons/neutrodyne.ico"),
+            )
         }
         macOS {
             bundleID = BASE_PACKAGE
@@ -237,7 +264,12 @@ private fun configureNativeDistributions(
             minimumSystemVersion = "13.0"
             appCategory = "public.app-category.music"
             iconFile.set(project.file("icons/neutrodyne.icns"))
-            fileAssociation("text/x-opml", "opml", "OPML subscription list", project.file("icons/neutrodyne.icns"))
+            fileAssociation(
+                mimeType = OPML_MIME_TYPE,
+                extension = OPML_EXTENSION,
+                description = OPML_DESCRIPTION,
+                iconFile = project.file("icons/neutrodyne.icns"),
+            )
             infoPlist { extraKeysRawXml = MAC_URL_TYPES + MAC_LOCAL_NETWORK_USAGE }
             // jpackage refuses a macOS version whose first number is 0 (11 macOS DMG, ad-hoc signing
             // and the 0.x ZIP): before 1.0.0 the image carries the 1.0.0 placeholder and

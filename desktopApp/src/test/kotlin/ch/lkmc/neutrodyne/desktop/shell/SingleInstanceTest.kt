@@ -2,6 +2,18 @@
 package ch.lkmc.neutrodyne.desktop.shell
 
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
+import org.junit.Test
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
@@ -11,20 +23,6 @@ import java.security.SecureRandom
 import java.util.concurrent.TimeUnit
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.withTimeoutOrNull
-import org.junit.Test
 
 /**
  * Two in-process instances against one temporary `AppDirs` (11 Single instance and handshake;
@@ -38,7 +36,11 @@ class SingleInstanceTest {
     private val tokenFile = dirs.state.resolve(InstanceHandshake.TOKEN_FILE_NAME)
 
     /** Small timeouts so the failure paths finish in milliseconds, not seconds. */
-    private fun fastHandshake(attempts: Int = 2, retryDelayMs: Long = 10, replyTimeoutMs: Long = 300): InstanceHandshake =
+    private fun fastHandshake(
+        attempts: Int = 2,
+        retryDelayMs: Long = 10,
+        replyTimeoutMs: Long = 300,
+    ): InstanceHandshake =
         InstanceHandshake(
             dirs = dirs,
             random = SecureRandom(),
@@ -50,124 +52,136 @@ class SingleInstanceTest {
         )
 
     @Test
-    fun `a second launch delivers its arguments to the owner and exits`() = runBlocking {
-        // Stale files from an earlier owner are overwritten when this owner serves.
-        Files.writeString(portFile, "1")
-        Files.writeString(tokenFile, "stale")
+    fun `a second launch delivers its arguments to the owner and exits`() =
+        runBlocking {
+            // Stale files from an earlier owner are overwritten when this owner serves.
+            Files.writeString(portFile, "1")
+            Files.writeString(tokenFile, "stale")
 
-        val owner = SingleInstanceLock(dirs)
-        assertThat(owner.tryAcquire()).isEqualTo(SingleInstanceLock.Acquire.Acquired)
+            val owner = SingleInstanceLock(dirs)
+            assertThat(owner.tryAcquire()).isEqualTo(SingleInstanceLock.Acquire.Acquired)
 
-        val received = Channel<HandoffRequest>(Channel.UNLIMITED)
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        val serveJob = scope.launch { fastHandshake().serve { received.send(it) } }
+            val received = Channel<HandoffRequest>(Channel.UNLIMITED)
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            val serveJob = scope.launch { fastHandshake().serve { received.send(it) } }
 
-        val second = SingleInstanceLock(dirs)
-        assertThat(second.tryAcquire()).isEqualTo(SingleInstanceLock.Acquire.HeldByOther)
+            val second = SingleInstanceLock(dirs)
+            assertThat(second.tryAcquire()).isEqualTo(SingleInstanceLock.Acquire.HeldByOther)
 
-        val client = fastHandshake(attempts = 100, retryDelayMs = 50, replyTimeoutMs = 1_000)
-        val request = HandoffRequest.fromLaunchArgs(
-            token = InstanceHandshake.readToken(dirs) ?: "",
-            args = listOf("feed:https://example.org/feed", "/home/tester/import.opml"),
-            cwd = "/home/tester",
-        )
-        assertThat(client.send(request)).isEqualTo(HandoffOutcome.Delivered)
+            val client = fastHandshake(attempts = 100, retryDelayMs = 50, replyTimeoutMs = 1_000)
+            val request =
+                HandoffRequest.fromLaunchArgs(
+                    token = InstanceHandshake.readToken(dirs) ?: "",
+                    args = listOf("feed:https://example.org/feed", "/home/tester/import.opml"),
+                    cwd = "/home/tester",
+                )
+            assertThat(client.send(request)).isEqualTo(HandoffOutcome.Delivered)
 
-        val delivered = withTimeout(5.seconds) { received.receive() }
-        assertThat(delivered.args).containsExactly("feed:https://example.org/feed", "/home/tester/import.opml").inOrder()
-        assertThat(delivered.cwd).isEqualTo("/home/tester")
-        assertThat(delivered.activate).isTrue()
+            val delivered = withTimeout(5.seconds) { received.receive() }
+            assertThat(delivered.args)
+                .containsExactly("feed:https://example.org/feed", "/home/tester/import.opml")
+                .inOrder()
+            assertThat(delivered.cwd).isEqualTo("/home/tester")
+            assertThat(delivered.activate).isTrue()
 
-        // Stopping the server removes its files, and closing the lock frees it again.
-        serveJob.cancelAndJoin()
-        assertThat(Files.exists(portFile)).isFalse()
-        assertThat(Files.exists(tokenFile)).isFalse()
-        owner.close()
-        val third = SingleInstanceLock(dirs)
-        assertThat(third.tryAcquire()).isEqualTo(SingleInstanceLock.Acquire.Acquired)
-        third.close()
-        scope.cancel()
-    }
-
-    @Test
-    fun `an owner still publishing its files is retried until it answers`() = runBlocking {
-        val owner = SingleInstanceLock(dirs)
-        assertThat(owner.tryAcquire()).isEqualTo(SingleInstanceLock.Acquire.Acquired)
-
-        val received = Channel<HandoffRequest>(Channel.UNLIMITED)
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        val serveJob = scope.launch {
-            delay(OWNER_START_DELAY_MS)
-            fastHandshake().serve { received.send(it) }
+            // Stopping the server removes its files, and closing the lock frees it again.
+            serveJob.cancelAndJoin()
+            assertThat(Files.exists(portFile)).isFalse()
+            assertThat(Files.exists(tokenFile)).isFalse()
+            owner.close()
+            val third = SingleInstanceLock(dirs)
+            assertThat(third.tryAcquire()).isEqualTo(SingleInstanceLock.Acquire.Acquired)
+            third.close()
+            scope.cancel()
         }
 
-        val client = fastHandshake(attempts = 200, retryDelayMs = 25, replyTimeoutMs = 1_000)
-        val outcome = client.send(
-            HandoffRequest.fromLaunchArgs(token = "", args = listOf("neutrodyne://open/queue"), cwd = "/home/tester"),
-        )
-        assertThat(outcome).isEqualTo(HandoffOutcome.Delivered)
-        withTimeout(5.seconds) { received.receive() }
-
-        serveJob.cancelAndJoin()
-        owner.close()
-        scope.cancel()
-    }
-
     @Test
-    fun `a wrong token is rejected without a reply`() = runBlocking {
-        val owner = SingleInstanceLock(dirs)
-        assertThat(owner.tryAcquire()).isEqualTo(SingleInstanceLock.Acquire.Acquired)
+    fun `an owner still publishing its files is retried until it answers`() =
+        runBlocking {
+            val owner = SingleInstanceLock(dirs)
+            assertThat(owner.tryAcquire()).isEqualTo(SingleInstanceLock.Acquire.Acquired)
 
-        val received = Channel<HandoffRequest>(Channel.UNLIMITED)
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        val serveJob = scope.launch { fastHandshake().serve { received.send(it) } }
-        val port = awaitPortFile()
+            val received = Channel<HandoffRequest>(Channel.UNLIMITED)
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            val serveJob =
+                scope.launch {
+                    delay(OWNER_START_DELAY_MS)
+                    fastHandshake().serve { received.send(it) }
+                }
 
-        Socket().use { socket ->
-            socket.connect(InetSocketAddress(InetAddress.getLoopbackAddress(), port), CONNECT_TIMEOUT_MS.toInt())
-            socket.soTimeout = READ_TIMEOUT_MS.toInt()
-            val request = HandoffRequest(token = "definitely-not-the-token", args = listOf("feed:x"), cwd = "/w")
-            socket.getOutputStream().write(
-                (SHELL_JSON.encodeToString(HandoffRequest.serializer(), request) + "\n").toByteArray(),
-            )
-            // Closed without a reply: EOF or a reset write, never a response line.
-            val read = runCatching { socket.getInputStream().read() }
-            assertThat(read.getOrDefault(-1)).isEqualTo(-1)
+            val client = fastHandshake(attempts = 200, retryDelayMs = 25, replyTimeoutMs = 1_000)
+            val request =
+                HandoffRequest.fromLaunchArgs(
+                    token = "",
+                    args = listOf("neutrodyne://open/queue"),
+                    cwd = "/home/tester",
+                )
+            val outcome = client.send(request)
+            assertThat(outcome).isEqualTo(HandoffOutcome.Delivered)
+            withTimeout(5.seconds) { received.receive() }
+
+            serveJob.cancelAndJoin()
+            owner.close()
+            scope.cancel()
         }
-        assertThat(withTimeoutOrNull(500.milliseconds) { received.receive() }).isNull()
-
-        serveJob.cancelAndJoin()
-        owner.close()
-        scope.cancel()
-    }
 
     @Test
-    fun `an oversize line is rejected without a reply`() = runBlocking {
-        val owner = SingleInstanceLock(dirs)
-        assertThat(owner.tryAcquire()).isEqualTo(SingleInstanceLock.Acquire.Acquired)
+    fun `a wrong token is rejected without a reply`() =
+        runBlocking {
+            val owner = SingleInstanceLock(dirs)
+            assertThat(owner.tryAcquire()).isEqualTo(SingleInstanceLock.Acquire.Acquired)
 
-        val received = Channel<HandoffRequest>(Channel.UNLIMITED)
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        val serveJob = scope.launch { fastHandshake().serve { received.send(it) } }
-        val port = awaitPortFile()
+            val received = Channel<HandoffRequest>(Channel.UNLIMITED)
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            val serveJob = scope.launch { fastHandshake().serve { received.send(it) } }
+            val port = awaitPortFile()
 
-        Socket().use { socket ->
-            socket.connect(InetSocketAddress(InetAddress.getLoopbackAddress(), port), CONNECT_TIMEOUT_MS.toInt())
-            socket.soTimeout = READ_TIMEOUT_MS.toInt()
-            // Larger than 11's 64 KiB line cap; the token is irrelevant — the size alone rejects.
-            val filler = "x".repeat(HandoffRequest.MAX_LINE_BYTES + 1024)
-            runCatching {
-                socket.getOutputStream().write((filler + "\n").toByteArray())
+            Socket().use { socket ->
+                socket.connect(InetSocketAddress(InetAddress.getLoopbackAddress(), port), CONNECT_TIMEOUT_MS.toInt())
+                socket.soTimeout = READ_TIMEOUT_MS.toInt()
+                val request = HandoffRequest(token = "definitely-not-the-token", args = listOf("feed:x"), cwd = "/w")
+                socket.getOutputStream().write(
+                    (SHELL_JSON.encodeToString(HandoffRequest.serializer(), request) + "\n").toByteArray(),
+                )
+                // Closed without a reply: EOF or a reset write, never a response line.
+                val read = runCatching { socket.getInputStream().read() }
+                assertThat(read.getOrDefault(-1)).isEqualTo(-1)
             }
-            val read = runCatching { socket.getInputStream().read() }
-            assertThat(read.getOrDefault(-1)).isEqualTo(-1)
-        }
-        assertThat(withTimeoutOrNull(500.milliseconds) { received.receive() }).isNull()
+            assertThat(withTimeoutOrNull(500.milliseconds) { received.receive() }).isNull()
 
-        serveJob.cancelAndJoin()
-        owner.close()
-        scope.cancel()
-    }
+            serveJob.cancelAndJoin()
+            owner.close()
+            scope.cancel()
+        }
+
+    @Test
+    fun `an oversize line is rejected without a reply`() =
+        runBlocking {
+            val owner = SingleInstanceLock(dirs)
+            assertThat(owner.tryAcquire()).isEqualTo(SingleInstanceLock.Acquire.Acquired)
+
+            val received = Channel<HandoffRequest>(Channel.UNLIMITED)
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            val serveJob = scope.launch { fastHandshake().serve { received.send(it) } }
+            val port = awaitPortFile()
+
+            Socket().use { socket ->
+                socket.connect(InetSocketAddress(InetAddress.getLoopbackAddress(), port), CONNECT_TIMEOUT_MS.toInt())
+                socket.soTimeout = READ_TIMEOUT_MS.toInt()
+                // Larger than 11's 64 KiB line cap; the token is irrelevant — the size alone rejects.
+                val filler = "x".repeat(HandoffRequest.MAX_LINE_BYTES + 1024)
+                runCatching {
+                    socket.getOutputStream().write((filler + "\n").toByteArray())
+                }
+                val read = runCatching { socket.getInputStream().read() }
+                assertThat(read.getOrDefault(-1)).isEqualTo(-1)
+            }
+            assertThat(withTimeoutOrNull(500.milliseconds) { received.receive() }).isNull()
+
+            serveJob.cancelAndJoin()
+            owner.close()
+            scope.cancel()
+        }
 
     @Test
     fun `a stale port file means retries and then failure`() {
@@ -195,7 +209,8 @@ class SingleInstanceTest {
         assertThat(longInput.args.single()).hasLength(HandoffRequest.MAX_ARG_CHARS)
 
         // Twenty 4-KiB inputs would exceed the 64-KiB line cap: inputs drop from the end until it fits.
-        val fat = HandoffRequest.fromLaunchArgs(token = "t", args = (1..20).map { "y".repeat(HandoffRequest.MAX_ARG_CHARS) }, cwd = "/w")
+        val fatArgs = (1..20).map { "y".repeat(HandoffRequest.MAX_ARG_CHARS) }
+        val fat = HandoffRequest.fromLaunchArgs(token = "t", args = fatArgs, cwd = "/w")
         val serialised = SHELL_JSON.encodeToString(HandoffRequest.serializer(), fat).toByteArray().size
         assertThat(serialised + 1).isAtMost(HandoffRequest.MAX_LINE_BYTES)
         assertThat(fat.args.size).isLessThan(HandoffRequest.MAX_ARGS)

@@ -10,12 +10,15 @@ import java.util.Properties
 import kotlin.io.path.Path
 
 /** Log levels of `NEUTRODYNE_SERVER_LOG_LEVEL` / `log.level` (10 Configuration). */
-internal enum class LogLevel(val wire: String) {
+internal enum class LogLevel(
+    val wire: String,
+) {
     ERROR("error"),
     WARN("warn"),
     INFO("info"),
     DEBUG("debug"),
-    TRACE("trace");
+    TRACE("trace"),
+    ;
 
     internal companion object {
         fun parse(text: String): LogLevel? = entries.firstOrNull { it.wire == text.lowercase() }
@@ -23,9 +26,12 @@ internal enum class LogLevel(val wire: String) {
 }
 
 /** `NEUTRODYNE_SERVER_LOG_FORMAT` / `log.format` (10 Configuration). The JSON formatter arrives with MS1. */
-internal enum class LogFormat(val wire: String) {
+internal enum class LogFormat(
+    val wire: String,
+) {
     TEXT("text"),
-    JSON("json");
+    JSON("json"),
+    ;
 
     internal companion object {
         fun parse(text: String): LogFormat? = entries.firstOrNull { it.wire == text.lowercase() }
@@ -33,8 +39,10 @@ internal enum class LogFormat(val wire: String) {
 }
 
 /** A `host:port` listen address (10 Configuration: `listen`, `metrics.listen`). */
-internal data class ListenAddress(val host: String, val port: Int) {
-
+internal data class ListenAddress(
+    val host: String,
+    val port: Int,
+) {
     /** Loopback listeners are always allowed by the listen rule (10 TLS stance and insecure LAN mode). */
     val isLoopback: Boolean
         get() = isLoopbackHost(host)
@@ -133,8 +141,13 @@ internal data class ServerConfig(
 
 /** Result of a configuration load: either a valid [ServerConfig] or human-readable errors. */
 internal sealed interface ServerConfigResult {
-    data class Valid(val config: ServerConfig) : ServerConfigResult
-    data class Invalid(val errors: List<String>) : ServerConfigResult
+    data class Valid(
+        val config: ServerConfig,
+    ) : ServerConfigResult
+
+    data class Invalid(
+        val errors: List<String>,
+    ) : ServerConfigResult
 }
 
 /** Flags of the `serve` command (10 CLI). */
@@ -177,46 +190,80 @@ internal object ServerDefaults {
 
 /** Loads and validates [ServerConfig]; accumulates every problem so one run reports them all. */
 internal object ServerConfigLoader {
-
-    fun load(environment: Map<String, String>, properties: Map<String, String>, flags: ServeFlags): ServerConfigResult {
+    fun load(
+        environment: Map<String, String>,
+        properties: Map<String, String>,
+        flags: ServeFlags,
+    ): ServerConfigResult {
         val errors = mutableListOf<String>()
 
-        fun raw(envKey: String?, propertyKey: String): String? =
+        fun raw(
+            envKey: String?,
+            propertyKey: String,
+        ): String? =
             envKey?.let { environment[it] }?.trim()?.takeIf { it.isNotEmpty() }
                 ?: properties[propertyKey]?.trim()?.takeIf { it.isNotEmpty() }
 
         // Like [raw], but an explicitly empty value stays empty (so `trusted.proxies =` is an
         // error instead of silently falling back to the loopback default).
-        fun explicitRaw(envKey: String, propertyKey: String): String? =
-            environment[envKey]?.trim() ?: properties[propertyKey]?.trim()
+        fun explicitRaw(
+            envKey: String,
+            propertyKey: String,
+        ): String? = environment[envKey]?.trim() ?: properties[propertyKey]?.trim()
 
-        fun stringSetting(envKey: String?, propertyKey: String, default: String): String =
-            raw(envKey, propertyKey) ?: default
+        fun stringSetting(
+            envKey: String?,
+            propertyKey: String,
+            default: String,
+        ): String = raw(envKey, propertyKey) ?: default
 
-        fun settingName(envKey: String?, propertyKey: String): String =
-            listOfNotNull(envKey, propertyKey).joinToString(" / ")
+        fun settingName(
+            envKey: String?,
+            propertyKey: String,
+        ): String = listOfNotNull(envKey, propertyKey).joinToString(" / ")
 
-        fun listenSetting(envKey: String?, propertyKey: String, default: ListenAddress): ListenAddress {
+        fun listenSetting(
+            envKey: String?,
+            propertyKey: String,
+            default: ListenAddress,
+        ): ListenAddress {
             val text = raw(envKey, propertyKey) ?: return default
             return ListenAddress.parse(text) ?: run {
-                errors.add("${settingName(envKey, propertyKey)}: '$text' is not a listen address ${ListenAddress.FORMAT}")
+                val name = settingName(envKey, propertyKey)
+                errors.add("$name: '$text' is not a listen address ${ListenAddress.FORMAT}")
                 default
             }
         }
 
-        fun booleanSetting(envKey: String?, propertyKey: String, default: Boolean): Boolean {
+        fun booleanSetting(
+            envKey: String?,
+            propertyKey: String,
+            default: Boolean,
+        ): Boolean {
             val text = raw(envKey, propertyKey) ?: return default
             return when (text.lowercase()) {
-                "true" -> true
-                "false" -> false
-                else -> run {
-                    errors.add("${settingName(envKey, propertyKey)}: '$text' is not true or false")
-                    default
+                "true" -> {
+                    true
+                }
+
+                "false" -> {
+                    false
+                }
+
+                else -> {
+                    run {
+                        errors.add("${settingName(envKey, propertyKey)}: '$text' is not true or false")
+                        default
+                    }
                 }
             }
         }
 
-        fun intSetting(envKey: String?, propertyKey: String, default: Int): Int {
+        fun intSetting(
+            envKey: String?,
+            propertyKey: String,
+            default: Int,
+        ): Int {
             val text = raw(envKey, propertyKey) ?: return default
             return text.toIntOrNull()?.takeIf { it > 0 } ?: run {
                 errors.add("${settingName(envKey, propertyKey)}: '$text' is not a positive whole number")
@@ -224,7 +271,11 @@ internal object ServerConfigLoader {
             }
         }
 
-        fun longSetting(envKey: String?, propertyKey: String, default: Long): Long {
+        fun longSetting(
+            envKey: String?,
+            propertyKey: String,
+            default: Long,
+        ): Long {
             val text = raw(envKey, propertyKey) ?: return default
             return text.toLongOrNull()?.takeIf { it > 0 } ?: run {
                 errors.add("${settingName(envKey, propertyKey)}: '$text' is not a positive whole number")
@@ -234,60 +285,87 @@ internal object ServerConfigLoader {
 
         val dataDir = Path(stringSetting(ServerEnv.DATA, ServerPropertyKeys.DATA_DIR, ServerDefaults.DATA_DIR))
         val listen = listenSetting(ServerEnv.LISTEN, ServerPropertyKeys.LISTEN, defaultListen())
-        val publicUrl = raw(ServerEnv.PUBLIC_URL, ServerPropertyKeys.PUBLIC_URL)?.let { text ->
-            parsePublicUrl(text) ?: run {
-                errors.add("${settingName(ServerEnv.PUBLIC_URL, ServerPropertyKeys.PUBLIC_URL)}: '$text' is not an http:// or https:// URL")
-                null
+        val publicUrl =
+            raw(ServerEnv.PUBLIC_URL, ServerPropertyKeys.PUBLIC_URL)?.let { text ->
+                parsePublicUrl(text) ?: run {
+                    val name = settingName(ServerEnv.PUBLIC_URL, ServerPropertyKeys.PUBLIC_URL)
+                    errors.add("$name: '$text' is not an http:// or https:// URL")
+                    null
+                }
             }
-        }
-        val trustedProxies = explicitRaw(ServerEnv.TRUSTED_PROXIES, ServerPropertyKeys.TRUSTED_PROXIES)
-            ?.let { text -> parseTrustedProxies(text, errors) }
-            ?: IpCidr.parseAll(ServerDefaults.TRUSTED_PROXIES)
+        val trustedProxies =
+            explicitRaw(ServerEnv.TRUSTED_PROXIES, ServerPropertyKeys.TRUSTED_PROXIES)
+                ?.let { text -> parseTrustedProxies(text, errors) }
+                ?: IpCidr.parseAll(ServerDefaults.TRUSTED_PROXIES)
 
-        val logLevel = raw(ServerEnv.LOG_LEVEL, ServerPropertyKeys.LOG_LEVEL)?.let { text ->
-            LogLevel.parse(text) ?: run {
-                errors.add("${settingName(ServerEnv.LOG_LEVEL, ServerPropertyKeys.LOG_LEVEL)}: '$text' is not one of ${LogLevel.entries.joinToString("/") { it.wire }}")
-                null
-            }
-        } ?: ServerDefaults.LOG_LEVEL
+        val logLevel =
+            raw(ServerEnv.LOG_LEVEL, ServerPropertyKeys.LOG_LEVEL)?.let { text ->
+                LogLevel.parse(text) ?: run {
+                    val name = settingName(ServerEnv.LOG_LEVEL, ServerPropertyKeys.LOG_LEVEL)
+                    val levels = LogLevel.entries.joinToString("/") { it.wire }
+                    errors.add("$name: '$text' is not one of $levels")
+                    null
+                }
+            } ?: ServerDefaults.LOG_LEVEL
 
-        val logFormat = raw(ServerEnv.LOG_FORMAT, ServerPropertyKeys.LOG_FORMAT)?.let { text ->
-            LogFormat.parse(text) ?: run {
-                errors.add("${settingName(ServerEnv.LOG_FORMAT, ServerPropertyKeys.LOG_FORMAT)}: '$text' is not text or json")
-                null
-            }
-        } ?: ServerDefaults.LOG_FORMAT
+        val logFormat =
+            raw(ServerEnv.LOG_FORMAT, ServerPropertyKeys.LOG_FORMAT)?.let { text ->
+                LogFormat.parse(text) ?: run {
+                    val name = settingName(ServerEnv.LOG_FORMAT, ServerPropertyKeys.LOG_FORMAT)
+                    errors.add("$name: '$text' is not text or json")
+                    null
+                }
+            } ?: ServerDefaults.LOG_FORMAT
 
-        val updateCheck = booleanSetting(ServerEnv.UPDATE_CHECK, ServerPropertyKeys.UPDATE_CHECK, ServerDefaults.UPDATE_CHECK)
-        val metricsListen = raw(ServerEnv.METRICS_LISTEN, ServerPropertyKeys.METRICS_LISTEN)?.let { text ->
-            ListenAddress.parse(text) ?: run {
-                errors.add("${settingName(ServerEnv.METRICS_LISTEN, ServerPropertyKeys.METRICS_LISTEN)}: '$text' is not a listen address ${ListenAddress.FORMAT}")
-                null
+        val updateCheck =
+            booleanSetting(ServerEnv.UPDATE_CHECK, ServerPropertyKeys.UPDATE_CHECK, ServerDefaults.UPDATE_CHECK)
+        val metricsListen =
+            raw(ServerEnv.METRICS_LISTEN, ServerPropertyKeys.METRICS_LISTEN)?.let { text ->
+                ListenAddress.parse(text) ?: run {
+                    val name = settingName(ServerEnv.METRICS_LISTEN, ServerPropertyKeys.METRICS_LISTEN)
+                    errors.add("$name: '$text' is not a listen address ${ListenAddress.FORMAT}")
+                    null
+                }
             }
-        }
 
         // Properties-only settings (10 Configuration's last table row).
         val quotaRecords = longSetting(null, ServerPropertyKeys.QUOTA_RECORDS, ServerDefaults.QUOTA_RECORDS)
         val backupsKeep = intSetting(null, ServerPropertyKeys.BACKUPS_KEEP, ServerDefaults.BACKUPS_KEEP)
-        val accountBackupsKeep = intSetting(null, ServerPropertyKeys.ACCOUNT_BACKUPS_KEEP, ServerDefaults.ACCOUNT_BACKUPS_KEEP)
-        val retentionTombstoneDays = intSetting(null, ServerPropertyKeys.RETENTION_TOMBSTONE_DAYS, ServerDefaults.RETENTION_TOMBSTONE_DAYS)
-        val retentionUnsubscribedDays = intSetting(null, ServerPropertyKeys.RETENTION_UNSUBSCRIBED_DAYS, ServerDefaults.RETENTION_UNSUBSCRIBED_DAYS)
-        val retentionEmptyEpisodeDays = intSetting(null, ServerPropertyKeys.RETENTION_EMPTY_EPISODE_DAYS, ServerDefaults.RETENTION_EMPTY_EPISODE_DAYS)
-        val sseMaxPerAccount = intSetting(null, ServerPropertyKeys.SSE_MAX_PER_ACCOUNT, ServerDefaults.SSE_MAX_PER_ACCOUNT)
+        val accountBackupsKeep =
+            intSetting(null, ServerPropertyKeys.ACCOUNT_BACKUPS_KEEP, ServerDefaults.ACCOUNT_BACKUPS_KEEP)
+        val retentionTombstoneDays =
+            intSetting(null, ServerPropertyKeys.RETENTION_TOMBSTONE_DAYS, ServerDefaults.RETENTION_TOMBSTONE_DAYS)
+        val retentionUnsubscribedDays =
+            intSetting(null, ServerPropertyKeys.RETENTION_UNSUBSCRIBED_DAYS, ServerDefaults.RETENTION_UNSUBSCRIBED_DAYS)
+        val retentionEmptyEpisodeDays =
+            intSetting(
+                null,
+                ServerPropertyKeys.RETENTION_EMPTY_EPISODE_DAYS,
+                ServerDefaults.RETENTION_EMPTY_EPISODE_DAYS,
+            )
+        val sseMaxPerAccount =
+            intSetting(null, ServerPropertyKeys.SSE_MAX_PER_ACCOUNT, ServerDefaults.SSE_MAX_PER_ACCOUNT)
 
-        val backupTime = stringSetting(null, ServerPropertyKeys.BACKUP_TIME, ServerDefaults.BACKUP_TIME).let { text ->
-            if (isBackupTime(text)) text else run {
-                errors.add("${ServerPropertyKeys.BACKUP_TIME}: '$text' is not a time of day HH:mm (for example 03:30)")
-                ServerDefaults.BACKUP_TIME
+        val backupTime =
+            stringSetting(null, ServerPropertyKeys.BACKUP_TIME, ServerDefaults.BACKUP_TIME).let { text ->
+                if (isBackupTime(text)) {
+                    text
+                } else {
+                    run {
+                        val name = ServerPropertyKeys.BACKUP_TIME
+                        errors.add("$name: '$text' is not a time of day HH:mm (for example 03:30)")
+                        ServerDefaults.BACKUP_TIME
+                    }
+                }
             }
-        }
 
         // The listen rule (10 TLS stance, N13): loopback is always allowed; anything else needs
         // an https:// public URL (TLS is then the reverse proxy's job) or --insecure-lan.
         if (!listen.isLoopback && !flags.insecureLan && publicUrl?.scheme != ServerConfig.HTTPS_SCHEME) {
             errors.add(
-                "refusing to listen on $listen: the address is not loopback. Set ${ServerEnv.PUBLIC_URL} to the " +
-                    "https:// URL of your reverse proxy, or pass --insecure-lan to serve plain HTTP on a trusted LAN",
+                "refusing to listen on $listen: the address is not loopback. " +
+                    "Set ${ServerEnv.PUBLIC_URL} to the https:// URL of your reverse proxy, " +
+                    "or pass --insecure-lan to serve plain HTTP on a trusted LAN",
             )
         }
 
@@ -338,7 +416,10 @@ internal object ServerConfigLoader {
         return if (allowed && !uri.host.isNullOrEmpty()) uri else null
     }
 
-    private fun parseTrustedProxies(text: String, errors: MutableList<String>): List<IpCidr> {
+    private fun parseTrustedProxies(
+        text: String,
+        errors: MutableList<String>,
+    ): List<IpCidr> {
         val entries = text.split(',')
         val cidrs = entries.map { entry -> IpCidr.parse(entry) }
         val invalid = entries.filterIndexed { index, _ -> cidrs[index] == null }

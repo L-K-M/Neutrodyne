@@ -3,6 +3,8 @@ package ch.lkmc.neutrodyne.desktop.shell
 
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runInterruptible
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.InetAddress
@@ -17,8 +19,6 @@ import java.util.Base64
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runInterruptible
 
 /**
  * The single-instance hand-off channel (11 Single instance and handshake): the owner serves on
@@ -85,7 +85,15 @@ class InstanceHandshake(
     ) {
         socket.socket().soTimeout = READ_TIMEOUT.inWholeMilliseconds.toInt()
         val line = runCatching { readLineCapped(socket) }.getOrNull()
-        val request = line?.let { runCatching { SHELL_JSON.decodeFromString(HandoffRequest.serializer(), it) }.getOrNull() }
+        val request =
+            line?.let {
+                runCatching {
+                    SHELL_JSON.decodeFromString(
+                        HandoffRequest.serializer(),
+                        it,
+                    )
+                }.getOrNull()
+            }
         if (request == null) {
             Log.w(TAG) { "hand-off rejected (no line in time, malformed JSON or oversize); connection closed" }
             return
@@ -102,7 +110,10 @@ class InstanceHandshake(
         // Reply first, then queue: the sender exits 0 as soon as the answer arrives. A failed
         // reply means the sender will retry — the input is not applied twice.
         val response = HandoffResponse(ok = true, pid = ProcessHandle.current().pid(), versionName = versionName)
-        val sent = runCatching { writeLine(socket, SHELL_JSON.encodeToString(HandoffResponse.serializer(), response)) }.isSuccess
+        val sent =
+            runCatching {
+                writeLine(socket, SHELL_JSON.encodeToString(HandoffResponse.serializer(), response))
+            }.isSuccess
         if (!sent) {
             Log.w(TAG) { "hand-off reply failed; connection closed" }
             return
@@ -116,7 +127,10 @@ class InstanceHandshake(
      * timeout, sends one line and waits ≤ [timeout]; a refused or unanswered attempt is retried
      * [deliveryAttempts] times every [retryDelay]. The lock is never broken.
      */
-    fun send(request: HandoffRequest, timeout: Duration = replyTimeout): HandoffOutcome {
+    fun send(
+        request: HandoffRequest,
+        timeout: Duration = replyTimeout,
+    ): HandoffOutcome {
         allowSetForegroundOnWindows()
         repeat(deliveryAttempts) { attempt ->
             if (attemptOnce(request, timeout) == HandoffOutcome.Delivered) return HandoffOutcome.Delivered
@@ -125,7 +139,10 @@ class InstanceHandshake(
         return HandoffOutcome.NoAnswer
     }
 
-    private fun attemptOnce(request: HandoffRequest, timeout: Duration): HandoffOutcome {
+    private fun attemptOnce(
+        request: HandoffRequest,
+        timeout: Duration,
+    ): HandoffOutcome {
         val port = readPort() ?: return HandoffOutcome.NoAnswer
         // Each attempt re-reads the owner's token: a delivery started while the owner was still
         // publishing its files picks the fresh token up on a later retry (11's Retry row).
@@ -139,9 +156,10 @@ class InstanceHandshake(
                 socket.socket().soTimeout = timeout.inWholeMilliseconds.toInt()
                 writeLine(socket, SHELL_JSON.encodeToString(HandoffRequest.serializer(), effective))
                 val reply = runCatching { readLineCapped(socket) }.getOrNull() ?: return HandoffOutcome.NoAnswer
-                val response = runCatching {
-                    SHELL_JSON.decodeFromString(HandoffResponse.serializer(), reply)
-                }.getOrNull() ?: return HandoffOutcome.NoAnswer
+                val response =
+                    runCatching {
+                        SHELL_JSON.decodeFromString(HandoffResponse.serializer(), reply)
+                    }.getOrNull() ?: return HandoffOutcome.NoAnswer
                 return if (response.ok) HandoffOutcome.Delivered else HandoffOutcome.NoAnswer
             }
         } catch (_: IOException) {
@@ -155,8 +173,7 @@ class InstanceHandshake(
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
     }
 
-    private fun readPort(): Int? =
-        runCatching { Files.readString(portFile).trim().toIntOrNull() }.getOrNull()
+    private fun readPort(): Int? = runCatching { Files.readString(portFile).trim().toIntOrNull() }.getOrNull()
 
     private fun readToken(): String? =
         runCatching { Files.readString(tokenFile).trim() }.getOrNull()?.takeIf(String::isNotEmpty)
@@ -175,7 +192,10 @@ class InstanceHandshake(
         return null // oversize: the connection is closed without a reply
     }
 
-    private fun writeLine(socket: SocketChannel, line: String) {
+    private fun writeLine(
+        socket: SocketChannel,
+        line: String,
+    ) {
         val payload = (line + "\n").toByteArray(Charsets.UTF_8)
         val buffer = ByteBuffer.wrap(payload)
         while (buffer.hasRemaining()) socket.write(buffer)
@@ -187,11 +207,15 @@ class InstanceHandshake(
         // JNA's platform User32 does not declare this entry point (checked 2026-10-06), so it is
         // declared here on our own tiny mapping — loaded only on Windows.
         runCatching {
-            com.sun.jna.Native.load("user32", AsfwUser32::class.java).AllowSetForegroundWindow(ASFW_ANY)
+            com.sun.jna.Native
+                .load("user32", AsfwUser32::class.java)
+                .AllowSetForegroundWindow(ASFW_ANY)
         }
     }
 
     private interface AsfwUser32 : com.sun.jna.win32.StdCallLibrary {
+        // JNA binds by method name, so it must match the user32 export exactly.
+        @Suppress("ktlint:standard:function-naming", "FunctionName")
         fun AllowSetForegroundWindow(dwProcessId: Int): Boolean
     }
 
