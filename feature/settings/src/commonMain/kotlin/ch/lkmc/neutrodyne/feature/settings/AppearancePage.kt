@@ -51,7 +51,7 @@ import org.jetbrains.compose.resources.stringResource
 @Composable
 internal fun AppearancePage(
     settings: SettingsRepository,
-    dynamicColorAvailable: Boolean,
+    dynamicColorSupport: DynamicColorSupport,
 ) {
     val theme by
         settings
@@ -76,7 +76,7 @@ internal fun AppearancePage(
                 summary = stringResource(themeLabel(theme)),
                 onClick = { showThemeDialog = true },
             )
-            if (dynamicColorAvailable) {
+            if (dynamicColorSupport == DynamicColorSupport.AVAILABLE) {
                 SettingsSwitchRow(
                     title = stringResource(Res.string.appearance_dynamic_color),
                     summary = stringResource(Res.string.appearance_dynamic_color_summary),
@@ -100,6 +100,9 @@ internal fun AppearancePage(
         )
     }
 }
+
+/** Whether the platform serves wallpaper dynamic colour (Android 12+), which shows its switch. */
+internal enum class DynamicColorSupport { AVAILABLE, UNAVAILABLE }
 
 @Composable
 private fun ThemeDialog(

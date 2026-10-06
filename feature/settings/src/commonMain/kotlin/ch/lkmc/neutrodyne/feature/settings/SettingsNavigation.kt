@@ -40,19 +40,24 @@ public object SettingsNavigation {
     ): EntryProviderInstaller =
         {
             // 08: the wallpaper-colour row exists only where Android 12+ can serve it.
-            val dynamicColorAvailable =
-                platformInfo.kind == PlatformKind.ANDROID &&
+            val dynamicColorSupport =
+                if (platformInfo.kind == PlatformKind.ANDROID &&
                     (platformInfo.androidSdkInt ?: 0) >= DYNAMIC_COLOR_MIN_SDK
+                ) {
+                    DynamicColorSupport.AVAILABLE
+                } else {
+                    DynamicColorSupport.UNAVAILABLE
+                }
             entry<SettingsHomeKey>(
                 metadata =
                     NdSceneMetadata.paneList(
-                        detailPlaceholder = { AppearancePage(settingsRepository, dynamicColorAvailable) },
+                        detailPlaceholder = { AppearancePage(settingsRepository, dynamicColorSupport) },
                     ),
             ) {
                 SettingsHomeRoute()
             }
             entry<SettingsKey>(metadata = NdSceneMetadata.paneDetail()) { key ->
-                SettingsRoute(key, buildInfo, settingsRepository, dynamicColorAvailable)
+                SettingsRoute(key, buildInfo, settingsRepository, dynamicColorSupport)
             }
             entry<LicencesKey>(metadata = NdSceneMetadata.paneDetail()) {
                 LicencesRoute(licencesSource, buildInfo)

@@ -331,7 +331,7 @@ abstract class CheckPythonLicencesTask : DefaultTask() {
     @get:Input
     abstract val desktopLock: Property<Boolean>
 
-    /** The shell's `config/libraries` manual definitions — one `.json` file stem per `aboutLibrariesId`. */
+    /** The shell's `config/engine/libraries` manual definitions — one `.json` file stem per `aboutLibrariesId`. */
     @get:InputFiles
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val aboutLibrariesDefinitions: org.gradle.api.file.ConfigurableFileCollection
@@ -430,9 +430,14 @@ private fun resolvedTargetRuntime(dslVersion: String?): String? =
             ?.let { "${it.key}-${it.value}" }
     }
 
+/** A shell's engine config root's library definitions, relative to the shell's project directory. */
+private const val ENGINE_LIBRARY_DEFINITIONS = "config/engine/libraries"
+
 /**
- * Registers `checkPythonLicences` and `verifyBundledYtDlp` for one engine host. `aboutLibrariesDir` is the
- * owning shell's manual-definition directory (`app/config/libraries`, `desktopApp/config/libraries`).
+ * Registers `checkPythonLicences` and `verifyBundledYtDlp` for one engine host. The AboutLibraries
+ * definitions are read from the owning shell's engine config root (`app/config/engine/libraries`,
+ * `desktopApp/config/engine/libraries`): the engine's manual entries live only there, because the
+ * shell switches its `configPath` with the engine (01 Emergency build without the engine).
  */
 internal fun Project.registerPythonPolicy(desktopLock: Boolean) {
     val checkTask =
@@ -442,7 +447,7 @@ internal fun Project.registerPythonPolicy(desktopLock: Boolean) {
             lockFile.set(layout.projectDirectory.file("python-components.lock"))
             this.desktopLock.set(desktopLock)
             val shell = if (desktopLock) "desktopApp" else "app"
-            val defsDir = rootProject.layout.projectDirectory.dir("$shell/config/libraries")
+            val defsDir = rootProject.layout.projectDirectory.dir("$shell/$ENGINE_LIBRARY_DEFINITIONS")
             aboutLibrariesDefinitions.from(fileTree(defsDir) { include("*.json") })
         }
 

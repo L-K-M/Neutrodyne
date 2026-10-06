@@ -18,11 +18,11 @@ internal fun SettingsRoute(
     key: SettingsKey,
     buildInfo: BuildInfo,
     settings: SettingsRepository,
-    dynamicColorAvailable: Boolean,
+    dynamicColorSupport: DynamicColorSupport,
 ) {
     when (key.page) {
-        SettingsPage.APPEARANCE -> AppearancePage(settings, dynamicColorAvailable)
+        SettingsPage.APPEARANCE -> AppearancePage(settings, dynamicColorSupport)
         SettingsPage.ABOUT -> AboutPage(buildInfo)
-        else -> AppearancePage(settings, dynamicColorAvailable)
+        else -> AppearancePage(settings, dynamicColorSupport)
     }
 }
