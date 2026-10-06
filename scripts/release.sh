@@ -101,8 +101,9 @@ nightly="$(gh run list --repo "$REPO" --workflow nightly.yml --branch "$BRANCH" 
 if [ "$nightly" != "success" ]; then
     smoke_ok=0
     if [ "$HOTFIX" -eq 1 ]; then
-        # workflow_dispatch runs on this branch checked out at HEAD; their run's
-        # head_sha is the dispatch ref, so --commit keeps the wrong-ref case out
+        # nightly.yml checks out github.sha, so a dispatched run tests exactly
+        # its head_sha; --commit keeps runs dispatched from another ref (or
+        # green on an older, pre-rebase HEAD) out of this gate
         dispatched="$(gh run list --repo "$REPO" --workflow nightly.yml --branch "$BRANCH" \
             --commit "$HEAD_SHA" --limit 10 --json databaseId,conclusion,event \
             --jq '[.[] | select(.event == "workflow_dispatch" and .conclusion == "success")] | .[].databaseId' \

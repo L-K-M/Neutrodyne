@@ -63,8 +63,13 @@ internal object PythonLicencePolicy {
     /** Maven origin prefix of the Chaquopy-packaged CPython runtime artifact. */
     val TARGET_PREFIX = "maven:com.chaquo.python:target:"
 
-    /** pip flags that read their package list from a file or URL, bypassing the lock's `pip` list. */
-    val PIP_FILE_OPTION = Regex("(-r|--requirement(=.*)?|-e|--editable(=.*)?)")
+    /**
+     * pip flags that read their package list from a file or URL, bypassing the lock's `pip` list.
+     * Short flags also take their argument attached (`-rreq.txt`, `-e./pkg`), so `-r`/`-e` match
+     * with any suffix; whole-string matching keeps look-alikes (`--require-hashes`,
+     * `--resume-retries`) legal.
+     */
+    val PIP_FILE_OPTION = Regex("(-r|-e).*|--requirement(=.*)?|--editable(=.*)?")
 
     data class Component(
         val name: String,
