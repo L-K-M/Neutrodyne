@@ -1,20 +1,42 @@
-# Neutrodyne — notes for Claude sessions
+@AGENTS.md
 
-Status: planning only; no code yet. [docs/PLAN.md](docs/PLAN.md) is the source of truth (requirements, decisions, owner decisions, roadmap); the design docs in [docs/design/](docs/design/) elaborate it. Implement milestone by milestone and record any deviation in the owning document (and in PLAN.md for D-ids).
+## Pull request babysitting
 
-Standing owner conventions — apply them without asking:
+When you push a branch and open a pull request in this repo (or the user points
+you at one), subscribe to it with `subscribe_pr_activity` immediately — don't
+wait to be asked. Also arm an hourly `send_later` self check-in (webhooks don't
+deliver CI successes, new pushes, or merge-conflict transitions). Then handle
+review feedback under this policy:
 
-- **Scope of v1.0:** the Android app, the desktop app (Windows, macOS on Apple Silicon, Linux) and an optional self-hosted sync server, all shipped together in v1.0. The server syncs subscriptions and listening state, never audio or feed contents.
-- **Stack:** Kotlin Multiplatform with Compose Multiplatform (targets `android` and `jvm("desktop")`; no iOS), and a Kotlin + Ktor sync server that shares code with the clients. Keep `commonMain` free of `java.*` and `android.*`. The Android-specific parts stay native: Media3, WorkManager / user-initiated jobs, Android Auto, and Chaquopy for yt-dlp.
-- **Package and ID prefix:** always `ch.lkmc`. The application ID and Kotlin base package are `ch.lkmc.neutrodyne`. Local development builds use `ch.lkmc.neutrodyne.debug` and are never published.
-- **Distribution:** GitHub Releases only. One release per tag carries the Android APKs, desktop installers and the server JAR; the server container image goes to GHCR, which counts as GitHub. No Google Play, F-Droid, winget, Homebrew, Flathub or other stores or package catalogues, no mirror and no beta channel. Desktop builds are unsigned.
-- **Android builds:** published APKs are optimised, non-debuggable release builds signed with the keystore committed to the repository (`signing/neutrodyne-public.keystore`). There is no key management or key ceremony.
-- **No platform developer registration:** neither Google's Android developer verification nor Apple's Developer ID. Install and update guidance covers the workarounds.
-- **Updates:** apps only check GitHub and notify, linking to the release page and the right download. They never download or install app updates themselves. YouTube engine (yt-dlp) updates are automatic, limited to versions approved by our own canary.
-- **Licensing:** the repository is Unlicense.
-  - Never add GPL or AGPL code or dependencies (Gradle, Python or native). There is one exception: the unmodified OpenJDK runtime bundled with desktop installers and the server image, with its exact source attached to each release.
-  - LGPL is allowed when dynamically linked, with its notices met and its exact source attached (for example the LGPL FFmpeg build used for desktop playback).
-  - MPL-2.0 is allowed only for unmodified files and data.
-  - Two cases go beyond these classes and await the owner's answer to PO-48 (see `docs/PLAN.md` §4): WiX code (MS-RL) embedded in MSI installers, and python-build-standalone's MPL-2.0 patches.
-  - YouTube extraction uses yt-dlp (Unlicense), never NewPipe Extractor.
-- **Brand:** the app icon source is `media-sources/icon.png` (a vacuum-tube "N", amber on navy).
+### Respond to every round on its merits
+- Triage each comment into exactly one of: **apply** (real bug or improvement),
+  **decline with recorded reasons** (commit message and chat), or **refute with
+  evidence** (official docs, actual CI runs, the code itself) when a claim is
+  factually wrong.
+- Verify factual claims against primary sources before acting on them. Never
+  apply a change just to appease a reviewer.
+- Never flip-flop: if an earlier round declined something for stated reasons,
+  don't apply it later unless genuinely new evidence appears. Keep a running
+  list of what was declined and why.
+- Post a PR comment only when an incorrect claim would otherwise mislead a
+  merge decision (e.g. "this won't compile"); otherwise let commit messages and
+  chat summaries carry the record.
+
+### Declare steady-state and stop when any of these hold
+- Two consecutive rounds yield no valid, actionable findings (only nits,
+  restatements, or self-answered "✅ fine" items),
+- the reviewer re-raises items already declined with reasons, or contradicts
+  its own earlier feedback,
+- everything remaining is out of scope for the PR (pre-existing behavior,
+  product decisions) — collect those as follow-up suggestions instead.
+
+At steady-state: post a short scorecard in chat (what was real, what was
+refuted, what's deferred), state that the PR is merge-ready, call
+`unsubscribe_pr_activity`, and delete any pending self check-in triggers for
+that PR. Ignore further automated review rounds after that point.
+
+**Exceptions:** comments from human reviewers are never subject to the
+steady-state cutoff — always address them. And always unsubscribe when the PR
+is merged or closed, or the user says stop.
+
+The number of tokens used to edit files is best minimized, all else being equal. Therefore, when it will not affect the end result, try to surgically edit a file rather than rewrite the entire thing.

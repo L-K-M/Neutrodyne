@@ -1,5 +1,8 @@
 # Neutrodyne
 
+> [!IMPORTANT]
+> LLM disclosure: This codebase was written with substantial help from large language models: AI coding agents working from the [`AGENTS.md`](AGENTS.md) brief in this repo.
+
 Neutrodyne is an open-source podcast player for Android and the desktop (Windows, macOS, Linux), with an optional self-hosted sync server. It is organised around groups: a group such as "tech", "news" or "fiction" is a user-defined set of podcasts and YouTube channels, and every group is its own newest-first episode feed. Each app polls its feeds itself — there is no Neutrodyne-operated backend, no account at a third party and no tracking. Whoever wants their phones and computers in step runs Neutrodyne Sync on a machine of their own; it keeps subscriptions, groups and listening state, never audio or feed contents, and the apps work fully without it.
 
 **Status: planning — no code yet.** The repository holds the master plan and eleven design documents. Implementation starts with milestone M0a ([roadmap](docs/PLAN.md#7-roadmap)); Android tester builds come from M0a, desktop tester builds from M0b and the sync server from MS1. Android, desktop and server ship together as v1.0.

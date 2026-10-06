@@ -1,0 +1,25 @@
+# Build outputs
+build/
+dist/
+.gradle/
+out/
+
+# IDE / editor
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+
+# Android / local machine config
+local.properties
+.cxx/
+
+# Node (tools/doccheck mermaid check)
+node_modules/
+tools/doccheck/node_modules/
+
+# Python cache
+__pycache__/
+*.pyc
