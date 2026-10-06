@@ -122,4 +122,12 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4.accessibility)
     androidTestImplementation(libs.androidx.test.espresso.core)
     androidTestImplementation(libs.cmp.resources)
+    // S5's test-only entries call these directly; they ride on the feature modules' `implementation`
+    // edges, which never reach the androidTest compile classpath.
+    androidTestImplementation(libs.navigation3.runtime)
+    androidTestImplementation(libs.lifecycle.viewmodel.compose)
+    androidTestImplementation(libs.cmp.material3)
+
+    // S11's worker-side getString test resolves Res strings on the JVM.
+    testImplementation(libs.cmp.resources)
 }
