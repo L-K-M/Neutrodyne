@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:chaquopy",
+  "name": "Chaquopy runtime",
+  "description": "Java/JNI bridge and bootstrap of the embedded Python",
+  "website": "https://chaquo.com/chaquopy/",
+  "developers": [],
+  "licenses": [
+    "MIT"
+  ],
+  "artifactVersion": "17.0.0",
+  "tag": "bundled"
+}

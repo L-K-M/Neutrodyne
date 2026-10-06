@@ -7,9 +7,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.BuildInfo
@@ -19,10 +23,14 @@ import ch.lkmc.neutrodyne.core.model.InstallKind
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
+import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
+import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.about_debug_build
 import ch.lkmc.neutrodyne.feature.settings.resources.about_licence_android
 import ch.lkmc.neutrodyne.feature.settings.resources.about_licence_desktop
+import ch.lkmc.neutrodyne.feature.settings.resources.about_link_copy
+import ch.lkmc.neutrodyne.feature.settings.resources.about_link_no_handler
 import ch.lkmc.neutrodyne.feature.settings.resources.about_source
 import ch.lkmc.neutrodyne.feature.settings.resources.about_version
 import ch.lkmc.neutrodyne.feature.settings.resources.about_version_abi
@@ -30,6 +38,7 @@ import ch.lkmc.neutrodyne.feature.settings.resources.about_version_desktop
 import ch.lkmc.neutrodyne.feature.settings.resources.app_name
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_about
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_licences
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -41,6 +50,23 @@ import org.jetbrains.compose.resources.stringResource
 internal fun AboutPage(buildInfo: BuildInfo) {
     val navigator = LocalAppNavigator.current
     val urls = LocalPlatformActions.current.urls
+    val snackbarHost = LocalSnackbarHost.current
+    val clipboard = LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
+    val noHandlerMessage = stringResource(Res.string.about_link_no_handler)
+    val copyLabel = stringResource(Res.string.about_link_copy)
+
+    // 08 Show notes renderer: a link nothing can open shows "No app can open this link" with
+    // "Copy link" as its action.
+    fun openLink(url: String) {
+        if (urls.open(url) == OpenResult.OPENED) return
+        scope.launch {
+            val result = snackbarHost.showSnackbar(message = noHandlerMessage, actionLabel = copyLabel)
+            if (result == SnackbarResult.ActionPerformed) {
+                clipboard.setText(AnnotatedString(url))
+            }
+        }
+    }
     Column(Modifier.fillMaxSize()) {
         NdTopAppBar(
             title = stringResource(Res.string.settings_about),
@@ -76,7 +102,7 @@ internal fun AboutPage(buildInfo: BuildInfo) {
                 icon = NdIcons.Explore,
                 title = stringResource(Res.string.about_source),
                 summary = buildInfo.repoUrl,
-                onClick = { urls.open(buildInfo.repoUrl) },
+                onClick = { openLink(buildInfo.repoUrl) },
             )
         }
     }

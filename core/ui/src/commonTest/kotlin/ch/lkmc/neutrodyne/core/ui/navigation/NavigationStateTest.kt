@@ -95,6 +95,42 @@ class NavigationStateTest {
     }
 
     @Test
+    fun `re-selecting the selected tab resets its stack to the root`() {
+        val nav = state()
+        nav.push(SettingsHomeKey)
+        nav.push(PodcastKey(3))
+
+        // 08 Re-tap: tapping the shown destination pops to the root, whose own entry (and with
+        // it its saved scroll state) is kept.
+        nav.selectTab(FeedsKey)
+        assertEquals(listOf(FeedsKey), nav.stack(FeedsKey).toList())
+        assertEquals(FeedsKey, nav.selectedTab)
+    }
+
+    @Test
+    fun `re-selecting a tab already at its root keeps the root`() {
+        val nav = state()
+
+        nav.selectTab(FeedsKey)
+        assertEquals(listOf(FeedsKey), nav.stack(FeedsKey).toList())
+        assertEquals(FeedsKey, nav.selectedTab)
+    }
+
+    @Test
+    fun `re-selection resets only the selected tab`() {
+        val nav = state()
+        nav.selectTab(LibraryKey)
+        nav.push(PodcastKey(4))
+        nav.selectTab(FeedsKey)
+        nav.push(SettingsHomeKey)
+
+        nav.selectTab(FeedsKey)
+
+        assertEquals(listOf(FeedsKey), nav.stack(FeedsKey).toList())
+        assertEquals(listOf(LibraryKey, PodcastKey(4)), nav.stack(LibraryKey).toList())
+    }
+
+    @Test
     fun `open replaces a tab's stack and selects it`() {
         val nav = state()
         nav.selectTab(LibraryKey)

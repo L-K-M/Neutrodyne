@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:mimalloc",
+  "name": "mimalloc",
+  "description": "Allocator bundled with CPython",
+  "website": "https://github.com/microsoft/mimalloc",
+  "developers": [],
+  "licenses": [
+    "MIT"
+  ],
+  "artifactVersion": "bundled with CPython 3.14.0",
+  "tag": "bundled"
+}

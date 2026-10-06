@@ -9,7 +9,9 @@ kotlin {
         commonMain.dependencies {
             implementation(project(":core:model"))
             implementation(project(":core:common"))
-            implementation(libs.androidx.datastore.preferences.core)
+            // `api`: `DataStore<Preferences>` appears in `DataStoreBindings`' provider signatures,
+            // so every graph that can bind it (both shells) needs the type on its classpath.
+            api(libs.androidx.datastore.preferences.core)
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.collections.immutable)
             implementation(libs.okio)

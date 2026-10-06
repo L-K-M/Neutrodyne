@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.designsystem.theme
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
+import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
 
 /**
  * What the OS currently asks for, mapped by each shell (08 Theming and colour): Android reads night
@@ -36,9 +37,6 @@ public data class AppearancePrefs(
     /** Whether artwork-driven schemes may tint the player surfaces (M10). */
     val artworkTint: Boolean = true,
 )
-
-/** The theme preference: follow the OS, or force light/dark. */
-public enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
 /** Provided by [NeutrodyneTheme]; read by anything that must honour the OS state. */
 public val LocalSystemUiState: androidx.compose.runtime.ProvidableCompositionLocal<SystemUiState> =

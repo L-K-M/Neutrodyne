@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:libffi",
+  "name": "libffi",
+  "description": "Foreign-function calls (CPython _ctypes)",
+  "website": "https://sourceware.org/libffi/",
+  "developers": [],
+  "licenses": [
+    "MIT"
+  ],
+  "artifactVersion": "3.4.4",
+  "tag": "bundled"
+}

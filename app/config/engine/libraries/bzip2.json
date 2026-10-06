@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:bzip2",
+  "name": "bzip2",
+  "description": "Compression (CPython _bz2)",
+  "website": "https://sourceware.org/bzip2/",
+  "developers": [],
+  "licenses": [
+    "bzip2-1.0.6"
+  ],
+  "artifactVersion": "1.0.8",
+  "tag": "bundled"
+}

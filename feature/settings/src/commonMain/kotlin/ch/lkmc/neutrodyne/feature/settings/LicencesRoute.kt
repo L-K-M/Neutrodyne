@@ -32,10 +32,12 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdLoading
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.about_licence_android
 import ch.lkmc.neutrodyne.feature.settings.resources.about_licence_desktop
+import ch.lkmc.neutrodyne.feature.settings.resources.licences_bundled_engine
 import ch.lkmc.neutrodyne.feature.settings.resources.licences_close
 import ch.lkmc.neutrodyne.feature.settings.resources.licences_empty
 import ch.lkmc.neutrodyne.feature.settings.resources.licences_library_count
@@ -72,7 +74,10 @@ private sealed interface LicenceData {
  * nothing); tests pass a fake.
  */
 @Composable
-internal fun LicencesRoute(source: LicencesSource?) {
+internal fun LicencesRoute(
+    source: LicencesSource?,
+    buildInfo: BuildInfo,
+) {
     val data by produceState<LicenceData>(LicenceData.Loading, source) {
         value = LicenceData.Loaded(source?.load())
     }
@@ -83,13 +88,16 @@ internal fun LicencesRoute(source: LicencesSource?) {
         )
         when (val state = data) {
             LicenceData.Loading -> NdLoading()
-            is LicenceData.Loaded -> LicenceList(state.libs)
+            is LicenceData.Loaded -> LicenceList(state.libs, buildInfo)
         }
     }
 }
 
 @Composable
-private fun LicenceList(libs: Libs?) {
+private fun LicenceList(
+    libs: Libs?,
+    buildInfo: BuildInfo,
+) {
     val libraries = libs?.libraries.orEmpty().sortedBy { it.name.lowercase() }
     if (libraries.isEmpty()) {
         LicenceEmpty()
@@ -128,6 +136,16 @@ private fun LicenceList(libs: Libs?) {
                     title = stringResource(Res.string.licences_section_bundled),
                     count = shownBundled.size,
                 )
+                // 08 Licences: the engine-free APK (armeabi-v7a) still lists the engine stack the
+                // 64-bit APKs carry, so the header explains where those components are used.
+                if (buildInfo.apkAbi != null && !buildInfo.youTubeEngineBundled) {
+                    Text(
+                        stringResource(Res.string.licences_bundled_engine),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = SCREEN_PADDING),
+                    )
+                }
             }
             items(shownBundled, key = { it.uniqueId }) { library ->
                 LicenceRow(library) { detailId = library.uniqueId }

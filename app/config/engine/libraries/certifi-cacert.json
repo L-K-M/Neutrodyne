@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:certifi-cacert",
+  "name": "certifi CA certificate bundle",
+  "description": "Mozilla CA roots, shipped unmodified as data (MPL-2.0, kind=data)",
+  "website": "https://certifi.io",
+  "developers": [],
+  "licenses": [
+    "MPL-2.0"
+  ],
+  "artifactVersion": "2026.7.22",
+  "tag": "bundled"
+}

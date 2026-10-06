@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:llvm-libcxx",
+  "name": "LLVM libc++",
+  "description": "Statically linked into Chaquopy's JNI libraries",
+  "website": "https://libcxx.llvm.org",
+  "developers": [],
+  "licenses": [
+    "Apache-2.0 WITH LLVM-exception"
+  ],
+  "artifactVersion": "NDK r28.2",
+  "tag": "bundled"
+}
