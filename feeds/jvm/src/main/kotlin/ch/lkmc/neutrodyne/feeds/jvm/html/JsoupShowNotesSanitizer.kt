@@ -501,7 +501,7 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
                         // pending piece, then the block's content walks with the anchor inherited.
                         link?.flush()
                         sink.flush()
-                        appendNode(node, sink, link?.href)
+                        appendNode(node, sink, link?.href ?: sink.inheritedLink)
                     } else {
                         // span, q, small, strike, sub, sup contribute their text only.
                         childrenOf(node, style, out, sink, link)
