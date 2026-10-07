@@ -55,7 +55,8 @@ class ShowNotesSanitizerTest {
     @Test
     fun mailtoLinksSurvive() {
         val blocks = blocksOf("""<p><a href="mailto:host@example.com">write</a></p>""")
-        assertThat(spansOf(blocks.single()).single() as NoteSpan.Link).isNotNull()
+        val link = spansOf(blocks.single()).single() as NoteSpan.Link
+        assertThat(link.url).isEqualTo("mailto:host@example.com")
     }
 
     @Test
@@ -237,6 +238,160 @@ line two</pre>
         val html = (1..60).joinToString(" ") { """<img src="https://cdn.example/$it.jpg">""" }
         val blocks = blocksOf(html)
         assertThat(blocks.filterIsInstance<NoteBlock.Image>()).hasSize(50)
+    }
+
+    /** S5: a pathological `src` must not make the tracking-image check quadratic. */
+    @Test(timeout = 10_000)
+    fun trackingImageCheckStaysLinear() {
+        val html = """<img src="https://example.com/""" + "1x1".repeat(160_000) + ".jpg\">"
+        val blocks = blocksOf(html)
+        // Not a gif/png name and no size attributes: the image is kept.
+        assertThat(blocks.filterIsInstance<NoteBlock.Image>()).hasSize(1)
+    }
+
+    /** S6: merging 30,000 adjacent equal-style texts must not be quadratic. */
+    @Test(timeout = 10_000)
+    fun equalStyleTextMergingStaysLinear() {
+        val blocks = blocksOf("<p>" + "<span>x</span>".repeat(30_000) + "</p>")
+        val text = spansOf(blocks.single()).filterIsInstance<NoteSpan.Text>().single()
+        assertThat(text.text).isEqualTo("x".repeat(30_000))
+    }
+
+    @Test
+    fun blockCapCoversPlainTextParagraphs() {
+        val document =
+            sanitizer.toDocument("x\n\n".repeat(2_001), isHtml = false, baseUri = base)
+        assertThat(document.blocks).hasSize(2_000)
+    }
+
+    @Test
+    fun blockCapCoversTopLevelHtml() {
+        val blocks = blocksOf("<p>x</p>".repeat(2_001))
+        assertThat(blocks).hasSize(2_000)
+    }
+
+    @Test
+    fun blockCapCoversListItems() {
+        val blocks = blocksOf("<ul>" + "<li>x</li>".repeat(2_001) + "</ul>")
+        val list = blocks.single() as NoteBlock.ListBlock
+        // 1 list + 1,999 item paragraphs = the 2,000-block budget; the last items are dropped.
+        assertThat(list.items).hasSize(1_999)
+    }
+
+    @Test
+    fun blockCapCoversNestedQuoteBlocks() {
+        val blocks = blocksOf("<blockquote>" + "<p>x</p>".repeat(30_000) + "</blockquote>")
+        val quote = blocks.single() as NoteBlock.Quote
+        assertThat(quote.blocks).hasSize(1_999)
+    }
+
+    /** C11: HTML-flagged text without tags takes the plain-text path after normalisation. */
+    @Test
+    fun htmlFlaggedTaglessInputGetsPlainTextHandling() {
+        val document =
+            sanitizer.toDocument("a\nb\n\nhttps://example.com/x", isHtml = true, baseUri = base)
+        assertThat(document.blocks).hasSize(2)
+        val first = (document.blocks[0] as NoteBlock.Paragraph).spans
+        assertThat(first).contains(NoteSpan.LineBreak)
+        val link =
+            (document.blocks[1] as NoteBlock.Paragraph).spans.filterIsInstance<NoteSpan.Link>().single()
+        assertThat(link.url).isEqualTo("https://example.com/x")
+    }
+
+    /** C12: `div` contents flatten into one paragraph that keeps inline mappings. */
+    @Test
+    fun containerInlineContentKeepsLinks() {
+        val blocks = blocksOf("""<div>Hello <a href="/about">there</a>!</div>""")
+        val spans = spansOf(blocks.single())
+        val link = spans.filterIsInstance<NoteSpan.Link>().single()
+        assertThat(link.url).isEqualTo("https://example.com/about")
+        assertThat(link.text).isEqualTo("there")
+        val text = spans.filterIsInstance<NoteSpan.Text>().joinToString("") { it.text }
+        assertThat(text).isEqualTo("Hello !")
+    }
+
+    /** C12: the same accumulation applies inside list items. */
+    @Test
+    fun listItemInlineContentKeepsLinks() {
+        val blocks = blocksOf("""<ul><li>Hello <a href="/about">there</a>!</li></ul>""")
+        val item = (blocks.single() as NoteBlock.ListBlock).items.single().single()
+        val link = (item as NoteBlock.Paragraph).spans.filterIsInstance<NoteSpan.Link>().single()
+        assertThat(link.url).isEqualTo("https://example.com/about")
+    }
+
+    /** C26: escaped markup is decoded without whitespace normalisation. */
+    @Test
+    fun escapedPreKeepsItsLineBreaks() {
+        val document =
+            sanitizer.toDocument("&lt;pre&gt;a\nb&lt;/pre&gt;", isHtml = true, baseUri = base)
+        val spans = (document.blocks.single() as NoteBlock.Paragraph).spans
+        assertThat(spans)
+            .containsExactly(NoteSpan.Text("a", CODE), NoteSpan.LineBreak, NoteSpan.Text("b", CODE))
+            .inOrder()
+    }
+
+    /** C27: an `img` wrapped in inline elements still becomes an Image block. */
+    @Test
+    fun imageInsideInlineElementIsEmitted() {
+        val blocks = blocksOf("""<p><b><img src="https://cdn.example/image.jpg"></b></p>""")
+        val image = blocks.filterIsInstance<NoteBlock.Image>().single()
+        assertThat(image.url).isEqualTo("https://cdn.example/image.jpg")
+    }
+
+    /** C28: a `src` the cleaner rejects leaves no Image block behind. */
+    @Test
+    fun imageWithRejectedSourceIsOmitted() {
+        val blocks = blocksOf("""<p><img src="data:image/png;base64,AAAA">text</p>""")
+        assertThat(blocks.filterIsInstance<NoteBlock.Image>()).isEmpty()
+    }
+
+    /** C29: `pre` keeps LineBreak and Link mappings. */
+    @Test
+    fun preKeepsBreaksAndLinks() {
+        val spans = spansOf(blocksOf("<pre>a<br>b</pre>").single())
+        assertThat(spans).contains(NoteSpan.LineBreak)
+        assertThat(spans.filterIsInstance<NoteSpan.Text>().map { it.text }).containsExactly("a", "b")
+
+        val withLink = spansOf(blocksOf("""<pre><a href="https://example.com/x">go</a></pre>""").single())
+        val link = withLink.filterIsInstance<NoteSpan.Link>().single()
+        assertThat(link.url).isEqualTo("https://example.com/x")
+        assertThat(link.text).isEqualTo("go")
+    }
+
+    /** C30: timestamps linkify over the whole run, so a trailing `h` still excludes them. */
+    @Test
+    fun timestampLooksPastInlineBoundaries() {
+        val spans = spansOf(blocksOf("<p>10:30<b>h</b></p>").single())
+        assertThat(spans.filterIsInstance<NoteSpan.Timestamp>()).isEmpty()
+        assertThat(spans.filterIsInstance<NoteSpan.Text>().map { it.text })
+            .containsExactly("10:30", "h")
+            .inOrder()
+    }
+
+    /** C30: a timestamp inside a link stays link text and keeps the child style. */
+    @Test
+    fun linkKeepsChildStyles() {
+        val spans =
+            spansOf(blocksOf("""<p><a href="https://example.com/x"><b>1:00</b></a></p>""").single())
+        val link = spans.filterIsInstance<NoteSpan.Link>().single()
+        assertThat(link.text).isEqualTo("1:00")
+        assertThat(link.style and BOLD).isEqualTo(BOLD)
+        assertThat(spans.filterIsInstance<NoteSpan.Timestamp>()).isEmpty()
+    }
+
+    /** C31: whitespace collapsing carries across inline nodes. */
+    @Test
+    fun whitespaceCollapsesAcrossInlineBoundaries() {
+        val spans = spansOf(blocksOf("<p>a <b> b </b> c</p>").single())
+        assertThat(spans.filterIsInstance<NoteSpan.Text>().joinToString("") { it.text })
+            .isEqualTo("a b c")
+    }
+
+    /** C32: a word ending exactly at the cut stays in the snippet. */
+    @Test
+    fun snippetKeepsWordEndingAtTheLimit() {
+        val text = "a".repeat(195) + " end more"
+        assertThat(sanitizer.snippet(text, isHtml = false)).isEqualTo("a".repeat(195) + " end…")
     }
 
     @Test
