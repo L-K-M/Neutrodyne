@@ -243,7 +243,9 @@ line two</pre>
     /** S5: a pathological `src` must not make the tracking-image check quadratic. */
     @Test(timeout = 10_000)
     fun trackingImageCheckStaysLinear() {
-        val html = """<img src="https://example.com/""" + "1x1".repeat(160_000) + ".jpg\">"
+        // W3 bounds URL attributes at 4,096 chars before the clean, so this adversarial name
+        // fills the attr right up to the cap — the marker scan must stay linear across it.
+        val html = """<img src="https://example.com/""" + "1x1".repeat(1_300) + ".jpg\">"
         val blocks = blocksOf(html)
         // Not a gif/png name and no size attributes: the image is kept.
         assertThat(blocks.filterIsInstance<NoteBlock.Image>()).hasSize(1)
@@ -532,6 +534,52 @@ line two</pre>
         val timestamp = spans.filterIsInstance<NoteSpan.Timestamp>().single()
         assertThat(timestamp.positionMs).isEqualTo(30_000)
         assertThat(timestamp.text).isEqualTo("0:30")
+    }
+
+    /** W3: a giant relative URL is bounded before jsoup resolves it, not after the walk. */
+    @Test(timeout = 10_000)
+    fun overlongUrlAttributesAreBoundedBeforeResolution() {
+        val html = """<p><a href="""" + "./".repeat(200_000) + """x">x</a></p>"""
+        val spans = spansOf(blocksOf(html).single())
+        // Over the URL bound the attribute is dropped; the anchor falls back to plain text.
+        assertThat(spans.filterIsInstance<NoteSpan.Link>()).isEmpty()
+        assertThat(spans.filterIsInstance<NoteSpan.Text>().single().text).isEqualTo("x")
+    }
+
+    /** W7: a timestamp split across inline elements inside `pre` linkifies over the complete run. */
+    @Test
+    fun preTimestampSpansInlineBoundaries() {
+        val spans = spansOf(blocksOf("<pre>skip to 1<b>2:34</b></pre>").single())
+        val timestamp = spans.filterIsInstance<NoteSpan.Timestamp>().single()
+        assertThat(timestamp.text).isEqualTo("12:34")
+        assertThat(timestamp.positionMs).isEqualTo(754_000)
+    }
+
+    /** W7: a time-of-day suffix split across elements still excludes the timestamp. */
+    @Test
+    fun preTimeOfDaySpanningInlineBoundariesIsNotLinkified() {
+        val spans = spansOf(blocksOf("<pre>10:30<b> am</b></pre>").single())
+        assertThat(spans.filterIsInstance<NoteSpan.Timestamp>()).isEmpty()
+        assertThat(spans.filterIsInstance<NoteSpan.Text>().joinToString("") { it.text })
+            .isEqualTo("10:30 am")
+    }
+
+    /** W8: a block child inside an anchor keeps the link. */
+    @Test
+    fun anchorWrapsBlockChildContent() {
+        val blocks = blocksOf("""<a href="/x">one<div>two</div>three</a>""")
+        val links = blocks.flatMap { spansOf(it) }.filterIsInstance<NoteSpan.Link>()
+        assertThat(links.map { it.text }).containsExactly("one", "two", "three").inOrder()
+        assertThat(links.map { it.url }.distinct()).containsExactly("https://example.com/x")
+    }
+
+    /** W9: a paragraph of only breaks emits no block and spends no budget. */
+    @Test
+    fun breakOnlyParagraphsSpendNoBudget() {
+        val blocks = blocksOf("<p><br></p>".repeat(2_000) + "<p>kept</p>")
+        assertThat(blocks).hasSize(1)
+        assertThat(spansOf(blocks.single()).filterIsInstance<NoteSpan.Text>().single().text)
+            .isEqualTo("kept")
     }
 
     private fun stylesAround(

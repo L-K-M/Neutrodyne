@@ -48,7 +48,19 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
                 .addAttributes("img", "alt", "width", "height", "src")
                 .removeProtocols("a", "href", "ftp")
                 .removeEnforcedAttribute("a", "rel")
-        val cleaned = Cleaner(safelist).clean(Jsoup.parseBodyFragment(html, baseUri))
+        // URL-bearing attributes are bounded before the clean: jsoup resolves each of them against
+        // baseUri while checking protocols, so a giant relative value would do its work — and grow
+        // to base + value — before any post-clean bound could drop it (03's URL-length bound).
+        val parsed = Jsoup.parseBodyFragment(html, baseUri)
+        for (element in parsed.select(URL_ATTR_SELECTOR)) {
+            val overlong =
+                element
+                    .attributes()
+                    .asList()
+                    .filter { it.key in URL_ATTRIBUTES && it.value.length > MAX_URL_CHARS }
+            for (attribute in overlong) element.removeAttr(attribute.key)
+        }
+        val cleaned = Cleaner(safelist).clean(parsed)
 
         // Step 3: tracking images and 1×1 spacers are neutralised, not removed — removing each
         // rejected sibling would shift its parent's child list (quadratic on 70,000 siblings).
@@ -199,21 +211,32 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
          * wraps them into a block on [target]. A block-level child flushes the run first.
          * [contextStyle] is inherited from enclosing containers (`dt`'s bold, `figcaption`'s
          * italic) and reaches every block this run produces, including nested block children.
+         * [inheritedLink] is the enclosing anchor's href: inside `<a><div>x</div></a>` the block's
+         * text still belongs to the anchor, so the run's spans link to it instead of linkifying.
          */
         private inner class Sink(
             val target: MutableList<NoteBlock>,
             val wrap: (List<NoteSpan>) -> NoteBlock,
             val listDepth: Int,
             val contextStyle: Int,
+            val inheritedLink: String? = null,
         ) {
             val spans = mutableListOf<NoteSpan>()
 
             fun flush() {
                 if (spans.isEmpty()) return
-                val run = trimEdges(linkifyTimestamps(mergeTextSpans(spans)))
+                val merged = mergeTextSpans(spans)
+                val run =
+                    if (inheritedLink == null) {
+                        trimEdges(linkifyTimestamps(merged))
+                    } else {
+                        trimEdges(merged.map { linkedTo(it, inheritedLink) })
+                    }
                 spans.clear()
                 val styled = if (contextStyle == NONE) run else withStyle(run, contextStyle)
-                if (styled.isNotEmpty() && takeBlock()) target.add(wrap(styled))
+                // A run of only breaks and blanks — `<p><br></p>` — emits no block and spends none.
+                if (styled.all { it is NoteSpan.LineBreak }) return
+                if (takeBlock()) target.add(wrap(styled))
             }
 
             fun addBlock(block: NoteBlock) {
@@ -228,16 +251,21 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
             wrap: (List<NoteSpan>) -> NoteBlock,
             listDepth: Int,
             contextStyle: Int,
+            inheritedLink: String? = null,
         ) {
-            val sink = Sink(target, wrap, listDepth, contextStyle)
-            for (child in element.childNodes()) appendNode(child, sink)
+            val sink = Sink(target, wrap, listDepth, contextStyle, inheritedLink)
+            for (child in element.childNodes()) appendNode(child, sink, sink.inheritedLink)
             sink.flush()
         }
 
-        /** Appends [node] in run context [sink]; block-level elements flush it and emit block(s). */
+        /**
+         * Appends [node] in run context [sink]; block-level elements flush it and emit block(s).
+         * [inheritedLink] propagates the enclosing anchor to the block's children.
+         */
         private fun appendNode(
             node: Node,
             sink: Sink,
+            inheritedLink: String? = null,
         ) {
             if (node is TextNode) {
                 appendText(sink.spans, node.wholeText, NONE)
@@ -252,18 +280,25 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
             when (node.tagName()) {
                 "p" -> {
                     sink.flush()
-                    runContainer(node, sink.target, ::paragraph, sink.listDepth, sink.contextStyle)
+                    runContainer(node, sink.target, ::paragraph, sink.listDepth, sink.contextStyle, inheritedLink)
                 }
 
                 "h1", "h2", "h3", "h4", "h5", "h6" -> {
                     sink.flush()
                     val level = node.tagName().substring(1).toInt()
-                    runContainer(node, sink.target, { NoteBlock.Heading(level, it) }, sink.listDepth, sink.contextStyle)
+                    runContainer(
+                        node,
+                        sink.target,
+                        { NoteBlock.Heading(level, it) },
+                        sink.listDepth,
+                        sink.contextStyle,
+                        inheritedLink,
+                    )
                 }
 
                 "ul", "ol" -> {
                     sink.flush()
-                    walkList(node, sink.target, sink.listDepth, sink.contextStyle)
+                    walkList(node, sink.target, sink.listDepth, sink.contextStyle, inheritedLink)
                 }
 
                 "blockquote" -> {
@@ -271,7 +306,7 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
                     // Reserve the Quote before its children spend the rest of the block budget.
                     if (takeBlock()) {
                         val inner = mutableListOf<NoteBlock>()
-                        runContainer(node, inner, ::paragraph, sink.listDepth, sink.contextStyle)
+                        runContainer(node, inner, ::paragraph, sink.listDepth, sink.contextStyle, inheritedLink)
                         sink.target.add(NoteBlock.Quote(inner))
                     }
                 }
@@ -291,7 +326,7 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
 
                 "pre" -> {
                     sink.flush()
-                    preBlock(node, sink.target, sink.contextStyle)
+                    preBlock(node, sink.target, sink.contextStyle, inheritedLink)
                 }
 
                 "dl" -> {
@@ -307,11 +342,19 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
                                     ::paragraph,
                                     sink.listDepth,
                                     sink.contextStyle or BOLD,
+                                    inheritedLink,
                                 )
                             }
 
                             "dd" -> {
-                                runContainer(child, sink.target, ::paragraph, sink.listDepth, sink.contextStyle)
+                                runContainer(
+                                    child,
+                                    sink.target,
+                                    ::paragraph,
+                                    sink.listDepth,
+                                    sink.contextStyle,
+                                    inheritedLink,
+                                )
                             }
                         }
                     }
@@ -319,13 +362,20 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
 
                 "figcaption" -> {
                     sink.flush()
-                    runContainer(node, sink.target, ::paragraph, sink.listDepth, sink.contextStyle or ITALIC)
+                    runContainer(
+                        node,
+                        sink.target,
+                        ::paragraph,
+                        sink.listDepth,
+                        sink.contextStyle or ITALIC,
+                        inheritedLink,
+                    )
                 }
 
                 else -> {
                     // div/figure contents flatten; any stray block container the same.
                     sink.flush()
-                    runContainer(node, sink.target, ::paragraph, sink.listDepth, sink.contextStyle)
+                    runContainer(node, sink.target, ::paragraph, sink.listDepth, sink.contextStyle, inheritedLink)
                 }
             }
         }
@@ -337,7 +387,7 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
          * the link splits in document order and resumes after the boundary.
          */
         private inner class LinkBuffer(
-            private val href: String,
+            val href: String,
             private val style: Int,
             val out: MutableList<NoteSpan>,
         ) {
@@ -416,9 +466,11 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
 
                 else -> {
                     if (node.tagName() in BLOCK_TAGS) {
+                        // A block child inside an anchor keeps the link: the boundary flushes the
+                        // pending piece, then the block's content walks with the anchor inherited.
                         link?.flush()
                         sink.flush()
-                        appendNode(node, sink)
+                        appendNode(node, sink, link?.href)
                     } else {
                         // span, q, small, strike, sub, sup contribute their text only.
                         childrenOf(node, style, out, sink, link)
@@ -443,10 +495,11 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
             target: MutableList<NoteBlock>,
             listDepth: Int,
             contextStyle: Int,
+            inheritedLink: String? = null,
         ) {
             val items = node.children().filter { it.tagName() == "li" }
             if (listDepth >= MAX_LIST_NESTING) {
-                for (li in items) runContainer(li, target, ::paragraph, listDepth, contextStyle)
+                for (li in items) runContainer(li, target, ::paragraph, listDepth, contextStyle, inheritedLink)
                 return
             }
 
@@ -455,7 +508,7 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
             val lists = mutableListOf<List<NoteBlock>>()
             for (li in items) {
                 val itemBlocks = mutableListOf<NoteBlock>()
-                runContainer(li, itemBlocks, ::paragraph, listDepth + 1, contextStyle)
+                runContainer(li, itemBlocks, ::paragraph, listDepth + 1, contextStyle, inheritedLink)
                 if (itemBlocks.isEmpty()) {
                     // The budget is spent: the item is dropped rather than left bullet-shaped empty.
                     if (!takeBlock()) continue
@@ -476,11 +529,20 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
             node: Element,
             target: MutableList<NoteBlock>,
             contextStyle: Int,
+            inheritedLink: String? = null,
         ) {
+            val style = CODE or contextStyle
             val spans = mutableListOf<NoteSpan>()
             val wrappedImages = mutableListOf<Element>()
-            appendPreformatted(node, spans, wrappedImages, link = null, style = CODE or contextStyle)
-            if (spans.isNotEmpty() && takeBlock()) target.add(NoteBlock.Paragraph(mergeTextSpans(spans)))
+            // The link-free text collects in one run per contiguous stretch, so the timestamp
+            // grammar reads `10:30<b> am</b>` as "10:30 am" — line breaks, images and links end it.
+            val run = StringBuilder()
+            appendPreformatted(node, spans, wrappedImages, run, inheritedLink, style)
+            flushPreRun(run, spans, style)
+            // As in any paragraph run: a `pre` of only breaks emits no block and spends none.
+            if (spans.any { it !is NoteSpan.LineBreak } && takeBlock()) {
+                target.add(NoteBlock.Paragraph(mergeTextSpans(spans)))
+            }
             for (img in wrappedImages) addImage(img, target)
         }
 
@@ -488,18 +550,22 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
             node: Node,
             spans: MutableList<NoteSpan>,
             wrappedImages: MutableList<Element>,
+            run: StringBuilder,
             link: String?,
             style: Int,
         ) {
             when (node) {
                 is TextNode -> {
                     for ((i, line) in node.wholeText.split('\n').withIndex()) {
-                        if (i > 0) spans.add(NoteSpan.LineBreak)
+                        if (i > 0) {
+                            flushPreRun(run, spans, style)
+                            spans.add(NoteSpan.LineBreak)
+                        }
                         if (line.isEmpty()) continue
                         if (link != null) {
                             spans.add(NoteSpan.Link(line, link, style))
                         } else {
-                            spans.addAll(TimestampLinkifier.linkify(line, style))
+                            run.append(line)
                         }
                     }
                 }
@@ -507,24 +573,28 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
                 is Element -> {
                     when (node.tagName()) {
                         "br" -> {
+                            flushPreRun(run, spans, style)
                             spans.add(NoteSpan.LineBreak)
                         }
 
                         "img" -> {
+                            flushPreRun(run, spans, style)
                             wrappedImages.add(node)
                         }
 
                         "a" -> {
-                            // An anchor without href keeps the surrounding link context.
+                            // An anchor without href keeps the surrounding link context; a real
+                            // href is a run boundary — text before and after it is not contiguous.
                             val href = node.attr("href").ifEmpty { null } ?: link
+                            if (href != link) flushPreRun(run, spans, style)
                             for (child in node.childNodes()) {
-                                appendPreformatted(child, spans, wrappedImages, href, style)
+                                appendPreformatted(child, spans, wrappedImages, run, href, style)
                             }
                         }
 
                         else -> {
                             for (child in node.childNodes()) {
-                                appendPreformatted(child, spans, wrappedImages, link, style)
+                                appendPreformatted(child, spans, wrappedImages, run, link, style)
                             }
                         }
                     }
@@ -534,6 +604,17 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
                     // Comments, PIs and other non-text nodes contribute nothing inside pre.
                 }
             }
+        }
+
+        /** Ends the current link-free `pre` run: its complete text linkifies with [style]. */
+        private fun flushPreRun(
+            run: StringBuilder,
+            spans: MutableList<NoteSpan>,
+            style: Int,
+        ) {
+            if (run.isEmpty()) return
+            spans.addAll(TimestampLinkifier.linkify(run.toString(), style))
+            run.clear()
         }
 
         private fun addImage(
@@ -587,6 +668,19 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
     }
 
     private fun paragraph(spans: List<NoteSpan>): NoteBlock = NoteBlock.Paragraph(spans)
+
+    /**
+     * Re-wraps a run's spans under an enclosing anchor: `Text` links to [href] keeping its style;
+     * inner anchors already own their link and breaks and timestamps pass through untouched.
+     */
+    private fun linkedTo(
+        span: NoteSpan,
+        href: String,
+    ): NoteSpan =
+        when (span) {
+            is NoteSpan.Text -> NoteSpan.Link(span.text, href, span.style)
+            is NoteSpan.LineBreak, is NoteSpan.Link, is NoteSpan.Timestamp -> span
+        }
 
     /**
      * Timestamps linkify over each complete text run (03 Timestamp linkifier): every maximal run of
@@ -793,5 +887,10 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
         const val MAX_BLOCKS = 2_000
         const val MAX_LIST_NESTING = 4
         const val MAX_IMAGES = 50
+
+        /** The attributes jsoup resolves while cleaning — the same 4,096-char bound as feed URLs. */
+        const val MAX_URL_CHARS = 4_096
+        val URL_ATTRIBUTES = setOf("href", "src", "cite", "srcset")
+        val URL_ATTR_SELECTOR = "[href], [src], [cite], [srcset]"
     }
 }
