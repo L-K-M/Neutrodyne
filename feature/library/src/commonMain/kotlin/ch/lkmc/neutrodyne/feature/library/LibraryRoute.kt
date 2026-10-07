@@ -2,35 +2,56 @@
 
 package ch.lkmc.neutrodyne.feature.library
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import ch.lkmc.neutrodyne.core.designsystem.components.NdEmptyState
-import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
-import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
-import ch.lkmc.neutrodyne.core.ui.resources.Res
-import ch.lkmc.neutrodyne.core.ui.resources.library_empty_body
-import ch.lkmc.neutrodyne.core.ui.resources.library_empty_title
-import ch.lkmc.neutrodyne.core.ui.resources.nav_library
-import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
-import org.jetbrains.compose.resources.stringResource
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
+import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
+import ch.lkmc.neutrodyne.core.navigation.PodcastKey
+import ch.lkmc.neutrodyne.core.navigation.PodcastSettingsKey
+import dev.zacsweers.metrox.viewmodel.metroViewModel
+import kotlinx.coroutines.launch
 
 /**
- * The M0a Library destination (01 M0 checklist step 16): a top bar with the Settings gear and the
- * empty state. M1 delivers the subscription cover grid (08 Library).
+ * The Library destination (08 Library): the [LibraryViewModel] holds tiles/sort/titles; the tile
+ * menu's "Podcast settings" navigates at the route, "Unsubscribe…" opens the confirmation with
+ * the downloaded-episode count the dialog names.
  */
 @Composable
 internal fun LibraryRoute() {
-    Column(Modifier.fillMaxSize()) {
-        NdTopAppBar(
-            title = stringResource(Res.string.nav_library),
-            actions = { SettingsGearButton() },
-        )
-        NdEmptyState(
-            icon = NdIcons.GridView,
-            title = stringResource(Res.string.library_empty_title),
-            body = stringResource(Res.string.library_empty_body),
-        )
-    }
+    val viewModel = metroViewModel<LibraryViewModel>()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val navigator = LocalAppNavigator.current
+    val scope = rememberCoroutineScope()
+    var pending by remember { mutableStateOf<PendingUnsubscribe?>(null) }
+
+    LibraryScreen(
+        state = state,
+        pendingUnsubscribe = pending,
+        onSort = viewModel::setSort,
+        onToggleTitles = viewModel::setShowTitles,
+        onOpenPodcast = { navigator.pushDetail(PodcastKey(it)) },
+        onTileAction = { podcastId, action ->
+            when (action) {
+                TileAction.SETTINGS -> navigator.pushDetail(PodcastSettingsKey(podcastId))
+                TileAction.REFRESH -> viewModel.refreshPodcast(podcastId)
+                TileAction.MARK_PLAYED -> viewModel.markAllPlayed(podcastId)
+                TileAction.UNSUBSCRIBE ->
+                    scope.launch {
+                        val tile = state.tiles.firstOrNull { it.podcastId == podcastId } ?: return@launch
+                        pending = PendingUnsubscribe(tile, viewModel.downloadedCount(podcastId))
+                    }
+            }
+        },
+        onConfirmUnsubscribe = {
+            pending = null
+            viewModel.unsubscribe(it.podcastId)
+        },
+        onDismissUnsubscribe = { pending = null },
+        onAddPodcast = { navigator.push(AddPodcastKey(null)) },
+    )
 }

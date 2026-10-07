@@ -58,4 +58,319 @@
     <string name="review">Review</string>
     <string name="remote_session_title">Continue on this device</string>
     <string name="remote_session_detail">%1$s · %2$s · from %3$s</string>
+
+    <!-- Day headers and row dates (08 Feeds, EpisodeRow meta). -->
+    <string name="date_today">Today</string>
+    <string name="date_yesterday">Yesterday</string>
+    <string name="date_weekday_mon">Monday</string>
+    <string name="date_weekday_tue">Tuesday</string>
+    <string name="date_weekday_wed">Wednesday</string>
+    <string name="date_weekday_thu">Thursday</string>
+    <string name="date_weekday_fri">Friday</string>
+    <string name="date_weekday_sat">Saturday</string>
+    <string name="date_weekday_sun">Sunday</string>
+    <string name="date_duration_minutes">%1$d min</string>
+    <string name="date_duration_hours">%1$d h</string>
+    <string name="date_duration_hours_minutes">%1$d h %2$d min</string>
+    <string name="date_just_now">Just now</string>
+    <plurals name="date_minutes_ago">
+        <item quantity="one">%1$d min ago</item>
+        <item quantity="other">%1$d min ago</item>
+    </plurals>
+    <plurals name="date_hours_ago">
+        <item quantity="one">%1$d h ago</item>
+        <item quantity="other">%1$d h ago</item>
+    </plurals>
+    <plurals name="date_days_ago">
+        <item quantity="one">%1$d day ago</item>
+        <item quantity="other">%1$d days ago</item>
+    </plurals>
+    <string name="date_in_moment">a moment</string>
+    <plurals name="date_in_minutes">
+        <item quantity="one">%1$d min</item>
+        <item quantity="other">%1$d min</item>
+    </plurals>
+    <plurals name="date_in_hours">
+        <item quantity="one">%1$d h</item>
+        <item quantity="other">%1$d h</item>
+    </plurals>
+    <plurals name="date_in_days">
+        <item quantity="one">%1$d d</item>
+        <item quantity="other">%1$d d</item>
+    </plurals>
+
+    <!-- Episode row actions and states (08 EpisodeRow). -->
+    <string name="action_open">Open</string>
+    <string name="action_pause">Pause</string>
+    <string name="action_resume">Resume</string>
+    <string name="action_play_again">Play again</string>
+    <string name="action_download">Download</string>
+    <string name="action_download_now">Download now</string>
+    <string name="action_cancel_download">Cancel download</string>
+    <string name="action_pause_download">Pause download</string>
+    <string name="action_resume_download">Resume download</string>
+    <string name="action_retry_download">Retry download</string>
+    <string name="action_delete_download">Delete download</string>
+    <string name="action_mark_played">Mark played</string>
+    <string name="action_mark_unplayed">Mark unplayed</string>
+    <string name="action_play_next">Play next</string>
+    <string name="action_play_last">Play last</string>
+    <string name="action_up_next">Up next</string>
+    <string name="action_favorite">Favourite</string>
+    <string name="action_unfavorite">Remove favourite</string>
+    <string name="action_share">Share</string>
+    <string name="action_copy_link">Copy link</string>
+    <string name="action_open_website">Open website</string>
+    <string name="action_watch_on_youtube">Watch on YouTube</string>
+    <string name="action_check_again">Check again</string>
+    <string name="action_go_to_podcast">Go to podcast</string>
+    <string name="action_more">More actions</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_retry">Retry</string>
+    <string name="episode_opens_youtube">Opens in YouTube</string>
+    <string name="episode_offline_row">Offline</string>
+    <string name="episode_offline_toast">Offline — this episode isn\'t downloaded</string>
+    <string name="action_play">Play</string>
+
+    <!-- Row summary parts (08 Row summary). -->
+    <string name="summary_played">Played</string>
+    <string name="summary_new">New</string>
+    <string name="summary_video">Video</string>
+    <string name="summary_downloaded">Downloaded</string>
+    <string name="summary_downloading">Downloading, %1$d percent</string>
+    <string name="summary_now_playing">Now playing</string>
+    <plurals name="summary_minutes_left">
+        <item quantity="one">%1$d minute left</item>
+        <item quantity="other">%1$d minutes left</item>
+    </plurals>
+    <plurals name="summary_percent_played">
+        <item quantity="one">%1$d percent played</item>
+        <item quantity="other">%1$d percent played</item>
+    </plurals>
+
+    <!-- DownloadStatusText (08 String mappers). -->
+    <string name="dl_queued">Queued</string>
+    <string name="dl_wait_network">Waiting for a connection</string>
+    <string name="dl_wait_wifi">Waiting for Wi-Fi</string>
+    <string name="dl_wait_charging">Waiting for charging</string>
+    <string name="dl_wait_storage">Waiting for storage space</string>
+    <string name="dl_wait_storage_android">Waiting for the SD card</string>
+    <string name="dl_wait_storage_desktop">Waiting for the download folder</string>
+    <string name="dl_retry_soon">Retrying soon</string>
+    <string name="dl_retry_in">Retrying in %1$s</string>
+    <string name="dl_paused_system">Paused by Android, resumes automatically</string>
+    <string name="dl_tap_resume">Tap to resume</string>
+    <string name="dl_paused">Paused</string>
+    <string name="dl_missing">File missing</string>
+    <string name="dl_storage_unavailable">Storage isn\'t available</string>
+    <string name="dl_percent">%1$d %</string>
+    <string name="dl_err_no_longer">The file is no longer on the server</string>
+    <string name="dl_err_auth">The server asked for a password</string>
+    <string name="dl_err_server">Server error</string>
+    <string name="dl_err_ratelimit">The server is busy, try later</string>
+    <string name="dl_err_io">Connection lost</string>
+    <string name="dl_err_not_media">The server sent a web page instead of audio</string>
+    <string name="dl_err_size">The file was incomplete</string>
+    <string name="dl_err_storage">Not enough storage space</string>
+    <string name="dl_err_yt">YouTube download failed</string>
+    <string name="dl_err_stream">This format isn\'t supported</string>
+    <string name="dl_err_failed">Download failed</string>
+
+    <!-- AvailabilityText (08; wording adopted from 04). -->
+    <string name="availability_age_restricted">Age-restricted — sign-in required on YouTube</string>
+    <string name="availability_members_only">Members only</string>
+    <string name="availability_region_blocked">Not available in your country</string>
+    <string name="availability_private">Private video</string>
+    <string name="availability_kids">Made for kids — can\'t be played here</string>
+    <string name="availability_unavailable">No longer available</string>
+    <string name="availability_upcoming">Premieres soon</string>
+    <string name="availability_live">Live now</string>
+
+    <!-- FeedErrorText (08 String mappers) and NetErrorText. -->
+    <string name="net_offline">You\'re offline</string>
+    <string name="net_timeout">The server didn\'t answer in time</string>
+    <string name="net_dns">Couldn\'t find the server</string>
+    <string name="net_connection">Couldn\'t connect</string>
+    <string name="net_lan">Feeds on your local network aren\'t supported yet</string>
+    <string name="net_tls_untrusted">The server\'s certificate isn\'t trusted</string>
+    <string name="net_tls_handshake">Secure connection failed</string>
+    <string name="net_cancelled">Cancelled</string>
+    <string name="net_other">Something went wrong</string>
+    <string name="feed_err_auth">Needs a password</string>
+    <string name="feed_err_forbidden">Access denied</string>
+    <string name="feed_err_not_found">Feed not found</string>
+    <string name="feed_err_gone">This feed was removed</string>
+    <string name="feed_err_ratelimit">The server is busy</string>
+    <string name="feed_err_server">Server error</string>
+    <string name="feed_err_redirects">Too many redirects</string>
+    <string name="feed_err_too_large">The feed is too large</string>
+    <string name="feed_err_not_a_feed">This isn\'t a podcast feed</string>
+    <string name="feed_err_no_media">No audio or video in this feed</string>
+    <string name="feed_err_storage">Not enough storage space</string>
+    <string name="feed_err_moved">The feed moved to a new address</string>
+    <string name="feed_err_disabled">Manual refresh</string>
+    <string name="feed_err_paused">Updates are paused</string>
+    <string name="feed_err_auth_failed">Authentication failed</string>
+
+    <!-- Offline banner (08 Banners, priority 6). -->
+    <string name="offline_banner">You\'re offline — downloaded episodes still play</string>
+
+    <!-- Feeds (08 Feeds). -->
+    <string name="feeds_refresh">Refresh</string>
+    <string name="feeds_load_error">Couldn\'t load episodes</string>
+    <string name="feeds_caught_up">You\'re all caught up</string>
+    <string name="feeds_show_played">Show played episodes</string>
+    <string name="feeds_clear_filters">Clear filters</string>
+    <string name="feeds_onboarding_title">Your feeds live here</string>
+    <string name="feeds_search">Search podcasts</string>
+    <string name="feeds_add_url">Add by URL or YouTube link</string>
+    <string name="feeds_import">Import subscriptions</string>
+    <string name="feeds_mark_all_played">Mark all as played…</string>
+    <string name="filter_unplayed">Unplayed</string>
+    <string name="filter_downloaded">Downloaded</string>
+    <string name="filter_in_progress">In progress</string>
+    <string name="order_newest">Newest first</string>
+    <string name="order_oldest">Oldest first</string>
+
+    <!-- Library (08 Library). -->
+    <string name="library_sort">Sort</string>
+    <string name="library_show_titles">Show titles</string>
+    <string name="library_sort_title">Title (A–Z)</string>
+    <string name="library_sort_recent">Recently updated</string>
+    <string name="library_sort_unplayed">Most unplayed</string>
+    <string name="library_sort_added">Recently added</string>
+    <plurals name="tile_new_episodes">
+        <item quantity="one">%1$d new episode</item>
+        <item quantity="other">%1$d new episodes</item>
+    </plurals>
+    <string name="tile_pending">Being fetched</string>
+    <string name="tile_needs_password">Needs a password</string>
+    <string name="tile_gone">Feed gone</string>
+    <string name="tile_moved">Feed may have moved</string>
+
+    <!-- Podcast detail (08 Podcast detail). -->
+    <string name="podcast_subscribed">Subscribed</string>
+    <string name="podcast_private">Private</string>
+    <plurals name="podcast_episode_count">
+        <item quantity="one">%1$d episode</item>
+        <item quantity="other">%1$d episodes</item>
+    </plurals>
+    <string name="podcast_updated">Updated %1$s</string>
+    <string name="podcast_more">More</string>
+    <string name="podcast_less">Less</string>
+    <string name="podcast_settings">Podcast settings</string>
+    <string name="podcast_unsubscribe">Unsubscribe</string>
+    <string name="podcast_unsubscribe_title">Unsubscribe from %1$s?</string>
+    <plurals name="podcast_unsubscribe_downloads">
+        <item quantity="one">%1$d downloaded episode will be deleted.</item>
+        <item quantity="other">%1$d downloaded episodes will be deleted.</item>
+    </plurals>
+    <string name="podcast_removed">This podcast was removed</string>
+    <string name="podcast_no_episodes">No episodes yet</string>
+    <string name="podcast_fetching">Fetching episodes…</string>
+    <string name="podcast_needs_password">This feed needs a password</string>
+    <string name="podcast_enter_password">Enter password</string>
+    <string name="podcast_gone">This feed no longer exists</string>
+    <string name="podcast_maybe_moved">This feed hasn\'t updated since %1$s — it may have moved</string>
+    <string name="podcast_load_older">Load older episodes</string>
+    <string name="podcast_mark_played">Mark all as played</string>
+    <string name="podcast_copy_feed">Copy feed address</string>
+    <string name="podcast_copy_feed_warning">This feed address is private — anyone with it can read the feed.</string>
+    <string name="podcast_loading">Loading podcast…</string>
+
+    <!-- Podcast settings (08 Podcast settings: general and feed rows of M1). -->
+    <string name="section_general">General</string>
+    <string name="section_feed">Feed</string>
+    <string name="ps_custom_title">Custom title</string>
+    <string name="ps_show_in_all">Show in All</string>
+    <string name="ps_episode_order">Episode order</string>
+    <string name="ps_feed_address">Feed address</string>
+    <string name="ps_feed_reveal">Tap to show</string>
+    <string name="ps_last_refresh">Last refresh</string>
+    <string name="ps_feed_moves">Feed moved</string>
+    <string name="ps_move_reason_redirect">Redirect</string>
+    <string name="ps_move_reason_feed_url">Feed announced a new address</string>
+    <string name="ps_ok">OK</string>
+    <string name="ps_never">Never</string>
+    <string name="ps_edit_url">Edit feed address</string>
+    <string name="ps_edit_url_title">New feed address</string>
+    <string name="ps_credentials">Username and password</string>
+    <string name="ps_feed_copied">Feed address copied</string>
+    <string name="ps_move_line">%1$s · %2$s · %3$s</string>
+    <string name="ps_move_reason_other">Moved</string>
+    <string name="action_save">Save</string>
+    <string name="action_copy">Copy</string>
+
+    <!-- Episode detail (08 Episode detail). -->
+    <string name="episode_not_found">This episode is no longer available</string>
+    <string name="episode_load_images">Load images</string>
+    <string name="episode_images_off">Images are off to protect privacy</string>
+    <string name="episode_no_notes">No show notes</string>
+    <string name="episode_loading">Loading episode…</string>
+    <string name="episode_up_next_menu">Add to Up next</string>
+    <plurals name="episode_minutes_left">
+        <item quantity="one">%1$d min left</item>
+        <item quantity="other">%1$d min left</item>
+    </plurals>
+    <string name="shownotes_image">Image: %1$s</string>
+    <string name="no_handler">No app can open this link</string>
+
+    <!-- Discover (M1a: add-by-URL entry point only). -->
+    <string name="discover_add_url">Add by URL</string>
+
+    <!-- Add podcast sheet (08 Add podcast sheet, M1a direct feed URLs). -->
+    <string name="add_title">Add a podcast</string>
+    <string name="add_field_label">Feed or site address</string>
+    <string name="add_helper">Paste a podcast feed, website, Apple Podcasts or YouTube link</string>
+    <string name="add_paste">Paste</string>
+    <string name="add_looking_up">Looking up…</string>
+    <string name="add_subscribe">Subscribe</string>
+    <string name="add_private">Private feed</string>
+    <string name="add_empty_feed">This feed has no episodes yet</string>
+    <plurals name="add_episodes_count">
+        <item quantity="one">%1$d episode</item>
+        <item quantity="other">%1$d episodes</item>
+    </plurals>
+    <string name="add_last_episode">latest %1$s</string>
+    <string name="add_auth_title">This feed needs a password</string>
+    <string name="add_auth_username">Username</string>
+    <string name="add_auth_password">Password</string>
+    <string name="add_auth_show">Show password</string>
+    <string name="add_auth_hide">Hide password</string>
+    <string name="add_choose_title">This page has several feeds</string>
+    <plurals name="add_candidate_episodes">
+        <item quantity="one">%1$d episode</item>
+        <item quantity="other">%1$d episodes</item>
+    </plurals>
+    <string name="add_subscription_list">This is a subscription list — a file of feeds to subscribe to all at once.</string>
+    <string name="add_import_later">Import arrives with a later milestone — pick a single feed address meanwhile.</string>
+    <string name="add_error_not_a_url">Enter a feed address</string>
+    <string name="add_error_invalid_url">That doesn\'t look like a feed address</string>
+    <string name="add_error_http">The server answered %1$d</string>
+    <string name="add_error_malformed">The feed could not be read</string>
+    <string name="add_error_list_feed">This kind of feed isn\'t supported</string>
+    <string name="add_error_apple_only">This show has no public feed</string>
+    <string name="add_error_spotify">Spotify shows have no public feed — search by name</string>
+    <string name="add_error_directory_busy">Search is busy — try again in a moment</string>
+    <string name="add_error_youtube">YouTube channels aren\'t supported yet</string>
+    <string name="add_subscribed_toast">Subscribed to %1$s</string>
+    <string name="add_already_subscribed">Already subscribed</string>
+    <string name="add_might_be_subscribed">You may already be subscribed to this show. Subscribe anyway?</string>
+    <string name="add_open">Open</string>
+
+    <!-- Settings > Feeds (08 Settings screens: refresh rows). -->
+    <string name="settings_feeds">Feeds</string>
+    <string name="settings_feeds_summary">Refresh, paging and show notes</string>
+    <string name="feeds_refresh_interval">Refresh interval</string>
+    <string name="feeds_interval_manual">Manual only</string>
+    <string name="feeds_interval_hour">Every hour</string>
+    <string name="feeds_interval_hours">Every %1$d hours</string>
+    <string name="feeds_wifi_only">Refresh only on Wi-Fi</string>
+    <string name="feeds_on_open">Refresh when the app opens</string>
+    <string name="feeds_backfill">Fetch older pages of new feeds</string>
+    <string name="feeds_backfill_summary">Feeds that keep older episodes on later pages</string>
+    <string name="feeds_notes_images">Show-notes images</string>
+    <string name="feeds_images_always">Always</string>
+    <string name="feeds_images_wifi">On Wi-Fi only</string>
+    <string name="feeds_images_tap">Only after I tap</string>
 </resources>

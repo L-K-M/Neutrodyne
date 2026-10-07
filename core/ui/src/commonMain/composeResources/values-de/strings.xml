@@ -53,4 +53,304 @@
     <string name="review">Prüfen</string>
     <string name="remote_session_title">Auf diesem Gerät fortsetzen</string>
     <string name="remote_session_detail">%1$s · %2$s · von %3$s</string>
+
+    <string name="date_today">Heute</string>
+    <string name="date_yesterday">Gestern</string>
+    <string name="date_weekday_mon">Montag</string>
+    <string name="date_weekday_tue">Dienstag</string>
+    <string name="date_weekday_wed">Mittwoch</string>
+    <string name="date_weekday_thu">Donnerstag</string>
+    <string name="date_weekday_fri">Freitag</string>
+    <string name="date_weekday_sat">Samstag</string>
+    <string name="date_weekday_sun">Sonntag</string>
+    <string name="date_duration_minutes">%1$d Min.</string>
+    <string name="date_duration_hours">%1$d Std.</string>
+    <string name="date_duration_hours_minutes">%1$d Std. %2$d Min.</string>
+    <string name="date_just_now">Gerade eben</string>
+    <plurals name="date_minutes_ago">
+        <item quantity="one">vor %1$d Min.</item>
+        <item quantity="other">vor %1$d Min.</item>
+    </plurals>
+    <plurals name="date_hours_ago">
+        <item quantity="one">vor %1$d Std.</item>
+        <item quantity="other">vor %1$d Std.</item>
+    </plurals>
+    <plurals name="date_days_ago">
+        <item quantity="one">vor %1$d Tag</item>
+        <item quantity="other">vor %1$d Tagen</item>
+    </plurals>
+    <string name="date_in_moment">einem Moment</string>
+    <plurals name="date_in_minutes">
+        <item quantity="one">%1$d Min.</item>
+        <item quantity="other">%1$d Min.</item>
+    </plurals>
+    <plurals name="date_in_hours">
+        <item quantity="one">%1$d Std.</item>
+        <item quantity="other">%1$d Std.</item>
+    </plurals>
+    <plurals name="date_in_days">
+        <item quantity="one">%1$d Tag</item>
+        <item quantity="other">%1$d Tagen</item>
+    </plurals>
+
+    <string name="action_open">Öffnen</string>
+    <string name="action_pause">Pause</string>
+    <string name="action_resume">Fortsetzen</string>
+    <string name="action_play_again">Nochmals abspielen</string>
+    <string name="action_download">Herunterladen</string>
+    <string name="action_download_now">Jetzt herunterladen</string>
+    <string name="action_cancel_download">Download abbrechen</string>
+    <string name="action_pause_download">Download pausieren</string>
+    <string name="action_resume_download">Download fortsetzen</string>
+    <string name="action_retry_download">Download wiederholen</string>
+    <string name="action_delete_download">Download löschen</string>
+    <string name="action_mark_played">Als gespielt markieren</string>
+    <string name="action_mark_unplayed">Als ungespielt markieren</string>
+    <string name="action_play_next">Als Nächstes abspielen</string>
+    <string name="action_play_last">Ans Ende stellen</string>
+    <string name="action_up_next">Als Nächstes</string>
+    <string name="action_favorite">Favorit</string>
+    <string name="action_unfavorite">Favorit entfernen</string>
+    <string name="action_share">Teilen</string>
+    <string name="action_copy_link">Link kopieren</string>
+    <string name="action_open_website">Website öffnen</string>
+    <string name="action_watch_on_youtube">Auf YouTube ansehen</string>
+    <string name="action_check_again">Erneut prüfen</string>
+    <string name="action_go_to_podcast">Zum Podcast</string>
+    <string name="action_more">Weitere Aktionen</string>
+    <string name="action_cancel">Abbrechen</string>
+    <string name="action_retry">Wiederholen</string>
+    <string name="episode_opens_youtube">Öffnet in YouTube</string>
+    <string name="episode_offline_row">Offline</string>
+    <string name="episode_offline_toast">Offline — diese Folge ist nicht heruntergeladen</string>
+    <string name="action_play">Abspielen</string>
+
+    <string name="summary_played">Gespielt</string>
+    <string name="summary_new">Neu</string>
+    <string name="summary_video">Video</string>
+    <string name="summary_downloaded">Heruntergeladen</string>
+    <string name="summary_downloading">Wird geladen, %1$d Prozent</string>
+    <string name="summary_now_playing">Läuft gerade</string>
+    <plurals name="summary_minutes_left">
+        <item quantity="one">%1$d Minute übrig</item>
+        <item quantity="other">%1$d Minuten übrig</item>
+    </plurals>
+    <plurals name="summary_percent_played">
+        <item quantity="one">%1$d Prozent gespielt</item>
+        <item quantity="other">%1$d Prozent gespielt</item>
+    </plurals>
+
+    <string name="dl_queued">In der Warteschlange</string>
+    <string name="dl_wait_network">Wartet auf eine Verbindung</string>
+    <string name="dl_wait_wifi">Wartet auf WLAN</string>
+    <string name="dl_wait_charging">Wartet auf Laden</string>
+    <string name="dl_wait_storage">Wartet auf Speicherplatz</string>
+    <string name="dl_wait_storage_android">Wartet auf die SD-Karte</string>
+    <string name="dl_wait_storage_desktop">Wartet auf den Download-Ordner</string>
+    <string name="dl_retry_soon">Baldiger erneuter Versuch</string>
+    <string name="dl_retry_in">Erneut in %1$s</string>
+    <string name="dl_paused_system">Von Android pausiert, wird automatisch fortgesetzt</string>
+    <string name="dl_tap_resume">Zum Fortsetzen tippen</string>
+    <string name="dl_paused">Pausiert</string>
+    <string name="dl_missing">Datei fehlt</string>
+    <string name="dl_storage_unavailable">Speicher ist nicht verfügbar</string>
+    <string name="dl_percent">%1$d %</string>
+    <string name="dl_err_no_longer">Die Datei ist nicht mehr auf dem Server</string>
+    <string name="dl_err_auth">Der Server verlangt ein Passwort</string>
+    <string name="dl_err_server">Serverfehler</string>
+    <string name="dl_err_ratelimit">Der Server ist beschäftigt, später versuchen</string>
+    <string name="dl_err_io">Verbindung verloren</string>
+    <string name="dl_err_not_media">Der Server hat eine Webseite statt Audio geliefert</string>
+    <string name="dl_err_size">Die Datei war unvollständig</string>
+    <string name="dl_err_storage">Nicht genug Speicherplatz</string>
+    <string name="dl_err_yt">YouTube-Download fehlgeschlagen</string>
+    <string name="dl_err_stream">Dieses Format wird nicht unterstützt</string>
+    <string name="dl_err_failed">Download fehlgeschlagen</string>
+
+    <string name="availability_age_restricted">Altersbeschränkt — Anmeldung bei YouTube nötig</string>
+    <string name="availability_members_only">Nur für Mitglieder</string>
+    <string name="availability_region_blocked">In deinem Land nicht verfügbar</string>
+    <string name="availability_private">Privates Video</string>
+    <string name="availability_kids">Für Kinder — kann hier nicht abgespielt werden</string>
+    <string name="availability_unavailable">Nicht mehr verfügbar</string>
+    <string name="availability_upcoming">Premiere bald</string>
+    <string name="availability_live">Jetzt live</string>
+
+    <string name="net_offline">Du bist offline</string>
+    <string name="net_timeout">Der Server hat nicht rechtzeitig geantwortet</string>
+    <string name="net_dns">Server nicht gefunden</string>
+    <string name="net_connection">Verbindung fehlgeschlagen</string>
+    <string name="net_lan">Feeds im lokalen Netzwerk werden noch nicht unterstützt</string>
+    <string name="net_tls_untrusted">Das Zertifikat des Servers wird nicht vertraut</string>
+    <string name="net_tls_handshake">Sichere Verbindung fehlgeschlagen</string>
+    <string name="net_cancelled">Abgebrochen</string>
+    <string name="net_other">Etwas ist schiefgelaufen</string>
+    <string name="feed_err_auth">Passwort nötig</string>
+    <string name="feed_err_forbidden">Zugriff verweigert</string>
+    <string name="feed_err_not_found">Feed nicht gefunden</string>
+    <string name="feed_err_gone">Dieser Feed wurde entfernt</string>
+    <string name="feed_err_ratelimit">Der Server ist beschäftigt</string>
+    <string name="feed_err_server">Serverfehler</string>
+    <string name="feed_err_redirects">Zu viele Weiterleitungen</string>
+    <string name="feed_err_too_large">Der Feed ist zu groß</string>
+    <string name="feed_err_not_a_feed">Das ist kein Podcast-Feed</string>
+    <string name="feed_err_no_media">Kein Audio oder Video in diesem Feed</string>
+    <string name="feed_err_storage">Nicht genug Speicherplatz</string>
+    <string name="feed_err_moved">Der Feed ist an eine neue Adresse umgezogen</string>
+    <string name="feed_err_disabled">Manuelle Aktualisierung</string>
+    <string name="feed_err_paused">Aktualisierungen sind pausiert</string>
+    <string name="feed_err_auth_failed">Anmeldung fehlgeschlagen</string>
+
+    <string name="offline_banner">Du bist offline — heruntergeladene Folgen spielen weiter</string>
+
+    <string name="feeds_refresh">Aktualisieren</string>
+    <string name="feeds_load_error">Folgen konnten nicht geladen werden</string>
+    <string name="feeds_caught_up">Du bist auf dem neuesten Stand</string>
+    <string name="feeds_show_played">Gespielte Folgen zeigen</string>
+    <string name="feeds_clear_filters">Filter zurücksetzen</string>
+    <string name="feeds_onboarding_title">Hier erscheinen deine Feeds</string>
+    <string name="feeds_search">Podcasts suchen</string>
+    <string name="feeds_add_url">Per URL oder YouTube-Link hinzufügen</string>
+    <string name="feeds_import">Abonnements importieren</string>
+    <string name="feeds_mark_all_played">Alle als gespielt markieren…</string>
+    <string name="filter_unplayed">Ungespielt</string>
+    <string name="filter_downloaded">Heruntergeladen</string>
+    <string name="filter_in_progress">Angefangen</string>
+    <string name="order_newest">Neueste zuerst</string>
+    <string name="order_oldest">Älteste zuerst</string>
+
+    <string name="library_sort">Sortieren</string>
+    <string name="library_show_titles">Titel anzeigen</string>
+    <string name="library_sort_title">Titel (A–Z)</string>
+    <string name="library_sort_recent">Kürzlich aktualisiert</string>
+    <string name="library_sort_unplayed">Meiste ungespielte</string>
+    <string name="library_sort_added">Kürzlich hinzugefügt</string>
+    <plurals name="tile_new_episodes">
+        <item quantity="one">%1$d neue Folge</item>
+        <item quantity="other">%1$d neue Folgen</item>
+    </plurals>
+    <string name="tile_pending">Wird geladen</string>
+    <string name="tile_needs_password">Passwort nötig</string>
+    <string name="tile_gone">Feed weg</string>
+    <string name="tile_moved">Feed ist evtl. umgezogen</string>
+
+    <string name="podcast_subscribed">Abonniert</string>
+    <string name="podcast_private">Privat</string>
+    <plurals name="podcast_episode_count">
+        <item quantity="one">%1$d Folge</item>
+        <item quantity="other">%1$d Folgen</item>
+    </plurals>
+    <string name="podcast_updated">Aktualisiert %1$s</string>
+    <string name="podcast_more">Mehr</string>
+    <string name="podcast_less">Weniger</string>
+    <string name="podcast_settings">Podcast-Einstellungen</string>
+    <string name="podcast_unsubscribe">Deabonnieren</string>
+    <string name="podcast_unsubscribe_title">%1$s deabonnieren?</string>
+    <plurals name="podcast_unsubscribe_downloads">
+        <item quantity="one">%1$d heruntergeladene Folge wird gelöscht.</item>
+        <item quantity="other">%1$d heruntergeladene Folgen werden gelöscht.</item>
+    </plurals>
+    <string name="podcast_removed">Dieser Podcast wurde entfernt</string>
+    <string name="podcast_no_episodes">Noch keine Folgen</string>
+    <string name="podcast_fetching">Folgen werden geladen…</string>
+    <string name="podcast_needs_password">Dieser Feed braucht ein Passwort</string>
+    <string name="podcast_enter_password">Passwort eingeben</string>
+    <string name="podcast_gone">Dieser Feed existiert nicht mehr</string>
+    <string name="podcast_maybe_moved">Dieser Feed wurde seit %1$s nicht aktualisiert — er ist evtl. umgezogen</string>
+    <string name="podcast_load_older">Ältere Folgen laden</string>
+    <string name="podcast_mark_played">Alle als gespielt markieren</string>
+    <string name="podcast_copy_feed">Feed-Adresse kopieren</string>
+    <string name="podcast_copy_feed_warning">Diese Feed-Adresse ist privat — jeder mit ihr kann den Feed lesen.</string>
+    <string name="podcast_loading">Podcast wird geladen…</string>
+
+    <string name="section_general">Allgemein</string>
+    <string name="section_feed">Feed</string>
+    <string name="ps_custom_title">Eigener Titel</string>
+    <string name="ps_show_in_all">In „Alle“ zeigen</string>
+    <string name="ps_episode_order">Folgen-Reihenfolge</string>
+    <string name="ps_feed_address">Feed-Adresse</string>
+    <string name="ps_feed_reveal">Zum Anzeigen tippen</string>
+    <string name="ps_last_refresh">Zuletzt aktualisiert</string>
+    <string name="ps_feed_moves">Feed umgezogen</string>
+    <string name="ps_move_reason_redirect">Weiterleitung</string>
+    <string name="ps_move_reason_feed_url">Feed hat neue Adresse bekannt gegeben</string>
+    <string name="ps_ok">OK</string>
+    <string name="ps_never">Nie</string>
+    <string name="ps_edit_url">Feed-Adresse bearbeiten</string>
+    <string name="ps_edit_url_title">Neue Feed-Adresse</string>
+    <string name="ps_credentials">Benutzername und Passwort</string>
+    <string name="ps_feed_copied">Feed-Adresse kopiert</string>
+    <string name="ps_move_line">%1$s · %2$s · %3$s</string>
+    <string name="ps_move_reason_other">Umgezogen</string>
+    <string name="action_save">Speichern</string>
+    <string name="action_copy">Kopieren</string>
+
+    <string name="episode_not_found">Diese Folge ist nicht mehr verfügbar</string>
+    <string name="episode_load_images">Bilder laden</string>
+    <string name="episode_images_off">Bilder sind aus, um deine Privatsphäre zu schützen</string>
+    <string name="episode_no_notes">Keine Shownotes</string>
+    <string name="episode_loading">Folge wird geladen…</string>
+    <string name="episode_up_next_menu">Zu „Als Nächstes“</string>
+    <plurals name="episode_minutes_left">
+        <item quantity="one">%1$d Min. übrig</item>
+        <item quantity="other">%1$d Min. übrig</item>
+    </plurals>
+    <string name="shownotes_image">Bild: %1$s</string>
+    <string name="no_handler">Keine App kann diesen Link öffnen</string>
+
+    <string name="discover_add_url">Per URL hinzufügen</string>
+
+    <string name="add_title">Podcast hinzufügen</string>
+    <string name="add_field_label">Feed- oder Website-Adresse</string>
+    <string name="add_helper">Füge einen Podcast-Feed, eine Website, einen Apple-Podcasts- oder YouTube-Link ein</string>
+    <string name="add_paste">Einfügen</string>
+    <string name="add_looking_up">Suche läuft…</string>
+    <string name="add_subscribe">Abonnieren</string>
+    <string name="add_private">Privater Feed</string>
+    <string name="add_empty_feed">Dieser Feed hat noch keine Folgen</string>
+    <plurals name="add_episodes_count">
+        <item quantity="one">%1$d Folge</item>
+        <item quantity="other">%1$d Folgen</item>
+    </plurals>
+    <string name="add_last_episode">neueste %1$s</string>
+    <string name="add_auth_title">Dieser Feed braucht ein Passwort</string>
+    <string name="add_auth_username">Benutzername</string>
+    <string name="add_auth_password">Passwort</string>
+    <string name="add_auth_show">Passwort zeigen</string>
+    <string name="add_auth_hide">Passwort verbergen</string>
+    <string name="add_choose_title">Diese Seite hat mehrere Feeds</string>
+    <plurals name="add_candidate_episodes">
+        <item quantity="one">%1$d Folge</item>
+        <item quantity="other">%1$d Folgen</item>
+    </plurals>
+    <string name="add_subscription_list">Das ist eine Abonnementliste — eine Datei mit Feeds, die alle auf einmal abonniert werden.</string>
+    <string name="add_import_later">Der Import kommt mit einem späteren Meilenstein — nutze solange eine einzelne Feed-Adresse.</string>
+    <string name="add_error_not_a_url">Gib eine Feed-Adresse ein</string>
+    <string name="add_error_invalid_url">Das sieht nicht nach einer Feed-Adresse aus</string>
+    <string name="add_error_http">Der Server hat %1$d geantwortet</string>
+    <string name="add_error_malformed">Der Feed konnte nicht gelesen werden</string>
+    <string name="add_error_list_feed">Diese Art Feed wird nicht unterstützt</string>
+    <string name="add_error_apple_only">Diese Sendung hat keinen öffentlichen Feed</string>
+    <string name="add_error_spotify">Spotify-Sendungen haben keinen öffentlichen Feed — suche nach dem Namen</string>
+    <string name="add_error_directory_busy">Die Suche ist beschäftigt — versuche es gleich nochmal</string>
+    <string name="add_error_youtube">YouTube-Kanäle werden noch nicht unterstützt</string>
+    <string name="add_subscribed_toast">%1$s abonniert</string>
+    <string name="add_already_subscribed">Bereits abonniert</string>
+    <string name="add_might_be_subscribed">Du hast diese Sendung evtl. schon abonniert. Trotzdem abonnieren?</string>
+    <string name="add_open">Öffnen</string>
+
+    <string name="settings_feeds">Feeds</string>
+    <string name="settings_feeds_summary">Aktualisierung, Paging und Shownotes</string>
+    <string name="feeds_refresh_interval">Aktualisierungsintervall</string>
+    <string name="feeds_interval_manual">Nur manuell</string>
+    <string name="feeds_interval_hour">Jede Stunde</string>
+    <string name="feeds_interval_hours">Alle %1$d Stunden</string>
+    <string name="feeds_wifi_only">Nur über WLAN aktualisieren</string>
+    <string name="feeds_on_open">Beim Öffnen der App aktualisieren</string>
+    <string name="feeds_backfill">Ältere Seiten neuer Feeds laden</string>
+    <string name="feeds_backfill_summary">Feeds, die ältere Folgen auf späteren Seiten halten</string>
+    <string name="feeds_notes_images">Shownotes-Bilder</string>
+    <string name="feeds_images_always">Immer</string>
+    <string name="feeds_images_wifi">Nur über WLAN</string>
+    <string name="feeds_images_tap">Nur nach meinem Tippen</string>
 </resources>

@@ -4,9 +4,17 @@ package ch.lkmc.neutrodyne.core.ui
 
 import ch.lkmc.neutrodyne.core.common.DateFormatter
 import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.date_days_ago
 import ch.lkmc.neutrodyne.core.ui.resources.date_duration_hours
 import ch.lkmc.neutrodyne.core.ui.resources.date_duration_hours_minutes
 import ch.lkmc.neutrodyne.core.ui.resources.date_duration_minutes
+import ch.lkmc.neutrodyne.core.ui.resources.date_hours_ago
+import ch.lkmc.neutrodyne.core.ui.resources.date_in_days
+import ch.lkmc.neutrodyne.core.ui.resources.date_in_hours
+import ch.lkmc.neutrodyne.core.ui.resources.date_in_minutes
+import ch.lkmc.neutrodyne.core.ui.resources.date_in_moment
+import ch.lkmc.neutrodyne.core.ui.resources.date_just_now
+import ch.lkmc.neutrodyne.core.ui.resources.date_minutes_ago
 import ch.lkmc.neutrodyne.core.ui.resources.date_today
 import ch.lkmc.neutrodyne.core.ui.resources.date_weekday_fri
 import ch.lkmc.neutrodyne.core.ui.resources.date_weekday_mon
@@ -61,6 +69,76 @@ public object FeedDates {
         }
     }
 
+    /** The PODCAST leading date block's parts: (day numeral, abbreviated month) — 08 EpisodeRow. */
+    public fun dayMonth(publishedMs: Long): Pair<String, String> =
+        DateFormatter.dayOfMonth(publishedMs) to DateFormatter.monthShort(publishedMs)
+
+    /**
+     * The local day [ms] falls in, as `LocalDate.toEpochDays()` — the bucket the feed's day
+     * separators and `"d:{epochDay}"` item keys group by (08 Pages/paging/scroll memory).
+     */
+    public fun dayKey(ms: Long): Long =
+        Instant.fromEpochMilliseconds(ms)
+            .toLocalDateTime(TimeZone.currentSystemDefault())
+            .date
+            .toEpochDays()
+            .toLong()
+
+    /**
+     * Relative "… ago" label (08 Podcast detail "Updated {t}", download backoff "in {t}"): "Just
+     * now" under a minute, minutes under an hour, hours under a day, days under a week, else the
+     * medium localised date. Future and stale inputs clamp to "Just now" — rows show them as due.
+     */
+    public fun relative(
+        atMs: Long,
+        nowMs: Long,
+    ): UiText {
+        val elapsed = nowMs - atMs
+        return when {
+            elapsed < MS_PER_MINUTE -> UiText.Res(Res.string.date_just_now)
+            elapsed < MS_PER_HOUR -> {
+                val minutes = (elapsed / MS_PER_MINUTE).toInt()
+                UiText.Plural(Res.plurals.date_minutes_ago, minutes, listOf(minutes))
+            }
+            elapsed < MS_PER_DAY -> {
+                val hours = (elapsed / MS_PER_HOUR).toInt()
+                UiText.Plural(Res.plurals.date_hours_ago, hours, listOf(hours))
+            }
+            elapsed < MS_PER_WEEK -> {
+                val days = (elapsed / MS_PER_DAY).toInt()
+                UiText.Plural(Res.plurals.date_days_ago, days, listOf(days))
+            }
+            else -> UiText.Raw(DateFormatter.date(atMs))
+        }
+    }
+
+    /**
+     * Forward relative label for [atMs] after [nowMs] (07's "Retrying in {t}"): "a moment" under a
+     * minute, compact "5 min"/"2 h"/"3 d" spans, else the medium localised date.
+     */
+    public fun relativeIn(
+        atMs: Long,
+        nowMs: Long,
+    ): UiText {
+        val ahead = atMs - nowMs
+        return when {
+            ahead < MS_PER_MINUTE -> UiText.Res(Res.string.date_in_moment)
+            ahead < MS_PER_HOUR -> {
+                val minutes = (ahead / MS_PER_MINUTE).toInt()
+                UiText.Plural(Res.plurals.date_in_minutes, minutes, listOf(minutes))
+            }
+            ahead < MS_PER_DAY -> {
+                val hours = (ahead / MS_PER_HOUR).toInt()
+                UiText.Plural(Res.plurals.date_in_hours, hours, listOf(hours))
+            }
+            ahead < MS_PER_WEEK -> {
+                val days = (ahead / MS_PER_DAY).toInt()
+                UiText.Plural(Res.plurals.date_in_days, days, listOf(days))
+            }
+            else -> UiText.Raw(DateFormatter.date(atMs))
+        }
+    }
+
     private fun weekdayRes(day: LocalDate) =
         when (day.dayOfWeek) {
             kotlinx.datetime.DayOfWeek.MONDAY -> Res.string.date_weekday_mon
@@ -73,5 +151,8 @@ public object FeedDates {
         }
 
     private const val MS_PER_MINUTE = 60_000L
+    private const val MS_PER_HOUR = 3_600_000L
+    private const val MS_PER_DAY = 86_400_000L
+    private const val MS_PER_WEEK = 7 * MS_PER_DAY
     private const val MINUTES_PER_HOUR = 60L
 }

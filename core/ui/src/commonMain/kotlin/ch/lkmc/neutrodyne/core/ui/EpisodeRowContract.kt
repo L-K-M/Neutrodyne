@@ -52,15 +52,23 @@ public data class RowLive(
     val positionMs: Long? = null,
     val durationMs: Long? = null,
     val downloadState: DownloadState? = null,
+    val downloadedBytes: Long? = null,
+    val totalBytes: Long? = null,
     val waitReason: WaitReason? = null,
-    /** 0..1 when known; `null` = indeterminate. */
-    val downloadProgress: Float? = null,
-    val downloadError: DownloadError? = null,
+    val nextAttemptAt: Long? = null,
+    val lastError: DownloadError? = null,
     /** In the player as the current item. */
-    val nowPlaying: Boolean = false,
+    val isNowPlaying: Boolean = false,
     /** And currently advancing (vs paused). */
-    val playing: Boolean = false,
-)
+    val isPlaying: Boolean = false,
+) {
+    /** Progress as 0..1, `null` when indeterminate or not downloading. */
+    public fun downloadProgress(): Float? =
+        downloadedBytes?.let { done ->
+            val total = totalBytes ?: return null
+            if (total <= 0) null else (done.toFloat() / total).coerceIn(0f, 1f)
+        }
+}
 
 /** Everything a row's tap targets dispatch (08 EpisodeRow). */
 public sealed interface EpisodeAction {
