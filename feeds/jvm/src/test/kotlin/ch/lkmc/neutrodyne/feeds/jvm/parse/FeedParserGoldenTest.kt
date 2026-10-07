@@ -71,9 +71,9 @@ class FeedParserGoldenTest {
                 for (fixture in fixtures) {
                     jobs +=
                         fixture to
-                            pool.submit<ParseResult> {
-                                shared.parse({ Buffer().write(fixture.readBytes()) }, null, baseUrl)
-                            }
+                        pool.submit<ParseResult> {
+                            shared.parse({ Buffer().write(fixture.readBytes()) }, null, baseUrl)
+                        }
                 }
             }
             for ((fixture, future) in jobs) {

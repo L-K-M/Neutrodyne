@@ -60,9 +60,13 @@ internal object EncodingSniff {
      */
     fun decode(bytes: ByteArray): String? =
         when (val view = view(bytes)) {
-            is View.Rejected -> null
-            is View.Decoded ->
+            is View.Rejected -> {
+                null
+            }
+
+            is View.Decoded -> {
                 view.prefix + String(bytes, view.dataStart, bytes.size - view.dataStart, view.charset)
+            }
         }
 
     /** The decoding boundary of `KXmlParser.setInput(InputStream, null)`, reproduced one-to-one. */
@@ -76,18 +80,49 @@ internal object EncodingSniff {
         val b2 = bytes[2].toInt() and 0xFF
         val b3 = bytes[3].toInt() and 0xFF
         return when {
-            b0 == 0x00 && b1 == 0x00 && b2 == 0xFE && b3 == 0xFF -> charsetOrReject("UTF-32BE", "", SNIFF_BYTES)
-            b0 == 0xFF && b1 == 0xFE && b2 == 0x00 && b3 == 0x00 -> charsetOrReject("UTF-32LE", "", SNIFF_BYTES)
-            b0 == 0x00 && b1 == 0x00 && b2 == 0x00 && b3 == LT -> charsetOrReject("UTF-32BE", "<", SNIFF_BYTES)
-            b0 == LT && b1 == 0x00 && b2 == 0x00 && b3 == 0x00 -> charsetOrReject("UTF-32LE", "<", SNIFF_BYTES)
-            b0 == 0x00 && b1 == LT && b2 == 0x00 && b3 == QM -> View.Decoded("<?", SNIFF_BYTES, Charsets.UTF_16BE)
-            b0 == LT && b1 == 0x00 && b2 == QM && b3 == 0x00 -> View.Decoded("<?", SNIFF_BYTES, Charsets.UTF_16LE)
-            b0 == LT && b1 == QM && b2 == XC && b3 == MC -> declaredView(bytes)
-            b0 == 0xFE && b1 == 0xFF -> View.Decoded("", UTF16_BOM_BYTES, Charsets.UTF_16BE)
-            b0 == 0xFF && b1 == 0xFE -> View.Decoded("", UTF16_BOM_BYTES, Charsets.UTF_16LE)
-            b0 == 0xEF && b1 == 0xBB && b2 == 0xBF ->
+            b0 == 0x00 && b1 == 0x00 && b2 == 0xFE && b3 == 0xFF -> {
+                charsetOrReject("UTF-32BE", "", SNIFF_BYTES)
+            }
+
+            b0 == 0xFF && b1 == 0xFE && b2 == 0x00 && b3 == 0x00 -> {
+                charsetOrReject("UTF-32LE", "", SNIFF_BYTES)
+            }
+
+            b0 == 0x00 && b1 == 0x00 && b2 == 0x00 && b3 == LT -> {
+                charsetOrReject("UTF-32BE", "<", SNIFF_BYTES)
+            }
+
+            b0 == LT && b1 == 0x00 && b2 == 0x00 && b3 == 0x00 -> {
+                charsetOrReject("UTF-32LE", "<", SNIFF_BYTES)
+            }
+
+            b0 == 0x00 && b1 == LT && b2 == 0x00 && b3 == QM -> {
+                View.Decoded("<?", SNIFF_BYTES, Charsets.UTF_16BE)
+            }
+
+            b0 == LT && b1 == 0x00 && b2 == QM && b3 == 0x00 -> {
+                View.Decoded("<?", SNIFF_BYTES, Charsets.UTF_16LE)
+            }
+
+            b0 == LT && b1 == QM && b2 == XC && b3 == MC -> {
+                declaredView(bytes)
+            }
+
+            b0 == 0xFE && b1 == 0xFF -> {
+                View.Decoded("", UTF16_BOM_BYTES, Charsets.UTF_16BE)
+            }
+
+            b0 == 0xFF && b1 == 0xFE -> {
+                View.Decoded("", UTF16_BOM_BYTES, Charsets.UTF_16LE)
+            }
+
+            b0 == 0xEF && b1 == 0xBB && b2 == 0xBF -> {
                 View.Decoded(rawChars(bytes, UTF8_BOM_BYTES, SNIFF_BYTES), SNIFF_BYTES, Charsets.UTF_8)
-            else -> View.Decoded(rawChars(bytes, 0, SNIFF_BYTES), SNIFF_BYTES, Charsets.UTF_8)
+            }
+
+            else -> {
+                View.Decoded(rawChars(bytes, 0, SNIFF_BYTES), SNIFF_BYTES, Charsets.UTF_8)
+            }
         }
     }
 

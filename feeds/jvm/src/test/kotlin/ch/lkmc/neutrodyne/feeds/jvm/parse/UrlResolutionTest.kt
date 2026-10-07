@@ -235,7 +235,11 @@ class UrlResolutionTest {
             )
         assertEquals(
             "https://feeds.test/dir/ep/donate/f",
-            feed.items.single().funding.single().url,
+            feed.items
+                .single()
+                .funding
+                .single()
+                .url,
         )
     }
 
@@ -266,7 +270,14 @@ class UrlResolutionTest {
                     "<podcast:person img=\"face.png\">H</podcast:person>" +
                     "</item></channel></rss>",
             )
-        assertEquals("https://feeds.test/dir/ep/face.png", feed.items.single().persons?.single()?.img)
+        assertEquals(
+            "https://feeds.test/dir/ep/face.png",
+            feed.items
+                .single()
+                .persons
+                ?.single()
+                ?.img,
+        )
     }
 
     /** W6: `psc:chapter` href/image resolve — the container's `xml:base` propagates to children. */

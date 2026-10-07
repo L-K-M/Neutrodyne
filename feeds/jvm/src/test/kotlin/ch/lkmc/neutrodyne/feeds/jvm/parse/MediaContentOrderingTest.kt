@@ -33,7 +33,10 @@ class MediaContentOrderingTest {
                 "https://cdn.example.com/a.mp3",
                 "https://cdn.example.com/b.mp3",
             ),
-            feed.items.single().enclosures.map { it.url },
+            feed.items
+                .single()
+                .enclosures
+                .map { it.url },
         )
     }
 

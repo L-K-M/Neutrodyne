@@ -66,7 +66,9 @@ class LargeFeedPerformanceTest {
         return buildString(head.length + count * 110 + tail.length) {
             append(head)
             for (i in 1..count) {
-                append("<media:content url=\"https://cdn.example.com/d$i.mp3\" type=\"audio/mpeg\" isDefault=\"true\"/>")
+                append(
+                    "<media:content url=\"https://cdn.example.com/d$i.mp3\" type=\"audio/mpeg\" isDefault=\"true\"/>",
+                )
             }
             append(tail)
         }.encodeToByteArray()
