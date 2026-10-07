@@ -209,6 +209,86 @@ class UrlResolutionTest {
         )
     }
 
+    /** W6: `podcast:funding`'s url resolves against the element's own `xml:base`. */
+    @Test
+    fun fundingUrlAppliesItsOwnXmlBase() {
+        val feed =
+            feedOf(
+                "<rss version=\"2.0\" xmlns:podcast=\"https://podcastindex.org/namespace/1.0\">" +
+                    "<channel><title>t</title>" +
+                    "<podcast:funding url=\"donate\" xml:base=\"https://fund.test/o/\">F</podcast:funding>" +
+                    "</channel></rss>",
+            )
+        assertEquals("https://fund.test/o/donate", feed.funding.single().url)
+    }
+
+    /** W6: the item's `xml:base` reaches `podcast:funding` through the element's own. */
+    @Test
+    fun itemFundingUrlMergesItemAndElementXmlBase() {
+        val feed =
+            feedOf(
+                "<rss version=\"2.0\" xmlns:podcast=\"https://podcastindex.org/namespace/1.0\">" +
+                    "<channel><title>t</title>" +
+                    "<item xml:base=\"ep/\"><guid>g</guid>" +
+                    "<podcast:funding url=\"f\" xml:base=\"donate/\">F</podcast:funding>" +
+                    "</item></channel></rss>",
+            )
+        assertEquals(
+            "https://feeds.test/dir/ep/donate/f",
+            feed.items.single().funding.single().url,
+        )
+    }
+
+    /** W6: `podcast:person`'s img and href resolve against the element's `xml:base`. */
+    @Test
+    fun personImgAndHrefApplyXmlBase() {
+        val feed =
+            feedOf(
+                "<rss version=\"2.0\" xmlns:podcast=\"https://podcastindex.org/namespace/1.0\">" +
+                    "<channel><title>t</title>" +
+                    "<podcast:person xml:base=\"https://people.test/p/\" img=\"face.png\" " +
+                    "href=\"bio\">H</podcast:person>" +
+                    "</channel></rss>",
+            )
+        val person = feed.persons.single()
+        assertEquals("https://people.test/p/face.png", person.img)
+        assertEquals("https://people.test/p/bio", person.href)
+    }
+
+    /** W6: an item-level person's img resolves against the item's `xml:base`. */
+    @Test
+    fun itemPersonImgAppliesItemXmlBase() {
+        val feed =
+            feedOf(
+                "<rss version=\"2.0\" xmlns:podcast=\"https://podcastindex.org/namespace/1.0\">" +
+                    "<channel><title>t</title>" +
+                    "<item xml:base=\"ep/\"><guid>g</guid>" +
+                    "<podcast:person img=\"face.png\">H</podcast:person>" +
+                    "</item></channel></rss>",
+            )
+        assertEquals("https://feeds.test/dir/ep/face.png", feed.items.single().persons?.single()?.img)
+    }
+
+    /** W6: `psc:chapter` href/image resolve — the container's `xml:base` propagates to children. */
+    @Test
+    fun pscChapterUrlsApplyContainerAndElementXmlBase() {
+        val feed =
+            feedOf(
+                "<rss version=\"2.0\" xmlns:psc=\"http://podlove.org/simple-chapters\">" +
+                    "<channel><title>t</title><item><guid>g</guid>" +
+                    "<psc:chapters xml:base=\"ch/\">" +
+                    "<psc:chapter start=\"00:01\" title=\"a\" href=\"topic/1\" image=\"pic.png\"/>" +
+                    "<psc:chapter start=\"00:02\" title=\"b\" xml:base=\"https://cdn.test/x/\" " +
+                    "href=\"t2\" image=\"i2.jpg\"/>" +
+                    "</psc:chapters></item></channel></rss>",
+            )
+        val chapters = feed.items.single().inlineChapters
+        assertEquals("https://feeds.test/dir/ch/topic/1", chapters[0].href)
+        assertEquals("https://feeds.test/dir/ch/pic.png", chapters[0].image)
+        assertEquals("https://cdn.test/x/t2", chapters[1].href)
+        assertEquals("https://cdn.test/x/i2.jpg", chapters[1].image)
+    }
+
     /** V9/C17: invalid srcset entries are dropped before their widths are ranked. */
     @Test
     fun srcsetRanksOnlyValidEntries() {

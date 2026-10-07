@@ -717,11 +717,11 @@ private class ParseSession(
             }
 
             "funding" -> {
-                addFunding(parser, channel.funding)
+                addFunding(parser, channel.funding, channel.base)
             }
 
             "person" -> {
-                channel.persons.add(parsePerson(parser))
+                channel.persons.add(parsePerson(parser, channel.base))
             }
 
             "updateFrequency" -> {
@@ -1246,12 +1246,12 @@ private class ParseSession(
             "person" -> {
                 // Item-level persons REPLACE the channel list (Podcasting 2.0 spec).
                 (item.persons ?: mutableListOf<Person>().also { item.persons = it }).add(
-                    parsePerson(parser, item.index),
+                    parsePerson(parser, item.base, item.index),
                 )
             }
 
             "funding" -> {
-                addFunding(parser, item.funding, item.index)
+                addFunding(parser, item.funding, item.base, item.index)
             }
 
             "alternateEnclosure" -> {
@@ -1502,6 +1502,8 @@ private class ParseSession(
         parser: XmlPullParser,
         item: ItemBuilder,
     ) {
+        // The chapters container carries its own xml:base into every chapter's href and image.
+        val chaptersBase = baseOf(parser, item.base)
         val depth = parser.depth
         var event = nextEvent(parser)
         while (event != XmlPullParser.END_DOCUMENT) {
@@ -1510,14 +1512,15 @@ private class ParseSession(
                 Namespaces.elementKey(parser) == Namespaces.Key.PSC &&
                 parser.name == "chapter"
             ) {
+                val chapterBase = baseOf(parser, chaptersBase)
                 val startMs = Durations.parseMs(attr(parser, "start").orEmpty())
                 if (startMs != null) {
                     item.inlineChapters.add(
                         InlineChapter(
                             startMs = startMs,
                             title = attr(parser, "title").orEmpty(),
-                            href = attr(parser, "href")?.trim()?.takeIf { it.isNotEmpty() },
-                            image = attr(parser, "image")?.trim()?.takeIf { it.isNotEmpty() },
+                            href = urlOrNull(attr(parser, "href"), chapterBase, item.index),
+                            image = urlOrNull(attr(parser, "image"), chapterBase, item.index),
                         ),
                     )
                 }
@@ -1592,29 +1595,33 @@ private class ParseSession(
 
     private fun parsePerson(
         parser: XmlPullParser,
+        parentBase: String,
         itemIndex: Int? = null,
     ): Person {
         // Attributes belong to the START_TAG; feeds carry them both plain and podcast-namespaced.
+        val personBase = baseOf(parser, parentBase)
         val role = attr(parser, "role") ?: attr(parser, "role", PODCAST_NS)
         val group = attr(parser, "group") ?: attr(parser, "group", PODCAST_NS)
-        val img = attr(parser, "img") ?: attr(parser, "img", PODCAST_NS)
-        val href = attr(parser, "href") ?: attr(parser, "href", PODCAST_NS)
+        val img = urlOrNull(attr(parser, "img") ?: attr(parser, "img", PODCAST_NS), personBase, itemIndex)
+        val href = urlOrNull(attr(parser, "href") ?: attr(parser, "href", PODCAST_NS), personBase, itemIndex)
         val name = plainText(parser, itemIndex).trim()
         return Person(
             name = name,
             role = role?.trim()?.takeIf { it.isNotEmpty() } ?: Person.ROLE_HOST,
             group = group?.trim()?.takeIf { it.isNotEmpty() } ?: Person.GROUP_CAST,
-            img = img?.trim()?.takeIf { it.isNotEmpty() },
-            href = href?.trim()?.takeIf { it.isNotEmpty() },
+            img = img,
+            href = href,
         )
     }
 
     private fun addFunding(
         parser: XmlPullParser,
         target: MutableList<Funding>,
+        parentBase: String,
         itemIndex: Int? = null,
     ) {
-        val url = attr(parser, "url")?.trim()?.takeIf { it.isNotEmpty() }
+        // The element's own xml:base resolves the url; a bad one warns inside urlOrNull already.
+        val url = urlOrNull(attr(parser, "url"), baseOf(parser, parentBase), itemIndex)
         val title = plainText(parser, itemIndex).trim().take(FUNDING_TITLE_MAX_CHARS)
         if (url != null) target.add(Funding(url, title))
     }
