@@ -55,6 +55,21 @@ class LargeFeedPerformanceTest {
         )
     }
 
+    /**
+     * X4: an unrecognized inherited namespace URI is looked up on every element — lowercasing it
+     * per lookup costs Θ(uri length × elements). The comparison must be length-aware instead, so a
+     * ~562 KB document stays proportional to its size.
+     */
+    @Test(timeout = 20_000)
+    fun inheritedNamespaceUriLookupIsLinear() {
+        val uri = "urn:" + "A".repeat(262_144)
+        val xml =
+            "<rss version=\"2.0\" xmlns:x=\"$uri\"><channel>" +
+                "<x:z/>".repeat(50_000) +
+                "</channel></rss>"
+        parse(XmlPullFeedParser(PullParserFactory.Discovered), xml.encodeToByteArray())
+    }
+
     /** One item carrying [count] `media:content` entries, all `isDefault`, then one non-default. */
     private fun mediaDefaultDoc(count: Int): ByteArray {
         val head =

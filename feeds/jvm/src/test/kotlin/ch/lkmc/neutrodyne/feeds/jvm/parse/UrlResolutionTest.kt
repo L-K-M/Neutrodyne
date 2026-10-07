@@ -134,6 +134,33 @@ class UrlResolutionTest {
         assertEquals("https://pages.test/p2.xml", feed.paging.next)
     }
 
+    /**
+     * X7: RDF items are siblings of `channel`, not children — they inherit the RDF root's effective
+     * `xml:base`, while the channel's own `xml:base` applies only inside the channel element.
+     */
+    @Test
+    fun rdfItemsInheritRootBaseNotChannelBase() {
+        val feed =
+            feedOf(
+                "<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" " +
+                    "xmlns=\"http://purl.org/rss/1.0/\" xml:base=\"https://feed.test/root/\">" +
+                    "<channel xml:base=\"https://site.test/chan/\">" +
+                    "<title>T</title><link>about</link></channel>" +
+                    "<item><title>I</title>" +
+                    "<enclosure url=\"e.mp3\" type=\"audio/mpeg\" length=\"1\"/></item>" +
+                    "</rdf:RDF>",
+            )
+        assertEquals("https://site.test/chan/about", feed.link)
+        assertEquals(
+            "https://feed.test/root/e.mp3",
+            feed.items
+                .single()
+                .enclosures
+                .single()
+                .url,
+        )
+    }
+
     /** V5: schemes match case-insensitively; an empty authority is not a URL. */
     @Test
     fun httpSchemeIsCaseInsensitive() {

@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.feeds.jvm.parse
 
+import ch.lkmc.neutrodyne.feeds.model.WarningCode
 import ch.lkmc.neutrodyne.feeds.parse.ParseFailure
 import ch.lkmc.neutrodyne.feeds.parse.ParseResult
 import okio.Buffer
 import org.junit.Test
+import java.nio.charset.Charset
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 /**
  * The pre-parse guards decide the document encoding exactly as the pull parser does — a BOM or a
@@ -123,6 +126,74 @@ class ParserGuardsTest {
         val body = "<rss version=\"2.0\"><channel><title>Enc</title></channel></rss>"
         val bytes = declaration.toByteArray(Charsets.US_ASCII) + body.toByteArray(Charsets.UTF_16LE)
         assertEquals("Enc", assertIs<ParseResult.Ok>(parse(bytes)).feed.title)
+    }
+
+    /**
+     * X2: kxml2's `parseDoctype` ignores `"` — only `'` quotes — and stops the DOCTYPE at the first
+     * unquoted `>`. A `"…"` region therefore does not hide markup from the pull parser, and the tag
+     * bound must see the same boundary or the embedded flood reaches it uncounted.
+     */
+    @Test
+    fun doctypeDoubleQuoteCannotHideAnAttributeFlood() {
+        val flood = (1..1_001).joinToString(" ") { "a$it=\"v\"" }
+        val xml =
+            "<!DOCTYPE rss SYSTEM \"><rss $flood><channel><title>Hidden</title></channel></rss>\">" +
+                "<rss><channel/></rss>"
+        assertEquals(ParseFailure.MALFORMED, failedOf(xml).reason)
+    }
+
+    /** X2: relaxed kxml2 accepts a name starting with a digit; its attributes still get bounded. */
+    @Test
+    fun digitNamedTagIsBounded() {
+        val flood = (1..1_001).joinToString(" ") { "a$it=\"v\"" }
+        val xml = "<rss><channel><0 $flood/></channel></rss>"
+        assertEquals(ParseFailure.MALFORMED, failedOf(xml).reason)
+    }
+
+    /** X2: an `<?xml ` declaration is processed by kxml2's attribute loop too — bound it as well. */
+    @Test
+    fun xmlDeclarationAttributesAreBounded() {
+        val flood = (1..1_001).joinToString(" ") { "a$it=\"v\"" }
+        val xml = "<?xml version=\"1.0\" $flood ?><rss><channel/></rss>"
+        assertEquals(ParseFailure.MALFORMED, failedOf(xml).reason)
+    }
+
+    /**
+     * X3: the charset-override pass runs the guards on the stream as that pass decodes it. Here the
+     * oversized start tag exists only in the IBM037 view; before the fix the second pass ran
+     * unguarded and won the heuristic (title null, CHARSET_REPARSED). Guarded, the pass fails and
+     * the first pass' result stands.
+     */
+    @Test
+    fun charsetOverridePassIsCheckedByTagBounds() {
+        val flood = (1..1_001).joinToString(" ") { "a$it=\"v\"" }
+        val bytes =
+            "<rss><channel><title>Clean ".encodeToByteArray() +
+                "<rss $flood><channel/></rss>".toByteArray(Charset.forName("IBM037")) +
+                "</title></channel></rss>".encodeToByteArray()
+        val result =
+            XmlPullFeedParser
+                .discovered()
+                .parse({ Buffer().write(bytes) }, "IBM037", baseUrl)
+        val feed = assertIs<ParseResult.Ok>(result).feed
+        assertTrue(feed.title?.startsWith("Clean ") == true)
+        assertTrue(feed.warnings.none { it.code == WarningCode.CHARSET_REPARSED })
+    }
+
+    /** X3: a `<!ENTITY` that exists only in the override decoding is still hostile there. */
+    @Test
+    fun charsetOverridePassIsCheckedByPrologGuard() {
+        val bytes =
+            "<rss><channel><title>Clean ".encodeToByteArray() +
+                "<!DOCTYPE r [<!ENTITY x \"b\">]><r/>".toByteArray(Charset.forName("IBM037")) +
+                "</title></channel></rss>".encodeToByteArray()
+        val result =
+            XmlPullFeedParser
+                .discovered()
+                .parse({ Buffer().write(bytes) }, "IBM037", baseUrl)
+        val feed = assertIs<ParseResult.Ok>(result).feed
+        assertTrue(feed.title?.startsWith("Clean ") == true)
+        assertTrue(feed.warnings.none { it.code == WarningCode.CHARSET_REPARSED })
     }
 
     /** `setInput` fails when the declaration's `>` never comes: so does the parse. */

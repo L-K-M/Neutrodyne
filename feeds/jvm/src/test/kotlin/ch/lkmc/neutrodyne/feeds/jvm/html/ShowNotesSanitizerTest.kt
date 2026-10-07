@@ -582,6 +582,58 @@ line two</pre>
             .isEqualTo("kept")
     }
 
+    /**
+     * X1: `<base href>` resolves while jsoup parses — a giant relative value reaches JDK URL
+     * normalization (quadratic) before the attribute bound can drop it. Parsing with an empty base
+     * and attaching the caller base after bounding keeps it linear.
+     */
+    @Test(timeout = 10_000)
+    fun overlongBaseHrefIsBoundedBeforeResolution() {
+        val html = """<base href="""" + "./".repeat(200_000) + """x"><p>kept</p>"""
+        val blocks = blocksOf(html)
+        assertThat(blocks).hasSize(1)
+        assertThat(spansOf(blocks.single()).filterIsInstance<NoteSpan.Text>().single().text)
+            .isEqualTo("kept")
+    }
+
+    /** X1: a bounded `<base href>` still re-roots relative links after the bound. */
+    @Test
+    fun boundedBaseElementStillRerootsLinks() {
+        val blocks = blocksOf("""<base href="https://cdn.example/n/"><p><a href="a.html">go</a></p>""")
+        val link = spansOf(blocks.single()).filterIsInstance<NoteSpan.Link>().single()
+        assertThat(link.url).isEqualTo("https://cdn.example/n/a.html")
+    }
+
+    /** X8: an anchor's link reaches a block nested inside an inline wrapper. */
+    @Test
+    fun inheritedLinkReachesBlockInsideInlineWrapper() {
+        val blocks = blocksOf("""<a href="/x"><div><b><div>12:34</div></b></div></a>""")
+        val spans = blocks.flatMap { spansOf(it) }
+        val link = spans.filterIsInstance<NoteSpan.Link>().single()
+        assertThat(link.text).isEqualTo("12:34")
+        assertThat(link.url).isEqualTo("https://example.com/x")
+        assertThat(spans.filterIsInstance<NoteSpan.Timestamp>()).isEmpty()
+    }
+
+    /** X9: a `pre` of only whitespace emits no block and spends no budget. */
+    @Test
+    fun whitespaceOnlyPreSpendsNoBudget() {
+        val blocks = blocksOf("<pre> </pre>".repeat(2_000) + "<p>kept</p>")
+        assertThat(blocks).hasSize(1)
+        assertThat(spansOf(blocks.single()).filterIsInstance<NoteSpan.Text>().single().text)
+            .isEqualTo("kept")
+    }
+
+    /** X9: meaningful preformatted whitespace is still preserved verbatim. */
+    @Test
+    fun meaningfulPreWhitespaceIsPreserved() {
+        val spans = spansOf(blocksOf("<pre>  ind\nnext</pre>").single())
+        assertThat(spans.filterIsInstance<NoteSpan.Text>().map { it.text })
+            .containsExactly("  ind", "next")
+            .inOrder()
+        assertThat(spans).contains(NoteSpan.LineBreak)
+    }
+
     private fun stylesAround(
         spans: List<NoteSpan>,
         text: String,
