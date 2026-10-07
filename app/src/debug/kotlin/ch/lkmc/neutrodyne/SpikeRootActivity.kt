@@ -177,7 +177,15 @@ private fun PodcastStub(key: PodcastKey) {
     // activity: two PodcastKey entries must not share the instance.
     val vm = viewModel { ProbeViewModel() }
     SideEffect { PodcastVmProbe.register(key, vm) }
-    Column(Modifier.fillMaxSize()) { Text("podcast-${key.podcastId}") }
+    val navigator = LocalAppNavigator.current
+    Column(Modifier.fillMaxSize()) {
+        Text("podcast-${key.podcastId}")
+        // A compact window shows only the detail pane, so the second PodcastKey is opened from the
+        // first one: both then sit on the Feeds stack (S5's per-entry ViewModel check).
+        if (key.podcastId == FEEDS_PODCAST) {
+            NdButton(label = "open-next-podcast", onClick = { navigator.push(PodcastKey(FEEDS_PODCAST_2)) })
+        }
+    }
 }
 
 @Composable

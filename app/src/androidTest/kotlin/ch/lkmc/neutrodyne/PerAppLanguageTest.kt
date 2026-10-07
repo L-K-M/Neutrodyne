@@ -2,7 +2,10 @@
 package ch.lkmc.neutrodyne
 
 import android.content.Context
+import android.os.Build
+import android.os.LocaleList
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
@@ -18,6 +21,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.xmlpull.v1.XmlPullParser
+import java.util.Locale
 
 /**
  * S11's Android legs (01 S11): `AppCompatDelegate.setApplicationLocales` relabels the destination
@@ -47,9 +51,15 @@ class PerAppLanguageTest {
             AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags("de"))
         }
 
-        // The activity recreates itself; wait for the German resources to surface.
-        compose.waitUntil(RELABEL_TIMEOUT_MS) {
-            compose.onAllNodesWithText("Bibliothek").fetchSemanticsNodes().isNotEmpty()
+        // The activity recreates itself; wait for the German resources to surface. On a timeout the
+        // failure reports the locale chain (AppCompat's app locales → the activity configuration →
+        // the process default Compose resources read), so a device run shows where it broke.
+        try {
+            compose.waitUntil(RELABEL_TIMEOUT_MS) {
+                compose.onAllNodesWithText("Bibliothek").fetchSemanticsNodes().isNotEmpty()
+            }
+        } catch (e: ComposeTimeoutException) {
+            throw AssertionError("German labels did not appear: ${localeChain()}", e)
         }
         compose.onNodeWithTag("nav_library").assertIsDisplayed().assert(hasText("Bibliothek"))
         compose.onNodeWithTag("nav_up_next").assertIsDisplayed().assert(hasText("Als Nächstes"))
@@ -62,6 +72,18 @@ class PerAppLanguageTest {
         // offers exactly these names through the android.localeConfig manifest property.
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertThat(readLocalesConfig(context)).containsExactlyElementsIn(expectedLocales())
+    }
+
+    private fun localeChain(): String {
+        var activityLocales = "no activity"
+        compose.activityRule.scenario.onActivity {
+            activityLocales =
+                it.resources.configuration.locales
+                    .toLanguageTags()
+        }
+        return "appLocales=${AppCompatDelegate.getApplicationLocales().toLanguageTags()}, " +
+            "activity=$activityLocales, LocaleList.getDefault=${LocaleList.getDefault().toLanguageTags()}, " +
+            "Locale.getDefault=${Locale.getDefault().toLanguageTag()}, sdk=${Build.VERSION.SDK_INT}"
     }
 
     private fun readLocalesConfig(context: Context): List<String> {
