@@ -33,6 +33,16 @@ public sealed interface UiText {
     public data class Raw(
         val value: String,
     ) : UiText
+
+    /**
+     * Parts joined with a single separator when resolved (08's sentence-style summaries:
+     * "{title}. {podcast}. {date}." → `Joined(parts, ". ")`). Empty parts are dropped.
+     */
+    public data class Joined(
+        val parts: List<UiText>,
+        val separator: String = ". ",
+        val suffix: String = ".",
+    ) : UiText
 }
 
 /** Resolves this text inside composition (`stringResource`/`pluralStringResource`). */
@@ -42,6 +52,7 @@ public fun UiText.asString(): String =
         is UiText.Res -> stringResource(id, *composeArgs(args))
         is UiText.Plural -> pluralStringResource(id, count, *composeArgs(args))
         is UiText.Raw -> value
+        is UiText.Joined -> joined(parts, separator, suffix) { it.asString() }
     }
 
 /**
@@ -53,7 +64,15 @@ public suspend fun UiText.resolve(): String =
         is UiText.Res -> getString(id, *suspendArgs(args))
         is UiText.Plural -> getPluralString(id, count, *suspendArgs(args))
         is UiText.Raw -> value
+        is UiText.Joined -> joined(parts, separator, suffix) { it.resolve() }
     }
+
+private suspend fun joined(
+    parts: List<UiText>,
+    separator: String,
+    suffix: String,
+    resolve: suspend (UiText) -> String,
+): String = parts.map { resolve(it) }.filter { it.isNotEmpty() }.joinToString(separator) + suffix
 
 // Args flatten nested UiText; primitives pass through to the platform formatter.
 @Composable
