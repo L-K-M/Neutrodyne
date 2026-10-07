@@ -7,15 +7,14 @@ import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.core.splashscreen.SplashScreen
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.flowWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
+import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
@@ -27,6 +26,7 @@ import ch.lkmc.neutrodyne.core.ui.root.RootUiState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.seconds
 
 /**
@@ -36,34 +36,18 @@ import kotlin.time.Duration.Companion.seconds
  * milestones.
  */
 class MainActivity : AppCompatActivity() {
+    /** `appearance.*` once the settings file has emitted; null until then (08 App scheme). */
+    private val appearance = mutableStateOf<AppearancePrefs?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
         val graph = (application as NeutrodyneApplication).graph
-        setContent {
-            // 08 App scheme: the first frame waits for the settings file's first emission (1 s cap,
-            // then the key defaults) so a stored dark theme never flashes light.
-            val settings = graph.settingsRepository
-            val prefs by
-                remember(settings) {
-                    combine(
-                        settings.observe(AppearanceSettingKeys.THEME),
-                        settings.observe(AppearanceSettingKeys.DYNAMIC_COLOR),
-                    ) { theme, dynamicColor ->
-                        AppearancePrefs(theme = theme, dynamicColor = dynamicColor)
-                    }
-                }.collectAsStateWithLifecycle(initialValue = null)
-            var gateExpired by remember { mutableStateOf(false) }
-            LaunchedEffect(Unit) {
-                delay(PREFS_GATE_TIMEOUT)
-                gateExpired = true
-            }
-            val gateReady = prefs != null || gateExpired
-            splash.setKeepOnScreenCondition { !gateReady }
-            if (!gateReady) return@setContent
+        holdSplashForAppearance(splash, graph.settingsRepository)
 
+        setContent {
             val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
             CompositionLocalProvider(LocalPlatformActions provides rememberAndroidPlatformActions()) {
                 NeutrodyneRoot(
@@ -71,11 +55,39 @@ class MainActivity : AppCompatActivity() {
                     actions = M0_ROOT_ACTIONS,
                     slots = M0_ROOT_SLOTS,
                     installers = graph.entryInstallers,
-                    prefs = prefs ?: AppearancePrefs(),
+                    prefs = appearance.value ?: AppearancePrefs(),
                     systemUi = systemUi,
                     platform = BuildInfo.Platform.ANDROID,
                 )
             }
+        }
+    }
+
+    /**
+     * 08 App scheme: the splash stays until the settings file's first emission (1 s cap, then the
+     * key defaults), so a stored dark theme never flashes light. Collected on the activity's
+     * lifecycle scope, outside composition: a kept splash blocks every frame, so a gate that waited
+     * on a composition effect would wait on frames it blocks itself (and on the test clock under
+     * Compose tests, which only advances once the UI is idle).
+     */
+    private fun holdSplashForAppearance(
+        splash: SplashScreen,
+        settings: SettingsRepository,
+    ) {
+        var gateExpired = false
+        splash.setKeepOnScreenCondition { appearance.value == null && !gateExpired }
+
+        lifecycleScope.launch {
+            delay(PREFS_GATE_TIMEOUT)
+            gateExpired = true
+        }
+        lifecycleScope.launch {
+            combine(
+                settings.observe(AppearanceSettingKeys.THEME),
+                settings.observe(AppearanceSettingKeys.DYNAMIC_COLOR),
+            ) { theme, dynamicColor -> AppearancePrefs(theme = theme, dynamicColor = dynamicColor) }
+                .flowWithLifecycle(lifecycle)
+                .collect { appearance.value = it }
         }
     }
 
