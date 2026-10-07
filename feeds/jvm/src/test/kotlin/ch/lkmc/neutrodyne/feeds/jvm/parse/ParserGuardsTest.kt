@@ -142,6 +142,18 @@ class ParserGuardsTest {
         assertEquals(ParseFailure.MALFORMED, failedOf(xml).reason)
     }
 
+    /**
+     * Review round 5: relaxed kxml2 ends an end tag after its name, whitespace and exactly one more
+     * character (`</x !` closes `x`), so the guard must not skip to the next `>` past the start tag
+     * that follows.
+     */
+    @Test
+    fun malformedEndTagCannotHideAnAttributeFlood() {
+        val flood = (1..1_001).joinToString(" ") { "a$it=\"1\"" }
+        val xml = "<rss><channel><x></x !<item $flood/></channel></rss>"
+        assertEquals(ParseFailure.MALFORMED, failedOf(xml).reason)
+    }
+
     /** X2: relaxed kxml2 accepts a name starting with a digit; its attributes still get bounded. */
     @Test
     fun digitNamedTagIsBounded() {

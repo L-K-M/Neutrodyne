@@ -126,12 +126,18 @@ internal object TagBounds {
         return text.length
     }
 
+    /**
+     * End (exclusive) of an end tag as relaxed kxml2's `parseEndTag` reads it: the name, tag
+     * whitespace, then exactly one more character, whatever it is (`</x !` ends after `!`). Skipping
+     * to the next `>` instead would jump over a start tag kxml2 then processes.
+     */
     private fun skipToEndTag(
         text: String,
         start: Int,
     ): Int {
-        val close = text.indexOf('>', start)
-        return if (close < 0) text.length else close + 1
+        var i = nameEnd(text, start)
+        while (i < text.length && text[i] <= ' ') i++
+        return minOf(i + 1, text.length)
     }
 
     /**
