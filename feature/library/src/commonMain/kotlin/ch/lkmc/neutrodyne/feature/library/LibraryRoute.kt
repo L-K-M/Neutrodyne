@@ -22,8 +22,7 @@ import kotlinx.coroutines.launch
  * the downloaded-episode count the dialog names.
  */
 @Composable
-internal fun LibraryRoute() {
-    val viewModel = metroViewModel<LibraryViewModel>()
+internal fun LibraryRoute(viewModel: LibraryViewModel = metroViewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val navigator = LocalAppNavigator.current
     val scope = rememberCoroutineScope()
@@ -37,14 +36,24 @@ internal fun LibraryRoute() {
         onOpenPodcast = { navigator.pushDetail(PodcastKey(it)) },
         onTileAction = { podcastId, action ->
             when (action) {
-                TileAction.SETTINGS -> navigator.pushDetail(PodcastSettingsKey(podcastId))
-                TileAction.REFRESH -> viewModel.refreshPodcast(podcastId)
-                TileAction.MARK_PLAYED -> viewModel.markAllPlayed(podcastId)
-                TileAction.UNSUBSCRIBE ->
+                TileAction.SETTINGS -> {
+                    navigator.pushDetail(PodcastSettingsKey(podcastId))
+                }
+
+                TileAction.REFRESH -> {
+                    viewModel.refreshPodcast(podcastId)
+                }
+
+                TileAction.MARK_PLAYED -> {
+                    viewModel.markAllPlayed(podcastId)
+                }
+
+                TileAction.UNSUBSCRIBE -> {
                     scope.launch {
                         val tile = state.tiles.firstOrNull { it.podcastId == podcastId } ?: return@launch
                         pending = PendingUnsubscribe(tile, viewModel.downloadedCount(podcastId))
                     }
+                }
             }
         },
         onConfirmUnsubscribe = {

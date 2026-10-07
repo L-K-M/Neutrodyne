@@ -100,7 +100,10 @@ public fun CoverTile(
                     .aspectRatio(1f)
                     .hoverable(interactionSource)
                     .onFocusChanged { focused = it.isFocused }
-                    .onSecondaryClick { if (menuActions.isNotEmpty()) menuOpen = true }.semantics(mergeDescendants = true) {
+                    .onSecondaryClick { if (menuActions.isNotEmpty()) menuOpen = true }
+                    .semantics(
+                        mergeDescendants = true,
+                    ) {
                         if (description != null) contentDescription = description
                         customActions =
                             menuActions.map { action ->
@@ -226,32 +229,39 @@ private fun buildTileDescription(tile: LibraryTile): String {
 @Composable
 private fun StatusBadge(
     tile: LibraryTile,
-    modifier: Modifier,
+    modifier: Modifier = Modifier,
 ) {
     when {
-        tile.status == PodcastStatus.PENDING_FIRST_FETCH ->
+        tile.status == PodcastStatus.PENDING_FIRST_FETCH -> {
             CircularProgressIndicator(modifier = modifier.size(TILE_ICON_SIZE))
-        tile.health.needsCredentials ->
+        }
+
+        tile.health.needsCredentials -> {
             Icon(
                 NdIcons.Lock,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurface,
                 modifier = modifier.size(TILE_ICON_SIZE),
             )
-        tile.health.gone ->
+        }
+
+        tile.health.gone -> {
             Icon(
                 NdIcons.LinkOff,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.error,
                 modifier = modifier.size(TILE_ICON_SIZE),
             )
-        tile.health.possiblyDead ->
+        }
+
+        tile.health.possiblyDead -> {
             Icon(
                 NdIcons.Error,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.error,
                 modifier = modifier.size(TILE_ICON_SIZE),
             )
+        }
     }
 }
 

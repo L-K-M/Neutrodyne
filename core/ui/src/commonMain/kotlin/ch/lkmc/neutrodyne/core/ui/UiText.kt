@@ -49,12 +49,22 @@ public sealed interface UiText {
 @Composable
 public fun UiText.asString(): String =
     when (this) {
-        is UiText.Res -> stringResource(id, *composeArgs(args))
-        is UiText.Plural -> pluralStringResource(id, count, *composeArgs(args))
-        is UiText.Raw -> value
+        is UiText.Res -> {
+            stringResource(id, *composeArgs(args))
+        }
+
+        is UiText.Plural -> {
+            pluralStringResource(id, count, *composeArgs(args))
+        }
+
+        is UiText.Raw -> {
+            value
+        }
+
         // `map`/`filter` are inline, so the composable `asString()` calls are legal here.
-        is UiText.Joined ->
+        is UiText.Joined -> {
             parts.map { it.asString() }.filter { it.isNotEmpty() }.joinToString(separator) + suffix
+        }
     }
 
 /**

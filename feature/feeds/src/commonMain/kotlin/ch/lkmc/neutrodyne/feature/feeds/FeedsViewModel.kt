@@ -20,7 +20,6 @@ import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metrox.viewmodel.ViewModelKey
-import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -34,6 +33,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * The All feed's M1a ViewModel (08 Group feed pager → Data and state, reduced to its single
@@ -82,13 +82,17 @@ public class FeedsViewModel(
     /** Repository-owned row actions (08 EpisodeRow); the route owns navigation and URL opens. */
     public fun onRowAction(action: EpisodeAction) {
         when (action) {
-            is EpisodeAction.SetPlayed ->
+            is EpisodeAction.SetPlayed -> {
                 viewModelScope.launch {
                     episodes.setPlayed(listOf(action.episodeId), action.played)
                 }
+            }
+
             // PlayToggle/PlayNext/PlayLast need the player (M4), DownloadToggle the download
             // engine (M6), CheckAvailability the YouTube engine (M8), Select selection mode (M2).
-            else -> Unit
+            else -> {
+                Unit
+            }
         }
     }
 

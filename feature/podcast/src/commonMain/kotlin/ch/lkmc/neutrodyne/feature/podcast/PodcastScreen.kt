@@ -39,8 +39,8 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdFilterChip
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdLoading
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
-import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTooltipIconButton
+import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
@@ -127,7 +127,7 @@ internal fun PodcastScreen(
     onLoadOlder: () -> Unit,
     onRetryFeed: () -> Unit,
     onEnterCredentials: (BasicCredentials) -> Unit,
-    onMarkAllPlayed: () -> Unit,
+    onMarkAllPlayedClick: () -> Unit,
     onUnsubscribeRequest: () -> Unit,
     onConfirmUnsubscribe: () -> Unit,
     onDismissUnsubscribe: () -> Unit,
@@ -158,7 +158,7 @@ internal fun PodcastScreen(
                     detail = detail,
                     feedUrl = state.feedUrl,
                     onOpenSettings = onOpenSettings,
-                    onMarkAllPlayed = onMarkAllPlayed,
+                    onMarkAllPlayedClick = onMarkAllPlayedClick,
                     onUnsubscribe = onUnsubscribeRequest,
                 )
             },
@@ -166,9 +166,16 @@ internal fun PodcastScreen(
         )
 
         when {
-            !state.loaded -> LoadingBody()
-            detail == null -> Unit // `gone`: the route pops once the snackbar shows.
-            else ->
+            !state.loaded -> {
+                LoadingBody()
+            }
+
+            detail == null -> {
+                Unit
+            }
+
+            // `gone`: the route pops once the snackbar shows.
+            else -> {
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                     offlineBannerItem(state.offline)
                     item(key = "header", contentType = "header") {
@@ -259,6 +266,7 @@ internal fun PodcastScreen(
                         }
                     }
                 }
+            }
         }
     }
 
@@ -290,7 +298,7 @@ private fun PodcastOverflow(
     detail: PodcastDetail?,
     feedUrl: String?,
     onOpenSettings: () -> Unit,
-    onMarkAllPlayed: () -> Unit,
+    onMarkAllPlayedClick: () -> Unit,
     onUnsubscribe: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
@@ -396,7 +404,7 @@ private fun PodcastOverflow(
             confirm =
                 NdDialogAction(stringResource(Res.string.podcast_mark_played)) {
                     confirmMarkAll = false
-                    onMarkAllPlayed()
+                    onMarkAllPlayedClick()
                 },
             dismiss =
                 NdDialogAction(stringResource(Res.string.action_cancel)) { confirmMarkAll = false },
@@ -442,7 +450,7 @@ private fun FeedStateBanner(
     var credentialsOpen by remember { mutableStateOf(false) }
 
     when {
-        health.needsCredentials ->
+        health.needsCredentials -> {
             NdBanner(
                 message = stringResource(Res.string.podcast_needs_password),
                 icon = NdIcons.Key,
@@ -451,7 +459,9 @@ private fun FeedStateBanner(
                         stringResource(Res.string.podcast_enter_password),
                     ) { credentialsOpen = true },
             )
-        health.gone ->
+        }
+
+        health.gone -> {
             NdBanner(
                 message = stringResource(Res.string.podcast_gone),
                 icon = NdIcons.Error,
@@ -460,7 +470,9 @@ private fun FeedStateBanner(
                 secondary =
                     NdDialogAction(stringResource(Res.string.podcast_unsubscribe), onUnsubscribe),
             )
-        health.possiblyDead ->
+        }
+
+        health.possiblyDead -> {
             NdBanner(
                 message =
                     stringResource(
@@ -475,18 +487,23 @@ private fun FeedStateBanner(
                 secondary =
                     NdDialogAction(stringResource(Res.string.ps_edit_url), onOpenSettings),
             )
-        detail.status == PodcastStatus.PENDING_FIRST_FETCH ->
+        }
+
+        detail.status == PodcastStatus.PENDING_FIRST_FETCH -> {
             NdBanner(
                 message = stringResource(Res.string.podcast_fetching),
                 icon = NdIcons.ProgressActivity,
             )
-        health.lastErrorKind != null ->
+        }
+
+        health.lastErrorKind != null -> {
             NdBanner(
                 message = FeedErrorText.describe(health.lastErrorKind!!).asString(),
                 icon = NdIcons.Error,
                 primary =
                     NdDialogAction(stringResource(Res.string.action_retry), onRetryFeed),
             )
+        }
     }
 
     if (credentialsOpen) {

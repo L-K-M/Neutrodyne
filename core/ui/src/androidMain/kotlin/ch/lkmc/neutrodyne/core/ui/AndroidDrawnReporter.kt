@@ -8,7 +8,7 @@ import androidx.compose.runtime.Composable
 /** [DrawnReporter] over activity-compose's `ReportDrawnWhen` (08 Feeds, 09 ColdStartToFeeds). */
 public object AndroidDrawnReporter : DrawnReporter {
     @Composable
-    override fun reportWhen(predicate: () -> Boolean) {
+    override fun ReportWhen(predicate: () -> Boolean) {
         ReportDrawnWhen(predicate = predicate)
     }
 }

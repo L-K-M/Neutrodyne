@@ -32,13 +32,18 @@ public fun dispatchEpisodeRoute(
             navigator.pushDetail(EpisodeKey(action.episodeId))
             true
         }
+
         is EpisodeAction.OpenPodcast -> {
             navigator.pushDetail(PodcastKey(action.podcastId))
             true
         }
+
         is EpisodeAction.WatchOnYouTube -> {
             urls.open(YouTubeLinks.watch(action.videoId))
             true
         }
-        else -> false
+
+        else -> {
+            false
+        }
     }

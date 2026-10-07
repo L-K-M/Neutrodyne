@@ -24,11 +24,11 @@ import ch.lkmc.neutrodyne.core.ui.resources.date_weekday_thu
 import ch.lkmc.neutrodyne.core.ui.resources.date_weekday_tue
 import ch.lkmc.neutrodyne.core.ui.resources.date_weekday_wed
 import ch.lkmc.neutrodyne.core.ui.resources.date_yesterday
-import kotlin.time.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.daysUntil
 import kotlinx.datetime.toLocalDateTime
+import kotlin.time.Instant
 
 /** Feed date labels (08 Feeds day headers, EpisodeRow meta) — all `UiText` so callers stay resource-free. */
 public object FeedDates {
@@ -39,7 +39,10 @@ public object FeedDates {
      * Day-header label for [publishedMs] relative to [nowMs] (08 Feeds: "Today", "Yesterday",
      * weekday name within six days, else the medium localised date).
      */
-    public fun dayLabel(publishedMs: Long, nowMs: Long): UiText {
+    public fun dayLabel(
+        publishedMs: Long,
+        nowMs: Long,
+    ): UiText {
         val zone = TimeZone.currentSystemDefault()
         val day = Instant.fromEpochMilliseconds(publishedMs).toLocalDateTime(zone).date
         val today = Instant.fromEpochMilliseconds(nowMs).toLocalDateTime(zone).date
@@ -78,7 +81,8 @@ public object FeedDates {
      * separators and `"d:{epochDay}"` item keys group by (08 Pages/paging/scroll memory).
      */
     public fun dayKey(ms: Long): Long =
-        Instant.fromEpochMilliseconds(ms)
+        Instant
+            .fromEpochMilliseconds(ms)
             .toLocalDateTime(TimeZone.currentSystemDefault())
             .date
             .toEpochDays()
@@ -95,20 +99,28 @@ public object FeedDates {
     ): UiText {
         val elapsed = nowMs - atMs
         return when {
-            elapsed < MS_PER_MINUTE -> UiText.Res(Res.string.date_just_now)
+            elapsed < MS_PER_MINUTE -> {
+                UiText.Res(Res.string.date_just_now)
+            }
+
             elapsed < MS_PER_HOUR -> {
                 val minutes = (elapsed / MS_PER_MINUTE).toInt()
                 UiText.Plural(Res.plurals.date_minutes_ago, minutes, listOf(minutes))
             }
+
             elapsed < MS_PER_DAY -> {
                 val hours = (elapsed / MS_PER_HOUR).toInt()
                 UiText.Plural(Res.plurals.date_hours_ago, hours, listOf(hours))
             }
+
             elapsed < MS_PER_WEEK -> {
                 val days = (elapsed / MS_PER_DAY).toInt()
                 UiText.Plural(Res.plurals.date_days_ago, days, listOf(days))
             }
-            else -> UiText.Raw(DateFormatter.date(atMs))
+
+            else -> {
+                UiText.Raw(DateFormatter.date(atMs))
+            }
         }
     }
 
@@ -122,20 +134,28 @@ public object FeedDates {
     ): UiText {
         val ahead = atMs - nowMs
         return when {
-            ahead < MS_PER_MINUTE -> UiText.Res(Res.string.date_in_moment)
+            ahead < MS_PER_MINUTE -> {
+                UiText.Res(Res.string.date_in_moment)
+            }
+
             ahead < MS_PER_HOUR -> {
                 val minutes = (ahead / MS_PER_MINUTE).toInt()
                 UiText.Plural(Res.plurals.date_in_minutes, minutes, listOf(minutes))
             }
+
             ahead < MS_PER_DAY -> {
                 val hours = (ahead / MS_PER_HOUR).toInt()
                 UiText.Plural(Res.plurals.date_in_hours, hours, listOf(hours))
             }
+
             ahead < MS_PER_WEEK -> {
                 val days = (ahead / MS_PER_DAY).toInt()
                 UiText.Plural(Res.plurals.date_in_days, days, listOf(days))
             }
-            else -> UiText.Raw(DateFormatter.date(atMs))
+
+            else -> {
+                UiText.Raw(DateFormatter.date(atMs))
+            }
         }
     }
 

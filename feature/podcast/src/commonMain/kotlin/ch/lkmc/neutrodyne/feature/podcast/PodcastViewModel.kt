@@ -93,12 +93,16 @@ public class PodcastViewModel
         /** Repository-owned row actions; the route owns navigation and external URLs. */
         public fun onRowAction(action: EpisodeAction) {
             when (action) {
-                is EpisodeAction.SetPlayed ->
+                is EpisodeAction.SetPlayed -> {
                     viewModelScope.launch {
                         episodes.setPlayed(listOf(action.episodeId), action.played)
                     }
+                }
+
                 // PlayToggle/queue actions need the player (M4); DownloadToggle needs M6.
-                else -> Unit
+                else -> {
+                    Unit
+                }
             }
         }
 
@@ -129,9 +133,8 @@ public class PodcastViewModel
         }
 
         /** The "Enter password" dialog's commit (03 Basic auth; M1b API already bound). */
-        public suspend fun setCredentials(
-            credentials: BasicCredentials,
-        ): Outcome<Unit, AddPodcastError> = podcasts.setCredentials(podcastId, credentials)
+        public suspend fun setCredentials(credentials: BasicCredentials): Outcome<Unit, AddPodcastError> =
+            podcasts.setCredentials(podcastId, credentials)
 
         public fun unsubscribe() {
             viewModelScope.launch { unsubscribe(listOf(podcastId)) }
@@ -142,8 +145,7 @@ public class PodcastViewModel
         }
 
         /** The unsubscribe confirmation's downloaded-episode count (08's wording). */
-        public suspend fun downloadedCount(): Int =
-            podcasts.downloadedEpisodeIds(listOf(podcastId)).size
+        public suspend fun downloadedCount(): Int = podcasts.downloadedEpisodeIds(listOf(podcastId)).size
 
         @AssistedFactory
         @ManualViewModelAssistedFactoryKey(Factory::class)

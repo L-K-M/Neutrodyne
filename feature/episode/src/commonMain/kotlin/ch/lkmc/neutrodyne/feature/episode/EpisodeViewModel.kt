@@ -78,13 +78,17 @@ public class EpisodeViewModel
         /** Repository-owned actions; the route owns navigation, URLs, share and clipboard. */
         public fun onAction(action: EpisodeAction) {
             when (action) {
-                is EpisodeAction.SetPlayed ->
+                is EpisodeAction.SetPlayed -> {
                     viewModelScope.launch {
                         episodes.setPlayed(listOf(action.episodeId), action.played)
                     }
+                }
+
                 // PlayToggle/PlayNext/PlayLast need the player (M4); DownloadToggle needs M6;
                 // CheckAvailability needs the YouTube engine (M8).
-                else -> Unit
+                else -> {
+                    Unit
+                }
             }
         }
 
@@ -114,8 +118,15 @@ private fun imageMode(
     metered: Boolean,
 ): ShowNotesImageMode =
     when (setting) {
-        ShowNotesImages.ALWAYS -> ShowNotesImageMode.SHOWN
-        ShowNotesImages.TAP_TO_LOAD -> ShowNotesImageMode.TAP_TO_LOAD
-        ShowNotesImages.WIFI_ONLY ->
+        ShowNotesImages.ALWAYS -> {
+            ShowNotesImageMode.SHOWN
+        }
+
+        ShowNotesImages.TAP_TO_LOAD -> {
+            ShowNotesImageMode.TAP_TO_LOAD
+        }
+
+        ShowNotesImages.WIFI_ONLY -> {
             if (metered) ShowNotesImageMode.TAP_TO_LOAD else ShowNotesImageMode.SHOWN
+        }
     }

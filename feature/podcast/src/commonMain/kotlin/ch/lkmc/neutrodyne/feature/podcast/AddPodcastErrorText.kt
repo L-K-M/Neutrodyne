@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.ui.NetErrorText
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.add_auth_title
 import ch.lkmc.neutrodyne.core.ui.resources.add_error_apple_only
 import ch.lkmc.neutrodyne.core.ui.resources.add_error_directory_busy
 import ch.lkmc.neutrodyne.core.ui.resources.add_error_http
@@ -15,7 +16,6 @@ import ch.lkmc.neutrodyne.core.ui.resources.add_error_malformed
 import ch.lkmc.neutrodyne.core.ui.resources.add_error_not_a_url
 import ch.lkmc.neutrodyne.core.ui.resources.add_error_spotify
 import ch.lkmc.neutrodyne.core.ui.resources.add_error_youtube
-import ch.lkmc.neutrodyne.core.ui.resources.add_auth_title
 import ch.lkmc.neutrodyne.core.ui.resources.feed_err_no_media
 import ch.lkmc.neutrodyne.core.ui.resources.feed_err_not_a_feed
 import ch.lkmc.neutrodyne.core.ui.resources.feed_err_too_large

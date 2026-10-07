@@ -148,26 +148,28 @@ private fun GeneralSection(
     var titleDialog by rememberSaveable { mutableStateOf(false) }
     var orderDialog by rememberSaveable { mutableStateOf(false) }
 
-    SettingsRow(
-        icon = NdIcons.Edit,
-        title = stringResource(Res.string.ps_custom_title),
-        // The read model exposes only the effective title; the dialog pre-fills it (deviation).
-        summary = detail.displayTitle,
-        onClick = { titleDialog = true },
-    )
-    SettingsRow(
-        icon = NdIcons.Sort,
-        title = stringResource(Res.string.ps_episode_order),
-        summary =
-            stringResource(
-                if (order == FeedOrder.NEWEST_FIRST) {
-                    Res.string.order_newest
-                } else {
-                    Res.string.order_oldest
-                },
-            ),
-        onClick = { orderDialog = true },
-    )
+    Column(Modifier.fillMaxWidth()) {
+        SettingsRow(
+            icon = NdIcons.Edit,
+            title = stringResource(Res.string.ps_custom_title),
+            // The read model exposes only the effective title; the dialog pre-fills it (deviation).
+            summary = detail.displayTitle,
+            onClick = { titleDialog = true },
+        )
+        SettingsRow(
+            icon = NdIcons.Sort,
+            title = stringResource(Res.string.ps_episode_order),
+            summary =
+                stringResource(
+                    if (order == FeedOrder.NEWEST_FIRST) {
+                        Res.string.order_newest
+                    } else {
+                        Res.string.order_oldest
+                    },
+                ),
+            onClick = { orderDialog = true },
+        )
+    }
 
     if (titleDialog) {
         CustomTitleDialog(
@@ -214,77 +216,78 @@ private fun FeedSection(
     var editDialog by rememberSaveable { mutableStateOf(false) }
     var credentialsDialog by rememberSaveable { mutableStateOf(false) }
 
-    ListItem(
-        headlineContent = { Text(stringResource(Res.string.ps_feed_address)) },
-        supportingContent = {
-            Text(
-                if (revealed) {
-                    feedInfo.feedUrl
-                } else {
-                    feedInfo.redactedUrl + " · " + stringResource(Res.string.ps_feed_reveal)
-                },
-            )
-        },
-        leadingContent = { Icon(NdIcons.RssFeed, contentDescription = null) },
-        trailingContent = {
-            if (revealed) {
-                NdIconButton(
-                    onClick = {
-                        clipboard.setText(AnnotatedString(feedInfo.feedUrl))
-                        scope.launch { snackbar.showSnackbar(copiedLabel) }
-                    },
-                    icon = NdIcons.Link,
-                    contentDescription = stringResource(Res.string.action_copy),
-                )
-            }
-        },
-        modifier =
-            Modifier
-                .clickable {
-                    if (revealed) return@clickable
-                    if (feedInfo.isPrivate) {
-                        revealWarning = true
-                    } else {
-                        revealed = true
-                    }
-                }
-                .semantics { role = Role.Button },
-    )
-
-    ListItem(
-        headlineContent = { Text(stringResource(Res.string.ps_last_refresh)) },
-        supportingContent = { Text(lastRefreshSummary(feedInfo, nowMs).asString()) },
-        leadingContent = { Icon(NdIcons.History, contentDescription = null) },
-    )
-
-    if (feedInfo.moves.isNotEmpty()) {
+    Column(Modifier.fillMaxWidth()) {
         ListItem(
-            headlineContent = { Text(stringResource(Res.string.ps_feed_moves)) },
+            headlineContent = { Text(stringResource(Res.string.ps_feed_address)) },
             supportingContent = {
-                Column {
-                    feedInfo.moves.forEach { move ->
-                        Text(moveLine(move, nowMs).asString())
-                    }
+                Text(
+                    if (revealed) {
+                        feedInfo.feedUrl
+                    } else {
+                        feedInfo.redactedUrl + " · " + stringResource(Res.string.ps_feed_reveal)
+                    },
+                )
+            },
+            leadingContent = { Icon(NdIcons.RssFeed, contentDescription = null) },
+            trailingContent = {
+                if (revealed) {
+                    NdIconButton(
+                        onClick = {
+                            clipboard.setText(AnnotatedString(feedInfo.feedUrl))
+                            scope.launch { snackbar.showSnackbar(copiedLabel) }
+                        },
+                        icon = NdIcons.Link,
+                        contentDescription = stringResource(Res.string.action_copy),
+                    )
                 }
             },
-            leadingContent = { Icon(NdIcons.ArrowForward, contentDescription = null) },
+            modifier =
+                Modifier
+                    .clickable {
+                        if (revealed) return@clickable
+                        if (feedInfo.isPrivate) {
+                            revealWarning = true
+                        } else {
+                            revealed = true
+                        }
+                    }.semantics { role = Role.Button },
         )
-    }
 
-    if (detail.sourceType == SourceType.RSS) {
+        ListItem(
+            headlineContent = { Text(stringResource(Res.string.ps_last_refresh)) },
+            supportingContent = { Text(lastRefreshSummary(feedInfo, nowMs).asString()) },
+            leadingContent = { Icon(NdIcons.History, contentDescription = null) },
+        )
+
+        if (feedInfo.moves.isNotEmpty()) {
+            ListItem(
+                headlineContent = { Text(stringResource(Res.string.ps_feed_moves)) },
+                supportingContent = {
+                    Column {
+                        feedInfo.moves.forEach { move ->
+                            Text(moveLine(move, nowMs).asString())
+                        }
+                    }
+                },
+                leadingContent = { Icon(NdIcons.ArrowForward, contentDescription = null) },
+            )
+        }
+
+        if (detail.sourceType == SourceType.RSS) {
+            SettingsRow(
+                icon = NdIcons.Edit,
+                title = stringResource(Res.string.ps_edit_url),
+                summary = feedInfo.pendingNewFeedUrl,
+                onClick = { editDialog = true },
+            )
+        }
         SettingsRow(
-            icon = NdIcons.Edit,
-            title = stringResource(Res.string.ps_edit_url),
-            summary = feedInfo.pendingNewFeedUrl,
-            onClick = { editDialog = true },
+            icon = NdIcons.Key,
+            title = stringResource(Res.string.ps_credentials),
+            summary = null,
+            onClick = { credentialsDialog = true },
         )
     }
-    SettingsRow(
-        icon = NdIcons.Key,
-        title = stringResource(Res.string.ps_credentials),
-        summary = null,
-        onClick = { credentialsDialog = true },
-    )
 
     if (revealWarning) {
         NdDialog(
@@ -324,7 +327,10 @@ private fun FeedSection(
 
 /** "{relative} · {OK|error}" for the last-refresh row (08's Feed section). */
 @Composable
-private fun lastRefreshSummary(feedInfo: FeedInfo, nowMs: Long): UiText {
+private fun lastRefreshSummary(
+    feedInfo: FeedInfo,
+    nowMs: Long,
+): UiText {
     val whenText =
         feedInfo.lastSuccessAt?.let { FeedDates.relative(it, nowMs) }
             ?: UiText.Res(Res.string.ps_never)
@@ -336,7 +342,10 @@ private fun lastRefreshSummary(feedInfo: FeedInfo, nowMs: Long): UiText {
 
 /** "{fromHost} · {reason} · {when}" for one recorded feed move. */
 @Composable
-private fun moveLine(move: FeedMove, nowMs: Long): UiText =
+private fun moveLine(
+    move: FeedMove,
+    nowMs: Long,
+): UiText =
     UiText.Res(
         Res.string.ps_move_line,
         listOf(
@@ -426,8 +435,7 @@ private fun OrderDialog(
                                 selected = option == current,
                                 role = Role.RadioButton,
                                 onClick = { onPick(option) },
-                            )
-                            .padding(ROW_PADDING),
+                            ).padding(ROW_PADDING),
                 ) {
                     RadioButton(selected = option == current, onClick = null)
                     Text(

@@ -13,7 +13,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 public fun interface DrawnReporter {
     /** Runs [predicate] until it first holds, then reports the frame drawn. */
     @Composable
-    public fun reportWhen(predicate: () -> Boolean)
+    public fun ReportWhen(predicate: () -> Boolean)
 }
 
 /** The shell-provided [DrawnReporter]; `null` where the platform has nothing to report to. */

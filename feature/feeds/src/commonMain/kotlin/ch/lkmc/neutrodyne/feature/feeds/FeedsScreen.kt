@@ -39,8 +39,8 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdPullToRefresh
-import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTooltipIconButton
+import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.FeedFilters
@@ -93,7 +93,7 @@ internal fun FeedsScreen(
     onRefresh: () -> Unit,
     onFiltersChange: (FeedFilters) -> Unit,
     onAction: (EpisodeAction) -> Unit,
-    onMarkAllPlayed: () -> Unit,
+    onMarkAllPlayedClick: () -> Unit,
     onAddPodcast: () -> Unit,
     onSearch: () -> Unit,
     modifier: Modifier = Modifier,
@@ -134,7 +134,7 @@ internal fun FeedsScreen(
                     onRefresh = onRefresh,
                     onFiltersChange = onFiltersChange,
                     onAction = onAction,
-                    onMarkAllPlayed = { confirmMarkAll = true },
+                    onMarkAllPlayedClick = { confirmMarkAll = true },
                 )
             }
         }
@@ -148,7 +148,7 @@ internal fun FeedsScreen(
             confirm =
                 NdDialogAction(stringResource(Res.string.feeds_mark_all_played)) {
                     confirmMarkAll = false
-                    onMarkAllPlayed()
+                    onMarkAllPlayedClick()
                 },
             dismiss =
                 NdDialogAction(stringResource(Res.string.action_cancel)) { confirmMarkAll = false },
@@ -163,17 +163,17 @@ private fun FeedList(
     onRefresh: () -> Unit,
     onFiltersChange: (FeedFilters) -> Unit,
     onAction: (EpisodeAction) -> Unit,
-    onMarkAllPlayed: () -> Unit,
+    onMarkAllPlayedClick: () -> Unit,
 ) {
     val listState = rememberLazyListState()
     val refreshState = items.loadState.refresh
 
     // 08 Startup metric: ReportDrawnWhen once the first load settles (no-op off Android).
-    LocalDrawnReporter.current?.reportWhen { refreshState !is LoadState.Loading }
+    LocalDrawnReporter.current?.ReportWhen { refreshState !is LoadState.Loading }
 
     if (refreshState is LoadState.Loading && items.itemCount == 0) {
         Column(Modifier.fillMaxSize()) {
-            FeedHeader(state.filters, onFiltersChange, onRefresh, onMarkAllPlayed)
+            FeedHeader(state.filters, onFiltersChange, onRefresh, onMarkAllPlayedClick)
             repeat(SKELETON_ROWS) { SkeletonRow() }
         }
         return
@@ -212,7 +212,7 @@ private fun FeedList(
     LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
         offlineBannerItem(state.offline)
         item(key = "header", contentType = "header") {
-            FeedHeader(state.filters, onFiltersChange, onRefresh, onMarkAllPlayed)
+            FeedHeader(state.filters, onFiltersChange, onRefresh, onMarkAllPlayedClick)
         }
         items(
             count = items.itemCount,
@@ -226,14 +226,18 @@ private fun FeedList(
             contentType =
                 items.itemContentType { item ->
                     when (item) {
-                        is FeedItem.Day -> CONTENT_DAY
-                        is FeedItem.Episode ->
+                        is FeedItem.Day -> {
+                            CONTENT_DAY
+                        }
+
+                        is FeedItem.Episode -> {
                             if (item.row.sourceType == SourceType.RSS) CONTENT_RSS else CONTENT_YOUTUBE
+                        }
                     }
                 },
         ) { index ->
             when (val item = items[index]) {
-                is FeedItem.Day ->
+                is FeedItem.Day -> {
                     Text(
                         item.label.asString(),
                         style = MaterialTheme.typography.labelLarge,
@@ -248,7 +252,9 @@ private fun FeedList(
                                     bottom = DAY_BOTTOM,
                                 ),
                     )
-                is FeedItem.Episode ->
+                }
+
+                is FeedItem.Episode -> {
                     EpisodeRow(
                         row = item.row,
                         live = null,
@@ -258,11 +264,15 @@ private fun FeedList(
                         selected = null,
                         onAction = onAction,
                     )
-                null -> SkeletonRow()
+                }
+
+                null -> {
+                    SkeletonRow()
+                }
             }
         }
         when (items.loadState.append) {
-            is LoadState.Loading ->
+            is LoadState.Loading -> {
                 item(key = "appendLoading", contentType = "status") {
                     Box(
                         Modifier.fillMaxWidth().padding(FOOTER_PAD),
@@ -271,7 +281,9 @@ private fun FeedList(
                         CircularProgressIndicator(Modifier.size(FOOTER_SPINNER))
                     }
                 }
-            is LoadState.Error ->
+            }
+
+            is LoadState.Error -> {
                 item(key = "appendError", contentType = "status") {
                     NdBanner(
                         message = stringResource(Res.string.feeds_load_error),
@@ -283,7 +295,11 @@ private fun FeedList(
                             ),
                     )
                 }
-            else -> Unit
+            }
+
+            else -> {
+                Unit
+            }
         }
     }
 }
@@ -298,7 +314,7 @@ private fun FeedHeader(
     filters: FeedFilters,
     onFiltersChange: (FeedFilters) -> Unit,
     onRefresh: () -> Unit,
-    onMarkAllPlayed: () -> Unit,
+    onMarkAllPlayedClick: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -325,7 +341,7 @@ private fun FeedHeader(
                     text = { Text(stringResource(Res.string.feeds_mark_all_played)) },
                     onClick = {
                         menuOpen = false
-                        onMarkAllPlayed()
+                        onMarkAllPlayedClick()
                     },
                 )
             }
@@ -343,15 +359,26 @@ private fun SkeletonRow() {
     ) {
         Box(Modifier.size(56.dp).clip(NeutrodyneShapes.Tile).skeletonBlock())
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(Modifier.fillMaxWidth(0.7f).height(14.dp).clip(RoundedCornerShape(4.dp)).skeletonBlock())
-            Box(Modifier.fillMaxWidth(0.4f).height(12.dp).clip(RoundedCornerShape(4.dp)).skeletonBlock())
+            Box(
+                Modifier
+                    .fillMaxWidth(0.7f)
+                    .height(14.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .skeletonBlock(),
+            )
+            Box(
+                Modifier
+                    .fillMaxWidth(0.4f)
+                    .height(12.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .skeletonBlock(),
+            )
         }
     }
 }
 
 @Composable
-private fun Modifier.skeletonBlock(): Modifier =
-    background(MaterialTheme.colorScheme.surfaceContainer)
+private fun Modifier.skeletonBlock(): Modifier = background(MaterialTheme.colorScheme.surfaceContainer)
 
 private val ROW_HEIGHT = 72.dp
 private val DAY_PADDING = 16.dp

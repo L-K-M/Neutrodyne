@@ -38,8 +38,8 @@ import ch.lkmc.neutrodyne.core.ui.CoverTile
 import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.OfflineBanner
 import ch.lkmc.neutrodyne.core.ui.TileMenuAction
-import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.UiText
+import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_more
@@ -100,8 +100,11 @@ internal fun LibraryScreen(
         )
         OfflineBanner(state.offline)
         when {
-            !state.loaded -> SkeletonGrid()
-            state.tiles.isEmpty() ->
+            !state.loaded -> {
+                SkeletonGrid()
+            }
+
+            state.tiles.isEmpty() -> {
                 EmptyState(
                     icon = NdIcons.GridView,
                     title = stringResource(Res.string.library_empty_title),
@@ -109,7 +112,11 @@ internal fun LibraryScreen(
                     actionLabel = stringResource(Res.string.add_title),
                     onAction = onAddPodcast,
                 )
-            else -> TileGrid(state, onOpenPodcast, onTileAction)
+            }
+
+            else -> {
+                TileGrid(state, onOpenPodcast, onTileAction)
+            }
         }
     }
 

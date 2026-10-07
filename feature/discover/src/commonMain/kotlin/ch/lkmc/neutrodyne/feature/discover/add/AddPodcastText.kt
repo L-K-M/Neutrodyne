@@ -32,17 +32,47 @@ import ch.lkmc.neutrodyne.core.ui.resources.net_other
 internal object AddPodcastText {
     fun describe(error: AddPodcastError): UiText =
         when (error) {
-            is AddPodcastError.NotAUrl -> UiText.Res(Res.string.add_error_not_a_url)
-            AddPodcastError.InvalidUrl -> UiText.Res(Res.string.add_error_invalid_url)
-            is AddPodcastError.Network -> NetErrorText.describe(error.error)
-            is AddPodcastError.Http -> UiText.Res(Res.string.add_error_http, listOf(error.code))
-            is AddPodcastError.AuthRequired -> UiText.Res(Res.string.add_auth_title)
-            AddPodcastError.NotAFeed -> UiText.Res(Res.string.feed_err_not_a_feed)
-            AddPodcastError.NoMedia -> UiText.Res(Res.string.feed_err_no_media)
-            AddPodcastError.TooLarge -> UiText.Res(Res.string.feed_err_too_large)
-            AddPodcastError.Malformed -> UiText.Res(Res.string.add_error_malformed)
-            AddPodcastError.UnsupportedListFeed -> UiText.Res(Res.string.add_error_list_feed)
-            is AddPodcastError.SubscriptionList ->
+            is AddPodcastError.NotAUrl -> {
+                UiText.Res(Res.string.add_error_not_a_url)
+            }
+
+            AddPodcastError.InvalidUrl -> {
+                UiText.Res(Res.string.add_error_invalid_url)
+            }
+
+            is AddPodcastError.Network -> {
+                NetErrorText.describe(error.error)
+            }
+
+            is AddPodcastError.Http -> {
+                UiText.Res(Res.string.add_error_http, listOf(error.code))
+            }
+
+            is AddPodcastError.AuthRequired -> {
+                UiText.Res(Res.string.add_auth_title)
+            }
+
+            AddPodcastError.NotAFeed -> {
+                UiText.Res(Res.string.feed_err_not_a_feed)
+            }
+
+            AddPodcastError.NoMedia -> {
+                UiText.Res(Res.string.feed_err_no_media)
+            }
+
+            AddPodcastError.TooLarge -> {
+                UiText.Res(Res.string.feed_err_too_large)
+            }
+
+            AddPodcastError.Malformed -> {
+                UiText.Res(Res.string.add_error_malformed)
+            }
+
+            AddPodcastError.UnsupportedListFeed -> {
+                UiText.Res(Res.string.add_error_list_feed)
+            }
+
+            is AddPodcastError.SubscriptionList -> {
                 UiText.Joined(
                     listOf(
                         UiText.Res(Res.string.add_subscription_list),
@@ -51,10 +81,23 @@ internal object AddPodcastText {
                     separator = " ",
                     suffix = "",
                 )
-            AddPodcastError.AppleOnlyShow -> UiText.Res(Res.string.add_error_apple_only)
-            AddPodcastError.SpotifyShow -> UiText.Res(Res.string.add_error_spotify)
-            AddPodcastError.DirectoryBusy -> UiText.Res(Res.string.add_error_directory_busy)
-            AddPodcastError.YouTubeNotYetSupported -> UiText.Res(Res.string.add_error_youtube)
+            }
+
+            AddPodcastError.AppleOnlyShow -> {
+                UiText.Res(Res.string.add_error_apple_only)
+            }
+
+            AddPodcastError.SpotifyShow -> {
+                UiText.Res(Res.string.add_error_spotify)
+            }
+
+            AddPodcastError.DirectoryBusy -> {
+                UiText.Res(Res.string.add_error_directory_busy)
+            }
+
+            AddPodcastError.YouTubeNotYetSupported -> {
+                UiText.Res(Res.string.add_error_youtube)
+            }
         }
 }
 
@@ -63,8 +106,11 @@ internal object SubscribeErrorText {
     fun describe(error: SubscribeError): UiText =
         when (error) {
             is SubscribeError.Fetch -> AddPodcastText.describe(error.error)
+
             SubscribeError.NoMedia -> UiText.Res(Res.string.feed_err_no_media)
+
             SubscribeError.Storage -> UiText.Res(Res.string.feed_err_storage)
+
             // The sheet handles AlreadySubscribed inline (it has the podcastId to open).
             is SubscribeError.AlreadySubscribed -> UiText.Res(Res.string.net_other)
         }

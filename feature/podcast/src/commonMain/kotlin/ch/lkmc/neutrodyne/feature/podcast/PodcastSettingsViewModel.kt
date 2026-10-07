@@ -92,9 +92,8 @@ public class PodcastSettingsViewModel
             podcasts.editFeedUrl(podcastId, input)
 
         /** "Username and password" (03 Basic auth). */
-        public suspend fun setCredentials(
-            credentials: BasicCredentials,
-        ): Outcome<Unit, AddPodcastError> = podcasts.setCredentials(podcastId, credentials)
+        public suspend fun setCredentials(credentials: BasicCredentials): Outcome<Unit, AddPodcastError> =
+            podcasts.setCredentials(podcastId, credentials)
 
         @AssistedFactory
         @ManualViewModelAssistedFactoryKey(Factory::class)

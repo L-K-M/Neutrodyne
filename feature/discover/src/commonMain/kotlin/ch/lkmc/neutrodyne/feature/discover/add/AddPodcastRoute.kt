@@ -28,8 +28,10 @@ import org.jetbrains.compose.resources.getString
  * snackbar's result still arrives — the `SnackbarHostState` is root-scoped.
  */
 @Composable
-internal fun AddPodcastRoute(key: AddPodcastKey) {
-    val viewModel = metroViewModel<AddPodcastViewModel>()
+internal fun AddPodcastRoute(
+    key: AddPodcastKey,
+    viewModel: AddPodcastViewModel = metroViewModel(),
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val navigator = LocalAppNavigator.current
     val snackbar = LocalSnackbarHost.current
@@ -56,7 +58,7 @@ internal fun AddPodcastRoute(key: AddPodcastKey) {
         onResolve = viewModel::resolve,
         onCredentials = viewModel::resolveWithCredentials,
         onCancelResolve = viewModel::cancelResolve,
-        onInputChanged = viewModel::onInputChanged,
+        onInputChange = viewModel::onInputChanged,
         onCandidate = viewModel::resolve,
         onSubscribe = viewModel::subscribe,
         onOpenPodcast = { id ->

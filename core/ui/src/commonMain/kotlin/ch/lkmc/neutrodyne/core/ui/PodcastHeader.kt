@@ -148,18 +148,33 @@ private fun MetaLine(
 }
 
 /** The description as plain text — paragraphs and list items separated by newlines. */
-private fun ShowNotes.plainText(): String =
-    blocks.joinToString("\n") { it.plainText() }.trim()
+private fun ShowNotes.plainText(): String = blocks.joinToString("\n") { it.plainText() }.trim()
 
 private fun ShowNoteBlock.plainText(): String =
     when (this) {
-        is ShowNoteBlock.Paragraph -> spans.plainText()
-        is ShowNoteBlock.Heading -> spans.plainText()
-        is ShowNoteBlock.ListBlock ->
+        is ShowNoteBlock.Paragraph -> {
+            spans.plainText()
+        }
+
+        is ShowNoteBlock.Heading -> {
+            spans.plainText()
+        }
+
+        is ShowNoteBlock.ListBlock -> {
             items.joinToString("\n") { item -> item.joinToString("\n") { it.plainText() } }
-        is ShowNoteBlock.Quote -> blocks.joinToString("\n") { it.plainText() }
-        is ShowNoteBlock.Image -> alt ?: ""
-        ShowNoteBlock.Rule -> ""
+        }
+
+        is ShowNoteBlock.Quote -> {
+            blocks.joinToString("\n") { it.plainText() }
+        }
+
+        is ShowNoteBlock.Image -> {
+            alt ?: ""
+        }
+
+        ShowNoteBlock.Rule -> {
+            ""
+        }
     }
 
 private fun List<ShowNoteSpan>.plainText(): String =

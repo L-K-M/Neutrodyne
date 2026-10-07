@@ -15,9 +15,16 @@ public val LocalUiClock: androidx.compose.runtime.ProvidableCompositionLocal<Clo
     staticCompositionLocalOf { UiSystemClock }
 
 private object UiSystemClock : Clock {
-    override fun now(): Long = kotlin.time.Clock.System.now().toEpochMilliseconds()
+    override fun now(): Long =
+        kotlin.time.Clock.System
+            .now()
+            .toEpochMilliseconds()
 
-    override fun elapsedRealtime(): Long = TimeSource.Monotonic.markNow().elapsedNow().inWholeMilliseconds
+    override fun elapsedRealtime(): Long =
+        TimeSource.Monotonic
+            .markNow()
+            .elapsedNow()
+            .inWholeMilliseconds
 }
 
 /** Which platform the UI runs on — picks per-platform copy (07's storage wording, 11's labels). */

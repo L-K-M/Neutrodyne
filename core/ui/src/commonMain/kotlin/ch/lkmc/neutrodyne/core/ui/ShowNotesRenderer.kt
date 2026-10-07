@@ -102,14 +102,16 @@ private fun ShowNoteBlockContent(
     level: Int,
 ) {
     when (block) {
-        is ShowNoteBlock.Paragraph ->
+        is ShowNoteBlock.Paragraph -> {
             SelectionContainer(Modifier.padding(bottom = PARAGRAPH_GAP)) {
                 Text(
                     block.spans.toAnnotatedString(durationMs, onLink, onTimestamp),
                     style = MaterialTheme.typography.bodyLarge,
                 )
             }
-        is ShowNoteBlock.Heading ->
+        }
+
+        is ShowNoteBlock.Heading -> {
             Text(
                 block.spans.toAnnotatedString(durationMs, onLink, onTimestamp),
                 style =
@@ -120,12 +122,23 @@ private fun ShowNoteBlockContent(
                     },
                 modifier = Modifier.padding(top = HEADING_TOP_GAP, bottom = HEADING_BOTTOM_GAP),
             )
-        is ShowNoteBlock.ListBlock ->
+        }
+
+        is ShowNoteBlock.ListBlock -> {
             NoteList(block, imageMode, durationMs, onLink, onTimestamp, onLoadImages, level)
-        is ShowNoteBlock.Quote ->
+        }
+
+        is ShowNoteBlock.Quote -> {
             NoteQuote(block, imageMode, durationMs, onLink, onTimestamp, onLoadImages, level)
-        is ShowNoteBlock.Image -> NoteImage(block, imageMode, onLoadImages)
-        ShowNoteBlock.Rule -> HorizontalDivider(Modifier.padding(vertical = RULE_GAP))
+        }
+
+        is ShowNoteBlock.Image -> {
+            NoteImage(block, imageMode, onLoadImages)
+        }
+
+        ShowNoteBlock.Rule -> {
+            HorizontalDivider(Modifier.padding(vertical = RULE_GAP))
+        }
     }
 }
 
@@ -298,7 +311,8 @@ private fun List<ShowNoteSpan>.toAnnotatedString(
                     append(span.text)
                     pop()
                 }
-                is ShowNoteSpan.Link ->
+
+                is ShowNoteSpan.Link -> {
                     withLink(
                         LinkAnnotation.Clickable(
                             tag = span.url,
@@ -310,6 +324,8 @@ private fun List<ShowNoteSpan>.toAnnotatedString(
                         append(span.text)
                         pop()
                     }
+                }
+
                 is ShowNoteSpan.Timestamp -> {
                     val seekable = durationMs == null || span.positionMs <= durationMs
                     if (seekable) {
@@ -326,7 +342,10 @@ private fun List<ShowNoteSpan>.toAnnotatedString(
                         append(span.text)
                     }
                 }
-                ShowNoteSpan.LineBreak -> append('\n')
+
+                ShowNoteSpan.LineBreak -> {
+                    append('\n')
+                }
             }
         }
     }

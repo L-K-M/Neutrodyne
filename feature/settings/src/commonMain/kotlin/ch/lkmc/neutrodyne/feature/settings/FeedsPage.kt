@@ -44,8 +44,8 @@ import ch.lkmc.neutrodyne.core.ui.resources.feeds_images_wifi
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_interval_hour
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_interval_hours
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_interval_manual
-import ch.lkmc.neutrodyne.core.ui.resources.feeds_notes_images
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_not_on_desktop
+import ch.lkmc.neutrodyne.core.ui.resources.feeds_notes_images
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_on_open
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_refresh_interval
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_wifi_only

@@ -110,11 +110,15 @@ public object EpisodeRowSummary {
 
         val downloadState = live?.downloadState ?: row.downloadState
         when (downloadState) {
-            DownloadState.COMPLETED -> parts += UiText.Res(Res.string.summary_downloaded)
+            DownloadState.COMPLETED -> {
+                parts += UiText.Res(Res.string.summary_downloaded)
+            }
+
             DownloadState.DOWNLOADING -> {
                 val percent = live?.downloadProgress()?.let { (it * 100).toInt() } ?: 0
                 parts += UiText.Res(Res.string.summary_downloading, listOf(percent))
             }
+
             else -> {}
         }
         // QUEUED waits, failures and the missing file read their wording via DownloadStatusText.
@@ -164,14 +168,29 @@ public object DownloadStatusText {
         platform: PlatformKind,
     ): UiText? =
         when (state) {
-            null -> null
-            DownloadState.QUEUED ->
+            null -> {
+                null
+            }
+
+            DownloadState.QUEUED -> {
                 when (waitReason) {
-                    null, WaitReason.NONE, WaitReason.SLOT -> UiText.Res(Res.string.dl_queued)
-                    WaitReason.NETWORK -> UiText.Res(Res.string.dl_wait_network)
-                    WaitReason.UNMETERED_NETWORK -> UiText.Res(Res.string.dl_wait_wifi)
-                    WaitReason.CHARGING -> UiText.Res(Res.string.dl_wait_charging)
-                    WaitReason.STORAGE ->
+                    null, WaitReason.NONE, WaitReason.SLOT -> {
+                        UiText.Res(Res.string.dl_queued)
+                    }
+
+                    WaitReason.NETWORK -> {
+                        UiText.Res(Res.string.dl_wait_network)
+                    }
+
+                    WaitReason.UNMETERED_NETWORK -> {
+                        UiText.Res(Res.string.dl_wait_wifi)
+                    }
+
+                    WaitReason.CHARGING -> {
+                        UiText.Res(Res.string.dl_wait_charging)
+                    }
+
+                    WaitReason.STORAGE -> {
                         if (error == DownloadError.STORAGE_UNAVAILABLE) {
                             UiText.Res(
                                 if (platform == PlatformKind.ANDROID) {
@@ -183,22 +202,49 @@ public object DownloadStatusText {
                         } else {
                             UiText.Res(Res.string.dl_wait_storage)
                         }
-                    WaitReason.BACKOFF -> retryText(nextAttemptAt, nowMs)
-                    WaitReason.SYSTEM -> UiText.Res(Res.string.dl_paused_system)
-                    WaitReason.NEEDS_FOREGROUND -> UiText.Res(Res.string.dl_tap_resume)
+                    }
+
+                    WaitReason.BACKOFF -> {
+                        retryText(nextAttemptAt, nowMs)
+                    }
+
+                    WaitReason.SYSTEM -> {
+                        UiText.Res(Res.string.dl_paused_system)
+                    }
+
+                    WaitReason.NEEDS_FOREGROUND -> {
+                        UiText.Res(Res.string.dl_tap_resume)
+                    }
                 }
-            DownloadState.RESOLVING, DownloadState.VERIFYING -> null
-            DownloadState.DOWNLOADING ->
+            }
+
+            DownloadState.RESOLVING, DownloadState.VERIFYING -> {
+                null
+            }
+
+            DownloadState.DOWNLOADING -> {
                 progress?.let { UiText.Res(Res.string.dl_percent, listOf((it * 100).toInt())) }
-            DownloadState.PAUSED -> UiText.Res(Res.string.dl_paused)
-            DownloadState.COMPLETED -> null
-            DownloadState.MISSING ->
+            }
+
+            DownloadState.PAUSED -> {
+                UiText.Res(Res.string.dl_paused)
+            }
+
+            DownloadState.COMPLETED -> {
+                null
+            }
+
+            DownloadState.MISSING -> {
                 if (error == DownloadError.STORAGE_UNAVAILABLE) {
                     UiText.Res(Res.string.dl_storage_unavailable)
                 } else {
                     UiText.Res(Res.string.dl_missing)
                 }
-            DownloadState.FAILED -> errorText(error)
+            }
+
+            DownloadState.FAILED -> {
+                errorText(error)
+            }
         }
 
     /** 07's "Retrying in {relative time}" — "Retrying soon" when absent or past. */
@@ -215,26 +261,62 @@ public object DownloadStatusText {
     /** 08's `DownloadError` table (`SERVER` has no status code at row level — 07's `DownloadStatus`). */
     public fun errorText(error: DownloadError?): UiText =
         when (error) {
-            DownloadError.HTTP_NOT_FOUND, DownloadError.HTTP_GONE ->
+            DownloadError.HTTP_NOT_FOUND, DownloadError.HTTP_GONE -> {
                 UiText.Res(Res.string.dl_err_no_longer)
-            DownloadError.HTTP_AUTH -> UiText.Res(Res.string.dl_err_auth)
+            }
+
+            DownloadError.HTTP_AUTH -> {
+                UiText.Res(Res.string.dl_err_auth)
+            }
+
             DownloadError.HTTP_CLIENT,
             DownloadError.HTTP_SERVER,
-            -> UiText.Res(Res.string.dl_err_server)
-            DownloadError.HTTP_RATE_LIMITED -> UiText.Res(Res.string.dl_err_ratelimit)
-            DownloadError.NETWORK_IO -> UiText.Res(Res.string.dl_err_io)
-            DownloadError.NOT_MEDIA -> UiText.Res(Res.string.dl_err_not_media)
-            DownloadError.SIZE_MISMATCH -> UiText.Res(Res.string.dl_err_size)
-            DownloadError.STORAGE_FULL -> UiText.Res(Res.string.dl_err_storage)
-            DownloadError.STORAGE_UNAVAILABLE -> UiText.Res(Res.string.dl_storage_unavailable)
-            DownloadError.YT_UNAVAILABLE -> UiText.Res(Res.string.availability_unavailable)
-            DownloadError.YT_EXTRACTION, DownloadError.YT_FORBIDDEN ->
+            -> {
+                UiText.Res(Res.string.dl_err_server)
+            }
+
+            DownloadError.HTTP_RATE_LIMITED -> {
+                UiText.Res(Res.string.dl_err_ratelimit)
+            }
+
+            DownloadError.NETWORK_IO -> {
+                UiText.Res(Res.string.dl_err_io)
+            }
+
+            DownloadError.NOT_MEDIA -> {
+                UiText.Res(Res.string.dl_err_not_media)
+            }
+
+            DownloadError.SIZE_MISMATCH -> {
+                UiText.Res(Res.string.dl_err_size)
+            }
+
+            DownloadError.STORAGE_FULL -> {
+                UiText.Res(Res.string.dl_err_storage)
+            }
+
+            DownloadError.STORAGE_UNAVAILABLE -> {
+                UiText.Res(Res.string.dl_storage_unavailable)
+            }
+
+            DownloadError.YT_UNAVAILABLE -> {
+                UiText.Res(Res.string.availability_unavailable)
+            }
+
+            DownloadError.YT_EXTRACTION, DownloadError.YT_FORBIDDEN -> {
                 UiText.Res(Res.string.dl_err_yt)
-            DownloadError.UNSUPPORTED_STREAM -> UiText.Res(Res.string.dl_err_stream)
+            }
+
+            DownloadError.UNSUPPORTED_STREAM -> {
+                UiText.Res(Res.string.dl_err_stream)
+            }
+
             DownloadError.CANCELLED_BY_SYSTEM,
             DownloadError.UNKNOWN,
             null,
-            -> UiText.Res(Res.string.dl_err_failed)
+            -> {
+                UiText.Res(Res.string.dl_err_failed)
+            }
         }
 }
 
@@ -258,30 +340,84 @@ public object AvailabilityText {
 public object FeedErrorText {
     public fun describe(kind: FeedErrorKind): UiText =
         when (kind) {
-            FeedErrorKind.OFFLINE -> UiText.Res(Res.string.net_offline)
-            FeedErrorKind.TIMEOUT -> UiText.Res(Res.string.net_timeout)
-            FeedErrorKind.DNS -> UiText.Res(Res.string.net_dns)
-            FeedErrorKind.CONNECTION -> UiText.Res(Res.string.net_connection)
-            FeedErrorKind.LOCAL_NETWORK_UNSUPPORTED -> UiText.Res(Res.string.net_lan)
-            FeedErrorKind.TLS_UNTRUSTED, FeedErrorKind.TLS_CERTIFICATE_TRANSPARENCY ->
+            FeedErrorKind.OFFLINE -> {
+                UiText.Res(Res.string.net_offline)
+            }
+
+            FeedErrorKind.TIMEOUT -> {
+                UiText.Res(Res.string.net_timeout)
+            }
+
+            FeedErrorKind.DNS -> {
+                UiText.Res(Res.string.net_dns)
+            }
+
+            FeedErrorKind.CONNECTION -> {
+                UiText.Res(Res.string.net_connection)
+            }
+
+            FeedErrorKind.LOCAL_NETWORK_UNSUPPORTED -> {
+                UiText.Res(Res.string.net_lan)
+            }
+
+            FeedErrorKind.TLS_UNTRUSTED, FeedErrorKind.TLS_CERTIFICATE_TRANSPARENCY -> {
                 UiText.Res(Res.string.net_tls_untrusted)
-            FeedErrorKind.TLS_HANDSHAKE -> UiText.Res(Res.string.net_tls_handshake)
-            FeedErrorKind.HTTP_AUTH -> UiText.Res(Res.string.feed_err_auth)
-            FeedErrorKind.HTTP_FORBIDDEN -> UiText.Res(Res.string.feed_err_forbidden)
-            FeedErrorKind.HTTP_NOT_FOUND -> UiText.Res(Res.string.feed_err_not_found)
-            FeedErrorKind.HTTP_GONE -> UiText.Res(Res.string.feed_err_gone)
-            FeedErrorKind.HTTP_RATE_LIMITED -> UiText.Res(Res.string.feed_err_ratelimit)
-            FeedErrorKind.HTTP_SERVER, FeedErrorKind.HTTP_CLIENT ->
+            }
+
+            FeedErrorKind.TLS_HANDSHAKE -> {
+                UiText.Res(Res.string.net_tls_handshake)
+            }
+
+            FeedErrorKind.HTTP_AUTH -> {
+                UiText.Res(Res.string.feed_err_auth)
+            }
+
+            FeedErrorKind.HTTP_FORBIDDEN -> {
+                UiText.Res(Res.string.feed_err_forbidden)
+            }
+
+            FeedErrorKind.HTTP_NOT_FOUND -> {
+                UiText.Res(Res.string.feed_err_not_found)
+            }
+
+            FeedErrorKind.HTTP_GONE -> {
+                UiText.Res(Res.string.feed_err_gone)
+            }
+
+            FeedErrorKind.HTTP_RATE_LIMITED -> {
+                UiText.Res(Res.string.feed_err_ratelimit)
+            }
+
+            FeedErrorKind.HTTP_SERVER, FeedErrorKind.HTTP_CLIENT -> {
                 UiText.Res(Res.string.feed_err_server)
-            FeedErrorKind.REDIRECT_LOOP -> UiText.Res(Res.string.feed_err_redirects)
-            FeedErrorKind.TOO_LARGE -> UiText.Res(Res.string.feed_err_too_large)
+            }
+
+            FeedErrorKind.REDIRECT_LOOP -> {
+                UiText.Res(Res.string.feed_err_redirects)
+            }
+
+            FeedErrorKind.TOO_LARGE -> {
+                UiText.Res(Res.string.feed_err_too_large)
+            }
+
             FeedErrorKind.NOT_A_FEED,
             FeedErrorKind.PARSE_ERROR,
             FeedErrorKind.UNSUPPORTED_LIST_FEED,
-            -> UiText.Res(Res.string.feed_err_not_a_feed)
-            FeedErrorKind.NO_MEDIA -> UiText.Res(Res.string.feed_err_no_media)
-            FeedErrorKind.STORAGE -> UiText.Res(Res.string.feed_err_storage)
-            FeedErrorKind.IDENTITY_CONFLICT, FeedErrorKind.UNKNOWN -> UiText.Res(Res.string.net_other)
+            -> {
+                UiText.Res(Res.string.feed_err_not_a_feed)
+            }
+
+            FeedErrorKind.NO_MEDIA -> {
+                UiText.Res(Res.string.feed_err_no_media)
+            }
+
+            FeedErrorKind.STORAGE -> {
+                UiText.Res(Res.string.feed_err_storage)
+            }
+
+            FeedErrorKind.IDENTITY_CONFLICT, FeedErrorKind.UNKNOWN -> {
+                UiText.Res(Res.string.net_other)
+            }
         }
 }
 
@@ -289,18 +425,44 @@ public object FeedErrorText {
 public object NetErrorText {
     public fun describe(error: NetError): UiText =
         when (error) {
-            NetError.Offline -> UiText.Res(Res.string.net_offline)
-            NetError.Timeout -> UiText.Res(Res.string.net_timeout)
-            NetError.DnsFailure -> UiText.Res(Res.string.net_dns)
-            NetError.ConnectionFailed -> UiText.Res(Res.string.net_connection)
-            NetError.LocalNetworkUnsupported -> UiText.Res(Res.string.net_lan)
-            is NetError.Tls ->
+            NetError.Offline -> {
+                UiText.Res(Res.string.net_offline)
+            }
+
+            NetError.Timeout -> {
+                UiText.Res(Res.string.net_timeout)
+            }
+
+            NetError.DnsFailure -> {
+                UiText.Res(Res.string.net_dns)
+            }
+
+            NetError.ConnectionFailed -> {
+                UiText.Res(Res.string.net_connection)
+            }
+
+            NetError.LocalNetworkUnsupported -> {
+                UiText.Res(Res.string.net_lan)
+            }
+
+            is NetError.Tls -> {
                 when (error.kind) {
-                    TlsKind.UNTRUSTED_CERTIFICATE, TlsKind.CERTIFICATE_TRANSPARENCY ->
+                    TlsKind.UNTRUSTED_CERTIFICATE, TlsKind.CERTIFICATE_TRANSPARENCY -> {
                         UiText.Res(Res.string.net_tls_untrusted)
-                    TlsKind.HANDSHAKE -> UiText.Res(Res.string.net_tls_handshake)
+                    }
+
+                    TlsKind.HANDSHAKE -> {
+                        UiText.Res(Res.string.net_tls_handshake)
+                    }
                 }
-            NetError.Cancelled -> UiText.Res(Res.string.net_cancelled)
-            is NetError.Other -> UiText.Res(Res.string.net_other)
+            }
+
+            NetError.Cancelled -> {
+                UiText.Res(Res.string.net_cancelled)
+            }
+
+            is NetError.Other -> {
+                UiText.Res(Res.string.net_other)
+            }
         }
 }

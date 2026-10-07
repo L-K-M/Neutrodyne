@@ -42,8 +42,8 @@ import ch.lkmc.neutrodyne.core.designsystem.components.CoverTier
 import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdLoading
-import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTooltipIconButton
+import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.Availability
@@ -123,14 +123,19 @@ internal fun EpisodeScreen(
             },
         )
         when {
-            !state.loaded -> LoadingBody()
-            episode == null ->
+            !state.loaded -> {
+                LoadingBody()
+            }
+
+            episode == null -> {
                 EmptyState(
                     icon = NdIcons.Error,
                     title = stringResource(Res.string.episode_not_found),
                     body = "",
                 )
-            else ->
+            }
+
+            else -> {
                 LazyColumn(Modifier.fillMaxSize()) {
                     offlineBannerItem(state.offline)
                     item(key = "header", contentType = "header") {
@@ -169,6 +174,7 @@ internal fun EpisodeScreen(
                         )
                     }
                 }
+            }
         }
     }
 }

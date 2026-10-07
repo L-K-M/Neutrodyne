@@ -18,7 +18,6 @@ actual object DateFormatter {
     actual fun date(epochMs: Long): String =
         mediumDate.format(Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()))
 
-
     actual fun dayOfMonth(epochMs: Long): String =
         DAY_FORMAT.format(Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()))
 

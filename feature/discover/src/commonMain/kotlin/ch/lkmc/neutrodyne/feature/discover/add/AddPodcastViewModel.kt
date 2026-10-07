@@ -135,28 +135,34 @@ public class AddPodcastViewModel(
         mutableState.update { it.copy(step = step.copy(subscribing = true, subscribeError = null)) }
         viewModelScope.launch {
             when (val outcome = subscribeUseCase(step.preview.previewId, emptySet())) {
-                is Outcome.Success ->
+                is Outcome.Success -> {
                     mutableState.update {
                         it.copy(done = SubscribedPodcast(outcome.value, step.preview.title))
                     }
-                is Outcome.Failure ->
+                }
+
+                is Outcome.Failure -> {
                     mutableState.update {
                         it.copy(
                             step =
                                 when (val error = outcome.error) {
-                                    is SubscribeError.AlreadySubscribed ->
+                                    is SubscribeError.AlreadySubscribed -> {
                                         step.copy(
                                             subscribing = false,
                                             alreadySubscribedId = error.podcastId,
                                         )
-                                    else ->
+                                    }
+
+                                    else -> {
                                         step.copy(
                                             subscribing = false,
                                             subscribeError = SubscribeErrorText.describe(error),
                                         )
+                                    }
                                 },
                         )
                     }
+                }
             }
         }
     }
@@ -175,13 +181,20 @@ public class AddPodcastViewModel(
             state.copy(
                 step =
                     when (resolution) {
-                        is AddResolution.Feed -> AddSheetStep.Preview(resolution.preview)
-                        is AddResolution.Choose -> AddSheetStep.Choosing(resolution.candidates)
-                        is AddResolution.Failure ->
+                        is AddResolution.Feed -> {
+                            AddSheetStep.Preview(resolution.preview)
+                        }
+
+                        is AddResolution.Choose -> {
+                            AddSheetStep.Choosing(resolution.candidates)
+                        }
+
+                        is AddResolution.Failure -> {
                             AddSheetStep.Input(
                                 error = AddPodcastText.describe(resolution.error),
                                 auth = resolution.error is AddPodcastError.AuthRequired,
                             )
+                        }
                     },
             )
         }

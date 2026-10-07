@@ -19,8 +19,7 @@ import dev.zacsweers.metrox.viewmodel.metroViewModel
  * ViewModel's repository calls.
  */
 @Composable
-internal fun FeedsRoute() {
-    val viewModel = metroViewModel<FeedsViewModel>()
+internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val items = viewModel.feed.collectAsLazyPagingItems()
     val navigator = LocalAppNavigator.current
@@ -34,7 +33,7 @@ internal fun FeedsRoute() {
         onAction = { action ->
             if (!dispatchEpisodeRoute(action, navigator, urls)) viewModel.onRowAction(action)
         },
-        onMarkAllPlayed = viewModel::markAllPlayed,
+        onMarkAllPlayedClick = viewModel::markAllPlayed,
         onAddPodcast = { navigator.push(AddPodcastKey(null)) },
         onSearch = { navigator.selectTab(DiscoverKey) },
     )

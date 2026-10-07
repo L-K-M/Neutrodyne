@@ -24,6 +24,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -94,7 +95,7 @@ internal fun AddPodcastSheet(
     onResolve: (String) -> Unit,
     onCredentials: (BasicCredentials) -> Unit,
     onCancelResolve: () -> Unit,
-    onInputChanged: (String) -> Unit,
+    onInputChange: (String) -> Unit,
     onCandidate: (String) -> Unit,
     onSubscribe: () -> Unit,
     onOpenPodcast: (Long) -> Unit,
@@ -109,9 +110,10 @@ internal fun AddPodcastSheet(
     val focusRequester = remember { FocusRequester() }
 
     // A pre-filled input (deep link, restored field) resolves at once; the VM dedupes remounts.
+    val currentOnResolve by rememberUpdatedState(onResolve)
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
-        if (input.isNotBlank()) onResolve(input)
+        if (input.isNotBlank()) currentOnResolve(input)
     }
 
     val step = state.step
@@ -151,7 +153,7 @@ internal fun AddPodcastSheet(
             value = input,
             onValueChange = {
                 input = it
-                onInputChanged(it)
+                onInputChange(it)
             },
             label = { Text(stringResource(Res.string.add_field_label)) },
             supportingText = {
@@ -167,7 +169,7 @@ internal fun AddPodcastSheet(
                     onClick = {
                         clipboard.getText()?.text?.let {
                             input = it
-                            onInputChanged(it)
+                            onInputChange(it)
                         }
                     },
                     icon = NdIcons.ContentPaste,
@@ -200,7 +202,8 @@ internal fun AddPodcastSheet(
                     )
                 }
             }
-            AddSheetStep.Resolving ->
+
+            AddSheetStep.Resolving -> {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(ROW_GAP),
@@ -216,7 +219,9 @@ internal fun AddPodcastSheet(
                         onClick = onCancelResolve,
                     )
                 }
-            is AddSheetStep.Choosing ->
+            }
+
+            is AddSheetStep.Choosing -> {
                 Column(Modifier.fillMaxWidth().padding(top = ROW_GAP)) {
                     Text(
                         stringResource(Res.string.add_choose_title),
@@ -227,12 +232,16 @@ internal fun AddPodcastSheet(
                         // A pick becomes the field's value and re-resolves (08).
                         CandidateRow(candidate) {
                             input = candidate.url
-                            onInputChanged(candidate.url)
+                            onInputChange(candidate.url)
                             onCandidate(candidate.url)
                         }
                     }
                 }
-            is AddSheetStep.Preview -> PreviewCard(step)
+            }
+
+            is AddSheetStep.Preview -> {
+                PreviewCard(step)
+            }
         }
 
         Row(
@@ -262,7 +271,9 @@ internal fun AddPodcastSheet(
 /** The podcast an exact duplicate or subscribe-time dedupe hit already holds, if any. */
 private fun alreadySubscribedId(step: AddSheetStep): Long? =
     (step as? AddSheetStep.Preview)?.let { s ->
-        s.alreadySubscribedId ?: s.preview.alreadySubscribed?.takeIf { it.exact }?.podcastId
+        s.alreadySubscribedId ?: s.preview.alreadySubscribed
+            ?.takeIf { it.exact }
+            ?.podcastId
     }
 
 /** `AuthRequired`'s username/password fields (08; 03 Basic auth). */
@@ -319,11 +330,11 @@ private fun CandidateRow(
         supportingContent = {
             Text(
                 listOfNotNull(
-                        candidate.episodeCount?.let {
-                            pluralStringResource(Res.plurals.add_candidate_episodes, it, it)
-                        },
-                        candidate.source,
-                    ).joinToString(" · "),
+                    candidate.episodeCount?.let {
+                        pluralStringResource(Res.plurals.add_candidate_episodes, it, it)
+                    },
+                    candidate.source,
+                ).joinToString(" · "),
             )
         },
         modifier =
@@ -441,17 +452,17 @@ private fun PreviewCover(preview: FeedPreview) {
 @Composable
 private fun previewSubtitle(preview: FeedPreview): String =
     listOfNotNull(
-            preview.author?.takeIf { it.isNotBlank() },
-            pluralStringResource(
-                Res.plurals.add_episodes_count,
-                preview.episodeCount,
-                preview.episodeCount,
-            ),
-            preview.latestEpisodeAt?.let {
-                val (day, month) = FeedDates.dayMonth(it)
-                stringResource(Res.string.add_last_episode, "$day $month")
-            },
-        ).joinToString(" · ")
+        preview.author?.takeIf { it.isNotBlank() },
+        pluralStringResource(
+            Res.plurals.add_episodes_count,
+            preview.episodeCount,
+            preview.episodeCount,
+        ),
+        preview.latestEpisodeAt?.let {
+            val (day, month) = FeedDates.dayMonth(it)
+            stringResource(Res.string.add_last_episode, "$day $month")
+        },
+    ).joinToString(" · ")
 
 private val SHEET_PADDING = 24.dp
 private val TITLE_GAP = 16.dp

@@ -129,7 +129,8 @@ public fun EpisodeRow(
                     .background(container)
                     .hoverable(interactionSource)
                     .onFocusChanged { focused = it.isFocused }
-                    .onSecondaryClick { menuOpen = true }.semantics(mergeDescendants = true) {
+                    .onSecondaryClick { menuOpen = true }
+                    .semantics(mergeDescendants = true) {
                         contentDescription = summary
                         stateDescription = stateDesc
                         customActions =
@@ -238,23 +239,32 @@ private fun rowMenuActions(
     actions += stringResource(Res.string.action_play_next) to EpisodeAction.PlayNext(row.id)
     actions += stringResource(Res.string.action_play_last) to EpisodeAction.PlayLast(row.id)
     when (downloadState) {
-        null ->
+        null -> {
             actions += stringResource(Res.string.action_download) to
                 EpisodeAction.DownloadToggle(row.id)
-        DownloadState.COMPLETED ->
+        }
+
+        DownloadState.COMPLETED -> {
             actions += stringResource(Res.string.action_delete_download) to
                 EpisodeAction.DownloadToggle(row.id)
-        DownloadState.FAILED, DownloadState.MISSING ->
+        }
+
+        DownloadState.FAILED, DownloadState.MISSING -> {
             actions += stringResource(Res.string.action_retry_download) to
                 EpisodeAction.DownloadToggle(row.id)
-        else ->
+        }
+
+        else -> {
             actions += stringResource(Res.string.action_download_now) to
                 EpisodeAction.DownloadToggle(row.id)
+        }
     }
     if (caps.recheck &&
-        (row.availability == Availability.REGION_BLOCKED ||
-            row.availability == Availability.PRIVATE ||
-            row.availability == Availability.UNAVAILABLE)
+        (
+            row.availability == Availability.REGION_BLOCKED ||
+                row.availability == Availability.PRIVATE ||
+                row.availability == Availability.UNAVAILABLE
+        )
     ) {
         actions += stringResource(Res.string.action_check_again) to
             EpisodeAction.CheckAvailability(row.id)
@@ -296,7 +306,7 @@ private fun LeadingSlot(
     style: EpisodeRowStyle,
 ) {
     when (style) {
-        EpisodeRowStyle.FEED, EpisodeRowStyle.QUEUE ->
+        EpisodeRowStyle.FEED, EpisodeRowStyle.QUEUE -> {
             if (row.sourceType != SourceType.RSS) {
                 // YouTube rows show the 16:9 thumbnail (08; CHANNEL_AVATAR arrives with M8's setting).
                 CoverArt(
@@ -314,7 +324,9 @@ private fun LeadingSlot(
                     avgArgb = row.artworkAvgArgb,
                 )
             }
-        EpisodeRowStyle.PODCAST ->
+        }
+
+        EpisodeRowStyle.PODCAST -> {
             if (row.artwork.key != row.podcastArtwork.key) {
                 CoverArt(
                     ref = row.artwork,
@@ -325,6 +337,7 @@ private fun LeadingSlot(
             } else {
                 DateBlock(row)
             }
+        }
     }
 }
 
@@ -352,37 +365,39 @@ private fun DateBlock(row: EpisodeRow) {
 @Composable
 private fun RowBadges(row: EpisodeRow) {
     val tint = MaterialTheme.colorScheme.onSurfaceVariant
-    if (row.playedAt != null) {
-        Icon(
-            NdIcons.Check,
-            contentDescription = null,
-            modifier = Modifier.padding(start = BADGE_GAP).size(BADGE_SIZE),
-            tint = tint,
-        )
-    }
-    if (row.isVideo) {
-        Icon(
-            NdIcons.Videocam,
-            contentDescription = null,
-            modifier = Modifier.padding(start = BADGE_GAP).size(BADGE_SIZE),
-            tint = tint,
-        )
-    }
-    if (row.sourceType != SourceType.RSS) {
-        Icon(
-            NdIcons.SmartDisplay,
-            contentDescription = null,
-            modifier = Modifier.padding(start = BADGE_GAP).size(BADGE_SIZE),
-            tint = tint,
-        )
-    }
-    if (row.isFavorite) {
-        Icon(
-            NdIcons.FavoriteFilled,
-            contentDescription = null,
-            modifier = Modifier.padding(start = BADGE_GAP).size(BADGE_SIZE),
-            tint = tint,
-        )
+    Row {
+        if (row.playedAt != null) {
+            Icon(
+                NdIcons.Check,
+                contentDescription = null,
+                modifier = Modifier.padding(start = BADGE_GAP).size(BADGE_SIZE),
+                tint = tint,
+            )
+        }
+        if (row.isVideo) {
+            Icon(
+                NdIcons.Videocam,
+                contentDescription = null,
+                modifier = Modifier.padding(start = BADGE_GAP).size(BADGE_SIZE),
+                tint = tint,
+            )
+        }
+        if (row.sourceType != SourceType.RSS) {
+            Icon(
+                NdIcons.SmartDisplay,
+                contentDescription = null,
+                modifier = Modifier.padding(start = BADGE_GAP).size(BADGE_SIZE),
+                tint = tint,
+            )
+        }
+        if (row.isFavorite) {
+            Icon(
+                NdIcons.FavoriteFilled,
+                contentDescription = null,
+                modifier = Modifier.padding(start = BADGE_GAP).size(BADGE_SIZE),
+                tint = tint,
+            )
+        }
     }
 }
 
@@ -397,13 +412,17 @@ private fun MetaLine(
     val duration = FeedDates.duration(live?.durationMs ?: row.durationMs)
     val meta =
         when (style) {
-            EpisodeRowStyle.FEED, EpisodeRowStyle.QUEUE ->
+            EpisodeRowStyle.FEED, EpisodeRowStyle.QUEUE -> {
                 UiText.Joined(
                     listOf(UiText.Raw(row.podcastTitle), date, duration),
                     separator = " · ",
                     suffix = "",
                 )
-            EpisodeRowStyle.PODCAST -> duration
+            }
+
+            EpisodeRowStyle.PODCAST -> {
+                duration
+            }
         }.asString()
     if (meta.isEmpty()) return
     Text(
@@ -451,22 +470,30 @@ private fun StatusLine(
     val downloadState = live?.downloadState ?: row.downloadState
     val text: String? =
         when {
-            row.availability != Availability.AVAILABLE ->
+            row.availability != Availability.AVAILABLE -> {
                 AvailabilityText.describe(row.availability).asString()
-            caps.offline && downloadState != DownloadState.COMPLETED ->
+            }
+
+            caps.offline && downloadState != DownloadState.COMPLETED -> {
                 stringResource(Res.string.episode_offline_row)
-            row.sourceType != SourceType.RSS && !caps.inAppPlayback ->
+            }
+
+            row.sourceType != SourceType.RSS && !caps.inAppPlayback -> {
                 stringResource(Res.string.episode_opens_youtube)
-            else ->
-                DownloadStatusText.describe(
-                    state = downloadState,
-                    waitReason = live?.waitReason,
-                    progress = live?.downloadProgress(),
-                    error = live?.lastError,
-                    nextAttemptAt = live?.nextAttemptAt,
-                    nowMs = nowMs,
-                    platform = LocalPlatformKind.current,
-                )?.asString()
+            }
+
+            else -> {
+                DownloadStatusText
+                    .describe(
+                        state = downloadState,
+                        waitReason = live?.waitReason,
+                        progress = live?.downloadProgress(),
+                        error = live?.lastError,
+                        nextAttemptAt = live?.nextAttemptAt,
+                        nowMs = nowMs,
+                        platform = LocalPlatformKind.current,
+                    )?.asString()
+            }
         }
     if (text.isNullOrEmpty()) return
     val failed = downloadState == DownloadState.FAILED || downloadState == DownloadState.MISSING
@@ -505,33 +532,44 @@ private fun TrailingSlot(
         return
     }
 
-    if (caps.downloads) {
-        DownloadStateButton(
-            state = downloadState,
-            waitReason = live?.waitReason,
-            progress = live?.downloadProgress(),
-            onClick = { onAction(EpisodeAction.DownloadToggle(row.id)) },
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (caps.downloads) {
+            DownloadStateButton(
+                state = downloadState,
+                waitReason = live?.waitReason,
+                progress = live?.downloadProgress(),
+                onClick = { onAction(EpisodeAction.DownloadToggle(row.id)) },
+                modifier = Modifier.clearAndSetSemantics {},
+            )
+        }
+
+        val playing = live?.isNowPlaying == true && live.isPlaying
+        val (icon, label) =
+            when {
+                playing -> {
+                    NdIcons.Pause to stringResource(Res.string.action_pause)
+                }
+
+                live?.isNowPlaying == true || row.startedAt != null -> {
+                    NdIcons.PlayArrow to stringResource(Res.string.action_resume)
+                }
+
+                row.playedAt != null -> {
+                    NdIcons.PlayArrow to stringResource(Res.string.action_play_again)
+                }
+
+                else -> {
+                    NdIcons.PlayArrow to stringResource(Res.string.action_open)
+                }
+            }
+        NdIconButton(
+            onClick = { onAction(EpisodeAction.PlayToggle(row.id)) },
+            icon = icon,
+            contentDescription = label,
             modifier = Modifier.clearAndSetSemantics {},
+            enabled = !caps.offline || downloadState == DownloadState.COMPLETED,
         )
     }
-
-    val playing = live?.isNowPlaying == true && live.isPlaying
-    val (icon, label) =
-        when {
-            playing -> NdIcons.Pause to stringResource(Res.string.action_pause)
-            live?.isNowPlaying == true || row.startedAt != null ->
-                NdIcons.PlayArrow to stringResource(Res.string.action_resume)
-            row.playedAt != null ->
-                NdIcons.PlayArrow to stringResource(Res.string.action_play_again)
-            else -> NdIcons.PlayArrow to stringResource(Res.string.action_open)
-        }
-    NdIconButton(
-        onClick = { onAction(EpisodeAction.PlayToggle(row.id)) },
-        icon = icon,
-        contentDescription = label,
-        modifier = Modifier.clearAndSetSemantics {},
-        enabled = !caps.offline || downloadState == DownloadState.COMPLETED,
-    )
 }
 
 /**
@@ -548,29 +586,35 @@ public fun DownloadStateButton(
     modifier: Modifier = Modifier,
 ) {
     val label =
-        DownloadStatusText.describe(
-            state = state,
-            waitReason = waitReason,
-            progress = progress,
-            error = null,
-            nextAttemptAt = null,
-            nowMs = LocalUiClock.current.now(),
-            platform = LocalPlatformKind.current,
-        )?.asString() ?: stringResource(Res.string.action_download)
+        DownloadStatusText
+            .describe(
+                state = state,
+                waitReason = waitReason,
+                progress = progress,
+                error = null,
+                nextAttemptAt = null,
+                nowMs = LocalUiClock.current.now(),
+                platform = LocalPlatformKind.current,
+            )?.asString() ?: stringResource(Res.string.action_download)
 
     Box(
         modifier = modifier.size(TOUCH_TARGET).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         when (state) {
-            null ->
+            null -> {
                 Icon(NdIcons.Download, contentDescription = label, modifier = Modifier.size(ICON_SIZE))
+            }
+
             DownloadState.QUEUED -> {
                 CircularProgressIndicator(modifier = Modifier.size(ICON_SIZE + RING_PAD))
                 Icon(NdIcons.Schedule, contentDescription = label, modifier = Modifier.size(ICON_INNER))
             }
-            DownloadState.RESOLVING, DownloadState.VERIFYING ->
+
+            DownloadState.RESOLVING, DownloadState.VERIFYING -> {
                 CircularProgressIndicator(modifier = Modifier.size(ICON_SIZE + RING_PAD))
+            }
+
             DownloadState.DOWNLOADING -> {
                 if (progress == null) {
                     CircularProgressIndicator(modifier = Modifier.size(ICON_SIZE + RING_PAD))
@@ -582,24 +626,32 @@ public fun DownloadStateButton(
                 }
                 Icon(NdIcons.Close, contentDescription = label, modifier = Modifier.size(ICON_INNER))
             }
-            DownloadState.PAUSED ->
+
+            DownloadState.PAUSED -> {
                 Icon(NdIcons.Pause, contentDescription = label, modifier = Modifier.size(ICON_SIZE))
-            DownloadState.COMPLETED ->
+            }
+
+            DownloadState.COMPLETED -> {
                 Icon(
                     NdIcons.DownloadDone,
                     contentDescription = label,
                     modifier = Modifier.size(ICON_SIZE),
                     tint = MaterialTheme.colorScheme.primary,
                 )
-            DownloadState.FAILED ->
+            }
+
+            DownloadState.FAILED -> {
                 Icon(
                     NdIcons.Error,
                     contentDescription = label,
                     modifier = Modifier.size(ICON_SIZE),
                     tint = MaterialTheme.colorScheme.error,
                 )
-            DownloadState.MISSING ->
+            }
+
+            DownloadState.MISSING -> {
                 Icon(NdIcons.Error, contentDescription = label, modifier = Modifier.size(ICON_SIZE))
+            }
         }
     }
 }

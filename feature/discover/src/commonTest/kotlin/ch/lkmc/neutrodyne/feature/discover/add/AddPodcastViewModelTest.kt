@@ -12,14 +12,14 @@ import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.testing.FakeAddPodcastResolver
 import ch.lkmc.neutrodyne.core.testing.FakeSubscribeUseCase
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.advanceUntilIdle
-import kotlinx.coroutines.test.runTest
 
 /**
  * The sheet's resolution pipeline (08 Add podcast sheet; 03 Add podcast flow) against

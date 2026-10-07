@@ -81,8 +81,7 @@ public class LibraryViewModel(
     }
 
     /** The downloaded-episode count the unsubscribe confirmation names (08's dialog wording). */
-    public suspend fun downloadedCount(podcastId: Long): Int =
-        podcasts.downloadedEpisodeIds(listOf(podcastId)).size
+    public suspend fun downloadedCount(podcastId: Long): Int = podcasts.downloadedEpisodeIds(listOf(podcastId)).size
 
     public fun unsubscribe(podcastId: Long) {
         viewModelScope.launch { unsubscribe(listOf(podcastId)) }
@@ -93,12 +92,28 @@ public class LibraryViewModel(
         sort: LibrarySort,
     ): List<LibraryTile> =
         when (sort) {
-            LibrarySort.TITLE -> tiles.sortedWith { a, b -> collator.compare(a.displayTitle, b.displayTitle) }
-            LibrarySort.RECENTLY_UPDATED ->
+            LibrarySort.TITLE -> {
+                tiles.sortedWith { a, b -> collator.compare(a.displayTitle, b.displayTitle) }
+            }
+
+            LibrarySort.RECENTLY_UPDATED -> {
                 tiles.sortedByDescending { it.latestEpisodeAt ?: Long.MIN_VALUE }
-            LibrarySort.MOST_UNPLAYED ->
-                tiles.sortedWith(compareByDescending<LibraryTile> { it.unplayedCount }.then { a, b -> collator.compare(a.displayTitle, b.displayTitle) })
-            LibrarySort.RECENTLY_ADDED -> tiles.sortedByDescending { it.subscribedAt }
+            }
+
+            LibrarySort.MOST_UNPLAYED -> {
+                tiles.sortedWith(
+                    compareByDescending<LibraryTile> { it.unplayedCount }.then {
+                        a,
+                        b,
+                        ->
+                        collator.compare(a.displayTitle, b.displayTitle)
+                    },
+                )
+            }
+
+            LibrarySort.RECENTLY_ADDED -> {
+                tiles.sortedByDescending { it.subscribedAt }
+            }
         }
 
     private companion object {

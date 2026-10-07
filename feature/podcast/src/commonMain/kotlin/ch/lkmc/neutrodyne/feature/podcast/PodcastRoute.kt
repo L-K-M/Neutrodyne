@@ -16,9 +16,9 @@ import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastSettingsKey
 import ch.lkmc.neutrodyne.core.ui.dispatchEpisodeRoute
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
+import ch.lkmc.neutrodyne.core.ui.resolve
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_removed
-import ch.lkmc.neutrodyne.core.ui.resolve
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.core.ui.whenOutcome
 import dev.zacsweers.metrox.viewmodel.assistedMetroViewModel
@@ -76,7 +76,7 @@ internal fun PodcastRoute(key: PodcastKey) {
                 )
             }
         },
-        onMarkAllPlayed = viewModel::markAllPlayed,
+        onMarkAllPlayedClick = viewModel::markAllPlayed,
         onUnsubscribeRequest = {
             scope.launch {
                 val title = state.detail?.displayTitle ?: return@launch
