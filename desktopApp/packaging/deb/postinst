@@ -1,0 +1,29 @@
+#!/bin/sh
+# SPDX-License-Identifier: Unlicense
+#
+# Neutrodyne's DEB post-install (11 Links and files from the OS): installs the frozen
+# desktop entry ch.lkmc.neutrodyne.desktop and the hicolor icons that ship inside the
+# app image, then refreshes the desktop caches when the tools exist. Written from the
+# Desktop Entry specification; jpackage's own templates are GPL-2.0+CE and never copied (D3).
+set -e
+
+APP_DIR="/opt/neutrodyne"
+INTEGRATION_DIR="$APP_DIR/lib/app/resources/desktop-integration"
+APPLICATIONS_DIR="/usr/share/applications"
+ICONS_DIR="/usr/share/icons/hicolor"
+
+install -D -m 0644 "$INTEGRATION_DIR/ch.lkmc.neutrodyne.desktop" \
+    "$APPLICATIONS_DIR/ch.lkmc.neutrodyne.desktop"
+
+find "$INTEGRATION_DIR/hicolor" -type f -name '*.png' | while IFS= read -r icon; do
+    rel="${icon#"$INTEGRATION_DIR/hicolor/"}"
+    install -D -m 0644 "$icon" "$ICONS_DIR/$rel"
+done
+
+# Optional caches (11 First install and every update); absent tools are not an error.
+command -v update-desktop-database >/dev/null 2>&1 &&
+    update-desktop-database "$APPLICATIONS_DIR" || true
+command -v gtk-update-icon-cache >/dev/null 2>&1 &&
+    gtk-update-icon-cache -q -t -f "$ICONS_DIR" || true
+
+exit 0

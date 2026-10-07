@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<resources>
+    <!-- The window (11 Window and tray behaviour). -->
+    <string name="window_title">Neutrodyne</string>
+    <string name="tray_tooltip">Neutrodyne</string>
+    <string name="tray_show">Show Neutrodyne</string>
+    <string name="tray_quit">Quit</string>
+</resources>
