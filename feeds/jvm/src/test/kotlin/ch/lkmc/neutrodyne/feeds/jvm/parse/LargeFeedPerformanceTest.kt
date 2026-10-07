@@ -37,6 +37,41 @@ class LargeFeedPerformanceTest {
         assertFailsWith<AssertionError> { assertWithinBudget(2_000, tight = true) }
     }
 
+    /**
+     * Media RSS `isDefault` entries merge ahead of the element's other `media:content` entries in
+     * document order (03 Field mapping) — and in linear time: inserting every default at index 0
+     * shifts the enclosure list once per default, so 4× the input would cost ~16× the time.
+     */
+    @Test
+    fun mediaIsDefaultMergeIsLinear() {
+        val parser = XmlPullFeedParser(PullParserFactory.Discovered)
+        // Warm-up keeps JIT effects out of both measurements.
+        timed(parser, mediaDefaultDoc(1_000))
+        val small = timed(parser, mediaDefaultDoc(DEFAULTS_SMALL))
+        val large = timed(parser, mediaDefaultDoc(DEFAULTS_SMALL * 4))
+        assertTrue(
+            large < small * QUADRATIC_SLACK,
+            "media defaults took $small ms for $DEFAULTS_SMALL, $large ms for 4x — quadratic would be ~16x",
+        )
+    }
+
+    /** One item carrying [count] `media:content` entries, all `isDefault`, then one non-default. */
+    private fun mediaDefaultDoc(count: Int): ByteArray {
+        val head =
+            "<rss version=\"2.0\" xmlns:media=\"http://search.yahoo.com/mrss/\">" +
+                "<channel><item><guid>m</guid>"
+        val tail =
+            "<media:content url=\"https://cdn.example.com/rest.mp3\" type=\"audio/mpeg\"/>" +
+                "</item></channel></rss>"
+        return buildString(head.length + count * 110 + tail.length) {
+            append(head)
+            for (i in 1..count) {
+                append("<media:content url=\"https://cdn.example.com/d$i.mp3\" type=\"audio/mpeg\" isDefault=\"true\"/>")
+            }
+            append(tail)
+        }.encodeToByteArray()
+    }
+
     private fun timed(
         parser: XmlPullFeedParser,
         bytes: ByteArray,
@@ -57,6 +92,10 @@ class LargeFeedPerformanceTest {
         const val BUDGET_MS = 5_000L
         const val TIGHT_BUDGET_MS = 1_000L
         const val EXPECTED_ITEMS = 831
+
+        /** A 4× input may cost at most 8× the time — twice the linear ratio, half the quadratic. */
+        const val QUADRATIC_SLACK = 8L
+        const val DEFAULTS_SMALL = 25_000
 
         fun assertWithinBudget(
             bestMs: Long,

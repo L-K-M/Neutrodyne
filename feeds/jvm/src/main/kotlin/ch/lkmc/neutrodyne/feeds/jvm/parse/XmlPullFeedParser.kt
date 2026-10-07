@@ -1025,6 +1025,10 @@ private class ParseSession(
         var atomAlternateLink: String? = null
         var rssEnclosures = mutableListOf<Enclosure>()
         var atomEnclosures = mutableListOf<Enclosure>()
+
+        // media:content splits into two buckets; inserting every isDefault entry at index 0 would
+        // reverse their order and shift the list once per default (quadratic on default-heavy items).
+        var mediaContentDefaults = mutableListOf<Enclosure>()
         var mediaContent = mutableListOf<Enclosure>()
         val alternateEnclosures = mutableListOf<AlternateEnclosure>()
         var durationMs: Long? = null
@@ -1390,11 +1394,12 @@ private class ParseSession(
             if (url != null) {
                 val enclosure =
                     Enclosure(url, type?.trim()?.takeIf { it.isNotEmpty() }, positiveLong(attr(parser, "fileSize")))
-                // isDefault content comes first within its element (03 Field mapping).
+                // isDefault content comes first within its element (03 Field mapping); the buckets
+                // merge once in buildEpisode, keeping document order inside each class.
                 if (attr(parser, "isDefault")?.trim() ==
                     "true"
                 ) {
-                    item.mediaContent.add(0, enclosure)
+                    item.mediaContentDefaults.add(enclosure)
                 } else {
                     item.mediaContent.add(enclosure)
                 }
@@ -1812,8 +1817,10 @@ private class ParseSession(
     // ---------------------------------------------------------------------------
 
     private fun buildEpisode(item: ItemBuilder): ParsedEpisode {
-        // Enclosure order: explicit enclosures, the Atom enclosures, then media:content entries.
-        val rawEnclosures = item.rssEnclosures + item.atomEnclosures + item.mediaContent
+        // Enclosure order: explicit enclosures, the Atom enclosures, then media:content entries —
+        // defaults ahead of the rest, each class in document order.
+        val rawEnclosures =
+            item.rssEnclosures + item.atomEnclosures + item.mediaContentDefaults + item.mediaContent
         val enclosures = rawEnclosures.map { it.copy(effectiveType = EnclosureTypes.effective(it.type, it.url)) }
         val primary = EnclosureTypes.primary(enclosures)
 
