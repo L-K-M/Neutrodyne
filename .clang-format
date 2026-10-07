@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: Unlicense
+# playback/native/src/native/** (from MD0) — 09 Formatting.
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 120

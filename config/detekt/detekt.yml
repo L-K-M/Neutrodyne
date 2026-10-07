@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Unlicense
+# detekt 2.0.0-alpha.6 config (09 detekt). Report-only; buildUponDefaultConfig is set on the Gradle
+# extension, so only deviations from the detekt defaults live here. 2.0 renamed the threshold keys to
+# allowedComplexity / allowedLines (1.x used `threshold`) and moved ForbiddenComment into `style`.
+complexity:
+  CyclomaticComplexMethod:
+    allowedComplexity: 15
+  LongMethod:
+    allowedLines: 80
+    # @Composable functions legitimately run long; detekt ignores them via this list.
+    ignoreAnnotated: [ 'Composable' ]
+
+exceptions:
+  TooGenericExceptionCaught:
+    active: true # reinforces 01's suspendRunCatching rule (already on by default; kept explicit)
+
+style:
+  ForbiddenComment:
+    active: true
+    comments:
+      - reason: 'Forbidden FIXME marker in comment, please fix the problem.'
+        value: 'FIXME:'
+      - reason: 'Forbidden STOPSHIP marker in comment, please address the problem before shipping the code.'
+        value: 'STOPSHIP:'
+      - reason: 'TODO without an issue link; reference the tracking issue (TODO(#123) or a URL).'
+        value: 'TODO'
+    # A TODO is acceptable only while it names its tracking issue.
+    allowedPatterns: 'TODO.*(#\d+|[A-Z]+-\d+|https?://)'
+  MagicNumber:
+    # The default excludes the 1.x test dir names; add this repo's desktopTest/androidHostTest/androidDeviceTest.
+    excludes: [ '**/test/**', '**/commonTest/**', '**/desktopTest/**', '**/androidTest/**',
+                '**/androidHostTest/**', '**/androidUnitTest/**', '**/androidDeviceTest/**',
+                '**/androidInstrumentedTest/**', '**/jvmTest/**', '**/*.kts' ]

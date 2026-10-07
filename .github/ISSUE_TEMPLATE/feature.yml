@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Unlicense
+# Feature request form (09).
+name: Feature request
+description: Suggest something Neutrodyne should do
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What should it do
+      description: The problem it solves for you; one concrete example helps more than a long list.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Android
+        - Windows
+        - macOS
+        - Linux
+        - sync server
+        - all of them
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Alternatives you tried, other players that do this, links.

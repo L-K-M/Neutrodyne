@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<!-- Android-only labels (D83): everything the shared UI shows lives in Compose resources. -->
+<resources>
+  <string name="app_name" translatable="false">Neutrodyne</string>
+  <string name="crash_dialog_title">Neutrodyne stopped</string>
+  <string name="crash_dialog_text">Neutrodyne stopped. You can send a crash report by email: your mail app opens with the report attached, and nothing is sent until you press Send there. The report contains the error, the app version, the Android version and the phone model — never your subscription list or listening history; passwords and access tokens are removed from any web address in an error message.</string>
+  <string name="crash_dialog_comment">What were you doing when it happened? (optional)</string>
+  <string name="crash_mail_subject">Neutrodyne crash report</string>
+  <string name="crash_mail_body">The crash report is attached. Add anything that helps reproduce the problem.</string>
+</resources>

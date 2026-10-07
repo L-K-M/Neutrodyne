@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: Unlicense
+# App-wide R8 rules (01 Release build and baseline profiles). Obfuscation stays off so ACRA stack traces are
+# readable without a mapping server; R8 still writes mapping.txt for inlined and outlined frames.
+-dontobfuscate

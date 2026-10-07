@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<!-- Module-wide opt-in to Media3's @UnstableApi, allowed only in :playback:impl (01 Convention plugins). -->
+<lint>
+  <issue id="UnsafeOptInUsageError">
+    <ignore regexp="\(markerClass = androidx\.media3\.common\.util\.UnstableApi\.class\)" />
+  </issue>
+</lint>

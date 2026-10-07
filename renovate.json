@@ -1,0 +1,30 @@
+{
+  "_license": "SPDX-License-Identifier: Unlicense",
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests", ":dependencyDashboard", "docker:pinDigests"],
+  "timezone": "UTC",
+  "schedule": ["before 6am on monday"],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "minimumReleaseAge": "3 days",
+  "labels": ["dependencies"],
+  "vulnerabilityAlerts": { "schedule": ["at any time"], "minimumReleaseAge": "0 days", "labels": ["security"] },
+  "packageRules": [
+    { "groupName": "Kotlin toolchain", "matchPackageNames": ["/^org\\.jetbrains\\.kotlin[.:]/", "/^com\\.google\\.devtools\\.ksp/", "/^dev\\.zacsweers\\.metro/", "/^org\\.jetbrains\\.compose[.:]/", "/^org\\.jetbrains\\.androidx\\./"] },
+    { "groupName": "AGP and Lint", "matchPackageNames": ["/^com\\.android\\.tools/", "/^com\\.android\\.(application|library|test|lint|kotlin\\.multiplatform\\.library)$/"] },
+    { "groupName": "Screenshot stack", "matchPackageNames": ["/^org\\.robolectric:/", "/^io\\.github\\.takahirom\\.roborazzi/", "androidx.compose:compose-bom"] },
+    { "groupName": "Media3", "matchPackageNames": ["/^androidx\\.media3:/"] },
+    { "groupName": "Ktor", "matchPackageNames": ["/^io\\.ktor[.:]/"] },
+    { "groupName": "Room and SQLite", "matchPackageNames": ["/^androidx\\.room3[.:]/", "/^androidx\\.sqlite:/", "org.xerial:sqlite-jdbc"] },
+    { "groupName": "AndroidX Test, benchmark and profiles", "matchPackageNames": ["/^androidx\\.test/", "/^androidx\\.benchmark/", "/^androidx\\.baselineprofile/"] },
+    { "description": "D4: toolchain minors need a PLAN amendment", "matchPackageNames": ["/^org\\.jetbrains\\.kotlin[.:]/", "/^com\\.android\\.tools\\.build:gradle$/", "/^com\\.android\\.(application|library|test|kotlin\\.multiplatform\\.library)$/", "/^org\\.jetbrains\\.compose$/"], "matchUpdateTypes": ["minor", "major"], "dependencyDashboardApproval": true },
+    { "description": "D4: stay on Gradle 9.7.x until Kotlin's tested matrix includes 9.8", "matchManagers": ["gradle-wrapper"], "allowedVersions": "<9.8.0" },
+    { "description": "Chaquopy bumps repeat S7's checks and change python-components.lock (01)", "matchPackageNames": ["/^com\\.chaquo\\.python/"], "dependencyDashboardApproval": true, "labels": ["chaquopy"] },
+    { "description": "Bundled runtime and native components: lockfile checksums and source bundles move with them (11)", "matchDepNames": ["temurin", "python-build-standalone", "ffmpeg", "miniaudio", "cppwinrt", "wix"], "dependencyDashboardApproval": true, "labels": ["bundled-component"] },
+    { "description": "Server base image and release container: digest bumps change the image sources (10)", "matchDatasources": ["docker"], "dependencyDashboardApproval": true, "labels": ["bundled-component"] },
+    { "description": "detekt has no stable release for this toolchain", "matchPackageNames": ["/^dev\\.detekt/"], "ignoreUnstable": false },
+    { "matchUpdateTypes": ["major"], "dependencyDashboardApproval": true },
+    { "matchPackageNames": ["junit:junit", "com.google.truth:truth", "app.cash.turbine:turbine", "io.mockk:mockk", "com.google.testparameterinjector:test-parameter-injector"], "matchUpdateTypes": ["patch"], "automerge": true },
+    { "matchManagers": ["github-actions"], "groupName": "GitHub Actions", "schedule": ["before 6am on the first day of the month"] }
+  ]
+}

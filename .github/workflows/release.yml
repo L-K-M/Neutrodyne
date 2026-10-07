@@ -1,0 +1,231 @@
+# SPDX-License-Identifier: Unlicense
+#
+# release.yml — tag → published immutable GitHub release (09 release.yml).
+# M0a carries verify-tag, android and publish; the desktop x4 matrix, sources,
+# server-jar, the GHCR image jobs and image-tags land with their milestones
+# (TODO stubs at the bottom of `jobs:`).
+#
+# Build jobs read no secret and need no approval, so they run while the
+# maintainer approves the `release` environment, which only `publish` uses.
+# Every job uses setup-gradle with cache-disabled (no cache-poisoning surface
+# for published builds). The APKs are signed with the committed public
+# keystore — nothing to decode, no secret enters the container.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GRADLE_OPTS: -Dorg.gradle.daemon=false
+  LANG: C.UTF-8
+
+jobs:
+  verify-tag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.verify.outputs.version }}
+      versionCode: ${{ steps.verify.outputs.versionCode }}
+      make_latest: ${{ steps.verify.outputs.make_latest }}
+      youtube_engine: ${{ steps.verify.outputs.youtube_engine }}
+      mac_kind: ${{ steps.verify.outputs.mac_kind }}
+      expected_assets: ${{ steps.verify.outputs.expected_assets }}
+    permissions:
+      contents: read
+      actions: read # gh api check-runs / workflow runs for the CI-success check
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # branch containment and the release.sh-commit shape
+      - name: Verify the tag
+        id: verify
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/verify-tag.sh "${{ github.ref_name }}" --products=android
+
+  android:
+    needs: verify-tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    # The pinned release container — the same one the nightly repro job uses,
+    # so published APKs and the repro check share a toolchain. The image digest
+    # is Renovate-managed.
+    container:
+      image: python:3.14-slim-trixie@sha256:f85c5697265c178cc6887276c55fe16cf3d14ca35c3df6a5eab3b360534a55d2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain in the container
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            openjdk-21-jdk-headless git unzip curl >/dev/null
+          echo "JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64" >> "$GITHUB_ENV"
+          scripts/ci/install-android-sdk.sh /opt/android-sdk
+          echo "ANDROID_HOME=/opt/android-sdk" >> "$GITHUB_ENV"
+      # Nothing else from the runner enters the build; signing comes from the
+      # committed keystore (neutrodynePublic). After Podcast Index's written
+      # permission (PO-3 option A) this job also passes
+      # -Pneutrodyne.podcastIndexKey/Secret and joins the environment.
+      - name: assembleRelease
+        run: |
+          export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 ANDROID_HOME=/opt/android-sdk
+          export PATH="$JAVA_HOME/bin:$PATH"
+          ./gradlew --no-daemon --no-build-cache assembleRelease -Pneutrodyne.abiSplits=true
+      - name: Per-APK checks and asset names
+        run: |
+          export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 ANDROID_HOME=/opt/android-sdk
+          export PATH="$JAVA_HOME/bin:$ANDROID_HOME/build-tools/36.0.0:$PATH"
+          v="${{ needs.verify-tag.outputs.version }}"
+          mkdir -p dist
+          for abi in arm64-v8a x86_64 armeabi-v7a; do
+            cp "app/build/outputs/apk/release/app-$abi-release.apk" "dist/neutrodyne-$v-$abi.apk"
+          done
+          scripts/ci/check-apk.sh --published dist/neutrodyne-*.apk
+          echo "::notice::signer $(scripts/ci/public-cert-sha256.sh --colons)"
+      - name: R8 mapping zip
+        run: |
+          v="${{ needs.verify-tag.outputs.version }}"
+          python3 - "$v" <<'PYEOF'
+          import os, sys, zipfile
+          v = sys.argv[1]
+          src = "app/build/outputs/mapping/release"
+          with zipfile.ZipFile(f"dist/neutrodyne-{v}-r8-mapping.zip", "w") as z:
+              for n in ("mapping.txt", "seeds.txt", "usage.txt"):
+                  p = os.path.join(src, n)
+                  if os.path.isfile(p):
+                      z.write(p, n)
+          PYEOF
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android
+          path: dist/
+          retention-days: 5
+
+  # TODO (M0b): `desktop` (matrix windows-x64 / macos-arm64 / linux-x64 /
+  # linux-arm64 with the two-attempt build loop and mac_kind from verify-tag)
+  # and `sources` (openjdk-{jdk}-temurin-sources.tar.gz + RUNTIME-SOURCES.md;
+  # MD1b ffmpeg sources; MD3 PBS sources; WiX sources with each MSI).
+  # TODO (MS1): `server-jar`, `server-image` (matrix, push-by-digest),
+  # `server-image-manifest`, and `image-tags` after publish.
+
+  publish:
+    needs: [verify-tag, android]
+    environment: release # required reviewer; holds no signing secret (09)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # one publisher at a time across ALL tags: two releases may build in parallel,
+    # but only one creates/uploads/flips latest, so an older tag can never publish
+    # last and take "latest" backwards (make_latest is recomputed in this job).
+    concurrency:
+      group: release-publish
+      cancel-in-progress: false
+    outputs:
+      # the value computed inside the serialized job — downstream jobs (image-tags, MS1)
+      # must consume this, never verify-tag's make_latest, which predates the queue
+      make_latest: ${{ steps.publish.outputs.make_latest }}
+    permissions:
+      contents: write        # gh release create/edit
+      id-token: write        # actions/attest
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          pattern: android
+          path: dist
+      - name: Compare the asset set with verify-tag's expected list
+        env:
+          EXPECTED: ${{ needs.verify-tag.outputs.expected_assets }}
+          V: ${{ needs.verify-tag.outputs.version }}
+        run: |
+          cd dist
+          expected="$(printf '%s\n' "$EXPECTED" | grep -vE 'neutrodyne-update.json|SHA256SUMS' | sort)"
+          actual="$(find . -type f -printf '%P\n' | sort)"
+          [ "$expected" = "$actual" ] || { echo "::error::asset set differs"; diff <(echo "$expected") <(echo "$actual"); exit 1; }
+      - name: Update manifest + checksums
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          scripts/ci/make-update-json.sh "$TAG" dist
+          scripts/ci/check-update-json.sh dist/neutrodyne-update.json dist "$TAG"
+          (cd dist && sha256sum -- * > SHA256SUMS)
+      - name: Release body
+        env:
+          TAG: ${{ github.ref_name }}
+          V: ${{ needs.verify-tag.outputs.version }}
+        run: |
+          cat "changelogs/${{ needs.verify-tag.outputs.versionCode }}.txt" > body.md
+          cat >> body.md <<EOF
+
+          Android — pick the APK for your device:
+            neutrodyne-$V-arm64-v8a.apk    most phones and tablets
+            neutrodyne-$V-x86_64.apk       x86_64 devices and emulators
+            neutrodyne-$V-armeabi-v7a.apk  older 32-bit phones (YouTube opens in the YouTube app)
+          These APKs are release builds signed with a key that is public in this repository
+          (signing/neutrodyne-public.keystore), so the signature does not show who built a file.
+
+          Download only from this page and check the file:
+            sha256sum --check --ignore-missing SHA256SUMS        (macOS: shasum -a 256 <file>; Windows: Get-FileHash -Algorithm SHA256 <file>)
+            gh release verify-asset $TAG <file> -R L-K-M/Neutrodyne
+            gh attestation verify <file> -R L-K-M/Neutrodyne
+
+          Guides: https://github.com/L-K-M/Neutrodyne#install-and-update
+          EOF
+          # TODO (M0b/MS1): desktop-packages block, source bundles and the
+          # server block of 09's release-body template join with their assets.
+      - name: Attest every asset
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/**
+      - name: Draft release, upload assets, publish
+        id: publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          VERSION_CODE: ${{ needs.verify-tag.outputs.versionCode }}
+        run: |
+          # make_latest is decided here, not in verify-tag: this job is serialized across
+          # tags, so compare against the latest release as it stands now (verify-tag's value
+          # was computed before builds and approval and may be stale).
+          latest_err="$(mktemp)"
+          if latest_tag="$(gh api "repos/${{ github.repository }}/releases/latest" --jq .tag_name 2>"$latest_err")"; then
+            lv="${latest_tag#v}"; lm="${lv%%.*}"; lr="${lv#*.}"; ln="${lr%%.*}"; lp="${lr#*.}"
+            latest_code=$((lm * 1000000 + ln * 10000 + lp * 100 + 95))
+            [ "$VERSION_CODE" -gt "$latest_code" ] && make_latest=true || make_latest=false
+          elif grep -qE '404|Not Found' "$latest_err"; then
+            make_latest=true # no published release yet: the first release is latest
+          else
+            cat "$latest_err" >&2
+            exit 1
+          fi
+          rm -f "$latest_err"
+          echo "make_latest=$make_latest" >> "$GITHUB_OUTPUT"
+          gh release create "$TAG" --draft --verify-tag --title "Neutrodyne ${TAG#v}" --notes-file body.md
+          gh release upload "$TAG" dist/*
+          gh release edit "$TAG" --draft=false --latest="$make_latest"
+      - name: Verify the immutable release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release verify "$TAG"
+          for f in dist/*; do
+            # verify-asset hashes the local file — it needs the real path under dist/,
+            # not the basename relative to the repository root
+            gh release verify-asset "$TAG" "$f"
+          done

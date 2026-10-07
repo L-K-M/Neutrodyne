@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<resources>
+    <!-- Five destinations (08 Destinations). -->
+    <string name="nav_feeds">Feeds</string>
+    <string name="nav_library">Library</string>
+    <string name="nav_up_next">Up next</string>
+    <string name="nav_downloads">Downloads</string>
+    <string name="nav_discover">Discover</string>
+
+    <!-- Navigation chrome. -->
+    <string name="settings">Settings</string>
+    <string name="settings_badge">Update available</string>
+    <string name="back">Back</string>
+    <string name="forward">Forward</string>
+    <string name="dismiss">Dismiss</string>
+    <string name="play">Play</string>
+
+    <!-- M0a feature empty states (08 Empty states). -->
+    <string name="feeds_empty_title">Nothing in this feed yet</string>
+    <string name="feeds_empty_body">New episodes from your podcasts show up here.</string>
+    <string name="library_empty_title">Your library is empty</string>
+    <string name="library_empty_body">Subscriptions you add appear here as cover tiles.</string>
+    <string name="up_next_empty_title">Up next is empty</string>
+    <string name="up_next_empty_body">Queue episodes from a feed or your library.</string>
+    <string name="downloads_empty_title">No downloads</string>
+    <string name="downloads_empty_body">Downloaded episodes are listed here.</string>
+    <string name="discover_empty_title">Find something new</string>
+    <string name="discover_empty_body">Search the podcast directories, charts or add a feed by URL.</string>
+
+    <!-- Startup gate (08 Banners and the startup gate). -->
+    <string name="startup_updating">Updating your library…</string>
+    <string name="startup_failed_disk_full">Not enough storage to open your library.</string>
+    <string name="startup_failed_generic">Neutrodyne couldn't open its library.</string>
+    <string name="startup_recovered">Your library was repaired automatically.</string>
+    <string name="try_again">Try again</string>
+    <string name="manage_storage">Manage storage</string>
+    <string name="send_report">Send report</string>
+    <string name="copy_diagnostics">Copy diagnostics</string>
+
+    <!-- Root notices and banners. -->
+    <string name="notice_first_run_title">Check for updates</string>
+    <string name="notice_first_run_body">Neutrodyne checks GitHub once a day for new versions and tells you when one is ready. GitHub sees only your IP address and app version.</string>
+    <string name="notice_first_run_ok">OK</string>
+    <string name="notice_first_run_off">Turn off</string>
+    <string name="notice_verification_title">Developer verification</string>
+    <string name="notice_verification_body">This device could not verify Neutrodyne's developer. Install the app from the project's GitHub releases page.</string>
+    <plurals name="podcast_count">
+        <item quantity="one">%1$d podcast</item>
+        <item quantity="other">%1$d podcasts</item>
+    </plurals>
+    <plurals name="group_count">
+        <item quantity="one">%1$d group</item>
+        <item quantity="other">%1$d groups</item>
+    </plurals>
+    <string name="held_changes_message">%1$s removed %2$s and %3$s. Apply here too?</string>
+    <string name="held_changes_unknown_device">Another device</string>
+    <string name="review">Review</string>
+    <string name="remote_session_title">Continue on this device</string>
+    <string name="remote_session_detail">%1$s · %2$s · from %3$s</string>
+</resources>

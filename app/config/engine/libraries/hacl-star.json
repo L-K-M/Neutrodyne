@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:hacl-star",
+  "name": "HACL*",
+  "description": "Verified crypto code inside CPython hashlib",
+  "website": "https://github.com/hacl-star/hacl-star",
+  "developers": [],
+  "licenses": [
+    "MIT"
+  ],
+  "artifactVersion": "bundled with CPython 3.14.0",
+  "tag": "bundled"
+}

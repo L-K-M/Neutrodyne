@@ -1,0 +1,292 @@
+# SPDX-License-Identifier: Unlicense
+#
+# nightly.yml — 09's overnight jobs. M0a carries `instrumented-full` (debug
+# leg), `api37-16k`, `release-build-smoke` and the report-only `repro`; the
+# other jobs land with their milestones (`system-tests` M6b, `no-engine-build`
+# M9a, `desktop-matrix` M0b, `sync-convergence` MS0, `server-image-smoke` MS1,
+# `benchmark-dryrun` M10, `screenshots-full` M10, `mutation-full` M1a,
+# `live-canary`, `youtube-canary` and `engine-nightly-canary` M9a).
+#
+# A failing job runs scripts/ci/report-nightly.sh, which opens or updates one
+# issue per job (label `nightly-failure`) and closes it after the next green
+# run; `repro` reports under the `repro` label and never blocks a release.
+#
+# Every job checks out github.sha — the exact commit the run's head_sha records
+# — and never a dispatch input ref: release.sh accepts a dispatched youtube-smoke
+# run as the hotfix gate by head_sha, so a checkout of anything else would let
+# green jobs prove the wrong commit (fixed 2026-10-06; the `ref` input with its
+# `main` default is gone — dispatch on a branch through the native ref selector).
+
+name: nightly
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "full | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | desktop (M0b)"
+        default: full
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GRADLE_OPTS: -Dorg.gradle.daemon=false
+  LANG: C.UTF-8
+
+jobs:
+  instrumented-full:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      issues: write # report-nightly.sh
+    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'youtube-smoke'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk /opt/ghc /usr/local/.ghcup
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm trigger --name-match=kvm || true
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+          cache-read-only: true
+      # The runner image no longer ships the emulator package; GMD needs it to boot devices
+      - name: Install the Android emulator
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools > /dev/null
+      # Debug leg: every device module's suite on api26/api33/api34/api36 GMDs
+      # (09). youtube-smoke narrows it to the YouTube smoke tests on api36.
+      # Step timeout: a hung test still leaves time to report and upload (see ci.yml).
+      - name: GMD nightly group (debug)
+        timeout-minutes: 60
+        run: |
+          if [ "${{ inputs.scope }}" = "youtube-smoke" ]; then
+            ./gradlew --max-workers=2 api36DebugAndroidTest \
+              -Pneutrodyne.testScope=nightly \
+              -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
+              -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest,ch.lkmc.neutrodyne.SmokeTest
+          else
+            ./gradlew --max-workers=2 nightlyGroupDebugAndroidTest \
+              -Pneutrodyne.testScope=nightly \
+              -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
+              -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
+          fi
+      # TODO (M6b): release leg — :benchmark's out-of-process release smoke
+      # journeys and E10's companions against :app release on api36 (09).
+      - name: Report failure
+        if: ${{ !success() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh instrumented-full
+      - name: Report recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh instrumented-full --close
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !success() }}
+        with:
+          name: instrumented-full-results
+          path: |
+            **/build/outputs/androidTest-results/
+            **/build/reports/androidTests/
+
+  api37-16k:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      issues: write
+    if: inputs.scope == '' || inputs.scope == 'full'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk /opt/ghc /usr/local/.ghcup
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm trigger --name-match=kvm || true
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+          cache-read-only: true
+      - name: Debug suite on the API 37 16 KB image
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 37.0
+          target: google_apis_ps16k
+          arch: x86_64
+          script: |
+            test "$(adb shell getconf PAGE_SIZE | tr -d '\r')" = "16384" || { echo "PAGE_SIZE != 16384"; exit 1; }
+            ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly \
+              -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true connectedDebugAndroidTest
+      - name: Release smoke on API 37
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 37.0
+          target: google_apis_ps16k
+          arch: x86_64
+          script: |
+            ./gradlew --max-workers=2 -PtestBuildType=release \
+              -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke \
+              -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
+              :app:connectedReleaseAndroidTest
+            # TODO (M6b): :benchmark's out-of-process release smoke journeys join here.
+      - name: Build the release APKs for the alignment check
+        run: ./gradlew assembleRelease -Pneutrodyne.abiSplits=true
+      - name: 16 KB alignment on the release x86_64 APK (PLAN M11 AC7)
+        run: scripts/ci/check-apk.sh --alignment-only app/build/outputs/apk/release/app-x86_64-release.apk
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh api37-16k
+      - name: Report recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh api37-16k --close
+
+  release-build-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write
+    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'youtube-smoke'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk /opt/ghc /usr/local/.ghcup
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm trigger --name-match=kvm || true
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+          cache-read-only: true
+      # The runner image no longer ships the emulator package; GMD needs it to boot devices
+      - name: Install the Android emulator
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools > /dev/null
+      # E0 (and from M9a E7) on the published release build — a GMD api36 run of
+      # the release variant's tests (PLAN M0 AC4).
+      - name: api36 release smoke
+        run: ./gradlew -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true api36ReleaseAndroidTest
+      - name: The tested release build is not debuggable
+        run: |
+          BT=$(find "$ANDROID_HOME/build-tools" -name aapt2 -type f | sort -V | tail -1)
+          APK=app/build/outputs/apk/release/app-x86_64-release.apk
+          [ -n "$BT" ] || { echo "::error::no aapt2 under $ANDROID_HOME/build-tools"; exit 1; }
+          [ -f "$APK" ] || { echo "::error::missing release APK: $APK"; exit 1; }
+          # a failed dump aborts the step (bash -e); only its output can clear the flag
+          BADGING="$($BT dump badging "$APK")"
+          if grep -q application-debuggable <<<"$BADGING"; then
+            echo "::error::release APK is debuggable"
+            exit 1
+          fi
+          echo "release APK is not debuggable"
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh release-build-smoke
+      - name: Report recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh release-build-smoke --close
+
+  repro:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      issues: write
+    if: inputs.scope == '' || inputs.scope == 'full'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      # Two builds, different checkout paths / CPU counts / umasks (09). Both
+      # signed with the committed key, so the APKs compare byte for byte.
+      - name: Build A
+        run: scripts/ci/repro-build.sh --path /build/a --cpus 2 --umask 022 assembleRelease -Pneutrodyne.abiSplits=true
+      - name: Copy build A outputs aside
+        run: mkdir -p /tmp/repro-a && cp app/build/outputs/apk/release/*-release.apk /tmp/repro-a/
+      - name: Build B
+        run: |
+          git clean -fdx app/build >/dev/null
+          scripts/ci/repro-build.sh --path /home/builder/src/neutrodyne --cpus 4 --umask 002 assembleRelease -Pneutrodyne.abiSplits=true
+      # TODO (M0b): also diff the desktop application JARs and the server JAR;
+      # the container then installs Temurin 25 from runtime.lock.
+      - name: Compare the APKs
+        id: diff
+        run: |
+          ok=1
+          for a in /tmp/repro-a/*-release.apk; do
+            b="app/build/outputs/apk/release/$(basename "$a")"
+            sa=$(sha256sum "$a" | cut -d' ' -f1)
+            sb=$(sha256sum "$b" | cut -d' ' -f1)
+            echo "$(basename "$a"): $sa vs $sb"
+            [ "$sa" = "$sb" ] || ok=0
+          done
+          echo "identical=$ok" >> "$GITHUB_OUTPUT"
+      - name: diffoscope on a difference
+        if: steps.diff.outputs.identical == '0'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq diffoscope >/dev/null
+          for a in /tmp/repro-a/*-release.apk; do
+            b="app/build/outputs/apk/release/$(basename "$a")"
+            diffoscope --html "diff-$(basename "$a").html" "$a" "$b" || true
+          done
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.diff.outputs.identical == '0'
+        with:
+          name: repro-diffoscope
+          path: diff-*.html
+      - name: Report a mismatch (label repro — report-only, never blocks)
+        if: failure() || steps.diff.outputs.identical == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh repro --label repro
+      - name: Report recovery
+        if: success() && steps.diff.outputs.identical == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh repro --label repro --close

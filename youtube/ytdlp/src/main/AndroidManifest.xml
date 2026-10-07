@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+  <application>
+    <!-- The CPython host process ch.lkmc.neutrodyne:ytx (04 Process and lifecycle). Bound only by
+         BinderYtxTransport and the instrumented tests, never exported. -->
+    <service
+      android:name=".ytx.YtxService"
+      android:exported="false"
+      android:process=":ytx" />
+  </application>
+
+</manifest>

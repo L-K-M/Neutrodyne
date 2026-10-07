@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:cpython",
+  "name": "CPython",
+  "description": "The Python runtime embedded via Chaquopy (full licence stack included)",
+  "website": "https://www.python.org",
+  "developers": [],
+  "licenses": [
+    "Python-2.0"
+  ],
+  "artifactVersion": "3.14.0",
+  "tag": "bundled"
+}

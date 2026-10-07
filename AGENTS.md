@@ -6,7 +6,7 @@ user-defined sets of podcasts and YouTube channels — each get their own
 newest-first episode feed. There is no Neutrodyne-operated backend; whoever
 wants devices in step self-hosts Neutrodyne Sync.
 
-**Status: planning only; no code yet.** [docs/PLAN.md](docs/PLAN.md) is the
+**Status: implementation in progress (milestone M0a.1; state in [HANDOFF.md](HANDOFF.md)).** [docs/PLAN.md](docs/PLAN.md) is the
 source of truth (requirements, decisions, owner decisions, roadmap); the
 design docs in [docs/design/](docs/design/) elaborate it. Implement milestone
 by milestone and record any deviation in the owning document (and in PLAN.md

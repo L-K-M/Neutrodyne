@@ -1,0 +1,45 @@
+{
+  "_license": "SPDX-License-Identifier: Unlicense",
+  "$schema-comment": "The asset set each release must carry (09 Release assets / release.yml step 1). verify-tag.sh expands {v} with the version and {mac_ext} with mac_kind (macos-arm64.zip before 1.0.0, .dmg from it, D63/PO-39). publish fails when the uploaded set differs — the 'always' files are generated in publish itself. Groups join the verify-tag --products list as their release jobs land.",
+  "always": [
+    "neutrodyne-update.json",
+    "SHA256SUMS"
+  ],
+  "groups": {
+    "android": [
+      "neutrodyne-{v}-arm64-v8a.apk",
+      "neutrodyne-{v}-x86_64.apk",
+      "neutrodyne-{v}-armeabi-v7a.apk",
+      "neutrodyne-{v}-r8-mapping.zip"
+    ],
+    "desktop": [
+      "neutrodyne-{v}-windows-x64.msi",
+      "neutrodyne-{v}-windows-x64.zip",
+      "neutrodyne-{v}-macos-arm64.{mac_ext}",
+      "neutrodyne-{v}-linux-x64.deb",
+      "neutrodyne-{v}-linux-x64.rpm",
+      "neutrodyne-{v}-linux-x64.tar.gz",
+      "neutrodyne-{v}-linux-arm64.deb",
+      "neutrodyne-{v}-linux-arm64.rpm",
+      "neutrodyne-{v}-linux-arm64.tar.gz"
+    ],
+    "sources": [
+      "openjdk-{jdk}-temurin-sources.tar.gz",
+      "RUNTIME-SOURCES.md",
+      "wix-{wix}-src.tar.gz",
+      "ffmpeg-{ffmpeg}-neutrodyne-src.tar.xz",
+      "python-build-standalone-{pbsTag}-src.tar.gz"
+    ],
+    "server": [
+      "neutrodyne-server-{v}.jar",
+      "neutrodyne-server-image-sources-{v}.tar.xz"
+    ]
+  },
+  "milestones": {
+    "comment": "the milestone a group starts shipping; verify-tag.sh --products names the active groups (M0a: android). {jdk}, {wix}, {ffmpeg} and {pbsTag} come from the lockfiles when those groups join.",
+    "android": "M0a",
+    "desktop": "M0b",
+    "sources": "M0b",
+    "server": "MS1"
+  }
+}

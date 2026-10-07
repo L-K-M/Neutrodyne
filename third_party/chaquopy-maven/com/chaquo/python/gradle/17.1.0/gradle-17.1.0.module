@@ -1,0 +1,129 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "com.chaquo.python",
+    "module": "gradle",
+    "version": "17.1.0",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "8.14.3"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 11,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "files": [
+        {
+          "name": "gradle-17.1.0.jar",
+          "url": "gradle-17.1.0.jar",
+          "size": 2092778,
+          "sha512": "95f8679090b12b0b0e282669accaf3b99f0b7430ec3cd718c1d3e3285946841fac417c687f7b05eec1a5be3daaab8e6634ca6e1eedb6425df93b976931b5bf7c",
+          "sha256": "8ccdd2ff0ced8f1c82e1239c37905bed9c9f6224c9c1fc55d47a4b5022e4027f",
+          "sha1": "001f7a3d0885033afa33eaee7a05f86a8f1c9193",
+          "md5": "e9107d95054b130dd58550974f49a909"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 11,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "org.apache.commons",
+          "module": "commons-compress",
+          "version": {
+            "requires": "1.18"
+          }
+        },
+        {
+          "group": "org.json",
+          "module": "json",
+          "version": {
+            "requires": "20160810"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "gradle-17.1.0.jar",
+          "url": "gradle-17.1.0.jar",
+          "size": 2092778,
+          "sha512": "95f8679090b12b0b0e282669accaf3b99f0b7430ec3cd718c1d3e3285946841fac417c687f7b05eec1a5be3daaab8e6634ca6e1eedb6425df93b976931b5bf7c",
+          "sha256": "8ccdd2ff0ced8f1c82e1239c37905bed9c9f6224c9c1fc55d47a4b5022e4027f",
+          "sha1": "001f7a3d0885033afa33eaee7a05f86a8f1c9193",
+          "md5": "e9107d95054b130dd58550974f49a909"
+        }
+      ]
+    },
+    {
+      "name": "javadocElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "javadoc",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "gradle-17.1.0-javadoc.jar",
+          "url": "gradle-17.1.0-javadoc.jar",
+          "size": 95064,
+          "sha512": "b80ec75260e0c3e5e0be67cc7bfcce97165578962278277489c2e26e55c8224e97611af9734a5b636f4fe32e9ac73e5daacbf130f1bb9791bfa2222bce0532e8",
+          "sha256": "9da45b5f842df43e786ea0b6bdf922399a9b475af4186009d87850afa2e99b72",
+          "sha1": "9e1bcd622b330cb13b70bb8449a9ccf0f1923dc0",
+          "md5": "18a9ca6a7e85d0298715382811e140a7"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "gradle-17.1.0-sources.jar",
+          "url": "gradle-17.1.0-sources.jar",
+          "size": 151510,
+          "sha512": "aa113e5428d62d93f105da6df541da84cde55fb0dc68b5a05c7ae9cc3c825a65d0126b53943ae6f013b32c8e738044e6ed9ca5e48f79d94f2a383bf46991c483",
+          "sha256": "a4f627c9a50a4b16e72ff236ee5357ce6417d2c82aedb2e872e746fa2f40a92b",
+          "sha1": "943f05b5b3fb94842f16e96b83fbbff0cf653b56",
+          "md5": "43518b3e27b33091202bae58113b738f"
+        },
+        {
+          "name": "gradle-17.1.0-sources.jar",
+          "url": "gradle-17.1.0-sources.jar",
+          "size": 151510,
+          "sha512": "aa113e5428d62d93f105da6df541da84cde55fb0dc68b5a05c7ae9cc3c825a65d0126b53943ae6f013b32c8e738044e6ed9ca5e48f79d94f2a383bf46991c483",
+          "sha256": "a4f627c9a50a4b16e72ff236ee5357ce6417d2c82aedb2e872e746fa2f40a92b",
+          "sha1": "943f05b5b3fb94842f16e96b83fbbff0cf653b56",
+          "md5": "43518b3e27b33091202bae58113b738f"
+        }
+      ]
+    }
+  ]
+}

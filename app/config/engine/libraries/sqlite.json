@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:sqlite",
+  "name": "SQLite",
+  "description": "SQL engine bundled in the CPython target artifact",
+  "website": "https://www.sqlite.org",
+  "developers": [],
+  "licenses": [
+    "blessing"
+  ],
+  "artifactVersion": "3.50.4",
+  "tag": "bundled"
+}

@@ -1,0 +1,160 @@
+# SPDX-License-Identifier: Unlicense
+# youtube/ytdlp/python-components.lock — the Android engine stack as S7 measured it in the
+# release APKs on 2026-10-06 (01 Python and native components). checkPythonLicences compares
+# `chaquopy`, `python` and `pip` against the build and applies the Python allow-list; every
+# component needs a manual AboutLibraries definition under its aboutLibrariesId.
+schema = 1
+chaquopy = "17.1.0"          # must equal libs.versions.chaquopy — self-built master @ a41f0c9d309c70a39a13775acfe40fa3dc94bfdd, served only from third_party/chaquopy-maven (01 S7)
+python = "3.14.0"            # the runtime Chaquopy packages for chaquopy.defaultConfig.version = "3.14" (target artifact 3.14.0-0)
+pip = []                     # must equal the chaquopy { pip { } } requirements: none in v1
+
+# CPython and everything the com.chaquo.python:target:3.14.0-0 artifact bundles.
+# Dependency versions pinned by CPython 3.14.0's own Android build
+# (Android/android.py: bzip2-1.0.8-3, libffi-3.4.4-3, openssl-3.0.18-0, sqlite-3.50.4-0,
+# xz-5.4.6-1, zstd-1.5.7-1) and verified in the shipped .so files on 2026-10-06.
+
+[[component]]
+name = "CPython"
+version = "3.14.0"
+origin = "maven:com.chaquo.python:target:3.14.0-0"
+licence = "Python-2.0"        # PSF-2.0 with the BeOpen, CNRI and CWI terms of CPython's LICENSE
+kind = "runtime"             # runtime | native | python | data | pbs-patches (desktop lock only)
+aboutLibrariesId = "cpython"  # entry text: CPython's full LICENSE incl. "Licenses and Acknowledgements for Incorporated Software"
+
+[[component]]
+name = "OpenSSL"
+version = "3.0.18"           # banner "OpenSSL 3.0.18 30 Sep 2025" inside libcrypto_python.so / libssl_python.so
+origin = "maven:com.chaquo.python:target:3.14.0-0"
+licence = "Apache-2.0"
+kind = "native"
+aboutLibrariesId = "openssl"
+
+[[component]]
+name = "SQLite"
+version = "3.50.4"           # sqlite_source_id "2025-07-30 19:33:53 4d8adfb3…" inside libsqlite3_python.so
+origin = "maven:com.chaquo.python:target:3.14.0-0"
+licence = "blessing"         # SQLite's public-domain dedication
+kind = "native"
+aboutLibrariesId = "sqlite"
+
+[[component]]
+name = "libffi"
+version = "3.4.4"            # _ctypes; version per the cpython-android-source-deps pin (libffi-3.4.4-3)
+origin = "maven:com.chaquo.python:target:3.14.0-0"
+licence = "MIT"
+kind = "native"
+aboutLibrariesId = "libffi"
+
+[[component]]
+name = "expat"
+version = "2.7.3"            # expat_2.7.3 inside pyexpat.cpython-314-*.so
+origin = "maven:com.chaquo.python:target:3.14.0-0"
+licence = "MIT"
+kind = "native"
+aboutLibrariesId = "expat"
+
+[[component]]
+name = "zstd"
+version = "1.5.7"            # _zstd; per the source-deps pin (zstd-1.5.7-1)
+origin = "maven:com.chaquo.python:target:3.14.0-0"
+licence = "BSD-3-Clause OR GPL-2.0-only"
+elected = "BSD-3-Clause"     # an OR expression is accepted only with an elected, allowed alternative
+kind = "native"
+aboutLibrariesId = "zstd"
+
+[[component]]
+name = "xz (liblzma)"
+version = "5.4.6"            # _lzma; per the source-deps pin (xz-5.4.6-1), string confirmed in the .so
+origin = "maven:com.chaquo.python:target:3.14.0-0"
+licence = "0BSD"
+kind = "native"
+aboutLibrariesId = "xz"
+
+[[component]]
+name = "bzip2"
+version = "1.0.8"            # _bz2; per the source-deps pin (bzip2-1.0.8-3), string confirmed in the .so
+origin = "maven:com.chaquo.python:target:3.14.0-0"
+licence = "bzip2-1.0.6"
+kind = "native"
+aboutLibrariesId = "bzip2"
+
+[[component]]
+name = "zlib"
+version = "1.2.8"            # version string embedded in zlib.cpython-314-*.so; compiled against the NDK r28.2 sysroot zlib (Chromium's 1.3.0.1-motley headers keep the 1.2.8 ABI string)
+origin = "android-ndk"
+licence = "Zlib"
+kind = "native"
+aboutLibrariesId = "zlib"
+
+[[component]]
+name = "mimalloc (CPython allocator)"
+version = "bundled with CPython 3.14.0"
+origin = "maven:com.chaquo.python:target:3.14.0-0"
+licence = "MIT"
+kind = "native"
+aboutLibrariesId = "mimalloc"
+
+[[component]]
+name = "HACL* (CPython hashlib code)"
+version = "bundled with CPython 3.14.0"
+origin = "maven:com.chaquo.python:target:3.14.0-0"
+licence = "MIT"
+kind = "native"
+aboutLibrariesId = "hacl-star"
+
+[[component]]
+name = "mpdecimal (CPython _decimal)"
+version = "bundled with CPython 3.14.0"
+origin = "maven:com.chaquo.python:target:3.14.0-0"
+licence = "BSD-2-Clause"
+kind = "native"
+aboutLibrariesId = "mpdecimal"
+
+[[component]]
+name = "Unicode Character Database extract"
+version = "bundled with CPython 3.14.0"   # unicodedata/str
+origin = "maven:com.chaquo.python:target:3.14.0-0"
+licence = "Unicode-3.0"
+kind = "data"
+aboutLibrariesId = "unicode-ucd"
+
+# Chaquopy's own runtime. The plugin (17.1.0, self-built master) resolves
+# com.chaquo.python.runtime:* at its own version; third_party/chaquopy-maven serves the released
+# 17.0.0 payloads republished under 17.1.0 because master's runtime sources are unchanged for us
+# (details in third_party/chaquopy-maven/README.md and 01 S7).
+
+[[component]]
+name = "Chaquopy runtime (Java, JNI bridge, bootstrap)"
+version = "17.0.0"           # payload bytes of the released 17.0.0 artifacts, republished as :17.1.0
+origin = "maven:com.chaquo.python.runtime:chaquopy_java:17.1.0 (third_party/chaquopy-maven)"
+licence = "MIT"
+kind = "runtime"
+aboutLibrariesId = "chaquopy"
+
+[[component]]
+name = "LLVM libc++ (statically linked into Chaquopy's JNI libraries)"
+version = "NDK r28.2"        # no libc++_shared.so is shipped; DT_NEEDED lists only libc/libm/libdl/liblog/libandroid
+origin = "android-ndk"
+licence = "Apache-2.0 WITH LLVM-exception"
+kind = "native"
+aboutLibrariesId = "llvm-libcxx"
+
+[[component]]
+name = "CA certificate bundle (certifi cacert.pem)"
+version = "2026.7.22"        # byte-identical to master's certifi 2026.7.22 update (9672d39)
+origin = "maven:com.chaquo.python:gradle:17.1.0 (bundled cacert.pem)"
+licence = "MPL-2.0"
+kind = "data"                # MPL-2.0 is accepted only for kind = "data", unmodified
+aboutLibrariesId = "certifi-cacert"
+
+[[component]]
+name = "neutrodyne_ytx shim"
+version = "SHIM_API_VERSION 1"
+origin = "repository:youtube/engine/python/neutrodyne_ytx"
+licence = "Unlicense"
+kind = "python"
+aboutLibrariesId = "neutrodyne-ytx"
+
+# M9a adds: yt-dlp (Unlicense, zipimport release under youtube/ytdlp/engine/, checked by
+# verifyBundledYtDlp) with yt-dlp-ejs (Unlicense; meriyah ISC, astring MIT), and QuickJS inside
+# quickjs-kt (MIT) only if the JS challenge provider ships.

@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:unicode-ucd",
+  "name": "Unicode Character Database",
+  "description": "UCD extract in CPython unicodedata/str",
+  "website": "https://www.unicode.org",
+  "developers": [],
+  "licenses": [
+    "Unicode-3.0"
+  ],
+  "artifactVersion": "bundled with CPython 3.14.0",
+  "tag": "bundled"
+}

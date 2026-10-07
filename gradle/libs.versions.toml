@@ -1,0 +1,279 @@
+# Version catalog. Source of truth: docs/design/01-foundation.md "Toolchain and versions".
+[versions]
+agp = "9.4.1"                       # fallback "9.3.3" (Spike S1)
+kotlin = "2.4.20"
+ksp = "2.3.12"                      # Room only
+composeMultiplatform = "1.12.1"     # org.jetbrains.compose plugin and the org.jetbrains.compose.* core artifacts
+composeBom = "2026.09.00"           # Android-only Compose artifacts of :app and :benchmark
+cmpMaterial3 = "1.9.0"              # -> androidx material3 1.4.0 on Android (D6)
+cmpMaterial3Adaptive = "1.3.0-rc01" # -> androidx 1.3.0 on Android; rc only on the desktop (S9)
+navigation3 = "1.2.0"               # Google navigation3-runtime (KMP); :app pins androidx navigation3-ui to it
+navigation3UiJb = "1.1.2"           # JetBrains navigation3-ui for common code
+lifecycle = "2.11.0"                # JetBrains lifecycle (common) and androidx lifecycle-process (Android)
+activity = "1.13.0"
+appcompat = "1.8.0"
+coreKtx = "1.19.1"
+coreSplashscreen = "1.2.0"
+graphicsShapes = "1.1.0"
+glance = "1.2.0"                    # v1.x
+materialColorUtilities = "5.0.1"
+coil = "3.6.3"
+reorderable = "3.1.0"
+aboutlibraries = "15.2.0"
+metro = "1.4.5"
+room3 = "3.0.3"
+sqlite = "2.7.1"
+paging = "3.5.1"
+datastore = "1.2.1"
+work = "2.12.0"
+documentfile = "1.1.0"              # v1.x
+okhttp = "5.5.0"
+ktor = "3.6.0"
+okio = "3.18.2"
+kotlinxSerialization = "1.11.0"
+kotlinxCoroutines = "1.11.0"
+kotlinxDatetime = "0.8.0"
+kotlinxCollectionsImmutable = "0.5.2"
+kotlinxHtml = "0.12.0"              # resolved through ktor-server-html-builder; declared for Renovate and the constraint
+jsoup = "1.23.2"
+kxml2 = "2.3.0"
+media3 = "1.11.1"
+jna = "5.19.1"
+dbusJava = "5.2.2"
+sqliteJdbc = "3.53.4.0"
+bouncycastle = "1.86"
+slf4j = "2.0.20"
+chaquopy = "17.1.0"                 # :youtube:ytdlp only; S7: self-built master @ a41f0c9 in third_party/chaquopy-maven (17.0.0 cannot do the configuration cache)
+tink = "1.23.0"                     # M9b
+quickjsKt = "1.0.15"                # M9b / MD3, only if the JS challenge provider ships (D75)
+acra = "5.14.2"
+junit4 = "4.13.2"
+testParameterInjector = "1.24"
+truth = "1.4.5"
+turbine = "1.2.1"
+mockk = "1.14.11"
+robolectric = "4.17"
+roborazzi = "1.76.0"
+androidxTestRunner = "1.7.0"
+androidxTestExtJunit = "1.3.0"
+espresso = "3.7.0"
+androidxTestOrchestrator = "1.6.1"
+uiautomator = "2.4.0"
+benchmark = "1.5.0"
+baselineprofile = "1.5.0"
+profileinstaller = "1.4.1"
+leakcanary = "2.14"
+spotless = "8.10.3"
+ktlint = "1.8.0"
+composeRules = "0.6.7"
+detekt = "2.0.0-alpha.6"
+licensee = "1.14.1"
+moduleGraphAssert = "2.9.1"
+tomlj = "1.1.1"                     # build-logic only: parses python-components.lock (Apache-2.0)
+
+[libraries]
+# Compose Multiplatform (common code; Android variants resolve androidx.compose 1.12.1)
+cmp-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "composeMultiplatform" }
+cmp-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "composeMultiplatform" }
+cmp-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "composeMultiplatform" }
+cmp-animation = { module = "org.jetbrains.compose.animation:animation", version.ref = "composeMultiplatform" }
+cmp-resources = { module = "org.jetbrains.compose.components:components-resources", version.ref = "composeMultiplatform" }
+cmp-ui-tooling-preview = { module = "org.jetbrains.compose.ui:ui-tooling-preview", version.ref = "composeMultiplatform" }   # Unverified coordinate (S9)
+cmp-ui-test = { module = "org.jetbrains.compose.ui:ui-test", version.ref = "composeMultiplatform" }                          # runComposeUiTest
+# :desktopApp adds the per-OS desktop runtime with the Compose plugin's `compose.desktop.currentOs` (desktop-jvm-<os>-<arch> + Skiko natives of the runner; 11)
+cmp-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "cmpMaterial3" }
+cmp-material3-navigationSuite = { module = "org.jetbrains.compose.material3:material3-adaptive-navigation-suite", version.ref = "cmpMaterial3" }
+cmp-material3-adaptive = { module = "org.jetbrains.compose.material3.adaptive:adaptive", version.ref = "cmpMaterial3Adaptive" }
+cmp-material3-adaptive-layout = { module = "org.jetbrains.compose.material3.adaptive:adaptive-layout", version.ref = "cmpMaterial3Adaptive" }
+cmp-material3-adaptive-navigation3 = { module = "org.jetbrains.compose.material3.adaptive:adaptive-navigation3", version.ref = "cmpMaterial3Adaptive" }
+navigation3-runtime = { module = "androidx.navigation3:navigation3-runtime", version.ref = "navigation3" }
+navigation3-ui-jb = { module = "org.jetbrains.androidx.navigation3:navigation3-ui", version.ref = "navigation3UiJb" }
+lifecycle-viewmodel-compose = { module = "org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+lifecycle-runtime-compose = { module = "org.jetbrains.androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
+lifecycle-viewmodel-navigation3 = { module = "org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-navigation3", version.ref = "lifecycle" }
+graphics-shapes = { module = "androidx.graphics:graphics-shapes", version.ref = "graphicsShapes" }
+materialColorUtilities = { module = "com.materialkolor:material-color-utilities", version.ref = "materialColorUtilities" }
+coil-bom = { module = "io.coil-kt.coil3:coil-bom", version.ref = "coil" }
+coil-core = { module = "io.coil-kt.coil3:coil" }
+coil-compose = { module = "io.coil-kt.coil3:coil-compose" }
+coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp" }        # platform source sets only
+coil-test = { module = "io.coil-kt.coil3:coil-test" }
+reorderable = { module = "sh.calvin.reorderable:reorderable", version.ref = "reorderable" }
+aboutlibraries-core = { module = "com.mikepenz:aboutlibraries-core", version.ref = "aboutlibraries" }
+# Android-only UI (:app, :benchmark; Compose artifacts take versions from the BOM)
+androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
+androidx-core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "coreSplashscreen" }
+androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activity" }
+androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
+androidx-compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }                 # debugImplementation of :app only
+androidx-compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4" }
+androidx-compose-ui-test-junit4-accessibility = { module = "androidx.compose.ui:ui-test-junit4-accessibility" }
+androidx-compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest" }     # debugImplementation of :app only
+androidx-navigation3-ui = { module = "androidx.navigation3:navigation3-ui", version.ref = "navigation3" }   # :app pin, Android only
+androidx-lifecycle-process = { module = "androidx.lifecycle:lifecycle-process", version.ref = "lifecycle" }
+androidx-glance-appwidget = { module = "androidx.glance:glance-appwidget", version.ref = "glance" }
+androidx-glance-material3 = { module = "androidx.glance:glance-material3", version.ref = "glance" }
+# DI (the Metro runtime itself is added by the dev.zacsweers.metro plugin)
+metrox-viewmodel = { module = "dev.zacsweers.metro:metrox-viewmodel", version.ref = "metro" }
+metrox-viewmodel-compose = { module = "dev.zacsweers.metro:metrox-viewmodel-compose", version.ref = "metro" }
+# Data
+androidx-room3-runtime = { module = "androidx.room3:room3-runtime", version.ref = "room3" }
+androidx-room3-paging = { module = "androidx.room3:room3-paging", version.ref = "room3" }
+androidx-room3-compiler = { module = "androidx.room3:room3-compiler", version.ref = "room3" }
+androidx-room3-testing = { module = "androidx.room3:room3-testing", version.ref = "room3" }
+androidx-sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "sqlite" }
+androidx-sqlite-framework = { module = "androidx.sqlite:sqlite-framework", version.ref = "sqlite" }   # Android Robolectric tests only
+androidx-paging-common = { module = "androidx.paging:paging-common", version.ref = "paging" }
+androidx-paging-compose = { module = "androidx.paging:paging-compose", version.ref = "paging" }
+androidx-paging-testing = { module = "androidx.paging:paging-testing", version.ref = "paging" }
+androidx-datastore-preferences-core = { module = "androidx.datastore:datastore-preferences-core", version.ref = "datastore" }
+androidx-work-runtime = { module = "androidx.work:work-runtime", version.ref = "work" }
+androidx-work-testing = { module = "androidx.work:work-testing", version.ref = "work" }
+androidx-documentfile = { module = "androidx.documentfile:documentfile", version.ref = "documentfile" }
+# Network and serialization (OkHttp and Ktor artifacts take versions from their BOMs)
+okhttp-bom = { module = "com.squareup.okhttp3:okhttp-bom", version.ref = "okhttp" }
+okhttp = { module = "com.squareup.okhttp3:okhttp" }
+okhttp-coroutines = { module = "com.squareup.okhttp3:okhttp-coroutines" }
+okhttp-tls = { module = "com.squareup.okhttp3:okhttp-tls" }
+okhttp-mockwebserver3 = { module = "com.squareup.okhttp3:mockwebserver3" }
+okhttp-mockwebserver3-junit4 = { module = "com.squareup.okhttp3:mockwebserver3-junit4" }
+ktor-bom = { module = "io.ktor:ktor-bom", version.ref = "ktor" }
+ktor-client-core = { module = "io.ktor:ktor-client-core" }
+ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp" }                          # platform source sets only
+ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation" }
+ktor-serialization-kotlinx-json = { module = "io.ktor:ktor-serialization-kotlinx-json" }
+okio = { module = "com.squareup.okio:okio", version.ref = "okio" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
+kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
+kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "kotlinxCoroutines" }
+kotlinx-coroutines-guava = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-guava", version.ref = "kotlinxCoroutines" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
+kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinxDatetime" }
+kotlinx-collections-immutable = { module = "org.jetbrains.kotlinx:kotlinx-collections-immutable", version.ref = "kotlinxCollectionsImmutable" }
+jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
+kxml2 = { module = "net.sf.kxml:kxml2", version.ref = "kxml2" }
+# Media (Android)
+androidx-media3-exoplayer = { module = "androidx.media3:media3-exoplayer", version.ref = "media3" }
+androidx-media3-session = { module = "androidx.media3:media3-session", version.ref = "media3" }
+androidx-media3-datasource-okhttp = { module = "androidx.media3:media3-datasource-okhttp", version.ref = "media3" }
+androidx-media3-ui-compose = { module = "androidx.media3:media3-ui-compose", version.ref = "media3" }
+androidx-media3-common-ktx = { module = "androidx.media3:media3-common-ktx", version.ref = "media3" }
+androidx-media3-inspector = { module = "androidx.media3:media3-inspector", version.ref = "media3" }
+androidx-media3-test-utils = { module = "androidx.media3:media3-test-utils", version.ref = "media3" }
+androidx-media3-test-utils-robolectric = { module = "androidx.media3:media3-test-utils-robolectric", version.ref = "media3" }
+# Desktop
+jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
+jna-platform = { module = "net.java.dev.jna:jna-platform", version.ref = "jna" }
+dbus-java-core = { module = "com.github.hypfvieh:dbus-java-core", version.ref = "dbusJava" }
+dbus-java-transport-native-unixsocket = { module = "com.github.hypfvieh:dbus-java-transport-native-unixsocket", version.ref = "dbusJava" }
+# Server (:sync:server only)
+ktor-server-core = { module = "io.ktor:ktor-server-core" }
+ktor-server-cio = { module = "io.ktor:ktor-server-cio" }
+ktor-server-content-negotiation = { module = "io.ktor:ktor-server-content-negotiation" }
+ktor-server-sse = { module = "io.ktor:ktor-server-sse" }
+ktor-server-auth = { module = "io.ktor:ktor-server-auth" }
+ktor-server-sessions = { module = "io.ktor:ktor-server-sessions" }
+ktor-server-rate-limit = { module = "io.ktor:ktor-server-rate-limit" }
+ktor-server-csrf = { module = "io.ktor:ktor-server-csrf" }
+ktor-server-compression = { module = "io.ktor:ktor-server-compression" }
+ktor-server-call-id = { module = "io.ktor:ktor-server-call-id" }
+ktor-server-status-pages = { module = "io.ktor:ktor-server-status-pages" }
+ktor-server-default-headers = { module = "io.ktor:ktor-server-default-headers" }
+ktor-server-html-builder = { module = "io.ktor:ktor-server-html-builder" }
+ktor-server-test-host = { module = "io.ktor:ktor-server-test-host" }
+kotlinx-html = { module = "org.jetbrains.kotlinx:kotlinx-html", version.ref = "kotlinxHtml" }        # constraint only
+sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqliteJdbc" }
+bouncycastle-bcprov = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
+slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
+slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
+# YouTube engine (the Chaquopy runtime comes through its plugin, not the catalog)
+tink-android = { module = "com.google.crypto.tink:tink-android", version.ref = "tink" }                 # M9b, :youtube:ytdlp
+quickjs-kt-android = { module = "io.github.dokar3:quickjs-kt-android", version.ref = "quickjsKt" }      # M9b, conditional (D75)
+quickjs-kt-jvm = { module = "io.github.dokar3:quickjs-kt-jvm", version.ref = "quickjsKt" }              # MD3, conditional (D75)
+# Crash reporting (Android)
+acra-mail = { module = "ch.acra:acra-mail", version.ref = "acra" }
+acra-dialog = { module = "ch.acra:acra-dialog", version.ref = "acra" }
+# Test
+kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
+junit4 = { module = "junit:junit", version.ref = "junit4" }
+testParameterInjector = { module = "com.google.testparameterinjector:test-parameter-injector", version.ref = "testParameterInjector" }
+truth = { module = "com.google.truth:truth", version.ref = "truth" }
+turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }
+mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
+roborazzi = { module = "io.github.takahirom.roborazzi:roborazzi", version.ref = "roborazzi" }
+roborazzi-compose = { module = "io.github.takahirom.roborazzi:roborazzi-compose", version.ref = "roborazzi" }
+roborazzi-compose-desktop = { module = "io.github.takahirom.roborazzi:roborazzi-compose-desktop", version.ref = "roborazzi" }
+roborazzi-junit-rule = { module = "io.github.takahirom.roborazzi:roborazzi-junit-rule", version.ref = "roborazzi" }
+androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidxTestRunner" }
+androidx-test-ext-junit = { module = "androidx.test.ext:junit", version.ref = "androidxTestExtJunit" }
+androidx-test-espresso-core = { module = "androidx.test.espresso:espresso-core", version.ref = "espresso" }
+androidx-test-orchestrator = { module = "androidx.test:orchestrator", version.ref = "androidxTestOrchestrator" }
+androidx-test-uiautomator = { module = "androidx.test.uiautomator:uiautomator", version.ref = "uiautomator" }
+androidx-benchmark-macro-junit4 = { module = "androidx.benchmark:benchmark-macro-junit4", version.ref = "benchmark" }
+androidx-profileinstaller = { module = "androidx.profileinstaller:profileinstaller", version.ref = "profileinstaller" }   # :app implementation (M0a)
+leakcanary-android = { module = "com.squareup.leakcanary:leakcanary-android", version.ref = "leakcanary" }   # debugImplementation of :app
+# build-logic classpath only (plugin markers for third-party plugins: <id>:<id>.gradle.plugin)
+android-gradlePlugin = { module = "com.android.tools.build:gradle", version.ref = "agp" }
+kotlin-gradlePlugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+kotlin-composeGradlePlugin = { module = "org.jetbrains.kotlin:compose-compiler-gradle-plugin", version.ref = "kotlin" }
+kotlin-serializationGradlePlugin = { module = "org.jetbrains.kotlin:kotlin-serialization", version.ref = "kotlin" }
+compose-gradlePlugin = { module = "org.jetbrains.compose:compose-gradle-plugin", version.ref = "composeMultiplatform" }
+ksp-gradlePlugin = { module = "com.google.devtools.ksp:symbol-processing-gradle-plugin", version.ref = "ksp" }
+metro-gradlePlugin = { module = "dev.zacsweers.metro:gradle-plugin", version.ref = "metro" }                # Unverified artifact name (S8)
+room3-gradlePlugin = { module = "androidx.room3:room3-gradle-plugin", version.ref = "room3" }
+baselineprofile-gradlePlugin = { module = "androidx.baselineprofile:androidx.baselineprofile.gradle.plugin", version.ref = "baselineprofile" }
+spotless-gradlePlugin = { module = "com.diffplug.spotless:com.diffplug.spotless.gradle.plugin", version.ref = "spotless" }
+licensee-gradlePlugin = { module = "app.cash.licensee:app.cash.licensee.gradle.plugin", version.ref = "licensee" }
+moduleGraphAssert-gradlePlugin = { module = "com.jraska.module.graph.assertion:com.jraska.module.graph.assertion.gradle.plugin", version.ref = "moduleGraphAssert" }
+aboutlibraries-gradlePlugin = { module = "com.mikepenz.aboutlibraries.plugin:com.mikepenz.aboutlibraries.plugin.gradle.plugin", version.ref = "aboutlibraries" }
+chaquopy-gradlePlugin = { module = "com.chaquo.python:gradle", version.ref = "chaquopy" }   # same classloader as AGP (catalog rule 3)
+detekt-gradlePlugin = { module = "dev.detekt:dev.detekt.gradle.plugin", version.ref = "detekt" }
+tomlj = { module = "org.tomlj:tomlj", version.ref = "tomlj" }   # build-logic lockfile parser; never in a product classpath
+
+[bundles]
+common-test = ["kotlin-test", "turbine", "kotlinx-coroutines-test"]
+jvm-test = ["junit4", "truth", "testParameterInjector"]
+cmp-core = ["cmp-runtime", "cmp-foundation", "cmp-ui", "cmp-animation", "cmp-material3", "cmp-resources", "cmp-ui-tooling-preview"]
+server-ktor = ["ktor-server-core", "ktor-server-cio", "ktor-server-content-negotiation", "ktor-serialization-kotlinx-json", "ktor-server-sse",
+               "ktor-server-auth", "ktor-server-sessions", "ktor-server-rate-limit", "ktor-server-csrf", "ktor-server-compression",
+               "ktor-server-call-id", "ktor-server-status-pages", "ktor-server-default-headers", "ktor-server-html-builder"]
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
+android-kotlin-multiplatform-library = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
+android-test = { id = "com.android.test", version.ref = "agp" }
+android-lint = { id = "com.android.lint", version.ref = "agp" }
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+metro = { id = "dev.zacsweers.metro", version.ref = "metro" }
+room3 = { id = "androidx.room3", version.ref = "room3" }
+baselineprofile = { id = "androidx.baselineprofile", version.ref = "baselineprofile" }
+detekt = { id = "dev.detekt", version.ref = "detekt" }
+aboutlibraries = { id = "com.mikepenz.aboutlibraries.plugin", version.ref = "aboutlibraries" }
+aboutlibraries-android = { id = "com.mikepenz.aboutlibraries.plugin.android", version.ref = "aboutlibraries" }
+roborazzi = { id = "io.github.takahirom.roborazzi", version.ref = "roborazzi" }
+# com.chaquo.python has no entry: it is on the build-logic classpath and applied by bare id (catalog rule 3)
+# convention plugins (no version: provided by the included build)
+neutrodyne-android-application = { id = "neutrodyne.android.application" }
+neutrodyne-android-library = { id = "neutrodyne.android.library" }
+neutrodyne-android-testing = { id = "neutrodyne.android.testing" }
+neutrodyne-android-lint = { id = "neutrodyne.android.lint" }
+neutrodyne-kmp-library = { id = "neutrodyne.kmp.library" }
+neutrodyne-kmp-compose = { id = "neutrodyne.kmp.compose" }
+neutrodyne-kmp-feature = { id = "neutrodyne.kmp.feature" }
+neutrodyne-jvm-island = { id = "neutrodyne.jvm.island" }
+neutrodyne-desktop-library = { id = "neutrodyne.desktop.library" }
+neutrodyne-desktop-native = { id = "neutrodyne.desktop.native" }
+neutrodyne-desktop-application = { id = "neutrodyne.desktop.application" }
+neutrodyne-server-application = { id = "neutrodyne.server.application" }
+neutrodyne-metro = { id = "neutrodyne.metro" }
+neutrodyne-room = { id = "neutrodyne.room" }
+neutrodyne-quality = { id = "neutrodyne.quality" }

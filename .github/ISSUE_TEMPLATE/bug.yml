@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: Unlicense
+# Bug report form (09): a platform dropdown and a diagnostics textarea that
+# Settings › Report a problem pre-fills (copy-report).
+name: Bug report
+description: Something in Neutrodyne is broken
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Android
+        - Windows
+        - macOS
+        - Linux
+        - sync server
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Neutrodyne version
+      description: Settings › About, e.g. 0.1.0 (10095)
+      placeholder: "0.1.0 (10095)"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what happened, what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Paste the report from Settings › Report a problem here. It contains versions and log lines only — no feed URLs, titles or history.
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Anything else
+      description: Screenshots, device model, Android/Windows/macOS version, server setup.

@@ -1,0 +1,4 @@
+Tester build for milestone M0a. First public build of Neutrodyne, the
+open-source podcast player that also lets you subscribe to YouTube channels and
+listen to them as audio. Android APKs only — desktop and the sync server ship
+in later milestones. Not for daily use yet; expect rough edges.

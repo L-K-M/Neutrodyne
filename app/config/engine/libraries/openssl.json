@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:openssl",
+  "name": "OpenSSL",
+  "description": "TLS/crypto bundled in the CPython target artifact",
+  "website": "https://www.openssl.org",
+  "developers": [],
+  "licenses": [
+    "Apache-2.0"
+  ],
+  "artifactVersion": "3.0.18",
+  "tag": "bundled"
+}

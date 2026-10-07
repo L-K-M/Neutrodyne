@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: Unlicense
+# Shipped locales of both apps (09 Shipped locales and per-app language):
+# en-US plus every language >= 90 % translated across all string components
+# when a minor release is prepared (PO-14). scripts/l10n/update-shipped-locales.sh
+# rewrites this file from Weblate's statistics; check-apk.sh compares the
+# packaged locale config against it.
+en-US

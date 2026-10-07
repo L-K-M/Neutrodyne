@@ -1,10 +1,22 @@
-# Handoff — state of the Neutrodyne planning work
+# Handoff — state of the Neutrodyne work
 
-This file lets another person or agent take over the work at any point. It is updated at every stage. **Last updated: 2026-10-06.** The KMP replan, the contributor review fixes (PRs #5–#8) and their follow-ups (PR #9) are on `main`. Next come the owner's open questions, then M0a.1. To hand implementation to another agent, use [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md).
+This file lets another person or agent take over the work at any point. It is updated at every stage. **Last updated: 2026-10-07.** The plan is final on `main`; **implementation has started with M0a.1** (see §0). The implementation brief is [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md).
+
+## 0. Implementation status
+
+| Milestone | State | Branch / PR | Notes |
+|---|---|---|---|
+| M0a.1 | PR open, CI green; blocked on review gap | `impl/m0a1-scaffold`, [PR #10](https://github.com/L-K-M/Neutrodyne/pull/10) | Done: scaffold and `build-logic`; `:core:common`/`:core:model`/`:core:testing`; `:core:navigation`; settings storage; networking (S12 go); policy checks (licences, banned APIs, module graph, manifest permissions, Python locks) with negative checks recorded; CI, nightly and release workflows and scripts; the Android shell (`NeutrodyneApplication` per process, ACRA with redaction, Metro graphs, `MainActivity` hosting the shared `NeutrodyneRoot`, splash held for the appearance settings); design system, shared navigation host, five destination stubs, Settings › Appearance, About and Licences; brand icons (brought forward from M0b). Spikes **S1, S7, S8, S9 (desktop), S11 (desktop), S12, S19 (partial) go**; S7 finding: no CPython on x86_64 Android 8.x (seccomp). Codex Sol reviews: 7 rounds, the last without important findings; the URL redactor became a linear scanner. Open: the GLM PR review skips (no `ZAI_API_KEY` secret), two integration failures, so merging waits for the owner to add the secret or waive it; then merge, a green nightly on `main`, tag `v0.1.0`. |
+| M0a.2 | branch ready, PR after M0a.1 | `impl/m0a2-spikes` | Room spikes S2, S3, S4 (Android migration tests fall back to GMD), S6, S10 (Linux x64) go; Android legs of S5, S9, S11 written (`Nav3SpikeTest`, `PerAppLanguageTest`, `LocaleConfigTest`, `ComposeResourcesWorkerTest`), device runs on CI. |
+| M0b | in progress | `impl/m0b-desktop` | Done there: server skeleton (`serve`, health, discovery, listen rule, 421); desktop shell (single instance, crash files, rolling log, smoke mode, graph); packaging (installers, `runtime.lock`, image and runtime-source checks, desktop CI); the window on `NeutrodyneRoot`, macOS app menu, tray stub, shell dialogs, desktop Licences with the OpenJDK entries. Next: merge M0a.1 once it lands, S13 (reference laptops, PO-43), PR and tester build. |
+
+**Toolchain used locally:** Temurin 21 and 25 (Gradle toolchains via `org.gradle.java.installations.paths` in `~/.gradle/gradle.properties`), Android SDK with build tools 36/37 and platform 37, host CPython 3.14 for Chaquopy's `buildPython` (`neutrodyne.buildPython` in `~/.gradle/gradle.properties`; builds need `LANG=C.UTF-8`). No KVM on the development machine: instrumented tests and Gradle Managed Devices run only on CI. Compose UI tests on the desktop JVM need a GL library; locally a user-level Mesa is unpacked in `~/.local/gfx` (`source ~/.local/gfx/env.sh`).
+
+**Resume:** `git fetch && git checkout impl/m0a1-scaffold`; read the M0 checklist in `docs/design/01-foundation.md`; `export JAVA_HOME=<jdk21> ANDROID_HOME=<sdk> LANG=C.UTF-8`; `./gradlew assembleDebug assembleRelease desktopTest`. Helper worktrees live under `~/nd-wt/` (one branch each, prompts in `~/nd-wt/prompts/`).
 
 ## 1. What this repository is
 
-Neutrodyne is a planned open-source podcast player. So far the repository holds **only the plan**: there is no code. The sources of truth are:
+Neutrodyne is an open-source podcast player in development. The sources of truth are:
 
 - [CLAUDE.md](CLAUDE.md): the owner's standing conventions. Read this first; they are binding.
 - [docs/PLAN.md](docs/PLAN.md): the master plan, holding requirements (R/N-ids), decisions (D-ids), owner decisions (PO-ids), the roadmap (M-ids), risks and the glossary.
@@ -29,6 +41,7 @@ Neutrodyne is a planned open-source podcast player. So far the repository holds 
 | 2026-10-05 | **LGPL allowed.** **Everything ships in v1.0** (Android + desktop + sync server). Desktop on **Windows, macOS and Linux, unsigned**. |
 | 2026-10-05 | **Stack: Kotlin Multiplatform + Compose Multiplatform** (not Flutter), with a Kotlin/Ktor server. **Desktop bundles the Java runtime** (OpenJDK, narrow licence exception, its source attached to each release). |
 | 2026-10-05 | The owner added the app icon `media-sources/icon.png` (vacuum-tube "N", amber on navy) and IntelliJ project files (`.idea/`). |
+| 2026-10-06 | The owner enabled **immutable releases** in the repository settings (needed for 09's `publish` job and `gh release verify`). |
 
 ## 3. Current state
 

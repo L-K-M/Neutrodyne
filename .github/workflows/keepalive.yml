@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: Unlicense
+#
+# keepalive.yml — GitHub disables scheduled workflows after 60 days of no
+# repository activity, and a disabled canary would stop approving engine fixes
+# without any failure issue (09 Helper workflows). Monthly run that re-enables
+# the scheduled workflows — itself included — so the schedule keeps ticking.
+
+name: keepalive
+
+on:
+  schedule:
+    - cron: "41 4 1 * *" # monthly (09)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write # gh workflow enable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Re-enable scheduled workflows
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          for wf in nightly.yml keepalive.yml; do
+            # TODO (M9b): engine-canary.yml joins this list with its workflow.
+            if [ -f ".github/workflows/$wf" ]; then
+              gh workflow enable "$wf" || true
+            fi
+          done
+          gh workflow list --all | sed 's/^/  /'

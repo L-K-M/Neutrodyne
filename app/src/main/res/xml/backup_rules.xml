@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<!-- Auto Backup on API 26–30 (01, 05 Auto Backup). M0a includes only the portable settings file, so tester builds
+     never back up the Room database before M3 adds the snapshot (D34). Encryption is required (PO-15). -->
+<full-backup-content>
+  <include domain="file" path="datastore/settings.preferences_pb" requireFlags="clientSideEncryption" />
+</full-backup-content>

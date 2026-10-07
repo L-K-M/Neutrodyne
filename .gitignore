@@ -23,3 +23,16 @@ tools/doccheck/node_modules/
 # Python cache
 __pycache__/
 *.pyc
+
+# Gradle and Kotlin extras
+!gradle/wrapper/gradle-wrapper.jar
+.kotlin/
+captures/
+.externalNativeBuild/
+
+# Private keys never belong here; the committed public keystore is signing/neutrodyne-public.keystore
+*.jks
+
+# OS and Python extras
+Thumbs.db
+.venv/

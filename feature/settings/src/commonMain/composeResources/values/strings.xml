@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<resources>
+    <string name="app_name" translatable="false">Neutrodyne</string>
+
+    <!-- Settings home rows (the M0a subset of 08 Settings). -->
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_appearance_summary">Theme, dynamic colour and contrast</string>
+    <string name="settings_about">About</string>
+    <string name="settings_about_summary">Version and build</string>
+    <string name="settings_licences">Licences</string>
+    <string name="settings_licences_summary">Open-source licences of bundled components</string>
+
+    <!-- Settings › Appearance (M0a rows of 08 Settings screen structure). -->
+    <string name="appearance_theme">Theme</string>
+    <string name="appearance_theme_system">System default</string>
+    <string name="appearance_theme_light">Light</string>
+    <string name="appearance_theme_dark">Dark</string>
+    <string name="appearance_dynamic_color">Use wallpaper colours</string>
+    <string name="appearance_dynamic_color_summary">Colours from your wallpaper</string>
+
+    <!-- Settings › About (01 About statements: the licence statement is one per platform). -->
+    <string name="about_version">Version %1$s (%2$d)</string>
+    <string name="about_version_abi">Version %1$s (%2$d) · %3$s</string>
+    <string name="about_version_desktop">Version %1$s · %2$s %3$s · %4$s</string>
+    <string name="about_licence_android">Neutrodyne's source code is dedicated to the public domain under the Unlicense. The app also includes third-party components under permissive licences, listed under Licences.</string>
+    <string name="about_licence_desktop">Neutrodyne's source code is dedicated to the public domain under the Unlicense. This app also includes third-party components under permissive licences, FFmpeg under the GNU LGPL 2.1, and an unmodified OpenJDK runtime under the GNU GPL 2.0 with the Classpath Exception; the source code of both is attached to every release. All components are listed under Licences.</string>
+    <string name="about_source">Source code and releases</string>
+    <string name="about_link_no_handler">No app can open this link</string>
+    <string name="about_link_copy">Copy link</string>
+    <string name="about_debug_build">Debug build</string>
+
+    <!-- Licences screen (AboutLibraries data rendered with Nd* components). -->
+    <string name="licences_section_libraries">Libraries</string>
+    <string name="licences_section_header">%1$s · %2$s</string>
+    <string name="licences_section_bundled">Bundled components</string>
+    <string name="licences_bundled_engine">Used by the YouTube engine of the 64-bit versions</string>
+    <string name="licences_search">Search</string>
+    <string name="licences_empty">No licence information in this build.</string>
+    <string name="licences_source">Source: %1$s</string>
+    <string name="licences_close">Close</string>
+    <plurals name="licences_library_count">
+        <item quantity="one">%1$d library</item>
+        <item quantity="other">%1$d libraries</item>
+    </plurals>
+</resources>

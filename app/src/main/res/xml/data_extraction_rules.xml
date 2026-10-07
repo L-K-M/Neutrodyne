@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<!-- Auto Backup and device transfer on API 31+ (01, 05 Auto Backup): the portable settings file only in M0a (D34);
+     cloud backup only with client-side encryption (PO-15). -->
+<data-extraction-rules>
+  <cloud-backup disableIfNoEncryptionCapabilities="true">
+    <include domain="file" path="datastore/settings.preferences_pb" />
+  </cloud-backup>
+  <device-transfer>
+    <include domain="file" path="datastore/settings.preferences_pb" />
+  </device-transfer>
+</data-extraction-rules>

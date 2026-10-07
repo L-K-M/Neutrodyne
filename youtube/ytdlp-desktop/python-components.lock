@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: Unlicense
+# youtube/ytdlp-desktop/python-components.lock — the desktop engine stack (01 Python and native
+# components, 11 Lockfiles). checkPythonLicences applies the Python allow-list; MPL-2.0 is accepted
+# only for kind = "data" or the pinned kind = "pbs-patches" case (PO-48), which requires a matching
+# [pbsSource] entry naming this lock's `pbs` release tag with the source tarball SHA-256.
+schema = 1
+
+# MD3 fills these when it lands the python-build-standalone stack:
+# pbs = "<pbs release tag>"          # the lock's own python-build-standalone release
+# python = "<cpython version>"       # e.g. "3.14.0"
+# [pbsSource]
+# tag = "<same tag as pbs>"          # python-build-standalone-<tag>-src.tar.gz
+# name = "python-build-standalone-<tag>-src.tar.gz"
+# url = "<release asset URL>"
+# sha256 = "<64-hex>"
+# [[target]] { id = "linux-x64"|"windows-x64"|"macos-aarch64", archive = "…", sha256 = "…" }
+
+# No components yet — MD3 records CPython, its bundled libraries, certifi and the PBS patch set here.
+# [[component]] entries: { name, version, origin, licence, elected?, kind, aboutLibrariesId }.
