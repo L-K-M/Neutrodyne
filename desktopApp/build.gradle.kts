@@ -71,6 +71,8 @@ dependencies {
     if (youtubeEngine) implementation(project(":youtube:ytdlp-desktop"))
 
     implementation(compose.desktop.currentOs)
+    // Metro aggregation must read the features' @ViewModelKey/@ManualViewModelAssistedFactoryKey map keys.
+    implementation(libs.metrox.viewmodel)
     implementation(libs.kotlinx.coroutines.swing)
     implementation(libs.kotlinx.collections.immutable)
     runtimeOnly(libs.kxml2)

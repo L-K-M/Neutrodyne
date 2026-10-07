@@ -21,6 +21,7 @@ import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.database.PodcastGroupMemberEntity
 import ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
+import ch.lkmc.neutrodyne.core.domain.AddPodcastResolver
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
@@ -54,7 +55,10 @@ import kotlin.uuid.Uuid
 internal class SubscribeUseCaseImpl(
     private val db: NeutrodyneDatabase,
     private val cache: PreviewCache,
-    private val resolver: AddPodcastResolverImpl,
+    // Interface-typed: Metro's contribution providers can't expose the impl binding (Metro 1.4.5,
+    // `@ExposeImplBinding` on an internal contributed class drops the interface provider). The
+    // `resolveEntry` bridge downcasts below — `@SingleIn` guarantees the single binding is the impl.
+    private val resolver: AddPodcastResolver,
     private val ingestor: FeedIngestor,
     private val eventBus: IngestionEventBus,
     private val scheduler: RefreshScheduler,
@@ -69,7 +73,7 @@ internal class SubscribeUseCaseImpl(
         // Step 1: the cached entry, or a re-fetch of the preview URL when it expired.
         val entry =
             cache.get(previewId)
-                ?: when (val r = resolver.resolveEntry(previewId)) {
+                ?: when (val r = (resolver as AddPodcastResolverImpl).resolveEntry(previewId)) {
                     is Outcome.Success -> r.value
                     is Outcome.Failure -> return Outcome.Failure(SubscribeError.Fetch(r.error))
                 }

@@ -23,6 +23,8 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
+import ch.lkmc.neutrodyne.core.ui.AndroidDrawnReporter
+import ch.lkmc.neutrodyne.core.ui.LocalDrawnReporter
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.rememberAndroidPlatformActions
@@ -34,6 +36,7 @@ import ch.lkmc.neutrodyne.core.ui.root.RootSlots
 import ch.lkmc.neutrodyne.core.ui.root.RootUiState
 import ch.lkmc.neutrodyne.core.ui.root.StartupFailure
 import ch.lkmc.neutrodyne.core.ui.root.StartupGateState
+import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emptyFlow
@@ -80,7 +83,13 @@ class MainActivity : AppCompatActivity() {
             val openState by opener.openState.collectAsStateWithLifecycle()
 
             val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
-            CompositionLocalProvider(LocalPlatformActions provides rememberAndroidPlatformActions()) {
+            CompositionLocalProvider(
+                LocalPlatformActions provides rememberAndroidPlatformActions(),
+                // 08 Feeds / 09 ColdStartToFeeds: ReportDrawnWhen once the feed settles.
+                LocalDrawnReporter provides AndroidDrawnReporter,
+                // 01 Feature entry installers: metroViewModel()/assistedMetroViewModel() resolve here.
+                LocalMetroViewModelFactory provides graph.metroViewModelFactory,
+            ) {
                 NeutrodyneRoot(
                     state = ROOT_STATE_BASE.copy(startup = openState.toGateState()),
                     actions =
