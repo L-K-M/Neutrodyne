@@ -63,7 +63,7 @@ internal class WorkManagerRefreshScheduler
             // Manual and automatic one-shots ride separate unique chains: a constrained
             // automatic request (battery low, wifi only) must never sit in front of a manual
             // pull-to-refresh, and a queued manual request is not replaced by automatic work.
-            val manual = origin == RefreshOrigin.MANUAL
+            val manual = userDriven(origin)
             val uniqueName = if (manual) WORK_NOW else WORK_AUTO
             if (scope is RefreshScope.Podcasts && scope.ids.size > RefreshWorkData.MAX_SCOPE_IDS) {
                 // `Data` caps at 10 KB: persist the due marks, then send a plain All run
@@ -197,8 +197,8 @@ internal class WorkManagerRefreshScheduler
         }
 
         /**
-         * The one-shot request shape by origin (03 Work requests): `MANUAL` keeps the expedited,
-         * connected-only user-driven request; automatic triggers ride the periodic constraint
+         * The one-shot request shape by origin (03 Work requests): user-driven origins keep the
+         * expedited, connected-only request; automatic triggers ride the periodic constraint
          * set — the `feeds.refresh_wifi_only` network type plus battery-not-low, never expedited.
          */
         private suspend fun requestFor(
@@ -207,11 +207,19 @@ internal class WorkManagerRefreshScheduler
             pagesOnly: Boolean,
             origin: RefreshOrigin,
         ): OneTimeWorkRequest =
-            if (origin == RefreshOrigin.MANUAL) {
+            if (userDriven(origin)) {
                 nowRequest(scope, force, pagesOnly, origin)
             } else {
                 automaticRequest(scope, force, pagesOnly, origin)
             }
+
+        /**
+         * User-driven origins ride `refresh-now` (expedited, connected-only): `MANUAL` is
+         * pull-to-refresh and "Load older episodes", `RETRY` is "Try again" — both asked for
+         * the work to run now.
+         */
+        private fun userDriven(origin: RefreshOrigin): Boolean =
+            origin == RefreshOrigin.MANUAL || origin == RefreshOrigin.RETRY
 
         /** A `refresh-now`-shape one-time: network-only constraints, expedited on API ≥ 31. */
         private fun nowRequest(

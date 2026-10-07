@@ -257,6 +257,281 @@ class IngestDiffTest {
             assertEquals(NOW - 2_000, db.episodeStateDao().byEpisode(fresh.id)!!.playedAt)
         }
 
+    /**
+     * A and B share "dup" — A owns the `g:` row, B a `u:` fallback. The next document
+     * rotates A's enclosure query: the reuse guard rejects A's blind `g:` claim, and the
+     * rejected row must stay eligible for pass 2's query-less match — reserving it would
+     * insert a fresh row and strand the played state on the stale one (r3 F1).
+     */
+    @Test
+    fun reusedGuidWithRotatedEnclosureStillUpdatesItsRow() =
+        runTest {
+            val id = podcastId()
+            ingest(
+                id,
+                parsedFeed(
+                    items =
+                        listOf(
+                            parsedEpisode(
+                                0,
+                                guid = "dup",
+                                enclosureUrl = "https://cdn.example.com/a.mp3?token=old",
+                                title = "A",
+                                pubDate = NOW - DAY,
+                            ),
+                            parsedEpisode(
+                                1,
+                                guid = "dup",
+                                enclosureUrl = "https://cdn.example.com/b.mp3",
+                                title = "B",
+                                pubDate = NOW - 2 * DAY,
+                            ),
+                        ),
+                ),
+                mode = IngestMode.INITIAL,
+            )
+            val aBefore = db.episodeDao().byIdentityKey(id, "g:dup")!!
+            db.episodeStateDao().upsert(episodeStateEntity(aBefore.id, playedAt = NOW - 1_000))
+            val bBefore =
+                db.ingestDao().existing(id).single {
+                    it.enclosureUrl == "https://cdn.example.com/b.mp3"
+                }
+
+            val result =
+                ingest(
+                    id,
+                    parsedFeed(
+                        items =
+                            listOf(
+                                parsedEpisode(
+                                    0,
+                                    guid = "dup",
+                                    enclosureUrl = "https://cdn.example.com/a.mp3?token=new",
+                                    title = "A",
+                                    pubDate = NOW - DAY,
+                                ),
+                                parsedEpisode(
+                                    1,
+                                    guid = "dup",
+                                    enclosureUrl = "https://cdn.example.com/b.mp3",
+                                    title = "B",
+                                    pubDate = NOW - 2 * DAY,
+                                ),
+                            ),
+                    ),
+                )
+
+            assertEquals(emptyList(), result.inserted)
+            val aAfter = db.episodeDao().byId(aBefore.id)!!
+            assertEquals("g:dup", aAfter.identityKey)
+            assertEquals("https://cdn.example.com/a.mp3?token=new", aAfter.enclosureUrl)
+            assertTrue(aAfter.inFeed)
+            assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(aBefore.id)!!.playedAt)
+            assertTrue(db.episodeDao().byId(bBefore.id)!!.inFeed)
+            assertEquals(2, db.podcastDao().episodeCount(id))
+        }
+
+    /**
+     * A single stored `g:` row carries no stored evidence that "dup" is reused — the
+     * incoming document supplies it instead: two distinct items share the guid while A
+     * aged out, so neither may claim A's row blindly. The guard's enclosure check
+     * rejects both: A keeps row and state, B and C insert separately (r3 F2).
+     */
+    @Test
+    fun documentDuplicateGuidsKeepTheAgedOutRowsState() =
+        runTest {
+            val id = podcastId()
+            ingest(
+                id,
+                parsedFeed(
+                    items =
+                        listOf(
+                            parsedEpisode(
+                                0,
+                                guid = "dup",
+                                enclosureUrl = "https://cdn.example.com/a.mp3",
+                                title = "A",
+                                pubDate = NOW - 10 * DAY,
+                            ),
+                        ),
+                ),
+                mode = IngestMode.INITIAL,
+            )
+            val aBefore = db.episodeDao().byIdentityKey(id, "g:dup")!!
+            db.episodeStateDao().upsert(episodeStateEntity(aBefore.id, playedAt = NOW - 1_000))
+
+            val result =
+                ingest(
+                    id,
+                    parsedFeed(
+                        items =
+                            listOf(
+                                parsedEpisode(
+                                    0,
+                                    guid = "dup",
+                                    enclosureUrl = "https://cdn.example.com/b.mp3",
+                                    title = "B",
+                                    pubDate = NOW - DAY,
+                                ),
+                                parsedEpisode(
+                                    1,
+                                    guid = "dup",
+                                    enclosureUrl = "https://cdn.example.com/c.mp3",
+                                    title = "C",
+                                    pubDate = NOW - 2 * DAY,
+                                ),
+                            ),
+                    ),
+                )
+
+            assertEquals(2, result.inserted.size)
+            val aAfter = db.episodeDao().byId(aBefore.id)!!
+            assertEquals("g:dup", aAfter.identityKey)
+            assertEquals("https://cdn.example.com/a.mp3", aAfter.enclosureUrl)
+            assertFalse(aAfter.inFeed)
+            assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(aBefore.id)!!.playedAt)
+            assertEquals(
+                3,
+                db
+                    .ingestDao()
+                    .existing(id)
+                    .map { it.identityKey }
+                    .distinct()
+                    .size,
+            )
+            assertEquals(3, db.podcastDao().episodeCount(id))
+        }
+
+    /**
+     * The document's first "dup" item is a different episode; the true continuation
+     * arrives second under a fallback document key and a rotated enclosure query. Pass
+     * 2's query-less match must give the row — its `g:` key, its id and its state — to
+     * the sibling whose enclosure it carries (the r3 F1/F2 matrix cell).
+     */
+    @Test
+    fun documentDuplicateGuidHandsTheRowToTheQueryLessSibling() =
+        runTest {
+            val id = podcastId()
+            ingest(
+                id,
+                parsedFeed(
+                    items =
+                        listOf(
+                            parsedEpisode(
+                                0,
+                                guid = "dup",
+                                enclosureUrl = "https://cdn.example.com/a.mp3?token=old",
+                                title = "A",
+                                pubDate = NOW - 10 * DAY,
+                            ),
+                        ),
+                ),
+                mode = IngestMode.INITIAL,
+            )
+            val aBefore = db.episodeDao().byIdentityKey(id, "g:dup")!!
+            db.episodeStateDao().upsert(episodeStateEntity(aBefore.id, playedAt = NOW - 1_000))
+
+            val result =
+                ingest(
+                    id,
+                    parsedFeed(
+                        items =
+                            listOf(
+                                parsedEpisode(
+                                    0,
+                                    guid = "dup",
+                                    enclosureUrl = "https://cdn.example.com/x.mp3",
+                                    title = "X",
+                                    pubDate = NOW - DAY,
+                                ),
+                                parsedEpisode(
+                                    1,
+                                    guid = "dup",
+                                    enclosureUrl = "https://cdn.example.com/a.mp3?token=new",
+                                    title = "A",
+                                    pubDate = NOW - 10 * DAY,
+                                ),
+                            ),
+                    ),
+                )
+
+            assertEquals(1, result.inserted.size)
+            val aAfter = db.episodeDao().byId(aBefore.id)!!
+            assertEquals("g:dup", aAfter.identityKey)
+            assertEquals("https://cdn.example.com/a.mp3?token=new", aAfter.enclosureUrl)
+            assertTrue(aAfter.inFeed)
+            assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(aBefore.id)!!.playedAt)
+            assertEquals(
+                "https://cdn.example.com/x.mp3",
+                db.episodeDao().byId(result.inserted.single())!!.enclosureUrl,
+            )
+        }
+
+    /**
+     * Stored evidence of reuse (two rows carry "dup"): a document offering a third,
+     * distinct episode under the same guid claims nothing — the reused rows only flip
+     * out of the feed and no state moves.
+     */
+    @Test
+    fun aNewItemSharingAReusedGuidInsertsBesideTheStoredRows() =
+        runTest {
+            val id = podcastId()
+            ingest(
+                id,
+                parsedFeed(
+                    items =
+                        listOf(
+                            parsedEpisode(
+                                0,
+                                guid = "dup",
+                                enclosureUrl = "https://cdn.example.com/a.mp3",
+                                title = "A",
+                                pubDate = NOW - DAY,
+                            ),
+                            parsedEpisode(
+                                1,
+                                guid = "dup",
+                                enclosureUrl = "https://cdn.example.com/b.mp3",
+                                title = "B",
+                                pubDate = NOW - 2 * DAY,
+                            ),
+                        ),
+                ),
+                mode = IngestMode.INITIAL,
+            )
+            val aBefore = db.episodeDao().byIdentityKey(id, "g:dup")!!
+            db.episodeStateDao().upsert(episodeStateEntity(aBefore.id, playedAt = NOW - 1_000))
+            val bBefore =
+                db.ingestDao().existing(id).single {
+                    it.enclosureUrl == "https://cdn.example.com/b.mp3"
+                }
+
+            val result =
+                ingest(
+                    id,
+                    parsedFeed(
+                        items =
+                            listOf(
+                                parsedEpisode(
+                                    0,
+                                    guid = "dup",
+                                    enclosureUrl = "https://cdn.example.com/c.mp3",
+                                    title = "C",
+                                    pubDate = NOW - DAY,
+                                ),
+                            ),
+                    ),
+                )
+
+            assertEquals(1, result.inserted.size)
+            val aAfter = db.episodeDao().byId(aBefore.id)!!
+            assertEquals("g:dup", aAfter.identityKey)
+            assertFalse(aAfter.inFeed)
+            assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(aBefore.id)!!.playedAt)
+            assertFalse(db.episodeDao().byId(bBefore.id)!!.inFeed)
+            assertEquals(3, db.podcastDao().episodeCount(id))
+        }
+
     // --- isNew and the back-catalogue guard -----------------------------------------------------
 
     @Test

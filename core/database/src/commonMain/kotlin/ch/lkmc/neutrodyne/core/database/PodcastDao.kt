@@ -111,6 +111,35 @@ abstract class PodcastDao(
     )
     abstract suspend fun clearRefreshBlock(id: Long)
 
+    /**
+     * The scoped variant of [clearRefreshBlock]: a `RETRY`-origin engine run re-applies the
+     * user's clear inside the run's critical section, so a stale in-flight outcome that
+     * re-blocked the feed while the retry queued cannot swallow it (r3 F3).
+     */
+    suspend fun clearRefreshBlocks(
+        scopeAll: Boolean,
+        ids: List<Long> = emptyList(),
+    ) {
+        ids.ifEmpty { listOf(NO_ID) }.chunked(BIND_CHUNK).forEach { clearRefreshBlocksChunk(scopeAll, it) }
+    }
+
+    /** The Group variant: the same statement with the membership subquery for `id IN (:ids)`. */
+    @Query(
+        "UPDATE podcast SET gone = 0, needsCredentials = 0, failureCount = 0," +
+            " lastErrorKind = NULL, lastErrorDetail = NULL" +
+            " WHERE id IN (SELECT m.podcastId FROM podcast_group_member m WHERE m.groupId = :groupId)",
+    )
+    abstract suspend fun clearRefreshBlocksGroup(groupId: Long)
+
+    @Query(
+        "UPDATE podcast SET gone = 0, needsCredentials = 0, failureCount = 0," +
+            " lastErrorKind = NULL, lastErrorDetail = NULL WHERE (:scopeAll = 1 OR id IN (:ids))",
+    )
+    protected abstract suspend fun clearRefreshBlocksChunk(
+        scopeAll: Boolean,
+        ids: List<Long>,
+    )
+
     /** `Ungrouped`'s member set (03 `refreshFeed` scope mapping). */
     @Query(
         "SELECT id FROM podcast WHERE NOT EXISTS" +

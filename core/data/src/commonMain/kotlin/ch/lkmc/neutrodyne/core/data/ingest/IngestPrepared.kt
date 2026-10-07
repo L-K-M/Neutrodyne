@@ -246,18 +246,20 @@ internal class PreparedItem(
 }
 
 /**
- * The pass-2 lookup structure of 03 step 5: stored rows whose `identityKey` no document key
- * claims — every *assigned* document key is reserved, primary or fallback — indexed by normalised
- * enclosure URL, query-less enclosure URL and title-day. Match order is the spec's: enclosure
- * URL → query-less URL → title+day with guards.
+ * The pass-2 lookup structure of 03 step 5: every stored row pass 1 left unclaimed. The
+ * design's reservation of "primary keys of document items" is narrowed to *claimed* rows —
+ * an unclaimed row whose `identityKey` is an assigned document key can only be a `g:` claim
+ * the reuse guard rejected, and keeping it reserved would strand exactly the episodes pass 2
+ * exists to recover (r3 F1). Indexed by normalised enclosure URL, query-less enclosure URL
+ * and title-day. Match order is the spec's: enclosure URL → query-less URL → title+day with
+ * guards.
  */
 internal class Pass2Index(
     existing: List<ExistingEpisodeKey>,
-    docKeys: Set<String>,
     alreadyMatched: Set<Long>,
 ) {
     private val candidates =
-        existing.filter { it.id !in alreadyMatched && it.identityKey !in docKeys }
+        existing.filter { it.id !in alreadyMatched }
 
     private val byEnclosure = candidates.grouped { it.enclosureUrl?.let(UrlNormalizer::forIdentity) }
     private val byEnclosureNoQuery =

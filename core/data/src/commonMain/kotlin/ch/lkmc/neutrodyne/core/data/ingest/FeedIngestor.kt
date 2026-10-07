@@ -118,7 +118,9 @@ internal class FeedIngestor(
         // A GUID the stored rows prove is reused — carried by two rows, or by one row under a
         // non-guid key — was once decided by enclosure. A later document offering that GUID
         // alone must not claim the `g:` row blind: the row belongs to the sibling whose
-        // enclosure it carries (r2 F1).
+        // enclosure it carries (r2 F1). The incoming document carries the same evidence when
+        // two distinct accepted items share one GUID: the `g:` row then holds a different
+        // episode's identity and only an enclosure-identical item may claim it (r3 F2).
         val guidRowCounts =
             existing.mapNotNull { it.guid?.trim()?.takeIf(String::isNotEmpty) }.groupingBy { it }.eachCount()
         val reusedGuids =
@@ -129,7 +131,17 @@ internal class FeedIngestor(
                         it.isNotEmpty() &&
                             (guidRowCounts[it]!! > 1 || row.identityKey != "g:$it")
                     }
-                }.toSet()
+                }.toMutableSet()
+        reusedGuids +=
+            prepared.items
+                .mapNotNull {
+                    it.episode.guid
+                        ?.trim()
+                        ?.takeIf(String::isNotEmpty)
+                }.groupingBy { it }
+                .eachCount()
+                .filterValues { it > 1 }
+                .keys
 
         // Pass 1 (03 step 4): each item claims rows in claim-key order — its assigned document
         // key first, then its (older-version) candidates. When a repeated GUID puts two items on
@@ -175,24 +187,17 @@ internal class FeedIngestor(
             }
         }
 
-        // Pass 2: rewritten-GUID fallbacks on rows no assigned document key claims (03 step 5).
-        val docKeys = prepared.items.mapTo(HashSet()) { it.docKey }
-        val fallbacks = Pass2Index(existing, docKeys, taken)
+        // Pass 2 (03 step 5): rewritten-GUID and query-rotation fallbacks over every row pass 1
+        // left unclaimed — including a `g:` row whose claim the reuse guard rejected; an
+        // unclaimed doc-keyed row can only be such a rejected `g:` row, so reserving it would
+        // strand exactly the episodes this pass exists to recover. Only claimed rows are
+        // protected, through `taken` (r3 F1).
+        val fallbacks = Pass2Index(existing, taken)
         for (item in prepared.items) {
             if (item.matchedTo != null || item.dropped) continue
             val row = fallbacks.match(item, taken) ?: continue
-            item.matchedTo = row
+            if (claimRow(ingestDao, storedKeys, item, row)) rekeyed++
             taken += row.id
-            if (row.identityKey != item.docKey) {
-                if (item.docKey !in storedKeys) {
-                    ingestDao.rekey(row.id, item.docKey, item.episode.guid)
-                    rekeyed++
-                } else {
-                    // The assigned key belongs to another stored row: keep the matched row's own
-                    // key rather than collide on the unique index.
-                    item.docKey = row.identityKey
-                }
-            }
         }
 
         // An unmatched item whose assigned key a stored row holds (lost to a better enclosure

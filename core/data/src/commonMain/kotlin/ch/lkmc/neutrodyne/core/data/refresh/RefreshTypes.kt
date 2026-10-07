@@ -13,7 +13,19 @@ import ch.lkmc.neutrodyne.core.model.NewEpisodes
  */
 
 /** Why a run exists; append-only (03 API). */
-internal enum class RefreshOrigin { PERIODIC, MANUAL, FOREGROUND, SUBSCRIBE, CONTINUATION, IMPORT, RESTORE, SYNC }
+internal enum class RefreshOrigin {
+    PERIODIC,
+    MANUAL,
+    FOREGROUND,
+    SUBSCRIBE,
+    CONTINUATION,
+    IMPORT,
+    RESTORE,
+    SYNC,
+
+    /** User-initiated retry of a blocked feed: user-driven like MANUAL, plus a scoped block clear. */
+    RETRY,
+}
 
 /**
  * One engine run (03 API). [deadlineElapsedMs] is a monotonic `Clock.elapsedRealtime` deadline:

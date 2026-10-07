@@ -172,6 +172,9 @@ internal class PodcastRepositoryImpl(
     /**
      * "Try again" (03 Per-feed states): flush the batcher, clear the failure block, then a
      * forced refresh of the one podcast; `refresh = false` re-runs 05's import worker (M3+).
+     * The `RETRY` origin re-applies the clear inside the engine's run mutex — a stale
+     * in-flight outcome (a backoff or a 410's `gone`) landing while the run queued cannot
+     * swallow the retry (r3 F3).
      */
     override suspend fun retry(
         podcastId: Long,
@@ -184,7 +187,7 @@ internal class PodcastRepositoryImpl(
                 scope = RefreshScope.Podcasts(listOf(podcastId)),
                 force = true,
                 pagesOnly = false,
-                origin = RefreshOrigin.MANUAL,
+                origin = RefreshOrigin.RETRY,
             )
         }
     }

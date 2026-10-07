@@ -21,8 +21,10 @@ import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.feeds.model.Paging
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
 import mockwebserver3.junit4.MockWebServerRule
@@ -43,6 +45,7 @@ import kotlin.test.assertTrue
  * behaviour, announcements and paging sessions. The scripted `StubSourceAdapter` isolates the
  * engine; `RssSourceAdapter` over MockWebServer covers the unconditional-fetch rule (AC7).
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class RefreshEngineTest {
     @get:Rule val serverRule = MockWebServerRule()
     private val server get() = serverRule.server
@@ -88,6 +91,7 @@ class RefreshEngineTest {
         scope: RefreshScope = RefreshScope.All,
         force: Boolean = false,
         pagesOnly: Boolean = false,
+        origin: RefreshOrigin = RefreshOrigin.PERIODIC,
         dueSlackMs: Long = 0,
         deadlineElapsedMs: Long = RefreshRequest.NO_DEADLINE,
         pagingBudgetMs: Long = 0,
@@ -95,7 +99,7 @@ class RefreshEngineTest {
         scope = scope,
         force = force,
         pagesOnly = pagesOnly,
-        origin = RefreshOrigin.PERIODIC,
+        origin = origin,
         deadlineElapsedMs = deadlineElapsedMs,
         dueSlackMs = dueSlackMs,
         pagingBudgetMs = pagingBudgetMs,
@@ -609,6 +613,193 @@ class RefreshEngineTest {
 
             gate.complete(Unit)
             first.await()
+        }
+
+    @Test
+    fun aWaitingForcedRunRefetchesAfterAStaleBackoffLands() =
+        runTest {
+            // The automatic run holds the engine mutex while its fetch of the feed is parked; the
+            // forced retry's due marks then sit in the open until the stale 500's backoff
+            // overwrites them. The waiting run must re-apply force inside the mutex — before
+            // selection — or it selects nothing and reports a false success (r3 F3).
+            val db = newDb(clock, queryContext = StandardTestDispatcher(testScheduler))
+            val gate = CompletableDeferred<Unit>()
+            val id =
+                seedPodcast(
+                    db,
+                    feedUrl = "https://a.example.com/f",
+                    nextRefreshAt = NOW - 1,
+                    subscribedAt = NOW - 30 * DAY,
+                    failureCount = 3,
+                )
+            val adapter =
+                stubAdapter(onFetch = { _, _ ->
+                    gate.await()
+                    AdapterResult.Failed(
+                        FeedErrorKind.HTTP_SERVER,
+                        http = 500,
+                        retryAfterMs = null,
+                        transient = true,
+                    )
+                })
+            val engine = newRefresher(db, mapOf(SourceType.RSS to adapter), clock, settings)
+            val automatic = backgroundScope.async { engine.run(request()) }
+            testScheduler.runCurrent()
+            assertEquals(listOf(id to FetchMode.REFRESH), adapter.calls)
+
+            val manual =
+                backgroundScope.async {
+                    engine.run(
+                        request(
+                            scope = RefreshScope.Podcasts(listOf(id)),
+                            force = true,
+                            origin = RefreshOrigin.MANUAL,
+                        ),
+                    )
+                }
+            testScheduler.runCurrent()
+            assertEquals(0L, db.podcastDao().byId(id)!!.nextRefreshAt)
+
+            gate.complete(Unit)
+            automatic.await()
+            val report = manual.await()
+
+            // The stale backoff committed first; the re-applied force still retried the feed.
+            assertEquals(2, adapter.calls.count { it.first == id })
+            assertEquals(FeedOutcome.Failed(FeedErrorKind.HTTP_SERVER, 500), report.outcomes[id])
+        }
+
+    @Test
+    fun aRetryRunClearsABlockRewrittenByAnInflightOutcome() =
+        runTest {
+            // The block leg of r3 F3: Try again clears the failure block and forces the run, then
+            // the in-flight fetch lands a 410 — `gone` is set again before the retry wins the
+            // mutex. A RETRY-origin run clears the scope's blocks inside the mutex, so the stale
+            // outcome cannot swallow the retry.
+            val db = newDb(clock, queryContext = StandardTestDispatcher(testScheduler))
+            val gate = CompletableDeferred<Unit>()
+            val id =
+                seedPodcast(
+                    db,
+                    feedUrl = "https://a.example.com/f",
+                    nextRefreshAt = NOW - 1,
+                    subscribedAt = NOW - 30 * DAY,
+                    failureCount = 3,
+                )
+            val adapter =
+                stubAdapter(onFetch = { _, _ ->
+                    gate.await()
+                    AdapterResult.Failed(
+                        FeedErrorKind.HTTP_GONE,
+                        http = 410,
+                        retryAfterMs = null,
+                        transient = false,
+                    )
+                })
+            val engine = newRefresher(db, mapOf(SourceType.RSS to adapter), clock, settings)
+            val automatic = backgroundScope.async { engine.run(request()) }
+            testScheduler.runCurrent()
+
+            // `PodcastRepository.retry`'s two legs: the immediate clear, then the RETRY run.
+            db.podcastDao().clearRefreshBlock(id)
+            val retry =
+                backgroundScope.async {
+                    engine.run(
+                        request(
+                            scope = RefreshScope.Podcasts(listOf(id)),
+                            force = true,
+                            origin = RefreshOrigin.RETRY,
+                        ),
+                    )
+                }
+            testScheduler.runCurrent()
+            assertEquals(0L, db.podcastDao().byId(id)!!.nextRefreshAt)
+
+            gate.complete(Unit)
+            automatic.await()
+            val report = retry.await()
+
+            assertEquals(2, adapter.calls.count { it.first == id })
+            assertEquals(FeedOutcome.Failed(FeedErrorKind.HTTP_GONE, 410), report.outcomes[id])
+        }
+
+    @Test
+    fun aTimedOutForcedRunRestoresMarksAnInflightOutcomeOverwrote() =
+        runTest {
+            // The timeout leg of r3 F3: feed A keeps the mutex past the retry's wait budget while
+            // feed B's stale 500 flushes mid-wait through the batch deadline — the marks it
+            // overwrote must be re-applied before the timed-out run reports, so the retry stays
+            // due for the next selection instead of vanishing.
+            val db = newDb(clock, queryContext = StandardTestDispatcher(testScheduler))
+            val gateA = CompletableDeferred<Unit>()
+            val gateB = CompletableDeferred<Unit>()
+            val a =
+                seedPodcast(
+                    db,
+                    feedUrl = "https://a.example.com/f",
+                    nextRefreshAt = NOW - 1,
+                    subscribedAt = NOW - 30 * DAY,
+                )
+            val b =
+                seedPodcast(
+                    db,
+                    feedUrl = "https://b.example.com/f",
+                    nextRefreshAt = NOW - 1,
+                    subscribedAt = NOW - 30 * DAY,
+                    failureCount = 3,
+                )
+            val adapter =
+                stubAdapter(onFetch = { feed, _ ->
+                    (if (feed.id == a) gateA else gateB).await()
+                    AdapterResult.Failed(
+                        FeedErrorKind.HTTP_SERVER,
+                        http = 500,
+                        retryAfterMs = null,
+                        transient = true,
+                    )
+                })
+            val engine = newRefresher(db, mapOf(SourceType.RSS to adapter), clock, settings)
+            val automatic = backgroundScope.async { engine.run(request()) }
+            testScheduler.runCurrent()
+            assertEquals(setOf(a, b), adapter.calls.map { it.first }.toSet())
+
+            val retry =
+                backgroundScope.async {
+                    engine.run(
+                        request(
+                            scope = RefreshScope.Podcasts(listOf(b)),
+                            force = true,
+                            origin = RefreshOrigin.MANUAL,
+                            deadlineElapsedMs = clock.elapsedRealtime() + 60_000L,
+                        ),
+                    )
+                }
+            testScheduler.runCurrent()
+            assertEquals(0L, db.podcastDao().byId(b)!!.nextRefreshAt)
+
+            // B's stale outcome buffers; the batcher's 5 s deadline flushes it while A's fetch
+            // still holds the engine mutex.
+            gateB.complete(Unit)
+            testScheduler.runCurrent()
+            clock.nowMs += 5_001L
+            advanceTimeBy(5_001L)
+            testScheduler.runCurrent()
+            assertTrue((db.podcastDao().byId(b)!!.nextRefreshAt ?: 0) > 0)
+
+            advanceTimeBy(31_000L)
+            val report = retry.await()
+
+            assertTrue(report.stoppedByDeadline)
+            assertEquals(emptyMap(), report.outcomes)
+            assertEquals(1, report.remaining)
+            assertEquals(0L, db.podcastDao().byId(b)!!.nextRefreshAt)
+
+            gateA.complete(Unit)
+            automatic.await()
+
+            // A plain later selection picks the restored mark up — durable, not reported-only.
+            engine.run(request())
+            assertEquals(2, adapter.calls.count { it.first == b })
         }
 
     @Test

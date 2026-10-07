@@ -135,6 +135,9 @@ internal class FeedRefresher(
                 }
             }
             if (!owned) {
+                // An older run's outcome could have overwritten this request's marks while it
+                // waited: re-apply them so the scope stays due for the next selection (r3 F3).
+                reapplyIntent(request)
                 // 03 step 1: a timed-out second run reports the scope's due count as remaining.
                 return RefreshReport(
                     outcomes = emptyMap(),
@@ -159,6 +162,10 @@ internal class FeedRefresher(
     }
 
     private suspend fun runLocked(request: RefreshRequest): RefreshReport {
+        // The run that just released the mutex may have committed an older outcome on top of
+        // this request's marks (a backoff over `nextRefreshAt = 0`, a 410's `gone`): the
+        // user's intent is re-applied inside the critical section, before selection (r3 F3).
+        reapplyIntent(request)
         val previousFinishedAt =
             suspendRunCatching { settings.get(FeedsSettingKeys.LAST_RUN_FINISHED_AT) }
                 .getOrNull()
@@ -850,6 +857,36 @@ internal class FeedRefresher(
             RefreshScope.All -> db.podcastDao().forceDue(scopeAll = true)
             is RefreshScope.Group -> db.podcastDao().forceDueGroup(scope.groupId)
             is RefreshScope.Podcasts -> db.podcastDao().forceDue(scopeAll = false, ids = scope.ids)
+        }
+    }
+
+    /**
+     * The request's persisted user intent: a `RETRY` clears the scope's failure blocks and a
+     * forced run re-marks it due. The entry writes land before the mutex wait, but an older
+     * run's outcome can overwrite them while the request queues (a backoff lands on
+     * `nextRefreshAt = 0`, a stale 410 re-sets `gone`), so they are re-applied after the grant
+     * and again when the wait times out — the marks outlive stale outcomes either way (r3 F3).
+     * Blocks clear before the force write: `forceDue` only touches unblocked rows.
+     */
+    private suspend fun reapplyIntent(request: RefreshRequest) {
+        if (request.origin == RefreshOrigin.RETRY) clearBlocks(request.scope)
+        if (request.force) forceDue(request.scope)
+    }
+
+    /** The scoped variant of 03's `PodcastDao.clearRefreshBlock` ("Try again"). */
+    private suspend fun clearBlocks(scope: RefreshScope) {
+        when (scope) {
+            RefreshScope.All -> {
+                db.podcastDao().clearRefreshBlocks(scopeAll = true)
+            }
+
+            is RefreshScope.Group -> {
+                db.podcastDao().clearRefreshBlocksGroup(scope.groupId)
+            }
+
+            is RefreshScope.Podcasts -> {
+                db.podcastDao().clearRefreshBlocks(scopeAll = false, ids = scope.ids)
+            }
         }
     }
 
