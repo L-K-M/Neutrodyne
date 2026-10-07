@@ -96,8 +96,26 @@ blockers="$(gh issue list --repo "$REPO" --label release-blocker --state open --
 # nightly whose checkout IS this commit and whose youtube-smoke jobs
 # (instrumented-full + release-build-smoke, nightly.yml's scope filter) ran
 # green on it. A green run for another sha or a narrower scope proves nothing.
-nightly="$(gh run list --repo "$REPO" --workflow nightly.yml --branch "$BRANCH" --limit 5 \
-    --json conclusion,event --jq '[.[] | select(.event == "schedule" and .conclusion != null)] | .[0].conclusion' 2>/dev/null || echo '')"
+# Judged per job: `repro` is report-only (D79), so its result never gates a tag; every other
+# job of the latest finished scheduled run must have succeeded (or been skipped by its scope).
+nightly=""
+nightly_id="$(gh run list --repo "$REPO" --workflow nightly.yml --branch "$BRANCH" --limit 5 \
+    --json databaseId,conclusion,event \
+    --jq '[.[] | select(.event == "schedule" and .conclusion != null)] | .[0].databaseId // empty' 2>/dev/null || echo '')"
+if [ -n "$nightly_id" ]; then
+    jobs_url="repos/$REPO/actions/runs/$nightly_id/jobs?per_page=100"
+    failed_jobs="$(gh api "$jobs_url" \
+        --jq '[.jobs[] | select(.name != "repro" and .conclusion != "success" and .conclusion != "skipped") | .name] | join(", ")' \
+        2>/dev/null || echo 'unknown')"
+    # A run whose gating jobs were all skipped (or that listed no jobs) proves nothing.
+    ok_jobs="$(gh api "$jobs_url" --jq '[.jobs[] | select(.name != "repro" and .conclusion == "success")] | length' \
+        2>/dev/null || echo 0)"
+    if [ -z "$failed_jobs" ] && [ "$ok_jobs" -gt 0 ]; then
+        nightly="success"
+    else
+        nightly="failed: ${failed_jobs:-no gating job succeeded}"
+    fi
+fi
 if [ "$nightly" != "success" ]; then
     smoke_ok=0
     if [ "$HOTFIX" -eq 1 ]; then
