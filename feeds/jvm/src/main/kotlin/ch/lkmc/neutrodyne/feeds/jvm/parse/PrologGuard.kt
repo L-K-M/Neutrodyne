@@ -7,6 +7,12 @@ package ch.lkmc.neutrodyne.feeds.jvm.parse
  * processing instructions and markup declarations — until the root element. `<!ENTITY` inside a
  * declaration means the document is hostile. `FEATURE_PROCESS_DOCDECL` stays off and no external
  * DTD is ever fetched (N9).
+ *
+ * Declaration boundaries are cut exactly where relaxed kxml2 cuts them — `parseDoctype` honours
+ * single quotes only and ends a declaration at the first unquoted `>` — so a `"`-quoted DOCTYPE
+ * literal cannot hide markup from the guard, and constructs inside an internal subset are scanned
+ * rather than treated as one opaque literal. The prolog ends at the first `</`-`-`/`!`-`?`-less
+ * `<x` too: relaxed kxml2 accepts any name-start character there (digits included).
  */
 internal object PrologGuard {
     private const val ENTITY_MARKER = "<!entity"
@@ -24,6 +30,11 @@ internal object PrologGuard {
         // Decoding first makes the scan encoding-aware: a UTF-16 prolog cannot hide its DOCTYPE.
         // A declaration the parser's own setInput cannot decode fails closed.
         val text = EncodingSniff.decode(bytes.copyOf(minOf(bytes.size, scanLimit))) ?: return true
+        return isHostileText(text)
+    }
+
+    /** The same scan over an already-decoded view — the charset-override pass' prolog window. */
+    fun isHostileText(text: String): Boolean {
         var i = 0
         while (i < text.length) {
             when {
@@ -49,7 +60,10 @@ internal object PrologGuard {
                     i = declEnd
                 }
 
-                text[i] == '<' && i + 1 < text.length && isNameStart(text[i + 1]) -> {
+                // The root element: relaxed kxml2 starts a tag on any char that is not `!`, `?` or
+                // `/`, so the prolog ends there whatever the name looks like.
+                text[i] == '<' && i + 1 < text.length &&
+                    text[i + 1] != '!' && text[i + 1] != '?' && text[i + 1] != '/' -> {
                     return false
                 }
 
@@ -62,91 +76,34 @@ internal object PrologGuard {
     }
 
     /**
-     * Scans one markup declaration starting after `<!` and returns the index just past its `>`, or
-     * a negative value when an `<!ENTITY` declaration is found inside it. Quoted values (an entity
-     * value may itself contain `<` or the marker as text) and the `[…]` internal subset are honoured;
-     * inside the subset, comments and processing instructions keep their own delimiters so a quote
-     * inside `<!-- " -->` cannot hide the entity declarations that follow it.
+     * Scans one markup declaration starting after `<!` and returns the index just past its end, or a
+     * negative value when an `<!ENTITY` declaration is found inside it. The boundary is kxml2's
+     * `parseDoctype` verbatim: `'` toggles the quoted state, an unquoted `<` nests, and an unquoted
+     * `>` at depth zero ends the declaration — a `"` region inside a DOCTYPE literal does not hide
+     * what follows it from either scanner.
      */
     private fun markupDeclEnd(
         text: String,
         start: Int,
     ): Int {
         var i = start
-        var inSubset = false
-        var quote = 0.toChar()
+        // The `<` that opened the declaration counts towards the nesting depth, like kxml2's `1`.
+        var depth = 1
+        var quoted = false
         while (i < text.length) {
-            val c = text[i]
-            if (quote != 0.toChar()) {
-                if (c == quote) quote = 0.toChar()
-                i++
-                continue
-            }
-            when {
-                text.startsWith(ENTITY_MARKER, i, ignoreCase = true) -> {
-                    return -1
-                }
-
-                inSubset && text.startsWith(COMMENT_OPEN, i) -> {
-                    i =
-                        skipDeclTo(text, COMMENT_CLOSE, i + COMMENT_OPEN.length)
-                }
-
-                inSubset && text.startsWith(PI_OPEN, i) -> {
-                    i = skipDeclTo(text, PI_CLOSE, i + PI_OPEN.length)
-                }
-
-                c == '"' || c == '\'' -> {
-                    quote = c
-                    i++
-                }
-
-                c == '[' -> {
-                    inSubset = true
-                    i++
-                }
-
-                c == ']' && inSubset && nextNonWhitespaceIsClose(text, i + 1) -> {
-                    return closeIndex(text, i + 1)
-                }
-
-                c == '>' && !inSubset -> {
-                    return i + 1
-                }
-
-                else -> {
-                    i++
+            if (text.startsWith(ENTITY_MARKER, i, ignoreCase = true)) return -1
+            when (text[i]) {
+                '\'' -> quoted = !quoted
+                '<' -> if (!quoted) depth++
+                '>' -> {
+                    if (!quoted) {
+                        depth--
+                        if (depth == 0) return i + 1
+                    }
                 }
             }
+            i++
         }
         return text.length
     }
-
-    /** The index just past the next [marker], or the end of the text when it never comes. */
-    private fun skipDeclTo(
-        text: String,
-        marker: String,
-        from: Int,
-    ): Int {
-        val close = text.indexOf(marker, from)
-        return if (close < 0) text.length else close + marker.length
-    }
-
-    /** Whether the next non-whitespace char after [from] is `>` (the internal subset is done). */
-    private fun nextNonWhitespaceIsClose(
-        text: String,
-        from: Int,
-    ): Boolean = closeIndex(text, from) > 0
-
-    /** The index just past the next `>` after whitespace, or -1 when something else comes first. */
-    private fun closeIndex(
-        text: String,
-        from: Int,
-    ): Int {
-        var i = from
-        while (i < text.length && text[i].isWhitespace()) i++
-        return if (i < text.length && text[i] == '>') i + 1 else -1
-    }
-
-    private fun isNameStart(c: Char): Boolean = c in 'a'..'z' || c in 'A'..'Z' || c == '_' || c == ':' || c.code > 127
 }
