@@ -69,7 +69,13 @@ class MediaContentOrderingTest {
                         "length=\"1\"/></item></channel></rss>",
                 ),
             ).feed
-        assertEquals("audio/mpeg", rss.items.single().primaryEnclosure?.effectiveType)
+        assertEquals(
+            "audio/mpeg",
+            rss.items
+                .single()
+                .primaryEnclosure
+                ?.effectiveType,
+        )
 
         val atom =
             assertIs<ParseResult.Ok>(
@@ -79,7 +85,13 @@ class MediaContentOrderingTest {
                         "type=\"VIDEO/MP4\"/></entry></feed>",
                 ),
             ).feed
-        assertEquals("video/mp4", atom.items.single().primaryEnclosure?.effectiveType)
+        assertEquals(
+            "video/mp4",
+            atom.items
+                .single()
+                .primaryEnclosure
+                ?.effectiveType,
+        )
     }
 
     private fun parse(xml: String): ParseResult =

@@ -93,8 +93,14 @@ internal object PrologGuard {
         while (i < text.length) {
             if (text.startsWith(ENTITY_MARKER, i, ignoreCase = true)) return -1
             when (text[i]) {
-                '\'' -> quoted = !quoted
-                '<' -> if (!quoted) depth++
+                '\'' -> {
+                    quoted = !quoted
+                }
+
+                '<' -> {
+                    if (!quoted) depth++
+                }
+
                 '>' -> {
                     if (!quoted) {
                         depth--

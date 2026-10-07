@@ -46,9 +46,13 @@ internal object SupplementaryRefs {
                     i = end
                 }
 
-                '<' -> i = skipMarkup(text, i, edits ?: ArrayList<Triple<Int, Int, Int>>().also { edits = it })
+                '<' -> {
+                    i = skipMarkup(text, i, edits ?: ArrayList<Triple<Int, Int, Int>>().also { edits = it })
+                }
 
-                else -> i++
+                else -> {
+                    i++
+                }
             }
         }
         val found = edits ?: return null
@@ -108,17 +112,33 @@ internal object SupplementaryRefs {
         edits: MutableList<Triple<Int, Int, Int>>,
     ): Int =
         when {
-            text.startsWith(COMMENT_OPEN, lt) -> endAt(text, COMMENT_CLOSE, lt + COMMENT_OPEN.length)
-            text.startsWith(CDATA_OPEN, lt) -> endAt(text, CDATA_CLOSE, lt + CDATA_OPEN.length)
-            text.startsWith(PI_OPEN, lt) ->
+            text.startsWith(COMMENT_OPEN, lt) -> {
+                endAt(text, COMMENT_CLOSE, lt + COMMENT_OPEN.length)
+            }
+
+            text.startsWith(CDATA_OPEN, lt) -> {
+                endAt(text, CDATA_CLOSE, lt + CDATA_OPEN.length)
+            }
+
+            text.startsWith(PI_OPEN, lt) -> {
                 if (isXmlDecl(text, lt)) {
                     scanTag(text, lt + PI_OPEN.length, edits, xmlDecl = true)
                 } else {
                     endAt(text, PI_CLOSE, lt + PI_OPEN.length)
                 }
-            lt + 1 < text.length && text[lt + 1] == '/' -> endTagEnd(text, lt + 2)
-            text.startsWith("<!", lt) -> markupDeclEnd(text, lt + 2)
-            else -> scanTag(text, lt + 1, edits, xmlDecl = false)
+            }
+
+            lt + 1 < text.length && text[lt + 1] == '/' -> {
+                endTagEnd(text, lt + 2)
+            }
+
+            text.startsWith("<!", lt) -> {
+                markupDeclEnd(text, lt + 2)
+            }
+
+            else -> {
+                scanTag(text, lt + 1, edits, xmlDecl = false)
+            }
         }
 
     /** `<?xml` followed by whitespace (or EOF) takes kxml2's xmldecl attribute loop, not the PI one. */
@@ -162,8 +182,14 @@ internal object SupplementaryRefs {
         var quoted = false
         while (i < text.length) {
             when (text[i]) {
-                '\'' -> quoted = !quoted
-                '<' -> if (!quoted) depth++
+                '\'' -> {
+                    quoted = !quoted
+                }
+
+                '<' -> {
+                    if (!quoted) depth++
+                }
+
                 '>' -> {
                     if (!quoted) {
                         depth--
@@ -192,9 +218,18 @@ internal object SupplementaryRefs {
             if (i >= text.length) return text.length
             val c = text[i]
             when {
-                xmlDecl && c == '?' -> return minOf(i + 2, text.length)
-                !xmlDecl && c == '>' -> return i + 1
-                !xmlDecl && c == '/' -> return minOf(skipWhitespace(text, i + 1) + 1, text.length)
+                xmlDecl && c == '?' -> {
+                    return minOf(i + 2, text.length)
+                }
+
+                !xmlDecl && c == '>' -> {
+                    return i + 1
+                }
+
+                !xmlDecl && c == '/' -> {
+                    return minOf(skipWhitespace(text, i + 1) + 1, text.length)
+                }
+
                 else -> {
                     i = skipWhitespace(text, nameEnd(text, i))
                     if (i < text.length && text[i] == '=') {
@@ -232,9 +267,17 @@ internal object SupplementaryRefs {
                     i = end
                 }
 
-                quote == ' ' && (c <= ' ' || c == '>') -> return i
-                c == quote -> return i + 1
-                else -> i++
+                quote == ' ' && (c <= ' ' || c == '>') -> {
+                    return i
+                }
+
+                c == quote -> {
+                    return i + 1
+                }
+
+                else -> {
+                    i++
+                }
             }
         }
         return i

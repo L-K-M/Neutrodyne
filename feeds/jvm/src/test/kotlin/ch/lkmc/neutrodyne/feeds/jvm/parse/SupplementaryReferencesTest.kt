@@ -25,8 +25,7 @@ class SupplementaryReferencesTest {
             .parse({ Buffer().write(xml.encodeToByteArray()) }, null, baseUrl)
             .let { assertIs<ParseResult.Ok>(it).feed }
 
-    private fun itemXml(content: String): String =
-        "<rss version=\"2.0\"><channel><item>$content</item></channel></rss>"
+    private fun itemXml(content: String): String = "<rss version=\"2.0\"><channel><item>$content</item></channel></rss>"
 
     @Test
     fun supplementaryReferenceInGuidMatchesLiteral() {

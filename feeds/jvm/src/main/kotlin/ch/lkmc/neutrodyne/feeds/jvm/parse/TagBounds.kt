@@ -41,11 +41,17 @@ internal object TagBounds {
         while (i < text.length) {
             when {
                 text[i] != '<' -> i++
+
                 text.startsWith(COMMENT_OPEN, i) -> i = skipTo(text, COMMENT_CLOSE, i + COMMENT_OPEN.length)
+
                 text.startsWith(CDATA_OPEN, i) -> i = skipTo(text, CDATA_CLOSE, i + CDATA_OPEN.length)
+
                 text.startsWith(PI_OPEN, i) -> i = scanLegacyPi(text, i, limits)
+
                 i + 1 < text.length && text[i + 1] == '/' -> i = skipToEndTag(text, i + 2)
+
                 text.startsWith("<!", i) -> i = skipMarkupDecl(text, i + 2)
+
                 // Relaxed kxml2 pushes any first name char: `<0 …>` is a start tag to it.
                 else -> i = scanStartTag(text, i + 1, limits, xmlDecl = false)
             }
@@ -100,8 +106,14 @@ internal object TagBounds {
         var quoted = false
         while (i < text.length) {
             when (text[i]) {
-                '\'' -> quoted = !quoted
-                '<' -> if (!quoted) depth++
+                '\'' -> {
+                    quoted = !quoted
+                }
+
+                '<' -> {
+                    if (!quoted) depth++
+                }
+
                 '>' -> {
                     if (!quoted) {
                         depth--
@@ -149,7 +161,9 @@ internal object TagBounds {
                     return minOf(i + 2, text.length)
                 }
 
-                !xmlDecl && c == '>' -> return i + 1
+                !xmlDecl && c == '>' -> {
+                    return i + 1
+                }
 
                 !xmlDecl && c == '/' -> {
                     // Degenerated tag: `/`, whitespace, then a single char read expecting `>`.
