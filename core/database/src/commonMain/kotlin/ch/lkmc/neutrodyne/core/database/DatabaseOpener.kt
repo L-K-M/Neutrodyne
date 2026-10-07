@@ -95,9 +95,6 @@ class DatabaseOpener(
     /** The recovery cause, retained across failed attempts until a result is published. */
     private var pendingRecovery: RecoveryCause? = null
 
-    /** One stamp per recovery: a retried partial quarantine move lands in the same directory. */
-    private var quarantineStamp: String? = null
-
     private val _openState = MutableStateFlow<DatabaseOpenState>(DatabaseOpenState.Pending)
 
     /** What the start-up gate renders: `Pending` until the open resolves. */
@@ -119,7 +116,6 @@ class DatabaseOpener(
                     val outcome = openWithRecovery()
                     result = outcome.result
                     pendingRecovery = null
-                    quarantineStamp = null
                     deferred.complete(outcome.db)
                     _openState.value = DatabaseOpenState.Opened(outcome.result)
                     outcome.result
@@ -160,30 +156,39 @@ class DatabaseOpener(
     private enum class Preflight { OK, CORRUPT, NEWER }
 
     /**
-     * The recovery chain: quarantine marker → quarantine; existing file → raw-driver preflight
-     * (`PRAGMA user_version` — a NOTADB/CORRUPT file or a version above [NeutrodyneDatabase.VERSION]
-     * quarantines); open Room → a migration or corruption error quarantines; after a quarantine a
-     * fresh database is created and `recovered` reports the cause. A failed or partial quarantine
-     * move propagates: the marker stays set and nothing opens over the unmoved file.
+     * The recovery chain: a pending quarantine stamp or quarantine marker → quarantine; existing
+     * file → raw-driver preflight (`PRAGMA user_version` — a NOTADB/CORRUPT file or a version
+     * above [NeutrodyneDatabase.VERSION] quarantines); open Room → a migration or corruption
+     * error quarantines; after a quarantine a fresh database is created and `recovered` reports
+     * the cause. A failed or partial quarantine move propagates: the marker stays set and
+     * nothing opens over the unmoved file.
      */
     private suspend fun openWithRecovery(): OpenOutcome {
-        if (factory.quarantineMarker) {
+        if (factory.quarantineMarker || factory.pendingQuarantine != null) {
             // The cause is recorded only once the move completed: `recovered` is published only
-            // when the old file really was quarantined, and it survives a failed fresh open.
+            // when the old file really was quarantined, and it survives a failed fresh open. A
+            // resumed pending stamp without a marker still reports CORRUPT — the original cause
+            // is lost with the process that died mid-move.
             quarantine()
             pendingRecovery = RecoveryCause.CORRUPT
-            runCatching { factory.quarantineMarker = false }
-                .onFailure { Log.e(TAG, it) { "quarantine marker could not be cleared" } }
+            // Both removals are verified and propagate — marker first so that while either
+            // record survives, the next attempt resumes into the same quarantine directory.
+            // Never let a launch create a replacement database under a stale marker: it would
+            // quarantine the healthy new library, or scatter the files across a second stamp.
+            factory.quarantineMarker = false
+            factory.pendingQuarantine = null
         }
         if (factory.exists()) {
             when (preflightUserVersion()) {
                 Preflight.CORRUPT -> {
                     quarantine()
+                    factory.pendingQuarantine = null
                     pendingRecovery = RecoveryCause.CORRUPT
                 }
 
                 Preflight.NEWER -> {
                     quarantine()
+                    factory.pendingQuarantine = null
                     pendingRecovery = RecoveryCause.DOWNGRADE
                 }
 
@@ -198,13 +203,19 @@ class DatabaseOpener(
                         // every path. Cancellation stays cancellation — it is never classified.
                         closeQuietly(candidate?.db)
                         if (t is CancellationException) throw t
-                        // Only a migration or corruption error quarantines; a full disk or an IO
-                        // error fails the open without touching the file (02: nothing is deleted).
-                        if (isDiskFull(t) || isIo(t)) throw DatabaseOpenException(classify(t), t)
+                        // Only a migration or corruption error quarantines; a full disk, an IO
+                        // error or another storage/open failure (permissions, a read-only file,
+                        // a lock held by a live process) fails the open without touching the
+                        // file (02: nothing is deleted). SQLITE_READONLY reaches Room here:
+                        // the raw driver preflight reads it fine through the read-only fallback.
+                        if (isDiskFull(t) || isStorageFailure(t)) {
+                            throw DatabaseOpenException(classify(t), t)
+                        }
                         if (strictMigrations && !isCorruption(t)) {
                             throw DatabaseOpenException(DatabaseOpenException.Reason.UNKNOWN, t)
                         }
                         quarantine()
+                        factory.pendingQuarantine = null
                         pendingRecovery =
                             if (isCorruption(t)) RecoveryCause.CORRUPT else RecoveryCause.MIGRATION_FAILED
                     }
@@ -274,10 +285,14 @@ class DatabaseOpener(
         return OpenOutcome(db, OpenResult(created = created, recovered = pendingRecovery))
     }
 
-    // A failed move propagates: the marker stays set, nothing is opened over the unmoved file,
-    // and the retried move reuses the same stamp so one recovery fills one quarantine directory.
+    // The stamp is persisted in the `quarantine-pending` file before the first move: a failed
+    // move propagates (nothing opens over the unmoved file) and a crashed or killed attempt
+    // resumes into the same directory on the next launch instead of scattering the files across
+    // a fresh stamp — an orphaned sidecar is a piece of the library prune must not destroy.
+    // The caller clears the record once the recovery request itself is resolved.
     private fun quarantine() {
-        val stamp = quarantineStamp ?: clock.now().toString().also { quarantineStamp = it }
+        val stamp = factory.pendingQuarantine ?: clock.now().toString()
+        factory.pendingQuarantine = stamp
         factory.quarantine(stamp)
     }
 
@@ -291,7 +306,7 @@ class DatabaseOpener(
     private fun classify(t: Throwable): DatabaseOpenException.Reason =
         when {
             isDiskFull(t) -> DatabaseOpenException.Reason.DISK_FULL
-            isIo(t) -> DatabaseOpenException.Reason.IO
+            isStorageFailure(t) -> DatabaseOpenException.Reason.IO
             else -> DatabaseOpenException.Reason.UNKNOWN
         }
 
@@ -307,10 +322,10 @@ class DatabaseOpener(
             DISK_FULL_MARKERS.any { text.contains(it) }
     }
 
-    private fun isIo(t: Throwable): Boolean {
+    private fun isStorageFailure(t: Throwable): Boolean {
         val text = chainText(t)
-        return sqlitePrimaryCodes(text).any { it in IO_CODES } ||
-            IO_MARKERS.any { text.contains(it) }
+        return sqlitePrimaryCodes(text).any { it in STORAGE_CODES } ||
+            STORAGE_MARKERS.any { text.contains(it) }
     }
 
     /**
@@ -334,8 +349,16 @@ class DatabaseOpener(
 
         const val PRIMARY_CODE_MASK = 0xFF
 
-        /** `SQLITE_IOERR` (10), `SQLITE_CANTOPEN` (14), `SQLITE_FULL` (13), `SQLITE_CORRUPT` (11), `SQLITE_NOTADB` (26). */
-        val IO_CODES = setOf(10, 14)
+        /**
+         * Storage/open failures: the environment refuses a file that may be perfectly healthy —
+         * permissions `SQLITE_PERM` (3), a lock held by a live process `SQLITE_BUSY` (5) or
+         * `SQLITE_LOCKED` (6), out of memory `SQLITE_NOMEM` (7), a read-only file
+         * `SQLITE_READONLY` (8), IO errors `SQLITE_IOERR` (10) and `SQLITE_CANTOPEN` (14), no
+         * large-file support `SQLITE_NOLFS` (22). None may quarantine (2026-10-07).
+         */
+        val STORAGE_CODES = setOf(3, 5, 6, 7, 8, 10, 14, 22)
+
+        /** `SQLITE_FULL` (13); `SQLITE_CORRUPT` (11), `SQLITE_NOTADB` (26). */
         val DISK_FULL_CODES = setOf(13)
         val CORRUPT_CODES = setOf(11, 26)
 
@@ -353,9 +376,25 @@ class DatabaseOpener(
         val DISK_FULL_MARKERS =
             listOf("SQLITE_FULL", "database or disk is full", "SQLiteFullException", "ENOSPC")
 
-        /** `SQLITE_CANTOPEN` (14) and `SQLITE_IOERR` (10). */
-        val IO_MARKERS =
-            listOf("SQLITE_CANTOPEN", "SQLITE_IOERR", "DiskIOException", "CantOpenDatabase", "IOException")
+        /** The [STORAGE_CODES] spellings across both drivers and Android's exception class names. */
+        val STORAGE_MARKERS =
+            listOf(
+                "SQLITE_PERM",
+                "SQLITE_BUSY",
+                "SQLITE_LOCKED",
+                "SQLITE_NOMEM",
+                "SQLITE_READONLY",
+                "SQLITE_CANTOPEN",
+                "SQLITE_IOERR",
+                "SQLITE_NOLFS",
+                "SQLiteReadOnlyDatabaseException",
+                "SQLiteDatabaseLockedException",
+                "readonly database",
+                "database is locked",
+                "DiskIOException",
+                "CantOpenDatabase",
+                "IOException",
+            )
     }
 }
 

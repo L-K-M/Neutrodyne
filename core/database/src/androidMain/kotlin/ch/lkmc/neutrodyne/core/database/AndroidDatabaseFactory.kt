@@ -41,7 +41,9 @@ class AndroidDatabaseFactory(
     }
 
     override fun pruneQuarantine(now: Long) {
-        val dirs = quarantineDir.listFiles()?.filter { it.isDirectory } ?: return
+        // A pending destination still awaits the rest of its files — never prune it.
+        val pending = pendingQuarantine
+        val dirs = quarantineDir.listFiles()?.filter { it.isDirectory && it.name != pending } ?: return
         val keep =
             dirs
                 .filter { isFresh(it, now) }
@@ -51,14 +53,35 @@ class AndroidDatabaseFactory(
         dirs.filter { it !in keep }.forEach { it.deleteRecursively() }
     }
 
+    // File.delete() reports failure only through its return value — check it: a surviving
+    // marker or pending stamp must propagate so the next launch resumes the same quarantine
+    // instead of re-quarantining a healthy replacement.
     override var quarantineMarker: Boolean
         get() = markerFile.exists()
         set(value) {
             if (value) {
                 markerFile.parentFile?.mkdirs()
                 markerFile.createNewFile()
+            } else if (markerFile.exists() && !markerFile.delete()) {
+                throw IOException("cannot delete $markerFile")
+            }
+        }
+
+    override var pendingQuarantine: String?
+        get() =
+            pendingFile
+                .takeIf { it.isFile }
+                ?.readText()
+                ?.trim()
+                ?.ifEmpty { null }
+        set(value) {
+            if (value == null) {
+                if (pendingFile.exists() && !pendingFile.delete()) {
+                    throw IOException("cannot delete $pendingFile")
+                }
             } else {
-                markerFile.delete()
+                pendingFile.parentFile?.mkdirs()
+                pendingFile.writeText(value)
             }
         }
 
@@ -67,6 +90,9 @@ class AndroidDatabaseFactory(
 
     private val markerFile: File
         get() = File(appContext.getDatabasePath(NeutrodyneDatabase.FILE_NAME).parentFile, MARKER_FILE)
+
+    private val pendingFile: File
+        get() = File(appContext.getDatabasePath(NeutrodyneDatabase.FILE_NAME).parentFile, PENDING_FILE)
 
     /** The stamp is the quarantine's epoch-millis name; fall back to the newest child's mtime. */
     private fun isFresh(
@@ -81,6 +107,7 @@ class AndroidDatabaseFactory(
     private companion object {
         const val QUARANTINE_DIR = "quarantine"
         const val MARKER_FILE = "quarantine-requested"
+        const val PENDING_FILE = "quarantine-pending"
 
         /** 02: quarantine keeps only the newest copy, at most 14 days. */
         const val QUARANTINE_KEEP_MS = 14L * 24 * 60 * 60 * 1000

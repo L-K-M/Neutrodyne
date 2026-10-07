@@ -416,6 +416,165 @@ class DatabaseOpenerTest {
         }
 
     @Test
+    fun storageAndOpenFailuresNeverQuarantine() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+            val dbFile = dir.resolve(NeutrodyneDatabase.FILE_NAME)
+            val sizeBefore = Files.size(dbFile)
+
+            // A read-only file passes SQLite's read-only open fallback and preflight, then fails
+            // Room's first write with SQLITE_READONLY (8); a database held by a live process
+            // reports SQLITE_BUSY (5) — the file is healthy, so neither may quarantine it.
+            val cases =
+                listOf(
+                    "Error code: 8, message: attempt to write a readonly database",
+                    "attempt to write a readonly database (code 8 SQLITE_READONLY)",
+                    "database is locked (code 5 SQLITE_BUSY)",
+                    "unable to open database file (code 3 SQLITE_PERM)",
+                )
+            for (message in cases) {
+                val throwing =
+                    object : DatabaseFactory by factory {
+                        override fun builder(): RoomDatabase.Builder<NeutrodyneDatabase> =
+                            throw IllegalStateException(message)
+                    }
+                val error = assertThrows { opener(f = throwing).awaitOpen() }
+                assertIs<DatabaseOpenException>(error)
+                assertEquals(DatabaseOpenException.Reason.IO, error.reason, message)
+                assertFalse(
+                    Files.exists(dir.resolve("quarantine")),
+                    "$message is a storage/open failure and must never quarantine",
+                )
+            }
+            assertEquals(sizeBefore, Files.size(dbFile), "the database file is untouched")
+        }
+
+    @Test
+    fun aFailedMarkerRemovalPropagatesBeforeCreatingTheReplacement() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+            factory.quarantineMarker = true
+
+            var deleteFails = true
+            val stickyMarker =
+                object : DatabaseFactory by factory {
+                    override var quarantineMarker: Boolean
+                        get() = factory.quarantineMarker
+                        set(value) {
+                            // A locked marker file (Windows fails deletes other processes hold).
+                            if (!value && deleteFails) throw IOException("marker is locked")
+                            factory.quarantineMarker = value
+                        }
+                }
+            val o = opener(f = stickyMarker)
+            val error = assertThrows { o.awaitOpen() }
+            assertIs<DatabaseOpenException>(error)
+
+            // The failure propagated before the fresh build: no healthy replacement exists for
+            // the still-set marker to quarantine on the next launch, and the pending stamp still
+            // names the directory the files already moved into.
+            assertTrue(factory.quarantineMarker, "the failed removal left the request in place")
+            assertFalse(factory.exists(), "no replacement may be created while the marker persists")
+            assertNotNull(factory.pendingQuarantine)
+
+            deleteFails = false
+            val result = o.awaitOpen()
+            assertEquals(RecoveryCause.CORRUPT, result.recovered)
+            assertFalse(factory.quarantineMarker)
+            assertNull(factory.pendingQuarantine)
+            o.requireDatabase().close()
+        }
+
+    @Test
+    fun aPartialQuarantineResumesIntoTheSameDirectoryAfterARestart() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+            val walFile = dir.resolve("${NeutrodyneDatabase.FILE_NAME}-wal")
+            Files.write(walFile, "stale".encodeToByteArray())
+            factory.quarantineMarker = true
+
+            // The first process dies mid-move: the wal sidecar lands, then the move fails.
+            val dying =
+                object : DatabaseFactory by factory {
+                    override fun quarantine(stamp: String) {
+                        val dest = dir.resolve("quarantine").resolve(stamp)
+                        Files.createDirectories(dest)
+                        Files.move(walFile, dest.resolve(walFile.fileName.toString()))
+                        throw IOException("process died mid-move")
+                    }
+                }
+            val first = opener(f = dying, clock = TestClock(nowMs = T0))
+            assertThrows { first.awaitOpen() }
+            assertEquals(T0.toString(), factory.pendingQuarantine, "the stamp is persisted before the first move")
+
+            // The relaunch has no in-memory stamp and a different wall clock: the persisted
+            // pending stamp must route the remaining moves into the same directory.
+            val second = opener(clock = TestClock(nowMs = T0 + 60_000))
+            val result = second.awaitOpen()
+            assertEquals(RecoveryCause.CORRUPT, result.recovered)
+            assertNull(factory.pendingQuarantine)
+
+            val copies = Files.list(dir.resolve("quarantine")).use { it.toList() }
+            assertEquals(1, copies.size, "the resumed quarantine must reuse the first stamp")
+            assertEquals(T0.toString(), copies.single().fileName.toString())
+            assertTrue(Files.exists(copies.single().resolve(NeutrodyneDatabase.FILE_NAME)))
+            assertTrue(
+                Files.exists(copies.single().resolve("${NeutrodyneDatabase.FILE_NAME}-wal")),
+                "the moved wal must not be orphaned or pruned",
+            )
+            second.requireDatabase().close()
+        }
+
+    @Test
+    fun aPendingQuarantineWithoutAMarkerStillResumes() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+            val walFile = dir.resolve("${NeutrodyneDatabase.FILE_NAME}-wal")
+            Files.write(walFile, "stale".encodeToByteArray())
+
+            // A non-marker quarantine (a preflight-detected corruption, a migration failure)
+            // died mid-move: the pending stamp survives without a recovery marker.
+            val stamp = T0.toString()
+            val dest = dir.resolve("quarantine").resolve(stamp)
+            Files.createDirectories(dest)
+            Files.move(walFile, dest.resolve(walFile.fileName.toString()))
+            factory.pendingQuarantine = stamp
+            assertFalse(factory.quarantineMarker)
+
+            val o = opener(clock = TestClock(nowMs = T0 + 60_000))
+            val result = o.awaitOpen()
+            assertEquals(RecoveryCause.CORRUPT, result.recovered)
+            assertNull(factory.pendingQuarantine)
+
+            val copies = Files.list(dir.resolve("quarantine")).use { it.toList() }
+            assertEquals(listOf(stamp), copies.map { it.fileName.toString() })
+            assertTrue(Files.exists(dest.resolve(NeutrodyneDatabase.FILE_NAME)))
+            assertTrue(Files.exists(dest.resolve("${NeutrodyneDatabase.FILE_NAME}-wal")))
+            o.requireDatabase().close()
+        }
+
+    @Test
+    fun pruneQuarantineKeepsAPendingDestination() =
+        runTest {
+            dirs.ensureCreated()
+            val old = dir.resolve("quarantine").resolve(T0.toString())
+            val pendingDir = dir.resolve("quarantine").resolve((T0 + 60_000).toString())
+            Files.createDirectories(old)
+            Files.createDirectories(pendingDir)
+            factory.pendingQuarantine = (T0 + 60_000).toString()
+
+            // Both stamps are far outside the 14-day window: only the pending one survives.
+            factory.pruneQuarantine(T0 + 30L * 24 * 60 * 60 * 1000)
+            assertFalse(Files.exists(old))
+            assertTrue(Files.exists(pendingDir))
+            factory.pendingQuarantine = null
+        }
+
+    @Test
     fun requireDatabaseReportsAFailureInsteadOfHanging() =
         runTest {
             dirs.ensureCreated()

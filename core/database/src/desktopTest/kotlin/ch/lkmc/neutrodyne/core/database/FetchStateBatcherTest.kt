@@ -115,6 +115,29 @@ class FetchStateBatcherTest {
         }
 
     @Test
+    fun aBackwardWallClockJumpCannotStrandTheDeadline() =
+        runTest {
+            // The deadline measures elapsed time: a wall-clock setback (NTP, DST, manual change)
+            // must not stretch or drop the 5 s flush — it is armed on the monotonic clock.
+            val clock = TestClock(nowMs = 1_000_000_000L, elapsedMs = 60_000L)
+            val writes = mutableListOf<List<PodcastFetchState>>()
+            val batcher =
+                FetchStateBatcher(
+                    write = { writes += it },
+                    clock = clock,
+                    scope = backgroundScope,
+                )
+
+            batcher.add(row(failures = 1))
+            clock.nowMs -= 3_600_000L
+            clock.elapsedMs += FetchStateBatcher.MAX_DELAY_MS
+            advanceTimeBy(FetchStateBatcher.MAX_DELAY_MS)
+            runCurrent()
+
+            assertEquals(listOf(1), writes.flatten().map { it.failureCount })
+        }
+
+    @Test
     fun aCancelledAddStillCommitsTheTriggeredBatch() =
         runTest {
             val writes = mutableListOf<List<PodcastFetchState>>()
