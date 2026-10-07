@@ -1384,10 +1384,13 @@ private class ParseSession(
     ) {
         val type = attr(parser, "type")
         val medium = attr(parser, "medium")?.lowercase()
+        // MIME matching is case-insensitive (RFC 2045 §5.1); the declared type is stored verbatim.
+        // Normalisation mirrors EnclosureTypes.effective: parameters stripped, trimmed, lowercased.
+        val typeKey = type?.substringBefore(';')?.trim()?.lowercase()
         val isMedia =
             medium in AUDIO_VIDEO_MEDIA ||
-                type?.startsWith("audio/") == true ||
-                type?.startsWith("video/") == true
+                typeKey?.startsWith("audio/") == true ||
+                typeKey?.startsWith("video/") == true
         if (isMedia) {
             // Media RSS enclosure URLs go through the same resolve/validate path as every other URL.
             val url = urlOrNull(attr(parser, "url"), baseOf(parser, parentBase), item.index)
