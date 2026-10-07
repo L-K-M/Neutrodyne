@@ -8,12 +8,20 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Dispatcher
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
+import ch.lkmc.neutrodyne.core.common.PlatformInfo
+import ch.lkmc.neutrodyne.core.common.PowerEvent
+import ch.lkmc.neutrodyne.core.common.PowerMonitor
+import ch.lkmc.neutrodyne.core.common.StoragePaths
 import ch.lkmc.neutrodyne.core.database.DatabaseFactory
 import ch.lkmc.neutrodyne.core.database.DesktopDatabaseFactory
 import ch.lkmc.neutrodyne.core.database.StrictMigrations
+import ch.lkmc.neutrodyne.core.domain.OrderKeys
+import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.InstallKind
 import ch.lkmc.neutrodyne.desktop.platform.DesktopBuildInfo
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
+import ch.lkmc.neutrodyne.desktop.platform.DesktopPlatformFacts
+import ch.lkmc.neutrodyne.sync.protocol.OrderKey
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.Provides
@@ -70,4 +78,31 @@ object DesktopCoreBindings {
     @Provides
     @StrictMigrations
     fun strictMigrations(): Boolean = DesktopBuildInfo.installKind == InstallKind.DEV
+
+    @Provides
+    @SingleIn(AppScope::class)
+    fun storagePaths(dirs: AppDirs): StoragePaths = StoragePaths(dirs)
+
+    @Provides
+    @SingleIn(AppScope::class)
+    fun platformInfo(): PlatformInfo = DesktopPlatformFacts
+
+    @Provides
+    @SingleIn(AppScope::class)
+    fun buildInfo(): BuildInfo = DesktopPlatformFacts.buildInfo()
+
+    /**
+     * Interim no-op power port: `:desktop:system`'s `OsPowerMonitor` lands with MD2 (11). The job
+     * runner's clock-drift detector still catches every wake it misses.
+     */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun powerMonitor(): PowerMonitor =
+        object : PowerMonitor {
+            override val events: kotlinx.coroutines.flow.Flow<PowerEvent> = kotlinx.coroutines.flow.emptyFlow()
+        }
+
+    /** The subscribe transaction's fractional-index port (10 Ordered lists). */
+    @Provides
+    fun orderKeys(): OrderKeys = OrderKeys { last -> OrderKey.after(last) }
 }

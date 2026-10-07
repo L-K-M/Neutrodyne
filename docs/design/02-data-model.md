@@ -867,7 +867,7 @@ Serves R7.1, R7.3, R7.4, N1, N6 ([D93](../PLAN.md#3-key-decisions)). Delivered i
 
 | Rule | Detail |
 |---|---|
-| Inert without a server | With no configured server, only the `sync_state` singleton exists; `enabled = 0` makes every capture trigger inert. After a valid link token, explicit first-link metadata writes may run while capture stays disabled ([R7.1](../PLAN.md#21-functional-requirements); `SyncInertTest`, M1 acceptance 11, MS0 acceptance 3) |
+| Inert without a server | With no configured server, only the `sync_state` singleton exists; `enabled = 0` makes every capture trigger inert. After a valid link token, explicit first-link metadata writes may run while capture stays disabled ([R7.1](../PLAN.md#21-functional-requirements); `SyncInertTest`, M1 acceptance 11, MS0 acceptance 3; M1a 2026-10-07: `SyncInertTest` covers the schema leg and the subscribe leg of M1 acceptance 11 runs as `:core:data`'s `SubscribeFlowTest`) |
 | Keys | Records are addressed by their canonical `rid` text, never by local row IDs, so outbox rows survive local re-keys of row IDs and a restore on another device has nothing to translate ([10 Record IDs](10-sync.md#record-ids)) |
 | No foreign keys | `rid` and `podcastSyncId` are text references that may point at records this device does not have; the deletion paths below keep the tables tidy instead |
 | Never travel | Not in backups (the database is never backed up; [D34](../PLAN.md#3-key-decisions)), not in the diagnostics export (`DiagExportScrub` empties them, [db-maintenance worker](#db-maintenance-worker)), not synced themselves |

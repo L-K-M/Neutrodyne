@@ -72,10 +72,63 @@ dependencies {
 
     implementation(compose.desktop.currentOs)
     implementation(libs.kotlinx.coroutines.swing)
+    implementation(libs.kotlinx.collections.immutable)
     runtimeOnly(libs.kxml2)
 
     // The desktop graph test (01 Testing)
     testImplementation(project(":core:testing"))
     testImplementation(libs.junit4)
     testImplementation(libs.truth)
+}
+
+/**
+ * `build-info.properties` for `DesktopBuildInfo` — the desktop counterpart of `:app`'s BuildConfig
+ * fields (the gradle.properties single source) until M0b's packaging pipeline stamps the release
+ * facts (11). Reads the shared shipped-locales list from `:app/policy`.
+ */
+val buildInfoDir = layout.buildDirectory.dir("generated/build-info")
+val writeBuildInfoProperties =
+    tasks.register("writeBuildInfoProperties") {
+        val repoUrl = providers.gradleProperty("neutrodyne.repoUrl")
+        val engineManifestUrl = providers.gradleProperty("neutrodyne.engineManifestUrl")
+        val podcastIndexKey = providers.gradleProperty("neutrodyne.podcastIndexKey").orElse("")
+        val podcastIndexSecret = providers.gradleProperty("neutrodyne.podcastIndexSecret").orElse("")
+        // Only the text provider is captured: the `FileContents` object itself is not
+        // serialisable by the configuration cache.
+        val shippedLocales =
+            providers.fileContents(rootProject.layout.projectDirectory.file("app/policy/locales.txt")).asText
+        val output = buildInfoDir.map { it.file("build-info.properties") }
+        inputs.property("repoUrl", repoUrl)
+        inputs.property("engineManifestUrl", engineManifestUrl)
+        inputs.property("podcastIndexKey", podcastIndexKey)
+        inputs.property("podcastIndexSecret", podcastIndexSecret)
+        inputs.property("shippedLocales", shippedLocales)
+        outputs.file(output)
+        doLast {
+            val locales =
+                shippedLocales
+                    .get()
+                    .lineSequence()
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() && !it.startsWith("#") }
+                    .joinToString(",")
+            output.get().asFile.apply {
+                parentFile.mkdirs()
+                writeText(
+                    buildString {
+                        append("repoUrl=").append(repoUrl.get()).append('\n')
+                        append("engineManifestUrl=").append(engineManifestUrl.get()).append('\n')
+                        append("podcastIndexKey=").append(podcastIndexKey.get()).append('\n')
+                        append("podcastIndexSecret=").append(podcastIndexSecret.get()).append('\n')
+                        append("shippedLocales=").append(locales).append('\n')
+                    },
+                )
+            }
+        }
+    }
+
+// The generated properties travel as a classpath resource (like `install-kind`).
+tasks.named<ProcessResources>("processResources") {
+    dependsOn(writeBuildInfoProperties)
+    from(buildInfoDir)
 }
