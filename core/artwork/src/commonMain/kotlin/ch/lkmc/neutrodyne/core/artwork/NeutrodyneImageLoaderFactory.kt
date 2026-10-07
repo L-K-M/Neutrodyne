@@ -22,7 +22,10 @@ import okio.Path.Companion.toPath
 public class NeutrodyneImageLoaderFactory(
     private val network: ImageNetworkComponent,
     private val memory: ImageMemoryPolicy,
-    private val store: ArtworkStore,
+    // Lazy: the store opens the database, which must not be required during `Application.onCreate`
+    // (the start-up gate may not have opened it yet). Coil calls `newImageLoader` on first use,
+    // which always happens after the gate (08 Startup).
+    private val store: () -> ArtworkStore,
     private val paths: StoragePaths,
 ) : SingletonImageLoader.Factory {
     override fun newImageLoader(context: PlatformContext): ImageLoader =
@@ -30,7 +33,7 @@ public class NeutrodyneImageLoaderFactory(
             .Builder(context)
             .components {
                 network.install(this)
-                add(ArtworkRefMapper(store))
+                add(ArtworkRefMapper(store()))
             }.memoryCache { memory.build(context) }
             .apply { memory.configure(this) }
             .diskCache {
