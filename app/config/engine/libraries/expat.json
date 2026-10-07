@@ -5,7 +5,7 @@
   "website": "https://libexpat.github.io",
   "developers": [],
   "licenses": [
-    "MIT"
+    "mit-expat"
   ],
   "artifactVersion": "2.7.3",
   "tag": "bundled"

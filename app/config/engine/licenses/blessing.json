@@ -1,6 +1,7 @@
 {
-  "name": "SQLite Blessing",
-  "url": "https://sqlite.org/draft/license.html",
+  "name": "SQLite blessing",
+  "url": "https://sqlite.org/copyright.html",
+  "spdxId": "blessing",
   "hash": "blessing",
-  "content": "May you do good and not evil.\nMay you find forgiveness for yourself and forgive others.\nMay you share freely, never taking more than you give."
+  "content": "The author disclaims copyright to this source code.  In place of\na legal notice, here is a blessing:\n\n   May you do good and not evil.\n   May you find forgiveness for yourself and forgive others.\n   May you share freely, never taking more than you give.\n\n(Source: SQLite's public-domain dedication, https://sqlite.org/copyright.html)"
 }
