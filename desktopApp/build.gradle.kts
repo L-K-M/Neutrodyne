@@ -72,6 +72,7 @@ dependencies {
 
     implementation(compose.desktop.currentOs)
     implementation(libs.kotlinx.coroutines.swing)
+    implementation(libs.kotlinx.collections.immutable)
     runtimeOnly(libs.kxml2)
 
     // The desktop graph test (01 Testing)

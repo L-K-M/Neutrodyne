@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.common.JobLanePoker
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import dev.zacsweers.metro.ContributesBinding
+import dev.zacsweers.metro.ExposeImplBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.SingleIn
@@ -27,6 +28,8 @@ import kotlinx.coroutines.sync.withLock
  */
 @SingleIn(AppScope::class)
 @ContributesBinding(AppScope::class)
+// `DesktopRefreshLane` injects the concrete queue, not the `RefreshScheduler` the binding adds.
+@ExposeImplBinding
 internal class DesktopRefreshScheduler
     @Inject
     constructor(

@@ -19,17 +19,19 @@ import dev.zacsweers.metro.AssistedInject
  * `refresh-continuation` chain — `KEEP` cannot enqueue a successor from a running continuation, so
  * a deadline-bound continuation returns `Result.retry()` (linear 60 s) instead, at most 10 attempts.
  */
-@AssistedInject
-internal class RefreshWorker(
-    @Assisted context: Context,
-    @Assisted params: WorkerParameters,
-    private val refresher: FeedRefresher,
-    private val scheduler: RefreshScheduler,
-    private val settings: SettingsRepository,
-    private val clock: Clock,
-) : CoroutineWorker(context, params) {
+class RefreshWorker
+    @AssistedInject
+    internal constructor(
+        @Assisted context: Context,
+        @Assisted params: WorkerParameters,
+        private val refresher: FeedRefresher,
+        private val scheduler: RefreshScheduler,
+        private val settings: SettingsRepository,
+        private val clock: Clock,
+    ) : CoroutineWorker(context, params) {
+    /** The `MetroWorkerFactory` entry point; `:app` module's generated graph code calls it. */
     @AssistedFactory
-    internal interface Factory {
+    interface Factory {
         fun create(
             context: Context,
             params: WorkerParameters,

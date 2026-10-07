@@ -15,6 +15,7 @@ import ch.lkmc.neutrodyne.core.common.PowerMonitor
 import ch.lkmc.neutrodyne.core.common.Redactor
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import dev.zacsweers.metro.ContributesBinding
+import dev.zacsweers.metro.ExposeImplBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import java.util.concurrent.ConcurrentHashMap
@@ -64,7 +65,10 @@ data class LaneStatus(
  */
 @SingleIn(AppScope::class)
 @ContributesBinding(AppScope::class)
-internal class DesktopJobRunner
+// The initializer starts the concrete runner, not the `JobLanePoker` the binding contributes;
+// `@ExposeImplBinding` requires the public type — the desktop app's graph is not a friend module.
+@ExposeImplBinding
+class DesktopJobRunner
     @Inject
     constructor(
         lanes: Set<JobLane>,
