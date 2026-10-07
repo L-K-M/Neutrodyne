@@ -2,35 +2,35 @@
   "format": "RSS2",
   "items": [
     {
-      "feedOrder": 0,
-      "guid": "mco-1",
-      "title": "Only media:content carries the media",
+      "durationMs": 2725000,
       "enclosures": [
         {
-          "url": "https://cdn.example.com/x1.mp3",
-          "type": "audio/mpeg",
+          "effectiveType": "audio/mpeg",
           "length": 42000000,
-          "effectiveType": "audio/mpeg"
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/x1.mp3"
         }
       ],
+      "feedOrder": 0,
+      "guid": "mco-1",
       "primaryEnclosure": {
-        "url": "https://cdn.example.com/x1.mp3",
-        "type": "audio/mpeg",
+        "effectiveType": "audio/mpeg",
         "length": 42000000,
-        "effectiveType": "audio/mpeg"
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/x1.mp3"
       },
-      "durationMs": 2725000
+      "title": "Only media:content carries the media"
     },
     {
-      "feedOrder": 1,
-      "guid": "mco-2",
-      "title": "medium attribute variant",
       "enclosures": [
         {
-          "url": "https://cdn.example.com/x2",
-          "length": 42000000
+          "length": 42000000,
+          "url": "https://cdn.example.com/x2"
         }
-      ]
+      ],
+      "feedOrder": 1,
+      "guid": "mco-2",
+      "title": "medium attribute variant"
     }
   ],
   "title": "Media Content Only"

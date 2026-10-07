@@ -2,54 +2,57 @@
   "format": "RSS2",
   "items": [
     {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/pr1.mp3"
+        }
+      ],
       "feedOrder": 0,
       "guid": "persons-1",
-      "title": "Episode with its own cast",
-      "enclosures": [
-        {
-          "url": "https://cdn.example.com/pr1.mp3",
-          "type": "audio/mpeg",
-          "length": 10,
-          "effectiveType": "audio/mpeg"
-        }
-      ],
-      "primaryEnclosure": {
-        "url": "https://cdn.example.com/pr1.mp3",
-        "type": "audio/mpeg",
-        "length": 10,
-        "effectiveType": "audio/mpeg"
-      },
       "persons": [
         {
-          "name": "Item Guest"
-        }
-      ]
-    },
-    {
-      "feedOrder": 1,
-      "guid": "persons-2",
-      "title": "Episode without persons inherits the channel list",
-      "enclosures": [
-        {
-          "url": "https://cdn.example.com/pr2.mp3",
-          "type": "audio/mpeg",
-          "length": 10,
-          "effectiveType": "audio/mpeg"
+          "name": "Item Guest",
+          "role": "guest"
         }
       ],
       "primaryEnclosure": {
-        "url": "https://cdn.example.com/pr2.mp3",
-        "type": "audio/mpeg",
+        "effectiveType": "audio/mpeg",
         "length": 10,
-        "effectiveType": "audio/mpeg"
-      }
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/pr1.mp3"
+      },
+      "title": "Episode with its own cast"
+    },
+    {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/pr2.mp3"
+        }
+      ],
+      "feedOrder": 1,
+      "guid": "persons-2",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/pr2.mp3"
+      },
+      "title": "Episode without persons inherits the channel list"
     }
   ],
   "persons": [
     {
+      "href": "https://example.com/people/host",
       "name": "Channel Host"
     },
     {
+      "group": "narrator",
       "name": "Channel Narrator"
     }
   ],

@@ -1,0 +1,33 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "artwork": [
+        {
+          "height": 1400,
+          "source": "PODCAST_IMAGE",
+          "url": "https://cdn.example.com/episode.jpg",
+          "width": 1400
+        }
+      ],
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/i1.mp3"
+        }
+      ],
+      "feedOrder": 0,
+      "guid": "ipi-1",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/i1.mp3"
+      },
+      "title": "Episode art via url attribute"
+    }
+  ],
+  "title": "Item podcast:image"
+}

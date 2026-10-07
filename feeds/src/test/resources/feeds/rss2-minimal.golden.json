@@ -3,22 +3,22 @@
   "format": "RSS2",
   "items": [
     {
-      "feedOrder": 0,
-      "title": "Only episode",
       "enclosures": [
         {
-          "url": "https://cdn.example.com/min1.mp3",
-          "type": "audio/mpeg",
+          "effectiveType": "audio/mpeg",
           "length": 1000,
-          "effectiveType": "audio/mpeg"
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/min1.mp3"
         }
       ],
+      "feedOrder": 0,
       "primaryEnclosure": {
-        "url": "https://cdn.example.com/min1.mp3",
-        "type": "audio/mpeg",
+        "effectiveType": "audio/mpeg",
         "length": 1000,
-        "effectiveType": "audio/mpeg"
-      }
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/min1.mp3"
+      },
+      "title": "Only episode"
     }
   ],
   "link": "https://example.com/minimal",

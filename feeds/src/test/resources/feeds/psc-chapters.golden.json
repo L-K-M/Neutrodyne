@@ -2,45 +2,45 @@
   "format": "RSS2",
   "items": [
     {
-      "feedOrder": 0,
-      "guid": "psc-1",
-      "title": "Chaptered episode",
+      "durationMs": 3723500,
       "enclosures": [
         {
-          "url": "https://cdn.example.com/pc1.mp3",
-          "type": "audio/mpeg",
+          "effectiveType": "audio/mpeg",
           "length": 10,
-          "effectiveType": "audio/mpeg"
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/pc1.mp3"
         }
       ],
-      "primaryEnclosure": {
-        "url": "https://cdn.example.com/pc1.mp3",
-        "type": "audio/mpeg",
-        "length": 10,
-        "effectiveType": "audio/mpeg"
-      },
-      "durationMs": 3723500,
+      "feedOrder": 0,
+      "guid": "psc-1",
       "inlineChapters": [
         {
           "startMs": 0,
           "title": "Intro"
         },
         {
+          "href": "https://example.com/topic/1",
           "startMs": 42000,
-          "title": "Topic one",
-          "href": "https://example.com/topic/1"
+          "title": "Topic one"
         },
         {
-          "startMs": 1875250,
-          "title": "Topic two",
           "href": "https://example.com/topic/2",
-          "image": "https://cdn.example.com/ch2.jpg"
+          "image": "https://cdn.example.com/ch2.jpg",
+          "startMs": 1875250,
+          "title": "Topic two"
         },
         {
           "startMs": 3700000,
           "title": "Outro"
         }
-      ]
+      ],
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/pc1.mp3"
+      },
+      "title": "Chaptered episode"
     }
   ],
   "title": "Podlove Simple Chapters"

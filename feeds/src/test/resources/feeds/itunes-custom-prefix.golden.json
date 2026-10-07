@@ -3,24 +3,24 @@
   "format": "RSS2",
   "items": [
     {
-      "feedOrder": 0,
-      "guid": "custom-1",
-      "title": "Episode one",
+      "durationMs": 750000,
       "enclosures": [
         {
-          "url": "https://cdn.example.com/c1.mp3",
-          "type": "audio/mpeg",
+          "effectiveType": "audio/mpeg",
           "length": 1000,
-          "effectiveType": "audio/mpeg"
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/c1.mp3"
         }
       ],
+      "feedOrder": 0,
+      "guid": "custom-1",
       "primaryEnclosure": {
-        "url": "https://cdn.example.com/c1.mp3",
-        "type": "audio/mpeg",
+        "effectiveType": "audio/mpeg",
         "length": 1000,
-        "effectiveType": "audio/mpeg"
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/c1.mp3"
       },
-      "durationMs": 750000
+      "title": "Episode one"
     }
   ],
   "title": "Custom Prefix Show"

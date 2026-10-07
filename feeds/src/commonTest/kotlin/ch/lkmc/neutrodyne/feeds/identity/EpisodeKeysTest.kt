@@ -94,6 +94,21 @@ class EpisodeKeysTest {
     }
 
     @Test
+    fun nonPrimaryEnclosureIsNotTheKeySource() {
+        // Only the primary enclosure feeds u:; a stray non-primary one must not (03 Episode keys).
+        val pdf = Enclosure("https://e.example/notes.pdf", "application/pdf", 1, "application/pdf")
+        val e =
+            ParsedEpisode(
+                feedOrder = 0,
+                title = "Episode 42",
+                pubDate = 1791030896000L,
+                enclosures = listOf(pdf),
+                primaryEnclosure = null,
+            )
+        assertEquals("t:1f46eba7092e57135e3aef7b6570849f3712b5c1", EpisodeKeys.primary(e))
+    }
+
+    @Test
     fun candidatesArePrimaryOnlyInV1() {
         val e = episode(guid = "g-1")
         assertEquals(listOf(EpisodeKeys.primary(e)), EpisodeKeys.candidates(e))

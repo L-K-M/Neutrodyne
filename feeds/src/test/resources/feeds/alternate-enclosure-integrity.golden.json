@@ -2,43 +2,10 @@
   "format": "RSS2",
   "items": [
     {
-      "feedOrder": 0,
-      "guid": "alt-1",
-      "title": "Multiple transports",
-      "enclosures": [
-        {
-          "url": "https://cdn.example.com/base.mp3",
-          "type": "audio/mpeg",
-          "length": 48000000,
-          "effectiveType": "audio/mpeg"
-        }
-      ],
-      "primaryEnclosure": {
-        "url": "https://cdn.example.com/base.mp3",
-        "type": "audio/mpeg",
-        "length": 48000000,
-        "effectiveType": "audio/mpeg"
-      },
       "alternateEnclosures": [
         {
-          "type": "audio/mpeg",
-          "length": 96000000,
           "bitrate": 320,
-          "lang": "en-us",
-          "title": "High bitrate",
-          "rel": "replacement",
           "codecs": "mp3",
-          "isDefault": true,
-          "sources": [
-            {
-              "uri": "https://cdn.example.com/high.mp3",
-              "contentType": "audio/mpeg"
-            },
-            {
-              "uri": "https://mirror.example.com/high.mp3",
-              "contentType": "audio/mpeg"
-            }
-          ],
           "integrity": [
             {
               "type": "sri",
@@ -48,9 +15,42 @@
               "type": "pgp",
               "value": "ABCDEF0123456789"
             }
-          ]
+          ],
+          "isDefault": true,
+          "lang": "en-us",
+          "length": 96000000,
+          "rel": "replacement",
+          "sources": [
+            {
+              "contentType": "audio/mpeg",
+              "uri": "https://cdn.example.com/high.mp3"
+            },
+            {
+              "contentType": "audio/mpeg",
+              "uri": "https://mirror.example.com/high.mp3"
+            }
+          ],
+          "title": "High bitrate",
+          "type": "audio/mpeg"
         }
-      ]
+      ],
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 48000000,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/base.mp3"
+        }
+      ],
+      "feedOrder": 0,
+      "guid": "alt-1",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 48000000,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/base.mp3"
+      },
+      "title": "Multiple transports"
     }
   ],
   "title": "Alternate Enclosure Integrity"

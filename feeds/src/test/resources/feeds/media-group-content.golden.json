@@ -2,36 +2,37 @@
   "format": "RSS2",
   "items": [
     {
-      "feedOrder": 0,
-      "guid": "grp-1",
-      "title": "Grouped media with default",
-      "enclosures": [
-        {
-          "url": "https://cdn.example.com/g1-high.mp3",
-          "type": "audio/mpeg",
-          "length": 42000000,
-          "effectiveType": "audio/mpeg"
-        },
-        {
-          "url": "https://cdn.example.com/g1-low.mp3",
-          "type": "audio/mpeg",
-          "length": 22000000,
-          "effectiveType": "audio/mpeg"
-        }
-      ],
-      "primaryEnclosure": {
-        "url": "https://cdn.example.com/g1-high.mp3",
-        "type": "audio/mpeg",
-        "length": 42000000,
-        "effectiveType": "audio/mpeg"
-      },
       "artwork": [
         {
-          "url": "https://cdn.example.com/g1-art.jpg",
           "source": "MEDIA_THUMBNAIL",
+          "url": "https://cdn.example.com/g1-art.jpg",
           "width": 1400
         }
-      ]
+      ],
+      "descriptionHtml": "Grouped media description",
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 42000000,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/g1-high.mp3"
+        },
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 22000000,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/g1-low.mp3"
+        }
+      ],
+      "feedOrder": 0,
+      "guid": "grp-1",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 42000000,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/g1-high.mp3"
+      },
+      "title": "Grouped media with default"
     }
   ],
   "title": "Media Group Content"

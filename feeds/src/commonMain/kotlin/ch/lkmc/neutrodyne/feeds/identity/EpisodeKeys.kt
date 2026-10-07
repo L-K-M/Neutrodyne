@@ -21,7 +21,7 @@ public object EpisodeKeys {
 
     /** The primary key of [e]: `g:` → `u:` → `t:` → `l:` → `h:` (the last always applies). */
     public fun primary(e: ParsedEpisode): String =
-        guidKey(e.guid) ?: enclosureKey(e.primaryEnclosure?.url ?: e.enclosures.firstOrNull()?.url)
+        guidKey(e.guid) ?: enclosureKey(e.primaryEnclosure?.url)
             ?: titleDayKey(e.title, e.pubDate) ?: linkKey(e.link)
             ?: headKey(e.title, e.descriptionHtml)
 

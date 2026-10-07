@@ -28,6 +28,7 @@ internal fun Project.configureNeutrodyneTestTasks() {
         systemProperty("neutrodyne.rootDir", rootProject.layout.projectDirectory.asFile.absolutePath)
         systemProperty("neutrodyne.screenshotTier", providers.gradleProperty("screenshotTier").getOrElse("pr"))
         systemProperty("neutrodyne.mutationIterations", providers.gradleProperty("mutationIterations").getOrElse("20"))
+        systemProperty("neutrodyne.tightPerf", providers.gradleProperty("tightPerf").getOrElse("false"))
         systemProperty("neutrodyne.syncSeeds", providers.gradleProperty("syncSeeds").getOrElse("1000"))
         if (updateGoldens) outputs.upToDateWhen { false }
         // E12's host test lives in :desktopApp; only there is the category class on the test classpath (09)

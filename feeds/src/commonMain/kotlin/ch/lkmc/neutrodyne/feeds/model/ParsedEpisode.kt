@@ -36,4 +36,8 @@ public data class ParsedEpisode(
     val funding: List<Funding> = emptyList(),
     /** Raw `yt:videoId`; interpreted by 04 (04 Atom feed ingestion). */
     val externalMediaId: String? = null,
+    /** Raw entry-level `yt:channelId`; interpreted by 04 (04 Atom feed ingestion). */
+    val ytChannelId: String? = null,
+    /** Raw `media:group/media:community/media:statistics@views`; interpreted by 04. */
+    val mediaStatisticsViews: Long? = null,
 )

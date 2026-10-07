@@ -3,23 +3,23 @@
   "format": "RSS2",
   "items": [
     {
-      "feedOrder": 0,
-      "guid": "ufc-1",
-      "title": "Still here",
       "enclosures": [
         {
-          "url": "https://cdn.example.com/uf1.mp3",
-          "type": "audio/mpeg",
+          "effectiveType": "audio/mpeg",
           "length": 10,
-          "effectiveType": "audio/mpeg"
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/uf1.mp3"
         }
       ],
+      "feedOrder": 0,
+      "guid": "ufc-1",
       "primaryEnclosure": {
-        "url": "https://cdn.example.com/uf1.mp3",
-        "type": "audio/mpeg",
+        "effectiveType": "audio/mpeg",
         "length": 10,
-        "effectiveType": "audio/mpeg"
-      }
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/uf1.mp3"
+      },
+      "title": "Still here"
     }
   ],
   "title": "Update Frequency Complete",

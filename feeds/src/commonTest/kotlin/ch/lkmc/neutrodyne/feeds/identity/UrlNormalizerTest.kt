@@ -37,6 +37,23 @@ class UrlNormalizerTest {
     }
 
     @Test
+    fun crossSchemeDefaultPortsDroppedForIdentity() {
+        // Identity is scheme-free, so both well-known ports drop regardless of the scheme used.
+        assertEquals("example.com/feed", UrlNormalizer.forIdentity("http://example.com:443/feed"))
+        assertEquals("example.com/feed", UrlNormalizer.forIdentity("https://example.com:80/feed"))
+        assertEquals("example.com:8443/feed", UrlNormalizer.forIdentity("https://example.com:8443/feed"))
+    }
+
+    @Test
+    fun originKeepsSchemeSpecificDefaultPorts() {
+        // Credentials stay scheme-specific: only the scheme's own default port drops.
+        assertEquals("http://example.com:443", UrlNormalizer.origin("http://example.com:443/feed"))
+        assertEquals("https://example.com:80", UrlNormalizer.origin("https://example.com:80/feed"))
+        assertEquals("http://example.com", UrlNormalizer.origin("http://example.com:80/feed"))
+        assertEquals("https://example.com", UrlNormalizer.origin("https://example.com:443/feed"))
+    }
+
+    @Test
     fun emptyPathBecomesSlash() {
         assertEquals("example.com/", UrlNormalizer.forIdentity("https://example.com"))
         assertEquals("example.com/", UrlNormalizer.forIdentity("https://example.com?"))
@@ -137,6 +154,32 @@ class UrlNormalizerTest {
         val (url, credentials) = UrlNormalizer.splitUserInfo("https://feeds.example.com/show")
         assertEquals("https://feeds.example.com/show", url)
         assertNull(credentials)
+    }
+
+    @Test
+    fun splitUserInfoFragmentEndsTheAuthority() {
+        // The `#` ends the authority: text after it is never credentials and never the host.
+        val (url, credentials) = UrlNormalizer.splitUserInfo("https://feeds.example.com#contact@example.com")
+        assertEquals("https://feeds.example.com#contact@example.com", url)
+        assertNull(credentials)
+    }
+
+    @Test
+    fun splitUserInfoFragmentCannotMoveTheHost() {
+        // Everything after the first `/`, `?` or `#` stays verbatim; only in-authority userinfo is split.
+        val (url, credentials) =
+            UrlNormalizer.splitUserInfo("https://alice:secret@trusted.example#x@evil.example")
+        assertEquals("https://trusted.example#x@evil.example", url)
+        assertEquals("alice", credentials?.username)
+        assertEquals("secret", credentials?.password)
+    }
+
+    @Test
+    fun splitUserInfoQueryEndsTheAuthority() {
+        val (url, credentials) = UrlNormalizer.splitUserInfo("https://user:pass@example.com/feed?x=@evil")
+        assertEquals("https://example.com/feed?x=@evil", url)
+        assertEquals("user", credentials?.username)
+        assertEquals("pass", credentials?.password)
     }
 
     @Test

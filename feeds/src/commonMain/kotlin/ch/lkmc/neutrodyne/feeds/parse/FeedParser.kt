@@ -26,7 +26,7 @@ public interface FeedParser {
          * whenever a change would alter any value ingestion writes for an existing golden fixture
          * (03 Limits and version policy).
          */
-        public const val VERSION: Int = 1
+        public const val VERSION: Int = 2
     }
 }
 
@@ -59,5 +59,6 @@ public data class ParseLimits(
     val maxItems: Int = 10_000,
     val maxTextChars: Int = 512 * 1024,
     val maxUrlChars: Int = 4_096,
+    val maxTagAttributes: Int = 1_000,
     val prologScanBytes: Int = 64 * 1024,
 )

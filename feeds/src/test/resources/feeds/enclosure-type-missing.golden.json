@@ -2,38 +2,38 @@
   "format": "RSS2",
   "items": [
     {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 1000,
+          "url": "https://cdn.example.com/t1.mp3"
+        }
+      ],
       "feedOrder": 0,
       "guid": "etm-1",
-      "title": "No type attribute",
-      "enclosures": [
-        {
-          "url": "https://cdn.example.com/t1.mp3",
-          "length": 1000,
-          "effectiveType": "audio/mpeg"
-        }
-      ],
       "primaryEnclosure": {
-        "url": "https://cdn.example.com/t1.mp3",
+        "effectiveType": "audio/mpeg",
         "length": 1000,
-        "effectiveType": "audio/mpeg"
-      }
+        "url": "https://cdn.example.com/t1.mp3"
+      },
+      "title": "No type attribute"
     },
     {
-      "feedOrder": 1,
-      "guid": "etm-2",
-      "title": "Empty type attribute",
       "enclosures": [
         {
-          "url": "https://cdn.example.com/t2.ogg",
+          "effectiveType": "audio/ogg",
           "length": 1000,
-          "effectiveType": "audio/ogg"
+          "url": "https://cdn.example.com/t2.ogg"
         }
       ],
+      "feedOrder": 1,
+      "guid": "etm-2",
       "primaryEnclosure": {
-        "url": "https://cdn.example.com/t2.ogg",
+        "effectiveType": "audio/ogg",
         "length": 1000,
-        "effectiveType": "audio/ogg"
-      }
+        "url": "https://cdn.example.com/t2.ogg"
+      },
+      "title": "Empty type attribute"
     }
   ],
   "title": "Enclosure Type Missing"

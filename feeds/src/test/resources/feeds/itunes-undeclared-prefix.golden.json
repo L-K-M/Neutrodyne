@@ -5,26 +5,26 @@
   "format": "RSS2",
   "items": [
     {
-      "feedOrder": 0,
-      "guid": "undeclared-1",
-      "title": "Episode with undeclared itunes tags",
-      "pubDate": 1791273600000,
-      "rawPubDate": "Tue, 06 Oct 2026 08:00:00 +0000",
+      "durationMs": 2245000,
       "enclosures": [
         {
-          "url": "https://cdn.example.com/e1.mp3",
-          "type": "audio/mpeg",
+          "effectiveType": "audio/mpeg",
           "length": 48000000,
-          "effectiveType": "audio/mpeg"
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/e1.mp3"
         }
       ],
+      "feedOrder": 0,
+      "guid": "undeclared-1",
       "primaryEnclosure": {
-        "url": "https://cdn.example.com/e1.mp3",
-        "type": "audio/mpeg",
+        "effectiveType": "audio/mpeg",
         "length": 48000000,
-        "effectiveType": "audio/mpeg"
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/e1.mp3"
       },
-      "durationMs": 2245000
+      "pubDate": 1791273600000,
+      "rawPubDate": "Tue, 06 Oct 2026 08:00:00 +0000",
+      "title": "Episode with undeclared itunes tags"
     }
   ],
   "link": "https://example.com/show",

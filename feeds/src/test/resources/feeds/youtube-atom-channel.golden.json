@@ -1,38 +1,44 @@
 {
   "author": "Synthetic Channel",
+  "authorUri": "https://www.youtube.com/channel/UCsynthetic0001122334",
   "format": "ATOM",
   "items": [
     {
+      "artwork": [
+        {
+          "source": "MEDIA_THUMBNAIL",
+          "url": "https://i.synthetic.example/vi/syntheticA1/hqdefault.jpg",
+          "width": 480
+        }
+      ],
+      "descriptionHtml": "Plain text description of the first synthetic upload.",
+      "externalMediaId": "syntheticA1",
       "feedOrder": 0,
       "guid": "yt:video:syntheticA1",
-      "title": "First synthetic upload",
+      "link": "https://www.youtube.com/watch?v=syntheticA1",
+      "mediaStatisticsViews": 1000001,
       "pubDate": 1790607600000,
       "rawPubDate": "2026-09-28T15:00:00+00:00",
-      "link": "https://www.youtube.com/watch?v=syntheticA1",
-      "artwork": [
-        {
-          "url": "https://i.synthetic.example/vi/syntheticA1/hqdefault.jpg",
-          "source": "MEDIA_THUMBNAIL",
-          "width": 480
-        }
-      ],
-      "externalMediaId": "syntheticA1"
+      "title": "First synthetic upload",
+      "ytChannelId": "UCsynthetic0001122334"
     },
     {
-      "feedOrder": 1,
-      "guid": "yt:video:syntheticB2",
-      "title": "Second synthetic upload",
-      "pubDate": 1790928000000,
-      "rawPubDate": "2026-10-02T08:00:00+00:00",
-      "link": "https://www.youtube.com/watch?v=syntheticB2",
       "artwork": [
         {
-          "url": "https://i.synthetic.example/vi/syntheticB2/hqdefault.jpg",
           "source": "MEDIA_THUMBNAIL",
+          "url": "https://i.synthetic.example/vi/syntheticB2/hqdefault.jpg",
           "width": 480
         }
       ],
-      "externalMediaId": "syntheticB2"
+      "descriptionHtml": "Second plain description.",
+      "externalMediaId": "syntheticB2",
+      "feedOrder": 1,
+      "guid": "yt:video:syntheticB2",
+      "link": "https://www.youtube.com/watch?v=syntheticB2",
+      "pubDate": 1790928000000,
+      "rawPubDate": "2026-10-02T08:00:00+00:00",
+      "title": "Second synthetic upload",
+      "ytChannelId": "UCsynthetic0001122334"
     }
   ],
   "link": "https://www.youtube.com/channel/UCsynthetic0001122334",

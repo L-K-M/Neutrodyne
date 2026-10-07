@@ -4,25 +4,25 @@
   "format": "RDF",
   "items": [
     {
-      "feedOrder": 0,
-      "title": "RDF item one",
-      "pubDate": 1790873100000,
-      "rawPubDate": "2026-10-01T18:45:00+02:00",
-      "link": "https://example.com/rdf/1",
       "enclosures": [
         {
-          "url": "https://cdn.example.com/rdf1.mp3",
-          "type": "audio/mpeg",
+          "effectiveType": "audio/mpeg",
           "length": 1000,
-          "effectiveType": "audio/mpeg"
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/rdf1.mp3"
         }
       ],
+      "feedOrder": 0,
+      "link": "https://example.com/rdf/1",
       "primaryEnclosure": {
-        "url": "https://cdn.example.com/rdf1.mp3",
-        "type": "audio/mpeg",
+        "effectiveType": "audio/mpeg",
         "length": 1000,
-        "effectiveType": "audio/mpeg"
-      }
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/rdf1.mp3"
+      },
+      "pubDate": 1790873100000,
+      "rawPubDate": "2026-10-01T18:45:00+02:00",
+      "title": "RDF item one"
     }
   ],
   "link": "https://example.com/rdf",

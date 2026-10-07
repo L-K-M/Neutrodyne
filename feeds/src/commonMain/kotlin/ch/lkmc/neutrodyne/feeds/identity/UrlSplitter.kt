@@ -101,13 +101,21 @@ internal fun splitLenient(raw: String): UrlParts {
     return UrlParts(scheme, userInfo, host, port, path, query)
 }
 
-/** Whether [port] is the default port of [scheme] and therefore dropped from identity forms. */
+/**
+ * Whether [port] is dropped. Scheme-free identity drops both well-known ports (03 URL
+ * normalisation); scheme-specific forms ([UrlNormalizer.origin]) drop only the scheme's default.
+ */
 internal fun isDefaultPort(
     scheme: String?,
     port: String?,
+    schemeFree: Boolean,
 ): Boolean =
-    when (scheme) {
-        "http" -> port == DEFAULT_HTTP_PORT
-        "https" -> port == DEFAULT_HTTPS_PORT
-        else -> false
+    if (schemeFree) {
+        port == DEFAULT_HTTP_PORT || port == DEFAULT_HTTPS_PORT
+    } else {
+        when (scheme) {
+            "http" -> port == DEFAULT_HTTP_PORT
+            "https" -> port == DEFAULT_HTTPS_PORT
+            else -> false
+        }
     }

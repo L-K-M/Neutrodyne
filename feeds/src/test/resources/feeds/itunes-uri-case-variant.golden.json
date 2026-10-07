@@ -1,8 +1,8 @@
 {
   "artwork": [
     {
-      "url": "https://cdn.example.com/cover-1400.jpg",
-      "source": "ITUNES_IMAGE"
+      "source": "ITUNES_IMAGE",
+      "url": "https://cdn.example.com/cover-1400.jpg"
     }
   ],
   "author": "Grace Hopper",
@@ -10,26 +10,26 @@
   "format": "RSS2",
   "items": [
     {
-      "feedOrder": 0,
-      "guid": "case-1",
-      "title": "Episode via the case-variant namespace",
+      "durationMs": 180000,
       "enclosures": [
         {
-          "url": "https://cdn.example.com/c1.m4a",
-          "type": "audio/x-m4a",
+          "effectiveType": "audio/mp4",
           "length": 1000,
-          "effectiveType": "audio/mp4"
+          "type": "audio/x-m4a",
+          "url": "https://cdn.example.com/c1.m4a"
         }
       ],
+      "episodeType": "trailer",
+      "feedOrder": 0,
+      "guid": "case-1",
       "primaryEnclosure": {
-        "url": "https://cdn.example.com/c1.m4a",
-        "type": "audio/x-m4a",
+        "effectiveType": "audio/mp4",
         "length": 1000,
-        "effectiveType": "audio/mp4"
+        "type": "audio/x-m4a",
+        "url": "https://cdn.example.com/c1.m4a"
       },
-      "durationMs": 180000,
       "season": 2,
-      "episodeType": "trailer"
+      "title": "Episode via the case-variant namespace"
     }
   ],
   "title": "Case Variant URI"

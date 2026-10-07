@@ -14,6 +14,7 @@
   <entry>
     <id>yt:video:syntheticA1</id>
     <yt:videoId>syntheticA1</yt:videoId>
+    <yt:channelId>UCsynthetic0001122334</yt:channelId>
     <title>First synthetic upload</title>
     <link rel="alternate" href="https://www.youtube.com/watch?v=syntheticA1"/>
     <author><name>Synthetic Channel</name></author>
@@ -24,13 +25,13 @@
       <media:content url="https://www.youtube.com/v/syntheticA1?version=3" type="application/x-shockwave-flash" width="640" height="390"/>
       <media:thumbnail url="https://i.synthetic.example/vi/syntheticA1/hqdefault.jpg" width="480" height="360"/>
       <media:description>Plain text description of the first synthetic upload.</media:description>
-      <media:community><media:starRating count="1234" average="4.9"/></media:community>
+      <media:community><media:starRating count="1234" average="4.9"/><media:statistics views="1000001"/></media:community>
     </media:group>
   </entry>
   <entry>
     <id>yt:video:syntheticB2</id>
     <yt:videoId>syntheticB2</yt:videoId>
-    <title>Second synthetic upload</title>
+    <yt:channelId>UCsynthetic0001122334</yt:channelId>
     <link rel="alternate" href="https://www.youtube.com/watch?v=syntheticB2"/>
     <published>2026-10-02T08:00:00+00:00</published>
     <updated>2026-10-02T08:00:00+00:00</updated>

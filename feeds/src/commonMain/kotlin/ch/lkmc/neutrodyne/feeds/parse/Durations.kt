@@ -9,9 +9,10 @@ package ch.lkmc.neutrodyne.feeds.parse
  */
 public object Durations {
     private const val MAX_PARTS = 3
-    private const val MS_PER_SECOND = 1_000.0
-    private const val MS_PER_MINUTE = 60 * MS_PER_SECOND
-    private const val MS_PER_HOUR = 60 * MS_PER_MINUTE
+    private const val MS_PER_SECOND = 1_000L
+    private const val MS_PER_MINUTE = 60L * MS_PER_SECOND
+    private const val MS_PER_HOUR = 60L * MS_PER_MINUTE
+    private const val FRACTION_PAD = "000"
 
     /** Durations over 48 h are treated as garbage (03 Durations). */
     public const val MAX_VALUE_MS: Long = 48L * 60 * 60 * 1000
@@ -23,7 +24,8 @@ public object Durations {
         val parts = raw.trim().split(':')
         if (parts.size > MAX_PARTS) return null
 
-        var totalMs = 0.0
+        // Integer arithmetic throughout: a fractional last part keeps whole milliseconds ("1.001").
+        var totalMs = 0L
         for (i in parts.indices) {
             val part = parts[i]
             val isLast = i == parts.lastIndex
@@ -36,11 +38,19 @@ public object Durations {
                     2 -> MS_PER_MINUTE
                     else -> MS_PER_HOUR
                 }
-            totalMs += part.toDouble() * multiplier
+            val whole = part.substringBefore('.')
+            val wholeValue = whole.toLongOrNull() ?: return null
+            if (wholeValue > MAX_VALUE_MS / multiplier) return null
+            totalMs += wholeValue * multiplier
+
+            if (isLast && part.contains('.')) {
+                // The fraction is seconds-digits: pad to three places for milliseconds.
+                val fraction = part.substringAfter('.')
+                totalMs += ((fraction + FRACTION_PAD).substring(0, 3).toIntOrNull() ?: return null)
+            }
         }
 
-        val ms = totalMs.toLong()
-        if (ms > MAX_VALUE_MS) return null
-        return ms
+        if (totalMs > MAX_VALUE_MS) return null
+        return totalMs
     }
 }

@@ -99,4 +99,23 @@ class FeedDatesTest {
         assertNull(FeedDates.parse("Sat, 03 Oct 2026"))
         assertNull(FeedDates.parse("16:9"))
     }
+
+    @Test
+    fun outOfRangeOffsetsYieldNull() {
+        // An offset past ±18 h must not throw; the date is simply unknown (UNKNOWN_DATE upstream).
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 +1900"))
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 +9900"))
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 -1900"))
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 +19:00"))
+        assertNull(FeedDates.parse("2026-10-03T12:34:56+25:00"))
+    }
+
+    @Test
+    fun dateOnlyFallbackRejectsTrailingGarbage() {
+        // The date-only fallback consumes the whole input: trailing garbage is not a date.
+        assertNull(FeedDates.parse("2026-10-03 garbage"))
+        assertNull(FeedDates.parse("2026-10-03 24:00:00"))
+        assertNull(FeedDates.parse("2026-10-03junk"))
+        assertEquals(1790985600000L, FeedDates.parse("2026-10-03"))
+    }
 }

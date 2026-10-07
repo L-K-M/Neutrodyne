@@ -2,173 +2,200 @@
   "format": "RSS2",
   "items": [
     {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/dd1.mp3"
+        }
+      ],
       "feedOrder": 0,
       "guid": "d1",
-      "title": "Wrong weekday",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/dd1.mp3"
+      },
       "pubDate": 1791030896000,
       "rawPubDate": "Wed, 03 Oct 2026 12:34:56 +0000",
-      "enclosures": [
-        {
-          "url": "https://cdn.example.com/dd1.mp3",
-          "type": "audio/mpeg",
-          "length": 10,
-          "effectiveType": "audio/mpeg"
-        }
-      ],
-      "primaryEnclosure": {
-        "url": "https://cdn.example.com/dd1.mp3",
-        "type": "audio/mpeg",
-        "length": 10,
-        "effectiveType": "audio/mpeg"
-      }
+      "title": "Wrong weekday"
     },
     {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/dd2.mp3"
+        }
+      ],
       "feedOrder": 1,
       "guid": "d2",
-      "title": "PDT zone",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/dd2.mp3"
+      },
       "pubDate": 1791056096000,
       "rawPubDate": "Sat, 03 Oct 2026 12:34:56 PDT",
-      "enclosures": [
-        {
-          "url": "https://cdn.example.com/dd2.mp3",
-          "type": "audio/mpeg",
-          "length": 10,
-          "effectiveType": "audio/mpeg"
-        }
-      ],
-      "primaryEnclosure": {
-        "url": "https://cdn.example.com/dd2.mp3",
-        "type": "audio/mpeg",
-        "length": 10,
-        "effectiveType": "audio/mpeg"
-      }
+      "title": "PDT zone"
     },
     {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/dd3.mp3"
+        }
+      ],
       "feedOrder": 2,
       "guid": "d3",
-      "title": "UT zone",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/dd3.mp3"
+      },
       "pubDate": 1791030896000,
       "rawPubDate": "Sat, 03 Oct 2026 12:34:56 UT",
-      "enclosures": [
-        {
-          "url": "https://cdn.example.com/dd3.mp3",
-          "type": "audio/mpeg",
-          "length": 10,
-          "effectiveType": "audio/mpeg"
-        }
-      ],
-      "primaryEnclosure": {
-        "url": "https://cdn.example.com/dd3.mp3",
-        "type": "audio/mpeg",
-        "length": 10,
-        "effectiveType": "audio/mpeg"
-      }
+      "title": "UT zone"
     },
     {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/dd4.mp3"
+        }
+      ],
       "feedOrder": 3,
       "guid": "d4",
-      "title": "Z zone",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/dd4.mp3"
+      },
       "pubDate": 1791030896000,
       "rawPubDate": "Sat, 03 Oct 2026 12:34:56 Z",
-      "enclosures": [
-        {
-          "url": "https://cdn.example.com/dd4.mp3",
-          "type": "audio/mpeg",
-          "length": 10,
-          "effectiveType": "audio/mpeg"
-        }
-      ],
-      "primaryEnclosure": {
-        "url": "https://cdn.example.com/dd4.mp3",
-        "type": "audio/mpeg",
-        "length": 10,
-        "effectiveType": "audio/mpeg"
-      }
+      "title": "Z zone"
     },
     {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/dd5.mp3"
+        }
+      ],
       "feedOrder": 4,
       "guid": "d5",
-      "title": "Two digit year",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/dd5.mp3"
+      },
       "pubDate": 1791027296000,
       "rawPubDate": "Sat, 03 Oct 26 12:34:56 +0100",
-      "enclosures": [
-        {
-          "url": "https://cdn.example.com/dd5.mp3",
-          "type": "audio/mpeg",
-          "length": 10,
-          "effectiveType": "audio/mpeg"
-        }
-      ],
-      "primaryEnclosure": {
-        "url": "https://cdn.example.com/dd5.mp3",
-        "type": "audio/mpeg",
-        "length": 10,
-        "effectiveType": "audio/mpeg"
-      }
+      "title": "Two digit year"
     },
     {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/dd6.mp3"
+        }
+      ],
       "feedOrder": 5,
       "guid": "d6",
-      "title": "German month",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/dd6.mp3"
+      },
       "pubDate": 1791023696000,
       "rawPubDate": "Sam., 03 Okt 2026 12:34:56 +0200",
-      "enclosures": [
-        {
-          "url": "https://cdn.example.com/dd6.mp3",
-          "type": "audio/mpeg",
-          "length": 10,
-          "effectiveType": "audio/mpeg"
-        }
-      ],
-      "primaryEnclosure": {
-        "url": "https://cdn.example.com/dd6.mp3",
-        "type": "audio/mpeg",
-        "length": 10,
-        "effectiveType": "audio/mpeg"
-      }
+      "title": "German month"
     },
     {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/dd7.mp3"
+        }
+      ],
       "feedOrder": 6,
       "guid": "d7",
-      "title": "French month",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/dd7.mp3"
+      },
       "pubDate": 1791030896000,
       "rawPubDate": "sam., 03 oct. 2026 12:34:56 GMT",
-      "enclosures": [
-        {
-          "url": "https://cdn.example.com/dd7.mp3",
-          "type": "audio/mpeg",
-          "length": 10,
-          "effectiveType": "audio/mpeg"
-        }
-      ],
-      "primaryEnclosure": {
-        "url": "https://cdn.example.com/dd7.mp3",
-        "type": "audio/mpeg",
-        "length": 10,
-        "effectiveType": "audio/mpeg"
-      }
+      "title": "French month"
     },
     {
-      "feedOrder": 7,
-      "guid": "d8",
-      "title": "No seconds",
-      "pubDate": 1791030840000,
-      "rawPubDate": "Sat, 03 Oct 2026 12:34 +0000",
       "enclosures": [
         {
-          "url": "https://cdn.example.com/dd8.mp3",
-          "type": "audio/mpeg",
+          "effectiveType": "audio/mpeg",
           "length": 10,
-          "effectiveType": "audio/mpeg"
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/dd8.mp3"
         }
       ],
+      "feedOrder": 7,
+      "guid": "d8",
       "primaryEnclosure": {
-        "url": "https://cdn.example.com/dd8.mp3",
-        "type": "audio/mpeg",
+        "effectiveType": "audio/mpeg",
         "length": 10,
-        "effectiveType": "audio/mpeg"
-      }
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/dd8.mp3"
+      },
+      "pubDate": 1791030840000,
+      "rawPubDate": "Sat, 03 Oct 2026 12:34 +0000",
+      "title": "No seconds"
+    },
+    {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/dd9.mp3"
+        }
+      ],
+      "feedOrder": 8,
+      "guid": "d9",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/dd9.mp3"
+      },
+      "rawPubDate": "Sat, 03 Oct 2026 12:34:56 +1900",
+      "title": "Out of range offset"
     }
   ],
-  "title": "RFC 822 Variants"
+  "title": "RFC 822 Variants",
+  "warnings": [
+    {
+      "code": "UNKNOWN_DATE",
+      "detail": "Sat, 03 Oct 2026 12:34:56 +1900",
+      "itemIndex": 8
+    }
+  ]
 }

@@ -145,7 +145,8 @@ public object FeedDates {
             return localDateTime.toInstant(utcMidnightOffset).toEpochMilliseconds()
         }
 
-        val localDate = runCatching { LocalDate.parse(iso.substringBefore(' ')) }.getOrNull()
+        // The date-only fallback must consume the whole input: "2026-10-03 garbage" is not a date.
+        val localDate = runCatching { LocalDate.parse(iso) }.getOrNull()
         if (localDate != null) {
             val midnight =
                 LocalDateTime(localDate.year, localDate.monthNumber, localDate.dayOfMonth, 0, 0, 0, 0)
@@ -207,7 +208,9 @@ public object FeedDates {
         val hours = digits.substring(0, 2).toIntOrNull() ?: return null
         val minutes = digits.substring(2).toIntOrNull() ?: return null
         if (minutes > MAX_MINUTE_OR_SECOND) return null
-        return UtcOffset(sign * hours, sign * minutes)
+        // UtcOffset throws on hours outside its range (+1900, +9900); an invalid offset is an
+        // unknown date, never a parse failure of the whole document.
+        return runCatching { UtcOffset(sign * hours, sign * minutes) }.getOrNull()
     }
 
     private fun isoWithOffset(text: String): Long? =

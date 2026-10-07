@@ -192,7 +192,7 @@ data class ParseWarning(val code: WarningCode, val itemIndex: Int?, val detail: 
 
 These steps run in `XmlPullFeedParser` (`:feeds:jvm`) with either platform parser; AOSP's KXmlParser is a maintained fork of kxml2, so behavioural differences (BOM handling, relaxed-mode details) are caught by running the golden corpus through both ([Testing](#testing)).
 
-1. **Prolog guard** (`PrologGuard`, before any parser): scan the first 64 KiB up to the first element start tag; if it contains `<!ENTITY` (case-insensitive) return `Failed(HOSTILE)`. `FEATURE_PROCESS_DOCDECL` stays off, and no external DTD is ever fetched ([N9](../PLAN.md#22-non-functional-requirements)).
+1. **Prolog guard** (`PrologGuard`, before any parser): decode the first 64 KiB with the document's own encoding (BOMs, UTF-16/UTF-32, the `encoding` pseudo-attribute) and scan the real prolog — XML declaration, comments, processing instructions and markup declarations including a DOCTYPE's internal subset; `<!ENTITY` (case-insensitive) anywhere in it returns `Failed(HOSTILE)`. `FEATURE_PROCESS_DOCDECL` is disabled explicitly before the entity table is installed, and no external DTD is ever fetched ([N9](../PLAN.md#22-non-functional-requirements)).
 2. `setFeature(FEATURE_PROCESS_NAMESPACES, true)`; `runCatching { setFeature("http://xmlpull.org/v1/doc/features.html#relaxed", true) }` (relaxed tolerates undefined prefixes, unescaped `&`, bad attributes, unknown entities, which stay as literal `&name;` text).
 3. First pass: `setInput(stream, null)`, so KXmlParser sniffs UTF-32/UTF-16 BOMs and the XML declaration and defaults to UTF-8 ([AOSP KXmlParser](https://android.googlesource.com/platform/libcore/+/refs/heads/main/xml/src/main/java/com/android/org/kxml2/io/KXmlParser.java)). The HTTP `charset` is deliberately not used for the first pass: an `ISO-8859-1` header on a UTF-8 body (a common server default) would yield mojibake that no heuristic can detect, because every byte is valid ISO-8859-1; a wrong declaration, in contrast, shows up as U+FFFD (step 5). Never pass a `Reader`.
 4. Predefine all HTML 4 named entities with `defineEntityReplacementText` (`HtmlEntities.ALL`: `&nbsp;`, `&rsquo;`, `&eacute;`, …).
@@ -321,6 +321,7 @@ Episode art: item `itunes:image@href` (or text) › item `podcast:image` › `me
 | Items per document | 10,000 | stop reading items, `ITEMS_TRUNCATED` |
 | Text per element | 512 Ki chars | truncate, `TEXT_TRUNCATED` |
 | URL length | 4,096 chars | URL dropped, `BAD_URL` |
+| Attributes per start tag | 1,000 | `Failed(MALFORMED)`; enforced over the raw bytes before the pull parser sees the tag (`TagBounds`), because kxml2's attribute and namespace arrays grow quadratically inside `next()` — checking `attributeCount` afterwards is already too late |
 | `<!ENTITY` in prolog | — | `Failed(HOSTILE)` |
 
 `FeedParser.VERSION` (stored per podcast in `podcast.parserVersion` after each successful ingest) is bumped whenever a change would alter any value ingestion writes for an existing golden fixture; warnings-only changes do not bump. A podcast with `parserVersion < VERSION` is fetched once without validators and without the unchanged-SHA-256 shortcut, so every feed re-ingests after an upgrade ([Validators](#validators)).
@@ -338,6 +339,13 @@ Recorded per the implementation rules; behaviour follows this document, the devi
 7. 09's `Goldens` helper does not exist on this branch yet (an M0a deliverable that has not been merged into it); `FeedParserGoldenTest` uses a local, behaviour-identical helper in `:feeds:jvm`'s test sources. Switch to 09's helper when it lands.
 8. Corpus legs (b) (Robolectric, `android.util.Xml.newPullParser()`) and (c) (instrumented, GMD) live in `:core:data`'s `androidHostTest` and `:app`'s `androidTest` per this document and belong to the `:core:data`/shell packages, not to the parser package that built the tree; the fixture tree and goldens are ready for them (`feeds/src/test/resources/feeds/` is on `:feeds:jvm`'s test resources and can be `srcDir`-ed by those tests).
 9. Open question 12's unverified concern is resolved for M1a: a `src/test` directory in the KMP module `:feeds` produced no plugin warning (Kotlin 2.4.20 / AGP 9.4.1, 2026-10-06), so the tree stays at `feeds/src/test/resources/feeds/`.
+
+### Implementation deviations (2026-10-07, parser review fixes)
+
+1. **New limit `ParseLimits.maxTagAttributes = 1,000`.** The limits table bounds it explicitly ([Limits and version policy](#limits-and-version-policy)); it is enforced by `TagBounds` over the decoded byte prefix before `setInput`, not per event — recorded here because the design previously bounded only depth, items, text and URLs, while kxml2's quadratic array growth requires bounding tag work before it happens.
+2. `InnerXml.collect` walks with `nextToken` rather than `next`: only token events distinguish CDATA sections from ordinary text, so a CDATA HTML payload stays literal (`<p>Hi</p>`, not `&lt;p&gt;`) while real child markup is still re-serialised per step 6. Escaped text in ordinary nodes round-trips escaped.
+3. Sibling `itunes:category` children produce **separate** category paths (`["Society & Culture","Documentary"]` and `["Society & Culture","Relationships"]`); the field-mapping table's "nested → path" is read per leaf, not merged.
+4. `FeedParser.VERSION` bumped to 2 per the version policy: the review fixes alter values ingestion writes for existing fixtures (CDATA/media:group descriptions, Atom enclosure lists, `media:content` URLs, person attributes, `yt:*` fields).
 
 ---
 
@@ -1584,25 +1592,25 @@ Infrastructure, runners and CI wiring: [09 Test strategy](09-quality-and-release
 
 ### Golden corpus (`feeds/src/test/resources/feeds/`)
 
-The fixture tree stays at this path: a plain test-data directory of the `:feeds` project (not a Kotlin source set), added as test resources of `:feeds:jvm` and of the Android tests that run the platform parser, and shared with 04's and 05's fixtures under `feeds/src/test/resources/`. Each fixture `<name>.xml` has `<name>.golden.json` (the `ParsedFeed` serialised with sorted keys and `explicitNulls = false`); `FeedParserGoldenTest` (`:feeds:jvm`) compares them through 09's `Goldens` helper, and `./gradlew :feeds:jvm:test -PupdateGoldens` rewrites them locally (refused on CI, [09 Test strategy](09-quality-and-release.md#test-strategy)). Real-world fixtures are trimmed and their text replaced, keeping structure and quirks; `README.md` records each origin URL. At least these 52 fixtures (M1 acceptance 1 requires ≥ 40):
+The fixture tree stays at this path: a plain test-data directory of the `:feeds` project (not a Kotlin source set), added as test resources of `:feeds:jvm` and of the Android tests that run the platform parser, and shared with 04's and 05's fixtures under `feeds/src/test/resources/`. Each fixture `<name>.xml` has `<name>.golden.json` (the `ParsedFeed` serialised with sorted keys and `explicitNulls = false`); `FeedParserGoldenTest` (`:feeds:jvm`) compares them through 09's `Goldens` helper, and `./gradlew :feeds:jvm:test -PupdateGoldens` rewrites them locally (refused on CI, [09 Test strategy](09-quality-and-release.md#test-strategy)). **Every fixture is synthetic**: structures mirror the quirks the corpus table and `README.md` name, with generated content only — no real feed text is copied and `README.md` records what each fixture mirrors, not origin URLs. At least these fixtures (M1 acceptance 1 requires ≥ 40):
 
 | Area | Fixtures |
 |---|---|
 | Namespaces | `itunes-undeclared-prefix`, `itunes-uri-case-variant`, `itunes-custom-prefix`, `pc20-canonical-ns`, `pc20-github-alias-ns` (reference-feed quirks: `application.x-mpegURL`, `application/srt`, chapters typed `application/json`, deprecated `podcast:images`), `media-ns-no-trailing-slash` |
-| Text and encoding | `nbsp-outside-cdata`, `raw-html-in-description`, `double-escaped-html`, `cdata-description`, `windows1252-declared-utf8`, `utf16-bom`, `utf8-bom-utf16-declaration`, `latin1-declared`, `leading-whitespace-before-declaration` |
+| Text and encoding | `nbsp-outside-cdata`, `raw-html-in-description`, `double-escaped-html`, `cdata-description`, `empty-first-child-html`, `windows1252-declared-utf8`, `windows1252-http-charset`, `utf16-bom`, `utf8-bom-utf16-declaration`, `latin1-declared`, `leading-whitespace-before-declaration`, `xhtml-over-cap` |
 | Identity | `duplicate-guids`, `missing-guids`, `missing-guid-and-enclosure`, `guid-is-permalink-false` |
-| Enclosures | `multiple-enclosures-audio-video`, `media-content-only`, `media-group-content`, `atom-link-enclosure`, `enclosure-type-missing`, `enclosure-octet-stream`, `enclosure-length-zero`, `hls-enclosure` |
-| Formats | `rss2-minimal`, `atom-xhtml-content`, `rdf-rss1`, `youtube-atom-channel`, `youtube-atom-playlist-title-videos` |
+| Enclosures | `multiple-enclosures-audio-video`, `media-content-only`, `media-content-relative`, `media-group-content`, `atom-link-enclosure`, `atom-enclosure-order`, `enclosure-type-missing`, `enclosure-octet-stream`, `enclosure-length-zero`, `hls-enclosure`, `relative-urls`, `url-too-long` |
+| Formats | `rss2-minimal`, `atom-xhtml-content`, `atom-no-namespace`, `atom-media-extension`, `rdf-rss1`, `channel-precedence`, `sibling-categories`, `youtube-atom-channel`, `youtube-atom-playlist-title-videos` |
 | Paging and moves | `rfc5005-page1`, `rfc5005-page2`, `rfc5005-loop`, `fh-complete`, `new-feed-url-self`, `new-feed-url-other` |
 | P2.0 and chapters | `psc-chapters`, `item-persons-replace-channel`, `funding-and-transcripts`, `alternate-enclosure-integrity`, `medium-podcastL`, `update-frequency-complete` |
 | Dates and durations | `dates-rfc822-variants` (wrong weekday, `PDT`, `UT`, `Z`, two-digit year, German and French months), `dates-iso-variants` (offset, no zone, date only, space separator, garbage), `durations-variants` (`H:MM:SS`, `M:SS`, seconds, fraction, empty, > 48 h) |
-| Artwork | `artwork-precedence` (itunes text-only href, `podcast:image` widths, RSS image fallback) |
-| Hostile | `hostile-entity-doctype`, `hostile-deep-nesting`, `oversized-text` |
+| Artwork | `artwork-precedence` (itunes text-only href, `podcast:image` widths, RSS image fallback), `item-podcast-image` |
+| Hostile | `hostile-entity-doctype`, `hostile-deep-nesting`, `oversized-text`, `prolog-evasion-comment`, `prolog-evasion-utf16`, `attribute-flood`, `items-truncated` |
 | Scale | `large-831-items` (generated, 3.5 MB, structure of 99% Invisible): parses in < 1 s on the JVM |
 
 Also: `no-media-blog` and `empty-channel` for the accepted-items rules. The corpus runs (a) on the JVM with kxml2 2.3.0 — the desktop's run-time parser — through `PullParserFactory.Discovered` (`:feeds:jvm:test`, every PR; this is PLAN M1 AC1's "`:feeds:test`"), (b) under Robolectric with `android.util.Xml.newPullParser()` (`:core:data` `androidHostTest`, which reads the same fixture tree), (c) as an instrumented test in `:app`'s `androidTest` on a Gradle Managed Device with the platform parser (once per `main` run, 09); all three must match the goldens (kxml2 vs AOSP differences). 09's `MutationRobustnessTest` additionally mutates every fixture and requires `FeedParser.parse` to return without throwing ([09 Test strategy](09-quality-and-release.md#test-strategy)).
 
-**M1a status (2026-10-06):** leg (a), the mutation test and the timing test are in place (all 54 fixtures, goldens committed, provenance in the tree's `README.md`); legs (b) and (c) arrive with the `:core:data` and `:app` packages that own them ([Parser deviations](#implementation-deviations-2026-10-06-m1a-parser-half) item 8). `AddInputNormalizerTest` is M7's (its subject is not in the M1a parser half). The timing test asserts a generous 5 s CI margin around the 1 s JVM target.
+**M1a status (2026-10-06, amended 2026-10-07):** leg (a), the mutation test and the timing test are in place (all fixtures, goldens committed, provenance in the tree's `README.md`); legs (b) and (c) arrive with the `:core:data` and `:app` packages that own them ([Parser deviations](#implementation-deviations-2026-10-06-m1a-parser-half) item 8). `AddInputNormalizerTest` is M7's (its subject is not in the M1a parser half). The timing test asserts the fixture yields 831 items and keeps a generous 5 s CI margin around the 1 s JVM target; the strict 1 s check of M1 AC1 is opt-in via `-PtightPerf` (system property `neutrodyne.tightPerf`, wired in `TestConventions`), to be run on a developer machine or the PO-43 reference laptop — that opt-in run is how M1 AC1's "< 1 s" is verified.
 
 ### Unit and integration tests
 

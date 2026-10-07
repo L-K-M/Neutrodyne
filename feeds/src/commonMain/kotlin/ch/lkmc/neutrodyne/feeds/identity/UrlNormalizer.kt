@@ -35,7 +35,7 @@ public object UrlNormalizer {
         if (parts.scheme != "http" && parts.scheme != "https") return null
         if (!portIsValid(parts)) return null
         val host = normaliseHost(parts) ?: return null
-        val port = normalisePort(parts)
+        val port = normalisePort(parts, schemeFree = false)
         val suffix = if (port == null) "" else ":$port"
         return "${parts.scheme}://$host$suffix"
     }
@@ -49,7 +49,9 @@ public object UrlNormalizer {
         val trimmed = url.trim()
         val schemeMatch = Regex("""^[A-Za-z][A-Za-z0-9+.\-]*://""").find(trimmed) ?: return trimmed to null
         val afterScheme = trimmed.substring(schemeMatch.range.last + 1)
-        val authority = afterScheme.substringBefore('/').substringBefore('?')
+        // The authority ends at the first `/`, `?` or `#`: text in the query or fragment is never
+        // credentials, so `https://host#x@evil` carries no userinfo and its host never moves.
+        val authority = afterScheme.substringBefore('/').substringBefore('?').substringBefore('#')
         val atIndex = authority.lastIndexOf('@')
         if (atIndex < 0) return trimmed to null
 
@@ -68,7 +70,7 @@ public object UrlNormalizer {
         if (parts.scheme != "http" && parts.scheme != "https") return null
         if (!portIsValid(parts)) return null
         val host = normaliseHost(parts) ?: return null
-        val port = normalisePort(parts)
+        val port = normalisePort(parts, schemeFree = true)
         val path = normalisePath(parts.path)
         val portSuffix = if (port == null) "" else ":$port"
         val querySuffix =
@@ -97,11 +99,17 @@ public object UrlNormalizer {
     private fun portIsValid(parts: UrlParts): Boolean =
         parts.port == null || (parts.port.isNotEmpty() && parts.port.all { it in '0'..'9' })
 
-    /** The port to keep in identity forms: null when absent or the scheme's default. */
-    private fun normalisePort(parts: UrlParts): String? {
+    /**
+     * The port to keep: null when absent or default. Identity is scheme-free, so both well-known
+     * ports drop regardless of scheme (03 URL normalisation); [origin] keeps the scheme's own default.
+     */
+    private fun normalisePort(
+        parts: UrlParts,
+        schemeFree: Boolean,
+    ): String? {
         val raw = parts.port ?: return null
         val port = raw.trimStart('0').ifEmpty { "0" }
-        return if (isDefaultPort(parts.scheme, port)) null else port
+        return if (isDefaultPort(parts.scheme, port, schemeFree)) null else port
     }
 
     /** Empty path → `/`; percent-encoding normalised; dot segments removed; one trailing `/` removed. */

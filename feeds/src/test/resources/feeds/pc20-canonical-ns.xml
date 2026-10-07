@@ -12,6 +12,8 @@
       <enclosure url="https://cdn.example.com/p1.mp3" length="1" type="audio/mpeg"/>
       <podcast:transcript url="https://example.com/t1.srt" type="application/srt" language="en"/>
       <podcast:chapters url="https://example.com/ch1.json" type="application/json+chapters"/>
+      <podcast:season name="Season Three">3</podcast:season>
+      <podcast:episode display="Ep. 12">12</podcast:episode>
     </item>
   </channel>
 </rss>

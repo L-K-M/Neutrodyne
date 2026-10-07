@@ -3,23 +3,23 @@
   "format": "RSS2",
   "items": [
     {
-      "feedOrder": 0,
-      "guid": "win-1",
-      "title": "Épisode très bien",
       "enclosures": [
         {
-          "url": "https://cdn.example.com/w1.mp3",
-          "type": "audio/mpeg",
+          "effectiveType": "audio/mpeg",
           "length": 10,
-          "effectiveType": "audio/mpeg"
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/w1.mp3"
         }
       ],
+      "feedOrder": 0,
+      "guid": "win-1",
       "primaryEnclosure": {
-        "url": "https://cdn.example.com/w1.mp3",
-        "type": "audio/mpeg",
+        "effectiveType": "audio/mpeg",
         "length": 10,
-        "effectiveType": "audio/mpeg"
-      }
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/w1.mp3"
+      },
+      "title": "Épisode très bien"
     }
   ],
   "title": "Café Rösti “quotes” — dash",

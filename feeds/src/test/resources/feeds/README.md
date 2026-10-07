@@ -17,7 +17,7 @@ lists (real-world failure modes of feed generators, reproduced with generated co
 | Fixture | Structure mirrored after |
 |---|---|
 | `pc20-github-alias-ns.xml` | the Podcasting 2.0 reference feed's quirks: the GitHub-alias namespace URI, `application.x-mpegURL` (sic), `application/srt` transcripts, chapters typed `application/json`, deprecated `podcast:images` |
-| `large-831-items.xml` | the shape of 99% Invisible's feed (831 items, weekly cadence 2010–2026, `content:encoded` + `description`, GUID-per-episode); generated with a deterministic script, lorem-ipsum-style text, ~3.5 MB |
+| `large-831-items.xml` | the shape of 99% Invisible's feed (831 items newest-first, weekly cadence 2010–2026, `content:encoded` + `description`, GUID-per-episode); generated with a deterministic script, lorem-ipsum-style text, ~3.5 MB |
 | `windows1252-declared-utf8.xml` | feeds whose CMS sends windows-1252 bytes with a UTF-8 XML declaration |
 | `itunes-undeclared-prefix.xml` | feeds that use `itunes:` without declaring the namespace |
 | `youtube-atom-*.xml` | YouTube's channel and playlist Atom feeds (`yt:` namespace, `media:group`) |

@@ -77,7 +77,7 @@ public class XmlPullFeedParser(
     ): ParseResult {
         val bytes =
             try {
-                open().buffer().readByteArray()
+                open().buffer().use { it.readByteArray() }
             } catch (e: Exception) {
                 return ParseResult.Failed(ParseFailure.MALFORMED, "unreadable source: ${e.javaClass.simpleName}")
             }
@@ -85,6 +85,15 @@ public class XmlPullFeedParser(
         // Step 1: prolog guard, before any parser sees the document.
         if (PrologGuard.isHostile(bytes, limits.prologScanBytes)) {
             return ParseResult.Failed(ParseFailure.HOSTILE, "ENTITY declaration in the prolog")
+        }
+
+        // Bound start-tag work before the pull parser sees any tag (03 Limits and version policy):
+        // kxml2 grows its attribute and namespace arrays quadratically inside next(), so checking
+        // attributeCount after the event returns is already too late.
+        try {
+            TagBounds.check(bytes, limits)
+        } catch (e: XmlPullParserException) {
+            return ParseResult.Failed(ParseFailure.MALFORMED, e.message.orEmpty())
         }
 
         // Step 3: first pass with encoding sniffing (never a Reader, never the HTTP charset).
@@ -101,8 +110,8 @@ public class XmlPullFeedParser(
         if (replacementRatio > REPLACEMENT_RATIO_THRESHOLD) {
             val detected = detectedEncoding
             val secondCharset =
-                httpCharset?.trim()?.takeIf { it.isNotEmpty() && !it.equals(detected, ignoreCase = true) }
-                    ?: WINDOWS_1252.takeIf { !it.equals(detected, ignoreCase = true) }
+                httpCharset?.trim()?.takeIf { it.isNotEmpty() && !sameCharset(it, detected) }
+                    ?: WINDOWS_1252.takeIf { !sameCharset(it, detected) }
             if (secondCharset != null) {
                 val second = runPass(bytes, secondCharset, baseUrl)
                 if (second is Pass && second.replacementChars < stats.replacementChars) {
@@ -129,6 +138,7 @@ public class XmlPullFeedParser(
         warnings = mutableListOf()
         itemsTruncated = false
         undeclaredPrefixesSeen.clear()
+        atomNamespace = null
         detectedEncoding = null
 
         val parser = factory.create()
@@ -136,9 +146,22 @@ public class XmlPullFeedParser(
             parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, true)
             runCatching { parser.setFeature(RELAXED_FEATURE, true) }
 
+            // Android's platform parser processes DOCTYPEs by default and then refuses
+            // defineEntityReplacementText; kxml2 does not support the feature, so it is already off
+            // and the getFeature call answers false. Disable only when it is actually on: a failed
+            // disable must not be swallowed (03 step 1).
+            if (runCatching { parser.getFeature(XmlPullParser.FEATURE_PROCESS_DOCDECL) }
+                    .getOrDefault(false)
+            ) {
+                parser.setFeature(XmlPullParser.FEATURE_PROCESS_DOCDECL, false)
+            }
+
             if (charsetOverride == null) {
                 parser.setInput(ByteArrayInputStream(bytes), null)
-                detectedEncoding = parser.inputEncoding
+                // kxml2 reports null for inputEncoding right after setInput; the document encoding
+                // is decided only once the declaration is processed, so it is sniffed here with the
+                // same precedence (BOM, XML declaration, UTF-8 default).
+                detectedEncoding = EncodingSniff.sniff(bytes).name()
             } else {
                 val charset =
                     runCatching { Charset.forName(charsetOverride) }.getOrNull()
@@ -192,7 +215,12 @@ public class XmlPullFeedParser(
                 parseRss(parser, base)
             }
 
-            rootName.equals("feed", ignoreCase = true) && (rootKey == null || rootKey == Namespaces.Key.ATOM) -> {
+            rootName.equals("feed", ignoreCase = true) &&
+                (rootKey == null || rootKey == Namespaces.Key.ATOM || rootKey == Namespaces.Key.RSS) -> {
+                // A namespace-free (or unrecognized-namespace) feed still reads as Atom; the RSS key
+                // only reports the empty namespace here. Element keys inside resolve against the
+                // document's own namespace (see elementKey).
+                atomNamespace = parser.namespace.orEmpty()
                 parseAtom(parser, base)
             }
 
@@ -362,6 +390,37 @@ public class XmlPullFeedParser(
 
     private var itemsTruncated = false
 
+    /**
+     * The root element's namespace when the document parsed as Atom (03 step 7: `feed` with the Atom
+     * namespace or none). Elements in that same namespace then carry the Atom key — a namespace-free
+     * Atom document's `<entry>`/`<title>` otherwise resolve as RSS.
+     */
+    private var atomNamespace: String? = null
+
+    /**
+     * The registry key of the element the parser sits on; inside a namespace-free (or
+     * unrecognized-namespace) Atom document, unprefixed elements in the document's own namespace read
+     * as ATOM. Elements matched through the prefix fallback keep their extension key.
+     */
+    private fun elementKey(parser: XmlPullParser): Namespaces.Key? {
+        val key = Namespaces.elementKey(parser)
+        if (atomNamespace == null || key == Namespaces.Key.ATOM) return key
+        if (!parser.prefix.isNullOrEmpty() || parser.namespace.orEmpty() != atomNamespace) return key
+        return if (key == null || key == Namespaces.Key.RSS) Namespaces.Key.ATOM else key
+    }
+
+    /** Whether two charset names denote the same charset (`utf-16` vs `UTF-16`, `utf8` vs `UTF-8`). */
+    private fun sameCharset(
+        a: String,
+        b: String?,
+    ): Boolean {
+        if (b == null) return false
+        val ca = runCatching { Charset.forName(a) }.getOrNull()
+        val cb = runCatching { Charset.forName(b) }.getOrNull()
+        if (ca != null && cb != null) return ca == cb
+        return a.equals(b, ignoreCase = true)
+    }
+
     /** `xml:base` of the element the parser sits on, resolved against [current]; null when absent. */
     private fun baseOf(
         parser: XmlPullParser,
@@ -378,8 +437,11 @@ public class XmlPullFeedParser(
     ) {
         var title: String? = null
         var itunesTitle: String? = null
+        var atomTitle: String? = null
         var itunesAuthor: String? = null
         var dcCreator: String? = null
+        var atomAuthor: String? = null
+        var authorUri: String? = null
         var ownerName: String? = null
         var managingEditor: String? = null
         var description: String? = null
@@ -415,6 +477,7 @@ public class XmlPullFeedParser(
         var hubUrl: String? = null
         var usesPodping = false
         var ytChannelId: String? = null
+        var ytPlaylistId: String? = null
 
         fun build(
             format: FeedFormat,
@@ -430,8 +493,8 @@ public class XmlPullFeedParser(
 
             return ParsedFeed(
                 format = format,
-                title = firstNonBlank(title, itunesTitle),
-                author = firstNonBlank(itunesAuthor, dcCreator, ownerName, managingEditor),
+                title = firstNonBlank(title, itunesTitle, atomTitle),
+                author = firstNonBlank(itunesAuthor, dcCreator, atomAuthor, ownerName, managingEditor),
                 descriptionHtml =
                     firstNonBlank(description, itunesSummary, contentEncoded, atomSubtitle, googlePlayDescription),
                 link = firstNonBlank(link, atomAlternateLink),
@@ -454,6 +517,8 @@ public class XmlPullFeedParser(
                 hubUrl = hubUrl,
                 usesPodping = usesPodping,
                 ytChannelId = ytChannelId,
+                ytPlaylistId = ytPlaylistId,
+                authorUri = authorUri,
                 items = items.toList(),
                 warnings = warnings.toList(),
             )
@@ -466,7 +531,7 @@ public class XmlPullFeedParser(
         channel: ChannelBuilder,
     ) {
         trackPrefixFallback(parser)
-        val key = Namespaces.elementKey(parser)
+        val key = elementKey(parser)
         val name = parser.name
 
         when {
@@ -536,6 +601,10 @@ public class XmlPullFeedParser(
 
             key == Namespaces.Key.YT && name == "channelId" -> {
                 channel.ytChannelId = plainText(parser)
+            }
+
+            key == Namespaces.Key.YT && name == "playlistId" -> {
+                channel.ytPlaylistId = plainText(parser)
             }
 
             key == Namespaces.Key.GOOGLEPLAY -> {
@@ -666,7 +735,7 @@ public class XmlPullFeedParser(
     ) {
         when (name) {
             "title" -> {
-                channel.title = plainText(parser)
+                channel.atomTitle = plainText(parser)
             }
 
             "subtitle" -> {
@@ -674,8 +743,11 @@ public class XmlPullFeedParser(
             }
 
             "author" -> {
-                // Atom author/name; the first non-blank one wins (03 Field mapping author chain).
-                if (channel.ownerName == null) channel.ownerName = parseAtomAuthorName(parser) else skipElement(parser)
+                // Atom author/name and author/uri sit in their own slots; the source precedence of
+                // 03 Field mapping is applied at build time, never by document order.
+                val (authorName, uri) = parseAtomAuthor(parser)
+                if (channel.atomAuthor == null) channel.atomAuthor = authorName
+                if (channel.authorUri == null) channel.authorUri = uri
             }
 
             "link" -> {
@@ -803,29 +875,38 @@ public class XmlPullFeedParser(
         }
     }
 
-    /** Nested `itunes:category` elements build a path (`["Society & Culture","Documentary"]`). */
+    /**
+     * One `itunes:category` element: every nested `itunes:category` is a child slot, so sibling
+     * categories emit separate root-to-leaf paths (03 Field mapping categories).
+     */
     private fun parseItunesCategory(
         parser: XmlPullParser,
         channel: ChannelBuilder,
     ) {
-        val path = mutableListOf<String>()
-        val topDepth = parser.depth
-        var event: Int = parser.eventType
-        while (event != XmlPullParser.END_DOCUMENT) {
-            when (event) {
-                XmlPullParser.START_TAG -> {
-                    if (Namespaces.elementKey(parser) == Namespaces.Key.ITUNES && parser.name == "category") {
-                        attr(parser, "text")?.trim()?.takeIf { it.isNotEmpty() }?.let { path.add(it) }
-                    }
-                }
+        channel.categories.addAll(categoryPaths(parser))
+    }
 
-                XmlPullParser.END_TAG -> {
-                    if (parser.depth <= topDepth) break
-                }
+    /** All root-to-leaf paths under the `itunes:category` the parser sits on. */
+    private fun categoryPaths(parser: XmlPullParser): List<List<String>> {
+        val text = attr(parser, "text")?.trim()?.takeIf { it.isNotEmpty() }
+        val childPaths = mutableListOf<List<String>>()
+        val depth = parser.depth
+        var event = nextEvent(parser)
+        while (event != XmlPullParser.END_DOCUMENT) {
+            if (event == XmlPullParser.END_TAG && parser.depth <= depth) break
+            if (event == XmlPullParser.START_TAG &&
+                Namespaces.elementKey(parser) == Namespaces.Key.ITUNES &&
+                parser.name == "category"
+            ) {
+                childPaths.addAll(categoryPaths(parser))
             }
             event = nextEvent(parser)
         }
-        if (path.isNotEmpty()) channel.categories.add(path.toList())
+        return when {
+            text == null -> childPaths
+            childPaths.isEmpty() -> listOf(listOf(text))
+            else -> childPaths.map { listOf(text) + it }
+        }
     }
 
     private fun parseAtomLink(
@@ -862,18 +943,24 @@ public class XmlPullFeedParser(
         skipElement(parser)
     }
 
-    private fun parseAtomAuthorName(parser: XmlPullParser): String? {
+    /** Atom `author/name` and `author/uri`; the first non-blank of each wins. */
+    private fun parseAtomAuthor(parser: XmlPullParser): Pair<String?, String?> {
         val depth = parser.depth
         var name: String? = null
+        var uri: String? = null
         var event = nextEvent(parser)
         while (event != XmlPullParser.END_DOCUMENT) {
             if (event == XmlPullParser.END_TAG && parser.depth == depth) break
-            if (event == XmlPullParser.START_TAG && parser.name == "name" && name == null) {
-                name = plainText(parser)
+            if (event == XmlPullParser.START_TAG) {
+                when {
+                    parser.name == "name" && name == null -> name = plainText(parser)
+                    parser.name == "uri" && uri == null -> uri = plainText(parser)
+                    else -> skipElement(parser)
+                }
             }
             event = nextEvent(parser)
         }
-        return name?.trim()?.takeIf { it.isNotEmpty() }
+        return name?.trim()?.takeIf { it.isNotEmpty() } to uri?.trim()?.takeIf { it.isNotEmpty() }
     }
 
     // ---------------------------------------------------------------------------
@@ -911,7 +998,7 @@ public class XmlPullFeedParser(
         var link: String? = null
         var atomAlternateLink: String? = null
         var rssEnclosures = mutableListOf<Enclosure>()
-        var atomEnclosure: Enclosure? = null
+        var atomEnclosures = mutableListOf<Enclosure>()
         var mediaContent = mutableListOf<Enclosure>()
         val alternateEnclosures = mutableListOf<AlternateEnclosure>()
         var durationMs: Long? = null
@@ -932,6 +1019,8 @@ public class XmlPullFeedParser(
         var persons: MutableList<Person>? = null
         val funding = mutableListOf<Funding>()
         var externalMediaId: String? = null
+        var ytChannelId: String? = null
+        var mediaStatisticsViews: Long? = null
     }
 
     private fun parseItemElement(
@@ -939,7 +1028,7 @@ public class XmlPullFeedParser(
         item: ItemBuilder,
     ) {
         trackPrefixFallback(parser)
-        val key = Namespaces.elementKey(parser)
+        val key = elementKey(parser)
         val name = parser.name
 
         when {
@@ -968,7 +1057,7 @@ public class XmlPullFeedParser(
             }
 
             key == Namespaces.Key.DC && name == "date" -> {
-                readDate(parser)?.let { (ms, raw) ->
+                readDate(parser, item.index).let { (ms, raw) ->
                     item.dcDate = ms
                     item.dcDateRaw = raw
                 }
@@ -980,6 +1069,10 @@ public class XmlPullFeedParser(
 
             key == Namespaces.Key.YT && name == "videoId" -> {
                 item.externalMediaId = plainText(parser).trim()
+            }
+
+            key == Namespaces.Key.YT && name == "channelId" -> {
+                item.ytChannelId = plainText(parser).trim()
             }
 
             else -> {
@@ -1007,11 +1100,11 @@ public class XmlPullFeedParser(
             }
 
             name.equals("link", true) -> {
-                item.link = urlOrNull(plainText(parser), item.base)
+                item.link = urlOrNull(plainText(parser), item.base, item.index)
             }
 
             name.equals("pubDate", true) -> {
-                readDate(parser)?.let { (ms, raw) ->
+                readDate(parser, item.index).let { (ms, raw) ->
                     item.pubDate = ms
                     item.rawPubDate = raw
                 }
@@ -1034,15 +1127,45 @@ public class XmlPullFeedParser(
         name: String,
     ) {
         when (name) {
-            "title" -> item.itunesTitle = plainText(parser)
-            "duration" -> item.durationMs = readDuration(plainText(parser))
-            "summary" -> item.slotItunesSummary = htmlText(parser)
-            "season" -> item.itunesSeason = plainText(parser).trim().toIntOrNull()
-            "episode" -> item.itunesEpisode = plainText(parser).trim().takeIf { it.isNotEmpty() }
-            "episodeType" -> item.episodeType = episodeTypeOf(plainText(parser))
-            "explicit" -> item.explicit = explicitOf(plainText(parser))
-            "image" -> addArtwork(item.artwork, artworkUrlFromElement(parser, item.base), ArtworkSource.ITUNES_IMAGE)
-            else -> skipElement(parser)
+            "title" -> {
+                item.itunesTitle = plainText(parser)
+            }
+
+            "duration" -> {
+                item.durationMs = readDuration(plainText(parser), item.index)
+            }
+
+            "summary" -> {
+                item.slotItunesSummary = htmlText(parser)
+            }
+
+            "season" -> {
+                item.itunesSeason = plainText(parser).trim().toIntOrNull()
+            }
+
+            "episode" -> {
+                item.itunesEpisode = plainText(parser).trim().takeIf { it.isNotEmpty() }
+            }
+
+            "episodeType" -> {
+                item.episodeType = episodeTypeOf(plainText(parser))
+            }
+
+            "explicit" -> {
+                item.explicit = explicitOf(plainText(parser))
+            }
+
+            "image" -> {
+                addArtwork(
+                    item.artwork,
+                    artworkUrlFromElement(parser, item.base, item.index),
+                    ArtworkSource.ITUNES_IMAGE,
+                )
+            }
+
+            else -> {
+                skipElement(parser)
+            }
         }
     }
 
@@ -1053,17 +1176,19 @@ public class XmlPullFeedParser(
     ) {
         when (name) {
             "season" -> {
-                item.season = plainText(parser).trim().toIntOrNull()
+                // Attributes belong to the START_TAG: read them before plainText moves the parser.
                 item.seasonName = attr(parser, "name")?.trim()?.takeIf { it.isNotEmpty() }
+                item.season = plainText(parser).trim().toIntOrNull()
             }
 
             "episode" -> {
-                item.episodeNumber = plainText(parser).trim().takeIf { it.isNotEmpty() }
                 item.episodeDisplay = attr(parser, "display")?.trim()?.takeIf { it.isNotEmpty() }
+                item.episodeNumber = plainText(parser).trim().takeIf { it.isNotEmpty() }
             }
 
             "transcript" -> {
-                val url = urlOrNull(attr(parser, "url"), item.base)
+                val rawUrl = attr(parser, "url")
+                val url = urlOrNull(rawUrl, item.base, item.index)
                 if (url != null) {
                     item.transcripts.add(
                         TranscriptRef(
@@ -1073,16 +1198,17 @@ public class XmlPullFeedParser(
                             attr(parser, "rel")?.trim()?.takeIf { it.isNotEmpty() },
                         ),
                     )
-                } else {
+                } else if (rawUrl.isNullOrBlank()) {
                     warn(WarningCode.BAD_URL, item.index, "transcript")
                 }
                 skipElement(parser)
             }
 
             "chapters" -> {
-                item.chaptersUrl = urlOrNull(attr(parser, "url"), item.base)
+                val rawUrl = attr(parser, "url")
+                item.chaptersUrl = urlOrNull(rawUrl, item.base, item.index)
                 item.chaptersType = attr(parser, "type")?.trim()?.takeIf { it.isNotEmpty() }
-                if (item.chaptersUrl == null) warn(WarningCode.BAD_URL, item.index, "chapters")
+                if (rawUrl.isNullOrBlank()) warn(WarningCode.BAD_URL, item.index, "chapters")
                 skipElement(parser)
             }
 
@@ -1100,7 +1226,16 @@ public class XmlPullFeedParser(
             }
 
             "image" -> {
-                addArtwork(item.artwork, artworkUrlFromElement(parser, item.base), ArtworkSource.PODCAST_IMAGE)
+                // Item-level podcast:image carries its URL in the `url` attribute like the channel
+                // form (03 Artwork candidates), through the shared resolve/validate path.
+                addArtwork(
+                    item.artwork,
+                    urlOrNull(attr(parser, "url"), item.base, item.index),
+                    ArtworkSource.PODCAST_IMAGE,
+                    widthOf(parser),
+                    heightOf(parser),
+                )
+                skipElement(parser)
             }
 
             else -> {
@@ -1123,21 +1258,26 @@ public class XmlPullFeedParser(
             "link" -> {
                 val rel = attr(parser, "rel")?.trim()
                 when (rel) {
-                    "enclosure" -> item.atomEnclosure = enclosureOf(parser, item.base)
-                    null, "", "alternate" -> item.atomAlternateLink = urlOrNull(attr(parser, "href"), item.base)
+                    "enclosure" -> {
+                        enclosureOf(parser, item.base, item.index)?.let(item.atomEnclosures::add)
+                    }
+
+                    null, "", "alternate" -> {
+                        item.atomAlternateLink = urlOrNull(attr(parser, "href"), item.base, item.index)
+                    }
                 }
                 skipElement(parser)
             }
 
             "published" -> {
-                readDate(parser)?.let { (ms, raw) ->
+                readDate(parser, item.index).let { (ms, raw) ->
                     item.atomPublished = ms
                     item.atomPublishedRaw = raw
                 }
             }
 
             "updated" -> {
-                readDate(parser)?.let { (ms, raw) ->
+                readDate(parser, item.index).let { (ms, raw) ->
                     item.atomUpdated = ms
                     item.atomUpdatedRaw = raw
                 }
@@ -1186,7 +1326,7 @@ public class XmlPullFeedParser(
             "thumbnail" -> {
                 addArtwork(
                     item.artwork,
-                    urlOrNull(attr(parser, "url"), item.base),
+                    urlOrNull(attr(parser, "url"), item.base, item.index),
                     ArtworkSource.MEDIA_THUMBNAIL,
                     widthOf(parser),
                 )
@@ -1207,32 +1347,39 @@ public class XmlPullFeedParser(
         parser: XmlPullParser,
         item: ItemBuilder,
     ) {
-        val url = attr(parser, "url")
         val type = attr(parser, "type")
         val medium = attr(parser, "medium")?.lowercase()
         val isMedia =
             medium in AUDIO_VIDEO_MEDIA ||
                 type?.startsWith("audio/") == true ||
                 type?.startsWith("video/") == true
-        if (url != null && isMedia) {
-            val enclosure =
-                Enclosure(url, type?.trim()?.takeIf { it.isNotEmpty() }, positiveLong(attr(parser, "fileSize")))
-            // isDefault content comes first within its element (03 Field mapping).
-            if (attr(parser, "isDefault")?.trim() ==
-                "true"
-            ) {
-                item.mediaContent.add(0, enclosure)
-            } else {
-                item.mediaContent.add(enclosure)
-            }
-            if (item.mediaDurationMs == null) {
-                item.mediaDurationMs = readDuration(attr(parser, "duration"))
+        if (isMedia) {
+            // Media RSS enclosure URLs go through the same resolve/validate path as every other URL.
+            val url = urlOrNull(attr(parser, "url"), item.base, item.index)
+            if (url != null) {
+                val enclosure =
+                    Enclosure(url, type?.trim()?.takeIf { it.isNotEmpty() }, positiveLong(attr(parser, "fileSize")))
+                // isDefault content comes first within its element (03 Field mapping).
+                if (attr(parser, "isDefault")?.trim() ==
+                    "true"
+                ) {
+                    item.mediaContent.add(0, enclosure)
+                } else {
+                    item.mediaContent.add(enclosure)
+                }
+                if (item.mediaDurationMs == null) {
+                    item.mediaDurationMs = readDuration(attr(parser, "duration"), item.index)
+                }
             }
         }
         skipElement(parser)
     }
 
-    /** `media:group` children: `media:content` and `media:thumbnail` (also the channel variant). */
+    /**
+     * `media:group` children: `media:content` and `media:thumbnail` (also the channel variant) plus
+     * the group-level `media:title`/`media:description`/`media:community` YouTube carries (04 Atom
+     * feed ingestion); the channel form stores none of those.
+     */
     private fun parseMediaGroup(
         parser: XmlPullParser,
         channel: ChannelBuilder?,
@@ -1252,11 +1399,23 @@ public class XmlPullFeedParser(
                     "thumbnail" -> {
                         addArtwork(
                             item?.artwork ?: channel!!.artwork,
-                            urlOrNull(attr(parser, "url"), base),
+                            urlOrNull(attr(parser, "url"), base, item?.index),
                             ArtworkSource.MEDIA_THUMBNAIL,
                             widthOf(parser),
                         )
                         skipElement(parser)
+                    }
+
+                    "title" -> {
+                        if (item != null) item.mediaTitle = plainText(parser) else skipElement(parser)
+                    }
+
+                    "description" -> {
+                        if (item != null) item.slotMediaDescription = plainText(parser) else skipElement(parser)
+                    }
+
+                    "community" -> {
+                        if (item != null) parseMediaCommunity(parser, item) else skipElement(parser)
                     }
 
                     else -> {
@@ -1265,6 +1424,27 @@ public class XmlPullFeedParser(
                 }
             } else if (event == XmlPullParser.START_TAG) {
                 skipElement(parser)
+            }
+            event = nextEvent(parser)
+        }
+    }
+
+    /** `media:community` > `media:statistics@views`, the play-count hint of 04 Atom feed ingestion. */
+    private fun parseMediaCommunity(
+        parser: XmlPullParser,
+        item: ItemBuilder,
+    ) {
+        val depth = parser.depth
+        var event = nextEvent(parser)
+        while (event != XmlPullParser.END_DOCUMENT) {
+            if (event == XmlPullParser.END_TAG && parser.depth == depth) break
+            if (event == XmlPullParser.START_TAG &&
+                Namespaces.elementKey(parser) == Namespaces.Key.MEDIA &&
+                parser.name == "statistics" &&
+                item.mediaStatisticsViews == null
+            ) {
+                item.mediaStatisticsViews =
+                    attr(parser, "views")?.trim()?.toLongOrNull()?.takeIf { it >= 0 }
             }
             event = nextEvent(parser)
         }
@@ -1321,7 +1501,8 @@ public class XmlPullFeedParser(
             if (event == XmlPullParser.START_TAG && Namespaces.elementKey(parser) == Namespaces.Key.PODCAST) {
                 when (parser.name) {
                     "source" -> {
-                        val uri = urlOrNull(attr(parser, "uri"), item.base)
+                        val rawUri = attr(parser, "uri")
+                        val uri = urlOrNull(rawUri, item.base, item.index)
                         if (uri != null) {
                             sources.add(
                                 AlternateEnclosureSource(
@@ -1329,7 +1510,7 @@ public class XmlPullFeedParser(
                                     attr(parser, "contentType")?.trim()?.takeIf { it.isNotEmpty() },
                                 ),
                             )
-                        } else {
+                        } else if (rawUri.isNullOrBlank()) {
                             warn(WarningCode.BAD_URL, item.index, "alternateEnclosure source")
                         }
                     }
@@ -1361,13 +1542,18 @@ public class XmlPullFeedParser(
     }
 
     private fun parsePerson(parser: XmlPullParser): Person {
+        // Attributes belong to the START_TAG; feeds carry them both plain and podcast-namespaced.
+        val role = attr(parser, "role") ?: attr(parser, "role", PODCAST_NS)
+        val group = attr(parser, "group") ?: attr(parser, "group", PODCAST_NS)
+        val img = attr(parser, "img") ?: attr(parser, "img", PODCAST_NS)
+        val href = attr(parser, "href") ?: attr(parser, "href", PODCAST_NS)
         val name = plainText(parser).trim()
         return Person(
             name = name,
-            role = attr(parser, "role")?.trim()?.takeIf { it.isNotEmpty() } ?: Person.ROLE_HOST,
-            group = attr(parser, "group")?.trim()?.takeIf { it.isNotEmpty() } ?: Person.GROUP_CAST,
-            img = attr(parser, "img")?.trim()?.takeIf { it.isNotEmpty() },
-            href = attr(parser, "href")?.trim()?.takeIf { it.isNotEmpty() },
+            role = role?.trim()?.takeIf { it.isNotEmpty() } ?: Person.ROLE_HOST,
+            group = group?.trim()?.takeIf { it.isNotEmpty() } ?: Person.GROUP_CAST,
+            img = img?.trim()?.takeIf { it.isNotEmpty() },
+            href = href?.trim()?.takeIf { it.isNotEmpty() },
         )
     }
 
@@ -1443,12 +1629,33 @@ public class XmlPullFeedParser(
         item: ItemBuilder,
     ) {
         trackPrefixFallback(parser)
-        val key = Namespaces.elementKey(parser)
+        val key = elementKey(parser)
         val name = parser.name
 
+        // Extension namespaces dispatch before Atom local names: a media:title or media:content is
+        // an extension element even though Atom has names with the same local name (03 step 7).
         when {
-            key != Namespaces.Key.ATOM && key != Namespaces.Key.MEDIA &&
-                key != Namespaces.Key.YT && key != Namespaces.Key.PODCAST -> {
+            key == Namespaces.Key.MEDIA -> {
+                parseMediaItemElement(parser, item, name)
+            }
+
+            key == Namespaces.Key.YT && name == "videoId" -> {
+                item.externalMediaId = plainText(parser).trim()
+            }
+
+            key == Namespaces.Key.YT && name == "channelId" -> {
+                item.ytChannelId = plainText(parser).trim()
+            }
+
+            key == Namespaces.Key.YT -> {
+                skipElement(parser)
+            }
+
+            key == Namespaces.Key.PODCAST -> {
+                parsePodcastItemElement(parser, item, name)
+            }
+
+            key != Namespaces.Key.ATOM -> {
                 skipElement(parser)
             }
 
@@ -1461,14 +1668,14 @@ public class XmlPullFeedParser(
             }
 
             name == "published" -> {
-                readDate(parser)?.let { (ms, raw) ->
+                readDate(parser, item.index).let { (ms, raw) ->
                     item.atomPublished = ms
                     item.atomPublishedRaw = raw
                 }
             }
 
             name == "updated" -> {
-                readDate(parser)?.let { (ms, raw) ->
+                readDate(parser, item.index).let { (ms, raw) ->
                     item.atomUpdated = ms
                     item.atomUpdatedRaw = raw
                 }
@@ -1493,27 +1700,20 @@ public class XmlPullFeedParser(
             name == "link" -> {
                 val rel = attr(parser, "rel")?.trim()
                 when (rel) {
-                    "enclosure" -> item.atomEnclosure = enclosureOf(parser, item.base)
-                    null, "", "alternate" -> item.atomAlternateLink = urlOrNull(attr(parser, "href"), item.base)
+                    "enclosure" -> {
+                        enclosureOf(parser, item.base, item.index)?.let(item.atomEnclosures::add)
+                    }
+
+                    null, "", "alternate" -> {
+                        item.atomAlternateLink = urlOrNull(attr(parser, "href"), item.base, item.index)
+                    }
                 }
                 skipElement(parser)
             }
 
             name == "author" -> {
+                // Item-level authors are not stored in v1.
                 skipElement(parser)
-            }
-
-            // item-level authors are not stored in v1
-            key == Namespaces.Key.MEDIA -> {
-                parseMediaItemElement(parser, item, name)
-            }
-
-            key == Namespaces.Key.YT && name == "videoId" -> {
-                item.externalMediaId = plainText(parser).trim()
-            }
-
-            key == Namespaces.Key.PODCAST -> {
-                parsePodcastItemElement(parser, item, name)
             }
 
             else -> {
@@ -1527,7 +1727,7 @@ public class XmlPullFeedParser(
         val type = attr(parser, "type")?.trim()?.lowercase()
         return when (type) {
             "html" -> htmlText(parser) to true
-            "xhtml" -> InnerXml.collect(parser, ::countText, limits.maxDepth).trim().takeIf { it.isNotEmpty() } to true
+            "xhtml" -> htmlText(parser) to true
             else -> plainText(parser).takeIf { it.isNotEmpty() } to false
         }
     }
@@ -1537,8 +1737,8 @@ public class XmlPullFeedParser(
     // ---------------------------------------------------------------------------
 
     private fun buildEpisode(item: ItemBuilder): ParsedEpisode {
-        // Enclosure order: explicit enclosures, the Atom enclosure, then media:content entries.
-        val rawEnclosures = item.rssEnclosures + listOfNotNull(item.atomEnclosure) + item.mediaContent
+        // Enclosure order: explicit enclosures, the Atom enclosures, then media:content entries.
+        val rawEnclosures = item.rssEnclosures + item.atomEnclosures + item.mediaContent
         val enclosures = rawEnclosures.map { it.copy(effectiveType = EnclosureTypes.effective(it.type, it.url)) }
         val primary = EnclosureTypes.primary(enclosures)
 
@@ -1585,6 +1785,8 @@ public class XmlPullFeedParser(
             persons = item.persons?.toList(),
             funding = item.funding.toList(),
             externalMediaId = item.externalMediaId,
+            ytChannelId = item.ytChannelId,
+            mediaStatisticsViews = item.mediaStatisticsViews,
         )
     }
 
@@ -1615,59 +1817,71 @@ public class XmlPullFeedParser(
     // ---------------------------------------------------------------------------
 
     /** Reads a date element: the parsed epoch-ms (null plus `UNKNOWN_DATE` on failure) and the raw text. */
-    private fun readDate(parser: XmlPullParser): Pair<Long?, String> {
+    private fun readDate(
+        parser: XmlPullParser,
+        itemIndex: Int?,
+    ): Pair<Long?, String> {
         val raw = plainText(parser)
         val parsed = FeedDates.parse(raw)
-        if (parsed == null) warn(WarningCode.UNKNOWN_DATE, null, raw.take(SHORT_DETAIL_CHARS))
+        if (parsed == null) warn(WarningCode.UNKNOWN_DATE, itemIndex, raw.take(SHORT_DETAIL_CHARS))
         return parsed to raw
     }
 
-    /** Reads an `itunes:duration` value; null plus `BAD_DURATION` on failure. */
-    private fun readDuration(raw: String?): Long? {
+    /** Reads an `itunes:duration` or `media:content@duration` value; null plus `BAD_DURATION` on failure. */
+    private fun readDuration(
+        raw: String?,
+        itemIndex: Int?,
+    ): Long? {
         if (raw == null) return null
         val parsed = Durations.parseMs(raw)
-        if (parsed == null) warn(WarningCode.BAD_DURATION, null, raw.trim().take(SHORT_DETAIL_CHARS))
+        if (parsed == null) warn(WarningCode.BAD_DURATION, itemIndex, raw.trim().take(SHORT_DETAIL_CHARS))
         return parsed
     }
 
     /** Plain element text, trimmed; child markup is skipped, entity text included (03 steps 2–4). */
     private fun plainText(parser: XmlPullParser): String {
         val out = StringBuilder()
+        var total = 0
+
+        // The collector is bounded: text past the cap is counted (for the warning detail and the
+        // U+FFFD heuristic) but not retained (03 Limits and version policy).
+        fun appendBounded(text: String) {
+            countText(text)
+            total += text.length
+            val room = limits.maxTextChars - out.length
+            if (room > 0) out.append(text, 0, minOf(text.length, room))
+        }
         // Enter the element: the caller leaves the parser on its START_TAG.
         var event = nextEvent(parser)
         while (event != XmlPullParser.END_TAG && event != XmlPullParser.END_DOCUMENT) {
             when (event) {
                 XmlPullParser.TEXT, XmlPullParser.CDSECT -> {
-                    countAndAppend(out, InnerXml.stripRelaxedError(parser.text))
+                    appendBounded(InnerXml.stripRelaxedError(parser.text))
                 }
 
                 XmlPullParser.ENTITY_REF -> {
-                    parser.text?.let { countAndAppend(out, InnerXml.stripRelaxedError(it)) }
+                    parser.text?.let { appendBounded(InnerXml.stripRelaxedError(it)) }
                 }
 
                 XmlPullParser.START_TAG -> {
                     skipElement(parser)
                 }
-
-                else -> {
-                    Unit
-                }
             }
             event = nextEvent(parser)
         }
-        return truncateIfLong(out.toString().trim())
+        if (total > limits.maxTextChars) {
+            warnings.add(ParseWarning(WarningCode.TEXT_TRUNCATED, detail = "$total chars"))
+        }
+        return out.toString().trim()
     }
 
     /** HTML-bearing element text: child markup is re-serialised, never dropped (03 step 6). */
     private fun htmlText(parser: XmlPullParser): String? {
-        val collected = InnerXml.collect(parser, ::countText, limits.maxDepth).trim()
-        return truncateIfLong(collected).takeIf { it.isNotEmpty() }
-    }
-
-    private fun truncateIfLong(text: String): String {
-        if (text.length <= limits.maxTextChars) return text
-        warnings.add(ParseWarning(WarningCode.TEXT_TRUNCATED, detail = "${text.length} chars"))
-        return text.substring(0, limits.maxTextChars)
+        val collected = InnerXml.collect(parser, ::countText, limits.maxDepth, limits.maxTextChars)
+        if (collected.totalChars > limits.maxTextChars) {
+            warnings.add(ParseWarning(WarningCode.TEXT_TRUNCATED, detail = "${collected.totalChars} chars"))
+        }
+        return collected.text.trim().takeIf { it.isNotEmpty() }
     }
 
     private fun countText(text: String) {
@@ -1675,74 +1889,140 @@ public class XmlPullFeedParser(
         counters.replacementChars += text.count { it == REPLACEMENT_CHAR }
     }
 
-    private fun countAndAppend(
-        out: StringBuilder,
-        text: String,
-    ) {
-        countText(text)
-        out.append(text)
-    }
-
-    /** Resolves [raw] against [base], then enforces absolute http(s) and the URL-length limit. */
+    /**
+     * Resolves [raw] against [base], then enforces absolute http(s) and the URL-length limit
+     * (`BAD_URL`, 03 Limits and version policy); a blank value is no URL at all and stays silent.
+     */
     private fun urlOrNull(
         raw: String?,
         base: String,
+        itemIndex: Int? = null,
     ): String? {
         val trimmed = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        val resolved = resolveUrl(trimmed, base) ?: return null
-        if (!resolved.startsWith("http://") && !resolved.startsWith("https://")) return null
+        val resolved = resolveUrl(trimmed, base)
+        if (resolved == null || !(resolved.startsWith("http://") || resolved.startsWith("https://"))) {
+            warnings.add(ParseWarning(WarningCode.BAD_URL, itemIndex, trimmed.take(SHORT_DETAIL_CHARS)))
+            return null
+        }
         if (resolved.length > limits.maxUrlChars) {
-            warnings.add(ParseWarning(WarningCode.BAD_URL, detail = "${resolved.length} chars"))
+            warnings.add(ParseWarning(WarningCode.BAD_URL, itemIndex, "${resolved.length} chars"))
             return null
         }
         return resolved
     }
 
-    /** Lenient RFC 3986 reference resolution; `xml:base` has been folded into [base] already. */
+    /** RFC 3986 §5.2.2 reference resolution; `xml:base` has been folded into [base] already. */
     private fun resolveUrl(
         raw: String,
         base: String,
     ): String? {
-        if (Regex("""^[A-Za-z][A-Za-z0-9+.\-]*://""").containsMatchIn(raw)) return raw
+        // An absolute URI (scheme present) wins outright.
+        if (ABSOLUTE_URI.containsMatchIn(raw)) return raw
+        val baseMatch = BASE_URI.find(base.substringBefore('#')) ?: return null
+        val scheme = baseMatch.groupValues[1]
+        val authority = baseMatch.groupValues[2]
+        val basePath = baseMatch.groupValues[3]
+        val baseQuery = baseMatch.groupValues[4].ifEmpty { null }
 
-        val schemeMatch = Regex("""^([A-Za-z][A-Za-z0-9+.\-]*)://([^/?]*)([^\?#]*)?""").find(base) ?: return null
-        val (scheme, authority, fullPath) = schemeMatch.destructured
-        val hasPath = fullPath.isNotEmpty()
-        return when {
-            raw.startsWith("//") -> {
-                "$scheme:$raw"
+        val refPathQuery = raw.substringBefore('#')
+        val refPath = refPathQuery.substringBefore('?')
+        val refQuery = refPathQuery.substringAfter('?', "").ifEmpty { null }
+        val fragment =
+            raw
+                .substringAfter('#', "")
+                .ifEmpty { null }
+                ?.let { "#$it" }
+                .orEmpty()
+
+        val target =
+            when {
+                refPath.startsWith("//") -> "$scheme:$refPath"
+                refPath.startsWith("/") -> "$scheme://$authority" + removeDotSegments(refPath)
+                refPath.isEmpty() -> "$scheme://$authority$basePath"
+                else -> "$scheme://$authority" + removeDotSegments(mergePath(basePath, refPath))
             }
+        val query =
+            refQuery?.let { "?$it" }
+                ?: if (refPath.isEmpty() && baseQuery != null) "?$baseQuery" else ""
+        return target + query + fragment
+    }
 
-            raw.startsWith("/") -> {
-                "$scheme://$authority$raw"
-            }
+    /** The merge rule of RFC 3986 §5.2.3: the reference hangs on the base's directory. */
+    private fun mergePath(
+        basePath: String,
+        refPath: String,
+    ): String {
+        val cut = basePath.lastIndexOf('/')
+        return if (cut < 0) "/$refPath" else basePath.substring(0, cut + 1) + refPath
+    }
 
-            raw.startsWith("?") -> {
-                "$scheme://$authority$fullPath$raw"
-            }
+    /** RFC 3986 §5.2.4 dot-segment removal; `..` at the root stays at the root. */
+    private fun removeDotSegments(path: String): String {
+        val input = StringBuilder(path)
+        val out = StringBuilder()
+        while (input.isNotEmpty()) {
+            val s = input.toString()
+            when {
+                s.startsWith("../") -> {
+                    input.delete(0, 3)
+                }
 
-            raw.startsWith("#") -> {
-                "$scheme://$authority$fullPath"
-            }
+                s.startsWith("./") -> {
+                    input.delete(0, 2)
+                }
 
-            else -> {
-                // Relative reference: resolve against the base's directory.
-                val dir = if (hasPath) fullPath.substringBeforeLast('/', "/") else "/"
-                "$scheme://$authority$dir$raw"
+                s.startsWith("/./") -> {
+                    input.replace(0, 3, "/")
+                }
+
+                s == "/." -> {
+                    input.replace(0, 2, "/")
+                }
+
+                s.startsWith("/../") -> {
+                    input.replace(0, 4, "/")
+                    out.setLength(out.lastIndexOf("/").takeIf { it >= 0 } ?: 0)
+                }
+
+                s == "/.." -> {
+                    input.replace(0, 3, "/")
+                    out.setLength(out.lastIndexOf("/").takeIf { it >= 0 } ?: 0)
+                }
+
+                s == "." || s == ".." -> {
+                    input.delete(0, s.length)
+                }
+
+                else -> {
+                    // Move the first path segment, including its leading '/', to the output.
+                    val start = if (s.startsWith("/")) 1 else 0
+                    val end = s.indexOf('/', start).let { if (it < 0) s.length else it }
+                    out.append(s.substring(0, end))
+                    input.delete(0, end)
+                }
             }
         }
+        return out.toString()
     }
 
     /**
-     * The URL of `itunes:image`/`googleplay:image`/`podcast:image`: the href attribute, or the element
-     * text (a common error, 03 Artwork candidates).
+     * The URL of `itunes:image`/`googleplay:image`: the href attribute, or the element text (a common
+     * error, 03 Artwork candidates), through the shared resolve/validate path.
      */
     private fun artworkUrlFromElement(
         parser: XmlPullParser,
         base: String,
+        itemIndex: Int? = null,
     ): String? {
         val href = attr(parser, "href")?.trim()?.takeIf { it.isNotEmpty() }
-        return href ?: plainText(parser).trim().takeIf { it.isNotEmpty() }
+        val raw =
+            if (href != null) {
+                skipElement(parser)
+                href
+            } else {
+                plainText(parser).trim().takeIf { it.isNotEmpty() }
+            }
+        return urlOrNull(raw, base, itemIndex)
     }
 
     private fun addArtwork(
@@ -1773,19 +2053,17 @@ public class XmlPullFeedParser(
         type: String?,
         rawLength: String?,
     ) {
-        val url = urlOrNull(rawUrl, item.base)
-        if (url == null) {
-            if (!rawUrl.isNullOrBlank()) warn(WarningCode.BAD_URL, item.index, "enclosure")
-            return
-        }
+        // A non-blank URL that fails resolution or validation warns inside urlOrNull already.
+        val url = urlOrNull(rawUrl, item.base, item.index) ?: return
         item.rssEnclosures.add(Enclosure(url, type?.trim()?.takeIf { it.isNotEmpty() }, positiveLong(rawLength)))
     }
 
     private fun enclosureOf(
         parser: XmlPullParser,
         base: String,
+        itemIndex: Int? = null,
     ): Enclosure? {
-        val url = urlOrNull(attr(parser, "href"), base) ?: return null
+        val url = urlOrNull(attr(parser, "href"), base, itemIndex) ?: return null
         return Enclosure(
             url,
             attr(parser, "type")?.trim()?.takeIf { it.isNotEmpty() },
@@ -1882,6 +2160,7 @@ public class XmlPullFeedParser(
             XmlPullFeedParser(PullParserFactory.Discovered, limits)
 
         private const val RELAXED_FEATURE = "http://xmlpull.org/v1/doc/features.html#relaxed"
+        private const val PODCAST_NS = "https://podcastindex.org/namespace/1.0"
         private const val REPLACEMENT_CHAR = '�'
         private const val REPLACEMENT_RATIO_THRESHOLD = 0.005
         private const val WINDOWS_1252 = "windows-1252"
@@ -1893,6 +2172,13 @@ public class XmlPullFeedParser(
         private const val SQUARE_ASPECT = "1/1"
         private const val UNDETERMINED_LANGUAGE = "und"
         private const val SY_FREQUENCY_DEFAULT = 1
+
+        /** `scheme:` — anything with a URI scheme is already absolute (RFC 3986 §4.3). */
+        private val ABSOLUTE_URI = Regex("""^[A-Za-z][A-Za-z0-9+.\-]*:""")
+
+        /** `scheme://authority/path?query` of the base URL; a fragment is excluded before matching. */
+        private val BASE_URI =
+            Regex("""^([A-Za-z][A-Za-z0-9+.\-]*)://([^/?#]*)([^?#]*)(?:\?([^#]*))?""")
 
         /** `sy:updatePeriod` → minutes (03 Field mapping). */
         private val UPDATE_PERIOD_MINUTES =

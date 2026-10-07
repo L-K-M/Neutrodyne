@@ -1,25 +1,25 @@
 {
   "artwork": [
     {
-      "url": "https://cdn.example.com/atom-logo.png",
-      "source": "ATOM_LOGO"
+      "source": "ATOM_LOGO",
+      "url": "https://cdn.example.com/atom-logo.png"
     },
     {
-      "url": "https://cdn.example.com/atom-icon.png",
-      "source": "ATOM_ICON"
+      "source": "ATOM_ICON",
+      "url": "https://cdn.example.com/atom-icon.png"
     }
   ],
   "descriptionHtml": "An Atom feed with xhtml content",
   "format": "ATOM",
   "items": [
     {
+      "descriptionHtml": "<div>\n        <p>Paragraph with <strong>markup</strong> and <a href=\"https://example.com/target\">a link</a>.</p>\n      </div>",
+      "descriptionIsHtml": true,
       "feedOrder": 0,
       "guid": "atom-xhtml-1",
-      "title": "An <i>html</i> title",
       "pubDate": 1791192600000,
       "rawPubDate": "2026-10-05T09:30:00Z",
-      "descriptionHtml": "<div>\n        <p>Paragraph with <strong>markup</strong> and <a href=\"https://example.com/target\">a link</a>.</p>\n      </div>",
-      "descriptionIsHtml": true
+      "title": "An <i>html</i> title"
     }
   ],
   "title": "Atom XHTML Content"

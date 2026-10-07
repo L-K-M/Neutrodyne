@@ -2,23 +2,23 @@
   "format": "RSS2",
   "items": [
     {
-      "feedOrder": 0,
-      "guid": "rfc-1-1",
-      "title": "Page one episode",
       "enclosures": [
         {
-          "url": "https://cdn.example.com/r1.mp3",
-          "type": "audio/mpeg",
+          "effectiveType": "audio/mpeg",
           "length": 10,
-          "effectiveType": "audio/mpeg"
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/r1.mp3"
         }
       ],
+      "feedOrder": 0,
+      "guid": "rfc-1-1",
       "primaryEnclosure": {
-        "url": "https://cdn.example.com/r1.mp3",
-        "type": "audio/mpeg",
+        "effectiveType": "audio/mpeg",
         "length": 10,
-        "effectiveType": "audio/mpeg"
-      }
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/r1.mp3"
+      },
+      "title": "Page one episode"
     }
   ],
   "link": "https://example.com/archived",

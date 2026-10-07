@@ -2,36 +2,40 @@
   "format": "RSS2",
   "funding": [
     {
-      "url": "https://example.com/support",
-      "title": "Support the show"
+      "title": "Support the show",
+      "url": "https://example.com/support"
     }
   ],
   "items": [
     {
-      "feedOrder": 0,
-      "guid": "p20-1",
-      "title": "P2.0 episode",
+      "chaptersType": "application/json+chapters",
+      "chaptersUrl": "https://example.com/ch1.json",
       "enclosures": [
         {
-          "url": "https://cdn.example.com/p1.mp3",
-          "type": "audio/mpeg",
+          "effectiveType": "audio/mpeg",
           "length": 1,
-          "effectiveType": "audio/mpeg"
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/p1.mp3"
         }
       ],
+      "episodeDisplay": "Ep. 12",
+      "episodeNumber": "12",
+      "feedOrder": 0,
+      "guid": "p20-1",
       "primaryEnclosure": {
-        "url": "https://cdn.example.com/p1.mp3",
-        "type": "audio/mpeg",
+        "effectiveType": "audio/mpeg",
         "length": 1,
-        "effectiveType": "audio/mpeg"
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/p1.mp3"
       },
-      "chaptersUrl": "https://example.com/ch1.json",
-      "chaptersType": "application/json+chapters",
+      "season": 3,
+      "seasonName": "Season Three",
+      "title": "P2.0 episode",
       "transcripts": [
         {
-          "url": "https://example.com/t1.srt",
+          "language": "en",
           "type": "application/srt",
-          "language": "en"
+          "url": "https://example.com/t1.srt"
         }
       ]
     }

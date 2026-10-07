@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.feeds.jvm
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -64,6 +65,14 @@ object Goldens {
                 )
             }
 
+            is JsonArray -> {
+                JsonArray(
+                    element
+                        .filterNot { it is JsonPrimitive && it.isString == false && it.content == "null" }
+                        .map(::dropNulls),
+                )
+            }
+
             else -> {
                 element
             }
@@ -75,6 +84,10 @@ object Goldens {
                 JsonObject(
                     element.entries.associate { (k, v) -> k to sortKeys(v) }.toSortedMap(),
                 )
+            }
+
+            is JsonArray -> {
+                JsonArray(element.map(::sortKeys))
             }
 
             else -> {

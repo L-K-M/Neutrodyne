@@ -2,25 +2,25 @@
   "format": "RSS2",
   "items": [
     {
-      "feedOrder": 0,
-      "guid": "cdata-1",
-      "title": "CDATA wrapped markup",
-      "descriptionHtml": "&lt;p&gt;Real markup &lt;em&gt;inside&lt;/em&gt; CDATA with a &lt;a href=\"https://example.com/x\"&gt;link&lt;/a&gt;.&lt;/p&gt;",
+      "descriptionHtml": "<p>Real markup <em>inside</em> CDATA with a <a href=\"https://example.com/x\">link</a>.</p>",
       "descriptionIsHtml": true,
       "enclosures": [
         {
-          "url": "https://cdn.example.com/c1.mp3",
-          "type": "audio/mpeg",
+          "effectiveType": "audio/mpeg",
           "length": 10,
-          "effectiveType": "audio/mpeg"
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/c1.mp3"
         }
       ],
+      "feedOrder": 0,
+      "guid": "cdata-1",
       "primaryEnclosure": {
-        "url": "https://cdn.example.com/c1.mp3",
-        "type": "audio/mpeg",
+        "effectiveType": "audio/mpeg",
         "length": 10,
-        "effectiveType": "audio/mpeg"
-      }
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/c1.mp3"
+      },
+      "title": "CDATA wrapped markup"
     }
   ],
   "title": "CDATA Description"

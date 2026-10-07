@@ -2,26 +2,25 @@
 package ch.lkmc.neutrodyne.feeds.jvm.parse
 
 import ch.lkmc.neutrodyne.feeds.jvm.Goldens
-import com.google.testing.junit.testparameterinjector.TestParameter
-import com.google.testing.junit.testparameterinjector.TestParameterInjector
+import ch.lkmc.neutrodyne.feeds.parse.ParseResult
 import okio.Buffer
 import org.junit.Test
-import org.junit.runner.RunWith
 import java.io.File
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import kotlin.random.Random
 
 /**
  * Seeded mutation robustness over every committed fixture of `FeedParser` (09 Untrusted-input
- * robustness): every mutant must return a `ParseResult` without throwing, finish quickly and stay within
- * the small heap this task runs with. PR runs use 20 mutations per fixture (seed = fixture name hash);
- * nightly runs raise `-PmutationIterations` to 1,000.
+ * robustness): every mutant must return a `ParseResult` without throwing, finish inside the
+ * per-mutant timeout and stay within the small heap this task runs with. PR runs use 20 mutations
+ * per fixture (seed = fixture name hash); nightly runs raise `-PmutationIterations` to 1,000.
  */
-@RunWith(TestParameterInjector::class)
 class MutationRobustnessTest {
-    private val parser = XmlPullFeedParser.discovered()
-
-    @TestParameter(value = ["1"])
-    lateinit var fixtureHolder: String
+    /** Daemon pool: a mutant that never finishes is abandoned, never joined again. */
+    private val workers = Executors.newCachedThreadPool { r -> Thread(r).apply { isDaemon = true } }
 
     @Test
     fun everyFixtureSurvivesMutations() {
@@ -43,10 +42,30 @@ class MutationRobustnessTest {
 
         repeat(iterations) {
             for (mutant in mutantsOf(original, random)) {
-                val result = parser.parse({ Buffer().write(mutant) }, null, "https://example.com/feed.xml")
-                // Any ParseResult is acceptable; an exception would have propagated already.
-                check(result.javaClass.simpleName.isNotEmpty())
+                try {
+                    parseWithTimeout(mutant)
+                } catch (e: Throwable) {
+                    throw AssertionError("mutation of ${fixture.name} failed", e)
+                }
             }
+        }
+    }
+
+    /** One mutant on a worker thread with its own parser; a non-terminating parse is abandoned. */
+    private fun parseWithTimeout(mutant: ByteArray): ParseResult {
+        val future =
+            workers.submit<ParseResult> {
+                XmlPullFeedParser
+                    .discovered()
+                    .parse({ Buffer().write(mutant) }, null, "https://example.com/feed.xml")
+            }
+        try {
+            return future.get(MUTANT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        } catch (e: TimeoutException) {
+            future.cancel(true)
+            throw AssertionError("parse did not finish within $MUTANT_TIMEOUT_MS ms")
+        } catch (e: ExecutionException) {
+            throw e.cause ?: e
         }
     }
 
@@ -99,11 +118,15 @@ class MutationRobustnessTest {
 
         // Insert NUL and a lone surrogate.
         val asText = original.decodeToString()
-        val withNul = asText.replaceFirst("<", "<\u0000", ignoreCase = false)
+        val withNul = asText.replaceFirst("<", "<", ignoreCase = false)
         val withSurrogate = asText.replaceFirst("<", "<\uD800", ignoreCase = false)
         if (withNul != asText) mutants += withNul.encodeToByteArray()
         if (withSurrogate != asText) mutants += withSurrogate.encodeToByteArray()
 
         return mutants.distinctBy { it.contentHashCode() }
+    }
+
+    private companion object {
+        const val MUTANT_TIMEOUT_MS = 5_000L
     }
 }

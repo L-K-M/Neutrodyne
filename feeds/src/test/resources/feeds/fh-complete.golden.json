@@ -2,23 +2,23 @@
   "format": "RSS2",
   "items": [
     {
-      "feedOrder": 0,
-      "guid": "fhc-1",
-      "title": "The one and only",
       "enclosures": [
         {
-          "url": "https://cdn.example.com/fc1.mp3",
-          "type": "audio/mpeg",
+          "effectiveType": "audio/mpeg",
           "length": 10,
-          "effectiveType": "audio/mpeg"
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/fc1.mp3"
         }
       ],
+      "feedOrder": 0,
+      "guid": "fhc-1",
       "primaryEnclosure": {
-        "url": "https://cdn.example.com/fc1.mp3",
-        "type": "audio/mpeg",
+        "effectiveType": "audio/mpeg",
         "length": 10,
-        "effectiveType": "audio/mpeg"
-      }
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/fc1.mp3"
+      },
+      "title": "The one and only"
     }
   ],
   "paging": {

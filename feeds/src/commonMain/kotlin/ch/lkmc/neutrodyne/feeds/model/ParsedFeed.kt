@@ -35,6 +35,10 @@ public data class ParsedFeed(
     val usesPodping: Boolean = false,
     /** Raw feed-level `yt:channelId`; interpreted by 04 (04 Atom feed ingestion). */
     val ytChannelId: String? = null,
+    /** Raw feed-level `yt:playlistId`; interpreted by 04 (04 Atom feed ingestion). */
+    val ytPlaylistId: String? = null,
+    /** Atom `author/uri`; interpreted by 04 (04 Atom feed ingestion). */
+    val authorUri: String? = null,
     val items: List<ParsedEpisode> = emptyList(),
     val warnings: List<ParseWarning> = emptyList(),
 )

@@ -34,6 +34,15 @@ class DurationsTest {
     }
 
     @Test
+    fun fractionKeepsWholeMilliseconds() {
+        // Integer arithmetic: "1.001" is 1,001 ms, not a truncated double.
+        assertEquals(1_001L, Durations.parseMs("1.001"))
+        assertEquals(1_001L, Durations.parseMs("0:00:01.001"))
+        assertEquals(61_250L, Durations.parseMs("1:01.25"))
+        assertEquals(1_234L, Durations.parseMs("1.234"))
+    }
+
+    @Test
     fun rejectsGarbage() {
         assertNull(Durations.parseMs(""))
         assertNull(Durations.parseMs(" "))
