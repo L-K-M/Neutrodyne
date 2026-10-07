@@ -121,52 +121,59 @@ public object UrlNormalizer {
         return path
     }
 
-    /** RFC 3986 §5.2.4. */
+    /**
+     * RFC 3986 §5.2.4 as an indexed scan: the position moves, the input is never re-sliced, so
+     * `"../" * N` costs linear time instead of quadratic substring copies.
+     */
     private fun removeDotSegments(path: String): String {
-        val output = StringBuilder()
-        var input = path
+        val output = StringBuilder(path.length)
+        var i = 0
+        val end = path.length
 
-        while (input.isNotEmpty()) {
+        while (i < end) {
             when {
-                input.startsWith("../") -> {
-                    input = input.substring(3)
+                path.startsWith("../", i) -> {
+                    i += 3
                 }
 
-                input.startsWith("./") -> {
-                    input = input.substring(2)
+                path.startsWith("./", i) -> {
+                    i += 2
                 }
 
-                input.startsWith("/./") -> {
-                    input = "/" + input.substring(3)
+                // `/./` collapses to `/`: skip the `/.` and keep scanning at the second slash.
+                path.startsWith("/./", i) -> {
+                    i += 2
                 }
 
-                input == "/." -> {
-                    input = "/"
+                i + 2 == end && path.startsWith("/.", i) -> {
+                    output.append('/')
+                    i = end
                 }
 
-                input.startsWith("/../") -> {
-                    input = "/" + input.substring(4)
+                path.startsWith("/../", i) -> {
+                    i += 3
                     output.setLength(removeLastSegment(output))
                 }
 
-                input == "/.." -> {
-                    input = "/"
+                i + 3 == end && path.startsWith("/..", i) -> {
                     output.setLength(removeLastSegment(output))
+                    output.append('/')
+                    i = end
                 }
 
-                input == "." || input == ".." -> {
-                    input = ""
+                (i + 1 == end && path[i] == '.') || (i + 2 == end && path.startsWith("..", i)) -> {
+                    i = end
                 }
 
                 else -> {
                     // Move the next segment (with its leading slash) to the output.
-                    val nextSlash = input.indexOf('/', 1)
+                    val nextSlash = path.indexOf('/', i + 1)
                     if (nextSlash < 0) {
-                        output.append(input)
-                        input = ""
+                        output.append(path, i, end)
+                        i = end
                     } else {
-                        output.append(input, 0, nextSlash)
-                        input = input.substring(nextSlash)
+                        output.append(path, i, nextSlash)
+                        i = nextSlash
                     }
                 }
             }

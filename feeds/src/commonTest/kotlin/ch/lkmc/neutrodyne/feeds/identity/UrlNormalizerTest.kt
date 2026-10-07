@@ -6,6 +6,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.measureTime
 
 /**
  * Fixed vectors of 03 URL normalisation, shared with the sync server's tests. `forIdentity` is
@@ -72,6 +74,29 @@ class UrlNormalizerTest {
         assertEquals("example.com/b", UrlNormalizer.forIdentity("https://example.com/a/../b"))
         assertEquals("example.com/a", UrlNormalizer.forIdentity("https://example.com/a/b/.."))
         assertEquals("example.com/", UrlNormalizer.forIdentity("https://example.com/../.."))
+    }
+
+    /**
+     * Dot-segment removal must be an indexed linear scan: re-slicing the remaining input once per
+     * segment turns `"../" * N` quadratic. A 4× input may cost at most 8× the time (linear ≈ 4×,
+     * quadratic ≈ 16×) and the large run stays under a generous absolute budget.
+     */
+    @Test
+    fun dotSegmentRemovalIsLinear() {
+        UrlNormalizer.forIdentity(dotDoc(1_000)) // warm-up outside the measurements
+        val small = measureTime { UrlNormalizer.forIdentity(dotDoc(DOT_SMALL)) }
+        val large =
+            measureTime {
+                assertEquals("example.com/x", UrlNormalizer.forIdentity(dotDoc(DOT_SMALL * 4)))
+            }
+        assertTrue(
+            large < BUDGET,
+            "dot segments took $large for ${DOT_SMALL * 4} segments (budget $BUDGET)",
+        )
+        assertTrue(
+            large < small * QUADRATIC_SLACK,
+            "dot segments took $small for $DOT_SMALL, $large for 4x — quadratic would be ~16x",
+        )
     }
 
     @Test
@@ -187,5 +212,13 @@ class UrlNormalizerTest {
         // java.net.URI would throw here; the splitter is lenient.
         assertEquals("example.com/a b", UrlNormalizer.forIdentity("https://example.com/a b"))
         assertTrue(UrlNormalizer.forIdentity("https://example.com/a b")!!.startsWith("example.com/"))
+    }
+
+    private fun dotDoc(count: Int): String = "https://example.com/" + "../".repeat(count) + "x"
+
+    private companion object {
+        const val DOT_SMALL = 40_000
+        const val QUADRATIC_SLACK = 8
+        val BUDGET = 3.seconds
     }
 }
