@@ -93,7 +93,7 @@ object FeedQueryBuilder {
             }
 
         when (source) {
-            FeedSource.All -> Unit
+            FeedSource.All -> {}
 
             FeedSource.Ungrouped -> {
                 where += "NOT EXISTS (SELECT 1 FROM podcast_group_member m WHERE m.podcastId = e.podcastId)"

@@ -30,12 +30,11 @@ import kotlinx.coroutines.withContext
  * Deviation (02, recorded 2026-10-06): the spec places this class in `:core:data`; it lives in
  * `:core:database` because the M1a package may not edit `core/data`.
  */
-class FetchStateBatcher
-    internal constructor(
-        private val write: suspend (List<PodcastFetchState>) -> Unit,
-        private val clock: Clock,
-        private val scope: CoroutineScope,
-    ) {
+class FetchStateBatcher internal constructor(
+    private val write: suspend (List<PodcastFetchState>) -> Unit,
+    private val clock: Clock,
+    private val scope: CoroutineScope,
+) {
     constructor(
         dao: PodcastDao,
         clock: Clock,
@@ -52,17 +51,18 @@ class FetchStateBatcher
         mutex.withLock {
             if (pending.isEmpty()) {
                 firstPendingAt = clock.now()
-                deadlineJob = scope.launch {
-                    delay(MAX_DELAY_MS)
-                    mutex.withLock {
-                        // The deadline is re-checked against [clock]: a test scheduler can skip
-                        // virtual time while the caller is suspended on real-dispatcher work —
-                        // flush only when the limit actually elapsed.
-                        if (pending.isNotEmpty() && clock.now() - firstPendingAt >= MAX_DELAY_MS) {
-                            flushLocked()
+                deadlineJob =
+                    scope.launch {
+                        delay(MAX_DELAY_MS)
+                        mutex.withLock {
+                            // The deadline is re-checked against [clock]: a test scheduler can skip
+                            // virtual time while the caller is suspended on real-dispatcher work —
+                            // flush only when the limit actually elapsed.
+                            if (pending.isNotEmpty() && clock.now() - firstPendingAt >= MAX_DELAY_MS) {
+                                flushLocked()
+                            }
                         }
                     }
-                }
             }
             pending += row
             if (pending.size >= MAX_BATCH || clock.now() - firstPendingAt >= MAX_DELAY_MS) flushLocked()

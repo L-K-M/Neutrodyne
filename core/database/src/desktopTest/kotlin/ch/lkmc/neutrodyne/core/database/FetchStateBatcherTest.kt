@@ -60,18 +60,20 @@ class FetchStateBatcherTest {
                     scope = backgroundScope,
                 )
 
-            val firstFlush = launch {
-                batcher.add(row(failures = 1))
-                batcher.flush()
-            }
+            val firstFlush =
+                launch {
+                    batcher.add(row(failures = 1))
+                    batcher.flush()
+                }
             writeEntered.await()
 
             // While the first write is suspended, a user action's add+flush must queue behind
             // it: the flush waits for the in-flight write, then persists the later add after it.
-            val secondFlush = launch {
-                batcher.add(row(failures = 2))
-                batcher.flush()
-            }
+            val secondFlush =
+                launch {
+                    batcher.add(row(failures = 2))
+                    batcher.flush()
+                }
             runCurrent()
             try {
                 assertTrue(secondFlush.isActive, "the second flush must wait for the in-flight write")
@@ -129,7 +131,8 @@ class FetchStateBatcherTest {
                     scope = backgroundScope,
                 )
 
-            val run = launch { repeat(FetchStateBatcher.MAX_BATCH) { batcher.add(row(it)) } }
+            val run =
+                launch { repeat(FetchStateBatcher.MAX_BATCH) { batcher.add(row(it)) } }
             writeEntered.await()
             run.cancel() // the refresh run dies mid-write
             runCurrent()
