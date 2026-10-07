@@ -292,6 +292,8 @@ internal fun fetchMeta(
     lastModified: String? = null,
     permanentUrl: String? = null,
     unconditional: Boolean = false,
+    serverDateMs: Long? = null,
+    maxAgeSec: Long? = null,
 ): FetchMeta =
     FetchMeta(
         finalUrl = finalUrl,
@@ -299,8 +301,8 @@ internal fun fetchMeta(
         etag = etag,
         lastModified = lastModified,
         sha256Hex = sha256Hex,
-        serverDateMs = null,
-        maxAgeSec = null,
+        serverDateMs = serverDateMs,
+        maxAgeSec = maxAgeSec,
         unconditional = unconditional,
     )
 
