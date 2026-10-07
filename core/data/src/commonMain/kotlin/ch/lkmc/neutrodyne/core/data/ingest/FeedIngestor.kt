@@ -176,7 +176,13 @@ internal class FeedIngestor(
             if (fresh == null) {
                 item.dropped = true
                 prepared.warnings +=
-                    ParseWarning(WarningCode.DUPLICATE_ITEM, item.index, item.episode.guid.orEmpty().shorten())
+                    ParseWarning(
+                        WarningCode.DUPLICATE_ITEM,
+                        item.index,
+                        item.episode.guid
+                            .orEmpty()
+                            .shorten(),
+                    )
             } else {
                 item.docKey = fresh
                 liveDocKeys += fresh
@@ -432,21 +438,28 @@ internal class FeedIngestor(
     ): Boolean {
         var rekeyed = false
         when {
-            row.identityKey == item.docKey -> Unit
-            row.identityKey == item.primaryKey -> item.docKey = item.primaryKey
+            // The stored row already carries this document's key: nothing moves.
+            row.identityKey == item.docKey -> {}
+
+            row.identityKey == item.primaryKey -> {
+                item.docKey = item.primaryKey
+            }
+
             item.docKey !in storedKeys -> {
                 // An older key version matched: the row's identity is rewritten in place.
                 ingestDao.rekey(row.id, item.docKey, item.episode.guid)
                 rekeyed = true
             }
-            else -> item.docKey = row.identityKey
+
+            else -> {
+                item.docKey = row.identityKey
+            }
         }
         item.matchedTo = row
         return rekeyed
     }
 
-    private fun normEnc(row: ExistingEpisodeKey): String? =
-        row.enclosureUrl?.let(UrlNormalizer::forIdentity)
+    private fun normEnc(row: ExistingEpisodeKey): String? = row.enclosureUrl?.let(UrlNormalizer::forIdentity)
 
     /**
      * The diff's CPU half: accepted-item filter, in-document key choice and every resolved column.

@@ -3,8 +3,6 @@
 package ch.lkmc.neutrodyne.core.data.fetch
 
 import io.ktor.http.HttpHeaders
-import io.ktor.http.URLBuilder
-import io.ktor.http.takeFrom
 
 /**
  * Header parsing for the fetch pipeline (03 Validators and Response handling):
@@ -124,11 +122,11 @@ internal object FeedHttpHeaders {
     }
 
     /**
-     * RFC 3986 reference resolution for `Location` against the current hop — Ktor's
-     * `URLBuilder.takeFrom` handles absolute, network-path, absolute/relative-path, query-only
-     * and fragment references plus dot-segment removal (03 Request rules). A bare `#…` reference
-     * (the document itself) resolves back to [base] and is reported as unusable: the redirect
-     * chain cannot follow it without re-requesting the same URL.
+     * RFC 3986 §5.2.2 reference resolution for `Location` against the current hop: absolute,
+     * network-path (`//host`), absolute-path and relative-path references, `?query`-only and
+     * `#fragment` forms, with dot-segment removal (03 Request rules). A reference resolving back
+     * to [base] (e.g. `#section` on the request URL) is unusable — the chain cannot follow it
+     * without re-requesting the same URL.
      */
     fun resolveLocation(
         base: String,
@@ -136,11 +134,159 @@ internal object FeedHttpHeaders {
     ): String? {
         val loc = location.trim()
         if (loc.isEmpty()) return null
+        val b = parseRef(base) ?: return null
+        val r = parseRef(loc) ?: return null
+        if (r.authority != null && r.authority.isEmpty()) return null
+
+        val tScheme: String?
+        val tAuthority: String?
+        val tPath: String
+        val tQuery: String?
+        when {
+            r.scheme != null -> {
+                tScheme = r.scheme
+                tAuthority = r.authority
+                tPath = removeDotSegments(r.path)
+                tQuery = r.query
+            }
+
+            r.authority != null -> {
+                tScheme = b.scheme
+                tAuthority = r.authority
+                tPath = removeDotSegments(r.path)
+                tQuery = r.query
+            }
+
+            r.path.isEmpty() -> {
+                tScheme = b.scheme
+                tAuthority = b.authority
+                tPath = b.path
+                tQuery = r.query ?: b.query
+            }
+
+            r.path.startsWith("/") -> {
+                tScheme = b.scheme
+                tAuthority = b.authority
+                tPath = removeDotSegments(r.path)
+                tQuery = r.query
+            }
+
+            else -> {
+                tScheme = b.scheme
+                tAuthority = b.authority
+                tPath = removeDotSegments(mergePaths(b, r.path))
+                tQuery = r.query
+            }
+        }
+
         val resolved =
-            runCatching { URLBuilder(base).takeFrom(loc).build().toString() }.getOrNull()
-                ?: return null
-        return resolved.substringBefore('#').takeUnless { it == base }
+            buildString {
+                tScheme?.let { append(it).append(':') }
+                tAuthority?.let { append("//").append(it) }
+                append(tPath)
+                tQuery?.let { append('?').append(it) }
+            }
+        return resolved.takeUnless { it.isEmpty() || it == base }
     }
+
+    /** A parsed URI reference; a null component is *absent* (an empty query still overrides). */
+    private class UriRef(
+        val scheme: String?,
+        val authority: String?,
+        val path: String,
+        val query: String?,
+    )
+
+    /** Splits `scheme://authority/path?query#fragment` leniently; the fragment is dropped. */
+    private fun parseRef(ref: String): UriRef? {
+        var rest = ref.substringBefore('#')
+        val scheme =
+            SCHEME_RE.find(rest)?.let {
+                rest = rest.substring(it.value.length + 1)
+                it.value
+            }
+        val authority =
+            if (rest.startsWith("//")) {
+                rest.substring(2).substringBefore('/').substringBefore('?').also {
+                    rest = rest.substring(2 + it.length)
+                }
+            } else {
+                null
+            }
+        val query = if ('?' in rest) rest.substringAfter('?') else null
+        val path = rest.substringBefore('?')
+        if (scheme == null && authority == null && path.isEmpty() && query == null) return null
+        return UriRef(scheme, authority, path, query)
+    }
+
+    /** RFC 3986 §5.2.3: the reference's path merged onto the base's directory. */
+    private fun mergePaths(
+        base: UriRef,
+        refPath: String,
+    ): String =
+        if (base.authority != null && base.path.isEmpty()) {
+            "/$refPath"
+        } else {
+            base.path.substringBeforeLast('/', "") + "/" + refPath
+        }
+
+    /** RFC 3986 §5.2.4 `remove_dot_segments`. */
+    private fun removeDotSegments(path: String): String {
+        val out = StringBuilder(path.length)
+        var input = path
+        while (input.isNotEmpty()) {
+            when {
+                input.startsWith("../") -> {
+                    input = input.substring(3)
+                }
+
+                input.startsWith("./") -> {
+                    input = input.substring(2)
+                }
+
+                input.startsWith("/./") -> {
+                    input = "/" + input.substring(3)
+                }
+
+                input == "/." -> {
+                    input = "/"
+                }
+
+                input.startsWith("/../") -> {
+                    input = "/" + input.substring(4)
+                    out.dropLastSegment()
+                }
+
+                input == "/.." -> {
+                    input = "/"
+                    out.dropLastSegment()
+                }
+
+                input == "." || input == ".." -> {
+                    input = ""
+                }
+
+                else -> {
+                    val end =
+                        if (input.startsWith("/")) {
+                            input.indexOf('/', 1).let { if (it < 0) input.length else it }
+                        } else {
+                            input.indexOf('/').let { if (it < 0) input.length else it }
+                        }
+                    out.append(input, 0, end)
+                    input = input.substring(end)
+                }
+            }
+        }
+        return out.toString()
+    }
+
+    private fun StringBuilder.dropLastSegment() {
+        val lastSlash = lastIndexOf('/')
+        if (lastSlash >= 0) setLength(lastSlash) else setLength(0)
+    }
+
+    private val SCHEME_RE = Regex("""^[A-Za-z][A-Za-z0-9+.-]*(?=:)""")
 
     /** Header names used across the pipeline. */
     val CACHE_CONTROL = HttpHeaders.CacheControl

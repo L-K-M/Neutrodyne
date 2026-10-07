@@ -163,10 +163,16 @@ internal object FeedSniffer {
             val c = bytes[i + 2].toInt() and 0xFF
             val d = bytes[i + 3].toInt() and 0xFF
             val codePoint =
-                if (littleEndian) (d shl 24) or (c shl 16) or (b shl 8) or a
-                else (a shl 24) or (b shl 16) or (c shl 8) or d
+                if (littleEndian) {
+                    (d shl 24) or (c shl 16) or (b shl 8) or a
+                } else {
+                    (a shl 24) or (b shl 16) or (c shl 8) or d
+                }
             when {
-                codePoint in 0..0xFFFF -> out.append(codePoint.toChar())
+                codePoint in 0..0xFFFF -> {
+                    out.append(codePoint.toChar())
+                }
+
                 codePoint in 0x10000..0x10FFFF -> {
                     val v = codePoint - 0x10000
                     out.append((0xD800 + (v shr 10)).toChar())

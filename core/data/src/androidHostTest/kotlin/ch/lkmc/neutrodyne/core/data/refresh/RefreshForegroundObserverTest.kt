@@ -144,9 +144,9 @@ class RefreshForegroundObserverTest {
             val deps = deps()
             val observer = deps.observer()
 
-            // The claim lands before the gate reads settings (R12): two ON_STARTs inside the
-            // same cooldown window collapse to one enqueue even though the first coroutine
-            // has not run yet.
+            // The claim is atomic inside the enqueuing coroutine (R12): two ON_STARTs inside
+            // the same cooldown window collapse to one enqueue — the first coroutine to reach
+            // the CAS wins and the second sees the fresh stamp.
             observer.onStart(owner)
             observer.onStart(owner)
             advanceUntilIdle()

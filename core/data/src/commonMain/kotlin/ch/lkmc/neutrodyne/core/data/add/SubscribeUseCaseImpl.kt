@@ -106,11 +106,12 @@ internal class SubscribeUseCaseImpl(
                     // Step 3.1: dedupe again inside the transaction (03 Subscribe) — every URL
                     // the entry knows is checked against both primary feedKeys and aliases, so
                     // a hop URL that is another feed's current URL also dedupes.
-                    val candidateKeys = buildList {
-                        add(feedKey)
-                        if (inputKey != null) add(inputKey)
-                        addAll(hopKeys)
-                    }
+                    val candidateKeys =
+                        buildList {
+                            add(feedKey)
+                            if (inputKey != null) add(inputKey)
+                            addAll(hopKeys)
+                        }
                     var existing: Long? = null
                     for (key in candidateKeys) {
                         existing = dao.byFeedKey(key)?.id ?: dao.aliasOwner(key)

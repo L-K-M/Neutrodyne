@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -578,7 +579,9 @@ class FeedFetcherTest {
             fetcher().use { bundle ->
                 for (path in listOf("/le16", "/be16", "/le32", "/be32")) {
                     val outcome = bundle.fetcher.fetch(request(server.url(path).toString()))
-                    assertThat((outcome as FetchOutcome.Body).sniff).named(path).isEqualTo(Sniff.RSS)
+                    assertWithMessage(path)
+                        .that((outcome as FetchOutcome.Body).sniff)
+                        .isEqualTo(Sniff.RSS)
                     FileSystem.SYSTEM.delete(outcome.file)
                 }
             }
@@ -730,7 +733,11 @@ class FeedFetcherTest {
         }
 
     private fun rawBody(bytes: ByteArray): MockResponse =
-        MockResponse.Builder().code(200).body(Buffer().write(bytes)).build()
+        MockResponse
+            .Builder()
+            .code(200)
+            .body(Buffer().write(bytes))
+            .build()
 
     private fun utf16Le(s: String): ByteArray =
         byteArrayOf(0xFF.toByte(), 0xFE.toByte()) + s.toByteArray(Charsets.UTF_16LE)

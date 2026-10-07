@@ -254,9 +254,8 @@ internal class WorkManagerRefreshScheduler
                     .any { !it.state.isFinished }
             }.getOrDefault(false)
 
-        /** The `Operation` awaited; only `SUCCESS` counts — a failed op must not set markers. */
-        private suspend fun Operation.awaitSuccess(): Boolean =
-            suspendRunCatching { await() is Operation.State.SUCCESS }.getOrDefault(false)
+        /** The `Operation` awaited; `await()` returns `SUCCESS` or throws — a failed op must not set markers. */
+        private suspend fun Operation.awaitSuccess(): Boolean = suspendRunCatching { await() }.isSuccess
 
         internal companion object {
             const val WORK_PERIODIC = "refresh-periodic"

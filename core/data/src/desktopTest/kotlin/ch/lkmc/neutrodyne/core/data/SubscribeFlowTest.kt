@@ -304,7 +304,8 @@ class SubscribeFlowTest {
         runTest {
             val owned = "https://cdn.example.com/hop-alias.xml"
             val existing = seedPodcast(db, feedUrl = "https://b.example.com/f")
-            db.podcastDao()
+            db
+                .podcastDao()
                 .insertAliases(
                     listOf(
                         PodcastUrlAliasEntity(

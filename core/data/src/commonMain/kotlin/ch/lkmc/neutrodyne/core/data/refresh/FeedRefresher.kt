@@ -470,9 +470,7 @@ internal class FeedRefresher(
         result.htmlBody?.let { suspendRunCatching { tempFiles.delete(it) } }
         when {
             // The feed stays due; no column moves (03 policy table).
-            result.kind == FeedErrorKind.OFFLINE -> {
-                Unit
-            }
+            result.kind == FeedErrorKind.OFFLINE -> {}
 
             result.kind == FeedErrorKind.LOCAL_NETWORK_UNSUPPORTED -> {
                 addFetchState(

@@ -23,6 +23,7 @@ import ch.lkmc.neutrodyne.feeds.parse.FeedParser
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import mockwebserver3.junit4.MockWebServerRule
 import org.junit.Rule
 import java.io.File
@@ -614,7 +615,8 @@ class RefreshEngineTest {
         runTest {
             // Eight pending pages share six global permits; each page burns 30 s of fake uptime,
             // so the sessions that waited out round one must re-check the 10 s budget before
-            // starting a page of their own (R3): six pages run, two sessions stop queued.
+            // starting a page of their own (R3): six pages run, two sessions stop queued. The
+            // yield lets every permit holder pass the recheck before the first page's burn lands.
             val feeds =
                 (0 until 8).map { i ->
                     due("https://$i.example.com/f", nextRefreshAt = NOW + 60 * DAY) {
@@ -624,6 +626,7 @@ class RefreshEngineTest {
             val adapter =
                 stubAdapter(
                     onFetch = { feed, _ ->
+                        yield()
                         clock.elapsedMs += 30_000L
                         adapterParsed(
                             parsedFeed(items = listOf(parsedEpisode(0, guid = "p${feed.id}"))),

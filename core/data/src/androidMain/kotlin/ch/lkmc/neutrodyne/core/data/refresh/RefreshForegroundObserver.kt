@@ -39,11 +39,12 @@ internal class RefreshForegroundObserver
 
         override fun onStart(owner: LifecycleOwner) {
             val nowElapsed = clock.elapsedRealtime()
-            // The cooldown is claimed atomically: two concurrent ON_STARTs cannot both pass the
-            // window and then both enqueue (03 Triggers).
-            if (!claimTrigger(nowElapsed)) return
             appScope.launch {
                 if (!suspendRunCatching { gatesOpen(nowElapsed) }.getOrDefault(false)) return@launch
+                // The cooldown is claimed atomically after the gates pass: two concurrent
+                // ON_START coroutines cannot both enqueue (03 Triggers), and a closed gate —
+                // a metered network, a recent run — never consumes the window.
+                if (!claimTrigger(nowElapsed)) return@launch
                 scheduler.enqueueNow(
                     RefreshScope.All,
                     force = false,
@@ -53,7 +54,7 @@ internal class RefreshForegroundObserver
             }
         }
 
-        /** The 10-min cooldown, claimed at the boundary — concurrent starts cannot both win. */
+        /** The 10-min cooldown, claimed atomically — concurrent winners cannot both pass. */
         private fun claimTrigger(nowElapsed: Long): Boolean {
             while (true) {
                 val last = lastTriggerElapsed.get()
