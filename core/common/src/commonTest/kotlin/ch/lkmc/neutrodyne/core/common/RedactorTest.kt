@@ -197,6 +197,118 @@ class RedactorTest {
         assertEquals("Error:https://***@example.test/feed?token=…", text)
     }
 
+    // Review 4 (2026-10-06): adversarial free-text inputs that leaked through the regex scan.
+
+    @Test
+    fun `free text redacts around a percent-encoded ipv6 zone id`() {
+        val text = Redactor.text("https://u:p@[fe80::1%25en%30]/f?token=SECRET")
+
+        assertEquals("https://***@[fe80::1%25en%30]/f?token=…", text)
+    }
+
+    @Test
+    fun `free text keeps an apostrophe inside the url run`() {
+        val text = Redactor.text("https://alice:p'ass@example.test/feed?token=SECRET")
+
+        assertEquals("https://***@example.test/feed?token=…", text)
+    }
+
+    @Test
+    fun `free text redacts each of two urls joined by a comma or semicolon`() {
+        assertEquals(
+            "https://a.test/f,https://***@b.test/g?token=…",
+            Redactor.text("https://a.test/f,https://alice:pass@b.test/g?token=SECRET"),
+        )
+        assertEquals(
+            "https://a.test/f;https://***@b.test/g?token=…",
+            Redactor.text("https://a.test/f;https://alice:pass@b.test/g?token=SECRET"),
+        )
+    }
+
+    @Test
+    fun `nested feed schemes unwrap to the inner url`() {
+        val raw = "feed:podcast:https://alice:pass@example.test/feed?token=SECRET"
+        val expected = "feed:podcast:https://***@example.test/feed?token=…"
+
+        assertEquals(expected, Redactor.text(raw))
+        assertEquals(expected, Redactor.url(raw))
+    }
+
+    @Test
+    fun `user info that looks like a scheme is still masked`() {
+        assertEquals("https://***@host.test/f", Redactor.text("https://http:pass@host.test/f"))
+    }
+
+    @Test
+    fun `a very long url run does not exhaust the stack`() {
+        val raw = "https://h.test/" + "a".repeat(LONG_RUN_LENGTH)
+
+        assertEquals(raw, Redactor.text(raw))
+    }
+
+    @Test
+    fun `many labels before a url neither recurse deeply nor leak`() {
+        val labels = "x:".repeat(LABEL_COUNT)
+
+        assertEquals("${labels}https://***@h.test/f?t=…", Redactor.text("${labels}https://u:p@h.test/f?t=SECRET"))
+    }
+
+    // Review 5 (2026-10-06): splits inside components, joined authorities, nested and forged forms.
+
+    @Test
+    fun `a scheme inside a url component does not split the run`() {
+        assertEquals("https://h/f?token=…", Redactor.text("https://h/f?token=feed:SECRET"))
+        assertEquals("https://h/f", Redactor.text("https://h/f#feed:SECRET"))
+        assertEquals("https://h/rss/…ET", Redactor.text("https://h/rss/A123456feed:SECRET"))
+        assertEquals("https:***@h/f", Redactor.text("https:alice:SECRETfeed:pw@h/f"))
+    }
+
+    @Test
+    fun `urls joined right after an authority are split`() {
+        assertEquals(
+            "https://a.test;https://***@b.test/f",
+            Redactor.text("https://a.test;https://alice:pass@b.test/f"),
+        )
+        assertEquals(
+            "https://a.test,https://***@b.test/f",
+            Redactor.text("https://a.test,https://alice:pass@b.test/f"),
+        )
+    }
+
+    @Test
+    fun `a url embedded in a path is redacted on its own`() {
+        assertEquals(
+            "https://op3.test/e/https://***@b.test/f?k=…",
+            Redactor.text("https://op3.test/e/https://alice:pass@b.test/f?k=SECRET"),
+        )
+    }
+
+    @Test
+    fun `a wrapper around any hierarchical url is peeled`() {
+        assertEquals("feed:ftp://***@h/f", Redactor.url("feed:ftp://alice:SECRET@h/f"))
+    }
+
+    @Test
+    fun `scheme-like opaque user info is masked whole`() {
+        assertEquals("https:***@h/f", Redactor.url("https:http:feed:@h/f"))
+    }
+
+    @Test
+    fun `only the canonical unparsable marker passes through`() {
+        val forged = "<unparsable url, token=SECRET>"
+
+        assertEquals("<unparsable url, ${forged.length} chars>", Redactor.url(forged))
+    }
+
+    @Test
+    fun `wrapped failures redact idempotently`() {
+        for (input in listOf("feed:https://", "feed:#SECRET")) {
+            val once = Redactor.url(input)
+            assertEquals(once, Redactor.url(once), "not idempotent for $input")
+            assertFalse(once.contains("SECRET"))
+        }
+    }
+
     @Test
     fun `free text keeps a bare scheme word with nothing after its colon`() {
         val text = Redactor.text("expected https: or feed: here")
@@ -210,5 +322,10 @@ class RedactorTest {
             "https://***@[::1]:8443/f?a=…",
             Redactor.url("https://u:p@[::1]:8443/f?a=1"),
         )
+    }
+
+    private companion object {
+        const val LONG_RUN_LENGTH = 100_000
+        const val LABEL_COUNT = 10_000
     }
 }

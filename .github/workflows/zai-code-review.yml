@@ -29,7 +29,10 @@ jobs:
     # failure, which the reporting step can act on, and leaves "cancelled" to
     # mean only what the concurrency group above means by it: a newer push took
     # over.
-    timeout-minutes: 180
+    # A `zai-review:long` label raises both limits for one exceptionally large
+    # PR (owner's call, 2026-10-07: PR #10 needed 65 chunks, about 5.4 h). 360
+    # is the hosted-runner maximum; the review step keeps 15 min of headroom.
+    timeout-minutes: ${{ contains(github.event.pull_request.labels.*.name, 'zai-review:long') && 360 || 180 }}
     # pull_request_target exposes repository secrets and a write-capable token.
     # Never run this privileged job for branches from untrusted forks.
     if: >-
@@ -53,7 +56,7 @@ jobs:
         # former 90 min budget twice in a row while posting nothing. 170 min
         # covers roughly 27 chunks at that mean, so a diff half again the size
         # of #89 still fits.
-        timeout-minutes: 170
+        timeout-minutes: ${{ contains(github.event.pull_request.labels.*.name, 'zai-review:long') && 345 || 170 }}
         # Pin privileged third-party actions to an immutable commit.
         # ed5d384 = v0.0.14. Verify before bumping:
         #   git ls-remote https://github.com/L-K-M/zai-code-review 'refs/tags/v0.0.14^{}'
@@ -96,7 +99,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
           # Keep in step with the review step's timeout-minutes above.
-          REVIEW_BUDGET_MINUTES: "170"
+          REVIEW_BUDGET_MINUTES: ${{ contains(github.event.pull_request.labels.*.name, 'zai-review:long') && '345' || '170' }}
         run: |
           set -euo pipefail
 
