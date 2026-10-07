@@ -93,18 +93,20 @@ val writeBuildInfoProperties =
         val engineManifestUrl = providers.gradleProperty("neutrodyne.engineManifestUrl")
         val podcastIndexKey = providers.gradleProperty("neutrodyne.podcastIndexKey").orElse("")
         val podcastIndexSecret = providers.gradleProperty("neutrodyne.podcastIndexSecret").orElse("")
+        // Only the text provider is captured: the `FileContents` object itself is not
+        // serialisable by the configuration cache.
         val shippedLocales =
-            providers.fileContents(layout.file(provider { rootProject.file("app/policy/locales.txt") }))
+            providers.fileContents(rootProject.layout.projectDirectory.file("app/policy/locales.txt")).asText
         val output = buildInfoDir.map { it.file("build-info.properties") }
         inputs.property("repoUrl", repoUrl)
         inputs.property("engineManifestUrl", engineManifestUrl)
         inputs.property("podcastIndexKey", podcastIndexKey)
         inputs.property("podcastIndexSecret", podcastIndexSecret)
-        inputs.property("shippedLocales", shippedLocales.asText)
+        inputs.property("shippedLocales", shippedLocales)
         outputs.file(output)
         doLast {
             val locales =
-                shippedLocales.asText
+                shippedLocales
                     .get()
                     .lineSequence()
                     .map { it.trim() }
