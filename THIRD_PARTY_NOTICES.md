@@ -56,7 +56,7 @@ component's own upstream notice at the pinned version:
   Microsoft Corporation; Copyright (c) 2022-2023 HACL\* Contributors.
 - **mpdecimal** (bundled with CPython, `Modules/_decimal/libmpdec`) — BSD-2-Clause — Copyright (c)
   2008-2020 Stefan Krah.
-- **Unicode Character Database extract** — Unicode-3.0 — Copyright © 1991-2023 Unicode, Inc. —
+- **Unicode Character Database extract** — Unicode-3.0 — Copyright © 1991-2024 Unicode, Inc. —
   data inside CPython.
 - **Chaquopy runtime 17.0.0 payloads** (published as 17.1.0 from `third_party/chaquopy-maven`,
   self-built master `a41f0c9`, 01 S7) — MIT — Copyright (c) 2017-2025 Chaquo Ltd and contributors —
