@@ -2,11 +2,13 @@
 
 package ch.lkmc.neutrodyne.core.data.fetch
 
+import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.common.HttpClientKind
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.network.NetErrorClassifier
+import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import dev.zacsweers.metro.Inject
 import io.ktor.client.request.header
 import io.ktor.client.request.prepareGet
@@ -35,6 +37,7 @@ internal class FeedFetcher(
     private val fileSystem: FileSystem,
     private val classifier: NetErrorClassifier,
     private val credentialLookup: CredentialLookup,
+    private val clock: Clock,
 ) {
     private val client = httpClients.client(HttpClientKind.FEED)
 
@@ -56,6 +59,7 @@ internal class FeedFetcher(
                     return FetchOutcome.Network(classifier.classify(e))
                 }
 
+            // A 3xx without a usable http(s) Location is the final response (03 Request rules).
             val location = result.location ?: return result.outcome
             val next = FeedHttpHeaders.resolveLocation(url, location) ?: return result.outcome
             if (!next.startsWith("http://") && !next.startsWith("https://")) return result.outcome
@@ -85,13 +89,18 @@ internal class FeedFetcher(
         var outcome: FetchOutcome = FetchOutcome.Network(NetError.Other("unassigned"))
         var location: String? = null
         var status = 0
+        // 03 Request rules: not-yet-stored credentials are sent only on hops whose origin equals
+        // the first request's (a cross-scheme/host/port hop never carries them).
+        val firstOrigin = UrlNormalizer.origin(req.url)
+        val hopOrigin = UrlNormalizer.origin(url)
         client.prepareGet(url) {
             header(HttpHeaders.Accept, FEED_ACCEPT)
             if (req.conditional) {
                 req.etag?.let { header(HttpHeaders.IfNoneMatch, it) }
                 req.lastModified?.let { header(HttpHeaders.IfModifiedSince, it) }
             }
-            req.credentials?.let {
+            if (req.credentials != null && hopOrigin != null && hopOrigin == firstOrigin) {
+                val it = req.credentials
                 header(
                     HttpHeaders.Authorization,
                     "Basic " +
@@ -105,6 +114,8 @@ internal class FeedFetcher(
                     response.discardBody()
                     outcome =
                         FetchOutcome.NotModified(
+                            etag = response.headers[FeedHttpHeaders.ETAG],
+                            lastModified = response.headers[FeedHttpHeaders.LAST_MODIFIED],
                             maxAgeSec =
                                 FeedHttpHeaders.maxAgeSec(
                                     response.headers[FeedHttpHeaders.CACHE_CONTROL],
@@ -117,6 +128,13 @@ internal class FeedFetcher(
                 status in 300..399 && response.headers[FeedHttpHeaders.LOCATION] != null -> {
                     response.discardBody()
                     location = response.headers[FeedHttpHeaders.LOCATION]
+                    outcome =
+                        FetchOutcome.Http(
+                            code = status,
+                            retryAfterMs = null,
+                            basicChallenge = false,
+                            realm = null,
+                        )
                 }
 
                 response.status.isSuccess() -> outcome = readBody(req, url, hops, permanentUrl, response)
@@ -133,6 +151,7 @@ internal class FeedFetcher(
                             retryAfterMs =
                                 FeedHttpHeaders.retryAfterMs(
                                     response.headers[FeedHttpHeaders.RETRY_AFTER],
+                                    clock.now(),
                                 ),
                             basicChallenge = basic,
                             realm = realm,
@@ -162,33 +181,37 @@ internal class FeedFetcher(
         val chunk = ByteArray(CHUNK_BYTES)
         var tooLarge = false
 
-        while (true) {
-            val read =
-                try {
-                    channel.readAvailable(chunk, 0, chunk.size)
-                } catch (e: CancellationException) {
-                    tempFiles.delete(path)
-                    throw e
+        try {
+            while (true) {
+                val read = channel.readAvailable(chunk, 0, chunk.size)
+                if (read == -1) break
+                if (read == 0) {
+                    channel.awaitContent()
+                    continue
                 }
-            if (read == -1) break
-            if (read == 0) {
-                channel.awaitContent()
-                continue
+                sink.write(chunk, 0, read)
+                total += read
+                if (probeBytes < sniffTarget) {
+                    val take = minOf(read.toLong(), sniffTarget - probeBytes).toInt()
+                    probe.write(chunk, 0, take)
+                    probeBytes += take
+                }
+                if (total > req.maxBytes) {
+                    tooLarge = true
+                    break
+                }
+                if (req.sniffOnlyBytes != null && total >= req.sniffOnlyBytes) break
             }
-            sink.write(chunk, 0, read)
-            total += read
-            if (probeBytes < sniffTarget) {
-                val take = minOf(read.toLong(), sniffTarget - probeBytes).toInt()
-                probe.write(chunk, 0, take)
-                probeBytes += take
+            sink.close()
+        } catch (e: CancellationException) {
+            tempFiles.delete(path)
+            try {
+                sink.close()
+            } catch (_: Exception) {
+                // Closing a cancelled sink can fail; the temp file is already gone.
             }
-            if (total > req.maxBytes) {
-                tooLarge = true
-                break
-            }
-            if (req.sniffOnlyBytes != null && total >= req.sniffOnlyBytes) break
+            throw e
         }
-        sink.close()
 
         if (tooLarge) {
             tempFiles.delete(path)

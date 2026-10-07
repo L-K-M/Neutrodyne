@@ -26,8 +26,10 @@ internal data class FeedRequest(
 )
 
 internal sealed interface FetchOutcome {
-    /** 304 to a conditional request. */
+    /** 304 to a conditional request; validators the response still sent are kept (03 Validators). */
     data class NotModified(
+        val etag: String?,
+        val lastModified: String?,
         val maxAgeSec: Long?,
         val serverDateMs: Long?,
     ) : FetchOutcome

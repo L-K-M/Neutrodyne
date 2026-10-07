@@ -58,8 +58,16 @@ abstract class PodcastDao(
     @Query("SELECT * FROM podcast_url_alias WHERE podcastId = :podcastId")
     abstract fun observeAliases(podcastId: Long): Flow<List<PodcastUrlAliasEntity>>
 
+    /** The suspend variant of [observeAliases] for in-transaction lookups (03 new-feed-url rule 1). */
+    @Query("SELECT * FROM podcast_url_alias WHERE podcastId = :podcastId")
+    abstract suspend fun aliases(podcastId: Long): List<PodcastUrlAliasEntity>
+
     @Query("SELECT COUNT(*) FROM episode WHERE podcastId = :podcastId")
     abstract fun observeEpisodeCount(podcastId: Long): Flow<Int>
+
+    /** The suspend variant for 03's paging-session item cap (5,000 episodes). */
+    @Query("SELECT COUNT(*) FROM episode WHERE podcastId = :podcastId")
+    abstract suspend fun episodeCount(podcastId: Long): Int
 
     /** `observeCategoryCounts`'s source rows (03): every podcast's stored categories. */
     @Query("SELECT id, categoriesJson FROM podcast WHERE categoriesJson IS NOT NULL")
@@ -211,6 +219,25 @@ abstract class PodcastDao(
             " AND id IN (SELECT m.podcastId FROM podcast_group_member m WHERE m.groupId = :groupId) ORDER BY id",
     )
     abstract suspend fun pagingPendingGroup(groupId: Long): List<DueFeed>
+
+    /** The next-page re-read of a paging session (03): `pagingNextUrl` moved inside the ingest. */
+    @Query("$DUE_COLUMNS FROM podcast WHERE id = :id")
+    abstract suspend fun dueFeedById(id: Long): DueFeed?
+
+    /**
+     * The paging-session stop of 03 RFC 5005 paging: budget, loop, no-new-keys and the 5,000-item
+     * cap set "older pages exist, not wanted" while keeping `pagingNextUrl` so "Load older
+     * episodes" can resume.
+     */
+    @Query("UPDATE podcast SET pagingComplete = 1 WHERE id = :id")
+    abstract suspend fun markPagingComplete(id: Long)
+
+    /**
+     * "Load older episodes" (03 `loadOlderEpisodes`): a feed holding an older-page link returns to
+     * "background paging pending" (`pagingComplete = 0`); a feed without one stays put.
+     */
+    @Query("UPDATE podcast SET pagingComplete = 0 WHERE id = :id AND pagingNextUrl IS NOT NULL")
+    abstract suspend fun reopenPaging(id: Long)
 
     /**
      * Batched refresh outcomes (02): scheduling, error and validator columns only — the partial

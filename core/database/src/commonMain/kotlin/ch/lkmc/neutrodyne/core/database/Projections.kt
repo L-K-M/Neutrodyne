@@ -171,6 +171,10 @@ data class ExistingEpisodeKey(
     val durationMs: Long?,
     val contentHash: Long,
     val inFeed: Boolean,
+    /** Added 2026-10-07: `sortDate` is recomputed against the stored `firstSeenAt` (03 sortDate). */
+    val firstSeenAt: Long,
+    /** Added 2026-10-07: step 6's JSON-chapters invalidation compares the stored value. */
+    val chaptersUrl: String?,
 )
 
 /** `PodcastDao.observeCategoryRows` row: 03's `CategoryCount` source (suggested groups, M7). */
@@ -199,6 +203,8 @@ data class EpisodeDetailRow(
     val playedAt: Long?,
     val isFavorite: Boolean,
     val downloadState: DownloadState?,
+    /** The show-notes `baseUri` fallback (03 Sanitiser): episode `link` first, then this. */
+    val feedUrl: String,
 )
 
 /**

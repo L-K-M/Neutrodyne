@@ -53,7 +53,8 @@ interface EpisodeDao {
             " COALESCE(e.imageUrl, p.artworkUrl) AS artworkUrl," +
             " COALESCE(a.version, 0) AS artworkVersion," +
             " e.isVideo, p.sourceType, e.externalMediaId, e.availability, e.episodeDisplay, e.link," +
-            " s.playedAt, COALESCE(s.isFavorite, 0) AS isFavorite, d.state AS downloadState" +
+            " s.playedAt, COALESCE(s.isFavorite, 0) AS isFavorite, d.state AS downloadState," +
+            " p.feedUrl" +
             " FROM episode e JOIN podcast p ON p.id = e.podcastId" +
             " LEFT JOIN episode_state s ON s.episodeId = e.id" +
             " LEFT JOIN download d ON d.episodeId = e.id" +

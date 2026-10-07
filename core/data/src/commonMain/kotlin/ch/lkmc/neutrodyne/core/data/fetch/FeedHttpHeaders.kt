@@ -38,8 +38,18 @@ internal object FeedHttpHeaders {
         return toEpochMs(year, month, day, h, min, s)
     }
 
-    /** `Retry-After`: seconds only (HTTP-dates are treated as absent). */
-    fun retryAfterMs(value: String?): Long? = value?.trim()?.toLongOrNull()?.times(1000L)
+    /**
+     * `Retry-After`: delta-seconds, or an IMF-fixdate relative to [nowMs] (03 Response handling);
+     * negative dates (already past) clamp to 0.
+     */
+    fun retryAfterMs(
+        value: String?,
+        nowMs: Long,
+    ): Long? {
+        val trimmed = value?.trim() ?: return null
+        trimmed.toLongOrNull()?.let { return it * 1000L }
+        return serverDateMs(trimmed)?.let { (it - nowMs).coerceAtLeast(0L) }
+    }
 
     /** `WWW-Authenticate: Basic realm="…"` → (isBasic, realm). */
     fun basicChallenge(header: String?): Pair<Boolean, String?> {

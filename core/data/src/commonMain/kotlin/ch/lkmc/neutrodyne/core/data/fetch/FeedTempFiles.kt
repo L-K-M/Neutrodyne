@@ -33,4 +33,30 @@ internal class FeedTempFiles(
             // A vanished temp file is not an error.
         }
     }
+
+    /**
+     * Engine-run step 2 (03 Body, hashing and sniffing): removes leftovers older than one hour —
+     * crashes and stops can strand partial bodies. Errors are ignored; the next sweep retries.
+     */
+    fun sweep(nowMs: Long) {
+        val children =
+            try {
+                fileSystem.listOrNull(dir) ?: return
+            } catch (_: Exception) {
+                return
+            }
+        for (child in children) {
+            val modified =
+                try {
+                    fileSystem.metadataOrNull(child)?.lastModifiedAtMillis
+                } catch (_: Exception) {
+                    null
+                } ?: continue
+            if (nowMs - modified > MAX_AGE_MS) delete(child)
+        }
+    }
+
+    private companion object {
+        const val MAX_AGE_MS = 60L * 60 * 1000
+    }
 }
