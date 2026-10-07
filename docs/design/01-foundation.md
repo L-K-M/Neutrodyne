@@ -2117,6 +2117,8 @@ licensee {
 
 Any further permissive licence on a Gradle dependency (e.g. ISC; a weak-copyleft licence such as EPL-2.0 needs a [D3](../PLAN.md#3-key-decisions) amendment first) needs a reviewed PR adding a scoped `allowDependency(...) { because(...) }`, never a global `allow`. Unverified: whether Licensee accepts a dependency when only one of its declared licences is allowed (then the JNA entries are unnecessary) — M0b records it; Bouncy Castle's and Skiko's POM licence forms (`allowUrl` if needed, M0b/MS1). Tink and quickjs-kt are Apache-2.0; S7 recorded (2026-10-06): Chaquopy's runtime does not reach `releaseRuntimeClasspath` (the plugin resolves it through detached configurations into the variant pipeline), so Licensee never sees it — it is covered by the Android Python lockfile and the manual AboutLibraries entries.
 
+First `allowUrl` (2026-10-06, M0b): slf4j-api and slf4j-simple 2.0.20 name their MIT licence only by the URL `https://opensource.org/license/mit`, which Licensee cannot map to an SPDX id, so the server's build file scopes `allowUrl("https://opensource.org/license/mit")` with a `because(...)`; the entry lives in `:sync:server`'s `build.gradle.kts` for now (the shared `configureLicensee()` in build-logic belongs to another package) and should move there when a second module needs it.
+
 ### Python and native components
 
 Four lockfiles list every component that ships but is not a Gradle dependency with a POM. Each is edited by hand in the PR that changes a component and reviewed like code; the allow-lists live in build-logic (`PythonLicencePolicy.kt`, `NativeLicencePolicy.kt`), not in the lockfiles, so widening one is a visible build-logic change, never a side effect of a lockfile edit.
