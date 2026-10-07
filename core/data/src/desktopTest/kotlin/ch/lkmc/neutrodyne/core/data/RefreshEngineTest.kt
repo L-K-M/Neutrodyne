@@ -22,6 +22,7 @@ import ch.lkmc.neutrodyne.feeds.model.Paging
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
 import mockwebserver3.junit4.MockWebServerRule
@@ -764,13 +765,19 @@ class RefreshEngineTest {
     @Test
     fun dueRunsPagePendingFeedsInTheBackground() =
         runTest {
+            // Queries and ingest prep run on the test scheduler: the paging phase is
+            // cancellation-bounded now, and a real dispatcher would let the timeout fire while a
+            // commit is parked on a worker thread — rolling back the page this test checks.
+            val db = newDb(clock, queryContext = StandardTestDispatcher(testScheduler))
             val id =
-                due("https://a.example.com/f", nextRefreshAt = NOW - 1) {
-                    copy(
-                        pagingNextUrl = "https://a.example.com/f?page=2",
-                        pagingComplete = false,
-                    )
-                }
+                seedPodcast(
+                    db,
+                    feedUrl = "https://a.example.com/f",
+                    nextRefreshAt = NOW - 1,
+                    subscribedAt = NOW - 30 * DAY,
+                    pagingNextUrl = "https://a.example.com/f?page=2",
+                    pagingComplete = false,
+                )
             val adapter =
                 stubAdapter(
                     mutableMapOf(
@@ -784,13 +791,154 @@ class RefreshEngineTest {
                     ),
                 )
 
-            refresher(adapter).run(request(pagingBudgetMs = 120_000L))
+            newRefresher(
+                    db,
+                    mapOf(SourceType.RSS to adapter),
+                    clock,
+                    settings,
+                    ingestor =
+                        newIngestor(
+                            db,
+                            clock,
+                            settings,
+                            defaultDispatcher = StandardTestDispatcher(testScheduler),
+                        ),
+                ).run(request(pagingBudgetMs = 120_000L))
 
             assertEquals(
                 listOf(id to FetchMode.REFRESH, id to FetchMode.OLDER_PAGE),
                 adapter.calls,
             )
             assertTrue(db.podcastDao().byId(id)!!.pagingComplete)
+        }
+
+    @Test
+    fun aHungBackgroundPageIsCutAtThePagingBudget() =
+        runTest {
+            // A page still in flight when the paging budget lands is cancelled instead of
+            // overrunning the run: the feed keeps its paging cursor and nothing commits (03
+            // Engine run step 7). The desktop lane relies on this — it has no run deadline.
+            val gate = CompletableDeferred<Unit>()
+            val id =
+                due("https://a.example.com/f", nextRefreshAt = NOW + 60 * DAY) {
+                    copy(pagingNextUrl = "https://a.example.com/f?page=2", pagingComplete = false)
+                }
+            val adapter =
+                stubAdapter(onFetch = { _, _ ->
+                    gate.await()
+                    AdapterResult.NotModified(meta = null)
+                })
+
+            val report = refresher(adapter).run(request(pagingBudgetMs = 2_000L))
+
+            assertEquals(listOf(id to FetchMode.OLDER_PAGE), adapter.calls)
+            val stored = db.podcastDao().byId(id)!!
+            assertEquals("https://a.example.com/f?page=2", stored.pagingNextUrl)
+            assertFalse(stored.pagingComplete)
+            assertEquals(0, db.podcastDao().episodeCount(id))
+            assertEquals(emptyMap(), report.outcomes)
+        }
+
+    @Test
+    fun aHungBackgroundPageIsCutBeforeTheRunDeadline() =
+        runTest {
+            // The Android shape: the run's deadline bounds the whole execution and the paging
+            // phase's stop is PAGING_MARGIN_MS before it — an in-flight page is cancelled at
+            // that stop rather than riding past the deadline.
+            val gate = CompletableDeferred<Unit>()
+            val id =
+                due("https://a.example.com/f", nextRefreshAt = NOW + 60 * DAY) {
+                    copy(pagingNextUrl = "https://a.example.com/f?page=2", pagingComplete = false)
+                }
+            val adapter =
+                stubAdapter(onFetch = { _, _ ->
+                    gate.await()
+                    AdapterResult.NotModified(meta = null)
+                })
+
+            refresher(adapter).run(request(deadlineElapsedMs = clock.elapsedRealtime() + 300_000L))
+
+            assertEquals(listOf(id to FetchMode.OLDER_PAGE), adapter.calls)
+            assertFalse(db.podcastDao().byId(id)!!.pagingComplete)
+        }
+
+    @Test
+    fun aPagesOnlySessionIsCutAtThePagingBound() =
+        runTest {
+            // A pagesOnly session carries the same bound: the in-flight page is cancelled at
+            // `pagingStopAt` and the feed counts as a leftover, so the caller can continue later.
+            val gate = CompletableDeferred<Unit>()
+            val id =
+                due("https://a.example.com/f", nextRefreshAt = NOW + 60 * DAY) {
+                    copy(pagingNextUrl = "https://a.example.com/f?page=2", pagingComplete = false)
+                }
+            val adapter =
+                stubAdapter(onFetch = { _, _ ->
+                    gate.await()
+                    AdapterResult.NotModified(meta = null)
+                })
+
+            val report = refresher(adapter).run(request(pagesOnly = true, pagingBudgetMs = 2_000L))
+
+            assertEquals(listOf(id to FetchMode.OLDER_PAGE), adapter.calls)
+            assertEquals(1, report.remaining)
+            assertFalse(db.podcastDao().byId(id)!!.pagingComplete)
+        }
+
+    @Test
+    fun aHungPageKeepsThePagesCommittedEarlierInTheRun() =
+        runTest {
+            // Page 2 commits; page 3 hangs and is cancelled at the bound. Only the unfinished
+            // page rolls back — the cursor advanced to page 3 and page 2's episode stays. Queries
+            // and ingest prep run on the test scheduler so the bound fires only at the gate,
+            // never while a commit is parked on a real thread.
+            val db = newDb(clock, queryContext = StandardTestDispatcher(testScheduler))
+            val gate = CompletableDeferred<Unit>()
+            val id =
+                seedPodcast(
+                    db,
+                    feedUrl = "https://a.example.com/f",
+                    nextRefreshAt = NOW + 60 * DAY,
+                    subscribedAt = NOW - 30 * DAY,
+                    pagingNextUrl = "https://a.example.com/f?page=2",
+                    pagingComplete = false,
+                )
+            val adapter =
+                stubAdapter(
+                    onFetch = { feed, _ ->
+                        if (feed.pagingNextUrl == "https://a.example.com/f?page=3") {
+                            gate.await()
+                        }
+                        adapterParsed(
+                            parsedFeed(
+                                items =
+                                    listOf(parsedEpisode(10, guid = "p2", pubDate = NOW - 10 * DAY)),
+                            ).copy(paging = Paging(next = "https://a.example.com/f?page=3")),
+                        )
+                    },
+                )
+
+            val report =
+                newRefresher(
+                        db,
+                        mapOf(SourceType.RSS to adapter),
+                        clock,
+                        settings,
+                        ingestor =
+                            newIngestor(
+                                db,
+                                clock,
+                                settings,
+                                defaultDispatcher = StandardTestDispatcher(testScheduler),
+                            ),
+                    ).run(request(pagesOnly = true, pagingBudgetMs = 2_000L))
+
+            assertEquals(2, adapter.calls.size)
+            assertIs<FeedOutcome.Ingested>(report.outcomes[id])
+            val stored = db.podcastDao().byId(id)!!
+            assertEquals("https://a.example.com/f?page=3", stored.pagingNextUrl)
+            assertFalse(stored.pagingComplete)
+            assertEquals(1, db.podcastDao().episodeCount(id))
         }
 
     // --- AC7: the parser-version / full-fetch rule over the real RSS adapter -------------------------
@@ -1007,12 +1155,14 @@ class RefreshEngineTest {
             val feedUrl = server.url("/feed.xml").toString()
             val id = due(feedUrl, nextRefreshAt = NOW - 1)
             // An episode absent from the served document: whether it stays `inFeed` exposes the
-            // adapter's `partial` flag (03 step 8 only runs for complete documents).
+            // adapter's `partial` flag (03 step 8 only runs for complete documents). Its pubDate
+            // sits ten days below the document's items, so a partial window would keep it —
+            // the flag cannot pass for the wrong reason.
             val stored =
                 newIngestor(db, clock)
                     .ingest(
                         dueFeedOf(db, id),
-                        parsedFeed(items = listOf(parsedEpisode(0, guid = "old-ep"))),
+                        parsedFeed(items = listOf(parsedEpisode(0, guid = "old-ep", pubDate = NOW - 10 * DAY))),
                         IngestContext(mode = IngestMode.INITIAL, partial = false, fetch = fetchMeta()),
                     )
             assertEquals(1, stored.inserted.size)
@@ -1044,6 +1194,55 @@ class RefreshEngineTest {
 
                 assertIs<FeedOutcome.Ingested>(report.outcomes[id])
                 assertFalse(db.episodeDao().byId(stored.inserted.single())!!.inFeed)
+            } finally {
+                bundle.close()
+            }
+        }
+
+    @Test
+    fun anEndedShowWithAnArchiveLinkKeepsAbsentEpisodesPartial() =
+        runTest {
+            setUpRoot()
+            val feedUrl = server.url("/feed.xml").toString()
+            val id = due(feedUrl, nextRefreshAt = NOW - 1)
+            // Same shape as above, but the document is show-complete (itunes:complete), NOT
+            // feed-history-complete: the archive link still marks the window partial (03).
+            val stored =
+                newIngestor(db, clock)
+                    .ingest(
+                        dueFeedOf(db, id),
+                        parsedFeed(items = listOf(parsedEpisode(0, guid = "old-ep", pubDate = NOW - 10 * DAY))),
+                        IngestContext(mode = IngestMode.INITIAL, partial = false, fetch = fetchMeta()),
+                    )
+            assertEquals(1, stored.inserted.size)
+            db.podcastDao().forceDue(scopeAll = false, ids = listOf(id))
+
+            // itunes:complete ends the SHOW; without fh:complete the prev-archive link means older
+            // pages exist, so the absent row below the window must not flip out (S10).
+            val doc =
+                """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel><title>Ended Show</title><link>https://example.com/s</link>
+    <itunes:complete>yes</itunes:complete>
+    <atom:link rel="prev-archive" href="https://example.com/s/2.xml"/>
+    ${rssItem("new-ep")}
+  </channel></rss>"""
+            server.enqueue(mockResponse(body = doc))
+            val bundle = newRssAdapter(root, clock)
+            try {
+                val engine =
+                    newRefresher(
+                        db,
+                        mapOf(SourceType.RSS to bundle.adapter),
+                        clock,
+                        settings,
+                        tempFiles = bundle.tempFiles,
+                    )
+
+                val report = engine.run(request())
+
+                assertIs<FeedOutcome.Ingested>(report.outcomes[id])
+                assertTrue(db.episodeDao().byId(stored.inserted.single())!!.inFeed)
             } finally {
                 bundle.close()
             }

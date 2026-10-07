@@ -247,8 +247,8 @@ class RefreshSchedulerTest {
             )
 
             // R5: automatic work is never expedited and carries the wifi-only network type plus
-            // battery-not-low — manual work keeps its own independent shape.
-            val spec = specOf(awaitWork(WorkManagerRefreshScheduler.WORK_NOW).id.toString())
+            // battery-not-low — manual work keeps its own independent shape on `refresh-now`.
+            val spec = specOf(awaitWork(WorkManagerRefreshScheduler.WORK_AUTO).id.toString())
             assertThat(spec.constraints.requiredNetworkType).isEqualTo(NetworkType.UNMETERED)
             assertThat(spec.constraints.requiresBatteryNotLow()).isTrue()
             assertThat(spec.expedited).isFalse()
@@ -268,10 +268,52 @@ class RefreshSchedulerTest {
                 origin = RefreshOrigin.PERIODIC,
             )
 
-            val spec = specOf(awaitWork(WorkManagerRefreshScheduler.WORK_NOW).id.toString())
+            val spec = specOf(awaitWork(WorkManagerRefreshScheduler.WORK_AUTO).id.toString())
             assertThat(spec.constraints.requiredNetworkType).isEqualTo(NetworkType.CONNECTED)
             assertThat(spec.constraints.requiresBatteryNotLow()).isTrue()
             assertThat(spec.expedited).isFalse()
+        }
+
+    @Test
+    fun `a pending constrained automatic request never blocks the manual refresh-now`() =
+        runTest {
+            val scheduler = scheduler()
+
+            // The automatic request parks behind its battery constraint on `refresh-auto`; the
+            // manual pull gets the independent `refresh-now` chain and stays unblocked.
+            scheduler.enqueueNow(
+                RefreshScope.All,
+                force = false,
+                pagesOnly = false,
+                origin = RefreshOrigin.FOREGROUND,
+            )
+            scheduler.enqueueNow(
+                RefreshScope.All,
+                force = false,
+                pagesOnly = false,
+                origin = RefreshOrigin.MANUAL,
+            )
+            val automatic = awaitWork(WorkManagerRefreshScheduler.WORK_AUTO)
+
+            val autoInfos =
+                workManager.getWorkInfosForUniqueWork(WorkManagerRefreshScheduler.WORK_AUTO).get()
+            assertThat(autoInfos).hasSize(1)
+            val autoSpec = specOf(automatic.id.toString())
+            assertThat(RefreshWorkData.request(autoSpec.input, 0, 0, 0).origin)
+                .isEqualTo(RefreshOrigin.FOREGROUND)
+            assertThat(autoSpec.constraints.requiresBatteryNotLow()).isTrue()
+            assertThat(autoSpec.expedited).isFalse()
+
+            val nowInfos =
+                workManager.getWorkInfosForUniqueWork(WorkManagerRefreshScheduler.WORK_NOW).get()
+            assertThat(nowInfos).hasSize(1)
+            val manual = nowInfos.single()
+            assertThat(manual.state).isEqualTo(WorkInfo.State.ENQUEUED)
+            val manualSpec = specOf(manual.id.toString())
+            assertThat(RefreshWorkData.request(manualSpec.input, 0, 0, 0).origin)
+                .isEqualTo(RefreshOrigin.MANUAL)
+            assertThat(manualSpec.constraints.requiresBatteryNotLow()).isFalse()
+            assertThat(manualSpec.expedited).isTrue()
         }
 
     @Test

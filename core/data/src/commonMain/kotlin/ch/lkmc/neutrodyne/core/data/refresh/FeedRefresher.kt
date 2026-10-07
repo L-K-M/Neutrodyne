@@ -563,6 +563,9 @@ internal class FeedRefresher(
     /**
      * A paging session of 03 RFC 5005 paging: pages the feed until a link runs out, a stop
      * condition hits or the deadline's paging margin arrives. Returns the last page's outcome.
+     * The loop is cancellation-bounded at `pagingStopAt`, not only checked between pages: a page
+     * still in flight when the budget or deadline lands is cancelled — its ingest transaction
+     * rolls back and the feed keeps its paging cursor for a later run (03 Engine run steps 7/9).
      */
     private suspend fun runPagingSession(
         feed: DueFeed,
@@ -572,8 +575,15 @@ internal class FeedRefresher(
         val session = PagingSession(feed, adapter)
         val manual = request.origin == RefreshOrigin.MANUAL
         val stopAt = pagingStopAt(request)
-        while (session.active && clock.elapsedRealtime() < stopAt) {
-            session.active = onePage(session, manual)
+        val pages: suspend () -> Unit = {
+            while (session.active && clock.elapsedRealtime() < stopAt) {
+                session.active = onePage(session, manual)
+            }
+        }
+        if (stopAt == Long.MAX_VALUE) {
+            pages()
+        } else {
+            withTimeoutOrNull((stopAt - clock.elapsedRealtime()).coerceAtLeast(0)) { pages() }
         }
         return session.lastOutcome
     }
@@ -717,24 +727,34 @@ internal class FeedRefresher(
     ) {
         val stopAt = pagingStopAt(request)
         val sessions = pendingPages.map { PagingSession(it, adapters.getValue(it.sourceType)) }
-        while (clock.elapsedRealtime() < stopAt) {
-            val active = sessions.filter { it.active }
-            if (active.isEmpty()) break
-            coroutineScope {
-                for (session in active) {
-                    launch {
-                        global.withPermit {
-                            hostSems.getValue(session.adapter.hostKey(session.feed)).withPermit {
-                                // The bound is re-checked after the permit waits: a session that
-                                // spent the paging budget queued must not start a page anyway.
-                                if (clock.elapsedRealtime() < stopAt) {
-                                    session.active = onePage(session, manual = false)
+        // The phase is cancellation-bounded at the stop, not only checked between rounds: a page
+        // still in flight when the budget/deadline lands is cancelled — its transaction rolls
+        // back and the feed stays paging-pending for a later run (03 Engine run step 9).
+        val rounds: suspend () -> Unit = {
+            while (clock.elapsedRealtime() < stopAt) {
+                val active = sessions.filter { it.active }
+                if (active.isEmpty()) break
+                coroutineScope {
+                    for (session in active) {
+                        launch {
+                            global.withPermit {
+                                hostSems.getValue(session.adapter.hostKey(session.feed)).withPermit {
+                                    // The bound is re-checked after the permit waits: a session that
+                                    // spent the paging budget queued must not start a page anyway.
+                                    if (clock.elapsedRealtime() < stopAt) {
+                                        session.active = onePage(session, manual = false)
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
+        }
+        if (stopAt == Long.MAX_VALUE) {
+            rounds()
+        } else {
+            withTimeoutOrNull((stopAt - clock.elapsedRealtime()).coerceAtLeast(0)) { rounds() }
         }
     }
 

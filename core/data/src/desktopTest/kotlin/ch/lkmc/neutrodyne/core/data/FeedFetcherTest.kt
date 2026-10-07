@@ -514,6 +514,24 @@ class FeedFetcherTest {
             assertThat(outcome.code).isEqualTo(302)
         }
 
+    @Test
+    fun `an uppercase http scheme in Location is followed`() =
+        runBlocking {
+            // RFC 3986 schemes are case-insensitive; `HTTP://…` is a valid http redirect, not a
+            // non-http Location to stop at.
+            server.enqueue(
+                mockResponse(302, "", "Location" to "HTTP://${server.hostName}:${server.port}/b"),
+            )
+            server.enqueue(mockResponse(body = rssBody()))
+            val outcome =
+                fetcher().use { bundle ->
+                    bundle.fetcher.fetch(request(server.url("/feed.xml").toString()))
+                }
+            outcome as FetchOutcome.Body
+            assertThat(outcome.finalUrl).isEqualTo(server.url("/b").toString())
+            FileSystem.SYSTEM.delete(outcome.file)
+        }
+
     // --- Body policy --------------------------------------------------------------------------------
 
     @Test

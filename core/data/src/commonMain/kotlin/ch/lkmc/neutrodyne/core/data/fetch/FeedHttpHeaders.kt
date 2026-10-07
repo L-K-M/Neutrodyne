@@ -181,7 +181,9 @@ internal object FeedHttpHeaders {
 
         val resolved =
             buildString {
-                tScheme?.let { append(it).append(':') }
+                // RFC 3986 schemes are case-insensitive; emit the canonical lowercase so the
+                // caller's http(s) check and the hop-tracking sets see a normal form.
+                tScheme?.let { append(it.lowercase()).append(':') }
                 tAuthority?.let { append("//").append(it) }
                 append(tPath)
                 tQuery?.let { append('?').append(it) }

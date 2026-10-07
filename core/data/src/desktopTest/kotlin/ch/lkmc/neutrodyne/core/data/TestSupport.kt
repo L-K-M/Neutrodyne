@@ -64,6 +64,7 @@ import kotlinx.coroutines.Dispatchers
 import mockwebserver3.MockResponse
 import okio.FileSystem
 import java.io.File
+import kotlin.coroutines.CoroutineContext
 import kotlin.random.Random
 
 internal fun fakePlatform(
@@ -249,7 +250,10 @@ internal fun parsedFeed(
 
 // --- Database / engine builders --------------------------------------------------------------------
 
-internal fun newDb(clock: TestClock = TestClock()): NeutrodyneDatabase = TestDb.inMemory(clock = clock)
+internal fun newDb(
+    clock: TestClock = TestClock(),
+    queryContext: CoroutineContext = Dispatchers.Default,
+): NeutrodyneDatabase = TestDb.inMemory(clock = clock, queryContext = queryContext)
 
 internal fun newIngestor(
     db: NeutrodyneDatabase,

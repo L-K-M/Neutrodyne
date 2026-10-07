@@ -92,6 +92,9 @@ internal class SubscribeUseCaseImpl(
         val feedUrl = entry.meta.permanentUrl ?: entry.meta.requestedUrl
         val feedKey = UrlNormalizer.forIdentity(feedUrl) ?: return Outcome.Failure(SubscribeError.Storage)
         val inputKey = UrlNormalizer.forIdentity(entry.inputUrl)
+        // The terminal fetch URL is a dedupe candidate too: a temporary redirect's target is not
+        // this subscription's identity, but a feed already subscribed there is the same feed.
+        val terminalKey = UrlNormalizer.forIdentity(entry.meta.finalUrl)
         val hopKeys = entry.hops.mapNotNull { UrlNormalizer.forIdentity(it.url) }
         val backfill = settings.get(FeedsSettingKeys.BACKFILL_PAGED_FEEDS)
         val link = feed.paging.next ?: feed.paging.prevArchive
@@ -110,6 +113,7 @@ internal class SubscribeUseCaseImpl(
                         buildList {
                             add(feedKey)
                             if (inputKey != null) add(inputKey)
+                            if (terminalKey != null) add(terminalKey)
                             addAll(hopKeys)
                         }
                     var existing: Long? = null
@@ -205,11 +209,20 @@ internal class SubscribeUseCaseImpl(
                 // A `feedKey`/alias unique violation races step 3.1's dedupe (03 Subscribe); any
                 // other database failure maps to `Storage`.
                 Log.w(TAG, e) { "Subscribe transaction failed" }
-                var owner = db.podcastDao().byFeedKey(feedKey)?.id ?: inputKey?.let { db.podcastDao().aliasOwner(it) }
+                // Re-scan every candidate key (feed, input, terminal, hops) for the owner —
+                // the unique violation raced step 3.1's dedupe on one of them.
+                var owner: Long? = null
                 var idx = 0
-                while (owner == null && idx < hopKeys.size) {
-                    owner = db.podcastDao().byFeedKey(hopKeys[idx])?.id
-                        ?: db.podcastDao().aliasOwner(hopKeys[idx])
+                val racedKeys =
+                    buildList {
+                        add(feedKey)
+                        if (inputKey != null) add(inputKey)
+                        if (terminalKey != null) add(terminalKey)
+                        addAll(hopKeys)
+                    }
+                while (owner == null && idx < racedKeys.size) {
+                    owner = db.podcastDao().byFeedKey(racedKeys[idx])?.id
+                        ?: db.podcastDao().aliasOwner(racedKeys[idx])
                     idx++
                 }
                 if (owner != null) return Outcome.Failure(SubscribeError.AlreadySubscribed(owner))

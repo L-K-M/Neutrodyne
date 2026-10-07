@@ -233,7 +233,7 @@ internal class RssSourceAdapter(
                         // `fh:complete` overrides it — the document is the whole feed (03).
                         partial =
                             (result.feed.paging.next != null || result.feed.paging.prevArchive != null) &&
-                                !result.feed.complete,
+                                !result.feed.paging.fhComplete,
                         meta = meta,
                     )
                 }

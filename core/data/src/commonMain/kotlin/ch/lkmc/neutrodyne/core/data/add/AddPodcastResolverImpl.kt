@@ -294,7 +294,11 @@ internal class AddPodcastResolverImpl(
             latestEpisodeAt = feed.items.mapNotNull { it.pubDate }.maxOrNull(),
             episodes = feed.items.take(PREVIEW_EPISODE_LIMIT).map(::previewEpisode),
             hasOlderPages = feed.paging.next != null || feed.paging.prevArchive != null,
-            isPrivate = PrivateFeedUrls.looksPrivate(entry.meta.finalUrl),
+            // The chip covers the stored subscription URL AND the fetched terminal URL: a private
+            // input behind a public-looking redirect target still marks the feed private.
+            isPrivate =
+                PrivateFeedUrls.looksPrivate(entry.meta.permanentUrl ?: entry.meta.requestedUrl) ||
+                    PrivateFeedUrls.looksPrivate(entry.meta.finalUrl),
             alreadySubscribed = dedupe(entry),
             emptyFeed = feed.items.isEmpty(),
         )

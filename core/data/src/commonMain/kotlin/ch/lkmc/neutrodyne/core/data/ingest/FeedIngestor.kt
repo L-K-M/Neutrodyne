@@ -115,6 +115,19 @@ internal class FeedIngestor(
         val taken = mutableSetOf<Long>()
         var rekeyed = 0
 
+        // A GUID the stored rows prove is reused — carried by two rows, or by one row under a
+        // non-guid key — was once decided by enclosure. A later document offering that GUID
+        // alone must not claim the `g:` row blind: the row belongs to the sibling whose
+        // enclosure it carries (r2 F1).
+        val guidRowCounts =
+            existing.mapNotNull { it.guid?.trim()?.takeIf(String::isNotEmpty) }.groupingBy { it }.eachCount()
+        val reusedGuids =
+            existing
+                .asSequence()
+                .mapNotNull { row ->
+                    row.guid?.trim()?.takeIf { it.isNotEmpty() && (guidRowCounts[it]!! > 1 || row.identityKey != "g:$it") }
+                }.toSet()
+
         // Pass 1 (03 step 4): each item claims rows in claim-key order — its assigned document
         // key first, then its (older-version) candidates. When a repeated GUID puts two items on
         // one stored row, the item whose enclosure matches the row keeps it and the loser is
@@ -124,8 +137,17 @@ internal class FeedIngestor(
         while (pending.isNotEmpty()) {
             val item = pending.removeFirst()
             if (item.matchedTo != null) continue
+            val reusedGuid = item.episode.guid?.trim()?.takeIf(reusedGuids::contains)
             for (key in item.claimKeys) {
                 val row = byKey[key] ?: continue
+                if (
+                    reusedGuid != null && key == "g:$reusedGuid" &&
+                    item.enclosureIdentity != normEnc(row)
+                ) {
+                    // The reused guid's row holds the sibling's enclosure; pass 2 (or an insert)
+                    // resolves this item's own identity instead of moving user state here.
+                    continue
+                }
                 val holder = claimedBy[row.id]
                 if (holder == null) {
                     if (claimRow(ingestDao, storedKeys, item, row)) rekeyed++

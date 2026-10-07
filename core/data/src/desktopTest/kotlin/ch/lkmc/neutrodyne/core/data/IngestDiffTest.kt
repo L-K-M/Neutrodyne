@@ -224,6 +224,37 @@ class IngestDiffTest {
             assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(stored.id)!!.playedAt)
             val fresh = db.episodeDao().byId(result.inserted.single())!!
             assertEquals("https://cdn.example.com/b.mp3", fresh.enclosureUrl)
+            db.episodeStateDao().upsert(episodeStateEntity(fresh.id, playedAt = NOW - 2_000))
+
+            // v3: the sibling returns alone. Stored state already proves "g" is reused (two rows
+            // carry it), so the blind "g:" claim is skipped — a wrong claim would move A's row,
+            // user state and all, to B (r2 F1). B instead matches its own fallback-keyed row and
+            // A's row only leaves the feed.
+            val v3 =
+                ingest(
+                    id,
+                    parsedFeed(
+                        items =
+                            listOf(
+                                parsedEpisode(
+                                    0,
+                                    guid = "g",
+                                    enclosureUrl = "https://cdn.example.com/b.mp3",
+                                ),
+                            ),
+                    ),
+                )
+
+            assertTrue(v3.inserted.isEmpty())
+            val aRow = db.episodeDao().byId(stored.id)!!
+            assertEquals("g:g", aRow.identityKey)
+            assertEquals("https://cdn.example.com/a.mp3", aRow.enclosureUrl)
+            assertFalse(aRow.inFeed)
+            assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(stored.id)!!.playedAt)
+            val bRow = db.episodeDao().byId(fresh.id)!!
+            assertEquals("https://cdn.example.com/b.mp3", bRow.enclosureUrl)
+            assertTrue(bRow.inFeed)
+            assertEquals(NOW - 2_000, db.episodeStateDao().byEpisode(fresh.id)!!.playedAt)
         }
 
     // --- isNew and the back-catalogue guard -----------------------------------------------------

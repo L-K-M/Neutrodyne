@@ -415,6 +415,22 @@ class AddPodcastResolverTest {
         }
 
     @Test
+    fun aPrivateRequestedUrlKeepsTheChipOverAPublicTerminal() =
+        runTest {
+            // The token lives on the SUBSCRIPTION URL (a 302 keeps it as identity); a public-looking
+            // CDN target must not hide the "Private feed" chip (03 Preview and dedupe).
+            server.enqueue(mockResponse(302, "", "Location" to "/cdn/plain.xml"))
+            server.enqueue(mockResponse(body = rssBody(title = "Members")))
+
+            val feed =
+                assertIs<AddResolution.Feed>(
+                    bundle.resolver.resolve(feedUrl("/feed.xml") + "?token=abc"),
+                )
+
+            assertTrue(feed.preview.isPrivate)
+        }
+
+    @Test
     fun theNormalisedInputFeedsDedupe() =
         runTest {
             // The podcast's feedKey is the HTTPS form; `pcast://` input normalises to it (S4).

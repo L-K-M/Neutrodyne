@@ -33,9 +33,10 @@ import java.util.concurrent.TimeUnit
 /**
  * The Android `RefreshScheduler` (03 Work requests): `refresh-now` one-times for user-driven runs
  * (expedited on API ≥ 31 — below, expedited work would demand a foreground-service notification the
- * refresh deliberately avoids), `refresh-continuation` with `KEEP` for deadline leftovers,
- * `import-sync` for sync-added libraries, and the `refresh-periodic` tick whose interval and
- * constraint set are stored in `feeds.scheduled_tick_*` so re-enqueues only happen on a change.
+ * refresh deliberately avoids), `refresh-auto` for automatic one-shots on their own constrained
+ * chain, `refresh-continuation` with `KEEP` for deadline leftovers, `import-sync` for sync-added
+ * libraries, and the `refresh-periodic` tick whose interval and constraint set are stored in
+ * `feeds.scheduled_tick_*` so re-enqueues only happen on a change.
  *
  * M1a's tick is `max(60, feeds.refresh_interval_minutes)` minutes; `0` ("Manual only") cancels the
  * periodic work. 05's effective-settings resolver replaces the global read (03 Periodic tick).
@@ -59,20 +60,25 @@ internal class WorkManagerRefreshScheduler
             pagesOnly: Boolean,
             origin: RefreshOrigin,
         ) {
+            // Manual and automatic one-shots ride separate unique chains: a constrained
+            // automatic request (battery low, wifi only) must never sit in front of a manual
+            // pull-to-refresh, and a queued manual request is not replaced by automatic work.
+            val manual = origin == RefreshOrigin.MANUAL
+            val uniqueName = if (manual) WORK_NOW else WORK_AUTO
             if (scope is RefreshScope.Podcasts && scope.ids.size > RefreshWorkData.MAX_SCOPE_IDS) {
                 // `Data` caps at 10 KB: persist the due marks, then send a plain All run
                 // (03 Work requests). The enqueue rides this coroutine to keep the order.
                 appScope.launch {
                     db.podcastDao().forceDue(scopeAll = false, ids = scope.ids)
                     enqueueUnique(
-                        WORK_NOW,
+                        uniqueName,
                         ExistingWorkPolicy.APPEND_OR_REPLACE,
                         requestFor(RefreshScope.All, force = false, pagesOnly, origin),
                     )
                 }
                 return
             }
-            if (origin == RefreshOrigin.MANUAL) {
+            if (manual) {
                 enqueueUnique(
                     WORK_NOW,
                     ExistingWorkPolicy.APPEND_OR_REPLACE,
@@ -81,9 +87,9 @@ internal class WorkManagerRefreshScheduler
             } else {
                 appScope.launch {
                     enqueueUnique(
-                        WORK_NOW,
+                        WORK_AUTO,
                         ExistingWorkPolicy.APPEND_OR_REPLACE,
-                        requestFor(scope, force, pagesOnly, origin),
+                        automaticRequest(scope, force, pagesOnly, origin),
                     )
                 }
             }
@@ -191,7 +197,7 @@ internal class WorkManagerRefreshScheduler
         }
 
         /**
-         * The `refresh-now` shape by origin (03 Work requests): `MANUAL` keeps the expedited,
+         * The one-shot request shape by origin (03 Work requests): `MANUAL` keeps the expedited,
          * connected-only user-driven request; automatic triggers ride the periodic constraint
          * set — the `feeds.refresh_wifi_only` network type plus battery-not-low, never expedited.
          */
@@ -225,7 +231,7 @@ internal class WorkManagerRefreshScheduler
             return builder.build()
         }
 
-        /** Automatic `refresh-now`: the wifi-only-aware + battery-not-low set, non-expedited. */
+        /** The `refresh-auto` one-shot: the wifi-only-aware + battery-not-low set, non-expedited. */
         private suspend fun automaticRequest(
             scope: RefreshScope,
             force: Boolean,
@@ -260,6 +266,7 @@ internal class WorkManagerRefreshScheduler
         internal companion object {
             const val WORK_PERIODIC = "refresh-periodic"
             const val WORK_NOW = "refresh-now"
+            const val WORK_AUTO = "refresh-auto"
             const val WORK_CONTINUATION = "refresh-continuation"
             const val WORK_IMPORT_SYNC = "import-sync"
             const val TAG_REFRESH = "refresh"

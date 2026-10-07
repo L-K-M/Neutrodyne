@@ -73,11 +73,16 @@ internal class PreviewCache(
         mutex.withLock { entries.remove(previewId) }
     }
 
-    /** `preview(feedUrl)`'s reuse rule (03): the live entry for an already-fetched URL, if any. */
+    /**
+     * `preview(feedUrl)`'s reuse rule (03): the live entry for an already-fetched URL, if any.
+     * Only the entry's identity URLs count — the subscription identity (`previewId`) and the typed
+     * `inputUrl`. A differing `meta.finalUrl` reached through a temporary redirect is NOT an
+     * identity: reusing on it would subscribe the wrong URL for the target feed.
+     */
     suspend fun findByUrl(feedUrl: String): PreviewEntry? =
         mutex.withLock {
             entries.values.firstOrNull {
-                (it.inputUrl == feedUrl || it.meta.finalUrl == feedUrl) &&
+                (it.previewId == feedUrl || it.inputUrl == feedUrl) &&
                     clock.now() - it.createdAt <= TTL_MS
             }
         }

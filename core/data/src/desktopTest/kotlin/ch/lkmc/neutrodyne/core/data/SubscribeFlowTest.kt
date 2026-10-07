@@ -268,6 +268,67 @@ class SubscribeFlowTest {
         }
 
     @Test
+    fun aTemporaryRedirectTargetDoesNotReuseTheRedirectedPreview() =
+        runTest {
+            // A 302s to C: the cached entry's identity stays A. `preview(C)` must fetch C fresh —
+            // reusing A's entry would hand the subscribe transaction A's identity for C's feed.
+            server.enqueue(mockResponse(302, "", "Location" to "/cdn.xml"))
+            server.enqueue(mockResponse(body = rssBody(items = arrayOf(rssItem("e1")))))
+            val feedA =
+                assertIs<AddResolution.Feed>(resolverBundle.resolver.resolve(feedUrl("/a.xml")))
+            assertEquals(feedUrl("/a.xml"), feedA.preview.previewId)
+
+            server.enqueue(mockResponse(body = rssBody(items = arrayOf(rssItem("e2")))))
+            val previewC =
+                assertIs<Outcome.Success<ch.lkmc.neutrodyne.core.model.FeedPreview>>(
+                    resolverBundle.resolver.preview(feedUrl("/cdn.xml")),
+                ).value
+
+            assertEquals(feedUrl("/cdn.xml"), previewC.feedUrl)
+            assertEquals(feedUrl("/cdn.xml"), previewC.previewId)
+            assertEquals(3, server.requestCount)
+
+            val id =
+                assertIs<Outcome.Success<Long>>(subscribeBundle.useCase(previewC.previewId, emptySet()))
+                    .value
+            val row = assertNotNull(db.podcastDao().byId(id))
+            assertEquals(feedUrl("/cdn.xml"), row.feedUrl)
+            assertEquals(UrlNormalizer.forIdentity(feedUrl("/cdn.xml")), row.feedKey)
+        }
+
+    @Test
+    fun aTemporaryRedirectTerminalUrlDedupesAtCommit() =
+        runTest {
+            // C is subscribed directly while A's cached preview still sits in the cache (it fetched
+            // through a 302 onto C). Committing A must dedupe on the terminal URL — otherwise the
+            // subscribe slips a duplicate catalogue in under A (03 step 3.1).
+            server.enqueue(mockResponse(302, "", "Location" to "/cdn.xml"))
+            server.enqueue(mockResponse(body = rssBody(items = arrayOf(rssItem("e1")))))
+            val feedA =
+                assertIs<AddResolution.Feed>(resolverBundle.resolver.resolve(feedUrl("/a.xml")))
+
+            server.enqueue(mockResponse(body = rssBody(items = arrayOf(rssItem("e1")))))
+            val feedC =
+                assertIs<AddResolution.Feed>(resolverBundle.resolver.resolve(feedUrl("/cdn.xml")))
+            val idC =
+                assertIs<Outcome.Success<Long>>(
+                    subscribeBundle.useCase(feedC.preview.previewId, emptySet()),
+                ).value
+
+            val outcome = subscribeBundle.useCase(feedA.preview.previewId, emptySet())
+
+            assertEquals(
+                SubscribeError.AlreadySubscribed(idC),
+                assertIs<Outcome.Failure<SubscribeError>>(outcome).error,
+            )
+            assertNull(
+                db.podcastDao().byFeedKey(UrlNormalizer.forIdentity(feedUrl("/a.xml"))!!),
+            )
+            assertEquals(1, db.podcastDao().ungroupedIds().size)
+            assertEquals(1, db.podcastDao().episodeCount(idC))
+        }
+
+    @Test
     fun aRedirectHopOwnedAsAFeedKeyDedupes() =
         runTest {
             // Another podcast already owns a hop URL as its PRIMARY feedKey — the in-transaction
