@@ -570,8 +570,9 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
             val run = StringBuilder()
             appendPreformatted(node, spans, wrappedImages, run, inheritedLink, style)
             flushPreRun(run, spans, style)
-            // As in any paragraph run: a `pre` of only breaks emits no block and spends none.
-            if (spans.any { it !is NoteSpan.LineBreak } && takeBlock()) {
+            // As in any paragraph run: a `pre` of only breaks — or of only whitespace — emits no
+            // block and spends none of the budget.
+            if (textOf(spans).isNotBlank() && takeBlock()) {
                 target.add(NoteBlock.Paragraph(mergeTextSpans(spans)))
             }
             for (img in wrappedImages) addImage(img, target)
