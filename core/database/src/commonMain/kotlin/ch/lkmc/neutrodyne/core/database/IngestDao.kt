@@ -19,12 +19,26 @@ import ch.lkmc.neutrodyne.core.model.OwnerType
 abstract class IngestDao(
     private val db: NeutrodyneDatabase,
 ) {
-    /** 03 builds its identity/enclosure/guid maps from these rows. */
+    /**
+     * 03 builds its identity/enclosure/guid maps from these rows. `sortDate`, `durationMs` and
+     * `enclosureType` exist for the diff's pass-2 guards (03 Diff algorithm step 5: duration
+     * within 10 min, same MIME major type) — added 2026-10-07 for the ingest half.
+     */
     @Query(
-        "SELECT id, identityKey, guid, enclosureUrl, title, pubDate, contentHash, inFeed" +
-            " FROM episode WHERE podcastId = :podcastId",
+        "SELECT id, identityKey, guid, enclosureUrl, enclosureType, title, pubDate, sortDate," +
+            " durationMs, contentHash, inFeed FROM episode WHERE podcastId = :podcastId",
     )
     abstract suspend fun existing(podcastId: Long): List<ExistingEpisodeKey>
+
+    /** `latestEpisodeAt = max(sortDate)`, maintained by ingestion (02 podcast). */
+    @Query("SELECT MAX(sortDate) FROM episode WHERE podcastId = :podcastId")
+    abstract suspend fun maxSortDate(podcastId: Long): Long?
+
+    /**
+     * Deletes the `PODCASTING20_JSON` chapters of one episode (03 Diff step 6: a changed
+     * `chaptersUrl` invalidates the fetched document so 06 re-fetches it).
+     */
+    suspend fun deleteJsonChapters(episodeId: Long) = deleteChaptersOfSource(episodeId, JSON)
 
     /** ABORT on a duplicate `(podcastId, identityKey)`; rows in descending `feedOrder` (02). */
     @Insert
@@ -267,5 +281,8 @@ abstract class IngestDao(
 
         /** `ChapterSource.PSC.name` — a literal because the column is converted to TEXT. */
         const val PSC = "PSC"
+
+        /** `ChapterSource.PODCASTING20_JSON.name`, same literal-table rule as [PSC]. */
+        const val JSON = "PODCASTING20_JSON"
     }
 }

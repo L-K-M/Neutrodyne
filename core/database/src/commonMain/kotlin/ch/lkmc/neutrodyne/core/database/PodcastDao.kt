@@ -42,6 +42,71 @@ abstract class PodcastDao(
     @Delete
     abstract suspend fun deleteAliases(rows: List<PodcastUrlAliasEntity>)
 
+    // --- Add-flow dedupe and repository reads (03, added 2026-10-07) -----------------------------
+
+    /** The podcast owning the alias `url` (`feedKey` is checked separately by the caller). */
+    @Query("SELECT podcastId FROM podcast_url_alias WHERE url = :url")
+    abstract suspend fun aliasOwner(url: String): Long?
+
+    /** Subscribe-time soft dedupe (03): real `podcastGuid`s only, never derived ones. */
+    @Query("SELECT * FROM podcast WHERE podcastGuid = :guid AND podcastGuidDerived = 0")
+    abstract suspend fun byRealGuid(guid: String): List<PodcastEntity>
+
+    @Query("SELECT * FROM podcast WHERE id = :id")
+    abstract fun observeById(id: Long): Flow<PodcastEntity?>
+
+    @Query("SELECT * FROM podcast_url_alias WHERE podcastId = :podcastId")
+    abstract fun observeAliases(podcastId: Long): Flow<List<PodcastUrlAliasEntity>>
+
+    @Query("SELECT COUNT(*) FROM episode WHERE podcastId = :podcastId")
+    abstract fun observeEpisodeCount(podcastId: Long): Flow<Int>
+
+    /** `observeCategoryCounts`'s source rows (03): every podcast's stored categories. */
+    @Query("SELECT id, categoriesJson FROM podcast WHERE categoriesJson IS NOT NULL")
+    abstract fun observeCategoryRows(): Flow<List<PodcastCategories>>
+
+    // --- Refresh rebase and user actions (03, added 2026-10-07) -----------------------------------
+
+    /**
+     * `NextRefreshRebaser`'s candidate set: healthy feeds only (failing feeds keep their backoff,
+     * 03 Periodic tick step 2). The `PodcastFetchState` projection carries exactly the columns the
+     * batched rebase write touches.
+     */
+    @Query(
+        "SELECT id, lastAttemptAt, lastSuccessAt, nextRefreshAt, failureCount, lastErrorKind," +
+            " lastErrorDetail, gone, needsCredentials, etag, lastModified, lastFullFetchAt," +
+            " lastParseOk, subscribedAt FROM podcast" +
+            " WHERE failureCount = 0 AND gone = 0 AND needsCredentials = 0",
+    )
+    abstract suspend fun rebaseCandidates(): List<RebaseCandidate>
+
+    /** "Try again" (03 Per-feed states): clears the gone/credentials block and the failure count. */
+    @Query(
+        "UPDATE podcast SET gone = 0, needsCredentials = 0, failureCount = 0," +
+            " lastErrorKind = NULL, lastErrorDetail = NULL WHERE id = :id",
+    )
+    abstract suspend fun clearRefreshBlock(id: Long)
+
+    /** `Ungrouped`'s member set (03 `refreshFeed` scope mapping). */
+    @Query(
+        "SELECT id FROM podcast WHERE NOT EXISTS" +
+            " (SELECT 1 FROM podcast_group_member m WHERE m.podcastId = podcast.id)",
+    )
+    abstract suspend fun ungroupedIds(): List<Long>
+
+    /** "Include in All" (02 user columns; never written by feed-derived paths). */
+    @Query("UPDATE podcast SET includeInAll = :include WHERE id = :podcastId")
+    abstract suspend fun setIncludeInAll(
+        podcastId: Long,
+        include: Boolean,
+    )
+
+    @Query("UPDATE podcast SET customTitle = :title WHERE id = :podcastId")
+    abstract suspend fun setCustomTitle(
+        podcastId: Long,
+        title: String?,
+    )
+
     // --- Refresh selection and fetch-state writes (02; 03 Refresh scheduling) --------------------
 
     /**
