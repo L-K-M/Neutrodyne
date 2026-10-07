@@ -67,8 +67,14 @@ docker run "${DOCKER_ARGS[@]}" \
     -e TZ=UTC \
     -e SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
     -e ANDROID_HOME=/opt/android-sdk \
+    -e HOST_UID="$(id -u)" \
+    -e HOST_GID="$(id -g)" \
     "$IMAGE" \
     bash -euxo pipefail -c '
+        # The container runs as root (apt-get needs it); hand everything it wrote in the
+        # checkout back to the runner user, on success or failure, so the next build can
+        # clean the tree (nightly `repro` Build B runs `git clean` on it).
+        trap '\''chown -R "$HOST_UID:$HOST_GID" . || true'\'' EXIT
         umask '"$UMASK"'
         apt-get update -qq
         DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \

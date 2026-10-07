@@ -139,7 +139,7 @@ jobs:
       - name: Debug suite on the API 37 16 KB image
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
-          api-level: 37.0
+          api-level: "37.0"
           target: google_apis_ps16k
           arch: x86_64
           script: |
@@ -149,7 +149,7 @@ jobs:
       - name: Release smoke on API 37
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
-          api-level: 37.0
+          api-level: "37.0"
           target: google_apis_ps16k
           arch: x86_64
           script: |
