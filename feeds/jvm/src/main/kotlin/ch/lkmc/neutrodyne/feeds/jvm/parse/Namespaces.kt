@@ -91,19 +91,26 @@ internal object Namespaces {
             "psc" to Key.PSC,
         )
 
-    /** The registry key of [uri], matched case-insensitively against canonical and accepted forms. */
+    /**
+     * The registry key of [uri], matched case-insensitively against canonical and accepted forms.
+     * The compare is length-aware — an inherited URI is looked up once per element, and lowercasing
+     * a giant URI on each call would make parsing quadratic in its length.
+     */
     internal fun keyOf(uri: String?): Key? {
         if (uri == null) return null
         if (uri.isEmpty()) return Key.RSS
-        val lowered = uri.lowercase()
         for ((key, canonical) in canonicalUris) {
-            if (lowered == canonical.lowercase()) return key
+            if (uri.equalFold(canonical)) return key
         }
         for ((key, accepted) in acceptedUris) {
-            if (accepted.any { it.lowercase() == lowered }) return key
+            if (accepted.any { uri.equalFold(it) }) return key
         }
         return null
     }
+
+    /** ASCII-style case-insensitive equality: the length check rejects long candidates up front. */
+    private fun String.equalFold(other: String): Boolean =
+        length == other.length && regionMatches(0, other, 0, length, ignoreCase = true)
 
     /**
      * Resolves the element the parser sits on: the registry key of its namespace URI, or the prefix
