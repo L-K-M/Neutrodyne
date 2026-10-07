@@ -145,12 +145,13 @@ object OrderKey {
         if (a.endsWith(zero) || b?.endsWith(zero) == true) throw IllegalArgumentException("trailing zero")
         if (b != null) {
             // Remove the longest common prefix, padding `a` with zeros; `b` cannot end before `a`
-            // while they share the prefix.
+            // while they share the prefix. `drop` clamps like the reference's `slice`: the padding
+            // case leaves an empty remainder instead of throwing.
             var n = 0
             while ((a.getOrNull(n) ?: zero) == b.getOrNull(n)) {
                 n++
             }
-            if (n > 0) return b.substring(0, n) + midpoint(a.substring(n), b.substring(n))
+            if (n > 0) return b.substring(0, n) + midpoint(a.drop(n), b.drop(n))
         }
         val digitA = if (a.isEmpty()) 0 else digitIndex(a[0])
         val digitB = if (b != null) digitIndex(b[0]) else BASE_62_DIGITS.length
@@ -159,7 +160,7 @@ object OrderKey {
             return BASE_62_DIGITS[midDigit].toString()
         }
         if (b != null && b.length > 1) return b.substring(0, 1)
-        return BASE_62_DIGITS[digitA] + midpoint(a.substring(1), null)
+        return BASE_62_DIGITS[digitA] + midpoint(a.drop(1), null)
     }
 
     // Head characters mark integer-part lengths: the first half of intDigits are negative-length

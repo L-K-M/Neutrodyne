@@ -43,7 +43,7 @@ class SyncInertTest {
                         ).single()
                 db.ingestDao().setInFeed(listOf(ep), inFeed = false)
                 db.ingestDao().touchSeen(a, TestClock.DEFAULT_NOW + 100)
-                FetchStateBatcher(db.podcastDao(), TestClock()).apply {
+                FetchStateBatcher(db.podcastDao(), TestClock(), backgroundScope).apply {
                     add(
                         PodcastFetchState(
                             id = a,

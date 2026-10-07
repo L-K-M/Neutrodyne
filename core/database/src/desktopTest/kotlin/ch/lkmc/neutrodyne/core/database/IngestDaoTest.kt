@@ -243,6 +243,53 @@ class IngestDaoTest {
         }
 
     @Test
+    fun chunkedSelectionDedupesAndSortsGlobally() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                val dao = db.podcastDao()
+                // 501 ACTIVE rows fill the first bind chunk; the 502nd is PENDING_FIRST_FETCH —
+                // concatenating per-chunk ORDER BY results would still leave it at the end (D3).
+                val ids = ArrayList<Long>(502)
+                repeat(501) {
+                    ids +=
+                        dao.insertPodcast(
+                            podcastEntity(feedKey = "k-$it") {
+                                copy(
+                                    status = PodcastStatus.ACTIVE,
+                                    nextRefreshAt = 0,
+                                    lastSuccessAt = 0,
+                                    pagingNextUrl = "https://next/$it",
+                                )
+                            },
+                        )
+                }
+                val pending =
+                    dao.insertPodcast(
+                        podcastEntity(feedKey = "k-pending") {
+                            copy(status = PodcastStatus.PENDING_FIRST_FETCH, nextRefreshAt = 0)
+                        },
+                    )
+
+                val due = dao.dueForRefresh(dueBefore = 100, scopeAll = false, ids = ids + pending)
+                assertEquals(502, due.size)
+                assertEquals(pending, due.first().id, "PENDING_FIRST_FETCH sorts first across chunks")
+
+                // A duplicate id straddling the chunk boundary still returns one row.
+                val dup =
+                    dao.dueForRefresh(dueBefore = 100, scopeAll = false, ids = ids + listOf(ids[0], pending))
+                assertEquals(502, dup.size)
+
+                // pagingPending's global key is `id`; a reversed id list puts the lowest id in
+                // the second chunk.
+                val paging = dao.pagingPending(scopeAll = false, ids = ids.asReversed())
+                assertEquals(ids.sorted(), paging.map { it.id })
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
     fun forceDueMarksEveryRowDueAndScopesWork() =
         runTest {
             val db = TestDb.inMemory()
@@ -279,7 +326,7 @@ class IngestDaoTest {
             val db = TestDb.inMemory()
             try {
                 val id = db.podcastDao().insertPodcast(podcastEntity())
-                val batcher = FetchStateBatcher(db.podcastDao(), TestClock())
+                val batcher = FetchStateBatcher(db.podcastDao(), TestClock(), backgroundScope)
                 val row = { n: Int ->
                     PodcastFetchState(
                         id = id,

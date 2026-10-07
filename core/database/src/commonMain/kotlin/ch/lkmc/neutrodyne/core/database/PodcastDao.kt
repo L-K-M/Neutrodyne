@@ -8,6 +8,7 @@ import androidx.room3.Insert
 import androidx.room3.Query
 import androidx.room3.Update
 import androidx.room3.withWriteTransaction
+import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -80,8 +81,18 @@ abstract class PodcastDao(
     ): List<DueFeed> =
         ids
             .ifEmpty { listOf(NO_ID) }
+            .distinct()
             .chunked(BIND_CHUNK)
             .flatMap { dueForRefreshChunk(dueBefore, scopeAll, it) }
+            // Chunk-local ORDER BY does not merge: reapply the global keys over the union.
+            .distinctBy { it.id }
+            .sortedWith(
+                compareBy(
+                    { row: DueFeed -> row.status != PodcastStatus.PENDING_FIRST_FETCH },
+                    { it.lastSuccessAt ?: 0L },
+                    { it.id },
+                ),
+            )
 
     @Query(
         "$DUE_COLUMNS FROM podcast WHERE gone = 0 AND needsCredentials = 0" +
@@ -113,8 +124,11 @@ abstract class PodcastDao(
     ): List<DueFeed> =
         ids
             .ifEmpty { listOf(NO_ID) }
+            .distinct()
             .chunked(BIND_CHUNK)
             .flatMap { pagingPendingChunk(scopeAll, it) }
+            .distinctBy { it.id }
+            .sortedBy { it.id }
 
     @Query(
         "$DUE_COLUMNS FROM podcast WHERE gone = 0 AND needsCredentials = 0" +

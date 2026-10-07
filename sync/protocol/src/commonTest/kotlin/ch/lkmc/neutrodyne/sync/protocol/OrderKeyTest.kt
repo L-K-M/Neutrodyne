@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.sync.protocol
 
+import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -75,5 +76,60 @@ class OrderKeyTest {
     fun invalidBoundsAreRejected() {
         assertFailsWith<IllegalArgumentException> { OrderKey.between("!!", "a0") }
         assertFailsWith<IllegalArgumentException> { OrderKey.between("a0", "a0x0") }
+    }
+
+    @Test
+    fun prefixEdgeBoundsProduceKeysBetween() {
+        // Regression for the unclamped substring in midpoint(): when the lower fraction is a
+        // proper prefix of the upper one (padding `a` with '0' digits), the port used to throw
+        // StringIndexOutOfBoundsException where the reference's slice() clamps.
+        val edgePairs =
+            listOf(
+                "a0" to "a00V",
+                "a0" to "a01",
+                "a05" to "a050V",
+                "a0x" to "a0x1",
+            )
+        for ((a, b) in edgePairs) {
+            val key = OrderKey.between(a, b)
+            assertTrue(a < key && key < b, "key $key is not strictly between $a and $b")
+        }
+    }
+
+    @Test
+    fun generatedNeighbourPairsProduceKeysBetween() {
+        // Property-style check with a fixed seed: a seeded pool of valid keys (literal prefix-edge
+        // forms plus rewrite() output plus random midpoint insertions) is probed at every adjacent
+        // pair; every between() must yield a strictly ordered key.
+        val random = Random(0xC0FFEE)
+        val pool =
+            sortedSetOf(
+                "Y10",
+                "Zz",
+                "a0",
+                "a00V",
+                "a01",
+                "a05",
+                "a050V",
+                "a0V",
+                "a0Vz",
+                "a0x",
+                "a0x1",
+                "a1",
+                "b0x",
+            )
+        pool += OrderKey.rewrite(64)
+        repeat(300) {
+            val keys = pool.toList()
+            val i = random.nextInt(keys.size - 1)
+            pool += OrderKey.between(keys[i], keys[i + 1])
+        }
+        val keys = pool.toList()
+        for (i in 0 until keys.size - 1) {
+            val a = keys[i]
+            val b = keys[i + 1]
+            val key = OrderKey.between(a, b)
+            assertTrue(a < key && key < b, "generated key $key is not strictly between $a and $b")
+        }
     }
 }

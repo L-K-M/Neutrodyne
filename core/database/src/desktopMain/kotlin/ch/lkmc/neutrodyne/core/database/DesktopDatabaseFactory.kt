@@ -30,8 +30,10 @@ class DesktopDatabaseFactory(
     override fun quarantine(stamp: String) {
         val dir = quarantineDir.resolve(stamp)
         Files.createDirectories(dir)
+        // Sidecars first, the main file last: a mid-sequence failure leaves the main file in
+        // place, so the retried move can complete instead of opening next to orphaned -wal/-shm.
         for (suffix in SIDE_FILES) {
-            val source = Path.of(databasePath + suffix)
+            val source = dirs.data.resolve(NeutrodyneDatabase.FILE_NAME + suffix)
             if (Files.exists(source)) {
                 Files.move(
                     source,
@@ -90,6 +92,6 @@ class DesktopDatabaseFactory(
 
         /** 02: quarantine keeps only the newest copy, at most 14 days. */
         const val QUARANTINE_KEEP_MS = 14L * 24 * 60 * 60 * 1000
-        val SIDE_FILES = listOf("", "-wal", "-shm")
+        val SIDE_FILES = listOf("-wal", "-shm", "")
     }
 }

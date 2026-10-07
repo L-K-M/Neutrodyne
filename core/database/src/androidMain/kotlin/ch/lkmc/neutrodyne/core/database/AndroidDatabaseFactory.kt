@@ -6,6 +6,7 @@ import android.content.Context
 import androidx.room3.Room
 import androidx.room3.RoomDatabase
 import java.io.File
+import java.io.IOException
 
 /**
  * `databases/` in credential-encrypted storage (02 Database builder and connections); the
@@ -27,9 +28,15 @@ class AndroidDatabaseFactory(
 
     override fun quarantine(stamp: String) {
         val dir = File(quarantineDir, stamp)
-        dir.mkdirs()
+        check(dir.isDirectory || dir.mkdirs()) { "cannot create quarantine directory $dir" }
+        // Sidecars first, the main file last: a mid-sequence failure leaves the main file in
+        // place, so the retried move can complete instead of opening next to orphaned -wal/-shm.
+        // `renameTo` reports failure only through its return value — check it.
         for (suffix in SIDE_FILES) {
-            File(databasePath + suffix).renameTo(File(dir, NeutrodyneDatabase.FILE_NAME + suffix))
+            val source = File(databasePath + suffix)
+            if (source.exists() && !source.renameTo(File(dir, NeutrodyneDatabase.FILE_NAME + suffix))) {
+                throw IOException("quarantine move failed: $source")
+            }
         }
     }
 
@@ -77,6 +84,6 @@ class AndroidDatabaseFactory(
 
         /** 02: quarantine keeps only the newest copy, at most 14 days. */
         const val QUARANTINE_KEEP_MS = 14L * 24 * 60 * 60 * 1000
-        val SIDE_FILES = listOf("", "-wal", "-shm")
+        val SIDE_FILES = listOf("-wal", "-shm", "")
     }
 }

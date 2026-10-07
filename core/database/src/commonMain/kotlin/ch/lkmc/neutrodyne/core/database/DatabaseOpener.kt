@@ -15,6 +15,7 @@ import dev.zacsweers.metro.Qualifier
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.runBlocking
@@ -79,12 +80,23 @@ class DatabaseOpener(
 ) {
     private val mutex = Mutex()
 
-    /** A failed attempt is never cached: the deferred is replaced before the next attempt. */
+    /**
+     * Holds the last attempt's outcome: a failed or cancelled attempt leaves the deferred
+     * completed, and it is replaced only when a retry actually starts under [mutex] — so a
+     * background `requireDatabase()` after a failure reports that failure instead of hanging on
+     * a fresh deferred that nobody will complete.
+     */
     @Volatile
     private var openDeferred = CompletableDeferred<NeutrodyneDatabase>()
 
     @Volatile
     private var result: OpenResult? = null
+
+    /** The recovery cause, retained across failed attempts until a result is published. */
+    private var pendingRecovery: RecoveryCause? = null
+
+    /** One stamp per recovery: a retried partial quarantine move lands in the same directory. */
+    private var quarantineStamp: String? = null
 
     private val _openState = MutableStateFlow<DatabaseOpenState>(DatabaseOpenState.Pending)
 
@@ -100,21 +112,24 @@ class DatabaseOpener(
         withContext(io) {
             mutex.withLock {
                 result?.let { return@withLock it }
+                if (openDeferred.isCompleted) openDeferred = CompletableDeferred()
+                val deferred = openDeferred
+                _openState.value = DatabaseOpenState.Pending
                 try {
                     val outcome = openWithRecovery()
                     result = outcome.result
-                    openDeferred.complete(outcome.db)
+                    pendingRecovery = null
+                    quarantineStamp = null
+                    deferred.complete(outcome.db)
                     _openState.value = DatabaseOpenState.Opened(outcome.result)
                     outcome.result
                 } catch (t: Throwable) {
                     if (t is CancellationException) {
-                        openDeferred.completeExceptionally(t)
-                        openDeferred = CompletableDeferred()
+                        deferred.completeExceptionally(t)
                         throw t
                     }
                     val failure = t as? DatabaseOpenException ?: DatabaseOpenException(classify(t), t)
-                    openDeferred.completeExceptionally(failure)
-                    openDeferred = CompletableDeferred()
+                    deferred.completeExceptionally(failure)
                     _openState.value = DatabaseOpenState.Failed(failure)
                     throw failure
                 }
@@ -125,9 +140,14 @@ class DatabaseOpener(
      * The Metro provider's accessor (02): throws on the UI thread if the database is not open yet;
      * on a background thread it blocks until the open finishes (and throws the open failure).
      */
+    @OptIn(ExperimentalCoroutinesApi::class) // getCompleted — the guarded await stays the fallback
     fun requireDatabase(): NeutrodyneDatabase {
+        val deferred = openDeferred
+        // An already-resolved attempt answers first — the UI-thread guard exists only to stop a
+        // UI caller from blocking on an open that has not finished, not to deny a ready database.
+        if (deferred.isCompleted) return deferred.getCompleted()
         check(!isUiThread()) { "NeutrodyneDatabase required on the UI thread before the start-up gate" }
-        return runBlocking { openDeferred.await() }
+        return runBlocking { deferred.await() }
     }
 
     // --- Open and recovery (02's flow) -------------------------------------------------------------
@@ -143,25 +163,28 @@ class DatabaseOpener(
      * The recovery chain: quarantine marker → quarantine; existing file → raw-driver preflight
      * (`PRAGMA user_version` — a NOTADB/CORRUPT file or a version above [NeutrodyneDatabase.VERSION]
      * quarantines); open Room → a migration or corruption error quarantines; after a quarantine a
-     * fresh database is created and `recovered` reports the cause.
+     * fresh database is created and `recovered` reports the cause. A failed or partial quarantine
+     * move propagates: the marker stays set and nothing opens over the unmoved file.
      */
     private suspend fun openWithRecovery(): OpenOutcome {
-        var recovered: RecoveryCause? = null
         if (factory.quarantineMarker) {
-            recovered = RecoveryCause.CORRUPT
+            // The cause is recorded only once the move completed: `recovered` is published only
+            // when the old file really was quarantined, and it survives a failed fresh open.
             quarantine()
+            pendingRecovery = RecoveryCause.CORRUPT
             runCatching { factory.quarantineMarker = false }
+                .onFailure { Log.e(TAG, it) { "quarantine marker could not be cleared" } }
         }
-        if (recovered == null && factory.exists()) {
+        if (factory.exists()) {
             when (preflightUserVersion()) {
                 Preflight.CORRUPT -> {
-                    recovered = RecoveryCause.CORRUPT
                     quarantine()
+                    pendingRecovery = RecoveryCause.CORRUPT
                 }
 
                 Preflight.NEWER -> {
-                    recovered = RecoveryCause.DOWNGRADE
                     quarantine()
+                    pendingRecovery = RecoveryCause.DOWNGRADE
                 }
 
                 Preflight.OK -> {
@@ -169,17 +192,21 @@ class DatabaseOpener(
                     try {
                         candidate = build()
                         forceOpen(candidate.db)
-                        return finish(candidate.db, candidate.callback.created, null)
+                        return finish(candidate.db, candidate.callback.created)
                     } catch (t: Throwable) {
+                        // The failed candidate never becomes the returned database: close it on
+                        // every path. Cancellation stays cancellation — it is never classified.
+                        closeQuietly(candidate?.db)
+                        if (t is CancellationException) throw t
                         // Only a migration or corruption error quarantines; a full disk or an IO
                         // error fails the open without touching the file (02: nothing is deleted).
                         if (isDiskFull(t) || isIo(t)) throw DatabaseOpenException(classify(t), t)
                         if (strictMigrations && !isCorruption(t)) {
                             throw DatabaseOpenException(DatabaseOpenException.Reason.UNKNOWN, t)
                         }
-                        recovered = if (isCorruption(t)) RecoveryCause.CORRUPT else RecoveryCause.MIGRATION_FAILED
-                        closeQuietly(candidate?.db)
                         quarantine()
+                        pendingRecovery =
+                            if (isCorruption(t)) RecoveryCause.CORRUPT else RecoveryCause.MIGRATION_FAILED
                     }
                 }
             }
@@ -189,9 +216,10 @@ class DatabaseOpener(
             forceOpen(fresh.db)
         } catch (t: Throwable) {
             closeQuietly(fresh.db)
+            if (t is CancellationException) throw t
             throw DatabaseOpenException(classify(t), t)
         }
-        return finish(fresh.db, created = fresh.callback.created, recovered = recovered)
+        return finish(fresh.db, created = fresh.callback.created)
     }
 
     /**
@@ -239,15 +267,18 @@ class DatabaseOpener(
     private suspend fun finish(
         db: NeutrodyneDatabase,
         created: Boolean,
-        recovered: RecoveryCause?,
     ): OpenOutcome {
-        if (recovered != null || created) factory.pruneQuarantine(clock.now())
-        return OpenOutcome(db, OpenResult(created = created, recovered = recovered))
+        // pruneQuarantine runs only after every move succeeded — a propagated quarantine failure
+        // never reaches here (02: quarantine keeps only the newest copy, at most 14 days).
+        if (pendingRecovery != null || created) factory.pruneQuarantine(clock.now())
+        return OpenOutcome(db, OpenResult(created = created, recovered = pendingRecovery))
     }
 
-    private suspend fun quarantine() {
-        runCatching { factory.quarantine(clock.now().toString()) }
-            .onFailure { Log.e(TAG, it) { "quarantine move failed; deleting is never the fallback" } }
+    // A failed move propagates: the marker stays set, nothing is opened over the unmoved file,
+    // and the retried move reuses the same stamp so one recovery fills one quarantine directory.
+    private fun quarantine() {
+        val stamp = quarantineStamp ?: clock.now().toString().also { quarantineStamp = it }
+        factory.quarantine(stamp)
     }
 
     private fun closeQuietly(db: NeutrodyneDatabase?) {
@@ -266,18 +297,30 @@ class DatabaseOpener(
 
     private fun isCorruption(t: Throwable): Boolean {
         val text = chainText(t)
-        return CORRUPT_MARKERS.any { text.contains(it) }
+        return sqlitePrimaryCodes(text).any { it in CORRUPT_CODES } ||
+            CORRUPT_MARKERS.any { text.contains(it) }
     }
 
     private fun isDiskFull(t: Throwable): Boolean {
         val text = chainText(t)
-        return DISK_FULL_MARKERS.any { text.contains(it) }
+        return sqlitePrimaryCodes(text).any { it in DISK_FULL_CODES } ||
+            DISK_FULL_MARKERS.any { text.contains(it) }
     }
 
     private fun isIo(t: Throwable): Boolean {
         val text = chainText(t)
-        return IO_MARKERS.any { text.contains(it) }
+        return sqlitePrimaryCodes(text).any { it in IO_CODES } ||
+            IO_MARKERS.any { text.contains(it) }
     }
+
+    /**
+     * Every `code N` the exception chain carries, reduced to its primary SQLite result code (the
+     * low byte — e.g. `SQLITE_IOERR_SHMOPEN` 4618 = 0x120A → 10). `androidx.sqlite.SQLiteException`
+     * has no structured result-code API (02, S2): the bundled driver writes "Error code: N,
+     * message: …" and the framework driver "… (code N SQLITE_…)".
+     */
+    private fun sqlitePrimaryCodes(text: String): List<Int> =
+        SQLITE_CODE.findAll(text).map { it.groupValues[1].toInt() and PRIMARY_CODE_MASK }.toList()
 
     private fun chainText(t: Throwable): String =
         generateSequence(t) { it.cause }
@@ -286,6 +329,16 @@ class DatabaseOpener(
     private companion object {
         const val TAG = "DbOpen"
 
+        /** Bundled "Error code: N" and framework "(code N …)" spellings. */
+        val SQLITE_CODE = Regex("""\bcode:?\s*(\d+)""")
+
+        const val PRIMARY_CODE_MASK = 0xFF
+
+        /** `SQLITE_IOERR` (10), `SQLITE_CANTOPEN` (14), `SQLITE_FULL` (13), `SQLITE_CORRUPT` (11), `SQLITE_NOTADB` (26). */
+        val IO_CODES = setOf(10, 14)
+        val DISK_FULL_CODES = setOf(13)
+        val CORRUPT_CODES = setOf(11, 26)
+
         /** `SQLITE_CORRUPT` (11) and `SQLITE_NOTADB` (26) spellings across both drivers (S2, 02). */
         val CORRUPT_MARKERS =
             listOf(
@@ -293,18 +346,16 @@ class DatabaseOpener(
                 "SQLITE_NOTADB",
                 "not a database",
                 "database disk image is malformed",
-                "code 11",
-                "code 26",
                 "DatabaseCorrupt",
             )
 
         /** `SQLITE_FULL` (13). */
         val DISK_FULL_MARKERS =
-            listOf("SQLITE_FULL", "database or disk is full", "code 13", "SQLiteFullException", "ENOSPC")
+            listOf("SQLITE_FULL", "database or disk is full", "SQLiteFullException", "ENOSPC")
 
         /** `SQLITE_CANTOPEN` (14) and `SQLITE_IOERR` (10). */
         val IO_MARKERS =
-            listOf("SQLITE_CANTOPEN", "SQLITE_IOERR", "code 14", "code 10", "DiskIOException", "CantOpenDatabase")
+            listOf("SQLITE_CANTOPEN", "SQLITE_IOERR", "DiskIOException", "CantOpenDatabase", "IOException")
     }
 }
 
