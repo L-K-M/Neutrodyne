@@ -142,6 +142,12 @@ jobs:
           api-level: "37.0"
           target: google_apis_ps16k
           arch: x86_64
+          # The 16 KB-page image boots slowly on the hosted runners: with the action's 2 cores, default
+          # RAM and 600 s timeout it never finished booting (nightly 2026-10-07).
+          cores: 4
+          ram-size: 4096M
+          disk-size: 6000M
+          emulator-boot-timeout: 1200
           script: |
             test "$(adb shell getconf PAGE_SIZE | tr -d '\r')" = "16384" || { echo "PAGE_SIZE != 16384"; exit 1; }
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly \
@@ -152,6 +158,12 @@ jobs:
           api-level: "37.0"
           target: google_apis_ps16k
           arch: x86_64
+          # The 16 KB-page image boots slowly on the hosted runners: with the action's 2 cores, default
+          # RAM and 600 s timeout it never finished booting (nightly 2026-10-07).
+          cores: 4
+          ram-size: 4096M
+          disk-size: 6000M
+          emulator-boot-timeout: 1200
           script: |
             ./gradlew --max-workers=2 -PtestBuildType=release \
               -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke \
