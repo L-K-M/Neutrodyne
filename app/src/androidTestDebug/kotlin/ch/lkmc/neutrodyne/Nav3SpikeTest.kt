@@ -24,6 +24,10 @@ import org.junit.runner.RunWith
  * the host's `rememberViewModelStoreNavEntryDecorator()` provides, the sheet/dialog overlay scenes
  * dismissed by system back, and the 08 back order (`pop()` at a non-Feeds root selects Feeds).
  * Runs on the API 26 and 36 GMDs in CI; no emulator exists locally.
+ *
+ * Debug-only (`androidTestDebug`): its host [SpikeRootActivity] lives in the debug source set, so
+ * the release-variant test APK (`-PtestBuildType=release`, the release smoke runs) must not
+ * compile it.
  */
 @RunWith(AndroidJUnit4::class)
 class Nav3SpikeTest {
