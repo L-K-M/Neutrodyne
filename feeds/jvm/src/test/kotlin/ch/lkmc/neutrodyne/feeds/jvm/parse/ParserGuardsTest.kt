@@ -89,4 +89,75 @@ class ParserGuardsTest {
                 "<rss version=\"2.0\"><channel/></rss>"
         assertEquals(ParseFailure.HOSTILE, failedOf(xml).reason)
     }
+
+    /**
+     * kxml2 keeps an ASCII declaration's raw bytes and decodes only the remainder with the declared
+     * encoding. Decoding the whole stream that way instead pairs the body's first byte with the
+     * declaration's last when the declaration is odd, phase-shifting every tag out of the guards'
+     * view while the pull parser still sees a genuine UTF-16 document.
+     */
+    @Test
+    fun declaredEncodingCannotPhaseShiftAnEntityPastTheGuard() {
+        // 41 ASCII bytes: odd, so a whole-stream UTF-16LE decode misaligns the body.
+        val declaration = "<?xml version=\"1.0\" encoding=\"utf-16le\"?>"
+        assertEquals(41, declaration.length)
+        val body = "<!DOCTYPE rss [<!ENTITY x \"boom\">]><rss version=\"2.0\"><channel/></rss>"
+        val bytes = declaration.toByteArray(Charsets.US_ASCII) + body.toByteArray(Charsets.UTF_16LE)
+        assertEquals(ParseFailure.HOSTILE, assertIs<ParseResult.Failed>(parse(bytes)).reason)
+    }
+
+    /** Same phase shift against the attribute bound: the flood must not reach the pull parser. */
+    @Test
+    fun declaredEncodingCannotPhaseShiftAnAttributeFlood() {
+        val declaration = "<?xml version=\"1.0\" encoding=\"utf-16le\"?>"
+        val flood = (1..1_001).joinToString(" ") { "a$it=\"v\"" }
+        val body = "<rss version=\"2.0\" $flood><channel/></rss>"
+        val bytes = declaration.toByteArray(Charsets.US_ASCII) + body.toByteArray(Charsets.UTF_16LE)
+        assertEquals(ParseFailure.MALFORMED, assertIs<ParseResult.Failed>(parse(bytes)).reason)
+    }
+
+    /** The boundary also works forward: a declaration naming UTF-16 with a real UTF-16 body parses. */
+    @Test
+    fun declaredUtf16BodyStillParses() {
+        val declaration = "<?xml version=\"1.0\" encoding=\"utf-16le\"?>"
+        val body = "<rss version=\"2.0\"><channel><title>Enc</title></channel></rss>"
+        val bytes = declaration.toByteArray(Charsets.US_ASCII) + body.toByteArray(Charsets.UTF_16LE)
+        assertEquals("Enc", assertIs<ParseResult.Ok>(parse(bytes)).feed.title)
+    }
+
+    /** `setInput` fails when the declaration's `>` never comes: so does the parse. */
+    @Test
+    fun declarationWithoutCloseIsRejected() {
+        assertIs<EncodingSniff.View.Rejected>(EncodingSniff.view("<?xml".toByteArray()))
+        assertEquals(
+            ParseFailure.MALFORMED,
+            assertIs<ParseResult.Failed>(parse("<?xml".toByteArray())).reason,
+        )
+    }
+
+    /** kxml2's 8192-char store buffer bounds the declaration scan; past it `setInput` throws. */
+    @Test
+    fun declarationClosingBeyondTheParserBufferIsRejected() {
+        val bytes = ("<?xml " + "a".repeat(8_192) + ">").toByteArray()
+        assertIs<EncodingSniff.View.Rejected>(EncodingSniff.view(bytes))
+    }
+
+    @Test
+    fun unsupportedDeclaredEncodingIsRejected() {
+        val bytes = "<?xml version=\"1.0\" encoding=\"utf-99\"?>".toByteArray()
+        assertIs<EncodingSniff.View.Rejected>(EncodingSniff.view(bytes))
+        assertEquals(ParseFailure.MALFORMED, assertIs<ParseResult.Failed>(parse(bytes)).reason)
+    }
+
+    /** The declaration bytes stay raw even when the body decodes in the declared charset. */
+    @Test
+    fun declaredEncodingDecodesOnlyTheRemainder() {
+        val declaration = "<?xml version=\"1.0\" encoding=\"utf-16le\"?>"
+        val body = "<r>x</r>"
+        val bytes = declaration.toByteArray(Charsets.US_ASCII) + body.toByteArray(Charsets.UTF_16LE)
+        val view = assertIs<EncodingSniff.View.Decoded>(EncodingSniff.view(bytes))
+        assertEquals(declaration, view.prefix)
+        assertEquals(declaration.length, view.dataStart)
+        assertEquals(declaration + body, EncodingSniff.decode(bytes))
+    }
 }

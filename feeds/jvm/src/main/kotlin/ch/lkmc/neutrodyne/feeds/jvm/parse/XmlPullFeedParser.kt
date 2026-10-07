@@ -69,6 +69,14 @@ public class XmlPullFeedParser(
                 return ParseResult.Failed(ParseFailure.MALFORMED, "unreadable source: ${e.javaClass.simpleName}")
             }
 
+        // The guards judge the document the pull parser will see: kxml2 keeps an ASCII/UTF-8
+        // declaration's raw bytes and decodes only the remainder with the declared encoding. A
+        // declaration its own setInput cannot decode (no `>` in reach, a bad encoding name) fails
+        // the same way here.
+        (EncodingSniff.view(bytes) as? EncodingSniff.View.Rejected)?.let {
+            return ParseResult.Failed(ParseFailure.MALFORMED, it.detail)
+        }
+
         // Step 1: prolog guard, before any parser sees the document.
         if (PrologGuard.isHostile(bytes, limits.prologScanBytes)) {
             return ParseResult.Failed(ParseFailure.HOSTILE, "ENTITY declaration in the prolog")

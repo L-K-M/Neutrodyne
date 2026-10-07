@@ -24,7 +24,9 @@ internal object TagBounds {
         bytes: ByteArray,
         limits: ParseLimits,
     ) {
-        val text = EncodingSniff.decode(bytes)
+        val text =
+            EncodingSniff.decode(bytes)
+                ?: throw XmlPullParserException("encoding declaration the parser cannot decode")
         var i = 0
         while (i < text.length) {
             when {

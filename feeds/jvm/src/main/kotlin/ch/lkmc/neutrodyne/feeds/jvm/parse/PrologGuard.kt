@@ -22,7 +22,8 @@ internal object PrologGuard {
         scanLimit: Int,
     ): Boolean {
         // Decoding first makes the scan encoding-aware: a UTF-16 prolog cannot hide its DOCTYPE.
-        val text = EncodingSniff.decode(bytes.copyOf(minOf(bytes.size, scanLimit)))
+        // A declaration the parser's own setInput cannot decode fails closed.
+        val text = EncodingSniff.decode(bytes.copyOf(minOf(bytes.size, scanLimit))) ?: return true
         var i = 0
         while (i < text.length) {
             when {
