@@ -7,14 +7,18 @@ import ch.lkmc.neutrodyne.core.data.refresh.DesktopRefreshLane
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopRefreshScheduler
 import ch.lkmc.neutrodyne.core.data.refresh.NextRefreshRebaser
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
+import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -30,14 +34,14 @@ import kotlin.time.Instant
  */
 class DesktopRefreshLaneTest {
     private val clock = TestClock()
-    private val db = newDb(clock)
+    private lateinit var db: NeutrodyneDatabase
     private val settings = FakeSettingsRepository()
     private val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
     private val pokes = mutableListOf<String>()
 
     @Test
     fun offlineRunDoesNothing() =
-        runTest {
+        laneTest {
             network.setStatus(FakeNetworkMonitor.OFFLINE)
             val adapter = stubAdapter()
             val lane = lane(adapter, queue(this))
@@ -50,7 +54,7 @@ class DesktopRefreshLaneTest {
 
     @Test
     fun queuedForcedRequestPersistsDueThenRuns() =
-        runTest {
+        laneTest {
             val id =
                 seedPodcast(db, "https://a.example.com/f", nextRefreshAt = NOW + 60 * DAY)
             val adapter = stubAdapter()
@@ -76,7 +80,7 @@ class DesktopRefreshLaneTest {
 
     @Test
     fun queuedRequestsDrainInOrder() =
-        runTest {
+        laneTest {
             val a = seedPodcast(db, "https://a.example.com/f", nextRefreshAt = NOW + 60 * DAY)
             val b = seedPodcast(db, "https://b.example.com/f", nextRefreshAt = NOW + 60 * DAY)
             val adapter = stubAdapter()
@@ -104,7 +108,7 @@ class DesktopRefreshLaneTest {
 
     @Test
     fun feedsDueInsideTheSlackTriggerAnAutomaticRun() =
-        runTest {
+        laneTest {
             val soon =
                 seedPodcast(db, "https://a.example.com/f", nextRefreshAt = NOW + 10 * 60_000L)
             seedPodcast(db, "https://b.example.com/f", nextRefreshAt = NOW + 20 * 60_000L)
@@ -119,7 +123,7 @@ class DesktopRefreshLaneTest {
 
     @Test
     fun nothingDueMeansNoRun() =
-        runTest {
+        laneTest {
             seedPodcast(db, "https://a.example.com/f", nextRefreshAt = NOW + 20 * 60_000L)
             val adapter = stubAdapter()
             val lane = lane(adapter, queue(this))
@@ -132,7 +136,7 @@ class DesktopRefreshLaneTest {
 
     @Test
     fun forceAllInTheQueueMarksEveryHealthyFeedDue() =
-        runTest {
+        laneTest {
             val a = seedPodcast(db, "https://a.example.com/f", nextRefreshAt = NOW + 60 * DAY)
             val b =
                 seedPodcast(db, "https://b.example.com/f", nextRefreshAt = NOW + 60 * DAY) {
@@ -158,6 +162,21 @@ class DesktopRefreshLaneTest {
         }
 
     private suspend fun summaryCount(): Int = if (settings.get(FeedsSettingKeys.LAST_RUN_SUMMARY).isEmpty()) 0 else 1
+
+    /**
+     * `enqueueNow` persists forced scopes on Room before it pokes the lane, from its own launched
+     * coroutine. With the queries on the test scheduler, `advanceUntilIdle()` covers that write;
+     * on a real thread the assertions raced it.
+     */
+    private fun laneTest(body: suspend TestScope.() -> Unit) =
+        runTest {
+            db = TestDb.inMemory(clock = clock, queryContext = StandardTestDispatcher(testScheduler))
+            try {
+                body()
+            } finally {
+                db.close()
+            }
+        }
 
     private fun queue(scope: CoroutineScope): DesktopRefreshScheduler =
         DesktopRefreshScheduler(
