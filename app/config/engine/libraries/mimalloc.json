@@ -5,7 +5,7 @@
   "website": "https://github.com/microsoft/mimalloc",
   "developers": [],
   "licenses": [
-    "MIT"
+    "mit-mimalloc"
   ],
   "artifactVersion": "bundled with CPython 3.14.0",
   "tag": "bundled"

@@ -5,7 +5,7 @@
   "website": "https://www.bytereef.org/mpdecimal/",
   "developers": [],
   "licenses": [
-    "BSD-2-Clause"
+    "bsd-2-clause-mpdecimal"
   ],
   "artifactVersion": "bundled with CPython 3.14.0",
   "tag": "bundled"

@@ -1,0 +1,7 @@
+{
+  "name": "Public domain (XZ Utils liblzma)",
+  "url": "https://tukaani.org/xz/",
+  "spdxId": "LicenseRef-PublicDomain",
+  "hash": "public-domain-xz",
+  "content": "XZ Utils licensing (liblzma)\n\nliblzma is in the public domain.\n\nFrom XZ Utils' COPYING file (v5.4.6,\nhttps://github.com/tukaani-project/xz/blob/v5.4.6/COPYING):\n\n    \"liblzma is in the public domain.\n\n    [...]\n\n    You can do whatever you want with the files that have been put\n    into the public domain. If you find public domain legally\n    problematic, take the previous sentence as a license grant.\"\n\nThe public-domain dedication inside liblzma's source files (Lasse\nCollin and the other XZ Utils authors) reads:\n\n    This file has been put into the public domain.\n    You can do whatever you want with this file."
+}
