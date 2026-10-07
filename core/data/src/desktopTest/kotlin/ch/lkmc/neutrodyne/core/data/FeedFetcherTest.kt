@@ -3,25 +3,33 @@
 package ch.lkmc.neutrodyne.core.data
 
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
+import ch.lkmc.neutrodyne.core.data.fetch.FeedFetcher
 import ch.lkmc.neutrodyne.core.data.fetch.FeedRequest
+import ch.lkmc.neutrodyne.core.data.fetch.FeedTempFiles
 import ch.lkmc.neutrodyne.core.data.fetch.FetchOutcome
 import ch.lkmc.neutrodyne.core.data.fetch.MAX_REDIRECT_FOLLOWUPS
 import ch.lkmc.neutrodyne.core.data.fetch.Sniff
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
+import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
+import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.junit4.MockWebServerRule
 import okhttp3.Headers.Companion.headersOf
 import okio.Buffer
 import okio.ByteString.Companion.encodeUtf8
 import okio.FileSystem
+import okio.ForwardingFileSystem
+import okio.Path
+import okio.Sink
 import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 import java.util.Base64
 import java.util.zip.GZIPOutputStream
 
@@ -236,6 +244,25 @@ class FeedFetcherTest {
         }
 
     @Test
+    fun `an unsolicited 304 without sent validators is an Http outcome`() =
+        runBlocking {
+            server.enqueue(mockResponse(code = 304, body = ""))
+            val outcome =
+                fetcher().use { bundle ->
+                    bundle.fetcher.fetch(
+                        FeedRequest(
+                            url = server.url("/feed.xml").toString(),
+                            etag = null,
+                            lastModified = null,
+                            conditional = true,
+                        ),
+                    )
+                }
+            // No validators went out — a bare 304 cannot mean NotModified (03 Response handling).
+            assertThat((outcome as FetchOutcome.Http).code).isEqualTo(304)
+        }
+
+    @Test
     fun `401 basic challenge sets basicChallenge and realm`() =
         runBlocking {
             server.enqueue(
@@ -266,6 +293,45 @@ class FeedFetcherTest {
                 }
             outcome as FetchOutcome.Http
             assertThat(outcome.basicChallenge).isFalse()
+        }
+
+    @Test
+    fun `a basic challenge is found among several challenges`() =
+        runBlocking {
+            server.enqueue(
+                mockResponse(
+                    401,
+                    "",
+                    "WWW-Authenticate" to "Digest realm=\"sync\", nonce=\"n\", qop=\"auth\"",
+                    "WWW-Authenticate" to "Basic realm=\"members\"",
+                ),
+            )
+            val outcome =
+                fetcher().use { bundle ->
+                    bundle.fetcher.fetch(request(server.url("/feed.xml").toString()))
+                }
+            outcome as FetchOutcome.Http
+            assertThat(outcome.basicChallenge).isTrue()
+            assertThat(outcome.realm).isEqualTo("members")
+        }
+
+    @Test
+    fun `a packed challenge list finds basic after digest`() =
+        runBlocking {
+            server.enqueue(
+                mockResponse(
+                    401,
+                    "",
+                    "WWW-Authenticate" to "Digest realm=\"d\", Basic realm=\"packed\"",
+                ),
+            )
+            val outcome =
+                fetcher().use { bundle ->
+                    bundle.fetcher.fetch(request(server.url("/feed.xml").toString()))
+                }
+            outcome as FetchOutcome.Http
+            assertThat(outcome.basicChallenge).isTrue()
+            assertThat(outcome.realm).isEqualTo("packed")
         }
 
     @Test
@@ -372,6 +438,41 @@ class FeedFetcherTest {
         }
 
     @Test
+    fun `query-only and network-path Locations resolve against the hop`() =
+        runBlocking {
+            server.enqueue(mockResponse(302, "", "Location" to "?page=2"))
+            server.enqueue(
+                mockResponse(
+                    302,
+                    "",
+                    "Location" to "//${server.hostName}:${server.port}/other",
+                ),
+            )
+            server.enqueue(mockResponse(body = rssBody()))
+            val outcome =
+                fetcher().use { bundle ->
+                    bundle.fetcher.fetch(request(server.url("/feed.xml").toString()))
+                }
+            outcome as FetchOutcome.Body
+            // `?page=2` replaced the query in place, `//host/other` kept the scheme (RFC 3986).
+            assertThat(outcome.finalUrl).isEqualTo(server.url("/other").toString())
+            FileSystem.SYSTEM.delete(outcome.file)
+        }
+
+    @Test
+    fun `a fragment-only Location is the final response`() =
+        runBlocking {
+            server.enqueue(mockResponse(302, "", "Location" to "/feed.xml#section"))
+            val outcome =
+                fetcher().use { bundle ->
+                    bundle.fetcher.fetch(request(server.url("/feed.xml").toString()))
+                }
+            // Resolves back to the request URL with the fragment dropped — unusable (03).
+            outcome as FetchOutcome.Http
+            assertThat(outcome.code).isEqualTo(302)
+        }
+
+    @Test
     fun `a repeated URL is a redirect loop`() =
         runBlocking {
             server.enqueue(mockResponse(302, "", "Location" to "/b"))
@@ -462,6 +563,66 @@ class FeedFetcherTest {
                 assertThat(outcome).isEqualTo(FetchOutcome.TooLarge)
                 val feedsDir = File(root, "cache/feeds")
                 assertThat(feedsDir.list()?.toList() ?: emptyList<String>()).isEmpty()
+            }
+        }
+
+    @Test
+    fun `utf-16 and utf-32 bodies sniff as rss`() =
+        runBlocking {
+            val doc =
+                "<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>E</title></channel></rss>"
+            server.enqueue(rawBody(utf16Le(doc)))
+            server.enqueue(rawBody(utf16Be(doc)))
+            server.enqueue(rawBody(utf32Le(doc)))
+            server.enqueue(rawBody(utf32Be(doc)))
+            fetcher().use { bundle ->
+                for (path in listOf("/le16", "/be16", "/le32", "/be32")) {
+                    val outcome = bundle.fetcher.fetch(request(server.url(path).toString()))
+                    assertThat((outcome as FetchOutcome.Body).sniff).named(path).isEqualTo(Sniff.RSS)
+                    FileSystem.SYSTEM.delete(outcome.file)
+                }
+            }
+        }
+
+    @Test
+    fun `a long comment prolog still sniffs inside the window`() =
+        runBlocking {
+            // The first element sits ~40 KB in — past any small probe, inside 64 KiB (03).
+            val doc = "<!-- " + "x".repeat(40_000) + " -->\n" + rssBody()
+            server.enqueue(mockResponse(body = doc))
+            val outcome =
+                fetcher().use { bundle ->
+                    bundle.fetcher.fetch(request(server.url("/feed.xml").toString()))
+                }
+            outcome as FetchOutcome.Body
+            assertThat(outcome.sniff).isEqualTo(Sniff.RSS)
+            FileSystem.SYSTEM.delete(outcome.file)
+        }
+
+    @Test
+    fun `a body-write failure is a Storage outcome and no temp file remains`() =
+        runBlocking {
+            server.enqueue(mockResponse(body = rssBody()))
+            val broken =
+                object : ForwardingFileSystem(FileSystem.SYSTEM) {
+                    override fun sink(
+                        file: Path,
+                        mustCreate: Boolean,
+                    ): Sink = throw IOException("simulated disk full")
+                }
+            setUpRoot()
+            val clients = OkHttpNeutrodyneHttpClients(newNetworkClients(), testUserAgent())
+            try {
+                val tempFiles = FeedTempFiles(storagePathsFor(root), FileSystem.SYSTEM)
+                val fetcher =
+                    FeedFetcher(clients, tempFiles, broken, testClassifier, CredentialLookup.None, clock)
+                val outcome = fetcher.fetch(request(server.url("/feed.xml").toString()))
+                // Sink/disk faults classify as STORAGE, not transport failures (03 Response).
+                assertThat(outcome).isInstanceOf(FetchOutcome.Storage::class.java)
+                val feedsDir = File(root, "cache/feeds")
+                assertThat(feedsDir.list()?.toList() ?: emptyList<String>()).isEmpty()
+            } finally {
+                clients.close()
             }
         }
 
@@ -567,6 +728,32 @@ class FeedFetcherTest {
                 second.close()
             }
         }
+
+    private fun rawBody(bytes: ByteArray): MockResponse =
+        MockResponse.Builder().code(200).body(Buffer().write(bytes)).build()
+
+    private fun utf16Le(s: String): ByteArray =
+        byteArrayOf(0xFF.toByte(), 0xFE.toByte()) + s.toByteArray(Charsets.UTF_16LE)
+
+    private fun utf16Be(s: String): ByteArray =
+        byteArrayOf(0xFE.toByte(), 0xFF.toByte()) + s.toByteArray(Charsets.UTF_16BE)
+
+    private fun utf32Le(s: String): ByteArray {
+        // BOM FF FE 00 00, then one little-endian 32-bit unit per (ASCII) char.
+        val out = ByteArray(4 + s.length * 4)
+        out[0] = 0xFF.toByte()
+        out[1] = 0xFE.toByte()
+        for ((i, c) in s.withIndex()) out[4 + i * 4] = c.code.toByte()
+        return out
+    }
+
+    private fun utf32Be(s: String): ByteArray {
+        val out = ByteArray(4 + s.length * 4)
+        out[2] = 0xFE.toByte()
+        out[3] = 0xFF.toByte()
+        for ((i, c) in s.withIndex()) out[4 + i * 4 + 3] = c.code.toByte()
+        return out
+    }
 
     private companion object {
         const val FEED_ACCEPT_VALUE =

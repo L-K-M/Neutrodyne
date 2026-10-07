@@ -12,6 +12,8 @@ import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import dev.zacsweers.metro.Assisted
 import dev.zacsweers.metro.AssistedFactory
 import dev.zacsweers.metro.AssistedInject
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 /**
  * The one worker behind every `refresh-*` unique work (03 Work requests): decodes the scope from
@@ -58,11 +60,13 @@ class RefreshWorker
                     }
 
                     request.origin != RefreshOrigin.CONTINUATION -> {
-                        scheduler.enqueueContinuation()
-                        Result.success()
+                        // The continuation enqueue is awaited before success is reported: an
+                        // unconfirmed enqueue would strand the leftovers (03 Worker).
+                        if (scheduler.enqueueContinuation()) Result.success() else Result.retry()
                     }
 
-                    runAttemptCount < MAX_CONTINUATION_ATTEMPTS -> {
+                    // Attempts are zero-based: nine retries reach the tenth and last execution.
+                    runAttemptCount < MAX_CONTINUATION_ATTEMPTS - 1 -> {
                         Result.retry()
                     }
 
@@ -71,8 +75,11 @@ class RefreshWorker
                     }
                 }
             } finally {
-                // 03 Diagnostics: Android reports the WorkManager stop reason (−1 when none).
-                suspendRunCatching { settings.set(FeedsSettingKeys.LAST_RUN_STOP_REASON, stopReason) }
+                // 03 Diagnostics: Android reports the WorkManager stop reason (−1 when none);
+                // the write survives the worker's own stop.
+                withContext(NonCancellable) {
+                    suspendRunCatching { settings.set(FeedsSettingKeys.LAST_RUN_STOP_REASON, stopReason) }
+                }
             }
         }
 

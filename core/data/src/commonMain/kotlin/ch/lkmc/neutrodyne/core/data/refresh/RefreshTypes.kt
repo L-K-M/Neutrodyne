@@ -94,8 +94,12 @@ internal interface RefreshScheduler {
     /** Android: tick + constraints + rebase; desktop: `NextRefreshRebaser.rebase()` only. */
     suspend fun reschedulePeriodic()
 
-    /** Android: `refresh-continuation` with `KEEP`; a no-op on the desktop (no soft deadline). */
-    fun enqueueContinuation()
+    /**
+     * Android: `refresh-continuation` with `KEEP`; a no-op on the desktop (no soft deadline).
+     * Suspending so the worker can await the enqueued `Operation` before it reports success
+     * (03 Worker): returns false when the enqueue could not be confirmed.
+     */
+    suspend fun enqueueContinuation(): Boolean
 
     /** MS2's first fetch of sync-added podcasts: Android `import-sync`, desktop lane poke. */
     fun requestFirstFetch()

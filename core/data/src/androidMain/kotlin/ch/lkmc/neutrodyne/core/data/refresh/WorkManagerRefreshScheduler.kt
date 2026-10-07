@@ -11,11 +11,14 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequest
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.Operation
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import androidx.work.await
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
+import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
@@ -57,19 +60,33 @@ internal class WorkManagerRefreshScheduler
             origin: RefreshOrigin,
         ) {
             if (scope is RefreshScope.Podcasts && scope.ids.size > RefreshWorkData.MAX_SCOPE_IDS) {
-                // `Data` caps at 10 KB: persist the due marks, then send a plain All run (03 Work
-                // requests). The enqueue rides along in the same coroutine to keep the order.
+                // `Data` caps at 10 KB: persist the due marks, then send a plain All run
+                // (03 Work requests). The enqueue rides this coroutine to keep the order.
                 appScope.launch {
                     db.podcastDao().forceDue(scopeAll = false, ids = scope.ids)
                     enqueueUnique(
                         WORK_NOW,
                         ExistingWorkPolicy.APPEND_OR_REPLACE,
-                        nowRequest(RefreshScope.All, false, pagesOnly, origin),
+                        requestFor(RefreshScope.All, force = false, pagesOnly, origin),
                     )
                 }
                 return
             }
-            enqueueUnique(WORK_NOW, ExistingWorkPolicy.APPEND_OR_REPLACE, nowRequest(scope, force, pagesOnly, origin))
+            if (origin == RefreshOrigin.MANUAL) {
+                enqueueUnique(
+                    WORK_NOW,
+                    ExistingWorkPolicy.APPEND_OR_REPLACE,
+                    nowRequest(scope, force, pagesOnly, origin),
+                )
+            } else {
+                appScope.launch {
+                    enqueueUnique(
+                        WORK_NOW,
+                        ExistingWorkPolicy.APPEND_OR_REPLACE,
+                        requestFor(scope, force, pagesOnly, origin),
+                    )
+                }
+            }
         }
 
         override suspend fun reschedulePeriodic() {
@@ -80,13 +97,18 @@ internal class WorkManagerRefreshScheduler
 
             val lastTick = settings.get(FeedsSettingKeys.SCHEDULED_TICK_MINUTES)
             val lastUnmetered = settings.get(FeedsSettingKeys.SCHEDULED_TICK_UNMETERED)
+            // The persisted markers and WorkManager's actual unique work are reconciled here:
+            // a marker without live work (a failed enqueue, a wiped store) re-enqueues, and the
+            // markers are only written after the Operation reports success.
+            val live = periodicWorkLive()
             if (tick == NO_TICK) {
-                if (lastTick != NO_TICK) {
-                    workManager.cancelUniqueWork(WORK_PERIODIC)
-                    settings.set(FeedsSettingKeys.SCHEDULED_TICK_MINUTES, NO_TICK)
-                    settings.set(FeedsSettingKeys.SCHEDULED_TICK_UNMETERED, unmetered)
+                if (lastTick != NO_TICK || live) {
+                    if (workManager.cancelUniqueWork(WORK_PERIODIC).awaitSuccess()) {
+                        settings.set(FeedsSettingKeys.SCHEDULED_TICK_MINUTES, NO_TICK)
+                        settings.set(FeedsSettingKeys.SCHEDULED_TICK_UNMETERED, unmetered)
+                    }
                 }
-            } else if (tick != lastTick || unmetered != lastUnmetered) {
+            } else if (tick != lastTick || unmetered != lastUnmetered || !live) {
                 val constraints =
                     Constraints
                         .Builder()
@@ -109,41 +131,47 @@ internal class WorkManagerRefreshScheduler
                             ),
                         ).addTag(TAG_REFRESH)
                         .build()
-                workManager.enqueueUniquePeriodicWork(WORK_PERIODIC, ExistingPeriodicWorkPolicy.UPDATE, request)
-                settings.set(FeedsSettingKeys.SCHEDULED_TICK_MINUTES, tick)
-                settings.set(FeedsSettingKeys.SCHEDULED_TICK_UNMETERED, unmetered)
+                if (
+                    workManager
+                        .enqueueUniquePeriodicWork(WORK_PERIODIC, ExistingPeriodicWorkPolicy.UPDATE, request)
+                        .awaitSuccess()
+                ) {
+                    settings.set(FeedsSettingKeys.SCHEDULED_TICK_MINUTES, tick)
+                    settings.set(FeedsSettingKeys.SCHEDULED_TICK_UNMETERED, unmetered)
+                }
             }
 
             // Interval changes take effect without waiting for the old schedule (03 Periodic tick).
             rebaser.rebase()
         }
 
-        override fun enqueueContinuation() {
-            // Non-suspend for the worker's call path; the constraint read rides the app scope.
-            appScope.launch {
-                val unmetered = settings.get(FeedsSettingKeys.REFRESH_WIFI_ONLY)
-                val constraints =
-                    Constraints
-                        .Builder()
-                        .setRequiredNetworkType(if (unmetered) NetworkType.UNMETERED else NetworkType.CONNECTED)
-                        .setRequiresBatteryNotLow(true)
-                        .build()
-                val request =
-                    OneTimeWorkRequestBuilder<RefreshWorker>()
-                        .setConstraints(constraints)
-                        .setInitialDelay(CONTINUATION_INITIAL_DELAY_MS, TimeUnit.MILLISECONDS)
-                        .setBackoffCriteria(BackoffPolicy.LINEAR, CONTINUATION_BACKOFF_MS, TimeUnit.MILLISECONDS)
-                        .setInputData(
-                            RefreshWorkData.of(
-                                RefreshScope.All,
-                                force = false,
-                                pagesOnly = false,
-                                RefreshOrigin.CONTINUATION,
-                            ),
-                        ).addTag(TAG_REFRESH)
-                        .build()
-                enqueueUnique(WORK_CONTINUATION, ExistingWorkPolicy.KEEP, request)
-            }
+        override suspend fun enqueueContinuation(): Boolean {
+            val unmetered = settings.get(FeedsSettingKeys.REFRESH_WIFI_ONLY)
+            val constraints =
+                Constraints
+                    .Builder()
+                    .setRequiredNetworkType(if (unmetered) NetworkType.UNMETERED else NetworkType.CONNECTED)
+                    .setRequiresBatteryNotLow(true)
+                    .build()
+            val request =
+                OneTimeWorkRequestBuilder<RefreshWorker>()
+                    .setConstraints(constraints)
+                    .setInitialDelay(CONTINUATION_INITIAL_DELAY_MS, TimeUnit.MILLISECONDS)
+                    .setBackoffCriteria(BackoffPolicy.LINEAR, CONTINUATION_BACKOFF_MS, TimeUnit.MILLISECONDS)
+                    .setInputData(
+                        RefreshWorkData.of(
+                            RefreshScope.All,
+                            force = false,
+                            pagesOnly = false,
+                            RefreshOrigin.CONTINUATION,
+                        ),
+                    ).addTag(TAG_REFRESH)
+                    .build()
+            // The worker awaits the Operation before reporting success: an unconfirmed enqueue
+            // would strand the run's leftovers with nothing scheduled (03 Worker).
+            return workManager
+                .enqueueUniqueWork(WORK_CONTINUATION, ExistingWorkPolicy.KEEP, request)
+                .awaitSuccess()
         }
 
         override fun requestFirstFetch() {
@@ -162,6 +190,23 @@ internal class WorkManagerRefreshScheduler
             workManager.enqueueUniqueWork(name, policy, request)
         }
 
+        /**
+         * The `refresh-now` shape by origin (03 Work requests): `MANUAL` keeps the expedited,
+         * connected-only user-driven request; automatic triggers ride the periodic constraint
+         * set — the `feeds.refresh_wifi_only` network type plus battery-not-low, never expedited.
+         */
+        private suspend fun requestFor(
+            scope: RefreshScope,
+            force: Boolean,
+            pagesOnly: Boolean,
+            origin: RefreshOrigin,
+        ): OneTimeWorkRequest =
+            if (origin == RefreshOrigin.MANUAL) {
+                nowRequest(scope, force, pagesOnly, origin)
+            } else {
+                automaticRequest(scope, force, pagesOnly, origin)
+            }
+
         /** A `refresh-now`-shape one-time: network-only constraints, expedited on API ≥ 31. */
         private fun nowRequest(
             scope: RefreshScope,
@@ -179,6 +224,39 @@ internal class WorkManagerRefreshScheduler
             }
             return builder.build()
         }
+
+        /** Automatic `refresh-now`: the wifi-only-aware + battery-not-low set, non-expedited. */
+        private suspend fun automaticRequest(
+            scope: RefreshScope,
+            force: Boolean,
+            pagesOnly: Boolean,
+            origin: RefreshOrigin,
+        ): OneTimeWorkRequest {
+            val unmetered = settings.get(FeedsSettingKeys.REFRESH_WIFI_ONLY)
+            return OneTimeWorkRequestBuilder<RefreshWorker>()
+                .setConstraints(
+                    Constraints
+                        .Builder()
+                        .setRequiredNetworkType(if (unmetered) NetworkType.UNMETERED else NetworkType.CONNECTED)
+                        .setRequiresBatteryNotLow(true)
+                        .build(),
+                ).setInputData(RefreshWorkData.of(scope, force, pagesOnly, origin))
+                .addTag(TAG_REFRESH)
+                .build()
+        }
+
+        /** Any unfinished `refresh-periodic` — ENQUEUED or RUNNING — exists in WorkManager. */
+        private suspend fun periodicWorkLive(): Boolean =
+            suspendRunCatching {
+                workManager
+                    .getWorkInfosForUniqueWork(WORK_PERIODIC)
+                    .get()
+                    .any { !it.state.isFinished }
+            }.getOrDefault(false)
+
+        /** The `Operation` awaited; only `SUCCESS` counts — a failed op must not set markers. */
+        private suspend fun Operation.awaitSuccess(): Boolean =
+            suspendRunCatching { await() is Operation.State.SUCCESS }.getOrDefault(false)
 
         internal companion object {
             const val WORK_PERIODIC = "refresh-periodic"

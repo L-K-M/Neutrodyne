@@ -283,6 +283,7 @@ internal fun fetchMeta(
 ): FetchMeta =
     FetchMeta(
         finalUrl = finalUrl,
+        requestedUrl = finalUrl,
         permanentUrl = permanentUrl,
         etag = etag,
         lastModified = lastModified,
@@ -394,8 +395,9 @@ internal class FakeRefreshScheduler : RefreshScheduler {
         rescheduleCount++
     }
 
-    override fun enqueueContinuation() {
+    override suspend fun enqueueContinuation(): Boolean {
         continuationCount++
+        return true
     }
 
     override fun requestFirstFetch() {

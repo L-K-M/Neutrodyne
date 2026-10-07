@@ -138,6 +138,41 @@ class RefreshForegroundObserverTest {
             assertThat(deps.scheduler.nowRequests).hasSize(2)
         }
 
+    @Test
+    fun `concurrent foregrounds claim the cooldown once`() =
+        runTest {
+            val deps = deps()
+            val observer = deps.observer()
+
+            // The claim lands before the gate reads settings (R12): two ON_STARTs inside the
+            // same cooldown window collapse to one enqueue even though the first coroutine
+            // has not run yet.
+            observer.onStart(owner)
+            observer.onStart(owner)
+            advanceUntilIdle()
+
+            assertThat(deps.scheduler.nowRequests).hasSize(1)
+        }
+
+    @Test
+    fun `a monotonic step back does not suppress the trigger`() =
+        runTest {
+            val deps = deps()
+            val observer = deps.observer()
+
+            observer.onStart(owner)
+            advanceUntilIdle()
+            assertThat(deps.scheduler.nowRequests).hasSize(1)
+
+            // elapsedRealtime moving backwards makes `now - last` negative — a `&lt;` check would
+            // suppress every trigger until the stale stamp ages out; `in 0 until` re-claims.
+            deps.clock.elapsedMs -= 60_000L
+            observer.onStart(owner)
+            advanceUntilIdle()
+
+            assertThat(deps.scheduler.nowRequests).hasSize(2)
+        }
+
     // --- plumbing ---------------------------------------------------------------------------------
 
     private class Deps(

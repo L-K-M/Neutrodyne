@@ -65,6 +65,11 @@ internal sealed interface FetchOutcome {
         val error: NetError,
     ) : FetchOutcome
 
+    /** Writing or creating the body temp file failed — a local disk fault, not transport (03). */
+    data class Storage(
+        val detail: String?,
+    ) : FetchOutcome
+
     /** The body exceeded `maxBytes`; the temp file was deleted. */
     data object TooLarge : FetchOutcome
 

@@ -39,17 +39,30 @@ internal class RefreshForegroundObserver
 
         override fun onStart(owner: LifecycleOwner) {
             val nowElapsed = clock.elapsedRealtime()
-            val last = lastTriggerElapsed.get()
-            if (last != NEVER_TRIGGERED && nowElapsed - last < TRIGGER_COOLDOWN_MS) return
+            // The cooldown is claimed atomically: two concurrent ON_STARTs cannot both pass the
+            // window and then both enqueue (03 Triggers).
+            if (!claimTrigger(nowElapsed)) return
             appScope.launch {
                 if (!suspendRunCatching { gatesOpen(nowElapsed) }.getOrDefault(false)) return@launch
-                lastTriggerElapsed.set(nowElapsed)
                 scheduler.enqueueNow(
                     RefreshScope.All,
                     force = false,
                     pagesOnly = false,
                     origin = RefreshOrigin.FOREGROUND,
                 )
+            }
+        }
+
+        /** The 10-min cooldown, claimed at the boundary — concurrent starts cannot both win. */
+        private fun claimTrigger(nowElapsed: Long): Boolean {
+            while (true) {
+                val last = lastTriggerElapsed.get()
+                // `in 0 until` lets a (hypothetical) elapsedRealtime step-back re-claim rather
+                // than suppressing the trigger until the stale stamp ages out.
+                if (last != NEVER_TRIGGERED && nowElapsed - last in 0 until TRIGGER_COOLDOWN_MS) {
+                    return false
+                }
+                if (lastTriggerElapsed.compareAndSet(last, nowElapsed)) return true
             }
         }
 

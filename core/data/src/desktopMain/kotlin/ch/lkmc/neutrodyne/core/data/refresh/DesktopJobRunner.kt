@@ -30,7 +30,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
@@ -100,13 +99,22 @@ class DesktopJobRunner
         val lastWakeAt: StateFlow<Instant?> = _lastWakeAt.asStateFlow()
 
         private var runnerJob: Job? = null
+
+        /**
+         * The scope lane jobs launch under — a child of [runnerJob], so `stop` cancels every lane
+         * with the runner itself rather than only waiting for them (11 Quitting).
+         */
+        private var laneScope: CoroutineScope = scope
+
+        /** Set by [stop]: no new lane launches and no rerun handoffs while shutting down. */
+        @Volatile private var stopping = false
         private var lastWallAt = Long.MIN_VALUE
         private var lastMonotonicAt = Long.MIN_VALUE
 
         /** Band-200 entry point (11 Tick algorithm): 5 s of settle time, then the tick loop. */
         fun start() {
             check(runnerJob == null) { "DesktopJobRunner.start() called twice" }
-            runnerJob =
+            val job =
                 scope.launch {
                     launch {
                         power.events.collect { event ->
@@ -119,6 +127,8 @@ class DesktopJobRunner
                         withTimeoutOrNull(TICK_INTERVAL_MS) { tickSignal.receive() }
                     }
                 }
+            runnerJob = job
+            laneScope = CoroutineScope(job)
         }
 
         /**
@@ -133,8 +143,11 @@ class DesktopJobRunner
 
         /** `ShutdownCoordinator` (11 Quitting): cancels every lane, waiting up to [grace]. */
         suspend fun stop(grace: Duration) {
-            runnerJob?.cancel()
-            withTimeoutOrNull(grace) { states.values.mapNotNull { it.job }.joinAll() }
+            stopping = true
+            val job = runnerJob ?: return
+            job.cancel()
+            // `join` waits for the runner's children too — the lane jobs under `laneScope`.
+            withTimeoutOrNull(grace) { job.join() }
         }
 
         private suspend fun tick() {
@@ -161,7 +174,7 @@ class DesktopJobRunner
         ) {
             state.running = true
             state.job =
-                scope.launch(laneDispatcher(lane.name)) {
+                laneScope.launch(laneDispatcher(lane.name)) {
                     try {
                         updateStatus(lane.name) {
                             it.copy(running = true, lastStartAt = Instant.fromEpochMilliseconds(clock.now()))
@@ -209,10 +222,13 @@ class DesktopJobRunner
                                 },
                             )
                     } finally {
-                        state.running = false
-                        if (state.rerun) {
+                        // `running` stays true through the rerun handoff: the tick must never
+                        // see the lane unowned between the finished job and its replacement.
+                        if (state.rerun && !stopping) {
                             state.rerun = false
                             launchLane(lane, state)
+                        } else {
+                            state.running = false
                         }
                     }
                 }

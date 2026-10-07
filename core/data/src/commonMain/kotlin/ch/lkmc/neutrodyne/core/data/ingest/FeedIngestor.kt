@@ -10,7 +10,9 @@ import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshPolicy
 import ch.lkmc.neutrodyne.core.database.DueFeed
 import ch.lkmc.neutrodyne.core.database.EpisodeDescriptionCodec
+import ch.lkmc.neutrodyne.core.database.ExistingEpisodeKey
 import ch.lkmc.neutrodyne.core.database.FundingEntity
+import ch.lkmc.neutrodyne.core.database.IngestDao
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PersonEntity
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
@@ -102,48 +104,89 @@ internal class FeedIngestor(
         }
         if (
             ctx.mode != IngestMode.OLDER_PAGE && parsed.items.isEmpty() &&
-            parsed.medium?.endsWith(LIST_MEDIUM_SUFFIX) == true
+            parsed.medium?.endsWith(LIST_MEDIUM_SUFFIX, ignoreCase = true) == true
         ) {
             return IngestResult.empty(prepared.warnings, FeedErrorKind.UNSUPPORTED_LIST_FEED)
         }
 
         val existing = ingestDao.existing(stored.id)
         val byKey = existing.associateBy { it.identityKey }
-        val docPrimaries = prepared.items.mapTo(HashSet()) { it.primaryKey }
+        val storedKeys = byKey.keys
         val taken = mutableSetOf<Long>()
         var rekeyed = 0
 
-        // Pass 1: exact key candidates, first candidate match wins (03 step 4).
-        for (item in prepared.items) {
-            for (candidate in item.candidates) {
-                val row = byKey[candidate] ?: continue
-                if (row.id in taken) continue
-                if (row.identityKey != item.docKey) {
-                    // An older key version matched: the row's identity is rewritten in place.
-                    ingestDao.rekey(row.id, item.docKey, item.episode.guid)
-                    rekeyed++
+        // Pass 1 (03 step 4): each item claims rows in claim-key order — its assigned document
+        // key first, then its (older-version) candidates. When a repeated GUID puts two items on
+        // one stored row, the item whose enclosure matches the row keeps it and the loser is
+        // retried on its next claim key — user state never moves between distinct episodes.
+        val claimedBy = HashMap<Long, PreparedItem>()
+        val pending = ArrayDeque(prepared.items)
+        while (pending.isNotEmpty()) {
+            val item = pending.removeFirst()
+            if (item.matchedTo != null) continue
+            for (key in item.claimKeys) {
+                val row = byKey[key] ?: continue
+                val holder = claimedBy[row.id]
+                if (holder == null) {
+                    if (claimRow(ingestDao, storedKeys, item, row)) rekeyed++
+                    claimedBy[row.id] = item
+                    taken += row.id
+                    break
                 }
-                item.matchedTo = row
-                taken += row.id
-                break
+                val itemWins =
+                    item.enclosureIdentity != null && item.enclosureIdentity == normEnc(row) &&
+                        !(holder.enclosureIdentity != null && holder.enclosureIdentity == normEnc(row))
+                if (itemWins) {
+                    holder.matchedTo = null
+                    pending.addLast(holder)
+                    if (claimRow(ingestDao, storedKeys, item, row)) rekeyed++
+                    claimedBy[row.id] = item
+                    taken += row.id
+                    break
+                }
             }
         }
 
-        // Pass 2: rewritten-GUID fallbacks on rows no document primary claims (03 step 5).
-        val fallbacks = Pass2Index(existing, docPrimaries, taken)
+        // Pass 2: rewritten-GUID fallbacks on rows no assigned document key claims (03 step 5).
+        val docKeys = prepared.items.mapTo(HashSet()) { it.docKey }
+        val fallbacks = Pass2Index(existing, docKeys, taken)
         for (item in prepared.items) {
-            if (item.matchedTo != null) continue
+            if (item.matchedTo != null || item.dropped) continue
             val row = fallbacks.match(item, taken) ?: continue
             item.matchedTo = row
             taken += row.id
-            ingestDao.rekey(row.id, item.docKey, item.episode.guid)
-            rekeyed++
+            if (row.identityKey != item.docKey) {
+                if (item.docKey !in storedKeys) {
+                    ingestDao.rekey(row.id, item.docKey, item.episode.guid)
+                    rekeyed++
+                } else {
+                    // The assigned key belongs to another stored row: keep the matched row's own
+                    // key rather than collide on the unique index.
+                    item.docKey = row.identityKey
+                }
+            }
+        }
+
+        // An unmatched item whose assigned key a stored row holds (lost to a better enclosure
+        // match above) re-derives a free fallback; with none it is dropped as a duplicate.
+        val liveDocKeys = prepared.items.mapTo(HashSet()) { it.docKey }
+        for (item in prepared.items) {
+            if (item.matchedTo != null || item.dropped || item.docKey !in storedKeys) continue
+            val fresh = item.fallbackKeys.firstOrNull { it !in storedKeys && it !in liveDocKeys }
+            if (fresh == null) {
+                item.dropped = true
+                prepared.warnings +=
+                    ParseWarning(WarningCode.DUPLICATE_ITEM, item.index, item.episode.guid.orEmpty().shorten())
+            } else {
+                item.docKey = fresh
+                liveDocKeys += fresh
+            }
         }
 
         var updated = 0
         var flippedOut = 0
         val matchedItems = prepared.items.filter { it.matchedTo != null }
-        val insertedItems = prepared.items.filter { it.matchedTo == null }
+        val insertedItems = prepared.items.filter { it.matchedTo == null && !it.dropped }
 
         if (prepared.items.isNotEmpty()) {
             // Step 6: changed matched rows rewrite feed columns and children; out-of-feed rows
@@ -180,7 +223,7 @@ internal class FeedIngestor(
             for (item in insertedItems) {
                 item.isNew =
                     ctx.mode == IngestMode.REFRESH && !stored.initialFetch &&
-                    (item.episode.pubDate ?: prepared.now) >= newFloor
+                    (item.pubDateValid ?: prepared.now) >= newFloor
             }
             val rowsByDescFeedOrder = insertedItems.sortedByDescending { it.episode.feedOrder }
             val ids =
@@ -376,6 +419,36 @@ internal class FeedIngestor(
     }
 
     /**
+     * One pass-1 claim (03 step 4): [item] takes [row] and the identities align — the row's own
+     * key when it equals [docKey], an upgrade of [docKey] to the primary the row already carries,
+     * an in-place rekey to [docKey] when the assigned key is free, or adoption of the row's own
+     * key when [docKey] would collide with a different stored row. Returns whether a rekey wrote.
+     */
+    private suspend fun claimRow(
+        ingestDao: IngestDao,
+        storedKeys: Set<String>,
+        item: PreparedItem,
+        row: ExistingEpisodeKey,
+    ): Boolean {
+        var rekeyed = false
+        when {
+            row.identityKey == item.docKey -> Unit
+            row.identityKey == item.primaryKey -> item.docKey = item.primaryKey
+            item.docKey !in storedKeys -> {
+                // An older key version matched: the row's identity is rewritten in place.
+                ingestDao.rekey(row.id, item.docKey, item.episode.guid)
+                rekeyed = true
+            }
+            else -> item.docKey = row.identityKey
+        }
+        item.matchedTo = row
+        return rekeyed
+    }
+
+    private fun normEnc(row: ExistingEpisodeKey): String? =
+        row.enclosureUrl?.let(UrlNormalizer::forIdentity)
+
+    /**
      * The diff's CPU half: accepted-item filter, in-document key choice and every resolved column.
      * Runs off the write transaction (03 Diff algorithm step 1).
      */
@@ -393,13 +466,19 @@ internal class FeedIngestor(
         val warnings = parsed.warnings.toMutableList()
         val usedKeys = mutableSetOf<String>()
         val items = mutableListOf<PreparedItem>()
+        val seenIdenticals = HashMap<String, MutableSet<Long>>()
 
         for ((index, e) in parsed.items.withIndex()) {
             if (e.primaryEnclosure == null && e.externalMediaId == null) {
                 warnings += ParseWarning(WarningCode.NO_MEDIA_ITEM, index, e.title.orEmpty().shorten())
                 continue
             }
-            val docKey = chooseKey(e, usedKeys, warnings, index) ?: continue
+            val primaryKey = EpisodeKeys.primary(e)
+            val contentHash = EpisodeContentHash.of(e)
+            // Identical repeats collapse before fallback keys are assigned (03 step 2); a
+            // different item that repeats the primary gets a fallback in `chooseKey` below.
+            if (!seenIdenticals.getOrPut(primaryKey) { mutableSetOf() }.add(contentHash)) continue
+            val docKey = chooseKey(e, primaryKey, usedKeys, warnings, index) ?: continue
             val imageUrl =
                 e.artwork.firstOrNull()?.url?.takeUnless {
                     UrlNormalizer.forIdentity(it) == artworkIdentity
@@ -407,19 +486,26 @@ internal class FeedIngestor(
             items +=
                 PreparedItem(
                     episode = e,
-                    primaryKey = EpisodeKeys.primary(e),
+                    index = index,
+                    primaryKey = primaryKey,
                     docKey = docKey,
-                    candidates = EpisodeKeys.candidates(e),
+                    claimKeys =
+                        (listOf(docKey) + EpisodeKeys.candidates(e)).distinct(),
+                    fallbackKeys = EpisodeKeys.fallbacks(e),
                     enclosureIdentity = e.primaryEnclosure?.url?.let(UrlNormalizer::forIdentity),
                     enclosureNoQuery = e.primaryEnclosure?.url?.let(UrlNormalizer::forIdentityNoQuery),
                     titleDayKey = titleDayKey(e),
-                    contentHash = EpisodeContentHash.of(e),
+                    contentHash = contentHash,
                     title = resolvedTitle(e),
                     imageUrl = imageUrl,
                     artworkKey = imageUrl?.let(ArtworkKeys::forUrl),
                     descriptionBytes = e.descriptionHtml?.let(EpisodeDescriptionCodec::encode),
                     snippet = e.descriptionHtml?.let { sanitizer.snippet(it, e.descriptionIsHtml) },
                     hint = e.externalMediaId?.let { ctx.rowHints[it] },
+                    pubDateValid =
+                        e.pubDate?.takeIf {
+                            it in PreparedItem.PUB_DATE_MIN_MS..(now + PreparedItem.PUB_DATE_MAX_OFFSET_MS)
+                        },
                 )
         }
         return PreparedFeed(items = items, warnings = warnings, now = now, firstSeenAt = firstSeenAt)
@@ -428,11 +514,11 @@ internal class FeedIngestor(
     /** In-document key choice (03 step 2–3): primary wins, else the first free fallback. */
     private fun chooseKey(
         e: ParsedEpisode,
+        primary: String,
         usedKeys: MutableSet<String>,
         warnings: MutableList<ParseWarning>,
         index: Int,
     ): String? {
-        val primary = EpisodeKeys.primary(e)
         if (usedKeys.add(primary)) return primary
         val fallback = EpisodeKeys.fallbacks(e).firstOrNull { it !in usedKeys }
         if (fallback != null) {

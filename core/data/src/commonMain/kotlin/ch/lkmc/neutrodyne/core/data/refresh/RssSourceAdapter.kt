@@ -51,6 +51,13 @@ internal class RssSourceAdapter(
 ) : SourceAdapter {
     override val sourceType: SourceType = SourceType.RSS
 
+    /**
+     * The shared bounded view of 03's threading table ("Parse from temp file"): capped at
+     * [PARSE_PARALLELISM] concurrent parses for the adapter's lifetime — a per-call
+     * `limitedParallelism` view would cap each call separately.
+     */
+    private val parseDispatcher = io.limitedParallelism(PARSE_PARALLELISM)
+
     /** The per-host semaphore key of the fan-out limit (lowercase request host). */
     override fun hostKey(feed: DueFeed): String =
         feed.feedUrl
@@ -88,6 +95,7 @@ internal class RssSourceAdapter(
                     meta =
                         FetchMeta(
                             finalUrl = feed.feedUrl,
+                            requestedUrl = feed.feedUrl,
                             permanentUrl = null,
                             etag = outcome.etag ?: feed.etag,
                             lastModified = outcome.lastModified ?: feed.lastModified,
@@ -109,6 +117,16 @@ internal class RssSourceAdapter(
                     retryAfterMs = outcome.retryAfterMs,
                     // `transient` only gates `gone`: the RSS adapter asks for it on a real 410.
                     transient = outcome.code != HTTP_GONE,
+                )
+            }
+
+            is FetchOutcome.Storage -> {
+                AdapterResult.Failed(
+                    FeedErrorKind.STORAGE,
+                    http = null,
+                    retryAfterMs = null,
+                    transient = true,
+                    detail = outcome.detail,
                 )
             }
 
@@ -152,6 +170,7 @@ internal class RssSourceAdapter(
         val meta =
             FetchMeta(
                 finalUrl = body.finalUrl,
+                requestedUrl = body.requestedUrl,
                 permanentUrl = body.permanentUrl,
                 etag = body.etag,
                 lastModified = body.lastModified,
@@ -160,8 +179,12 @@ internal class RssSourceAdapter(
                 maxAgeSec = body.maxAgeSec,
                 unconditional = unconditional,
             )
-        // Byte-identical body: the stored parse still holds; skip parse and ingest.
-        if (body.sha256Hex == feed.contentSha256) {
+        // Byte-identical body: the stored parse still holds — but only when the stored parse is
+        // current; a parser-version bump or a failed parse re-parses the same bytes (03).
+        if (body.sha256Hex == feed.contentSha256 &&
+            feed.parserVersion == FeedParser.VERSION &&
+            feed.lastParseOk
+        ) {
             tempFiles.delete(body.file)
             return AdapterResult.Unchanged(meta)
         }
@@ -195,7 +218,7 @@ internal class RssSourceAdapter(
     ): AdapterResult =
         try {
             val result =
-                withContext(io.limitedParallelism(PARSE_PARALLELISM)) {
+                withContext(parseDispatcher) {
                     parser.parse(
                         open = { fileSystem.source(body.file).buffer() },
                         httpCharset = body.charset,
@@ -206,8 +229,11 @@ internal class RssSourceAdapter(
                 is ParseResult.Ok -> {
                     AdapterResult.Parsed(
                         feed = result.feed,
-                        // A page-1 link means the stored window is incomplete until paging ends.
-                        partial = result.feed.paging.next != null || result.feed.paging.prevArchive != null,
+                        // A page-1 link means the stored window is incomplete until paging ends;
+                        // `fh:complete` overrides it — the document is the whole feed (03).
+                        partial =
+                            (result.feed.paging.next != null || result.feed.paging.prevArchive != null) &&
+                                !result.feed.complete,
                         meta = meta,
                     )
                 }

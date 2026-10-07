@@ -60,6 +60,12 @@ internal class AddPodcastResolverImpl(
     private val db: NeutrodyneDatabase,
     @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
 ) : AddPodcastResolver {
+    /**
+     * The shared bounded parse lane (03's threading table): capped at [PARSE_PARALLELISM]
+     * concurrent parses — a per-call `limitedParallelism` view would cap each call separately.
+     */
+    private val parseDispatcher = io.limitedParallelism(PARSE_PARALLELISM)
+
     override suspend fun resolve(input: String): AddResolution = resolveInner(input, null)
 
     override suspend fun resolve(
@@ -111,7 +117,7 @@ internal class AddPodcastResolverImpl(
         if (HostChecks.isSpotifyShow(url.url)) return AddResolution.Failure(AddPodcastError.SpotifyShow)
 
         val creds = credentials ?: url.credentials?.let { BasicCredentials(it.username, it.password) }
-        return when (val r = fetchAndParse(url.url, input, creds, url.schemeGuessed)) {
+        return when (val r = fetchAndParse(url.url, url.url, creds, url.schemeGuessed)) {
             is PreviewOutcome.Done -> AddResolution.Feed(buildPreview(r.entry))
             is PreviewOutcome.Failed -> AddResolution.Failure(r.error)
         }
@@ -160,6 +166,10 @@ internal class AddPodcastResolverImpl(
                 }
             }
 
+            is FetchOutcome.Storage -> {
+                PreviewOutcome.Failed(AddPodcastError.Network(NetError.Other("storage")))
+            }
+
             FetchOutcome.TooLarge -> {
                 PreviewOutcome.Failed(AddPodcastError.TooLarge)
             }
@@ -200,7 +210,7 @@ internal class AddPodcastResolverImpl(
         }
         val result =
             try {
-                withContext(io.limitedParallelism(PARSE_PARALLELISM)) {
+                withContext(parseDispatcher) {
                     parser.parse(
                         open = { fileSystem.source(body.file).buffer() },
                         httpCharset = body.charset,
@@ -227,13 +237,18 @@ internal class AddPodcastResolverImpl(
                 }
             }
 
-        // Items but nothing playable (03 Accepted items → NoMedia); an empty feed previews fine.
+        // Items but nothing playable (03 Accepted items → NoMedia); an empty feed previews fine —
+        // except an empty `podcast:medium*L` list feed, which is rejected up front.
         if (feed.items.isNotEmpty() && feed.items.none { it.isAccepted() }) {
             return PreviewOutcome.Failed(AddPodcastError.NoMedia)
+        }
+        if (feed.items.isEmpty() && feed.medium?.endsWith("L", ignoreCase = true) == true) {
+            return PreviewOutcome.Failed(AddPodcastError.UnsupportedListFeed)
         }
         val meta =
             FetchMeta(
                 finalUrl = body.finalUrl,
+                requestedUrl = body.requestedUrl,
                 permanentUrl = body.permanentUrl,
                 etag = body.etag,
                 lastModified = body.lastModified,
@@ -242,7 +257,7 @@ internal class AddPodcastResolverImpl(
                 maxAgeSec = body.maxAgeSec,
                 unconditional = true,
             )
-        val id = cache.put(meta.permanentUrl ?: meta.finalUrl, inputUrl, feed, meta, body.hops, credentials)
+        val id = cache.put(meta.permanentUrl ?: meta.requestedUrl, inputUrl, feed, meta, body.hops, credentials)
         return PreviewOutcome.Done(cache.get(id) ?: error("fresh preview entry vanished"))
     }
 
@@ -263,7 +278,7 @@ internal class AddPodcastResolverImpl(
         val feed = entry.feed
         return FeedPreview(
             previewId = entry.previewId,
-            feedUrl = entry.meta.permanentUrl ?: entry.meta.finalUrl,
+            feedUrl = entry.meta.permanentUrl ?: entry.meta.requestedUrl,
             title = feed.title?.takeUnless { it.isBlank() } ?: entry.meta.finalUrl,
             author = feed.author,
             description =
@@ -298,10 +313,14 @@ internal class AddPodcastResolverImpl(
     /** Exact feedKey/alias match first, then the soft real-`podcastGuid` match (03 dedupe). */
     private suspend fun dedupe(entry: PreviewEntry): AlreadySubscribed? {
         val dao = db.podcastDao()
+        // Every URL the fetch produced is a candidate: the normalised input, the first request,
+        // each redirect hop, the final URL and a permanent-move target (03 dedupe).
         val keys =
-            listOf(entry.inputUrl, entry.meta.finalUrl, entry.meta.permanentUrl)
-                .filterNotNull()
-                .mapNotNull(UrlNormalizer::forIdentity)
+            (
+                listOf(entry.inputUrl, entry.meta.requestedUrl, entry.meta.finalUrl, entry.meta.permanentUrl)
+                    .filterNotNull() + entry.hops.map { it.url }
+            ).mapNotNull(UrlNormalizer::forIdentity)
+                .distinct()
         for (key in keys) {
             dao.byFeedKey(key)?.let { return AlreadySubscribed(it.id, exact = true) }
             dao.aliasOwner(key)?.let { return AlreadySubscribed(it, exact = true) }

@@ -93,6 +93,7 @@ internal class FeedFetcher(
         // the first request's (a cross-scheme/host/port hop never carries them).
         val firstOrigin = UrlNormalizer.origin(req.url)
         val hopOrigin = UrlNormalizer.origin(url)
+        val validatorsSent = req.conditional && (req.etag != null || req.lastModified != null)
         client
             .prepareGet(url) {
                 header(HttpHeaders.Accept, FEED_ACCEPT)
@@ -111,7 +112,9 @@ internal class FeedFetcher(
             }.execute { response ->
                 status = response.status.value
                 when {
-                    status == 304 -> {
+                    // A 304 counts only when this request actually sent validators (03 Response
+                    // handling); an unsolicited 304 is a client-visible HTTP error below.
+                    status == 304 && validatorsSent -> {
                         response.discardBody()
                         outcome =
                             FetchOutcome.NotModified(
@@ -126,7 +129,7 @@ internal class FeedFetcher(
                             )
                     }
 
-                    status in 300..399 && response.headers[FeedHttpHeaders.LOCATION] != null -> {
+                    status in FOLLOWABLE_STATUSES && response.headers[FeedHttpHeaders.LOCATION] != null -> {
                         response.discardBody()
                         location = response.headers[FeedHttpHeaders.LOCATION]
                         outcome =
@@ -146,7 +149,7 @@ internal class FeedFetcher(
                         response.discardBody()
                         val (basic, realm) =
                             FeedHttpHeaders.basicChallenge(
-                                response.headers[FeedHttpHeaders.WWW_AUTHENTICATE],
+                                response.headers.getAll(FeedHttpHeaders.WWW_AUTHENTICATE),
                             )
                         outcome =
                             FetchOutcome.Http(
@@ -165,7 +168,12 @@ internal class FeedFetcher(
         return HopResult(outcome, location, status)
     }
 
-    /** Streams a 200 body to a temp file under the cap, hashing and sniffing on the way. */
+    /**
+     * Streams a 200 body to a temp file under the cap, hashing and sniffing on the way. The temp
+     * file is owned only by a returned [FetchOutcome.Body]; every failure and cancellation path
+     * closes the sink and deletes it, and sink/disk faults are [FetchOutcome.Storage], not
+     * transport failures (03 Response handling).
+     */
     private suspend fun readBody(
         req: FeedRequest,
         url: String,
@@ -173,8 +181,24 @@ internal class FeedFetcher(
         permanentUrl: String?,
         response: HttpResponse,
     ): FetchOutcome {
-        val path = tempFiles.create()
-        val hashing = HashingSink.sha256(fileSystem.sink(path))
+        val path =
+            try {
+                tempFiles.create()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                return FetchOutcome.Storage(storageDetail(e))
+            }
+        val hashing =
+            try {
+                HashingSink.sha256(fileSystem.sink(path))
+            } catch (e: CancellationException) {
+                tempFiles.delete(path)
+                throw e
+            } catch (e: Throwable) {
+                tempFiles.delete(path)
+                return FetchOutcome.Storage(storageDetail(e))
+            }
         val sink = hashing.buffer()
         val probe = Buffer()
         var probeBytes = 0L
@@ -186,13 +210,32 @@ internal class FeedFetcher(
 
         try {
             while (true) {
-                val read = channel.readAvailable(chunk, 0, chunk.size)
+                val read =
+                    try {
+                        channel.readAvailable(chunk, 0, chunk.size)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        throw StreamFailure(FetchOutcome.Network(classifier.classify(e)))
+                    }
                 if (read == -1) break
                 if (read == 0) {
-                    channel.awaitContent()
+                    try {
+                        channel.awaitContent()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        throw StreamFailure(FetchOutcome.Network(classifier.classify(e)))
+                    }
                     continue
                 }
-                sink.write(chunk, 0, read)
+                try {
+                    sink.write(chunk, 0, read)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    throw StreamFailure(FetchOutcome.Storage(storageDetail(e)))
+                }
                 total += read
                 if (probeBytes < sniffTarget) {
                     val take = minOf(read.toLong(), sniffTarget - probeBytes).toInt()
@@ -205,15 +248,19 @@ internal class FeedFetcher(
                 }
                 if (req.sniffOnlyBytes != null && total >= req.sniffOnlyBytes) break
             }
-            sink.close()
-        } catch (e: CancellationException) {
-            tempFiles.delete(path)
             try {
                 sink.close()
-            } catch (_: Exception) {
-                // Closing a cancelled sink can fail; the temp file is already gone.
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                throw StreamFailure(FetchOutcome.Storage(storageDetail(e)))
             }
+        } catch (e: CancellationException) {
+            closeAndDelete(sink, path)
             throw e
+        } catch (e: StreamFailure) {
+            closeAndDelete(sink, path)
+            return e.outcome
         }
 
         if (tooLarge) {
@@ -250,6 +297,26 @@ internal class FeedFetcher(
         }
     }
 
+    /** Best-effort sink close plus temp-file delete for the failure/cancellation exits. */
+    private fun closeAndDelete(
+        sink: okio.BufferedSink,
+        path: okio.Path,
+    ) {
+        try {
+            sink.close()
+        } catch (_: Exception) {
+            // Closing a half-failed or cancelled sink can throw; the file is deleted anyway.
+        }
+        tempFiles.delete(path)
+    }
+
+    private fun storageDetail(e: Throwable): String = e::class.simpleName ?: "storage"
+
+    /** Carries the outcome of an aborted body stream out of the read loop. */
+    private class StreamFailure(
+        val outcome: FetchOutcome,
+    ) : Exception()
+
     private class HopResult(
         val outcome: FetchOutcome,
         val location: String?,
@@ -258,5 +325,8 @@ internal class FeedFetcher(
 
     private companion object {
         const val CHUNK_BYTES = 64 * 1024
+
+        /** The only 3xx codes the manual chain follows (03 Request rules). */
+        val FOLLOWABLE_STATUSES = setOf(301, 302, 303, 307, 308)
     }
 }

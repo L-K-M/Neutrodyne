@@ -27,6 +27,7 @@ import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SubscribeError
 import ch.lkmc.neutrodyne.core.domain.SubscribeUseCase
 import ch.lkmc.neutrodyne.core.model.AliasReason
+import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.MemberSource
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
@@ -86,7 +87,9 @@ internal class SubscribeUseCaseImpl(
         }
 
         val now = clock.now()
-        val feedUrl = entry.meta.permanentUrl ?: entry.meta.finalUrl
+        // `permanentUrl ?: requestedUrl` is the subscribe identity (03 redirects/dedupe): a
+        // temporary redirect's target never becomes the subscription's feedUrl/feedKey.
+        val feedUrl = entry.meta.permanentUrl ?: entry.meta.requestedUrl
         val feedKey = UrlNormalizer.forIdentity(feedUrl) ?: return Outcome.Failure(SubscribeError.Storage)
         val inputKey = UrlNormalizer.forIdentity(entry.inputUrl)
         val hopKeys = entry.hops.mapNotNull { UrlNormalizer.forIdentity(it.url) }
@@ -100,11 +103,18 @@ internal class SubscribeUseCaseImpl(
                 db.withWriteTransaction<TxOutcome> {
                     val dao = db.podcastDao()
 
-                    // Step 3.1: dedupe again inside the transaction (03 Subscribe).
-                    var existing = dao.byFeedKey(feedKey)?.id ?: inputKey?.let { dao.aliasOwner(it) }
-                    var hopIndex = 0
-                    while (existing == null && hopIndex < hopKeys.size) {
-                        existing = dao.aliasOwner(hopKeys[hopIndex++])
+                    // Step 3.1: dedupe again inside the transaction (03 Subscribe) — every URL
+                    // the entry knows is checked against both primary feedKeys and aliases, so
+                    // a hop URL that is another feed's current URL also dedupes.
+                    val candidateKeys = buildList {
+                        add(feedKey)
+                        if (inputKey != null) add(inputKey)
+                        addAll(hopKeys)
+                    }
+                    var existing: Long? = null
+                    for (key in candidateKeys) {
+                        existing = dao.byFeedKey(key)?.id ?: dao.aliasOwner(key)
+                        if (existing != null) break
                     }
                     if (existing != null) return@withWriteTransaction TxOutcome.Duplicate(existing)
 
@@ -159,6 +169,10 @@ internal class SubscribeUseCaseImpl(
                                     fetch = entry.meta,
                                 ),
                         )
+                    // An error-valued ingest must not commit an ACTIVE podcast: step 1 and the
+                    // resolver already refuse blog/list feeds, so an `emptyKind` here means the
+                    // entry slipped past both — roll back and report it (03 Accepted items).
+                    ingest.emptyKind?.let { throw RejectedIngestException(it) }
 
                     // Step 3.5: requested group memberships (`OrderKey.after` per group).
                     for (groupId in groupIds) {
@@ -178,12 +192,25 @@ internal class SubscribeUseCaseImpl(
                     TxOutcome.Inserted(id, ingest)
                 }
             }.getOrElse { e ->
+                // The rejected-ingest guard carries its own kind; the transaction rolled back.
+                if (e is RejectedIngestException) {
+                    return Outcome.Failure(
+                        when (e.kind) {
+                            FeedErrorKind.NO_MEDIA -> SubscribeError.NoMedia
+                            else -> SubscribeError.Fetch(AddPodcastError.UnsupportedListFeed)
+                        },
+                    )
+                }
                 // A `feedKey`/alias unique violation races step 3.1's dedupe (03 Subscribe); any
                 // other database failure maps to `Storage`.
                 Log.w(TAG, e) { "Subscribe transaction failed" }
-                val owner =
-                    db.podcastDao().byFeedKey(feedKey)?.id
-                        ?: inputKey?.let { db.podcastDao().aliasOwner(it) }
+                var owner = db.podcastDao().byFeedKey(feedKey)?.id ?: inputKey?.let { db.podcastDao().aliasOwner(it) }
+                var idx = 0
+                while (owner == null && idx < hopKeys.size) {
+                    owner = db.podcastDao().byFeedKey(hopKeys[idx])?.id
+                        ?: db.podcastDao().aliasOwner(hopKeys[idx])
+                    idx++
+                }
                 if (owner != null) return Outcome.Failure(SubscribeError.AlreadySubscribed(owner))
                 return Outcome.Failure(SubscribeError.Storage)
             }
@@ -217,6 +244,11 @@ internal class SubscribeUseCaseImpl(
         cache.remove(previewId)
         return Outcome.Success(podcastId)
     }
+
+    /** Rolls the transaction back carrying the ingest's `emptyKind` (S14). */
+    private class RejectedIngestException(
+        val kind: FeedErrorKind,
+    ) : Exception("initial ingest rejected: $kind")
 
     private sealed interface TxOutcome {
         /** Step 3.1's in-transaction dedupe hit (a feedKey or alias race → `AlreadySubscribed`). */

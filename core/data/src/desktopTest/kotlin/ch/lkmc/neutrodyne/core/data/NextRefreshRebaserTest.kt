@@ -44,7 +44,7 @@ class NextRefreshRebaserTest {
                 )
             val close = seedPodcast(db, "https://d.example.com/f", lastSuccessAt = NOW, nextRefreshAt = NOW + 1)
 
-            rebaser(backgroundScope).rebase()
+            rebaser().rebase()
 
             val target = NOW - DAY + 240 * 60_000L
             // stored > target → pulled in; the row keeps its own anchor.
@@ -63,7 +63,7 @@ class NextRefreshRebaserTest {
             val a = seedPodcast(db, "https://a.example.com/f", nextRefreshAt = NOW + 1)
             val b = seedPodcast(db, "https://b.example.com/f", nextRefreshAt = null)
 
-            rebaser(backgroundScope).rebase()
+            rebaser().rebase()
 
             assertEquals(RefreshPolicy.NEVER, db.podcastDao().byId(a)!!.nextRefreshAt)
             assertEquals(RefreshPolicy.NEVER, db.podcastDao().byId(b)!!.nextRefreshAt)
@@ -87,7 +87,7 @@ class NextRefreshRebaserTest {
                     copy(failureCount = 3)
                 }
 
-            rebaser(backgroundScope).rebase()
+            rebaser().rebase()
 
             for (id in listOf(forced, gone, creds, failing)) {
                 val expected = if (id == forced) 0L else NOW + 1
@@ -108,13 +108,62 @@ class NextRefreshRebaserTest {
                     subscribedAt = SUBSCRIBED,
                 )
 
-            rebaser(backgroundScope).rebase()
+            rebaser().rebase()
 
             assertNull(db.podcastDao().byId(id)!!.lastSuccessAt)
             assertEquals(SUBSCRIBED + 60 * 60_000L, db.podcastDao().byId(id)!!.nextRefreshAt)
         }
 
-    private fun rebaser(scope: kotlinx.coroutines.CoroutineScope) = NextRefreshRebaser(db, settings, clock, scope)
+    @Test
+    fun aNewerAttemptBlocksTheStaleRebaseWrite() =
+        runTest {
+            settings.set(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES, 240)
+            val id =
+                seedPodcast(
+                    db,
+                    "https://a.example.com/f",
+                    lastSuccessAt = NOW - DAY,
+                    lastAttemptAt = NOW - DAY,
+                    nextRefreshAt = NOW + 60 * DAY,
+                )
+            val dao = db.podcastDao()
+            val snapshot = dao.rebaseCandidates().single { it.id == id }
+
+            // A refresh commit lands between the candidate read and the write (R2): the newer
+            // attempt carries its own schedule, which the conditional update must not overwrite.
+            dao.updateFetchStates(
+                listOf(
+                    fetchState(id, nextRefreshAt = NOW + 7 * DAY)
+                        .copy(lastAttemptAt = NOW, lastSuccessAt = NOW),
+                ),
+            )
+
+            val target = (snapshot.lastSuccessAt ?: snapshot.subscribedAt) + 240 * 60_000L
+            val written = dao.rebaseNextRefreshAt(id, target, snapshot.lastAttemptAt ?: -1)
+            assertEquals(0, written)
+            assertEquals(NOW + 7 * DAY, dao.byId(id)!!.nextRefreshAt)
+        }
+
+    @Test
+    fun anUnattemptedRowStillRebases() =
+        runTest {
+            settings.set(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES, 240)
+            // `lastAttemptAt` null → the `-1` sentinel matches `COALESCE(lastAttemptAt, -1) <= -1`.
+            val id =
+                seedPodcast(
+                    db,
+                    "https://a.example.com/f",
+                    lastAttemptAt = null,
+                    nextRefreshAt = NOW + 60 * DAY,
+                    subscribedAt = SUBSCRIBED,
+                )
+
+            rebaser().rebase()
+
+            assertEquals(SUBSCRIBED + 240 * 60_000L, db.podcastDao().byId(id)!!.nextRefreshAt)
+        }
+
+    private fun rebaser() = NextRefreshRebaser(db, settings)
 
     private companion object {
         const val NOW = TestClock.DEFAULT_NOW

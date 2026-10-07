@@ -109,6 +109,21 @@ class RefreshWorkerTest {
         }
 
     @Test
+    fun `a deadline-bound continuation retries up to the ninth retry`() =
+        runTest {
+            val db = openDb()
+            seedPodcast(db, "https://a.test/feed.xml")
+            seedPodcast(db, "https://b.test/feed.xml")
+            val deps = deps(db = db, clock = DeadlineClock())
+
+            // Zero-based attempts 0–8 are the nine retries before the tenth execution.
+            val result =
+                worker(deps, origin = RefreshOrigin.CONTINUATION, runAttemptCount = 8).doWork()
+
+            assertThat(result).isInstanceOf(ListenableWorker.Result.Retry::class.java)
+        }
+
+    @Test
     fun `a deadline-bound continuation succeeds at the attempt cap`() =
         runTest {
             val db = openDb()
@@ -116,11 +131,28 @@ class RefreshWorkerTest {
             seedPodcast(db, "https://b.test/feed.xml")
             val deps = deps(db = db, clock = DeadlineClock())
 
+            // Count 9 is the tenth execution — AC4's cap: leftovers are dropped, not retried.
             val result =
-                worker(deps, origin = RefreshOrigin.CONTINUATION, runAttemptCount = 10).doWork()
+                worker(deps, origin = RefreshOrigin.CONTINUATION, runAttemptCount = 9).doWork()
 
             assertThat(result).isInstanceOf(ListenableWorker.Result.Success::class.java)
             assertThat(deps.scheduler.continuationCount).isEqualTo(0)
+        }
+
+    @Test
+    fun `a failed continuation enqueue retries instead of reporting success`() =
+        runTest {
+            val db = openDb()
+            seedPodcast(db, "https://a.test/feed.xml")
+            seedPodcast(db, "https://b.test/feed.xml")
+            val deps = deps(db = db, clock = DeadlineClock())
+            deps.scheduler.continuationResult = false
+
+            val result = worker(deps, origin = RefreshOrigin.PERIODIC).doWork()
+
+            // The enqueue is awaited: an unconfirmed enqueue must not strand the leftovers (R6).
+            assertThat(result).isInstanceOf(ListenableWorker.Result.Retry::class.java)
+            assertThat(deps.scheduler.continuationCount).isEqualTo(1)
         }
 
     @Test

@@ -80,7 +80,8 @@ internal object AddInputNormalizer {
             }
 
             lower.startsWith("feed:") -> {
-                return input.substring("feed:".length)
+                // `feed://host/…` unwraps like `feed:http(s)://…` (03 step 3): an optional `//`.
+                return input.substring("feed:".length).removePrefix("//")
             }
 
             lower.startsWith("pcast://") -> {

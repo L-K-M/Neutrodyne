@@ -234,6 +234,68 @@ class RefreshSchedulerTest {
         }
 
     @Test
+    fun `automatic origins ride the periodic constraint set`() =
+        runTest {
+            val scheduler = scheduler()
+            settings.set(FeedsSettingKeys.REFRESH_WIFI_ONLY, true)
+
+            scheduler.enqueueNow(
+                RefreshScope.All,
+                force = false,
+                pagesOnly = false,
+                origin = RefreshOrigin.FOREGROUND,
+            )
+
+            // R5: automatic work is never expedited and carries the wifi-only network type plus
+            // battery-not-low — manual work keeps its own independent shape.
+            val spec = specOf(awaitWork(WorkManagerRefreshScheduler.WORK_NOW).id.toString())
+            assertThat(spec.constraints.requiredNetworkType).isEqualTo(NetworkType.UNMETERED)
+            assertThat(spec.constraints.requiresBatteryNotLow()).isTrue()
+            assertThat(spec.expedited).isFalse()
+            val request = RefreshWorkData.request(spec.input, 0, 0, 0)
+            assertThat(request.origin).isEqualTo(RefreshOrigin.FOREGROUND)
+        }
+
+    @Test
+    fun `automatic origins stay connected when wifi only is off`() =
+        runTest {
+            val scheduler = scheduler()
+
+            scheduler.enqueueNow(
+                RefreshScope.All,
+                force = false,
+                pagesOnly = false,
+                origin = RefreshOrigin.PERIODIC,
+            )
+
+            val spec = specOf(awaitWork(WorkManagerRefreshScheduler.WORK_NOW).id.toString())
+            assertThat(spec.constraints.requiredNetworkType).isEqualTo(NetworkType.CONNECTED)
+            assertThat(spec.constraints.requiresBatteryNotLow()).isTrue()
+            assertThat(spec.expedited).isFalse()
+        }
+
+    @Test
+    fun `markers without live work are reconciled into an enqueue`() =
+        runTest {
+            val scheduler = scheduler()
+            settings.set(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES, 240)
+            scheduler.reschedulePeriodic()
+            val first = uniqueWork(WorkManagerRefreshScheduler.WORK_PERIODIC)
+
+            // A wiped WorkManager store (or a killed enqueue) leaves live work missing while the
+            // persisted markers still claim a tick — the next reconcile re-enqueues (R7).
+            workManager.cancelUniqueWork(WorkManagerRefreshScheduler.WORK_PERIODIC).result.get()
+
+            scheduler.reschedulePeriodic()
+
+            // The cancelled spec stays in the store; the reconciled enqueue is the live one.
+            val infos = workManager.getWorkInfosForUniqueWork(WorkManagerRefreshScheduler.WORK_PERIODIC).get()
+            val live = infos.single { !it.state.isFinished }
+            assertThat(live.state).isEqualTo(WorkInfo.State.ENQUEUED)
+            assertThat(live.id).isNotEqualTo(first.id)
+        }
+
+    @Test
     fun `enqueueContinuation keeps a single work with the linear backoff`() =
         runTest {
             val scheduler = scheduler()
@@ -321,7 +383,7 @@ class RefreshSchedulerTest {
             application = app,
             db = db,
             settings = settings,
-            rebaser = NextRefreshRebaser(db, settings, clock, this),
+            rebaser = NextRefreshRebaser(db, settings),
             appScope = this,
         )
 

@@ -28,12 +28,20 @@ import kotlin.math.min
  */
 internal class PreparedItem(
     val episode: ParsedEpisode,
+    /** The item's index in the document — warning records carry it. */
+    val index: Int,
     /** `EpisodeKeys.primary(episode)` — also the docPrimary set entry. */
     val primaryKey: String,
-    /** The key this document actually assigns (primary, else a fallback for a dup'd primary). */
-    val docKey: String,
-    /** `EpisodeKeys.candidates(episode)` — pass 1's lookup keys. */
-    val candidates: List<String>,
+    /**
+     * The key this document actually assigns (primary, else a fallback for a dup'd primary).
+     * Mutable: a contested row keeps its own stored key, and an unmatched item whose assigned
+     * key a stored row already holds re-derives a free fallback before insert (03 step 4).
+     */
+    var docKey: String,
+    /** [docKey] first, then `EpisodeKeys.candidates(episode)` — pass 1's claim keys in order. */
+    val claimKeys: List<String>,
+    /** `EpisodeKeys.fallbacks(episode)` — the re-derive pool when [docKey] collides at insert. */
+    val fallbackKeys: List<String>,
     /** `UrlNormalizer.forIdentity(enclosure.url)` — pass-2 enclosure map key. */
     val enclosureIdentity: String?,
     /** `UrlNormalizer.forIdentityNoQuery(enclosure.url)` — pass-2 query-less map key. */
@@ -50,15 +58,23 @@ internal class PreparedItem(
     val snippet: String?,
     /** 04's per-`externalMediaId` override (null for RSS items). */
     val hint: RowHint?,
+    /**
+     * `pubDateValid` (03 sortDate and clock): `pubDate` clamped to
+     * `1990-01-01 .. now + 365 days` — invalid and future dates sort/newness-date as undated.
+     */
+    val pubDateValid: Long?,
 ) {
     var matchedTo: ExistingEpisodeKey? = null
     var insertedId: Long? = null
     var isNew: Boolean = false
 
+    /** A still-unmatched item with no free fallback left — skipped by the insert phase. */
+    var dropped: Boolean = false
+
     private val parsedIsVideo: Boolean get() = EnclosureTypes.isVideo(episode.primaryEnclosure?.effectiveType)
 
-    /** `sortDate = min(pubDate ?: firstSeenAt, firstSeenAt + 24 h)` (03 sortDate and clock). */
-    fun sortDate(firstSeenAt: Long): Long = min(episode.pubDate ?: firstSeenAt, firstSeenAt + DAY_MS)
+    /** `sortDate = min(pubDateValid ?: firstSeenAt, firstSeenAt + 24 h)` (03 sortDate and clock). */
+    fun sortDate(firstSeenAt: Long): Long = min(pubDateValid ?: firstSeenAt, firstSeenAt + DAY_MS)
 
     /** The insert row (03 step 7); `isNew`/`firstSeenAt` come from the transaction phase. */
     fun insertRow(
@@ -220,21 +236,28 @@ internal class PreparedItem(
 
     companion object {
         const val DAY_MS = 86_400_000L
+
+        /** `pubDateValid`'s lower bound: 1990-01-01T00:00:00Z (03 sortDate and clock). */
+        const val PUB_DATE_MIN_MS = 631_152_000_000L
+
+        /** `pubDateValid`'s upper bound offset: one year past the ingest's `now`. */
+        const val PUB_DATE_MAX_OFFSET_MS = 365L * DAY_MS
     }
 }
 
 /**
- * The pass-2 lookup structure of 03 step 5: stored rows whose `identityKey` no document primary
- * claims, indexed by normalised enclosure URL, query-less enclosure URL and title-day. Match order
- * is the spec's: enclosure URL → query-less URL → title+day with guards.
+ * The pass-2 lookup structure of 03 step 5: stored rows whose `identityKey` no document key
+ * claims — every *assigned* document key is reserved, primary or fallback — indexed by normalised
+ * enclosure URL, query-less enclosure URL and title-day. Match order is the spec's: enclosure
+ * URL → query-less URL → title+day with guards.
  */
 internal class Pass2Index(
     existing: List<ExistingEpisodeKey>,
-    docPrimaries: Set<String>,
+    docKeys: Set<String>,
     alreadyMatched: Set<Long>,
 ) {
     private val candidates =
-        existing.filter { it.id !in alreadyMatched && it.identityKey !in docPrimaries }
+        existing.filter { it.id !in alreadyMatched && it.identityKey !in docKeys }
 
     private val byEnclosure = candidates.grouped { it.enclosureUrl?.let(UrlNormalizer::forIdentity) }
     private val byEnclosureNoQuery =

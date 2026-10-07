@@ -75,6 +75,13 @@ class AddPodcastResolverTest {
     }
 
     @Test
+    fun feedSchemeWithSlashesIsSchemeGuessed() {
+        // `feed://host/path` unwraps like `feed:http(s)://…` (03 step 3): bare host → https guess.
+        assertUrl("feed://a.example.com/f", "https://a.example.com/f", guessed = true)
+        assertUrl("feed:http://a.example.com/f", "http://a.example.com/f")
+    }
+
+    @Test
     fun shareIntentTextYieldsTheFirstUrlToken() {
         val input = "  Listen to this https://a.example.com/f right now "
         assertUrl(input, "https://a.example.com/f")
@@ -243,6 +250,31 @@ class AddPodcastResolverTest {
         }
 
     @Test
+    fun anEmptyListFeedIsRejectedBeforePreview() =
+        runTest {
+            // `podcast:medium` ending in `L` is a list of OTHER feeds — nothing to subscribe to
+            // (03 Accepted items): rejected at resolve, never previewed (S14).
+            server.enqueue(
+                mockResponse(
+                    body =
+                        """<?xml version="1.0"?>
+<rss version="2.0" xmlns:podcast="https://podcastindex.org/namespace/1.0">
+  <channel><title>A List</title>
+    <podcast:medium>podcastL</podcast:medium>
+    <podcast:remoteItem medium="podcast" feedGuid="917393e3-1b1e-5cef-ace4-edaa54e1f810"/>
+  </channel></rss>""",
+                ),
+            )
+
+            val r = bundle.resolver.resolve(feedUrl())
+
+            assertEquals(
+                AddPodcastError.UnsupportedListFeed,
+                assertIs<AddResolution.Failure>(r).error,
+            )
+        }
+
+    @Test
     fun basicChallengeAsksForCredentials() =
         runTest {
             server.enqueue(
@@ -366,5 +398,44 @@ class AddPodcastResolverTest {
             assertEquals(feedUrl("/new.xml"), feed.preview.previewId)
             // The cache reuse lookup hits on the typed URL too (`inputUrl` of the entry).
             assertTrue(bundle.cache.get(feedUrl("/new.xml")) != null)
+        }
+
+    @Test
+    fun aTemporaryRedirectKeepsTheRequestedUrlAsPreviewId() =
+        runTest {
+            server.enqueue(mockResponse(302, "", "Location" to "/temp.xml"))
+            server.enqueue(mockResponse(body = rssBody(title = "CDN copy")))
+
+            val feed = assertIs<AddResolution.Feed>(bundle.resolver.resolve(feedUrl("/old.xml")))
+
+            // `permanentUrl ?: requestedUrl` (03 redirects): a 302's target must not become the
+            // subscription identity — the preview stays keyed on the requested URL (S6).
+            assertEquals(feedUrl("/old.xml"), feed.preview.feedUrl)
+            assertEquals(feedUrl("/old.xml"), feed.preview.previewId)
+        }
+
+    @Test
+    fun theNormalisedInputFeedsDedupe() =
+        runTest {
+            // The podcast's feedKey is the HTTPS form; `pcast://` input normalises to it (S4).
+            // Without the normalised `inputUrl` the scheme-guess retry leaves only `http://`
+            // candidates and the dedupe misses.
+            val existing =
+                seedPodcast(
+                    db,
+                    feedUrl = "https://127.0.0.1:${server.port}/feed.xml",
+                    feedKey =
+                        UrlNormalizer.forIdentity("https://127.0.0.1:${server.port}/feed.xml")
+                            ?: error("bad url"),
+                )
+            server.enqueue(mockResponse(body = rssBody()))
+
+            val feed =
+                assertIs<AddResolution.Feed>(
+                    bundle.resolver.resolve("pcast://127.0.0.1:${server.port}/feed.xml"),
+                )
+
+            assertEquals(existing, feed.preview.alreadySubscribed?.podcastId)
+            assertEquals(true, feed.preview.alreadySubscribed?.exact)
         }
 }

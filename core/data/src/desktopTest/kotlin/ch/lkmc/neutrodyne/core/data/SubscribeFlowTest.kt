@@ -3,13 +3,16 @@
 package ch.lkmc.neutrodyne.core.data
 
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.data.fetch.RedirectHop
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
 import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
+import ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SubscribeError
+import ch.lkmc.neutrodyne.core.model.AliasReason
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
@@ -243,6 +246,119 @@ class SubscribeFlowTest {
                 SubscribeError.NoMedia,
                 assertIs<Outcome.Failure<SubscribeError>>(outcome).error,
             )
+        }
+
+    @Test
+    fun aTemporaryRedirectKeepsTheRequestedUrlAsIdentity() =
+        runTest {
+            server.enqueue(mockResponse(302, "", "Location" to "/temp.xml"))
+            server.enqueue(mockResponse(body = rssBody(items = arrayOf(rssItem("e1")))))
+            val feed =
+                assertIs<AddResolution.Feed>(resolverBundle.resolver.resolve(feedUrl("/old.xml")))
+
+            val id =
+                assertIs<Outcome.Success<Long>>(subscribeBundle.useCase(feed.preview.previewId, emptySet()))
+                    .value
+
+            val row = assertNotNull(db.podcastDao().byId(id))
+            // `permanentUrl ?: requestedUrl` (03 Subscribe): a 302's target is the final fetch URL,
+            // never the subscription identity — the expiring CDN URL must not become `feedUrl`.
+            assertEquals(feedUrl("/old.xml"), row.feedUrl)
+            assertEquals(UrlNormalizer.forIdentity(feedUrl("/old.xml")), row.feedKey)
+        }
+
+    @Test
+    fun aRedirectHopOwnedAsAFeedKeyDedupes() =
+        runTest {
+            // Another podcast already owns a hop URL as its PRIMARY feedKey — the in-transaction
+            // dedupe checks feedKeys as well as aliases for every relevant URL (S4).
+            val owned = "https://cdn.example.com/owned.xml"
+            val existing =
+                seedPodcast(db, feedUrl = owned, feedKey = UrlNormalizer.forIdentity(owned)!!)
+            resolverBundle.cache.put(
+                previewId = "https://a.example.com/f",
+                inputUrl = "https://a.example.com/f",
+                feed = parsedFeed(items = listOf(parsedEpisode(0, guid = "e1"))),
+                meta =
+                    fetchMeta(finalUrl = "https://b.example.com/f")
+                        .copy(requestedUrl = "https://a.example.com/f"),
+                hops =
+                    listOf(
+                        RedirectHop(url = "https://a.example.com/f", status = 301),
+                        RedirectHop(url = owned, status = 301),
+                    ),
+                credentials = null,
+            )
+
+            val outcome = subscribeBundle.useCase("https://a.example.com/f", emptySet())
+
+            assertEquals(
+                SubscribeError.AlreadySubscribed(existing),
+                assertIs<Outcome.Failure<SubscribeError>>(outcome).error,
+            )
+            assertNull(db.podcastDao().byFeedKey(UrlNormalizer.forIdentity("https://a.example.com/f")!!))
+        }
+
+    @Test
+    fun aRedirectHopOwnedAsAnAliasDedupes() =
+        runTest {
+            val owned = "https://cdn.example.com/hop-alias.xml"
+            val existing = seedPodcast(db, feedUrl = "https://b.example.com/f")
+            db.podcastDao()
+                .insertAliases(
+                    listOf(
+                        PodcastUrlAliasEntity(
+                            UrlNormalizer.forIdentity(owned)!!,
+                            existing,
+                            AliasReason.REDIRECT,
+                            NOW,
+                        ),
+                    ),
+                )
+            resolverBundle.cache.put(
+                previewId = "https://a.example.com/f",
+                inputUrl = "https://a.example.com/f",
+                feed = parsedFeed(items = listOf(parsedEpisode(0, guid = "e1"))),
+                meta =
+                    fetchMeta(finalUrl = "https://c.example.com/f")
+                        .copy(requestedUrl = "https://a.example.com/f"),
+                hops = listOf(RedirectHop(url = owned, status = 302)),
+                credentials = null,
+            )
+
+            val outcome = subscribeBundle.useCase("https://a.example.com/f", emptySet())
+
+            assertEquals(
+                SubscribeError.AlreadySubscribed(existing),
+                assertIs<Outcome.Failure<SubscribeError>>(outcome).error,
+            )
+        }
+
+    @Test
+    fun anErrorValuedInitialIngestRollsBackTheSubscription() =
+        runTest {
+            // A list feed that slipped past the resolver's guards: the ingest's `emptyKind`
+            // must roll the subscription back instead of committing an ACTIVE row (S14).
+            resolverBundle.cache.put(
+                previewId = "https://a.example.com/list",
+                inputUrl = "https://a.example.com/list",
+                feed = parsedFeed(items = emptyList(), medium = "podcastL"),
+                meta = fetchMeta(finalUrl = "https://a.example.com/list"),
+                hops = emptyList(),
+                credentials = null,
+            )
+
+            val outcome = subscribeBundle.useCase("https://a.example.com/list", emptySet())
+
+            assertEquals(
+                SubscribeError.Fetch(AddPodcastError.UnsupportedListFeed),
+                assertIs<Outcome.Failure<SubscribeError>>(outcome).error,
+            )
+            assertTrue(db.podcastDao().ungroupedIds().isEmpty())
+            assertNull(
+                db.podcastDao().byFeedKey(UrlNormalizer.forIdentity("https://a.example.com/list")!!),
+            )
+            assertEquals(0, scheduler.rescheduleCount)
         }
 
     // --- Paging kick (03 Subscribe transaction, RFC 5005 paging) --------------------------------------

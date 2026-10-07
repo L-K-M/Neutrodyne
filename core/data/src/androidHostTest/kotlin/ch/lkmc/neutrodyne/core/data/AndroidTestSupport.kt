@@ -194,6 +194,7 @@ internal class FakeRefreshScheduler : RefreshScheduler {
     var rescheduleCount = 0
     var continuationCount = 0
     var firstFetchCount = 0
+    var continuationResult = true
 
     override fun enqueueNow(
         scope: RefreshScope,
@@ -208,8 +209,9 @@ internal class FakeRefreshScheduler : RefreshScheduler {
         rescheduleCount++
     }
 
-    override fun enqueueContinuation() {
+    override suspend fun enqueueContinuation(): Boolean {
         continuationCount++
+        return continuationResult
     }
 
     override fun requestFirstFetch() {

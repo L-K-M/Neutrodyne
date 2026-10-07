@@ -104,34 +104,48 @@ internal class FeedRefresher(
     /** The last 50 feeds' parse warnings, kept for M11's diagnostics (insertion-order LRU). */
     private val parseWarnings = LinkedHashMap<Long, List<ParseWarning>>()
 
-    /** One engine run (03 Engine run): mutex → sweep → force → select → fan out → page → flush. */
+    /**
+     * One engine run (03 Engine run): force-mark → mutex → sweep → select → fan out → page →
+     * flush. A forced run marks its scope due *before* it waits, so a run that never wins the
+     * mutex still leaves its scope for a later due-selection.
+     */
     suspend fun run(request: RefreshRequest): RefreshReport {
+        if (request.force) forceDue(request.scope)
         val deadline = request.deadlineElapsedMs
-        val acquired =
+        var owned = false
+        try {
             when {
                 deadline == RefreshRequest.NO_DEADLINE -> {
                     mutex.lock()
-                    true
+                    owned = true
                 }
 
                 else -> {
                     val waitMs = deadline - clock.elapsedRealtime() - DEADLINE_MARGIN_MS
-                    if (waitMs <= 0) mutex.tryLock() else withTimeoutOrNull(waitMs) { mutex.lock() } != null
+                    if (waitMs <= 0) {
+                        owned = mutex.tryLock()
+                    } else {
+                        // Ownership is recorded inside the timeout: a grant that loses the race
+                        // to the deadline still reaches the outer finally and is released.
+                        withTimeoutOrNull(waitMs) {
+                            mutex.lock()
+                            owned = true
+                        }
+                    }
                 }
             }
-        if (!acquired) {
-            // 03 step 1: a timed-out second run reports the scope's due-feed count as remaining.
-            return RefreshReport(
-                outcomes = emptyMap(),
-                newEpisodes = emptyList(),
-                remaining = selectDue(request).size,
-                stoppedByDeadline = true,
-            )
-        }
-        try {
+            if (!owned) {
+                // 03 step 1: a timed-out second run reports the scope's due count as remaining.
+                return RefreshReport(
+                    outcomes = emptyMap(),
+                    newEpisodes = emptyList(),
+                    remaining = selectDue(request).size,
+                    stoppedByDeadline = true,
+                )
+            }
             return runLocked(request)
         } finally {
-            mutex.unlock()
+            if (owned) mutex.unlock()
         }
     }
 
@@ -150,7 +164,6 @@ internal class FeedRefresher(
                 .getOrNull()
                 ?.takeIf { it > 0 }
         tempFiles.sweep(clock.now())
-        if (request.force) forceDue(request.scope)
         intervalMinutes =
             RefreshPolicy.effectiveIntervalMinutes(settings.get(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES))
 
@@ -174,6 +187,8 @@ internal class FeedRefresher(
 
         var launched = 0
         var timedOut = false
+        var completed = false
+        var report: RefreshReport? = null
         try {
             coroutineScope {
                 batcherLock.withLock { batcher = FetchStateBatcher(db.podcastDao(), clock, this) }
@@ -219,39 +234,42 @@ internal class FeedRefresher(
                     runBackgroundPaging(request, pendingPages, global, hostSems)
                 }
             }
+            completed = true
         } finally {
-            val active = batcherLock.withLock { batcher.also { batcher = null } }
-            withContext(NonCancellable) { suspendRunCatching { active?.flush() } }
-        }
+            // Finalisation survives cancellation (03 Engine run): the buffered fetch-state rows
+            // flush, and the finished slots still report their committed outcomes so the summary
+            // and status reflect what actually landed.
+            withContext(NonCancellable) {
+                val active = batcherLock.withLock { batcher.also { batcher = null } }
+                suspendRunCatching { active?.flush() }
 
-        val outcomes = mutableMapOf<Long, FeedOutcome>()
-        for ((index, feed) in due.withIndex()) {
-            val outcome = slots[index] ?: continue
-            outcomes[feed.id] = outcome
-            _events.tryEmit(FeedRunEvent(feed.id, request.origin, outcome))
+                val outcomes = mutableMapOf<Long, FeedOutcome>()
+                for ((index, feed) in due.withIndex()) {
+                    val outcome = slots[index] ?: continue
+                    outcomes[feed.id] = outcome
+                    _events.tryEmit(FeedRunEvent(feed.id, request.origin, outcome))
+                }
+                val finishedAt = clock.now()
+                val finalReport =
+                    RefreshReport(
+                        outcomes = outcomes,
+                        newEpisodes = announcementsLock.withLock { announcements.toList() },
+                        remaining = due.size - outcomes.size,
+                        stoppedByDeadline = timedOut || launched < due.size || !completed,
+                    )
+                writeDiagnostics(request, finalReport, finishedAt)
+                _status.value =
+                    RefreshStatus(
+                        running = false,
+                        scope = null,
+                        done = outcomes.size,
+                        total = due.size,
+                        lastRunFinishedAt = finishedAt,
+                    )
+                report = finalReport
+            }
         }
-        val stoppedByDeadline = timedOut || launched < due.size
-        val report =
-            RefreshReport(
-                outcomes = outcomes,
-                newEpisodes = announcementsLock.withLock { announcements.toList() },
-                remaining = due.size - outcomes.size,
-                stoppedByDeadline = stoppedByDeadline,
-            )
-
-        val finishedAt = clock.now()
-        withContext(NonCancellable) {
-            writeDiagnostics(request, report, finishedAt)
-        }
-        _status.value =
-            RefreshStatus(
-                running = false,
-                scope = null,
-                done = outcomes.size,
-                total = due.size,
-                lastRunFinishedAt = finishedAt,
-            )
-        return report
+        return report ?: error("report unset")
     }
 
     /**
@@ -397,7 +415,10 @@ internal class FeedRefresher(
 
         val emptyKind = ingest.emptyKind
         if (emptyKind != null) {
-            // NO_MEDIA/UNSUPPORTED_LIST_FEED: the kind is recorded but scheduling is the success row.
+            // NO_MEDIA/UNSUPPORTED_LIST_FEED: the kind is recorded but scheduling is the success
+            // row. The response's validators are *not* adopted — the body produced no ingest, so
+            // the stored validators (and `lastFullFetchAt`) keep the next attempt conditional on
+            // what was actually committed; otherwise a 304 would quietly clear the error.
             addFetchState(
                 fetchStateOf(
                     feed,
@@ -408,9 +429,9 @@ internal class FeedRefresher(
                     failureCount = 0,
                     lastErrorKind = emptyKind,
                     lastErrorDetail = null,
-                    etag = result.meta.etag ?: feed.etag,
-                    lastModified = result.meta.lastModified ?: feed.lastModified,
-                    lastFullFetchAt = if (result.meta.unconditional) now else feed.lastFullFetchAt,
+                    etag = feed.etag,
+                    lastModified = feed.lastModified,
+                    lastFullFetchAt = feed.lastFullFetchAt,
                     lastParseOk = feed.lastParseOk,
                 ),
             )
@@ -706,7 +727,11 @@ internal class FeedRefresher(
                     launch {
                         global.withPermit {
                             hostSems.getValue(session.adapter.hostKey(session.feed)).withPermit {
-                                session.active = onePage(session, manual = false)
+                                // The bound is re-checked after the permit waits: a session that
+                                // spent the paging budget queued must not start a page anyway.
+                                if (clock.elapsedRealtime() < stopAt) {
+                                    session.active = onePage(session, manual = false)
+                                }
                             }
                         }
                     }

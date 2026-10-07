@@ -416,9 +416,11 @@ class RefreshEngineTest {
         }
 
     @Test
-    fun uniqueViolationFailsOnlyThatFeed() =
+    fun assignedKeyCollisionIngestsWithoutConflict() =
         runTest {
-            // Feed A's stored rows plus the colliding document of IngestDiffTest's construction.
+            // Feed A's stored rows plus the colliding document of IngestDiffTest's construction:
+            // the second item's assigned t: key exactly matches row D's — the diff claims it in
+            // pass 1 rather than aborting on UNIQUE (S3).
             val a = due("https://a.example.com/f")
             val day = NOW - DAY
             newIngestor(db, clock)
@@ -484,9 +486,50 @@ class RefreshEngineTest {
 
             val report = refresher(adapter).run(request())
 
-            assertEquals(FeedOutcome.Failed(FeedErrorKind.IDENTITY_CONFLICT, null), report.outcomes[a])
+            assertIs<FeedOutcome.Ingested>(report.outcomes[a])
             assertIs<FeedOutcome.Ingested>(report.outcomes[b])
-            assertEquals("g:gc", db.episodeDao().byIdentityKey(a, "g:gc")!!.identityKey)
+            assertEquals(3, db.podcastDao().episodeCount(a))
+            assertFalse(db.episodeDao().byIdentityKey(a, "g:gc")!!.inFeed)
+        }
+
+    @Test
+    fun aRejectedIngestKeepsTheStoredValidators() =
+        runTest {
+            val id =
+                due("https://a.example.com/f", nextRefreshAt = NOW - 1) {
+                    copy(etag = "old-etag", lastModified = "old-lm")
+                }
+            val adapter =
+                stubAdapter(
+                    mutableMapOf(
+                        "https://a.example.com/f" to
+                            adapterParsed(
+                                parsedFeed(
+                                    items =
+                                        listOf(
+                                            parsedEpisode(
+                                                0,
+                                                guid = "a",
+                                                enclosureUrl = null,
+                                                externalMediaId = null,
+                                            ),
+                                        ),
+                                ),
+                                meta = fetchMeta(etag = "new-etag", lastModified = "new-lm"),
+                            ),
+                    ),
+                )
+
+            val report = refresher(adapter).run(request())
+
+            assertEquals(FeedOutcome.Failed(FeedErrorKind.NO_MEDIA, null), report.outcomes[id])
+            val stored = db.podcastDao().byId(id)!!
+            // The body produced no ingest: the response's validators are not adopted — keeping
+            // the stored pair keeps the next attempt conditional on committed state (S15).
+            assertEquals("old-etag", stored.etag)
+            assertEquals("old-lm", stored.lastModified)
+            assertEquals(FeedErrorKind.NO_MEDIA, stored.lastErrorKind)
+            assertNull(stored.contentSha256)
         }
 
     // --- Deadline and concurrency ------------------------------------------------------------------
@@ -529,6 +572,70 @@ class RefreshEngineTest {
 
             gate.complete(Unit)
             assertEquals(1, first.await().outcomes.size)
+        }
+
+    @Test
+    fun aForcedScopeStaysDueWhenTheRunNeverStarts() =
+        runTest {
+            val gate = CompletableDeferred<Unit>()
+            val adapter =
+                stubAdapter(onFetch = { _, _ ->
+                    gate.await()
+                    AdapterResult.NotModified(meta = null)
+                })
+            due("https://a.example.com/f")
+            val b = due("https://b.example.com/f", nextRefreshAt = NOW + 60 * DAY)
+            val engine = refresher(adapter)
+            val first = backgroundScope.async { engine.run(request()) }
+            testScheduler.runCurrent()
+
+            // The forced request persists its due marks before it blocks on the run mutex: the
+            // timed-out run still leaves B due for a later selection (R4).
+            val report =
+                engine.run(
+                    request(
+                        scope = RefreshScope.Podcasts(listOf(b)),
+                        force = true,
+                        // Exactly the 30 s margin past now → tryLock fails behind the held run.
+                        deadlineElapsedMs = clock.elapsedRealtime() + 30_000L,
+                    ),
+                )
+
+            assertTrue(report.stoppedByDeadline)
+            assertEquals(0L, db.podcastDao().byId(b)!!.nextRefreshAt)
+            assertEquals(1, report.remaining)
+
+            gate.complete(Unit)
+            first.await()
+        }
+
+    @Test
+    fun pagingRechecksTheBudgetAfterPermitWaits() =
+        runTest {
+            // Eight pending pages share six global permits; each page burns 30 s of fake uptime,
+            // so the sessions that waited out round one must re-check the 10 s budget before
+            // starting a page of their own (R3): six pages run, two sessions stop queued.
+            val feeds =
+                (0 until 8).map { i ->
+                    due("https://$i.example.com/f", nextRefreshAt = NOW + 60 * DAY) {
+                        copy(pagingNextUrl = "https://$i.example.com/f?page=2", pagingComplete = false)
+                    }
+                }
+            val adapter =
+                stubAdapter(
+                    onFetch = { feed, _ ->
+                        clock.elapsedMs += 30_000L
+                        adapterParsed(
+                            parsedFeed(items = listOf(parsedEpisode(0, guid = "p${feed.id}"))),
+                        )
+                    },
+                )
+
+            refresher(adapter).run(request(pagingBudgetMs = 10_000L))
+
+            assertEquals(6, adapter.calls.size)
+            assertTrue(adapter.calls.all { it.second == FetchMode.OLDER_PAGE })
+            assertTrue(feeds.size == 8)
         }
 
     // --- Announcements and diagnostics -------------------------------------------------------------
@@ -842,6 +949,98 @@ class RefreshEngineTest {
                 engine.run(request())
 
                 assertEquals("e-m", server.takeRequest().headers["If-None-Match"])
+            } finally {
+                bundle.close()
+            }
+        }
+
+    @Test
+    fun aParserBumpReParsesAByteIdenticalBody() =
+        runTest {
+            setUpRoot()
+            val feedUrl = server.url("/feed.xml").toString()
+            val body = rssBody(items = arrayOf(rssItem("re")))
+            val sha =
+                java.security.MessageDigest
+                    .getInstance("SHA-256")
+                    .digest(body.toByteArray())
+                    .joinToString("") { "%02x".format(it) }
+            val id =
+                due(feedUrl, nextRefreshAt = NOW - 1) {
+                    copy(
+                        contentSha256 = sha,
+                        parserVersion = FeedParser.VERSION - 1,
+                        lastParseOk = true,
+                        lastFullFetchAt = NOW,
+                    )
+                }
+            server.enqueue(mockResponse(body = body))
+            val bundle = newRssAdapter(root, clock)
+            try {
+                val engine =
+                    newRefresher(
+                        db,
+                        mapOf(SourceType.RSS to bundle.adapter),
+                        clock,
+                        settings,
+                        tempFiles = bundle.tempFiles,
+                    )
+
+                val report = engine.run(request())
+
+                // The stored sha matches the served bytes, but the stale parser version forces a
+                // re-parse — `Unchanged` would leave rows parsed by the old parser in place (S5).
+                assertIs<FeedOutcome.Ingested>(report.outcomes[id])
+                assertEquals(FeedParser.VERSION, db.podcastDao().byId(id)!!.parserVersion)
+            } finally {
+                bundle.close()
+            }
+        }
+
+    @Test
+    fun fhCompleteOverridesAnArchiveLinkForPartial() =
+        runTest {
+            setUpRoot()
+            val feedUrl = server.url("/feed.xml").toString()
+            val id = due(feedUrl, nextRefreshAt = NOW - 1)
+            // An episode absent from the served document: whether it stays `inFeed` exposes the
+            // adapter's `partial` flag (03 step 8 only runs for complete documents).
+            val stored =
+                newIngestor(db, clock)
+                    .ingest(
+                        dueFeedOf(db, id),
+                        parsedFeed(items = listOf(parsedEpisode(0, guid = "old-ep"))),
+                        IngestContext(mode = IngestMode.INITIAL, partial = false, fetch = fetchMeta()),
+                    )
+            assertEquals(1, stored.inserted.size)
+            db.podcastDao().forceDue(scopeAll = false, ids = listOf(id))
+
+            // fh:complete + an archive link: the link alone would mark the document partial —
+            // fh:complete overrides it (S10), so the absent row flips out of the feed.
+            val doc =
+                """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:fh="http://purl.org/syndication/history/1.0">
+  <channel><title>Archived Show</title><link>https://example.com/s</link>
+    <fh:complete/>
+    <atom:link rel="prev-archive" href="https://example.com/s/2.xml"/>
+    ${rssItem("new-ep")}
+  </channel></rss>"""
+            server.enqueue(mockResponse(body = doc))
+            val bundle = newRssAdapter(root, clock)
+            try {
+                val engine =
+                    newRefresher(
+                        db,
+                        mapOf(SourceType.RSS to bundle.adapter),
+                        clock,
+                        settings,
+                        tempFiles = bundle.tempFiles,
+                    )
+
+                val report = engine.run(request())
+
+                assertIs<FeedOutcome.Ingested>(report.outcomes[id])
+                assertFalse(db.episodeDao().byId(stored.inserted.single())!!.inFeed)
             } finally {
                 bundle.close()
             }

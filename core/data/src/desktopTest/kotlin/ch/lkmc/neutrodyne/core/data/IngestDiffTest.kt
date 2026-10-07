@@ -17,7 +17,6 @@ import ch.lkmc.neutrodyne.feeds.parse.FeedParser
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
@@ -148,6 +147,85 @@ class IngestDiffTest {
             assertTrue(result.warnings.any { it.code == WarningCode.DUPLICATE_GUID })
         }
 
+    @Test
+    fun identicalItemsCollapseBeforeFallbackKeys() =
+        runTest {
+            val id = podcastId()
+            // The same item twice (same GUID, same content): the repeat is dropped outright, not
+            // given a fallback key (03 in-document dedupe; S2).
+            val same =
+                parsedEpisode(
+                    0,
+                    guid = "d",
+                    enclosureUrl = "https://cdn.example.com/s.mp3",
+                    title = "Same",
+                    pubDate = NOW - DAY,
+                )
+            val result =
+                ingest(
+                    id,
+                    parsedFeed(items = listOf(same, same.copy(feedOrder = 1))),
+                    mode = IngestMode.INITIAL,
+                )
+
+            assertEquals(1, result.accepted)
+            assertEquals(1, result.inserted.size)
+            assertEquals(1, db.podcastDao().episodeCount(id))
+        }
+
+    @Test
+    fun reusedGuidKeepsUserStateOnTheEnclosureMatch() =
+        runTest {
+            val id = podcastId()
+            ingest(
+                id,
+                parsedFeed(
+                    items =
+                        listOf(
+                            parsedEpisode(
+                                0,
+                                guid = "g",
+                                enclosureUrl = "https://cdn.example.com/a.mp3",
+                            ),
+                        ),
+                ),
+                mode = IngestMode.INITIAL,
+            )
+            val stored = db.episodeDao().byIdentityKey(id, "g:g")!!
+            db.episodeStateDao().upsert(episodeStateEntity(stored.id, playedAt = NOW - 1_000))
+
+            // v2: two items reuse "g"; only the second still points at the stored enclosure.
+            // Doc order alone would hand the stored row — and its user state — to the first,
+            // distinct episode (S1); the enclosure contest keeps it with the real match.
+            val result =
+                ingest(
+                    id,
+                    parsedFeed(
+                        items =
+                            listOf(
+                                parsedEpisode(
+                                    0,
+                                    guid = "g",
+                                    enclosureUrl = "https://cdn.example.com/b.mp3",
+                                ),
+                                parsedEpisode(
+                                    1,
+                                    guid = "g",
+                                    enclosureUrl = "https://cdn.example.com/a.mp3",
+                                ),
+                            ),
+                    ),
+                )
+
+            assertEquals(1, result.inserted.size)
+            val kept = db.episodeDao().byId(stored.id)!!
+            assertEquals("g:g", kept.identityKey)
+            assertEquals("https://cdn.example.com/a.mp3", kept.enclosureUrl)
+            assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(stored.id)!!.playedAt)
+            val fresh = db.episodeDao().byId(result.inserted.single())!!
+            assertEquals("https://cdn.example.com/b.mp3", fresh.enclosureUrl)
+        }
+
     // --- isNew and the back-catalogue guard -----------------------------------------------------
 
     @Test
@@ -183,6 +261,36 @@ class IngestDiffTest {
             assertTrue(newRow.isNew)
             assertFalse(oldRow.isNew)
             assertEquals(listOf(newRow.id), result.newIds)
+        }
+
+    @Test
+    fun outOfRangePubDatesAreTreatedAsUndatedForSortAndNewness() =
+        runTest {
+            val id = podcastId(subscribedAt = NOW - 30 * DAY)
+            // 1973 is below the 1990 floor; now+400d is past the now+365d ceiling — both count
+            // as undated under `pubDateValid` (03 sortDate and clock): sortDate = firstSeenAt
+            // and the newness check uses `now`, like an item with no date at all.
+            val result =
+                ingest(
+                    id,
+                    parsedFeed(
+                        items =
+                            listOf(
+                                parsedEpisode(0, guid = "pre", pubDate = 100_000_000_000L),
+                                parsedEpisode(1, guid = "post", pubDate = NOW + 400 * DAY),
+                            ),
+                    ),
+                )
+
+            val pre = db.episodeDao().byIdentityKey(id, "g:pre")!!
+            val post = db.episodeDao().byIdentityKey(id, "g:post")!!
+            assertEquals(pre.firstSeenAt, pre.sortDate)
+            assertEquals(post.firstSeenAt, post.sortDate)
+            assertTrue(pre.isNew)
+            assertTrue(post.isNew)
+            assertEquals(setOf(pre.id, post.id), result.newIds.toSet())
+            // The raw pubDate stays on the row — only sort/newness treats it as undated.
+            assertEquals(100_000_000_000L, pre.pubDate)
         }
 
     @Test
@@ -584,7 +692,7 @@ class IngestDiffTest {
     // --- Integrity -------------------------------------------------------------------------------
 
     @Test
-    fun uniqueViolationRollsBackTheWholeFeedIngest() =
+    fun assignedKeyCollisionResolvesWithoutConflict() =
         runTest {
             val id = podcastId()
             // v1: row B (u:encX), row C (g:gc with the same enclosure URL), row D (t: key of T+day).
@@ -613,10 +721,13 @@ class IngestDiffTest {
                 mode = IngestMode.INITIAL,
             )
             val cBefore = db.episodeDao().byIdentityKey(id, "g:gc")!!
+            val dBefore = db.ingestDao().existing(id).single { it.enclosureUrl == null }
 
-            // v2: two items share enclosure x.mp3. The second falls back to the t: key that row D
-            // already holds; pass 2 re-keys row C onto it → UNIQUE(podcastId, identityKey).
-            assertFailsWith<Exception> {
+            // v2: two items share enclosure x.mp3. The second's assigned key is its t: fallback —
+            // exactly row D's key, so it claims D in pass 1 (S3: exact-match the assigned key;
+            // every assigned key is reserved, so no pass-2 rekey can collide and nothing aborts
+            // on UNIQUE(podcastId, identityKey)).
+            val result =
                 ingest(
                     id,
                     parsedFeed(
@@ -637,16 +748,17 @@ class IngestDiffTest {
                             ),
                     ),
                 )
-            }
 
-            val after = db.episodeDao().byId(cBefore.id)!!
-            assertEquals("g:gc", after.identityKey)
+            assertEquals(0, result.inserted.size)
+            assertEquals(2, result.updated)
+            val d = db.episodeDao().byId(dBefore.id)!!
+            assertEquals("https://cdn.example.com/x.mp3", d.enclosureUrl)
+            assertEquals("T", d.title)
+            // The unclaimed row C is absent from the complete document (03 step 8).
+            val c = db.episodeDao().byId(cBefore.id)!!
+            assertEquals("g:gc", c.identityKey)
+            assertFalse(c.inFeed)
             assertEquals(3, db.podcastDao().episodeCount(id))
-
-            // A different podcast's ingest still works — the abort was per-feed.
-            val other = podcastId(feedUrl = "https://other.example.com/f.xml")
-            val ok = ingest(other, parsedFeed(items = listOf(parsedEpisode(0, guid = "o"))), mode = IngestMode.INITIAL)
-            assertEquals(1, ok.inserted.size)
         }
 
     @Test

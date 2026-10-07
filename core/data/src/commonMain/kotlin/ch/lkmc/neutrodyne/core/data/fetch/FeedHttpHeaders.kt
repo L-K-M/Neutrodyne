@@ -3,6 +3,8 @@
 package ch.lkmc.neutrodyne.core.data.fetch
 
 import io.ktor.http.HttpHeaders
+import io.ktor.http.URLBuilder
+import io.ktor.http.takeFrom
 
 /**
  * Header parsing for the fetch pipeline (03 Validators and Response handling):
@@ -51,12 +53,21 @@ internal object FeedHttpHeaders {
         return serverDateMs(trimmed)?.let { (it - nowMs).coerceAtLeast(0L) }
     }
 
-    /** `WWW-Authenticate: Basic realm="…"` → (isBasic, realm). */
-    fun basicChallenge(header: String?): Pair<Boolean, String?> {
-        if (header == null) return false to null
-        if (!header.startsWith("Basic", ignoreCase = true)) return false to null
-        val realm = REALM_RE.find(header)?.groupValues?.get(1)
-        return true to realm
+    /**
+     * `WWW-Authenticate: Basic realm="…"` → (isBasic, realm). Servers may send the header more
+     * than once or pack several challenges into one value — a `Basic` challenge is found anywhere
+     * in the list (e.g. `Digest realm=…, Basic realm="x"`), not just when the value leads with it.
+     */
+    fun basicChallenge(headers: List<String>?): Pair<Boolean, String?> {
+        if (headers == null) return false to null
+        for (header in headers) {
+            val challenge = BASIC_CHALLENGE_RE.find(header)
+            if (challenge != null) {
+                return true to REALM_RE.find(challenge.groupValues[1])?.groupValues?.get(1)
+            }
+            if (BASIC_BARE_RE.containsMatchIn(header)) return true to null
+        }
+        return false to null
     }
 
     fun contentTypeCharset(contentType: String?): String? {
@@ -75,6 +86,15 @@ internal object FeedHttpHeaders {
         Regex("""[A-Za-z]{3},\s*(\d{1,2})\s*([A-Za-z]{3})\s*(\d{4})\s*(\d{2}):(\d{2}):(\d{2})\s*GMT""")
 
     private val REALM_RE = Regex("""realm\s*=\s*"([^"]*)"""", RegexOption.IGNORE_CASE)
+
+    /** A `Basic` challenge carrying auth-params anywhere in a challenge list. */
+    private val BASIC_CHALLENGE_RE =
+        Regex(
+            """(?i)(?:^|,)\s*Basic\s+((?:[A-Za-z0-9_-]+\s*=\s*(?:"[^"]*"|[^,\s"]*)\s*,?\s*)+)""",
+        )
+
+    /** A bare `Basic` challenge (no params — permitted though useless), anywhere in the list. */
+    private val BASIC_BARE_RE = Regex("""(?i)(?:^|,)\s*Basic\s*(?:,|$)""")
 
     private val MONTHS =
         listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
@@ -103,52 +123,24 @@ internal object FeedHttpHeaders {
         return (days * 86400L + h * 3600L + min * 60L + s) * 1000L
     }
 
-    /** Location resolution base helpers used by the redirect chain. */
+    /**
+     * RFC 3986 reference resolution for `Location` against the current hop — Ktor's
+     * `URLBuilder.takeFrom` handles absolute, network-path, absolute/relative-path, query-only
+     * and fragment references plus dot-segment removal (03 Request rules). A bare `#…` reference
+     * (the document itself) resolves back to [base] and is reported as unusable: the redirect
+     * chain cannot follow it without re-requesting the same URL.
+     */
     fun resolveLocation(
         base: String,
         location: String,
     ): String? {
         val loc = location.trim()
         if (loc.isEmpty()) return null
-        val schemeEnd = loc.indexOf(':')
-        if (schemeEnd in 1..8 && loc.substring(0, schemeEnd).all { it.isSchemeChar() }) {
-            return loc // absolute
-        }
-        val baseSchemeEnd = base.indexOf("://")
-        if (baseSchemeEnd < 0) return null
-        val authority =
-            base.substring(0, baseSchemeEnd + 3) +
-                base.substring(baseSchemeEnd + 3).substringBefore('/')
-        if (loc.startsWith("//")) return base.substring(0, baseSchemeEnd) + ":" + loc
-        if (loc.startsWith("/")) return authority + normalizePath(loc)
-        val path = base.substringAfter("://").substringAfter('/', "")
-        val dir = path.substringBeforeLast('/', "")
-        val basePath =
-            base.substringBefore("://") + "://" +
-                base.substringAfter("://").substringBefore('/')
-        val joined = if (dir.isEmpty()) "/$loc" else "/$dir/$loc"
-        return basePath + normalizePath(joined)
+        val resolved =
+            runCatching { URLBuilder(base).takeFrom(loc).build().toString() }.getOrNull()
+                ?: return null
+        return resolved.substringBefore('#').takeUnless { it == base }
     }
-
-    /** RFC 3986 §5.2.4 dot-segment removal; a `..` past the root clamps (servers treat it as absent). */
-    private fun normalizePath(path: String): String {
-        if (!path.contains('.')) return path
-        val out = ArrayDeque<String>()
-        val trailingSlash = path.endsWith("/")
-        for (segment in path.split('/')) {
-            when (segment) {
-                "", "." -> Unit
-                ".." -> if (out.isNotEmpty()) out.removeLast()
-                else -> out.addLast(segment)
-            }
-        }
-        if (out.isEmpty()) return "/"
-        var result = "/" + out.joinToString("/")
-        if (trailingSlash) result += "/"
-        return result
-    }
-
-    private fun Char.isSchemeChar(): Boolean = isLetterOrDigit() || this == '+' || this == '-' || this == '.'
 
     /** Header names used across the pipeline. */
     val CACHE_CONTROL = HttpHeaders.CacheControl

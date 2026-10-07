@@ -61,8 +61,9 @@ internal class RefreshControllerImpl(
                 }
             refreshFeedLock.withLock {
                 val now = clock.elapsedRealtime()
-                val last = lastRefreshFeedAt[source] ?: Long.MIN_VALUE
-                if (now - last < REFRESH_FEED_COOLDOWN_MS) return@withLock
+                val last = lastRefreshFeedAt[source]
+                // `in 0 until` keeps a clock step-back (now < last) from suppressing the source.
+                if (last != null && now - last in 0 until REFRESH_FEED_COOLDOWN_MS) return@launch
                 lastRefreshFeedAt[source] = now
             }
             scheduler.enqueueNow(scope, force = true, pagesOnly = false, origin = RefreshOrigin.MANUAL)

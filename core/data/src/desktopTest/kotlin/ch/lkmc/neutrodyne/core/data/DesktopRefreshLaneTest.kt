@@ -181,7 +181,7 @@ class DesktopRefreshLaneTest {
     private fun queue(scope: CoroutineScope): DesktopRefreshScheduler =
         DesktopRefreshScheduler(
             db = db,
-            rebaser = NextRefreshRebaser(db, settings, clock, scope),
+            rebaser = NextRefreshRebaser(db, settings),
             poker = Provider { JobLanePoker { name -> pokes += name } },
             appScope = scope,
         )

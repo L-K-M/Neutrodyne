@@ -88,6 +88,22 @@ abstract class PodcastDao(
     )
     abstract suspend fun rebaseCandidates(): List<RebaseCandidate>
 
+    /**
+     * `NextRefreshRebaser`'s conditional, schedule-only write (03 Periodic tick step 2, adjusted
+     * 2026-10-07): a candidate snapshot can go stale while a refresh or user action commits
+     * fresher fetch state — the write then skips rather than roll `nextRefreshAt` (or any other
+     * column) back to the stale target. Returns the number of rows written.
+     */
+    @Query(
+        "UPDATE podcast SET nextRefreshAt = :nextRefreshAt WHERE id = :id" +
+            " AND COALESCE(lastAttemptAt, -1) <= :sinceAttempt",
+    )
+    abstract suspend fun rebaseNextRefreshAt(
+        id: Long,
+        nextRefreshAt: Long,
+        sinceAttempt: Long,
+    ): Int
+
     /** "Try again" (03 Per-feed states): clears the gone/credentials block and the failure count. */
     @Query(
         "UPDATE podcast SET gone = 0, needsCredentials = 0, failureCount = 0," +

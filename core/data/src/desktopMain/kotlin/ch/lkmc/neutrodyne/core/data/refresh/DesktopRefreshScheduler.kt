@@ -66,7 +66,7 @@ internal class DesktopRefreshScheduler
         }
 
         /** The desktop runs have no deadline, so there is nothing to continue (03 Desktop refresh). */
-        override fun enqueueContinuation() = Unit
+        override suspend fun enqueueContinuation(): Boolean = true
 
         /** Sync-added rows are pending (`nextRefreshAt = now`); the next lane run selects them. */
         override fun requestFirstFetch() {

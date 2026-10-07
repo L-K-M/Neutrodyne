@@ -33,6 +33,11 @@ internal data class IngestContext(
 /** The validator and URL data of one 200 response that parsed (03 IngestContext). */
 internal data class FetchMeta(
     val finalUrl: String,
+    /**
+     * The URL of the first request of the fetch chain — `permanentUrl ?: requestedUrl` is the
+     * subscribe-time identity (03 Subscribe): a temporary redirect's final URL is not.
+     */
+    val requestedUrl: String,
     val permanentUrl: String?,
     val etag: String?,
     val lastModified: String?,
