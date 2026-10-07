@@ -17,6 +17,9 @@ import ch.lkmc.neutrodyne.core.data.ingest.FeedIngestor
 import ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher
 import ch.lkmc.neutrodyne.core.data.refresh.SourceAdapter
 import ch.lkmc.neutrodyne.core.data.ingest.IngestionEventBus
+import ch.lkmc.neutrodyne.core.data.refresh.AdapterResult
+import ch.lkmc.neutrodyne.core.data.refresh.FetchMode
+import ch.lkmc.neutrodyne.core.data.refresh.RssSourceAdapter
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.database.PodcastFetchState
@@ -24,6 +27,7 @@ import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.network.NetErrorClassifier
@@ -38,11 +42,13 @@ import ch.lkmc.neutrodyne.core.network.okhttp.UserAgentInterceptor
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshScheduler
 import ch.lkmc.neutrodyne.core.database.DueFeed
+import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.feeds.html.ShowNotesSanitizer
 import ch.lkmc.neutrodyne.feeds.jvm.html.JsoupShowNotesSanitizer
+import ch.lkmc.neutrodyne.feeds.jvm.parse.XmlPullFeedParser
 import ch.lkmc.neutrodyne.feeds.model.Enclosure
 import ch.lkmc.neutrodyne.feeds.model.FeedFormat
 import ch.lkmc.neutrodyne.feeds.model.ParsedEpisode
@@ -335,6 +341,7 @@ internal suspend fun seedPodcast(
     podcastGuid: String? = null,
     podcastGuidDerived: Boolean = false,
     syncId: String = java.util.UUID.randomUUID().toString(),
+    block: PodcastEntity.() -> PodcastEntity = { this },
 ): Long =
     db.podcastDao().insertPodcast(
         PodcastEntity(
@@ -369,7 +376,7 @@ internal suspend fun seedPodcast(
             needsCredentials = needsCredentials,
             podcastGuid = podcastGuid,
             podcastGuidDerived = podcastGuidDerived,
-        ),
+        ).block(),
     )
 
 internal suspend fun dueFeedOf(
@@ -432,3 +439,98 @@ internal fun fetchState(
         lastFullFetchAt = null,
         lastParseOk = true,
     )
+
+// --- Refresh-engine doubles -----------------------------------------------------------------------
+
+/**
+ * A scripted `SourceAdapter` (03 Source adapters): [result] answers `fetchAndParse` per feed —
+ * `OLDER_PAGE` requests key on `feed.pagingNextUrl`, the rest on `feed.feedUrl`. `afterIngest`
+ * defaults to the RSS behaviour (newIds unchanged) and every call is recorded.
+ */
+internal class StubSourceAdapter(
+    val results: MutableMap<String, AdapterResult> = mutableMapOf(),
+    private val onFetch: suspend (DueFeed, FetchMode) -> AdapterResult? = { _, _ -> null },
+    private val announce: suspend (Long, List<Long>, List<Long>) -> List<Long> = { _, _, newIds -> newIds },
+) : SourceAdapter {
+    override val sourceType: SourceType = SourceType.RSS
+
+    /** `(podcastId, mode)` of every `fetchAndParse`, in call order. */
+    val calls = mutableListOf<Pair<Long, FetchMode>>()
+
+    /** `(podcastId, inserted, newIds)` of every `afterIngest`, in call order. */
+    val afterIngestCalls = mutableListOf<Triple<Long, List<Long>, List<Long>>>()
+
+    override fun hostKey(feed: DueFeed): String =
+        feed.feedUrl.substringAfter("://", feed.feedUrl).substringBefore("/").lowercase()
+
+    override suspend fun fetchAndParse(
+        feed: DueFeed,
+        mode: FetchMode,
+    ): AdapterResult {
+        calls += feed.id to mode
+        onFetch(feed, mode)?.let { return it }
+        val key = if (mode == FetchMode.OLDER_PAGE) feed.pagingNextUrl else feed.feedUrl
+        return results[key] ?: AdapterResult.Failed(
+            FeedErrorKind.UNKNOWN,
+            http = null,
+            retryAfterMs = null,
+            transient = true,
+        )
+    }
+
+    override fun nextRefreshAt(
+        feed: DueFeed,
+        result: AdapterResult,
+        base: Long,
+    ): Long = base
+
+    override suspend fun afterIngest(
+        podcastId: Long,
+        inserted: List<Long>,
+        newIds: List<Long>,
+    ): List<Long> {
+        afterIngestCalls += Triple(podcastId, inserted, newIds)
+        return announce(podcastId, inserted, newIds)
+    }
+}
+
+internal fun stubAdapter(
+    results: MutableMap<String, AdapterResult> = mutableMapOf(),
+    onFetch: suspend (DueFeed, FetchMode) -> AdapterResult? = { _, _ -> null },
+    announce: suspend (Long, List<Long>, List<Long>) -> List<Long> = { _, _, newIds -> newIds },
+) = StubSourceAdapter(results, onFetch, announce)
+
+/** A parsed-document adapter result (03 `AdapterResult.Parsed`). */
+internal fun adapterParsed(
+    feed: ParsedFeed,
+    partial: Boolean = false,
+    meta: FetchMeta = fetchMeta(),
+) = AdapterResult.Parsed(feed = feed, partial = partial, meta = meta)
+
+/** A real `RssSourceAdapter` over the production fetcher stack for the engine end-to-end tests. */
+internal class RssAdapterBundle(
+    val adapter: RssSourceAdapter,
+    val tempFiles: FeedTempFiles,
+    private val fetcher: FetcherBundle,
+) : AutoCloseable by fetcher
+
+internal fun newRssAdapter(
+    root: File,
+    clock: TestClock,
+    network: FakeNetworkMonitor = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE),
+    credentials: CredentialLookup = CredentialLookup.None,
+    io: CoroutineDispatcher = Dispatchers.IO,
+): RssAdapterBundle {
+    val bundle = newFetcher(root, credentials, clock)
+    val adapter =
+        RssSourceAdapter(
+            fetcher = bundle.fetcher,
+            parser = XmlPullFeedParser.discovered(),
+            tempFiles = bundle.tempFiles,
+            fileSystem = FileSystem.SYSTEM,
+            network = network,
+            clock = clock,
+            io = io,
+        )
+    return RssAdapterBundle(adapter, bundle.tempFiles, bundle)
+}
