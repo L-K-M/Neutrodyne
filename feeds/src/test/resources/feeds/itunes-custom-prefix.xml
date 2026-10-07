@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:show="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>Custom Prefix Show</title>
+    <show:author>Katherine Johnson</show:author>
+    <item>
+      <title>Episode one</title>
+      <guid>custom-1</guid>
+      <enclosure url="https://cdn.example.com/c1.mp3" length="1000" type="audio/mpeg"/>
+      <show:duration>12:30</show:duration>
+    </item>
+  </channel>
+</rss>

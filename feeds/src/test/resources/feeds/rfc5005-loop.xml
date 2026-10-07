@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Looping paging links</title>
+    <atom:link rel="next" href="https://example.com/loop/1.xml"/>
+    <atom:link rel="prev-archive" href="https://example.com/loop/1.xml"/>
+    <item><title>Loop episode</title><guid>loop-1</guid>
+      <enclosure url="https://cdn.example.com/lp1.mp3" length="10" type="audio/mpeg"/></item>
+  </channel>
+</rss>
