@@ -210,13 +210,18 @@ jobs:
       # GMD `ci` group (API 26 + 36, debug) — the group task resolves in every
       # module that defines it (:app plus the opted-in device-test modules such
       # as :core:database; 09, Unverified KMP task name).
+      # The step timeout leaves the job time to upload the device results and logcat
+      # when a test hangs; a job-level timeout would cancel the upload too.
       - name: GMD ci group (debug)
+        timeout-minutes: 45
         run: ./gradlew --max-workers=2 ciGroupDebugAndroidTest -Pneutrodyne.testScope=ci -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: failure()
+        if: ${{ !success() }}
         with:
           name: androidTest-results
-          path: "**/build/outputs/androidTest-results/"
+          path: |
+            **/build/outputs/androidTest-results/
+            **/build/reports/androidTests/
 
   # TODO (M0b): `desktop-smoke` (xvfb-run smoke start of the Linux x64 image +
   # check-desktop-image.sh + check-runtime-sources.sh --image) and `server`

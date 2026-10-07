@@ -73,7 +73,9 @@ jobs:
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools > /dev/null
       # Debug leg: every device module's suite on api26/api33/api34/api36 GMDs
       # (09). youtube-smoke narrows it to the YouTube smoke tests on api36.
+      # Step timeout: a hung test still leaves time to report and upload (see ci.yml).
       - name: GMD nightly group (debug)
+        timeout-minutes: 60
         run: |
           if [ "${{ inputs.scope }}" = "youtube-smoke" ]; then
             ./gradlew --max-workers=2 api36DebugAndroidTest \
@@ -89,7 +91,7 @@ jobs:
       # TODO (M6b): release leg — :benchmark's out-of-process release smoke
       # journeys and E10's companions against :app release on api36 (09).
       - name: Report failure
-        if: failure()
+        if: ${{ !success() }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: scripts/ci/report-nightly.sh instrumented-full
@@ -99,10 +101,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: scripts/ci/report-nightly.sh instrumented-full --close
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: failure()
+        if: ${{ !success() }}
         with:
           name: instrumented-full-results
-          path: "**/build/outputs/androidTest-results/"
+          path: |
+            **/build/outputs/androidTest-results/
+            **/build/reports/androidTests/
 
   api37-16k:
     runs-on: ubuntu-24.04
