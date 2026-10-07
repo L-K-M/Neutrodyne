@@ -148,10 +148,11 @@ jobs:
           ram-size: 4096M
           disk-size: 6000M
           emulator-boot-timeout: 1200
+          # android-emulator-runner runs each script line as its own `sh -c`, so a command
+          # must fit on one line (a `\` continuation becomes a literal argument).
           script: |
             test "$(adb shell getconf PAGE_SIZE | tr -d '\r')" = "16384" || { echo "PAGE_SIZE != 16384"; exit 1; }
-            ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly \
-              -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true connectedDebugAndroidTest
+            ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true connectedDebugAndroidTest
       - name: Release smoke on API 37
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
@@ -165,10 +166,7 @@ jobs:
           disk-size: 6000M
           emulator-boot-timeout: 1200
           script: |
-            ./gradlew --max-workers=2 -PtestBuildType=release \
-              -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke \
-              -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
-              :app:connectedReleaseAndroidTest
+            ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true :app:connectedReleaseAndroidTest
             # TODO (M6b): :benchmark's out-of-process release smoke journeys join here.
       - name: Build the release APKs for the alignment check
         run: ./gradlew assembleRelease -Pneutrodyne.abiSplits=true
