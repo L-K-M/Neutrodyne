@@ -8,8 +8,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.espresso.Espresso.pressBack
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import ch.lkmc.neutrodyne.core.navigation.FeedsKey
-import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import com.google.common.truth.Truth.assertThat
 import org.junit.Before
@@ -20,8 +18,9 @@ import org.junit.runner.RunWith
 /**
  * S5's Android legs (01 S5): the shared `NeutrodyneRoot`/`NeutrodyneNavHost` under test-only
  * entries in [SpikeRootActivity]. Covers per-tab `rememberSaveable` state across tab switches, the
- * process-death restore of both tabs' back stacks (`ActivityScenario.recreate()` plus a
- * `StateRestorationTester` round trip of `rememberNavigationState`), the entry-scoped ViewModel
+ * process-death restore of both tabs' back stacks via `ActivityScenario.recreate()` (the
+ * `StateRestorationTester` round trip of `rememberNavigationState` lives in
+ * [NavigationStateRestorationTest]), the entry-scoped ViewModel
  * the host's `rememberViewModelStoreNavEntryDecorator()` provides, the sheet/dialog overlay scenes
  * dismissed by system back, and the 08 back order (`pop()` at a non-Feeds root selects Feeds).
  * Runs on the API 26 and 36 GMDs in CI; no emulator exists locally.

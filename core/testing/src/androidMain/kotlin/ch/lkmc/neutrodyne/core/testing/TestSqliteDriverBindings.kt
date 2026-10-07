@@ -16,6 +16,10 @@ import dev.zacsweers.metro.SingleIn
  * Robolectric's host SQLite, while the bundled driver's Android `.so` files cannot load on the
  * host JVM (01 Test overrides; spike S4, 2026-10-06). Instrumented tests keep `BundledSQLiteDriver`;
  * desktop tests use the bundled driver's host natives.
+ *
+ * `replaces` drops every binding [SqliteDriverBindings] contributes — if that container grows beyond
+ * the driver (callbacks, driver decorators), mirror the additions here so Robolectric graphs keep
+ * matching production.
  */
 @BindingContainer
 @ContributesTo(AppScope::class, replaces = [SqliteDriverBindings::class])

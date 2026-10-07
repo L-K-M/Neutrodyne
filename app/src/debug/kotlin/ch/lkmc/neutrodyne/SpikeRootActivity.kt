@@ -43,6 +43,7 @@ import ch.lkmc.neutrodyne.core.ui.root.RootSlots
 import ch.lkmc.neutrodyne.core.ui.root.RootUiState
 import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
 import kotlinx.coroutines.flow.emptyFlow
+import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -128,16 +129,21 @@ internal class ProbeViewModel : ViewModel()
  * the store on pop, not on hide).
  */
 internal object PodcastVmProbe {
-    private val instances = ConcurrentHashMap<PodcastKey, LinkedHashSet<ProbeViewModel>>()
+    // Per-key sets are synchronized: `register` runs on the main thread today, but the probe is
+    // static and `instancesOf` hands out iteration order to tests — a background registration
+    // must not corrupt a set or race a read.
+    private val instances = ConcurrentHashMap<PodcastKey, MutableSet<ProbeViewModel>>()
 
     fun register(
         key: PodcastKey,
         vm: ProbeViewModel,
     ) {
-        instances.getOrPut(key) { LinkedHashSet() }.add(vm)
+        instances.getOrPut(key) { Collections.synchronizedSet(LinkedHashSet()) }.add(vm)
     }
 
-    fun instancesOf(key: PodcastKey): Set<ProbeViewModel> = instances[key].orEmpty()
+    /** A copy: callers iterate while `register` may still add to the live set. */
+    fun instancesOf(key: PodcastKey): Set<ProbeViewModel> =
+        instances[key]?.let { synchronized(it) { it.toSet() } }.orEmpty()
 
     fun reset() = instances.clear()
 }

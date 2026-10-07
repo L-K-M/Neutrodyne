@@ -29,7 +29,8 @@ import java.util.Locale
  * items through the `core/ui` Compose resources without a test-side activity restart — AppCompat
  * (API < 33) or the framework `LocaleManager` recreates `MainActivity` itself. The generated
  * `locales_config.xml` is also read on device so the merged-resource contents are checked, not
- * just the build-time file. Runs on the API 26 (AppCompat path) and 36 (framework path) GMDs.
+ * just the build-time file. Runs on the API 26 and 36 GMDs; the relabel leg skips below API 33
+ * while only `en-US` ships (the S11 finding in the test body).
  */
 @RunWith(AndroidJUnit4::class)
 class PerAppLanguageTest {
@@ -102,13 +103,16 @@ class PerAppLanguageTest {
     private fun readLocalesConfig(context: Context): List<String> {
         val names = mutableListOf<String>()
         val parser = context.resources.getXml(localeConfigXmlId())
-        while (parser.eventType != XmlPullParser.END_DOCUMENT) {
-            if (parser.eventType == XmlPullParser.START_TAG && parser.name == "locale") {
-                names += parser.getAttributeValue(ANDROID_NS, "name").orEmpty()
+        try {
+            while (parser.eventType != XmlPullParser.END_DOCUMENT) {
+                if (parser.eventType == XmlPullParser.START_TAG && parser.name == "locale") {
+                    names += parser.getAttributeValue(ANDROID_NS, "name").orEmpty()
+                }
+                parser.next()
             }
-            parser.next()
+        } finally {
+            parser.close()
         }
-        parser.close()
         return names
     }
 

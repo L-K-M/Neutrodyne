@@ -24,7 +24,10 @@ class SqliteDriverBindingsTest {
             assertEquals(0L, connection.queryPragmaLong("PRAGMA foreign_keys"))
             // The dialect baseline of all SQL (02): the bundled SQLite is far newer than 3.18.
             val version = connection.queryPragmaText("SELECT sqlite_version()")
-            assertTrue(version.startsWith("3."), "unexpected sqlite version $version")
+            val parts = version.split('.')
+            val major = parts[0].toInt()
+            val minor = parts[1].toInt()
+            assertTrue(major > 3 || (major == 3 && minor >= 18), "unexpected sqlite version $version")
         }
     }
 }

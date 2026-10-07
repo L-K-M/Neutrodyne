@@ -53,13 +53,16 @@ class LocaleConfigTest {
     private fun readLocalesConfig(context: Context): List<String> {
         val names = mutableListOf<String>()
         val parser = context.resources.getXml(localeConfigXmlId())
-        while (parser.eventType != XmlPullParser.END_DOCUMENT) {
-            if (parser.eventType == XmlPullParser.START_TAG && parser.name == "locale") {
-                names += parser.getAttributeValue(ANDROID_NS, "name").orEmpty()
+        try {
+            while (parser.eventType != XmlPullParser.END_DOCUMENT) {
+                if (parser.eventType == XmlPullParser.START_TAG && parser.name == "locale") {
+                    names += parser.getAttributeValue(ANDROID_NS, "name").orEmpty()
+                }
+                parser.next()
             }
-            parser.next()
+        } finally {
+            parser.close()
         }
-        parser.close()
         return names
     }
 

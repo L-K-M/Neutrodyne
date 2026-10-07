@@ -27,11 +27,11 @@ class RoomConventionPlugin : Plugin<Project> {
                 implementation(libs.lib("androidx-room3-testing"))
             }
             // Created only when the module opts into Android host tests (withHostTest, S4 2026-10-06);
-            // the task is `testAndroidHostTest` (09 Unverified note confirmed).
+            // the task is `testAndroidHostTest` (09 Unverified note confirmed). No room3-testing here:
+            // MigrationTestHelper needs merged assets Robolectric cannot provide, so it is GMD-only.
             kotlin.sourceSets.configureEach {
                 if (name == "androidHostTest") {
                     dependencies {
-                        implementation(libs.lib("androidx-room3-testing"))
                         implementation(libs.lib("androidx-sqlite-framework"))
                     }
                 }
