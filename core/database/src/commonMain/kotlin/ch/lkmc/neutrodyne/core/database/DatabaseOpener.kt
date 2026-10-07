@@ -289,10 +289,11 @@ class DatabaseOpener(
     // move propagates (nothing opens over the unmoved file) and a crashed or killed attempt
     // resumes into the same directory on the next launch instead of scattering the files across
     // a fresh stamp — an orphaned sidecar is a piece of the library prune must not destroy.
-    // The caller clears the record once the recovery request itself is resolved.
+    // The caller clears the record once the recovery request itself is resolved. An existing
+    // record is reused, never rewritten: a rewrite truncates first, and a kill in between would
+    // leave it empty and send the next launch to a fresh stamp.
     private fun quarantine() {
-        val stamp = factory.pendingQuarantine ?: clock.now().toString()
-        factory.pendingQuarantine = stamp
+        val stamp = factory.pendingQuarantine ?: clock.now().toString().also { factory.pendingQuarantine = it }
         factory.quarantine(stamp)
     }
 

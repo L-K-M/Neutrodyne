@@ -529,6 +529,34 @@ class DatabaseOpenerTest {
         }
 
     @Test
+    fun aResumedQuarantineNeverRewritesItsPersistedStamp() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+            factory.quarantineMarker = true
+            factory.pendingQuarantine = T0.toString()
+
+            // Rewriting truncates the record first: a kill in between would leave it empty and
+            // send the next launch to a fresh stamp, orphaning what the first attempt moved.
+            val stampWrites = mutableListOf<String?>()
+            val recording =
+                object : DatabaseFactory by factory {
+                    override var pendingQuarantine: String?
+                        get() = factory.pendingQuarantine
+                        set(value) {
+                            stampWrites += value
+                            factory.pendingQuarantine = value
+                        }
+                }
+            val subject = opener(f = recording, clock = TestClock(nowMs = T0 + 60_000))
+            val result = subject.awaitOpen()
+
+            assertEquals(RecoveryCause.CORRUPT, result.recovered)
+            assertEquals(listOf<String?>(null), stampWrites, "only the final clear may write the record")
+            subject.requireDatabase().close()
+        }
+
+    @Test
     fun aPendingQuarantineWithoutAMarkerStillResumes() =
         runTest {
             dirs.ensureCreated()
