@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.feeds.html.ShowNotesStyles.NONE
 import ch.lkmc.neutrodyne.feeds.html.ShowNotesStyles.UNDERLINE
 import ch.lkmc.neutrodyne.feeds.html.TimestampLinkifier
 import org.jsoup.Jsoup
+import org.jsoup.internal.StringUtil
 import org.jsoup.nodes.Element
 import org.jsoup.nodes.Entities
 import org.jsoup.nodes.Node
@@ -49,9 +50,12 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
                 .removeProtocols("a", "href", "ftp")
                 .removeEnforcedAttribute("a", "rel")
         // URL-bearing attributes are bounded before the clean: jsoup resolves each of them against
-        // baseUri while checking protocols, so a giant relative value would do its work — and grow
-        // to base + value — before any post-clean bound could drop it (03's URL-length bound).
-        val parsed = Jsoup.parseBodyFragment(html, baseUri)
+        // the element's base while checking protocols, so a giant relative value would do its work —
+        // and grow to base + value — before any post-clean bound could drop it (03's URL-length
+        // bound). The parse runs with an empty base for the same reason: the tree builder resolves
+        // `<base href>` against the parse base during parse (`maybeSetBaseUri` → JDK URL
+        // normalisation), which is quadratic on a pathological value — the bound must land first.
+        val parsed = Jsoup.parseBodyFragment(html, "")
         for (element in parsed.select(URL_ATTR_SELECTOR)) {
             val overlong =
                 element
@@ -60,6 +64,7 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
                     .filter { it.key in URL_ATTRIBUTES && it.value.length > MAX_URL_CHARS }
             for (attribute in overlong) element.removeAttr(attribute.key)
         }
+        attachBaseUri(parsed, baseUri)
         val cleaned = Cleaner(safelist).clean(parsed)
 
         // Step 3: tracking images and 1×1 spacers are neutralised, not removed — removing each
@@ -96,6 +101,32 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
         // A high surrogate at the cut pulls it back one: snippets never split a surrogate pair.
         val end = if (collapsed[lastSpace - 1].isHighSurrogate()) lastSpace - 1 else lastSpace
         return cut.substring(0, end).trimEnd() + "…"
+    }
+
+    /**
+     * Replays what jsoup's `maybeSetBaseUri` does while parsing, after the URL bound has run: the
+     * first `<base href>` whose value still resolves re-roots the elements that follow it (and the
+     * document), everything else takes the caller's [baseUri]. `setBaseUri` writes jsoup's hidden
+     * `baseUri` attribute, so per-element `absUrl` resolution — the cleaner's protocol check —
+     * behaves exactly as if the document had been parsed with it.
+     */
+    private fun attachBaseUri(
+        parsed: org.jsoup.nodes.Document,
+        baseUri: String,
+    ) {
+        var current = baseUri
+        var baseSeen = false
+        for (element in parsed.allElements) {
+            element.setBaseUri(current)
+            if (!baseSeen && element.tagName() == "base" && element.hasAttr("href")) {
+                val resolved = StringUtil.resolve(current, element.attr("href"))
+                if (resolved.isNotEmpty()) {
+                    current = resolved
+                    baseSeen = true
+                }
+            }
+        }
+        parsed.setBaseUri(current)
     }
 
     /** A real tag open, close, comment or processing instruction — a bare `<` in text is none. */
