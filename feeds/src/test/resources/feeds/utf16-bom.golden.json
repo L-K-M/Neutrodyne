@@ -1,0 +1,25 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "feedOrder": 0,
+      "guid": "u16-1",
+      "title": "Sechzehn Bits",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/u1.mp3",
+          "type": "audio/mpeg",
+          "length": 10,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/u1.mp3",
+        "type": "audio/mpeg",
+        "length": 10,
+        "effectiveType": "audio/mpeg"
+      }
+    }
+  ],
+  "title": "UTF-16 LE BOM Show"
+}

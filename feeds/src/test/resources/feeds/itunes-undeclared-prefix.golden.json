@@ -1,0 +1,38 @@
+{
+  "author": "Ada Lovelace",
+  "descriptionHtml": "Synthetic feed: itunes prefix used without its xmlns declaration.",
+  "explicit": false,
+  "format": "RSS2",
+  "items": [
+    {
+      "feedOrder": 0,
+      "guid": "undeclared-1",
+      "title": "Episode with undeclared itunes tags",
+      "pubDate": 1791273600000,
+      "rawPubDate": "Tue, 06 Oct 2026 08:00:00 +0000",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/e1.mp3",
+          "type": "audio/mpeg",
+          "length": 48000000,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/e1.mp3",
+        "type": "audio/mpeg",
+        "length": 48000000,
+        "effectiveType": "audio/mpeg"
+      },
+      "durationMs": 2245000
+    }
+  ],
+  "link": "https://example.com/show",
+  "title": "Synthetic Undeclared Show",
+  "warnings": [
+    {
+      "code": "UNDECLARED_PREFIX",
+      "detail": "itunes"
+    }
+  ]
+}

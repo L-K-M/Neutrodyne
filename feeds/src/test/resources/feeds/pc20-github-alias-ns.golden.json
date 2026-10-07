@@ -1,0 +1,67 @@
+{
+  "artwork": [
+    {
+      "url": "https://cdn.example.com/alias-600.jpg",
+      "source": "PODCAST_IMAGES",
+      "width": 600
+    }
+  ],
+  "format": "RSS2",
+  "items": [
+    {
+      "feedOrder": 0,
+      "guid": "alias-1",
+      "title": "Alias namespace episode",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/a1.m4a",
+          "type": "audio/x-m4a",
+          "length": 2,
+          "effectiveType": "audio/mp4"
+        },
+        {
+          "url": "https://cdn.example.com/a1.m3u8",
+          "type": "application.x-mpegURL",
+          "effectiveType": "application/x-mpegurl"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/a1.m4a",
+        "type": "audio/x-m4a",
+        "length": 2,
+        "effectiveType": "audio/mp4"
+      },
+      "alternateEnclosures": [
+        {
+          "type": "audio/mpeg",
+          "length": 96000000,
+          "bitrate": 128,
+          "isDefault": true,
+          "sources": [
+            {
+              "uri": "https://cdn.example.com/a1.mp3",
+              "contentType": "audio/mpeg"
+            }
+          ],
+          "integrity": [
+            {
+              "type": "sri",
+              "value": "sha384-AbCdEf"
+            }
+          ]
+        }
+      ],
+      "chaptersUrl": "https://example.com/ch1.json",
+      "chaptersType": "application/json",
+      "transcripts": [
+        {
+          "url": "https://example.com/t1.srt",
+          "type": "application/srt",
+          "language": "en"
+        }
+      ]
+    }
+  ],
+  "podcastGuid": "e1a2e8dc-fb0e-5b8e-a092-8f7c1c1e1234",
+  "title": "GitHub Alias Namespace (reference-feed quirks)"
+}

@@ -1,0 +1,25 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "feedOrder": 0,
+      "guid": "latin-1",
+      "title": "Français : accentué",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/l1.mp3",
+          "type": "audio/mpeg",
+          "length": 10,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/l1.mp3",
+        "type": "audio/mpeg",
+        "length": 10,
+        "effectiveType": "audio/mpeg"
+      }
+    }
+  ],
+  "title": "Latin eins: Öl und Käse"
+}

@@ -1,0 +1,28 @@
+{
+  "descriptionHtml": "Curly quotes and entities — kept as text.",
+  "format": "RSS2",
+  "items": [
+    {
+      "feedOrder": 0,
+      "guid": "nbsp-1",
+      "title": "Fancy title",
+      "descriptionHtml": "Non'breaking summary &amp; text.",
+      "descriptionIsHtml": true,
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/n1.mp3",
+          "type": "audio/mpeg",
+          "length": 10,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/n1.mp3",
+        "type": "audio/mpeg",
+        "length": 10,
+        "effectiveType": "audio/mpeg"
+      }
+    }
+  ],
+  "title": "Entity Outside CDATA"
+}

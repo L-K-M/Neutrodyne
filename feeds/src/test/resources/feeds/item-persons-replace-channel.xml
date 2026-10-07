@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:podcast="https://podcastindex.org/namespace/1.0">
+  <channel>
+    <title>Persons Replacement</title>
+    <podcast:person podcast:role="host" href="https://example.com/people/host">Channel Host</podcast:person>
+    <podcast:person group="narrator">Channel Narrator</podcast:person>
+    <item>
+      <title>Episode with its own cast</title><guid>persons-1</guid>
+      <enclosure url="https://cdn.example.com/pr1.mp3" length="10" type="audio/mpeg"/>
+      <podcast:person role="guest">Item Guest</podcast:person>
+    </item>
+    <item>
+      <title>Episode without persons inherits the channel list</title><guid>persons-2</guid>
+      <enclosure url="https://cdn.example.com/pr2.mp3" length="10" type="audio/mpeg"/>
+    </item>
+  </channel>
+</rss>

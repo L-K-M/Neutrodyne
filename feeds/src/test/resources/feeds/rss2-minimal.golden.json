@@ -1,0 +1,26 @@
+{
+  "descriptionHtml": "The smallest valid synthetic feed.",
+  "format": "RSS2",
+  "items": [
+    {
+      "feedOrder": 0,
+      "title": "Only episode",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/min1.mp3",
+          "type": "audio/mpeg",
+          "length": 1000,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/min1.mp3",
+        "type": "audio/mpeg",
+        "length": 1000,
+        "effectiveType": "audio/mpeg"
+      }
+    }
+  ],
+  "link": "https://example.com/minimal",
+  "title": "Minimal RSS 2.0"
+}

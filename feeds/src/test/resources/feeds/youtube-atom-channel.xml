@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns="http://www.w3.org/2005/Atom"
+      xmlns:media="http://search.yahoo.com/mrss/">
+  <link rel="self" href="https://www.youtube.com/feeds/videos.xml?channel_id=UCsynthetic0001122334"/>
+  <id>yt:channel:UCsynthetic0001122334</id>
+  <yt:channelId>UCsynthetic0001122334</yt:channelId>
+  <title>Synthetic Channel</title>
+  <link rel="alternate" href="https://www.youtube.com/channel/UCsynthetic0001122334"/>
+  <author>
+    <name>Synthetic Channel</name>
+    <uri>https://www.youtube.com/channel/UCsynthetic0001122334</uri>
+  </author>
+  <published>2019-03-04T10:00:00+00:00</published>
+  <entry>
+    <id>yt:video:syntheticA1</id>
+    <yt:videoId>syntheticA1</yt:videoId>
+    <title>First synthetic upload</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=syntheticA1"/>
+    <author><name>Synthetic Channel</name></author>
+    <published>2026-09-28T15:00:00+00:00</published>
+    <updated>2026-09-28T15:30:00+00:00</updated>
+    <media:group>
+      <media:title>First synthetic upload</media:title>
+      <media:content url="https://www.youtube.com/v/syntheticA1?version=3" type="application/x-shockwave-flash" width="640" height="390"/>
+      <media:thumbnail url="https://i.synthetic.example/vi/syntheticA1/hqdefault.jpg" width="480" height="360"/>
+      <media:description>Plain text description of the first synthetic upload.</media:description>
+      <media:community><media:starRating count="1234" average="4.9"/></media:community>
+    </media:group>
+  </entry>
+  <entry>
+    <id>yt:video:syntheticB2</id>
+    <yt:videoId>syntheticB2</yt:videoId>
+    <title>Second synthetic upload</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=syntheticB2"/>
+    <published>2026-10-02T08:00:00+00:00</published>
+    <updated>2026-10-02T08:00:00+00:00</updated>
+    <media:group>
+      <media:title>Second synthetic upload</media:title>
+      <media:thumbnail url="https://i.synthetic.example/vi/syntheticB2/hqdefault.jpg" width="480" height="360"/>
+      <media:description>Second plain description.</media:description>
+    </media:group>
+  </entry>
+</feed>

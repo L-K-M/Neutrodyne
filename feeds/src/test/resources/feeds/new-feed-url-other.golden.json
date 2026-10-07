@@ -1,0 +1,27 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "feedOrder": 0,
+      "guid": "nfo-1",
+      "title": "Episode from the old home",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/no1.mp3",
+          "type": "audio/mpeg",
+          "length": 10,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/no1.mp3",
+        "type": "audio/mpeg",
+        "length": 10,
+        "effectiveType": "audio/mpeg"
+      }
+    }
+  ],
+  "link": "https://example.com/old-home",
+  "newFeedUrl": "https://feeds.newhost.example/moving-show.xml",
+  "title": "Moving Show"
+}

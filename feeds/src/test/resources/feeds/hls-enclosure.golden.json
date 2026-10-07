@@ -1,0 +1,23 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "feedOrder": 0,
+      "guid": "hls-1",
+      "title": "Stream only",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/s1/index.m3u8",
+          "type": "application/vnd.apple.mpegurl",
+          "effectiveType": "application/x-mpegurl"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/s1/index.m3u8",
+        "type": "application/vnd.apple.mpegurl",
+        "effectiveType": "application/x-mpegurl"
+      }
+    }
+  ],
+  "title": "HLS Enclosure"
+}

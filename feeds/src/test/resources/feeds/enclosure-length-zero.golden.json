@@ -1,0 +1,57 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "feedOrder": 0,
+      "guid": "len0-1",
+      "title": "Zero length",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/z1.mp3",
+          "type": "audio/mpeg",
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/z1.mp3",
+        "type": "audio/mpeg",
+        "effectiveType": "audio/mpeg"
+      }
+    },
+    {
+      "feedOrder": 1,
+      "guid": "len0-2",
+      "title": "Negative length",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/z2.mp3",
+          "type": "audio/mpeg",
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/z2.mp3",
+        "type": "audio/mpeg",
+        "effectiveType": "audio/mpeg"
+      }
+    },
+    {
+      "feedOrder": 2,
+      "guid": "len0-3",
+      "title": "Garbage length",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/z3.mp3",
+          "type": "audio/mpeg",
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/z3.mp3",
+        "type": "audio/mpeg",
+        "effectiveType": "audio/mpeg"
+      }
+    }
+  ],
+  "title": "Enclosure Length Zero"
+}

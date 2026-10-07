@@ -1,0 +1,33 @@
+{
+  "artwork": [
+    {
+      "url": "https://cdn.example.com/cover-300.jpg",
+      "source": "MEDIA_THUMBNAIL",
+      "width": 300
+    }
+  ],
+  "format": "RSS2",
+  "items": [
+    {
+      "feedOrder": 0,
+      "guid": "media-1",
+      "title": "Media item",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/m1.mp4",
+          "type": "video/mp4",
+          "length": 4200000,
+          "effectiveType": "video/mp4"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/m1.mp4",
+        "type": "video/mp4",
+        "length": 4200000,
+        "effectiveType": "video/mp4"
+      },
+      "durationMs": 185000
+    }
+  ],
+  "title": "Media RSS No Trailing Slash"
+}

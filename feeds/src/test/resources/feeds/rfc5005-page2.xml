@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:fh="http://purl.org/syndication/history/1.0">
+  <channel>
+    <title>Archived Show, page 2</title>
+    <fh:archive/>
+    <atom:link rel="self" href="https://example.com/archived/2.xml"/>
+    <atom:link rel="next" href="https://example.com/archived/1.xml"/>
+    <atom:link rel="prev-archive" href="https://example.com/archived/3.xml"/>
+    <item><title>Page two episode</title><guid>rfc-2-1</guid>
+      <enclosure url="https://cdn.example.com/r2.mp3" length="10" type="audio/mpeg"/></item>
+  </channel>
+</rss>

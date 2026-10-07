@@ -1,0 +1,156 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "feedOrder": 0,
+      "guid": "du1",
+      "title": "Hours minutes seconds",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/du1.mp3",
+          "type": "audio/mpeg",
+          "length": 10,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/du1.mp3",
+        "type": "audio/mpeg",
+        "length": 10,
+        "effectiveType": "audio/mpeg"
+      },
+      "durationMs": 3177000
+    },
+    {
+      "feedOrder": 1,
+      "guid": "du2",
+      "title": "Minutes seconds",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/du2.mp3",
+          "type": "audio/mpeg",
+          "length": 10,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/du2.mp3",
+        "type": "audio/mpeg",
+        "length": 10,
+        "effectiveType": "audio/mpeg"
+      },
+      "durationMs": 4512000
+    },
+    {
+      "feedOrder": 2,
+      "guid": "du3",
+      "title": "Seconds",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/du3.mp3",
+          "type": "audio/mpeg",
+          "length": 10,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/du3.mp3",
+        "type": "audio/mpeg",
+        "length": 10,
+        "effectiveType": "audio/mpeg"
+      },
+      "durationMs": 960000
+    },
+    {
+      "feedOrder": 3,
+      "guid": "du4",
+      "title": "Fraction",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/du4.mp3",
+          "type": "audio/mpeg",
+          "length": 10,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/du4.mp3",
+        "type": "audio/mpeg",
+        "length": 10,
+        "effectiveType": "audio/mpeg"
+      },
+      "durationMs": 3723500
+    },
+    {
+      "feedOrder": 4,
+      "guid": "du5",
+      "title": "Empty",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/du5.mp3",
+          "type": "audio/mpeg",
+          "length": 10,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/du5.mp3",
+        "type": "audio/mpeg",
+        "length": 10,
+        "effectiveType": "audio/mpeg"
+      }
+    },
+    {
+      "feedOrder": 5,
+      "guid": "du6",
+      "title": "Over 48 hours",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/du6.mp3",
+          "type": "audio/mpeg",
+          "length": 10,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/du6.mp3",
+        "type": "audio/mpeg",
+        "length": 10,
+        "effectiveType": "audio/mpeg"
+      }
+    },
+    {
+      "feedOrder": 6,
+      "guid": "du7",
+      "title": "Garbage",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/du7.mp3",
+          "type": "audio/mpeg",
+          "length": 10,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/du7.mp3",
+        "type": "audio/mpeg",
+        "length": 10,
+        "effectiveType": "audio/mpeg"
+      }
+    }
+  ],
+  "title": "Duration Variants",
+  "warnings": [
+    {
+      "code": "BAD_DURATION"
+    },
+    {
+      "code": "BAD_DURATION",
+      "detail": "52:00:00"
+    },
+    {
+      "code": "BAD_DURATION",
+      "detail": "about an hour"
+    }
+  ]
+}

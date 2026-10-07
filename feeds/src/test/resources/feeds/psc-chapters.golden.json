@@ -1,0 +1,47 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "feedOrder": 0,
+      "guid": "psc-1",
+      "title": "Chaptered episode",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/pc1.mp3",
+          "type": "audio/mpeg",
+          "length": 10,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/pc1.mp3",
+        "type": "audio/mpeg",
+        "length": 10,
+        "effectiveType": "audio/mpeg"
+      },
+      "durationMs": 3723500,
+      "inlineChapters": [
+        {
+          "startMs": 0,
+          "title": "Intro"
+        },
+        {
+          "startMs": 42000,
+          "title": "Topic one",
+          "href": "https://example.com/topic/1"
+        },
+        {
+          "startMs": 1875250,
+          "title": "Topic two",
+          "href": "https://example.com/topic/2",
+          "image": "https://cdn.example.com/ch2.jpg"
+        },
+        {
+          "startMs": 3700000,
+          "title": "Outro"
+        }
+      ]
+    }
+  ],
+  "title": "Podlove Simple Chapters"
+}

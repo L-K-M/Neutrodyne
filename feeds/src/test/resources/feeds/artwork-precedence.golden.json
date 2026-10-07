@@ -1,0 +1,92 @@
+{
+  "artwork": [
+    {
+      "url": "https://cdn.example.com/cover-1400.jpg",
+      "source": "ITUNES_IMAGE"
+    },
+    {
+      "url": "https://cdn.example.com/cover-3000.jpg",
+      "source": "PODCAST_IMAGE",
+      "width": 3000,
+      "height": 3000
+    },
+    {
+      "url": "https://cdn.example.com/legacy-1400.jpg",
+      "source": "PODCAST_IMAGES",
+      "width": 1400
+    },
+    {
+      "url": "https://cdn.example.com/thumb-300.jpg",
+      "source": "MEDIA_THUMBNAIL",
+      "width": 300
+    },
+    {
+      "url": "https://cdn.example.com/rss-image-144.png",
+      "source": "RSS_IMAGE"
+    },
+    {
+      "url": "https://cdn.example.com/gp-500.jpg",
+      "source": "GOOGLEPLAY_IMAGE"
+    }
+  ],
+  "bannerUrl": "https://cdn.example.com/banner-3200.jpg",
+  "format": "RSS2",
+  "items": [
+    {
+      "feedOrder": 0,
+      "guid": "art-1",
+      "title": "Episode art",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/ar1.mp3",
+          "type": "audio/mpeg",
+          "length": 10,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/ar1.mp3",
+        "type": "audio/mpeg",
+        "length": 10,
+        "effectiveType": "audio/mpeg"
+      },
+      "artwork": [
+        {
+          "url": "https://cdn.example.com/ep-art.jpg",
+          "source": "ITUNES_IMAGE"
+        },
+        {
+          "url": "https://cdn.example.com/ep-thumb.jpg",
+          "source": "MEDIA_THUMBNAIL",
+          "width": 300
+        }
+      ]
+    },
+    {
+      "feedOrder": 1,
+      "guid": "art-2",
+      "title": "Text-only itunes:image quirk",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/ar2.mp3",
+          "type": "audio/mpeg",
+          "length": 10,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/ar2.mp3",
+        "type": "audio/mpeg",
+        "length": 10,
+        "effectiveType": "audio/mpeg"
+      },
+      "artwork": [
+        {
+          "url": "https://cdn.example.com/ep-art-as-text.jpg",
+          "source": "ITUNES_IMAGE"
+        }
+      ]
+    }
+  ],
+  "title": "Artwork Precedence"
+}

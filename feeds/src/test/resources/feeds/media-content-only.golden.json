@@ -1,0 +1,37 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "feedOrder": 0,
+      "guid": "mco-1",
+      "title": "Only media:content carries the media",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/x1.mp3",
+          "type": "audio/mpeg",
+          "length": 42000000,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/x1.mp3",
+        "type": "audio/mpeg",
+        "length": 42000000,
+        "effectiveType": "audio/mpeg"
+      },
+      "durationMs": 2725000
+    },
+    {
+      "feedOrder": 1,
+      "guid": "mco-2",
+      "title": "medium attribute variant",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/x2",
+          "length": 42000000
+        }
+      ]
+    }
+  ],
+  "title": "Media Content Only"
+}

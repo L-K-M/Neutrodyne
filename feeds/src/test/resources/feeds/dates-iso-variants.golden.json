@@ -1,0 +1,137 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "feedOrder": 0,
+      "guid": "i1",
+      "title": "With offset",
+      "pubDate": 1791023696000,
+      "rawPubDate": "2026-10-03T12:34:56+02:00",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/di1.mp3",
+          "type": "audio/mpeg",
+          "length": 10,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/di1.mp3",
+        "type": "audio/mpeg",
+        "length": 10,
+        "effectiveType": "audio/mpeg"
+      }
+    },
+    {
+      "feedOrder": 1,
+      "guid": "i2",
+      "title": "No zone",
+      "pubDate": 1791030896000,
+      "rawPubDate": "2026-10-03T12:34:56",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/di2.mp3",
+          "type": "audio/mpeg",
+          "length": 10,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/di2.mp3",
+        "type": "audio/mpeg",
+        "length": 10,
+        "effectiveType": "audio/mpeg"
+      }
+    },
+    {
+      "feedOrder": 2,
+      "guid": "i3",
+      "title": "Date only",
+      "pubDate": 1790985600000,
+      "rawPubDate": "2026-10-03",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/di3.mp3",
+          "type": "audio/mpeg",
+          "length": 10,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/di3.mp3",
+        "type": "audio/mpeg",
+        "length": 10,
+        "effectiveType": "audio/mpeg"
+      }
+    },
+    {
+      "feedOrder": 3,
+      "guid": "i4",
+      "title": "Space separator",
+      "pubDate": 1791030896000,
+      "rawPubDate": "2026-10-03 12:34:56",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/di4.mp3",
+          "type": "audio/mpeg",
+          "length": 10,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/di4.mp3",
+        "type": "audio/mpeg",
+        "length": 10,
+        "effectiveType": "audio/mpeg"
+      }
+    },
+    {
+      "feedOrder": 4,
+      "guid": "i5",
+      "title": "Garbage",
+      "rawPubDate": "sometime next week, probably",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/di5.mp3",
+          "type": "audio/mpeg",
+          "length": 10,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/di5.mp3",
+        "type": "audio/mpeg",
+        "length": 10,
+        "effectiveType": "audio/mpeg"
+      }
+    },
+    {
+      "feedOrder": 5,
+      "guid": "i6",
+      "title": "Offset without colon",
+      "pubDate": 1791023696000,
+      "rawPubDate": "2026-10-03T12:34:56+0200",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/di6.mp3",
+          "type": "audio/mpeg",
+          "length": 10,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/di6.mp3",
+        "type": "audio/mpeg",
+        "length": 10,
+        "effectiveType": "audio/mpeg"
+      }
+    }
+  ],
+  "title": "ISO Variants",
+  "warnings": [
+    {
+      "code": "UNKNOWN_DATE",
+      "detail": "sometime next week, probably"
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "feedOrder": 0,
+      "guid": "multi-1",
+      "title": "Video first, audio second",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/m1.mp4",
+          "type": "video/mp4",
+          "length": 99000000,
+          "effectiveType": "video/mp4"
+        },
+        {
+          "url": "https://cdn.example.com/m1.mp3",
+          "type": "audio/mpeg",
+          "length": 48000000,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/m1.mp3",
+        "type": "audio/mpeg",
+        "length": 48000000,
+        "effectiveType": "audio/mpeg"
+      }
+    },
+    {
+      "feedOrder": 1,
+      "guid": "multi-2",
+      "title": "Audio and pdf",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/m2.mp3",
+          "type": "audio/mpeg",
+          "length": 48000000,
+          "effectiveType": "audio/mpeg"
+        },
+        {
+          "url": "https://cdn.example.com/m2.pdf",
+          "type": "application/pdf",
+          "length": 120000,
+          "effectiveType": "application/pdf"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/m2.mp3",
+        "type": "audio/mpeg",
+        "length": 48000000,
+        "effectiveType": "audio/mpeg"
+      }
+    }
+  ],
+  "title": "Multiple Enclosures Audio Video"
+}

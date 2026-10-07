@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:podcast="https://podcastindex.org/namespace/1.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>Podcasting 2.0 Canonical</title>
+    <podcast:guid>AdA1E7C6-9F4E-5E8A-9E9B-2C1B5E6F7D8E</podcast:guid>
+    <podcast:locked>yes</podcast:locked>
+    <podcast:medium>podcast</podcast:medium>
+    <podcast:funding url="https://example.com/support">Support the show</podcast:funding>
+    <item>
+      <title>P2.0 episode</title>
+      <guid>p20-1</guid>
+      <enclosure url="https://cdn.example.com/p1.mp3" length="1" type="audio/mpeg"/>
+      <podcast:transcript url="https://example.com/t1.srt" type="application/srt" language="en"/>
+      <podcast:chapters url="https://example.com/ch1.json" type="application/json+chapters"/>
+    </item>
+  </channel>
+</rss>

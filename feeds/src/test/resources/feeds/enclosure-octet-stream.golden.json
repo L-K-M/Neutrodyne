@@ -1,0 +1,38 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "feedOrder": 0,
+      "guid": "oct-1",
+      "title": "Generic type, known extension",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/o1.m4a?sig=abc",
+          "type": "application/octet-stream",
+          "length": 1000,
+          "effectiveType": "audio/mp4"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/o1.m4a?sig=abc",
+        "type": "application/octet-stream",
+        "length": 1000,
+        "effectiveType": "audio/mp4"
+      }
+    },
+    {
+      "feedOrder": 1,
+      "guid": "oct-2",
+      "title": "Generic type, unknown extension",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/o2.bin",
+          "type": "application/octet-stream",
+          "length": 1000,
+          "effectiveType": "application/octet-stream"
+        }
+      ]
+    }
+  ],
+  "title": "Enclosure Octet Stream"
+}

@@ -1,0 +1,26 @@
+{
+  "format": "ATOM",
+  "items": [
+    {
+      "feedOrder": 0,
+      "guid": "atom-enclosure-1",
+      "title": "Entry with an enclosure link",
+      "link": "https://example.com/entries/1",
+      "enclosures": [
+        {
+          "url": "https://cdn.example.com/ae1.mp3",
+          "type": "audio/mpeg",
+          "length": 42000000,
+          "effectiveType": "audio/mpeg"
+        }
+      ],
+      "primaryEnclosure": {
+        "url": "https://cdn.example.com/ae1.mp3",
+        "type": "audio/mpeg",
+        "length": 42000000,
+        "effectiveType": "audio/mpeg"
+      }
+    }
+  ],
+  "title": "Atom Link Enclosure"
+}
