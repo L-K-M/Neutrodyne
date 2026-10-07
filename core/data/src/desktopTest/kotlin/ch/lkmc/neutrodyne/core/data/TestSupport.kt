@@ -39,9 +39,15 @@ import ch.lkmc.neutrodyne.core.network.okhttp.JvmNetErrors
 import ch.lkmc.neutrodyne.core.network.okhttp.LocalNetworkGuard
 import ch.lkmc.neutrodyne.core.network.okhttp.NetworkClients
 import ch.lkmc.neutrodyne.core.network.okhttp.UserAgentInterceptor
+import ch.lkmc.neutrodyne.core.data.add.AddPodcastResolverImpl
+import ch.lkmc.neutrodyne.core.data.add.PreviewCache
+import ch.lkmc.neutrodyne.core.data.add.SubscribeUseCaseImpl
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshScheduler
+import ch.lkmc.neutrodyne.core.data.repo.PodcastRepositoryImpl
 import ch.lkmc.neutrodyne.core.database.DueFeed
+import ch.lkmc.neutrodyne.core.domain.OrderKeys
+import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -534,3 +540,83 @@ internal fun newRssAdapter(
         )
     return RssAdapterBundle(adapter, bundle.tempFiles, bundle)
 }
+
+// --- Add-podcast builders -----------------------------------------------------------------------
+
+/** A real `AddPodcastResolverImpl` over the production fetch/parse stack plus its preview cache. */
+internal class ResolverBundle(
+    val resolver: AddPodcastResolverImpl,
+    val cache: PreviewCache,
+    val tempFiles: FeedTempFiles,
+    private val fetcher: FetcherBundle,
+) : AutoCloseable by fetcher
+
+internal fun newResolver(
+    root: File,
+    db: NeutrodyneDatabase,
+    clock: TestClock,
+    credentials: CredentialLookup = CredentialLookup.None,
+    io: CoroutineDispatcher = Dispatchers.IO,
+): ResolverBundle {
+    val bundle = newFetcher(root, credentials, clock)
+    val cache = PreviewCache(clock)
+    val resolver =
+        AddPodcastResolverImpl(
+            fetcher = bundle.fetcher,
+            parser = XmlPullFeedParser.discovered(),
+            sanitizer = JsoupShowNotesSanitizer(),
+            tempFiles = bundle.tempFiles,
+            fileSystem = FileSystem.SYSTEM,
+            cache = cache,
+            db = db,
+            io = io,
+        )
+    return ResolverBundle(resolver, cache, bundle.tempFiles, bundle)
+}
+
+/** The subscribe transaction over real collaborators; [eventBus] stays reachable for collects. */
+internal class SubscribeBundle(
+    val useCase: SubscribeUseCaseImpl,
+    val eventBus: IngestionEventBus,
+)
+
+internal fun newSubscribe(
+    db: NeutrodyneDatabase,
+    cache: PreviewCache,
+    resolver: AddPodcastResolverImpl,
+    scheduler: RefreshScheduler,
+    settings: SettingsRepository,
+    clock: TestClock,
+    eventBus: IngestionEventBus = IngestionEventBus(),
+    orderKeys: OrderKeys = OrderKeys { last -> if (last == null) "a" else "$last~" },
+): SubscribeBundle =
+    SubscribeBundle(
+        SubscribeUseCaseImpl(
+            db = db,
+            cache = cache,
+            resolver = resolver,
+            ingestor = newIngestor(db, clock, settings),
+            eventBus = eventBus,
+            scheduler = scheduler,
+            settings = settings,
+            orderKeys = orderKeys,
+            clock = clock,
+        ),
+        eventBus,
+    )
+
+/** `UnsubscribeUseCase` over the real `PodcastRepositoryImpl` (and a real `FeedRefresher`). */
+internal fun newUnsubscribe(
+    db: NeutrodyneDatabase,
+    scheduler: RefreshScheduler,
+    clock: TestClock,
+): UnsubscribeUseCase =
+    UnsubscribeUseCase(
+        PodcastRepositoryImpl(
+            db = db,
+            refresher = newRefresher(db, emptyMap(), clock),
+            scheduler = scheduler,
+            sanitizer = JsoupShowNotesSanitizer(),
+            clock = clock,
+        ),
+    )
