@@ -9,14 +9,6 @@ import androidx.sqlite.driver.AndroidSQLiteDriver
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import kotlin.test.assertNotNull
-import kotlin.test.assertNull
-import kotlin.test.assertTrue
-import kotlinx.coroutines.test.runTest
-import org.junit.Test
-import org.junit.runner.RunWith
 import ch.lkmc.neutrodyne.core.model.AliasReason
 import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.OwnerType
@@ -28,6 +20,14 @@ import ch.lkmc.neutrodyne.core.testing.database.groupEntity
 import ch.lkmc.neutrodyne.core.testing.database.memberEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.core.testing.database.queueEntryEntity
+import kotlinx.coroutines.test.runTest
+import org.junit.Test
+import org.junit.runner.RunWith
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * The GMD half of `SchemaSmokeTest` and `UnsubscribeCascadeTest` (02 Testing): the framework and
@@ -36,60 +36,65 @@ import ch.lkmc.neutrodyne.core.testing.database.queueEntryEntity
  */
 @RunWith(AndroidJUnit4::class)
 class NeutrodyneDatabaseDeviceTest {
-
     private val context
         get() = InstrumentationRegistry.getInstrumentation().targetContext
 
     @Test
-    fun opensAndReadsEveryDaoOnTheFrameworkDriver() = runTest {
-        smoke(AndroidSQLiteDriver())
-    }
+    fun opensAndReadsEveryDaoOnTheFrameworkDriver() =
+        runTest {
+            smoke(AndroidSQLiteDriver())
+        }
 
     @Test
-    fun opensAndReadsEveryDaoOnTheBundledDriver() = runTest {
-        smoke(BundledSQLiteDriver())
-    }
+    fun opensAndReadsEveryDaoOnTheBundledDriver() =
+        runTest {
+            smoke(BundledSQLiteDriver())
+        }
 
     @Test
-    fun deleteCascadeRemovesThePodcastAndItsRows() = runTest {
-        for (driver in listOf(AndroidSQLiteDriver(), BundledSQLiteDriver())) {
-            val db = TestDb.inMemory(context, driver)
-            try {
-                val group = db.groupDao().insert(groupEntity(orderKey = "a0"))
-                val p = db.podcastDao().insertPodcast(podcastEntity(feedKey = "k-cascade"))
-                db.podcastDao().insertAlias(
-                    PodcastUrlAliasEntity("https://old/$p", p, AliasReason.REDIRECT, addedAt = 1),
-                )
-                db.scopeSettingsDao()
-                    .upsertPodcast(PodcastSettingsEntity(podcastId = p, o = ScopeOverrides()))
-                db.groupDao().insertMember(memberEntity(group, p, orderKey = "a1"))
+    fun deleteCascadeRemovesThePodcastAndItsRows() =
+        runTest {
+            for (driver in listOf(AndroidSQLiteDriver(), BundledSQLiteDriver())) {
+                val db = TestDb.inMemory(context, driver)
+                try {
+                    val group = db.groupDao().insert(groupEntity(orderKey = "a0"))
+                    val p = db.podcastDao().insertPodcast(podcastEntity(feedKey = "k-cascade"))
+                    db.podcastDao().insertAlias(
+                        PodcastUrlAliasEntity("https://old/$p", p, AliasReason.REDIRECT, addedAt = 1),
+                    )
+                    db
+                        .scopeSettingsDao()
+                        .upsertPodcast(PodcastSettingsEntity(podcastId = p, o = ScopeOverrides()))
+                    db.groupDao().insertMember(memberEntity(group, p, orderKey = "a1"))
 
-                val ep =
-                    db.ingestDao().insertEpisodes(
-                        listOf(episodeEntity(podcastId = p, identityKey = "g:1")),
-                    ).single()
-                db.episodeStateDao().upsert(episodeStateEntity(ep, playedAt = 1))
-                db.queueDao().insert(queueEntryEntity(ep, orderKey = "a0"))
-                db.downloadDao().insert(downloadEntity(ep))
-                val persons =
-                    listOf(PersonEntity(ownerType = OwnerType.PODCAST, ownerId = p, name = "Host"))
-                val funding =
-                    listOf(FundingEntity(ownerType = OwnerType.PODCAST, ownerId = p, url = "https://fund"))
-                db.ingestDao().replacePodcastChildren(podcastId = p, persons = persons, funding = funding)
+                    val ep =
+                        db
+                            .ingestDao()
+                            .insertEpisodes(
+                                listOf(episodeEntity(podcastId = p, identityKey = "g:1")),
+                            ).single()
+                    db.episodeStateDao().upsert(episodeStateEntity(ep, playedAt = 1))
+                    db.queueDao().insert(queueEntryEntity(ep, orderKey = "a0"))
+                    db.downloadDao().insert(downloadEntity(ep))
+                    val persons =
+                        listOf(PersonEntity(ownerType = OwnerType.PODCAST, ownerId = p, name = "Host"))
+                    val funding =
+                        listOf(FundingEntity(ownerType = OwnerType.PODCAST, ownerId = p, url = "https://fund"))
+                    db.ingestDao().replacePodcastChildren(podcastId = p, persons = persons, funding = funding)
 
-                db.podcastDao().deleteCascade(p, now = 2)
+                    db.podcastDao().deleteCascade(p, now = 2)
 
-                assertNull(db.podcastDao().byId(p))
-                assertTrue(db.ingestDao().existing(p).isEmpty())
-                assertNull(db.episodeStateDao().byEpisode(ep))
-                assertTrue(db.queueDao().entries().isEmpty())
-                assertNull(db.downloadDao().byEpisode(ep))
-                assertTrue(db.groupDao().membersOf(group).isEmpty())
-            } finally {
-                db.close()
+                    assertNull(db.podcastDao().byId(p))
+                    assertTrue(db.ingestDao().existing(p).isEmpty())
+                    assertNull(db.episodeStateDao().byEpisode(ep))
+                    assertTrue(db.queueDao().entries().isEmpty())
+                    assertNull(db.downloadDao().byEpisode(ep))
+                    assertTrue(db.groupDao().membersOf(group).isEmpty())
+                } finally {
+                    db.close()
+                }
             }
         }
-    }
 
     private suspend fun smoke(driver: SQLiteDriver) {
         val db = TestDb.inMemory(context, driver)

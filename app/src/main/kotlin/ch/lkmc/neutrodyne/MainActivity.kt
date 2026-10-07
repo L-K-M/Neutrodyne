@@ -44,7 +44,7 @@ import kotlin.time.Duration.Companion.seconds
  * The one launcher activity (01 Application element and components): AppCompat for per-app language, the system
  * splash, edge-to-edge, then the shared [NeutrodyneRoot]. The start-up gate renders
  * `DatabaseOpener.openState` (01 Splash and start-up gate): "Try again" re-runs `awaitOpen()` (a
- * failed result is never cached), "Manage storage" opens `ACTION_MANAGE_STORAGE`; playback,
+ * failed result is never cached), "Manage storage" opens `ACTION_INTERNAL_STORAGE_SETTINGS`; playback,
  * notices and sync wire their state in later milestones.
  */
 class MainActivity : AppCompatActivity() {
