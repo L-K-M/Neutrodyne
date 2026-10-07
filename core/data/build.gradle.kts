@@ -45,7 +45,13 @@ kotlin {
             implementation(libs.truth)
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.androidx.work.testing)
+            implementation(libs.androidx.room.runtime)
+            implementation(libs.androidx.lifecycle.process)
+            implementation(libs.kotlinx.serialization.json)
+            implementation(libs.okio)
             implementation(project(":core:testing"))
+            // Corpus leg b: `XmlPullFeedParser` on the platform parser (03 Testing).
+            implementation(project(":feeds:jvm"))
         }
         // Wiring DataStoreBindings' providers in desktopTest mentions the DataStore type
         // (implementation deps of :core:datastore are otherwise invisible here).

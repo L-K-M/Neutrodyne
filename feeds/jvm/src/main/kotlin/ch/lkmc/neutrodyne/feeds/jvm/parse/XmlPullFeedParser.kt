@@ -97,7 +97,11 @@ public class XmlPullFeedParser(
         }
 
         // Step 3: first pass with encoding sniffing (never a Reader, never the HTTP charset).
-        val first = runPass(bytes, charsetOverride = null, baseUrl)
+        // Whitespace before the declaration is tolerated by kxml2's relaxed mode but refused by
+        // AOSP's KXmlParser, so both see it stripped (corpus leg b); a BOM is never ASCII
+        // whitespace, so encoding detection is untouched.
+        val content = bytes.withoutLeadingWhitespace()
+        val first = runPass(content, charsetOverride = null, baseUrl)
         if (first is ParseResult) return first
 
         val stats = first as Pass
@@ -113,7 +117,7 @@ public class XmlPullFeedParser(
                 httpCharset?.trim()?.takeIf { it.isNotEmpty() && !sameCharset(it, detected) }
                     ?: WINDOWS_1252.takeIf { !sameCharset(it, detected) }
             if (secondCharset != null) {
-                val second = runPass(bytes, secondCharset, baseUrl)
+                val second = runPass(content, secondCharset, baseUrl)
                 if (second is Pass && second.replacementChars < stats.replacementChars) {
                     val reparseWarning =
                         ParseWarning(WarningCode.CHARSET_REPARSED, detail = "re-parsed as $secondCharset")
@@ -2342,3 +2346,10 @@ public class XmlPullFeedParser(
 }
 
 private fun firstNonBlank(vararg values: String?): String? = values.firstOrNull { !it.isNullOrBlank() }
+
+/** Drops ASCII whitespace before the first byte of markup (see [XmlPullFeedParser.parse] step 3). */
+private fun ByteArray.withoutLeadingWhitespace(): ByteArray {
+    var i = 0
+    while (i < size && (this[i] == ' '.code.toByte() || this[i] == '\t'.code.toByte() || this[i] == '\r'.code.toByte() || this[i] == '\n'.code.toByte())) i++
+    return if (i == 0) this else copyOfRange(i, size)
+}

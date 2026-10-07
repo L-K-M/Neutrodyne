@@ -35,11 +35,12 @@ internal class RefreshForegroundObserver
         private val clock: Clock,
         @param:ApplicationScope private val appScope: CoroutineScope,
     ) : DefaultLifecycleObserver {
-        private val lastTriggerElapsed = AtomicLong(Long.MIN_VALUE)
+        private val lastTriggerElapsed = AtomicLong(NEVER_TRIGGERED)
 
         override fun onStart(owner: LifecycleOwner) {
             val nowElapsed = clock.elapsedRealtime()
-            if (nowElapsed - lastTriggerElapsed.get() < TRIGGER_COOLDOWN_MS) return
+            val last = lastTriggerElapsed.get()
+            if (last != NEVER_TRIGGERED && nowElapsed - last < TRIGGER_COOLDOWN_MS) return
             appScope.launch {
                 if (!suspendRunCatching { gatesOpen(nowElapsed) }.getOrDefault(false)) return@launch
                 lastTriggerElapsed.set(nowElapsed)
@@ -64,5 +65,8 @@ internal class RefreshForegroundObserver
         private companion object {
             const val TRIGGER_COOLDOWN_MS = 10 * 60_000L
             const val MIN_TICK_MINUTES = 60L
+
+            /** Sentinel: `nowElapsed - Long.MIN_VALUE` overflows into the cooldown window. */
+            const val NEVER_TRIGGERED = Long.MIN_VALUE
         }
     }
