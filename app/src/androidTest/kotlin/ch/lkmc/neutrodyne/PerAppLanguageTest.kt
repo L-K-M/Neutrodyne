@@ -17,6 +17,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.google.common.truth.Truth.assertThat
 import org.junit.After
+import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -44,11 +45,23 @@ class PerAppLanguageTest {
 
     @Test
     fun perAppLanguageRelabelsTheDestinations() {
+        // S11 finding (2026-10-07): below API 33 the framework reorders the activity configuration
+        // so a locale the APK's Android resources ship comes first, and AppCompat sets the process
+        // default (what Compose resources read) from it. A requested locale the build does not ship
+        // therefore stays English there; the picker only offers shipped locales (09), and every
+        // shipped locale has `:app` Android resources. Until a second locale ships, the API < 33 leg
+        // has nothing to switch to.
+        val shipped = shippedLocales().map { it.substringBefore('-') }
+        assumeTrue(
+            "API ${Build.VERSION.SDK_INT} < 33 switches only to shipped locales; '$GERMAN' is not shipped yet",
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU || GERMAN in shipped,
+        )
+
         // Baseline: the GMDs boot en-US.
         compose.onNodeWithTag("nav_library").assertIsDisplayed().assert(hasText("Library"))
 
         compose.runOnUiThread {
-            AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags("de"))
+            AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(GERMAN))
         }
 
         // The activity recreates itself; wait for the German resources to surface. On a timeout the
@@ -102,6 +115,7 @@ class PerAppLanguageTest {
     private companion object {
         const val ANDROID_NS = "http://schemas.android.com/apk/res/android"
         const val RELABEL_TIMEOUT_MS = 10_000L
+        const val GERMAN = "de"
 
         /** `app/policy/locales.txt`, mirrored through `BuildConfig.SHIPPED_LOCALES`. */
         fun shippedLocales(): List<String> = BuildConfig.SHIPPED_LOCALES.split(',').map { it.trim() }
