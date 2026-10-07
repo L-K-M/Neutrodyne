@@ -69,29 +69,9 @@ public class XmlPullFeedParser(
                 return ParseResult.Failed(ParseFailure.MALFORMED, "unreadable source: ${e.javaClass.simpleName}")
             }
 
-        // The guards judge the document the pull parser will see: kxml2 keeps an ASCII/UTF-8
-        // declaration's raw bytes and decodes only the remainder with the declared encoding. A
-        // declaration its own setInput cannot decode (no `>` in reach, a bad encoding name) fails
-        // the same way here.
-        (EncodingSniff.view(bytes) as? EncodingSniff.View.Rejected)?.let {
-            return ParseResult.Failed(ParseFailure.MALFORMED, it.detail)
-        }
-
-        // Step 1: prolog guard, before any parser sees the document.
-        if (PrologGuard.isHostile(bytes, limits.prologScanBytes)) {
-            return ParseResult.Failed(ParseFailure.HOSTILE, "ENTITY declaration in the prolog")
-        }
-
-        // Bound start-tag work before the pull parser sees any tag (03 Limits and version policy):
-        // kxml2 grows its attribute and namespace arrays quadratically inside next(), so checking
-        // attributeCount after the event returns is already too late.
-        try {
-            TagBounds.check(bytes, limits)
-        } catch (e: XmlPullParserException) {
-            return ParseResult.Failed(ParseFailure.MALFORMED, e.message.orEmpty())
-        }
-
-        // Step 3: first pass with encoding sniffing (never a Reader, never the HTTP charset).
+        // Step 3: first pass with encoding sniffing (never a Reader, never the HTTP charset). The
+        // prolog and start-tag guards run inside runPass so the charset re-parse (step 5) is
+        // checked on the stream exactly as that pass decodes it too.
         val first = ParseSession(factory, limits).runPass(bytes, charsetOverride = null, baseUrl)
         if (first is ParseResult) return first
 
@@ -167,6 +147,21 @@ private class ParseSession(
 
     private val undeclaredPrefixesSeen = mutableSetOf<String>()
 
+    /**
+     * The bytes and encoding to hand `setInput`: when the decoded document carries a numeric
+     * reference past U+FFFF — which kxml2 truncates to a single `char` — the corrected text goes in
+     * re-encoded as UTF-8 so the parser meets the literal character instead. Otherwise the original
+     * bytes go in untouched, with the pass' own encoding (null = let the parser sniff).
+     */
+    private fun supplementarySafe(
+        bytes: ByteArray,
+        charset: Charset?,
+        text: String,
+    ): Pair<ByteArray, String?> {
+        val rewritten = SupplementaryRefs.rewrite(text) ?: return bytes to charset?.name()
+        return rewritten.toByteArray(Charsets.UTF_8) to Charsets.UTF_8.name()
+    }
+
     /** One parse pass: `ParseResult` when it failed structurally, otherwise the feed with its stats. */
     fun runPass(
         bytes: ByteArray,
@@ -189,7 +184,37 @@ private class ParseSession(
             }
 
             if (charsetOverride == null) {
-                parser.setInput(ByteArrayInputStream(bytes), null)
+                // The guards judge the document the pull parser will see: kxml2 keeps an ASCII/UTF-8
+                // declaration's raw bytes and decodes only the remainder with the declared encoding.
+                // A declaration its own setInput cannot decode (no `>` in reach, a bad encoding
+                // name) fails the same way here.
+                (EncodingSniff.view(bytes) as? EncodingSniff.View.Rejected)?.let {
+                    return ParseResult.Failed(ParseFailure.MALFORMED, it.detail)
+                }
+
+                // Step 1: prolog guard, before any parser sees the document.
+                if (PrologGuard.isHostile(bytes, limits.prologScanBytes)) {
+                    return ParseResult.Failed(ParseFailure.HOSTILE, "ENTITY declaration in the prolog")
+                }
+
+                // Bound start-tag work before the pull parser sees any tag (03 Limits and version
+                // policy): kxml2 grows its attribute and namespace arrays quadratically inside
+                // next(), so checking attributeCount after the event returns is already too late.
+                // A document its own setInput cannot decode yields no view for the check.
+                val text =
+                    EncodingSniff.decode(bytes)
+                        ?: return ParseResult.Failed(
+                            ParseFailure.MALFORMED,
+                            "encoding declaration the parser cannot decode",
+                        )
+                try {
+                    TagBounds.checkText(text, limits)
+                } catch (e: XmlPullParserException) {
+                    return ParseResult.Failed(ParseFailure.MALFORMED, e.message.orEmpty())
+                }
+
+                val (input, encoding) = supplementarySafe(bytes, charset = null, text)
+                parser.setInput(ByteArrayInputStream(input), encoding)
                 // kxml2 reports null for inputEncoding right after setInput; the document encoding
                 // is decided only once the declaration is processed, so it is sniffed here with the
                 // same precedence (BOM, XML declaration, UTF-8 default).
@@ -198,9 +223,24 @@ private class ParseSession(
                 val charset =
                     runCatching { Charset.forName(charsetOverride) }.getOrNull()
                         ?: return ParseResult.Failed(ParseFailure.MALFORMED, "unknown charset $charsetOverride")
+                // The override decoding can expose markup the sniffed view did not contain, so the
+                // guards run on the stream exactly as this pass decodes it: the prolog window is
+                // the same first bytes, decoded with the override.
+                val prolog = String(bytes, 0, minOf(bytes.size, limits.prologScanBytes), charset)
+                if (PrologGuard.isHostileText(prolog)) {
+                    return ParseResult.Failed(ParseFailure.HOSTILE, "ENTITY declaration in the prolog")
+                }
+                val text = String(bytes, charset)
+                try {
+                    TagBounds.checkText(text, limits)
+                } catch (e: XmlPullParserException) {
+                    return ParseResult.Failed(ParseFailure.MALFORMED, e.message.orEmpty())
+                }
+
+                val (input, encoding) = supplementarySafe(bytes, charset, text)
                 // setInput(InputStream, encoding), never a Reader: the Reader overloads differ between
                 // kxml2's bundled xmlpull API and android.jar, this one exists on both.
-                parser.setInput(ByteArrayInputStream(bytes), charset.name())
+                parser.setInput(ByteArrayInputStream(input), encoding)
                 detectedEncoding = charset.name()
             }
 
