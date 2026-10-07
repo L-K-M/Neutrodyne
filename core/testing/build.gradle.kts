@@ -26,6 +26,7 @@ kotlin {
             api(libs.kotlinx.coroutines.test)
             api(libs.turbine)
             implementation(libs.kotlinx.collections.immutable)
+            implementation(libs.androidx.paging.common)
             api(project.dependencies.platform(libs.coil.bom))
             api(libs.coil.test)
         }

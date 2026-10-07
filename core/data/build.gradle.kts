@@ -29,6 +29,7 @@ kotlin {
             implementation(libs.kotlinx.datetime)
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.collections.immutable)
+            implementation(libs.androidx.paging.common)
             implementation(libs.okio)
         }
         androidMain.dependencies {
