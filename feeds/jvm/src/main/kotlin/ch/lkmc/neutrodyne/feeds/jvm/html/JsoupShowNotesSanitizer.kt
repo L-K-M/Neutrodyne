@@ -34,9 +34,10 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
 
         // Step 1: no tags but escaped markup (double-escaped feeds) → unescape once. `unescape`
         // decodes entities without normalising whitespace, so `pre` line breaks survive; if the
-        // description still has no tags it is plain text and takes the plain-text path.
-        val html = if (raw.contains('<')) raw else Entities.unescape(raw)
-        if (!html.contains('<')) return plainTextDocument(html)
+        // description still has no tags it is plain text and takes the plain-text path. A literal
+        // `<` in running text (`2 < 3`) is not a tag and must not select the HTML path either.
+        val html = if (hasMarkup(raw)) raw else Entities.unescape(raw)
+        if (!hasMarkup(html)) return plainTextDocument(html)
 
         // Step 2: clean. jsoup's default preserveRelativeLinks(false) makes relative href/src absolute
         // against baseUri; unresolvable ones are dropped.
@@ -49,15 +50,14 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
                 .removeEnforcedAttribute("a", "rel")
         val cleaned = Cleaner(safelist).clean(Jsoup.parseBodyFragment(html, baseUri))
 
-        // Step 3: drop tracking images, 1×1 spacers and empty paragraphs.
-        for (img in cleaned.select("img").toList()) {
+        // Step 3: tracking images and 1×1 spacers are neutralised, not removed — removing each
+        // rejected sibling would shift its parent's child list (quadratic on 70,000 siblings).
+        // Without `src` the walk below emits nothing for them, and empty paragraphs emit no block.
+        for (img in cleaned.select("img")) {
             val width = img.attr("width").trim().toIntOrNull()
             val height = img.attr("height").trim().toIntOrNull()
             val tracks = isTrackingImage(img.attr("src"))
-            if (tracks || (width != null && width <= 2) || (height != null && height <= 2)) img.remove()
-        }
-        for (paragraph in cleaned.select("p").toList()) {
-            if (paragraph.text().isBlank() && paragraph.select("img").isEmpty()) paragraph.remove()
+            if (tracks || (width != null && width <= 2) || (height != null && height <= 2)) img.removeAttr("src")
         }
 
         // Step 4: walk the cleaned DOM into blocks, with the caps of the mapping table.
@@ -81,8 +81,13 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
             } else {
                 cut.lastIndexOf(' ').takeIf { it > 0 } ?: SNIPPET_MAX_CHARS
             }
-        return cut.substring(0, lastSpace).trimEnd() + "…"
+        // A high surrogate at the cut pulls it back one: snippets never split a surrogate pair.
+        val end = if (collapsed[lastSpace - 1].isHighSurrogate()) lastSpace - 1 else lastSpace
+        return cut.substring(0, end).trimEnd() + "…"
     }
+
+    /** A real tag open, close, comment or processing instruction — a bare `<` in text is none. */
+    private fun hasMarkup(text: String): Boolean = MARKUP_START.containsMatchIn(text)
 
     /**
      * 03 step 3's tracking-pixel pattern `(?i)(/pixel|/track|/beacon|1x1|spacer)[^/]*\.(gif|png)` as a
@@ -183,7 +188,7 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
 
         fun document(body: Element): ShowNotesDocument {
             val blocks = mutableListOf<NoteBlock>()
-            val sink = Sink(blocks, ::paragraph, listDepth = 0)
+            val sink = Sink(blocks, ::paragraph, listDepth = 0, contextStyle = NONE)
             for (child in body.childNodes()) appendNode(child, sink)
             sink.flush()
             return ShowNotesDocument(blocks)
@@ -192,11 +197,14 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
         /**
          * One container's inline run: spans accumulate in [spans] and [flush] merges, linkifies and
          * wraps them into a block on [target]. A block-level child flushes the run first.
+         * [contextStyle] is inherited from enclosing containers (`dt`'s bold, `figcaption`'s
+         * italic) and reaches every block this run produces, including nested block children.
          */
         private inner class Sink(
             val target: MutableList<NoteBlock>,
             val wrap: (List<NoteSpan>) -> NoteBlock,
             val listDepth: Int,
+            val contextStyle: Int,
         ) {
             val spans = mutableListOf<NoteSpan>()
 
@@ -204,7 +212,8 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
                 if (spans.isEmpty()) return
                 val run = trimEdges(linkifyTimestamps(mergeTextSpans(spans)))
                 spans.clear()
-                if (run.isNotEmpty() && takeBlock()) target.add(wrap(run))
+                val styled = if (contextStyle == NONE) run else withStyle(run, contextStyle)
+                if (styled.isNotEmpty() && takeBlock()) target.add(wrap(styled))
             }
 
             fun addBlock(block: NoteBlock) {
@@ -218,8 +227,9 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
             target: MutableList<NoteBlock>,
             wrap: (List<NoteSpan>) -> NoteBlock,
             listDepth: Int,
+            contextStyle: Int,
         ) {
-            val sink = Sink(target, wrap, listDepth)
+            val sink = Sink(target, wrap, listDepth, contextStyle)
             for (child in element.childNodes()) appendNode(child, sink)
             sink.flush()
         }
@@ -242,18 +252,18 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
             when (node.tagName()) {
                 "p" -> {
                     sink.flush()
-                    runContainer(node, sink.target, ::paragraph, sink.listDepth)
+                    runContainer(node, sink.target, ::paragraph, sink.listDepth, sink.contextStyle)
                 }
 
                 "h1", "h2", "h3", "h4", "h5", "h6" -> {
                     sink.flush()
                     val level = node.tagName().substring(1).toInt()
-                    runContainer(node, sink.target, { NoteBlock.Heading(level, it) }, sink.listDepth)
+                    runContainer(node, sink.target, { NoteBlock.Heading(level, it) }, sink.listDepth, sink.contextStyle)
                 }
 
                 "ul", "ol" -> {
                     sink.flush()
-                    walkList(node, sink.target, sink.listDepth)
+                    walkList(node, sink.target, sink.listDepth, sink.contextStyle)
                 }
 
                 "blockquote" -> {
@@ -261,14 +271,17 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
                     // Reserve the Quote before its children spend the rest of the block budget.
                     if (takeBlock()) {
                         val inner = mutableListOf<NoteBlock>()
-                        runContainer(node, inner, ::paragraph, sink.listDepth)
+                        runContainer(node, inner, ::paragraph, sink.listDepth, sink.contextStyle)
                         sink.target.add(NoteBlock.Quote(inner))
                     }
                 }
 
                 "img" -> {
-                    sink.flush()
-                    addImage(node, sink.target)
+                    // A `src`-less img (tracking pixel, rejected src) emits nothing — as if removed.
+                    if (node.attr("src").isNotBlank()) {
+                        sink.flush()
+                        addImage(node, sink.target)
+                    }
                 }
 
                 "hr" -> {
@@ -278,96 +291,137 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
 
                 "pre" -> {
                     sink.flush()
-                    preBlock(node, sink.target)
+                    preBlock(node, sink.target, sink.contextStyle)
                 }
 
                 "dl" -> {
                     sink.flush()
                     for (child in node.children()) {
                         when (child.tagName()) {
-                            "dt" -> runContainer(child, sink.target, ::definitionTerm, sink.listDepth)
-                            "dd" -> runContainer(child, sink.target, ::paragraph, sink.listDepth)
+                            // dt terms are bold and dd stays plain — as inherited context so the
+                            // style reaches paragraphs nested deeper inside the term (03 mapping).
+                            "dt" -> {
+                                runContainer(
+                                    child,
+                                    sink.target,
+                                    ::paragraph,
+                                    sink.listDepth,
+                                    sink.contextStyle or BOLD,
+                                )
+                            }
+
+                            "dd" -> {
+                                runContainer(child, sink.target, ::paragraph, sink.listDepth, sink.contextStyle)
+                            }
                         }
                     }
                 }
 
                 "figcaption" -> {
                     sink.flush()
-                    runContainer(node, sink.target, ::figcaptionCaption, sink.listDepth)
+                    runContainer(node, sink.target, ::paragraph, sink.listDepth, sink.contextStyle or ITALIC)
                 }
 
                 else -> {
                     // div/figure contents flatten; any stray block container the same.
                     sink.flush()
-                    runContainer(node, sink.target, ::paragraph, sink.listDepth)
+                    runContainer(node, sink.target, ::paragraph, sink.listDepth, sink.contextStyle)
                 }
             }
         }
 
         /**
-         * Appends one inline node to [out]. Styles stack onto children; a link's text collects in a
-         * scratch list so it is never linkified; a nested `img` or a stray block-level element
-         * flushes [sink] and emits on its target.
+         * One `a[href]`'s pending text: pieces collect with whitespace collapsed against the
+         * surrounding run — [out] — not against the empty buffer, so `Hello<a> world</a>` keeps its
+         * space. Every boundary (`br`, `img`, a stray block tag) flushes the pending piece first:
+         * the link splits in document order and resumes after the boundary.
+         */
+        private inner class LinkBuffer(
+            private val href: String,
+            private val style: Int,
+            val out: MutableList<NoteSpan>,
+        ) {
+            val pieces = mutableListOf<NoteSpan>()
+
+            fun flush() {
+                if (pieces.isEmpty()) return
+                val text = textOf(pieces)
+                if (text.isNotEmpty()) out.add(NoteSpan.Link(text, href, style or styleOf(pieces)))
+                pieces.clear()
+            }
+        }
+
+        /**
+         * Appends one inline node to [out]. Styles stack onto children; a link's text collects in
+         * its [LinkBuffer]'s scratch list so it is never linkified; a nested `img` or a stray
+         * block-level element flushes the link and [sink] and emits on its target.
          */
         private fun appendInline(
             node: Node,
             style: Int,
             out: MutableList<NoteSpan>,
             sink: Sink,
+            link: LinkBuffer? = null,
         ) {
             if (node is TextNode) {
-                appendText(out, node.wholeText, style)
+                // Inside a link, `out` is the buffer's scratch list: collapse whitespace against
+                // the surrounding run when the buffer is still empty.
+                appendText(out, node.wholeText, style, collapseAgainst = link?.out ?: out)
                 return
             }
             if (node !is Element) return
 
             when (node.tagName()) {
                 "b", "strong" -> {
-                    childrenOf(node, style or BOLD, out, sink)
+                    childrenOf(node, style or BOLD, out, sink, link)
                 }
 
                 "i", "em", "cite" -> {
-                    childrenOf(node, style or ITALIC, out, sink)
+                    childrenOf(node, style or ITALIC, out, sink, link)
                 }
 
                 "u" -> {
-                    childrenOf(node, style or UNDERLINE, out, sink)
+                    childrenOf(node, style or UNDERLINE, out, sink, link)
                 }
 
                 "code" -> {
-                    childrenOf(node, style or CODE, out, sink)
+                    childrenOf(node, style or CODE, out, sink, link)
                 }
 
                 "br" -> {
-                    out.add(NoteSpan.LineBreak)
+                    // A break inside a link ends the current linked run; text after it links anew.
+                    link?.flush()
+                    (link?.out ?: out).add(NoteSpan.LineBreak)
                 }
 
                 "a" -> {
                     val href = node.attr("href")
-                    if (href.isEmpty()) {
-                        // An `a` without a surviving href becomes plain text.
-                        childrenOf(node, style, out, sink)
+                    if (href.isEmpty() || link != null) {
+                        // An `a` without a surviving href — or nested inside one — is plain text.
+                        childrenOf(node, style, out, sink, link)
                     } else {
-                        val inner = mutableListOf<NoteSpan>()
-                        childrenOf(node, style, inner, sink)
-                        var text = textOf(inner)
-                        if (endsInSpace(out)) text = text.trimStart()
-                        out.add(NoteSpan.Link(text, href, style or styleOf(inner)))
+                        val buffer = LinkBuffer(href, style, out)
+                        childrenOf(node, style, buffer.pieces, sink, buffer)
+                        buffer.flush()
                     }
                 }
 
                 "img" -> {
-                    sink.flush()
-                    addImage(node, sink.target)
+                    if (node.attr("src").isNotBlank()) {
+                        link?.flush()
+                        sink.flush()
+                        addImage(node, sink.target)
+                    }
                 }
 
                 else -> {
                     if (node.tagName() in BLOCK_TAGS) {
+                        link?.flush()
                         sink.flush()
                         appendNode(node, sink)
                     } else {
                         // span, q, small, strike, sub, sup contribute their text only.
-                        childrenOf(node, style, out, sink)
+                        childrenOf(node, style, out, sink, link)
                     }
                 }
             }
@@ -378,8 +432,9 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
             style: Int,
             out: MutableList<NoteSpan>,
             sink: Sink,
+            link: LinkBuffer? = null,
         ) {
-            for (child in element.childNodes()) appendInline(child, style, out, sink)
+            for (child in element.childNodes()) appendInline(child, style, out, sink, link)
         }
 
         /** `ul`/`ol`: `li` items are lists of blocks; nesting deeper than 4 flattens into the parent. */
@@ -387,10 +442,11 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
             node: Element,
             target: MutableList<NoteBlock>,
             listDepth: Int,
+            contextStyle: Int,
         ) {
             val items = node.children().filter { it.tagName() == "li" }
             if (listDepth >= MAX_LIST_NESTING) {
-                for (li in items) runContainer(li, target, ::paragraph, listDepth)
+                for (li in items) runContainer(li, target, ::paragraph, listDepth, contextStyle)
                 return
             }
 
@@ -399,7 +455,7 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
             val lists = mutableListOf<List<NoteBlock>>()
             for (li in items) {
                 val itemBlocks = mutableListOf<NoteBlock>()
-                runContainer(li, itemBlocks, ::paragraph, listDepth + 1)
+                runContainer(li, itemBlocks, ::paragraph, listDepth + 1, contextStyle)
                 if (itemBlocks.isEmpty()) {
                     // The budget is spent: the item is dropped rather than left bullet-shaped empty.
                     if (!takeBlock()) continue
@@ -412,15 +468,18 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
 
         /**
          * `pre` → one Paragraph keeping its line breaks (`LineBreak` spans) in CODE; `br` and links
-         * survive, an `img` becomes an Image block after it; whitespace is not collapsed.
+         * survive (link text is never linkified), an `img` becomes an Image block after it —
+         * including an `img` that is a link's only child — and timestamps in plain pre text are
+         * linkified; whitespace is not collapsed.
          */
         private fun preBlock(
             node: Element,
             target: MutableList<NoteBlock>,
+            contextStyle: Int,
         ) {
             val spans = mutableListOf<NoteSpan>()
             val wrappedImages = mutableListOf<Element>()
-            appendPreformatted(node, spans, wrappedImages)
+            appendPreformatted(node, spans, wrappedImages, link = null, style = CODE or contextStyle)
             if (spans.isNotEmpty() && takeBlock()) target.add(NoteBlock.Paragraph(mergeTextSpans(spans)))
             for (img in wrappedImages) addImage(img, target)
         }
@@ -429,12 +488,19 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
             node: Node,
             spans: MutableList<NoteSpan>,
             wrappedImages: MutableList<Element>,
+            link: String?,
+            style: Int,
         ) {
             when (node) {
                 is TextNode -> {
                     for ((i, line) in node.wholeText.split('\n').withIndex()) {
                         if (i > 0) spans.add(NoteSpan.LineBreak)
-                        if (line.isNotEmpty()) spans.add(NoteSpan.Text(line, CODE))
+                        if (line.isEmpty()) continue
+                        if (link != null) {
+                            spans.add(NoteSpan.Link(line, link, style))
+                        } else {
+                            spans.addAll(TimestampLinkifier.linkify(line, style))
+                        }
                     }
                 }
 
@@ -449,24 +515,23 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
                         }
 
                         "a" -> {
-                            val href = node.attr("href")
-                            if (href.isNotEmpty()) {
-                                spans.add(NoteSpan.Link(node.wholeText(), href, CODE))
-                            } else {
-                                for (child in node.childNodes()) {
-                                    appendPreformatted(child, spans, wrappedImages)
-                                }
+                            // An anchor without href keeps the surrounding link context.
+                            val href = node.attr("href").ifEmpty { null } ?: link
+                            for (child in node.childNodes()) {
+                                appendPreformatted(child, spans, wrappedImages, href, style)
                             }
                         }
 
                         else -> {
-                            for (child in node.childNodes()) appendPreformatted(child, spans, wrappedImages)
+                            for (child in node.childNodes()) {
+                                appendPreformatted(child, spans, wrappedImages, link, style)
+                            }
                         }
                     }
                 }
 
                 else -> {
-                    Unit
+                    // Comments, PIs and other non-text nodes contribute nothing inside pre.
                 }
             }
         }
@@ -501,26 +566,27 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
         }
 
         /**
-         * Collapses [text]'s whitespace to single spaces and appends it; a space where [out] already
-         * ends in whitespace is dropped, so `a <b> b </b> c` collapses to "a b c".
+         * Collapses [text]'s whitespace to single spaces and appends it; a space where the run
+         * already ends in whitespace is dropped, so `a <b> b </b> c` collapses to "a b c". When
+         * [out] is a link's still-empty scratch list, the run it will join ([collapseAgainst])
+         * decides instead.
          */
         private fun appendText(
             out: MutableList<NoteSpan>,
             text: String,
             style: Int,
+            collapseAgainst: List<NoteSpan> = out,
         ) {
             var collapsed = collapseWhitespace(text)
-            if (endsInSpace(out)) collapsed = collapsed.removePrefix(" ")
+            if (endsInSpace(if (out.isNotEmpty()) out else collapseAgainst)) {
+                collapsed = collapsed.removePrefix(" ")
+            }
             if (collapsed.isEmpty()) return
             out.add(NoteSpan.Text(collapsed, style))
         }
     }
 
     private fun paragraph(spans: List<NoteSpan>): NoteBlock = NoteBlock.Paragraph(spans)
-
-    private fun definitionTerm(spans: List<NoteSpan>): NoteBlock = NoteBlock.Paragraph(withStyle(spans, BOLD))
-
-    private fun figcaptionCaption(spans: List<NoteSpan>): NoteBlock = NoteBlock.Paragraph(withStyle(spans, ITALIC))
 
     /**
      * Timestamps linkify over each complete text run (03 Timestamp linkifier): every maximal run of
@@ -563,6 +629,19 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
             if (span is NoteSpan.Timestamp) {
                 out.add(span)
                 position += span.text.length
+                // The timestamp consumed input too: walk the piece cursor over its characters or
+                // the next piece's style read restarts at the timestamp's characters.
+                var left = span.text.length
+                while (left > 0 && pieceIndex < segment.size) {
+                    val piece = segment[pieceIndex]
+                    val take = minOf(piece.text.length - pieceOffset, left)
+                    left -= take
+                    pieceOffset += take
+                    if (pieceOffset == piece.text.length) {
+                        pieceIndex++
+                        pieceOffset = 0
+                    }
+                }
                 continue
             }
             if (span !is NoteSpan.Text) continue
@@ -682,6 +761,9 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
     private companion object {
         val WHITESPACE = Regex("\\s+")
         val URL_TOKEN = Regex("""https?://[^\s<>"']+[^\s<>"'.,;:!?)]""")
+
+        /** `</a`, `<a` — letter start, or `<!`/`<?` for comments, doctypes and PIs. */
+        val MARKUP_START = Regex("""</?[a-zA-Z]|<[!?]""")
 
         /** Every block-level tag the safelist can emit; anything else is inline content. */
         val BLOCK_TAGS =

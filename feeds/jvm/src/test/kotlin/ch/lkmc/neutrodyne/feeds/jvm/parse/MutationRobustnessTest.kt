@@ -11,6 +11,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import kotlin.random.Random
+import kotlin.test.assertTrue
 
 /**
  * Seeded mutation robustness over every committed fixture of `FeedParser` (09 Untrusted-input
@@ -69,8 +70,16 @@ class MutationRobustnessTest {
         }
     }
 
+    /** The NUL mutation must produce a mutant carrying a real 0x00, not a no-op replace. */
+    @Test
+    fun nulMutationInsertsANul() {
+        val original = "<rss><channel/></rss>".encodeToByteArray()
+        val expected = "<\u0000rss><channel/></rss>".encodeToByteArray()
+        assertTrue(mutantsOf(original, Random(0)).any { it.contentEquals(expected) })
+    }
+
     /** The mutation set of 09: truncation, byte flips, slice duplication, DOCTYPE injection, encoding swaps. */
-    private fun mutantsOf(
+    internal fun mutantsOf(
         original: ByteArray,
         random: Random,
     ): List<ByteArray> {
@@ -118,7 +127,7 @@ class MutationRobustnessTest {
 
         // Insert NUL and a lone surrogate.
         val asText = original.decodeToString()
-        val withNul = asText.replaceFirst("<", "<", ignoreCase = false)
+        val withNul = asText.replaceFirst("<", "<\u0000", ignoreCase = false)
         val withSurrogate = asText.replaceFirst("<", "<\uD800", ignoreCase = false)
         if (withNul != asText) mutants += withNul.encodeToByteArray()
         if (withSurrogate != asText) mutants += withSurrogate.encodeToByteArray()

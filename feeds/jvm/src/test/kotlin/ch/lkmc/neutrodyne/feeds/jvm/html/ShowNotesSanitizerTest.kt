@@ -411,6 +411,129 @@ line two</pre>
         assertThat(sanitizer.snippet("<p>html <b>text</b></p>", isHtml = true)).isEqualTo("html text")
     }
 
+    /** S-rev 1: rejected nodes are skipped during emission, not pruned from the DOM beforehand. */
+    @Test(timeout = 10_000)
+    fun emptyParagraphSkippingStaysLinear() {
+        val blocks = blocksOf("<p></p>".repeat(70_000))
+        assertThat(blocks).isEmpty()
+    }
+
+    /** S-rev 1: thousands of sibling tracking-pixel removals must not shift sibling lists. */
+    @Test(timeout = 10_000)
+    fun tinySiblingImageSkippingStaysLinear() {
+        val html = "<img src=\"https://e.test/x.png\" width=\"1\">".repeat(30_000)
+        assertThat(blocksOf(html)).isEmpty()
+    }
+
+    /** S-rev 2: a consumed timestamp still advances the cursor over the styled pieces. */
+    @Test
+    fun timestampKeepsFollowingStyles() {
+        val spans = spansOf(blocksOf("<p>1:00<b>x</b></p>").single())
+        assertThat(spans.filterIsInstance<NoteSpan.Timestamp>().single().positionMs).isEqualTo(60_000)
+        val text = spans.filterIsInstance<NoteSpan.Text>().single()
+        assertThat(text.text).isEqualTo("x")
+        assertThat(text.style).isEqualTo(BOLD)
+    }
+
+    /** S-rev 3: the anchor's leading space collapses against the surrounding run, never inwards. */
+    @Test
+    fun anchorWhitespaceCollapsesAgainstTheRun() {
+        val spans = spansOf(blocksOf("""<p>Hello<a href="/about"> world</a></p>""").single())
+        assertThat(spans.filterIsInstance<NoteSpan.Text>().single().text).isEqualTo("Hello")
+        val link = spans.filterIsInstance<NoteSpan.Link>().single()
+        assertThat(link.text).isEqualTo(" world")
+        assertThat(link.url).isEqualTo("https://example.com/about")
+    }
+
+    /** S-rev 3: a `br` inside an anchor splits the link and keeps document order. */
+    @Test
+    fun lineBreakInsideAnchorSplitsTheLink() {
+        val spans = spansOf(blocksOf("""<a href="/x">one<br>two</a>""").single())
+        assertThat(spans)
+            .containsExactly(
+                NoteSpan.Link("one", "https://example.com/x", 0),
+                NoteSpan.LineBreak,
+                NoteSpan.Link("two", "https://example.com/x", 0),
+            ).inOrder()
+    }
+
+    /** S-rev 3: an `img` inside an anchor splits the link in document order, before and after. */
+    @Test
+    fun imageInsideAnchorSplitsTheLinkInOrder() {
+        val blocks = blocksOf("""<p>A<a href="/x">B<img src="https://cdn.test/i.jpg">C</a>D</p>""")
+        assertThat(blocks).hasSize(3)
+        assertThat(spansOf(blocks[0]))
+            .containsExactly(NoteSpan.Text("A", 0), NoteSpan.Link("B", "https://example.com/x", 0))
+            .inOrder()
+        assertThat((blocks[1] as NoteBlock.Image).url).isEqualTo("https://cdn.test/i.jpg")
+        assertThat(spansOf(blocks[2]))
+            .containsExactly(NoteSpan.Link("C", "https://example.com/x", 0), NoteSpan.Text("D", 0))
+            .inOrder()
+    }
+
+    /** S-rev 4: an image inside a `pre`'s anchor is still emitted, link and whitespace intact. */
+    @Test
+    fun linkedImageInsidePreIsEmitted() {
+        val blocks = blocksOf("""<pre><a href="https://example.com/x"><img src="https://cdn.test/i.jpg"></a></pre>""")
+        assertThat(blocks.filterIsInstance<NoteBlock.Image>().single().url)
+            .isEqualTo("https://cdn.test/i.jpg")
+    }
+
+    /** S-rev 5: `figcaption`'s italic context reaches the paragraph inside it. */
+    @Test
+    fun figcaptionNestedParagraphKeepsItalic() {
+        val blocks = blocksOf("<figure><figcaption><p>caption</p></figcaption></figure>")
+        val text = spansOf(blocks.single()).filterIsInstance<NoteSpan.Text>().single()
+        assertThat(text.style and ITALIC).isEqualTo(ITALIC)
+    }
+
+    /** S-rev 5: `dt`'s bold context reaches the paragraph inside it. */
+    @Test
+    fun dtNestedParagraphKeepsBold() {
+        val blocks = blocksOf("<dl><dt><p>term</p></dt><dd>def</dd></dl>")
+        val term = spansOf(blocks[0]).filterIsInstance<NoteSpan.Text>().single()
+        assertThat(term.style and BOLD).isEqualTo(BOLD)
+        val def = spansOf(blocks[1]).filterIsInstance<NoteSpan.Text>().single()
+        assertThat(def.style and BOLD).isEqualTo(0)
+    }
+
+    /** S-rev 5: a `div` inside `figcaption` keeps the inherited italic. */
+    @Test
+    fun divInsideFigcaptionKeepsItalic() {
+        val blocks = blocksOf("<figcaption><div>cap</div></figcaption>")
+        val text = spansOf(blocks.single()).filterIsInstance<NoteSpan.Text>().single()
+        assertThat(text.style and ITALIC).isEqualTo(ITALIC)
+    }
+
+    /** S-rev 6: a literal `<` in text does not select the HTML path. */
+    @Test
+    fun literalLessThanDoesNotForceHtmlPath() {
+        val document =
+            sanitizer.toDocument("2 < 3\nhttps://example.com/x", isHtml = true, baseUri = base)
+        val spans = spansOf(document.blocks.single())
+        assertThat(spans).contains(NoteSpan.LineBreak)
+        assertThat(spans.filterIsInstance<NoteSpan.Link>().single().url)
+            .isEqualTo("https://example.com/x")
+        val text = spans.filterIsInstance<NoteSpan.Text>().joinToString("") { it.text }
+        assertThat(text).contains("2 < 3")
+    }
+
+    /** S-rev 7: the snippet cut never lands between a surrogate pair. */
+    @Test
+    fun snippetNeverSplitsASurrogatePair() {
+        val snippet = sanitizer.snippet("a".repeat(198) + "🙂z", isHtml = false)
+        assertThat(snippet).isEqualTo("a".repeat(198) + "…")
+    }
+
+    /** S-rev 8: timestamps linkify inside `pre`, whitespace preserved. */
+    @Test
+    fun preTextIsTimestampLinkified() {
+        val spans = spansOf(blocksOf("<pre>skip to 0:30</pre>").single())
+        val timestamp = spans.filterIsInstance<NoteSpan.Timestamp>().single()
+        assertThat(timestamp.positionMs).isEqualTo(30_000)
+        assertThat(timestamp.text).isEqualTo("0:30")
+    }
+
     private fun stylesAround(
         spans: List<NoteSpan>,
         text: String,

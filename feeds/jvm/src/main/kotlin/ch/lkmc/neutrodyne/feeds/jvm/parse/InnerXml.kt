@@ -24,6 +24,25 @@ internal object InnerXml {
     private const val RELAXED_ERROR_MARK = "ERR: undefined prefix: "
     private const val NO_DEPTH_LIMIT = Int.MAX_VALUE
 
+    /** HTML's void elements serialise bare (`<br>`); every other empty element needs `</…>`. */
+    private val VOID_ELEMENTS =
+        setOf(
+            "area",
+            "base",
+            "br",
+            "col",
+            "embed",
+            "hr",
+            "img",
+            "input",
+            "link",
+            "meta",
+            "param",
+            "source",
+            "track",
+            "wbr",
+        )
+
     /** The bounded text of a collected element and the length it would have had unbounded. */
     internal class Collected(
         val text: String,
@@ -99,6 +118,10 @@ internal object InnerXml {
                         val childDepth = parser.depth
                         parser.nextToken()
                         collectInto(parser, childDepth, sink, onText, maxDepth)
+                        sink.append("</").append(rawName(parser)).append('>')
+                    } else if (parser.name.lowercase() !in VOID_ELEMENTS) {
+                        // An empty non-void element still needs its close tag: `<strong/>` written
+                        // as `<strong>` would swallow the text that follows it (03 step 6).
                         sink.append("</").append(rawName(parser)).append('>')
                     }
                     parser.nextToken()

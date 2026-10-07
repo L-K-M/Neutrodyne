@@ -49,7 +49,12 @@ internal object TagBounds {
         return if (close < 0) text.length else close + marker.length
     }
 
-    /** Past one `<!…>` markup declaration, honouring quotes and the `[…]` internal subset. */
+    /**
+     * Past one `<!…>` markup declaration, honouring quotes and the `[…]` internal subset. Inside the
+     * subset, comments and processing instructions keep their own delimiters — a quote inside
+     * `<!-- " -->` or `<?p " ?>` is not a quoted literal and must not swallow the `]>` that closes
+     * the declaration.
+     */
     private fun skipMarkupDecl(
         text: String,
         start: Int,
@@ -67,23 +72,37 @@ internal object TagBounds {
             when {
                 c == '"' || c == '\'' -> {
                     quote = c
+                    i++
+                }
+
+                inSubset && text.startsWith(COMMENT_OPEN, i) -> {
+                    i = skipTo(text, COMMENT_CLOSE, i + COMMENT_OPEN.length)
+                }
+
+                inSubset && text.startsWith(PI_OPEN, i) -> {
+                    i = skipTo(text, PI_CLOSE, i + PI_OPEN.length)
                 }
 
                 c == '[' -> {
                     inSubset = true
+                    i++
                 }
 
                 c == ']' && inSubset -> {
                     var j = i + 1
                     while (j < text.length && text[j].isWhitespace()) j++
                     if (j < text.length && text[j] == '>') return j + 1
+                    i++
                 }
 
                 c == '>' && !inSubset -> {
                     return i + 1
                 }
+
+                else -> {
+                    i++
+                }
             }
-            i++
         }
         return text.length
     }

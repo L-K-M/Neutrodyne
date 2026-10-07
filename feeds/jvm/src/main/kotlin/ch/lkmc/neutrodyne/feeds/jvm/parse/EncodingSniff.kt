@@ -5,31 +5,41 @@ import java.nio.charset.Charset
 
 /**
  * Byte-level encoding detection shared by the prolog guard, the tag bound and the charset re-parse
- * heuristic (03 Parser setup and charset). kxml2's `getInputEncoding` reports only the explicitly
- * requested encoding, so the document encoding is sniffed here with the same precedence the parser
- * uses: BOM, then the XML declaration's `encoding`, else UTF-8.
+ * heuristic (03 Parser setup and charset). The guards must see the document exactly as the pull
+ * parser does, so [sniff] mirrors kxml2's `setInput` byte signatures one-to-one: BOMs (UTF-32 before
+ * the UTF-16 prefixes they share), BOM-less UTF-32 `<` padding, BOM-less UTF-16 only behind `<?`,
+ * the `<?xm` declaration's `encoding` name, else UTF-8. Text inside a comment or body is never
+ * consulted — the parser cannot see it either.
  */
 internal object EncodingSniff {
-    private const val SNIFF_BYTES = 512
-    private val encodingAttribute =
-        Regex("""encoding\s*=\s*["']([A-Za-z0-9._\-]+)["']""")
+    private const val LT = 0x3C
+    private const val QM = 0x3F
+    private const val GT = 0x3E
+    private const val XC = 0x78
+    private const val MC = 0x6D
+    private const val ENCODING_TOKEN = "encoding"
 
-    /** The charset [bytes] decodes with, canonically named; UTF-8 when nothing else is detectable. */
+    /** The charset [bytes] decodes with; UTF-8 when nothing the pull parser supports matches. */
     fun sniff(bytes: ByteArray): Charset {
-        bomCharset(bytes)?.let { return it }
-
-        // BOM-less UTF-16 still betrays itself: '<' as 0x00 0x3C or 0x3C 0x00.
-        if (bytes.size >= 2 && bytes[0] == 0x00.toByte() && bytes[1] == '<'.code.toByte()) {
-            return Charsets.UTF_16BE
+        // kxml2 decides only once four bytes are buffered; shorter input is UTF-8.
+        if (bytes.size < 4) return Charsets.UTF_8
+        val b0 = bytes[0].toInt() and 0xFF
+        val b1 = bytes[1].toInt() and 0xFF
+        val b2 = bytes[2].toInt() and 0xFF
+        val b3 = bytes[3].toInt() and 0xFF
+        return when {
+            b0 == 0x00 && b1 == 0x00 && b2 == 0xFE && b3 == 0xFF -> canonicalOrNull("UTF-32BE") ?: Charsets.UTF_8
+            b0 == 0xFF && b1 == 0xFE && b2 == 0x00 && b3 == 0x00 -> canonicalOrNull("UTF-32LE") ?: Charsets.UTF_8
+            b0 == 0x00 && b1 == 0x00 && b2 == 0x00 && b3 == LT -> canonicalOrNull("UTF-32BE") ?: Charsets.UTF_8
+            b0 == LT && b1 == 0x00 && b2 == 0x00 && b3 == 0x00 -> canonicalOrNull("UTF-32LE") ?: Charsets.UTF_8
+            b0 == 0x00 && b1 == LT && b2 == 0x00 && b3 == QM -> Charsets.UTF_16BE
+            b0 == LT && b1 == 0x00 && b2 == QM && b3 == 0x00 -> Charsets.UTF_16LE
+            b0 == LT && b1 == QM && b2 == XC && b3 == MC -> declaredEncoding(bytes) ?: Charsets.UTF_8
+            b0 == 0xFE && b1 == 0xFF -> Charsets.UTF_16BE
+            b0 == 0xFF && b1 == 0xFE -> Charsets.UTF_16LE
+            b0 == 0xEF && b1 == 0xBB && b2 == 0xBF -> Charsets.UTF_8
+            else -> Charsets.UTF_8
         }
-        if (bytes.size >= 2 && bytes[0] == '<'.code.toByte() && bytes[1] == 0x00.toByte()) {
-            return Charsets.UTF_16LE
-        }
-
-        // The XML declaration is pure ASCII in every ASCII-superset encoding.
-        val head = String(bytes, 0, minOf(bytes.size, SNIFF_BYTES), Charsets.US_ASCII)
-        val declared = encodingAttribute.find(head)?.groupValues?.get(1)
-        return declared?.let { canonicalOrNull(it) } ?: Charsets.UTF_8
     }
 
     /** Decodes [bytes] with [sniff]; a leading U+FEFF is kept out of the result. */
@@ -38,32 +48,22 @@ internal object EncodingSniff {
         return text.removePrefix("\uFEFF")
     }
 
-    private fun bomCharset(bytes: ByteArray): Charset? {
-        if (bytes.size >= 4) {
-            // UTF-32 BOMs must be checked before their UTF-16 prefixes.
-            if (bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte() &&
-                bytes[2] == 0x00.toByte() && bytes[3] == 0x00.toByte()
-            ) {
-                return canonicalOrNull("UTF-32LE")
-            }
-            if (bytes[0] == 0x00.toByte() && bytes[1] == 0x00.toByte() &&
-                bytes[2] == 0xFE.toByte() && bytes[3] == 0xFF.toByte()
-            ) {
-                return canonicalOrNull("UTF-32BE")
-            }
-        }
-        if (bytes.size >= 3 &&
-            bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()
-        ) {
-            return Charsets.UTF_8
-        }
-        if (bytes.size >= 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte()) {
-            return Charsets.UTF_16LE
-        }
-        if (bytes.size >= 2 && bytes[0] == 0xFE.toByte() && bytes[1] == 0xFF.toByte()) {
-            return Charsets.UTF_16BE
-        }
-        return null
+    /**
+     * The `encoding=` name of the leading XML declaration, kxml2's way: the raw declaration bytes up
+     * to `>` are ASCII, the first `encoding` occurrence wins, and its name runs to the closing quote.
+     * A malformed or unknown name reports nothing — the parser's own `setInput` fails the same way.
+     */
+    private fun declaredEncoding(bytes: ByteArray): Charset? {
+        val declEnd = bytes.indexOf(GT.toByte())
+        val decl = String(bytes, 0, if (declEnd < 0) bytes.size else declEnd + 1, Charsets.US_ASCII)
+        var start = decl.indexOf(ENCODING_TOKEN)
+        if (start < 0) return null
+        while (start < decl.length && decl[start] != '"' && decl[start] != '\'') start++
+        if (start >= decl.length) return null
+        val quote = decl[start++]
+        val end = decl.indexOf(quote, start)
+        if (end < 0) return null
+        return canonicalOrNull(decl.substring(start, end))
     }
 
     private fun canonicalOrNull(name: String): Charset? = runCatching { Charset.forName(name) }.getOrNull()

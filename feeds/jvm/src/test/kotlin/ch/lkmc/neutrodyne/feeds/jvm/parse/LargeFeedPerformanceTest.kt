@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.feeds.parse.ParseResult
 import okio.Buffer
 import org.junit.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
@@ -26,10 +27,14 @@ class LargeFeedPerformanceTest {
         assertEquals(EXPECTED_ITEMS, warm.feed.items.size, "fixture must carry $EXPECTED_ITEMS items")
 
         val best = (1..3).map { timed(parser, bytes) }.min()
-        assertTrue(best < BUDGET_MS, "parsing took $best ms (budget $BUDGET_MS ms, target 1 s)")
-        if (System.getProperty("neutrodyne.tightPerf") == "true") {
-            assertTrue(best < TIGHT_BUDGET_MS, "parsing took $best ms (strict budget $TIGHT_BUDGET_MS ms)")
-        }
+        assertWithinBudget(best, tight = System.getProperty("neutrodyne.tightPerf") == "true")
+    }
+
+    /** The strict 1 s gate must actually reject a slow parse — a 2 s run passes loose, fails tight. */
+    @Test
+    fun tightGateRejectsSlowParse() {
+        assertWithinBudget(2_000, tight = false)
+        assertFailsWith<AssertionError> { assertWithinBudget(2_000, tight = true) }
     }
 
     private fun timed(
@@ -52,5 +57,15 @@ class LargeFeedPerformanceTest {
         const val BUDGET_MS = 5_000L
         const val TIGHT_BUDGET_MS = 1_000L
         const val EXPECTED_ITEMS = 831
+
+        fun assertWithinBudget(
+            bestMs: Long,
+            tight: Boolean,
+        ) {
+            assertTrue(bestMs < BUDGET_MS, "parsing took $bestMs ms (budget $BUDGET_MS ms, target 1 s)")
+            if (tight) {
+                assertTrue(bestMs < TIGHT_BUDGET_MS, "parsing took $bestMs ms (strict budget $TIGHT_BUDGET_MS ms)")
+            }
+        }
     }
 }

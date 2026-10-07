@@ -29,7 +29,8 @@
   "warnings": [
     {
       "code": "TEXT_TRUNCATED",
-      "detail": "524300 chars"
+      "detail": "524300 chars",
+      "itemIndex": 0
     }
   ]
 }

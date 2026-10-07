@@ -27,11 +27,13 @@
   "warnings": [
     {
       "code": "TEXT_TRUNCATED",
-      "detail": "600005 chars"
+      "detail": "600005 chars",
+      "itemIndex": 0
     },
     {
       "code": "TEXT_TRUNCATED",
-      "detail": "600005 chars"
+      "detail": "600005 chars",
+      "itemIndex": 0
     }
   ]
 }
