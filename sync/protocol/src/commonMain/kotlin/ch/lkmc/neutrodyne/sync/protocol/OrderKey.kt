@@ -29,11 +29,19 @@ object OrderKey {
     fun between(
         a: String?,
         b: String?,
+    ): String = between(a, b, Random)
+
+    // Test seam: the jitter source is injectable so tests can walk the whole suffix space
+    // deterministically instead of sampling it.
+    internal fun between(
+        a: String?,
+        b: String?,
+        random: Random,
     ): String {
         val midpoint = generateKeyBetween(a, b)
-        val candidate = midpoint + jitter()
+        val candidate = midpoint + jitter(random)
         if (b == null || candidate < b) return candidate
-        return between(midpoint, b)
+        return between(midpoint, b, random)
     }
 
     /** A key before [first] (or the initial key when [first] is null). */
@@ -51,12 +59,12 @@ object OrderKey {
 
     // Two random digits; the last is never the zero digit, so the jittered key stays a valid
     // fractional index (the library rejects a fractional part ending in 0).
-    private fun jitter(): String {
+    private fun jitter(random: Random): String {
         var last = BASE_62_DIGITS[0]
         while (last == BASE_62_DIGITS[0]) {
-            last = BASE_62_DIGITS[Random.nextInt(BASE_62_DIGITS.length)]
+            last = BASE_62_DIGITS[random.nextInt(BASE_62_DIGITS.length)]
         }
-        return BASE_62_DIGITS[Random.nextInt(BASE_62_DIGITS.length)].toString() + last
+        return BASE_62_DIGITS[random.nextInt(BASE_62_DIGITS.length)].toString() + last
     }
 
     // --- Port of rocicorp/fractional-indexing src/index.js (CC0-1.0) -------------------------

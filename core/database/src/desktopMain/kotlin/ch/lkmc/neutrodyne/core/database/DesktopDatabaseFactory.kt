@@ -46,7 +46,11 @@ class DesktopDatabaseFactory(
 
     override fun pruneQuarantine(now: Long) {
         if (!Files.isDirectory(quarantineDir)) return
-        val dirsToCheck = children(quarantineDir).filter { Files.isDirectory(it) }
+        // A pending destination still awaits the rest of its files — never prune it.
+        val pending = pendingQuarantine
+        val dirsToCheck =
+            children(quarantineDir)
+                .filter { Files.isDirectory(it) && it.fileName.toString() != pending }
         val keep =
             dirsToCheck
                 .filter { isFresh(it, now) }
@@ -56,6 +60,9 @@ class DesktopDatabaseFactory(
         dirsToCheck.filter { it !in keep }.forEach { it.toFile().deleteRecursively() }
     }
 
+    // Files.delete throws on a real failure (a lock, a dead filesystem): a surviving marker or
+    // pending stamp must propagate so the next launch resumes the same quarantine instead of
+    // re-quarantining a healthy replacement.
     override var quarantineMarker: Boolean
         get() = Files.exists(markerFile)
         set(value) {
@@ -67,11 +74,30 @@ class DesktopDatabaseFactory(
             }
         }
 
+    override var pendingQuarantine: String?
+        get() =
+            if (Files.exists(pendingFile)) {
+                Files.readString(pendingFile).trim().ifEmpty { null }
+            } else {
+                null
+            }
+        set(value) {
+            if (value == null) {
+                Files.deleteIfExists(pendingFile)
+            } else {
+                Files.createDirectories(pendingFile.parent)
+                Files.writeString(pendingFile, value)
+            }
+        }
+
     private val quarantineDir: Path
         get() = dirs.data.resolve(QUARANTINE_DIR)
 
     private val markerFile: Path
         get() = dirs.data.resolve(MARKER_FILE)
+
+    private val pendingFile: Path
+        get() = dirs.data.resolve(PENDING_FILE)
 
     /** The stamp is the quarantine's epoch-millis name; fall back to the newest child's mtime. */
     private fun isFresh(
@@ -89,6 +115,7 @@ class DesktopDatabaseFactory(
     private companion object {
         const val QUARANTINE_DIR = "quarantine"
         const val MARKER_FILE = "quarantine-requested"
+        const val PENDING_FILE = "quarantine-pending"
 
         /** 02: quarantine keeps only the newest copy, at most 14 days. */
         const val QUARANTINE_KEEP_MS = 14L * 24 * 60 * 60 * 1000

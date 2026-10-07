@@ -45,10 +45,43 @@ class OrderKeyTest {
     }
 
     @Test
-    fun twoInsertsAtTheSameSpotAlmostNeverCollide() {
-        // Jitter exists so concurrent inserts on different devices produce different keys.
-        val keys = (1..32).map { OrderKey.between("a0", "a1") }.toSet()
-        assertEquals(32, keys.size, "jittered inserts at the same spot collided")
+    fun jitterCoversTheWholeSuffixSpace() {
+        // Jitter exists so concurrent inserts on different devices produce different keys. The
+        // suffix space is small enough to walk exhaustively — 62 first digits × 61 non-zero last
+        // digits = 3782 keys — instead of sampling it and flaking on the birthday bound.
+        val digits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+        val seen = HashSet<String>(3782)
+        for (first in digits.indices) {
+            for (last in 1 until digits.length) {
+                // jitter() draws the non-zero last digit first, then the leading digit.
+                val fed = intArrayOf(last, first)
+                var index = 0
+                val random =
+                    object : Random() {
+                        override fun nextBits(bitCount: Int): Int = error("jitter draws through nextInt(bound)")
+
+                        override fun nextInt(until: Int): Int = fed[index++]
+                    }
+                // between("a0", "a1") computes the fixed midpoint "a0V"; the jitter appends.
+                val key = OrderKey.between("a0", "a1", random)
+                assertEquals("a0V${digits[first]}${digits[last]}", key)
+                assertTrue(key in "a0".."a1")
+                assertTrue(seen.add(key), "duplicate jittered key $key")
+            }
+        }
+        assertEquals(3782, seen.size)
+
+        // A zero last digit is rejected and re-drawn (a key may not end in '0').
+        val fed = intArrayOf(0, 5, 10)
+        var index = 0
+        val random =
+            object : Random() {
+                override fun nextBits(bitCount: Int): Int = error("jitter draws through nextInt(bound)")
+
+                override fun nextInt(until: Int): Int = fed[index++]
+            }
+        assertEquals("a0V${digits[10]}${digits[5]}", OrderKey.between("a0", "a1", random))
+        assertEquals(3, index, "the rejected '0' draw must consume an extra value")
     }
 
     @Test

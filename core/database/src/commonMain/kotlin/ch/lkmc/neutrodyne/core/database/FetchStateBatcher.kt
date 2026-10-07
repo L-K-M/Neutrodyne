@@ -43,14 +43,16 @@ class FetchStateBatcher internal constructor(
 
     private val mutex = Mutex()
     private val pending = ArrayList<PodcastFetchState>(MAX_BATCH)
-    private var firstPendingAt = 0L
+    private var firstPendingElapsed = 0L
     private var deadlineJob: Job? = null
 
     /** Buffers one refresh outcome, flushing when the batch size or the deadline is reached. */
     suspend fun add(row: PodcastFetchState) {
         mutex.withLock {
             if (pending.isEmpty()) {
-                firstPendingAt = clock.now()
+                // The deadline is measured on the monotonic clock: a backward wall-clock
+                // adjustment (NTP, a manual change) must never strand the buffered outcomes.
+                firstPendingElapsed = clock.elapsedRealtime()
                 deadlineJob =
                     scope.launch {
                         delay(MAX_DELAY_MS)
@@ -58,14 +60,22 @@ class FetchStateBatcher internal constructor(
                             // The deadline is re-checked against [clock]: a test scheduler can skip
                             // virtual time while the caller is suspended on real-dispatcher work —
                             // flush only when the limit actually elapsed.
-                            if (pending.isNotEmpty() && clock.now() - firstPendingAt >= MAX_DELAY_MS) {
+                            if (
+                                pending.isNotEmpty() &&
+                                clock.elapsedRealtime() - firstPendingElapsed >= MAX_DELAY_MS
+                            ) {
                                 flushLocked()
                             }
                         }
                     }
             }
             pending += row
-            if (pending.size >= MAX_BATCH || clock.now() - firstPendingAt >= MAX_DELAY_MS) flushLocked()
+            if (
+                pending.size >= MAX_BATCH ||
+                clock.elapsedRealtime() - firstPendingElapsed >= MAX_DELAY_MS
+            ) {
+                flushLocked()
+            }
         }
     }
 
