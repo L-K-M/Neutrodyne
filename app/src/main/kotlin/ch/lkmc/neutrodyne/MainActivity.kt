@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne
 
+import android.os.Build
 import android.os.Bundle
+import android.os.LocaleList
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
@@ -27,6 +29,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
+import java.util.Locale
 import kotlin.time.Duration.Companion.seconds
 
 /**
@@ -43,6 +46,7 @@ class MainActivity : AppCompatActivity() {
         val splash = installSplashScreen()
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        mirrorActivityLocalesToDefault()
 
         val graph = (application as NeutrodyneApplication).graph
         holdSplashForAppearance(splash, graph.settingsRepository)
@@ -61,6 +65,20 @@ class MainActivity : AppCompatActivity() {
                 )
             }
         }
+    }
+
+    /**
+     * S11 (2026-10-07): below API 33 AppCompat applies the per-app language to this activity's
+     * configuration only, while Compose resources resolve their locale from the process default
+     * (`Locale.current`, i.e. `LocaleList.getDefault()`). Mirroring the activity's locales into the
+     * defaults lets the root relabel on the recreation AppCompat triggers; from API 33 the
+     * framework's `LocaleManager` changes the process default itself.
+     */
+    private fun mirrorActivityLocalesToDefault() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) return
+        val locales = resources.configuration.locales
+        LocaleList.setDefault(locales)
+        Locale.setDefault(locales[0])
     }
 
     /**

@@ -46,8 +46,8 @@ import kotlinx.coroutines.flow.emptyFlow
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * The activity S5's tests host: it composes the shared [NeutrodyneRoot] with the stubs below,
- * mirroring `MainActivity`'s shell composition (test installers stand in for the graph's
+ * Debug-only (01 S5): the activity S5's instrumented tests host. It composes the shared
+ * [NeutrodyneRoot] with the stubs below, mirroring `MainActivity`'s shell composition (test installers stand in for the graph's
  * `entryInstallers`). `onCreate` owns the `setContent` call so `ActivityScenario.recreate()`
  * re-runs it against the restored saved state — the "Don't keep activities" / process-death leg.
  */
