@@ -125,7 +125,10 @@ internal class FeedIngestor(
             existing
                 .asSequence()
                 .mapNotNull { row ->
-                    row.guid?.trim()?.takeIf { it.isNotEmpty() && (guidRowCounts[it]!! > 1 || row.identityKey != "g:$it") }
+                    row.guid?.trim()?.takeIf {
+                        it.isNotEmpty() &&
+                            (guidRowCounts[it]!! > 1 || row.identityKey != "g:$it")
+                    }
                 }.toSet()
 
         // Pass 1 (03 step 4): each item claims rows in claim-key order — its assigned document
@@ -137,7 +140,10 @@ internal class FeedIngestor(
         while (pending.isNotEmpty()) {
             val item = pending.removeFirst()
             if (item.matchedTo != null) continue
-            val reusedGuid = item.episode.guid?.trim()?.takeIf(reusedGuids::contains)
+            val reusedGuid =
+                item.episode.guid
+                    ?.trim()
+                    ?.takeIf(reusedGuids::contains)
             for (key in item.claimKeys) {
                 val row = byKey[key] ?: continue
                 if (

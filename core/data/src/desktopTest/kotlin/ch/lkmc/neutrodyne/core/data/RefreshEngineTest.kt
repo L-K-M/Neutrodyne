@@ -792,18 +792,18 @@ class RefreshEngineTest {
                 )
 
             newRefresher(
-                    db,
-                    mapOf(SourceType.RSS to adapter),
-                    clock,
-                    settings,
-                    ingestor =
-                        newIngestor(
-                            db,
-                            clock,
-                            settings,
-                            defaultDispatcher = StandardTestDispatcher(testScheduler),
-                        ),
-                ).run(request(pagingBudgetMs = 120_000L))
+                db,
+                mapOf(SourceType.RSS to adapter),
+                clock,
+                settings,
+                ingestor =
+                    newIngestor(
+                        db,
+                        clock,
+                        settings,
+                        defaultDispatcher = StandardTestDispatcher(testScheduler),
+                    ),
+            ).run(request(pagingBudgetMs = 120_000L))
 
             assertEquals(
                 listOf(id to FetchMode.REFRESH, id to FetchMode.OLDER_PAGE),
@@ -920,18 +920,18 @@ class RefreshEngineTest {
 
             val report =
                 newRefresher(
-                        db,
-                        mapOf(SourceType.RSS to adapter),
-                        clock,
-                        settings,
-                        ingestor =
-                            newIngestor(
-                                db,
-                                clock,
-                                settings,
-                                defaultDispatcher = StandardTestDispatcher(testScheduler),
-                            ),
-                    ).run(request(pagesOnly = true, pagingBudgetMs = 2_000L))
+                    db,
+                    mapOf(SourceType.RSS to adapter),
+                    clock,
+                    settings,
+                    ingestor =
+                        newIngestor(
+                            db,
+                            clock,
+                            settings,
+                            defaultDispatcher = StandardTestDispatcher(testScheduler),
+                        ),
+                ).run(request(pagesOnly = true, pagingBudgetMs = 2_000L))
 
             assertEquals(2, adapter.calls.size)
             assertIs<FeedOutcome.Ingested>(report.outcomes[id])
