@@ -19,13 +19,15 @@ import org.robolectric.annotation.Config
 class RefreshWorkDataTest {
     @Test
     fun `all scope round-trips`() {
-        val request = decode(RefreshWorkData.of(RefreshScope.All, force = false, pagesOnly = false, RefreshOrigin.PERIODIC))
+        val request =
+            decode(RefreshWorkData.of(RefreshScope.All, force = false, pagesOnly = false, RefreshOrigin.PERIODIC))
         assertThat(request.scope).isEqualTo(RefreshScope.All)
     }
 
     @Test
     fun `group scope round-trips`() {
-        val request = decode(RefreshWorkData.of(RefreshScope.Group(42), force = false, pagesOnly = false, RefreshOrigin.MANUAL))
+        val request =
+            decode(RefreshWorkData.of(RefreshScope.Group(42), force = false, pagesOnly = false, RefreshOrigin.MANUAL))
         assertThat(request.scope).isEqualTo(RefreshScope.Group(42))
     }
 

@@ -17,9 +17,9 @@ import ch.lkmc.neutrodyne.core.model.OwnerType
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.model.ParsedEpisode
 import ch.lkmc.neutrodyne.feeds.parse.EnclosureTypes
+import kotlinx.serialization.json.Json
 import kotlin.math.abs
 import kotlin.math.min
-import kotlinx.serialization.json.Json
 
 /**
  * The off-transaction projection of one accepted item (03 Diff algorithm): identity keys, pass-2
@@ -268,7 +268,10 @@ internal class Pass2Index(
             return false
         }
         val storedMajor = row.enclosureType?.substringBefore('/')
-        val itemMajor = item.episode.primaryEnclosure?.effectiveType?.substringBefore('/')
+        val itemMajor =
+            item.episode.primaryEnclosure
+                ?.effectiveType
+                ?.substringBefore('/')
         return storedMajor == null || itemMajor == null || storedMajor == itemMajor
     }
 
@@ -285,7 +288,9 @@ internal class Pass2Index(
 internal fun titleDayKeyOf(
     title: String,
     pubDateMs: Long,
-): String = ch.lkmc.neutrodyne.feeds.identity.TitleMatch.normalise(title) + "|" + pubDateMs / PreparedItem.DAY_MS
+): String =
+    ch.lkmc.neutrodyne.feeds.identity.TitleMatch
+        .normalise(title) + "|" + pubDateMs / PreparedItem.DAY_MS
 
 private fun List<ExistingEpisodeKey>.grouped(
     keyOf: (ExistingEpisodeKey) -> String?,

@@ -2,7 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.model
 
-/**
+/*
  * The read models of 03's "Unsubscribe and other podcast operations" (SQL: 02 Library tiles and
  * mosaics, rendering: 08). Display title = `customTitle ?: title`.
  */

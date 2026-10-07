@@ -53,17 +53,21 @@ internal class RssSourceAdapter(
 
     /** The per-host semaphore key of the fan-out limit (lowercase request host). */
     override fun hostKey(feed: DueFeed): String =
-        feed.feedUrl.substringAfter("://", feed.feedUrl).substringBefore("/").lowercase()
+        feed.feedUrl
+            .substringAfter("://", feed.feedUrl)
+            .substringBefore("/")
+            .lowercase()
 
     override suspend fun fetchAndParse(
         feed: DueFeed,
         mode: FetchMode,
     ): AdapterResult {
-        val unconditional = when (mode) {
-            FetchMode.OLDER_PAGE -> true
-            FetchMode.FULL -> true
-            FetchMode.REFRESH -> needsFullFetch(feed)
-        }
+        val unconditional =
+            when (mode) {
+                FetchMode.OLDER_PAGE -> true
+                FetchMode.FULL -> true
+                FetchMode.REFRESH -> needsFullFetch(feed)
+            }
         val url =
             when (mode) {
                 FetchMode.OLDER_PAGE -> feed.pagingNextUrl ?: feed.feedUrl
@@ -79,7 +83,7 @@ internal class RssSourceAdapter(
                 ),
             )
         return when (outcome) {
-            is FetchOutcome.NotModified ->
+            is FetchOutcome.NotModified -> {
                 AdapterResult.NotModified(
                     meta =
                         FetchMeta(
@@ -92,10 +96,13 @@ internal class RssSourceAdapter(
                             maxAgeSec = outcome.maxAgeSec,
                         ),
                 )
+            }
 
-            is FetchOutcome.Network -> networkOutcome(outcome.error)
+            is FetchOutcome.Network -> {
+                networkOutcome(outcome.error)
+            }
 
-            is FetchOutcome.Http ->
+            is FetchOutcome.Http -> {
                 AdapterResult.Failed(
                     kind = httpErrorKind(outcome.code, outcome.basicChallenge),
                     http = outcome.code,
@@ -103,22 +110,30 @@ internal class RssSourceAdapter(
                     // `transient` only gates `gone`: the RSS adapter asks for it on a real 410.
                     transient = outcome.code != HTTP_GONE,
                 )
+            }
 
-            FetchOutcome.TooLarge ->
+            FetchOutcome.TooLarge -> {
                 AdapterResult.Failed(FeedErrorKind.TOO_LARGE, http = null, retryAfterMs = null, transient = true)
+            }
 
-            FetchOutcome.RedirectLoop ->
+            FetchOutcome.RedirectLoop -> {
                 AdapterResult.Failed(FeedErrorKind.REDIRECT_LOOP, http = null, retryAfterMs = null, transient = true)
+            }
 
-            is FetchOutcome.Body -> bodyOutcome(feed, outcome, unconditional)
+            is FetchOutcome.Body -> {
+                bodyOutcome(feed, outcome, unconditional)
+            }
         }
     }
 
     /** `NetError.Cancelled` produces no outcome: it propagates so the feed counts as unattempted. */
     private fun networkOutcome(error: NetError): AdapterResult =
         when (error) {
-            NetError.Cancelled -> throw CancellationException("feed fetch cancelled")
-            else ->
+            NetError.Cancelled -> {
+                throw CancellationException("feed fetch cancelled")
+            }
+
+            else -> {
                 AdapterResult.Failed(
                     kind = kindOf(error),
                     http = null,
@@ -126,6 +141,7 @@ internal class RssSourceAdapter(
                     transient = true,
                     detail = if (error is NetError.Other) error.type else null,
                 )
+            }
         }
 
     private suspend fun bodyOutcome(
@@ -150,9 +166,12 @@ internal class RssSourceAdapter(
             return AdapterResult.Unchanged(meta)
         }
         return when (body.sniff) {
-            Sniff.RSS, Sniff.ATOM, Sniff.RDF -> parseOutcome(body, meta)
+            Sniff.RSS, Sniff.ATOM, Sniff.RDF -> {
+                parseOutcome(body, meta)
+            }
+
             // An HTML page where a feed was: keep the body for M3's autodiscovery.
-            Sniff.HTML ->
+            Sniff.HTML -> {
                 AdapterResult.Failed(
                     FeedErrorKind.NOT_A_FEED,
                     http = null,
@@ -160,6 +179,8 @@ internal class RssSourceAdapter(
                     transient = true,
                     htmlBody = body.file,
                 )
+            }
+
             Sniff.OPML, Sniff.JSON, Sniff.OTHER -> {
                 tempFiles.delete(body.file)
                 AdapterResult.Failed(FeedErrorKind.NOT_A_FEED, http = null, retryAfterMs = null, transient = true)
@@ -182,15 +203,16 @@ internal class RssSourceAdapter(
                     )
                 }
             when (result) {
-                is ParseResult.Ok ->
+                is ParseResult.Ok -> {
                     AdapterResult.Parsed(
                         feed = result.feed,
                         // A page-1 link means the stored window is incomplete until paging ends.
                         partial = result.feed.paging.next != null || result.feed.paging.prevArchive != null,
                         meta = meta,
                     )
+                }
 
-                is ParseResult.Failed ->
+                is ParseResult.Failed -> {
                     AdapterResult.Failed(
                         FeedErrorKind.PARSE_ERROR,
                         http = null,
@@ -198,6 +220,7 @@ internal class RssSourceAdapter(
                         transient = true,
                         detail = "${result.reason}: ${result.detail}",
                     )
+                }
             }
         } finally {
             // `tempFile` is deleted when handled, cancelled or superseded.
@@ -211,7 +234,7 @@ internal class RssSourceAdapter(
     private fun needsFullFetch(feed: DueFeed): Boolean =
         feed.parserVersion < FeedParser.VERSION ||
             !feed.lastParseOk ||
-            (feed.lastFullFetchAt ?: 0L) < clock.now() - FULL_FETCH_INTERVAL_MS && !network.status.value.isMetered
+            ((feed.lastFullFetchAt ?: 0L) < clock.now() - FULL_FETCH_INTERVAL_MS && !network.status.value.isMetered)
 
     /** RSS keeps the engine's base schedule (no adapter override for M1a). */
     override fun nextRefreshAt(
@@ -226,31 +249,57 @@ internal class RssSourceAdapter(
     ): FeedErrorKind =
         when {
             code == HTTP_GONE -> FeedErrorKind.HTTP_GONE
+
             code == HTTP_RATE_LIMITED -> FeedErrorKind.HTTP_RATE_LIMITED
+
             (code == HTTP_UNAUTHORIZED || code == HTTP_FORBIDDEN_CODE) && basicChallenge -> FeedErrorKind.HTTP_AUTH
+
             code == HTTP_UNAUTHORIZED || code == HTTP_FORBIDDEN_CODE -> FeedErrorKind.HTTP_FORBIDDEN
+
             code == HTTP_NOT_FOUND_CODE -> FeedErrorKind.HTTP_NOT_FOUND
+
             code >= 500 -> FeedErrorKind.HTTP_SERVER
+
             // A 3xx the chain could not follow (no usable Location) is the final response (03).
             code >= 300 -> FeedErrorKind.HTTP_CLIENT
+
             else -> FeedErrorKind.HTTP_CLIENT
         }
 
     private fun kindOf(error: NetError): FeedErrorKind =
         when (error) {
-            NetError.Offline -> FeedErrorKind.OFFLINE
-            NetError.Timeout -> FeedErrorKind.TIMEOUT
-            NetError.DnsFailure -> FeedErrorKind.DNS
-            NetError.ConnectionFailed -> FeedErrorKind.CONNECTION
-            NetError.LocalNetworkUnsupported -> FeedErrorKind.LOCAL_NETWORK_UNSUPPORTED
-            is NetError.Tls ->
+            NetError.Offline -> {
+                FeedErrorKind.OFFLINE
+            }
+
+            NetError.Timeout -> {
+                FeedErrorKind.TIMEOUT
+            }
+
+            NetError.DnsFailure -> {
+                FeedErrorKind.DNS
+            }
+
+            NetError.ConnectionFailed -> {
+                FeedErrorKind.CONNECTION
+            }
+
+            NetError.LocalNetworkUnsupported -> {
+                FeedErrorKind.LOCAL_NETWORK_UNSUPPORTED
+            }
+
+            is NetError.Tls -> {
                 when (error.kind) {
                     TlsKind.UNTRUSTED_CERTIFICATE -> FeedErrorKind.TLS_UNTRUSTED
                     TlsKind.CERTIFICATE_TRANSPARENCY -> FeedErrorKind.TLS_CERTIFICATE_TRANSPARENCY
                     TlsKind.HANDSHAKE -> FeedErrorKind.TLS_HANDSHAKE
                 }
+            }
+
             // Cancelled is thrown out in `networkOutcome`; Other lands here only via that branch.
-            NetError.Cancelled, is NetError.Other -> FeedErrorKind.UNKNOWN
+            NetError.Cancelled, is NetError.Other -> {
+                FeedErrorKind.UNKNOWN
+            }
         }
 
     private companion object {

@@ -10,7 +10,10 @@ package ch.lkmc.neutrodyne.core.data.fetch
 internal object FeedSniffer {
     const val PROBE_BYTES = 1024
 
-    fun sniff(bytes: ByteArray, length: Int = bytes.size): Sniff {
+    fun sniff(
+        bytes: ByteArray,
+        length: Int = bytes.size,
+    ): Sniff {
         var i = 0
         val n = minOf(length, PROBE_BYTES)
 
@@ -28,10 +31,22 @@ internal object FeedSniffer {
             while (i < n && isSpace(bytes[i])) i++
             val rest = remaining(bytes, i, n)
             when {
-                rest.startsWith("<?xml") -> i = skipTo(bytes, i + 2, n, "?>") ?: return Sniff.OTHER
-                rest.startsWith("<!--") -> i = skipTo(bytes, i + 4, n, "-->") ?: return Sniff.OTHER
-                rest.lowercase().startsWith("<!doctype html") -> return Sniff.HTML
-                rest.lowercase().startsWith("<!doctype") -> i = skipTo(bytes, i + 2, n, ">") ?: return Sniff.OTHER
+                rest.startsWith("<?xml") -> {
+                    i = skipTo(bytes, i + 2, n, "?>") ?: return Sniff.OTHER
+                }
+
+                rest.startsWith("<!--") -> {
+                    i = skipTo(bytes, i + 4, n, "-->") ?: return Sniff.OTHER
+                }
+
+                rest.lowercase().startsWith("<!doctype html") -> {
+                    return Sniff.HTML
+                }
+
+                rest.lowercase().startsWith("<!doctype") -> {
+                    i = skipTo(bytes, i + 2, n, ">") ?: return Sniff.OTHER
+                }
+
                 else -> {
                     return when {
                         rest.lowercase().startsWith("<rss") -> Sniff.RSS
@@ -72,5 +87,6 @@ internal object FeedSniffer {
         return null
     }
 
-    private fun isSpace(b: Byte): Boolean = b == ' '.code.toByte() || b == '\t'.code.toByte() || b == '\n'.code.toByte() || b == '\r'.code.toByte()
+    private fun isSpace(b: Byte): Boolean =
+        b == ' '.code.toByte() || b == '\t'.code.toByte() || b == '\n'.code.toByte() || b == '\r'.code.toByte()
 }

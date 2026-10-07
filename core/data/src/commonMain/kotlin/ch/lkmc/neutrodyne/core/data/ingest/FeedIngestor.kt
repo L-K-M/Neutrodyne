@@ -21,23 +21,23 @@ import ch.lkmc.neutrodyne.core.model.OwnerType
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.ShowType
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
+import ch.lkmc.neutrodyne.feeds.html.ShowNotesSanitizer
 import ch.lkmc.neutrodyne.feeds.identity.EpisodeContentHash
 import ch.lkmc.neutrodyne.feeds.identity.EpisodeKeys
 import ch.lkmc.neutrodyne.feeds.identity.PodcastGuid
 import ch.lkmc.neutrodyne.feeds.identity.TitleMatch
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+import ch.lkmc.neutrodyne.feeds.model.ParseWarning
 import ch.lkmc.neutrodyne.feeds.model.ParsedEpisode
 import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
-import ch.lkmc.neutrodyne.feeds.model.ParseWarning
 import ch.lkmc.neutrodyne.feeds.model.WarningCode
-import ch.lkmc.neutrodyne.feeds.html.ShowNotesSanitizer
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
 import dev.zacsweers.metro.Inject
-import kotlin.math.abs
-import kotlin.math.max
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlin.math.abs
+import kotlin.math.max
 
 /**
  * The ingestion/diff algorithm of 03 for one podcast and one parsed document. All episode work of
@@ -180,7 +180,7 @@ internal class FeedIngestor(
             for (item in insertedItems) {
                 item.isNew =
                     ctx.mode == IngestMode.REFRESH && !stored.initialFetch &&
-                        (item.episode.pubDate ?: prepared.now) >= newFloor
+                    (item.episode.pubDate ?: prepared.now) >= newFloor
             }
             val rowsByDescFeedOrder = insertedItems.sortedByDescending { it.episode.feedOrder }
             val ids =
@@ -271,10 +271,17 @@ internal class FeedIngestor(
             RefreshPolicy.effectiveIntervalMinutes(settings.get(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES))
         val (guidValue, guidDerived) =
             when {
-                realGuid != null -> realGuid to false
-                !stored.podcastGuidDerived && stored.podcastGuid != null ->
+                realGuid != null -> {
+                    realGuid to false
+                }
+
+                !stored.podcastGuidDerived && stored.podcastGuid != null -> {
                     stored.podcastGuid to false
-                else -> (stored.podcastGuid ?: PodcastGuid.derive(stored.feedUrl)) to true
+                }
+
+                else -> {
+                    (stored.podcastGuid ?: PodcastGuid.derive(stored.feedUrl)) to true
+                }
             }
         ingestDao.applyFeedMetadata(
             PodcastFeedMetadata(
@@ -305,14 +312,15 @@ internal class FeedIngestor(
                 lastSuccessAt = prepared.now,
                 // `lastFullFetchAt` tracks unconditional 200s only (03 full-fetch rule).
                 lastFullFetchAt = if (ctx.fetch.unconditional) prepared.now else stored.lastFullFetchAt,
-                nextRefreshAt = RefreshPolicy.successNextRefreshAt(
-                    prepared.now,
-                    intervalMinutes,
-                    parsed.complete,
-                    latestEpisodeAt,
-                    parsed.ttlMinutes,
-                    ctx.fetch.maxAgeSec,
-                ),
+                nextRefreshAt =
+                    RefreshPolicy.successNextRefreshAt(
+                        prepared.now,
+                        intervalMinutes,
+                        parsed.complete,
+                        latestEpisodeAt,
+                        parsed.ttlMinutes,
+                        ctx.fetch.maxAgeSec,
+                    ),
                 failureCount = 0,
                 lastErrorKind = null,
                 lastErrorDetail = null,
@@ -377,7 +385,11 @@ internal class FeedIngestor(
     ): PreparedFeed {
         val now = clock.now()
         val firstSeenAt = serverCorrectedNow(now, ctx.fetch.serverDateMs)
-        val artworkIdentity = parsed.artwork.firstOrNull()?.url?.let(UrlNormalizer::forIdentity)
+        val artworkIdentity =
+            parsed.artwork
+                .firstOrNull()
+                ?.url
+                ?.let(UrlNormalizer::forIdentity)
         val warnings = parsed.warnings.toMutableList()
         val usedKeys = mutableSetOf<String>()
         val items = mutableListOf<PreparedItem>()
@@ -442,8 +454,10 @@ internal class FeedIngestor(
     }
 
     /** A `Date` header >24 h off the local clock wins `firstSeenAt` (03 sortDate and clock). */
-    private fun serverCorrectedNow(now: Long, serverDateMs: Long?): Long =
-        if (serverDateMs != null && abs(now - serverDateMs) > PreparedItem.DAY_MS) serverDateMs else now
+    private fun serverCorrectedNow(
+        now: Long,
+        serverDateMs: Long?,
+    ): Long = if (serverDateMs != null && abs(now - serverDateMs) > PreparedItem.DAY_MS) serverDateMs else now
 
     /**
      * `itunes:new-feed-url` (03 Feed moves rule 1): stored on every ingest but ignored when it

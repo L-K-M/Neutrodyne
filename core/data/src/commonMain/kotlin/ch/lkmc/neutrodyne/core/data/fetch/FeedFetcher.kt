@@ -6,8 +6,8 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.common.HttpClientKind
 import ch.lkmc.neutrodyne.core.model.NetError
-import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.network.NetErrorClassifier
+import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import dev.zacsweers.metro.Inject
 import io.ktor.client.request.header
@@ -93,72 +93,75 @@ internal class FeedFetcher(
         // the first request's (a cross-scheme/host/port hop never carries them).
         val firstOrigin = UrlNormalizer.origin(req.url)
         val hopOrigin = UrlNormalizer.origin(url)
-        client.prepareGet(url) {
-            header(HttpHeaders.Accept, FEED_ACCEPT)
-            if (req.conditional) {
-                req.etag?.let { header(HttpHeaders.IfNoneMatch, it) }
-                req.lastModified?.let { header(HttpHeaders.IfModifiedSince, it) }
-            }
-            if (req.credentials != null && hopOrigin != null && hopOrigin == firstOrigin) {
-                val it = req.credentials
-                header(
-                    HttpHeaders.Authorization,
-                    "Basic " +
-                        "${it.username}:${it.password}".encodeToByteArray().toByteString().base64(),
-                )
-            }
-        }.execute { response ->
-            status = response.status.value
-            when {
-                status == 304 -> {
-                    response.discardBody()
-                    outcome =
-                        FetchOutcome.NotModified(
-                            etag = response.headers[FeedHttpHeaders.ETAG],
-                            lastModified = response.headers[FeedHttpHeaders.LAST_MODIFIED],
-                            maxAgeSec =
-                                FeedHttpHeaders.maxAgeSec(
-                                    response.headers[FeedHttpHeaders.CACHE_CONTROL],
-                                ),
-                            serverDateMs =
-                                FeedHttpHeaders.serverDateMs(response.headers[FeedHttpHeaders.DATE]),
-                        )
+        client
+            .prepareGet(url) {
+                header(HttpHeaders.Accept, FEED_ACCEPT)
+                if (req.conditional) {
+                    req.etag?.let { header(HttpHeaders.IfNoneMatch, it) }
+                    req.lastModified?.let { header(HttpHeaders.IfModifiedSince, it) }
                 }
-
-                status in 300..399 && response.headers[FeedHttpHeaders.LOCATION] != null -> {
-                    response.discardBody()
-                    location = response.headers[FeedHttpHeaders.LOCATION]
-                    outcome =
-                        FetchOutcome.Http(
-                            code = status,
-                            retryAfterMs = null,
-                            basicChallenge = false,
-                            realm = null,
-                        )
+                if (req.credentials != null && hopOrigin != null && hopOrigin == firstOrigin) {
+                    val it = req.credentials
+                    header(
+                        HttpHeaders.Authorization,
+                        "Basic " +
+                            "${it.username}:${it.password}".encodeToByteArray().toByteString().base64(),
+                    )
                 }
+            }.execute { response ->
+                status = response.status.value
+                when {
+                    status == 304 -> {
+                        response.discardBody()
+                        outcome =
+                            FetchOutcome.NotModified(
+                                etag = response.headers[FeedHttpHeaders.ETAG],
+                                lastModified = response.headers[FeedHttpHeaders.LAST_MODIFIED],
+                                maxAgeSec =
+                                    FeedHttpHeaders.maxAgeSec(
+                                        response.headers[FeedHttpHeaders.CACHE_CONTROL],
+                                    ),
+                                serverDateMs =
+                                    FeedHttpHeaders.serverDateMs(response.headers[FeedHttpHeaders.DATE]),
+                            )
+                    }
 
-                response.status.isSuccess() -> outcome = readBody(req, url, hops, permanentUrl, response)
+                    status in 300..399 && response.headers[FeedHttpHeaders.LOCATION] != null -> {
+                        response.discardBody()
+                        location = response.headers[FeedHttpHeaders.LOCATION]
+                        outcome =
+                            FetchOutcome.Http(
+                                code = status,
+                                retryAfterMs = null,
+                                basicChallenge = false,
+                                realm = null,
+                            )
+                    }
 
-                else -> {
-                    response.discardBody()
-                    val (basic, realm) =
-                        FeedHttpHeaders.basicChallenge(
-                            response.headers[FeedHttpHeaders.WWW_AUTHENTICATE],
-                        )
-                    outcome =
-                        FetchOutcome.Http(
-                            code = status,
-                            retryAfterMs =
-                                FeedHttpHeaders.retryAfterMs(
-                                    response.headers[FeedHttpHeaders.RETRY_AFTER],
-                                    clock.now(),
-                                ),
-                            basicChallenge = basic,
-                            realm = realm,
-                        )
+                    response.status.isSuccess() -> {
+                        outcome = readBody(req, url, hops, permanentUrl, response)
+                    }
+
+                    else -> {
+                        response.discardBody()
+                        val (basic, realm) =
+                            FeedHttpHeaders.basicChallenge(
+                                response.headers[FeedHttpHeaders.WWW_AUTHENTICATE],
+                            )
+                        outcome =
+                            FetchOutcome.Http(
+                                code = status,
+                                retryAfterMs =
+                                    FeedHttpHeaders.retryAfterMs(
+                                        response.headers[FeedHttpHeaders.RETRY_AFTER],
+                                        clock.now(),
+                                    ),
+                                basicChallenge = basic,
+                                realm = realm,
+                            )
+                    }
                 }
             }
-        }
         return HopResult(outcome, location, status)
     }
 

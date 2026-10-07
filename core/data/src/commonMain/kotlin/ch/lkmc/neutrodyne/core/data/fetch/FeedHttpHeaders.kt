@@ -61,7 +61,9 @@ internal object FeedHttpHeaders {
 
     fun contentTypeCharset(contentType: String?): String? {
         if (contentType == null) return null
-        return contentType.split(';').drop(1)
+        return contentType
+            .split(';')
+            .drop(1)
             .map { it.trim() }
             .firstOrNull { it.startsWith("charset=", ignoreCase = true) }
             ?.substringAfter('=')
@@ -102,7 +104,10 @@ internal object FeedHttpHeaders {
     }
 
     /** Location resolution base helpers used by the redirect chain. */
-    fun resolveLocation(base: String, location: String): String? {
+    fun resolveLocation(
+        base: String,
+        location: String,
+    ): String? {
         val loc = location.trim()
         if (loc.isEmpty()) return null
         val schemeEnd = loc.indexOf(':')
@@ -111,14 +116,16 @@ internal object FeedHttpHeaders {
         }
         val baseSchemeEnd = base.indexOf("://")
         if (baseSchemeEnd < 0) return null
-        val authority = base.substring(0, baseSchemeEnd + 3) +
-            base.substring(baseSchemeEnd + 3).substringBefore('/')
+        val authority =
+            base.substring(0, baseSchemeEnd + 3) +
+                base.substring(baseSchemeEnd + 3).substringBefore('/')
         if (loc.startsWith("//")) return base.substring(0, baseSchemeEnd) + ":" + loc
         if (loc.startsWith("/")) return authority + normalizePath(loc)
         val path = base.substringAfter("://").substringAfter('/', "")
         val dir = path.substringBeforeLast('/', "")
-        val basePath = base.substringBefore("://") + "://" +
-            base.substringAfter("://").substringBefore('/')
+        val basePath =
+            base.substringBefore("://") + "://" +
+                base.substringAfter("://").substringBefore('/')
         val joined = if (dir.isEmpty()) "/$loc" else "/$dir/$loc"
         return basePath + normalizePath(joined)
     }

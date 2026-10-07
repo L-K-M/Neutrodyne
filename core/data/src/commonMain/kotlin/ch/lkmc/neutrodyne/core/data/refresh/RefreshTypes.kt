@@ -6,7 +6,7 @@ import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.NewEpisodes
 
-/**
+/*
  * The refresh-scheduling types of 03 "API" and "Engine run" (`:core:data` commonMain, internal).
  * `RefreshControllerImpl` delegates work requests to the platform `RefreshScheduler`; the engine
  * state machine is `FeedRefresher`.

@@ -4,34 +4,42 @@ package ch.lkmc.neutrodyne.core.data
 
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
-import ch.lkmc.neutrodyne.core.common.HttpClientKind
 import ch.lkmc.neutrodyne.core.common.LocalNetworkAccess
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.common.StoragePaths
 import ch.lkmc.neutrodyne.core.common.UserAgentProvider
+import ch.lkmc.neutrodyne.core.data.add.AddPodcastResolverImpl
+import ch.lkmc.neutrodyne.core.data.add.PreviewCache
+import ch.lkmc.neutrodyne.core.data.add.SubscribeUseCaseImpl
 import ch.lkmc.neutrodyne.core.data.fetch.FeedFetcher
 import ch.lkmc.neutrodyne.core.data.fetch.FeedTempFiles
-import ch.lkmc.neutrodyne.core.data.ingest.FetchMeta
 import ch.lkmc.neutrodyne.core.data.ingest.FeedIngestor
-import ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher
-import ch.lkmc.neutrodyne.core.data.refresh.SourceAdapter
+import ch.lkmc.neutrodyne.core.data.ingest.FetchMeta
 import ch.lkmc.neutrodyne.core.data.ingest.IngestionEventBus
 import ch.lkmc.neutrodyne.core.data.refresh.AdapterResult
+import ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher
 import ch.lkmc.neutrodyne.core.data.refresh.FetchMode
+import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
+import ch.lkmc.neutrodyne.core.data.refresh.RefreshScheduler
 import ch.lkmc.neutrodyne.core.data.refresh.RssSourceAdapter
+import ch.lkmc.neutrodyne.core.data.refresh.SourceAdapter
+import ch.lkmc.neutrodyne.core.data.repo.PodcastRepositoryImpl
+import ch.lkmc.neutrodyne.core.database.DueFeed
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.database.PodcastFetchState
+import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
+import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.network.NetErrorClassifier
-import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
+import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.network.okhttp.AuthInterceptor
 import ch.lkmc.neutrodyne.core.network.okhttp.CoreClients
 import ch.lkmc.neutrodyne.core.network.okhttp.DnsFamilyHints
@@ -39,15 +47,6 @@ import ch.lkmc.neutrodyne.core.network.okhttp.JvmNetErrors
 import ch.lkmc.neutrodyne.core.network.okhttp.LocalNetworkGuard
 import ch.lkmc.neutrodyne.core.network.okhttp.NetworkClients
 import ch.lkmc.neutrodyne.core.network.okhttp.UserAgentInterceptor
-import ch.lkmc.neutrodyne.core.data.add.AddPodcastResolverImpl
-import ch.lkmc.neutrodyne.core.data.add.PreviewCache
-import ch.lkmc.neutrodyne.core.data.add.SubscribeUseCaseImpl
-import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
-import ch.lkmc.neutrodyne.core.data.refresh.RefreshScheduler
-import ch.lkmc.neutrodyne.core.data.repo.PodcastRepositoryImpl
-import ch.lkmc.neutrodyne.core.database.DueFeed
-import ch.lkmc.neutrodyne.core.domain.OrderKeys
-import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -59,16 +58,13 @@ import ch.lkmc.neutrodyne.feeds.model.Enclosure
 import ch.lkmc.neutrodyne.feeds.model.FeedFormat
 import ch.lkmc.neutrodyne.feeds.model.ParsedEpisode
 import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.okhttp.OkHttp
-import io.ktor.client.plugins.UserAgent
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlin.random.Random
 import mockwebserver3.MockResponse
 import okio.FileSystem
 import java.io.File
+import kotlin.random.Random
 
 internal fun fakePlatform(
     kind: PlatformKind = PlatformKind.DESKTOP,
@@ -114,28 +110,6 @@ internal fun newNetworkClients(
         AuthInterceptor(credentials),
     )
 
-/** `OkHttpNeutrodyneHttpClients` is internal to `:core:network`; this mirrors its client config. */
-internal class TestHttpClients(
-    networkClients: NetworkClients,
-    userAgent: UserAgentProvider,
-) : NeutrodyneHttpClients {
-    private val clients =
-        HttpClientKind.entries.associateWith { kind ->
-            HttpClient(OkHttp) {
-                engine { preconfigured = networkClients[kind] }
-                // Status codes are data for 03's fetch pipeline, not exceptions.
-                expectSuccess = false
-                // The manual redirect chain lives in FeedFetcher; the engine stays off for FEED.
-                followRedirects = kind != HttpClientKind.FEED
-                install(UserAgent) { agent = userAgent.value }
-            }
-        }
-
-    override fun client(kind: HttpClientKind): HttpClient = clients.getValue(kind)
-
-    fun close() = HttpClientKind.entries.forEach { client(it).close() }
-}
-
 /** The desktop classifier with a synthetic "connected" flag (Offline never wins in tests). */
 internal val testClassifier =
     object : NetErrorClassifier {
@@ -163,7 +137,7 @@ internal fun newFetcher(
     clock: TestClock = TestClock(),
     networkClients: NetworkClients = newNetworkClients(credentials),
 ): FetcherBundle {
-    val clients = TestHttpClients(networkClients, testUserAgent())
+    val clients = OkHttpNeutrodyneHttpClients(networkClients, testUserAgent())
     val tempFiles = FeedTempFiles(storagePathsFor(root), FileSystem.SYSTEM)
     val fetcher =
         FeedFetcher(
@@ -180,7 +154,7 @@ internal fun newFetcher(
 internal class FetcherBundle(
     val fetcher: FeedFetcher,
     val tempFiles: FeedTempFiles,
-    val clients: TestHttpClients,
+    val clients: OkHttpNeutrodyneHttpClients,
 ) : AutoCloseable {
     override fun close() = clients.close()
 }
@@ -346,7 +320,10 @@ internal suspend fun seedPodcast(
     needsCredentials: Boolean = false,
     podcastGuid: String? = null,
     podcastGuidDerived: Boolean = false,
-    syncId: String = java.util.UUID.randomUUID().toString(),
+    syncId: String =
+        java.util.UUID
+            .randomUUID()
+            .toString(),
     block: PodcastEntity.() -> PodcastEntity = { this },
 ): Long =
     db.podcastDao().insertPodcast(
@@ -467,7 +444,10 @@ internal class StubSourceAdapter(
     val afterIngestCalls = mutableListOf<Triple<Long, List<Long>, List<Long>>>()
 
     override fun hostKey(feed: DueFeed): String =
-        feed.feedUrl.substringAfter("://", feed.feedUrl).substringBefore("/").lowercase()
+        feed.feedUrl
+            .substringAfter("://", feed.feedUrl)
+            .substringBefore("/")
+            .lowercase()
 
     override suspend fun fetchAndParse(
         feed: DueFeed,

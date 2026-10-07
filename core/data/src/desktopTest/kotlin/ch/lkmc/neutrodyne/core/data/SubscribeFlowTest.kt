@@ -3,13 +3,13 @@
 package ch.lkmc.neutrodyne.core.data
 
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
 import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SubscribeError
-import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
@@ -17,6 +17,11 @@ import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.model.Paging
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.runTest
+import mockwebserver3.junit4.MockWebServerRule
+import org.junit.Rule
 import java.io.File
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -26,11 +31,6 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlinx.coroutines.async
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.test.runTest
-import mockwebserver3.junit4.MockWebServerRule
-import org.junit.Rule
 
 /**
  * 03 Subscribe transaction and Unsubscribe — the M1a write paths end to end over the real
@@ -53,7 +53,10 @@ class SubscribeFlowTest {
 
     @BeforeTest
     fun setUp() {
-        root = kotlin.io.path.createTempDirectory("nd-subscribe-test").toFile()
+        root =
+            kotlin.io.path
+                .createTempDirectory("nd-subscribe-test")
+                .toFile()
         resolverBundle = newResolver(root, db, clock)
         subscribeBundle =
             newSubscribe(db, resolverBundle.cache, resolverBundle.resolver, scheduler, settings, clock)
@@ -147,7 +150,8 @@ class SubscribeFlowTest {
     fun groupMembershipsAreWrittenInTheTransaction() =
         runTest {
             val groupId =
-                db.groupDao()
+                db
+                    .groupDao()
                     .insert(
                         PodcastGroupEntity(
                             uuid = "g-1",
@@ -260,8 +264,8 @@ class SubscribeFlowTest {
 
             val id =
                 assertIs<Outcome.Success<Long>>(
-                        subscribeBundle.useCase("https://a.example.com/f", emptySet()),
-                    ).value
+                    subscribeBundle.useCase("https://a.example.com/f", emptySet()),
+                ).value
 
             val row = assertNotNull(db.podcastDao().byId(id))
             assertEquals("https://a.example.com/f?page=2", row.pagingNextUrl)
@@ -289,8 +293,8 @@ class SubscribeFlowTest {
 
             val id =
                 assertIs<Outcome.Success<Long>>(
-                        subscribeBundle.useCase("https://a.example.com/f", emptySet()),
-                    ).value
+                    subscribeBundle.useCase("https://a.example.com/f", emptySet()),
+                ).value
 
             val row = assertNotNull(db.podcastDao().byId(id))
             assertEquals("https://a.example.com/f?page=2", row.pagingNextUrl)
@@ -305,7 +309,8 @@ class SubscribeFlowTest {
     fun unsubscribeCascadesEveryOwnedRow() =
         runTest {
             val groupId =
-                db.groupDao()
+                db
+                    .groupDao()
                     .insert(
                         PodcastGroupEntity(
                             uuid = "g-1",

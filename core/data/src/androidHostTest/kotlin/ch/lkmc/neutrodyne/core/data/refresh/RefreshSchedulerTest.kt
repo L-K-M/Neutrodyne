@@ -162,7 +162,13 @@ class RefreshSchedulerTest {
 
             scheduler.enqueueNow(RefreshScope.Group(9), force = false, pagesOnly = false, origin = RefreshOrigin.MANUAL)
 
-            val request = RefreshWorkData.request(specOf(uniqueWork(WorkManagerRefreshScheduler.WORK_NOW).id.toString()).input, 0, 0, 0)
+            val request =
+                RefreshWorkData.request(
+                    specOf(uniqueWork(WorkManagerRefreshScheduler.WORK_NOW).id.toString()).input,
+                    0,
+                    0,
+                    0,
+                )
             assertThat(request.scope).isEqualTo(RefreshScope.Group(9))
         }
 
@@ -174,13 +180,24 @@ class RefreshSchedulerTest {
             val p2 = seedPodcast(db, "https://b.test/feed.xml", nextRefreshAt = FAR_FUTURE)
             val ids = listOf(p1, p2) + (1_000L until 1_000L + RefreshWorkData.MAX_SCOPE_IDS)
 
-            scheduler.enqueueNow(RefreshScope.Podcasts(ids), force = true, pagesOnly = false, origin = RefreshOrigin.MANUAL)
+            scheduler.enqueueNow(
+                RefreshScope.Podcasts(ids),
+                force = true,
+                pagesOnly = false,
+                origin = RefreshOrigin.MANUAL,
+            )
             advanceUntilIdle()
 
             // `Data` caps at 10 KB: the run degrades to All and the rows carry the due marks.
             // The enqueue rides the app scope after the DAO write, which Room dispatches off the
             // test scheduler — wait for it in real time.
-            val request = RefreshWorkData.request(specOf(awaitWork(WorkManagerRefreshScheduler.WORK_NOW).id.toString()).input, 0, 0, 0)
+            val request =
+                RefreshWorkData.request(
+                    specOf(awaitWork(WorkManagerRefreshScheduler.WORK_NOW).id.toString()).input,
+                    0,
+                    0,
+                    0,
+                )
             assertThat(request.scope).isEqualTo(RefreshScope.All)
             assertThat(request.origin).isEqualTo(RefreshOrigin.MANUAL)
             assertThat(db.podcastDao().byId(p1)?.nextRefreshAt).isEqualTo(0L)
@@ -192,8 +209,18 @@ class RefreshSchedulerTest {
         runTest {
             val scheduler = scheduler()
 
-            scheduler.enqueueNow(RefreshScope.Podcasts(listOf(1L)), force = false, pagesOnly = false, origin = RefreshOrigin.MANUAL)
-            scheduler.enqueueNow(RefreshScope.Podcasts(listOf(2L)), force = true, pagesOnly = false, origin = RefreshOrigin.MANUAL)
+            scheduler.enqueueNow(
+                RefreshScope.Podcasts(listOf(1L)),
+                force = false,
+                pagesOnly = false,
+                origin = RefreshOrigin.MANUAL,
+            )
+            scheduler.enqueueNow(
+                RefreshScope.Podcasts(listOf(2L)),
+                force = true,
+                pagesOnly = false,
+                origin = RefreshOrigin.MANUAL,
+            )
 
             // APPEND_OR_REPLACE treats an unstarted predecessor as finished-enough to keep: the
             // earlier user request stays ENQUEUED and the newest waits BLOCKED behind it.
@@ -298,8 +325,7 @@ class RefreshSchedulerTest {
             appScope = this,
         )
 
-    private fun uniqueWork(name: String): WorkInfo =
-        workManager.getWorkInfosForUniqueWork(name).get().single()
+    private fun uniqueWork(name: String): WorkInfo = workManager.getWorkInfosForUniqueWork(name).get().single()
 
     /**
      * Waits for a work enqueue that rides the app scope behind a Room write: the DAO's dispatcher
@@ -309,7 +335,11 @@ class RefreshSchedulerTest {
         val deadlineMs = System.currentTimeMillis() + AWAIT_MS
         while (System.currentTimeMillis() < deadlineMs) {
             advanceUntilIdle()
-            workManager.getWorkInfosForUniqueWork(name).get().singleOrNull()?.let { return it }
+            workManager
+                .getWorkInfosForUniqueWork(name)
+                .get()
+                .singleOrNull()
+                ?.let { return it }
             Thread.sleep(POLL_MS)
         }
         error("no work enqueued for $name within ${AWAIT_MS}ms")

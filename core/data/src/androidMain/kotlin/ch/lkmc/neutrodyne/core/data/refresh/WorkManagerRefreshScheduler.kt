@@ -23,9 +23,9 @@ import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import java.util.concurrent.TimeUnit
 
 /**
  * The Android `RefreshScheduler` (03 Work requests): `refresh-now` one-times for user-driven runs
@@ -61,7 +61,11 @@ internal class WorkManagerRefreshScheduler
                 // requests). The enqueue rides along in the same coroutine to keep the order.
                 appScope.launch {
                     db.podcastDao().forceDue(scopeAll = false, ids = scope.ids)
-                    enqueueUnique(WORK_NOW, ExistingWorkPolicy.APPEND_OR_REPLACE, nowRequest(RefreshScope.All, false, pagesOnly, origin))
+                    enqueueUnique(
+                        WORK_NOW,
+                        ExistingWorkPolicy.APPEND_OR_REPLACE,
+                        nowRequest(RefreshScope.All, false, pagesOnly, origin),
+                    )
                 }
                 return
             }
@@ -90,10 +94,20 @@ internal class WorkManagerRefreshScheduler
                         .setRequiresBatteryNotLow(true)
                         .build()
                 val request =
-                    PeriodicWorkRequestBuilder<RefreshWorker>(tick, TimeUnit.MINUTES, tick / FLEX_DIVISOR, TimeUnit.MINUTES)
-                        .setConstraints(constraints)
-                        .setInputData(RefreshWorkData.of(RefreshScope.All, force = false, pagesOnly = false, RefreshOrigin.PERIODIC))
-                        .addTag(TAG_REFRESH)
+                    PeriodicWorkRequestBuilder<RefreshWorker>(
+                        tick,
+                        TimeUnit.MINUTES,
+                        tick / FLEX_DIVISOR,
+                        TimeUnit.MINUTES,
+                    ).setConstraints(constraints)
+                        .setInputData(
+                            RefreshWorkData.of(
+                                RefreshScope.All,
+                                force = false,
+                                pagesOnly = false,
+                                RefreshOrigin.PERIODIC,
+                            ),
+                        ).addTag(TAG_REFRESH)
                         .build()
                 workManager.enqueueUniquePeriodicWork(WORK_PERIODIC, ExistingPeriodicWorkPolicy.UPDATE, request)
                 settings.set(FeedsSettingKeys.SCHEDULED_TICK_MINUTES, tick)
@@ -119,15 +133,25 @@ internal class WorkManagerRefreshScheduler
                         .setConstraints(constraints)
                         .setInitialDelay(CONTINUATION_INITIAL_DELAY_MS, TimeUnit.MILLISECONDS)
                         .setBackoffCriteria(BackoffPolicy.LINEAR, CONTINUATION_BACKOFF_MS, TimeUnit.MILLISECONDS)
-                        .setInputData(RefreshWorkData.of(RefreshScope.All, force = false, pagesOnly = false, RefreshOrigin.CONTINUATION))
-                        .addTag(TAG_REFRESH)
+                        .setInputData(
+                            RefreshWorkData.of(
+                                RefreshScope.All,
+                                force = false,
+                                pagesOnly = false,
+                                RefreshOrigin.CONTINUATION,
+                            ),
+                        ).addTag(TAG_REFRESH)
                         .build()
                 enqueueUnique(WORK_CONTINUATION, ExistingWorkPolicy.KEEP, request)
             }
         }
 
         override fun requestFirstFetch() {
-            enqueueUnique(WORK_IMPORT_SYNC, ExistingWorkPolicy.APPEND_OR_REPLACE, nowRequest(RefreshScope.All, false, false, RefreshOrigin.SYNC))
+            enqueueUnique(
+                WORK_IMPORT_SYNC,
+                ExistingWorkPolicy.APPEND_OR_REPLACE,
+                nowRequest(RefreshScope.All, false, false, RefreshOrigin.SYNC),
+            )
         }
 
         private fun enqueueUnique(

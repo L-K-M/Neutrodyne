@@ -79,10 +79,21 @@ internal object AddInputNormalizer {
                 return percentDecode(enc.substringBefore('&'))
             }
 
-            lower.startsWith("feed:") -> return input.substring("feed:".length)
-            lower.startsWith("pcast://") -> return input.substring("pcast://".length)
-            lower.startsWith("podcast://") -> return input.substring("podcast://".length)
-            lower.startsWith("itpc://") -> return input.substring("itpc://".length)
+            lower.startsWith("feed:") -> {
+                return input.substring("feed:".length)
+            }
+
+            lower.startsWith("pcast://") -> {
+                return input.substring("pcast://".length)
+            }
+
+            lower.startsWith("podcast://") -> {
+                return input.substring("podcast://".length)
+            }
+
+            lower.startsWith("itpc://") -> {
+                return input.substring("itpc://".length)
+            }
         }
 
         // Subscribe-page wrappers (03 step 4).
@@ -94,14 +105,17 @@ internal object AddInputNormalizer {
                 return percentDecode(enc.substringBefore('&'))
             }
 
-            hostPath.startsWith("subscribeonandroid.com/") ->
+            hostPath.startsWith("subscribeonandroid.com/") -> {
                 return input.substringAfter("subscribeonandroid.com/")
+            }
 
-            hostPath.startsWith("www.subscribeonandroid.com/") ->
+            hostPath.startsWith("www.subscribeonandroid.com/") -> {
                 return input.substringAfter("www.subscribeonandroid.com/")
+            }
 
-            hostPath.startsWith("podcasts.google.com/feed/") ->
+            hostPath.startsWith("podcasts.google.com/feed/") -> {
                 return decodeGoogleFeed(input.substringAfter("/feed/"))
+            }
         }
         return input
     }
@@ -118,7 +132,9 @@ internal object AddInputNormalizer {
     /** `podcasts.google.com/feed/<base64url>` → the decoded feed URL (03 step 4, encoding unverified). */
     private fun decodeGoogleFeed(encoded: String): String? {
         val padded =
-            encoded.substringBefore('?').substringBefore('#')
+            encoded
+                .substringBefore('?')
+                .substringBefore('#')
                 .let { s -> s.padEnd(s.length + (4 - s.length % 4) % 4, '=') }
         return runCatching { Base64.UrlSafe.decode(padded).decodeToString() }.getOrNull()
     }

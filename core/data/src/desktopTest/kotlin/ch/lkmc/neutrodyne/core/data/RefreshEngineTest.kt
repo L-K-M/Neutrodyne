@@ -20,6 +20,11 @@ import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.feeds.model.Paging
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runTest
+import mockwebserver3.junit4.MockWebServerRule
+import org.junit.Rule
 import java.io.File
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -29,11 +34,6 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.async
-import kotlinx.coroutines.test.runTest
-import mockwebserver3.junit4.MockWebServerRule
-import org.junit.Rule
 
 /**
  * PLAN M1 acceptance 4/7 — the refresh engine's run semantics of 03 "Refresh scheduling": due
@@ -58,13 +58,15 @@ class RefreshEngineTest {
 
     private fun setUpRoot() {
         if (!::root.isInitialized) {
-            root = kotlin.io.path.createTempDirectory("nd-refresh-test").toFile()
+            root =
+                kotlin.io.path
+                    .createTempDirectory("nd-refresh-test")
+                    .toFile()
         }
     }
 
-    private fun refresher(
-        adapter: StubSourceAdapter,
-    ) = newRefresher(db, mapOf(SourceType.RSS to adapter), clock, settings)
+    private fun refresher(adapter: StubSourceAdapter) =
+        newRefresher(db, mapOf(SourceType.RSS to adapter), clock, settings)
 
     private suspend fun due(
         feedUrl: String,
@@ -425,9 +427,26 @@ class RefreshEngineTest {
                     parsedFeed(
                         items =
                             listOf(
-                                parsedEpisode(0, enclosureUrl = "https://cdn.example.com/x.mp3", title = "B", pubDate = day),
-                                parsedEpisode(1, guid = "gc", enclosureUrl = "https://cdn.example.com/x.mp3", title = "C", pubDate = day),
-                                parsedEpisode(2, enclosureUrl = null, externalMediaId = "m1", title = "T", pubDate = day),
+                                parsedEpisode(
+                                    0,
+                                    enclosureUrl = "https://cdn.example.com/x.mp3",
+                                    title = "B",
+                                    pubDate = day,
+                                ),
+                                parsedEpisode(
+                                    1,
+                                    guid = "gc",
+                                    enclosureUrl = "https://cdn.example.com/x.mp3",
+                                    title = "C",
+                                    pubDate = day,
+                                ),
+                                parsedEpisode(
+                                    2,
+                                    enclosureUrl = null,
+                                    externalMediaId = "m1",
+                                    title = "T",
+                                    pubDate = day,
+                                ),
                             ),
                     ),
                     IngestContext(mode = IngestMode.INITIAL, partial = false, fetch = fetchMeta()),
@@ -443,8 +462,18 @@ class RefreshEngineTest {
                                 parsedFeed(
                                     items =
                                         listOf(
-                                            parsedEpisode(0, enclosureUrl = "https://cdn.example.com/x.mp3", title = "B2", pubDate = day),
-                                            parsedEpisode(1, enclosureUrl = "https://cdn.example.com/x.mp3", title = "T", pubDate = day),
+                                            parsedEpisode(
+                                                0,
+                                                enclosureUrl = "https://cdn.example.com/x.mp3",
+                                                title = "B2",
+                                                pubDate = day,
+                                            ),
+                                            parsedEpisode(
+                                                1,
+                                                enclosureUrl = "https://cdn.example.com/x.mp3",
+                                                title = "T",
+                                                pubDate = day,
+                                            ),
                                         ),
                                 ),
                             ),
@@ -674,7 +703,13 @@ class RefreshEngineTest {
             val bundle = newRssAdapter(root, clock)
             try {
                 val engine =
-                    newRefresher(db, mapOf(SourceType.RSS to bundle.adapter), clock, settings, tempFiles = bundle.tempFiles)
+                    newRefresher(
+                        db,
+                        mapOf(SourceType.RSS to bundle.adapter),
+                        clock,
+                        settings,
+                        tempFiles = bundle.tempFiles,
+                    )
 
                 val report = engine.run(request())
 
@@ -707,7 +742,13 @@ class RefreshEngineTest {
             val bundle = newRssAdapter(root, clock)
             try {
                 val engine =
-                    newRefresher(db, mapOf(SourceType.RSS to bundle.adapter), clock, settings, tempFiles = bundle.tempFiles)
+                    newRefresher(
+                        db,
+                        mapOf(SourceType.RSS to bundle.adapter),
+                        clock,
+                        settings,
+                        tempFiles = bundle.tempFiles,
+                    )
 
                 val report = engine.run(request())
 
@@ -745,7 +786,13 @@ class RefreshEngineTest {
             val bundle = newRssAdapter(root, clock)
             try {
                 val engine =
-                    newRefresher(db, mapOf(SourceType.RSS to bundle.adapter), clock, settings, tempFiles = bundle.tempFiles)
+                    newRefresher(
+                        db,
+                        mapOf(SourceType.RSS to bundle.adapter),
+                        clock,
+                        settings,
+                        tempFiles = bundle.tempFiles,
+                    )
 
                 engine.run(request())
 
@@ -784,7 +831,13 @@ class RefreshEngineTest {
             val bundle = newRssAdapter(root, clock, network = metered)
             try {
                 val engine =
-                    newRefresher(db, mapOf(SourceType.RSS to bundle.adapter), clock, settings, tempFiles = bundle.tempFiles)
+                    newRefresher(
+                        db,
+                        mapOf(SourceType.RSS to bundle.adapter),
+                        clock,
+                        settings,
+                        tempFiles = bundle.tempFiles,
+                    )
 
                 engine.run(request())
 

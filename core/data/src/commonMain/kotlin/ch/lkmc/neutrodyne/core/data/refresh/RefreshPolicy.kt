@@ -63,6 +63,5 @@ internal object RefreshPolicy {
     fun localNetworkNextRefreshAt(now: Long): Long = now + DAY_MS
 
     /** A `feeds.refresh_interval_minutes` value → minutes, or `null` for "Manual only" (PO-21). */
-    fun effectiveIntervalMinutes(globalMinutes: Int): Int? =
-        globalMinutes.takeIf { it > 0 }
+    fun effectiveIntervalMinutes(globalMinutes: Int): Int? = globalMinutes.takeIf { it > 0 }
 }

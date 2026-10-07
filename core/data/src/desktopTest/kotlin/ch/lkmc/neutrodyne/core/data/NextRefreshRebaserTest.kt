@@ -7,10 +7,10 @@ import ch.lkmc.neutrodyne.core.data.refresh.RefreshPolicy
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
-import kotlinx.coroutines.test.runTest
 
 /**
  * 03 Periodic tick step 2 — the `nextRefreshAt` rebase after interval changes: healthy rows move
@@ -36,7 +36,12 @@ class NextRefreshRebaserTest {
             val nullSchedule =
                 seedPodcast(db, "https://b.example.com/f", nextRefreshAt = null, subscribedAt = SUBSCRIBED)
             val never =
-                seedPodcast(db, "https://c.example.com/f", nextRefreshAt = RefreshPolicy.NEVER, subscribedAt = SUBSCRIBED)
+                seedPodcast(
+                    db,
+                    "https://c.example.com/f",
+                    nextRefreshAt = RefreshPolicy.NEVER,
+                    subscribedAt = SUBSCRIBED,
+                )
             val close = seedPodcast(db, "https://d.example.com/f", lastSuccessAt = NOW, nextRefreshAt = NOW + 1)
 
             rebaser(backgroundScope).rebase()
@@ -109,8 +114,7 @@ class NextRefreshRebaserTest {
             assertEquals(SUBSCRIBED + 60 * 60_000L, db.podcastDao().byId(id)!!.nextRefreshAt)
         }
 
-    private fun rebaser(scope: kotlinx.coroutines.CoroutineScope) =
-        NextRefreshRebaser(db, settings, clock, scope)
+    private fun rebaser(scope: kotlinx.coroutines.CoroutineScope) = NextRefreshRebaser(db, settings, clock, scope)
 
     private companion object {
         const val NOW = TestClock.DEFAULT_NOW

@@ -6,7 +6,7 @@ import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.NetError
 import okio.Path
 
-/**
+/*
  * The 03 fetch-pipeline request/response types (`:core:data` commonMain, internal). `FeedFetcher`
  * runs the manual redirect chain, conditional GETs, temp-file storage, SHA-256, the 32 MB body cap
  * and the byte-level sniff; adapters turn outcomes into refresh policy.

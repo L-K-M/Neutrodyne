@@ -91,10 +91,17 @@ internal class AddPodcastResolverImpl(
         }
         val url =
             when (val n = AddInputNormalizer.normalize(input)) {
-                is NormalizedInput.Url -> n
-                NormalizedInput.Invalid -> return AddResolution.Failure(AddPodcastError.InvalidUrl)
-                is NormalizedInput.NotAUrl ->
+                is NormalizedInput.Url -> {
+                    n
+                }
+
+                NormalizedInput.Invalid -> {
+                    return AddResolution.Failure(AddPodcastError.InvalidUrl)
+                }
+
+                is NormalizedInput.NotAUrl -> {
                     return AddResolution.Failure(AddPodcastError.NotAUrl(n.query))
+                }
             }
 
         // Every URL the pipeline fetches passes the YouTube check (03 Host recognition).
@@ -117,34 +124,58 @@ internal class AddPodcastResolverImpl(
         credentials: BasicCredentials?,
         schemeGuessed: Boolean,
     ): PreviewOutcome {
-        var outcome = fetcher.fetch(FeedRequest(url, etag = null, lastModified = null, conditional = false, credentials = credentials))
+        var outcome =
+            fetcher.fetch(
+                FeedRequest(url, etag = null, lastModified = null, conditional = false, credentials = credentials),
+            )
 
         // Scheme-guessed input retries once on `http://` (03 step 5).
         if (schemeGuessed && outcome is FetchOutcome.Network && outcome.error.isTransport) {
             outcome =
                 fetcher.fetch(
-                    FeedRequest(url.replaceFirst("https://", "http://"), null, null, conditional = false, credentials = credentials),
+                    FeedRequest(
+                        url.replaceFirst("https://", "http://"),
+                        null,
+                        null,
+                        conditional = false,
+                        credentials = credentials,
+                    ),
                 )
         }
         return when (outcome) {
-            is FetchOutcome.Network -> PreviewOutcome.Failed(AddPodcastError.Network(outcome.error))
+            is FetchOutcome.Network -> {
+                PreviewOutcome.Failed(AddPodcastError.Network(outcome.error))
+            }
 
-            is FetchOutcome.Http ->
+            is FetchOutcome.Http -> {
                 when {
                     (outcome.code == HTTP_UNAUTHORIZED || outcome.code == HTTP_FORBIDDEN) &&
-                        outcome.basicChallenge ->
+                        outcome.basicChallenge -> {
                         PreviewOutcome.Failed(AddPodcastError.AuthRequired(outcome.realm))
-                    else -> PreviewOutcome.Failed(AddPodcastError.Http(outcome.code))
-                }
+                    }
 
-            FetchOutcome.TooLarge -> PreviewOutcome.Failed(AddPodcastError.TooLarge)
-            FetchOutcome.RedirectLoop ->
+                    else -> {
+                        PreviewOutcome.Failed(AddPodcastError.Http(outcome.code))
+                    }
+                }
+            }
+
+            FetchOutcome.TooLarge -> {
+                PreviewOutcome.Failed(AddPodcastError.TooLarge)
+            }
+
+            FetchOutcome.RedirectLoop -> {
                 PreviewOutcome.Failed(AddPodcastError.Network(NetError.Other("redirect_loop")))
+            }
 
             // A 304 to an unconditional request is a server quirk, not a feed document.
-            is FetchOutcome.NotModified -> PreviewOutcome.Failed(AddPodcastError.Http(HTTP_NOT_MODIFIED))
+            is FetchOutcome.NotModified -> {
+                PreviewOutcome.Failed(AddPodcastError.Http(HTTP_NOT_MODIFIED))
+            }
 
-            is FetchOutcome.Body -> bodyOutcome(outcome, inputUrl, credentials)
+            is FetchOutcome.Body -> {
+                bodyOutcome(outcome, inputUrl, credentials)
+            }
         }
     }
 
@@ -155,10 +186,12 @@ internal class AddPodcastResolverImpl(
     ): PreviewOutcome {
         when (body.sniff) {
             Sniff.RSS, Sniff.ATOM, Sniff.RDF -> {}
+
             Sniff.OPML -> {
                 tempFiles.delete(body.file)
                 return PreviewOutcome.Failed(AddPodcastError.SubscriptionList(body.finalUrl))
             }
+
             // HTML autodiscovery is M7; JSON and OTHER are never feeds.
             Sniff.HTML, Sniff.JSON, Sniff.OTHER -> {
                 tempFiles.delete(body.file)
@@ -179,8 +212,11 @@ internal class AddPodcastResolverImpl(
             }
         val feed =
             when (result) {
-                is ParseResult.Ok -> result.feed
-                is ParseResult.Failed ->
+                is ParseResult.Ok -> {
+                    result.feed
+                }
+
+                is ParseResult.Failed -> {
                     return PreviewOutcome.Failed(
                         if (result.reason == ParseFailure.NOT_A_FEED) {
                             AddPodcastError.NotAFeed
@@ -188,6 +224,7 @@ internal class AddPodcastResolverImpl(
                             AddPodcastError.Malformed
                         },
                     )
+                }
             }
 
         // Items but nothing playable (03 Accepted items → NoMedia); an empty feed previews fine.
@@ -284,8 +321,7 @@ internal class AddPodcastResolverImpl(
     }
 
     /** 03's accepted-item rule: a primary enclosure or an `externalMediaId` (04's rows). */
-    private fun ParsedEpisode.isAccepted(): Boolean =
-        primaryEnclosure != null || externalMediaId != null
+    private fun ParsedEpisode.isAccepted(): Boolean = primaryEnclosure != null || externalMediaId != null
 
     private val NetError.isTransport: Boolean
         get() =
@@ -299,6 +335,7 @@ internal class AddPodcastResolverImpl(
         const val HTTP_FORBIDDEN = 403
         const val HTTP_NOT_MODIFIED = 304
         const val PARSE_PARALLELISM = 2
+
         /** "the newest 200 items, display-mapped" (03 `FeedPreview.episodes`). */
         const val PREVIEW_EPISODE_LIMIT = 200
     }
@@ -322,7 +359,8 @@ internal object HostChecks {
     /** The lowercase host of an http(s) URL or bare `host.tld/…` token, or null. */
     private fun hostOf(url: String): String? {
         val cleaned =
-            url.removePrefix("feed:")
+            url
+                .removePrefix("feed:")
                 .substringAfter("://", url)
                 .substringBefore('/')
                 .substringAfterLast('@')

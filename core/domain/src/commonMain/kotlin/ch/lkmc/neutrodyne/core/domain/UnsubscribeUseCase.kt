@@ -18,6 +18,5 @@ class UnsubscribeUseCase(
     private val podcasts: PodcastRepository,
 ) {
     /** Unsubscribes [podcastIds]; returns the ids that were actually removed. */
-    suspend operator fun invoke(podcastIds: List<Long>): List<Long> =
-        podcasts.unsubscribe(podcastIds)
+    suspend operator fun invoke(podcastIds: List<Long>): List<Long> = podcasts.unsubscribe(podcastIds)
 }

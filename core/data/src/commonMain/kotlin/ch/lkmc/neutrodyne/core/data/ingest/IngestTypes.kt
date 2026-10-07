@@ -6,7 +6,7 @@ import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.feeds.model.ParseWarning
 
-/**
+/*
  * The ingest-side types of 03's diff algorithm (`:core:data` commonMain, internal). `FeedIngestor`
  * consumes a parsed feed plus this context; the refresh engine builds both and reads [IngestResult]
  * for its outcome, event and diagnostics accounting.

@@ -52,17 +52,25 @@ internal object RefreshWorkData {
         val ids = data.getLongArray(KEY_IDS)
         val scope =
             when {
-                ids != null -> RefreshScope.Podcasts(ids.toList())
-                scopeValue?.startsWith(SCOPE_GROUP) == true ->
+                ids != null -> {
+                    RefreshScope.Podcasts(ids.toList())
+                }
+
+                scopeValue?.startsWith(SCOPE_GROUP) == true -> {
                     RefreshScope.Group(scopeValue.removePrefix(SCOPE_GROUP).toLong())
-                else -> RefreshScope.All
+                }
+
+                else -> {
+                    RefreshScope.All
+                }
             }
         return RefreshRequest(
             scope = scope,
             force = data.getBoolean(KEY_FORCE, false),
             pagesOnly = data.getBoolean(KEY_PAGES_ONLY, false),
-            origin = data.getString(KEY_ORIGIN)?.let { runCatching { RefreshOrigin.valueOf(it) }.getOrNull() }
-                ?: RefreshOrigin.PERIODIC,
+            origin =
+                data.getString(KEY_ORIGIN)?.let { runCatching { RefreshOrigin.valueOf(it) }.getOrNull() }
+                    ?: RefreshOrigin.PERIODIC,
             deadlineElapsedMs = deadlineElapsedMs,
             dueSlackMs = dueSlackMs,
             pagingBudgetMs = pagingBudgetMs,

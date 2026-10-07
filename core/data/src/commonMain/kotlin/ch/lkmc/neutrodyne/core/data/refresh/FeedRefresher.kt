@@ -29,9 +29,6 @@ import ch.lkmc.neutrodyne.feeds.identity.PodcastGuid
 import ch.lkmc.neutrodyne.feeds.model.ParseWarning
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
-import kotlin.coroutines.cancellation.CancellationException
-import kotlin.jvm.JvmSuppressWildcards
-import kotlin.random.Random
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -49,6 +46,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
+import kotlin.coroutines.cancellation.CancellationException
+import kotlin.jvm.JvmSuppressWildcards
+import kotlin.random.Random
 
 /**
  * The refresh engine of 03 Engine run (`:core:data` singleton): one run per process, a 6-wide
@@ -113,6 +113,7 @@ internal class FeedRefresher(
                     mutex.lock()
                     true
                 }
+
                 else -> {
                     val waitMs = deadline - clock.elapsedRealtime() - DEADLINE_MARGIN_MS
                     if (waitMs <= 0) mutex.tryLock() else withTimeoutOrNull(waitMs) { mutex.lock() } != null
@@ -184,26 +185,27 @@ internal class FeedRefresher(
                         .associateWith { Semaphore(HOST_CONCURRENCY) }
                 val deadline = request.deadlineElapsedMs
 
-                val fanOut = suspend {
-                    coroutineScope {
-                        for ((index, feed) in due.withIndex()) {
-                            if (deadline != RefreshRequest.NO_DEADLINE &&
-                                clock.elapsedRealtime() >= deadline - DEADLINE_MARGIN_MS
-                            ) {
-                                break
-                            }
-                            val adapter = adapters.getValue(feed.sourceType)
-                            launched++
-                            launch {
-                                global.withPermit {
-                                    hostSems.getValue(adapter.hostKey(feed)).withPermit {
-                                        slots[index] = refreshOne(feed, adapter, request)
+                val fanOut =
+                    suspend {
+                        coroutineScope {
+                            for ((index, feed) in due.withIndex()) {
+                                if (deadline != RefreshRequest.NO_DEADLINE &&
+                                    clock.elapsedRealtime() >= deadline - DEADLINE_MARGIN_MS
+                                ) {
+                                    break
+                                }
+                                val adapter = adapters.getValue(feed.sourceType)
+                                launched++
+                                launch {
+                                    global.withPermit {
+                                        hostSems.getValue(adapter.hostKey(feed)).withPermit {
+                                            slots[index] = refreshOne(feed, adapter, request)
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
                 if (deadline == RefreshRequest.NO_DEADLINE) {
                     fanOut()
                 } else {
@@ -281,7 +283,10 @@ internal class FeedRefresher(
     ): FeedOutcome {
         val now = clock.now()
         return when (result) {
-            is AdapterResult.Parsed -> ingestOutcome(feed, adapter, result, now)
+            is AdapterResult.Parsed -> {
+                ingestOutcome(feed, adapter, result, now)
+            }
+
             is AdapterResult.NotModified -> {
                 val meta = result.meta
                 addFetchState(
@@ -350,7 +355,9 @@ internal class FeedRefresher(
                 FeedOutcome.Deferred(result.untilMs)
             }
 
-            is AdapterResult.Failed -> failedOutcome(feed, adapter, result, now)
+            is AdapterResult.Failed -> {
+                failedOutcome(feed, adapter, result, now)
+            }
         }
     }
 
@@ -414,7 +421,11 @@ internal class FeedRefresher(
         val realGuid = result.feed.podcastGuid?.let(PodcastGuid::parse)
         val sameGuidAs =
             realGuid?.let { guid ->
-                db.podcastDao().byRealGuid(guid).firstOrNull { it.id != feed.id }?.id
+                db
+                    .podcastDao()
+                    .byRealGuid(guid)
+                    .firstOrNull { it.id != feed.id }
+                    ?.id
             }
         return FeedOutcome.Ingested(
             inserted = ingest.inserted.size,
@@ -438,9 +449,11 @@ internal class FeedRefresher(
         result.htmlBody?.let { suspendRunCatching { tempFiles.delete(it) } }
         when {
             // The feed stays due; no column moves (03 policy table).
-            result.kind == FeedErrorKind.OFFLINE -> Unit
+            result.kind == FeedErrorKind.OFFLINE -> {
+                Unit
+            }
 
-            result.kind == FeedErrorKind.LOCAL_NETWORK_UNSUPPORTED ->
+            result.kind == FeedErrorKind.LOCAL_NETWORK_UNSUPPORTED -> {
                 addFetchState(
                     fetchStateOf(
                         feed,
@@ -456,6 +469,7 @@ internal class FeedRefresher(
                         lastParseOk = feed.lastParseOk,
                     ),
                 )
+            }
 
             result.kind == FeedErrorKind.HTTP_GONE && !result.transient -> {
                 val stored = db.podcastDao().byId(feed.id)
@@ -605,7 +619,10 @@ internal class FeedRefresher(
                 val link = result.feed.paging.next ?: result.feed.paging.prevArchive
                 when {
                     // The ingest already wrote `pagingComplete = 1` (the page had no older link).
-                    link == null -> false
+                    link == null -> {
+                        false
+                    }
+
                     // "a page yields no new keys" — inserted empty and nothing re-keyed by pass 2.
                     ingest.inserted.isEmpty() && ingest.rekeyed == 0 -> {
                         db.podcastDao().markPagingComplete(session.feed.id)

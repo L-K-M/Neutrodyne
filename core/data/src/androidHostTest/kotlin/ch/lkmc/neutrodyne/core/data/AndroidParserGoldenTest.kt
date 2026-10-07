@@ -85,8 +85,7 @@ class AndroidParserGoldenTest {
             }
 
         /** Pretty-printed JSON with object keys sorted recursively and explicit nulls dropped. */
-        fun canonicalJson(element: JsonElement): String =
-            CANONICAL_JSON.encodeToString(sortKeys(dropNulls(element)))
+        fun canonicalJson(element: JsonElement): String = CANONICAL_JSON.encodeToString(sortKeys(dropNulls(element)))
 
         private fun dropNulls(element: JsonElement): JsonElement =
             when (element) {

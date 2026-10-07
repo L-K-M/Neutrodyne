@@ -47,7 +47,8 @@ object ArtworkKeys {
 
         val host = authority.substringBefore(':').lowercase()
         val port = authority.substringAfter(':', "")
-        val keepPort = port.isNotEmpty() && !((scheme == "http" && port == "80") || (scheme == "https" && port == "443"))
+        val keepPort =
+            port.isNotEmpty() && !((scheme == "http" && port == "80") || (scheme == "https" && port == "443"))
 
         return buildString {
             if (scheme.isNotEmpty()) append(scheme).append("://")

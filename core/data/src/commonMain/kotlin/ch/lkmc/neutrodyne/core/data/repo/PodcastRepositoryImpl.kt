@@ -55,7 +55,8 @@ internal class PodcastRepositoryImpl(
 
     /** 02's 30-day counts window and the case-insensitive title sort (Collator in 02; M1a). */
     override fun observeLibraryTiles(groupId: Long?): Flow<List<LibraryTile>> =
-        db.podcastDao()
+        db
+            .podcastDao()
             .observeLibraryTiles(clock.now() - TILE_COUNTS_WINDOW_MS, groupId)
             .map { rows ->
                 rows
@@ -67,13 +68,20 @@ internal class PodcastRepositoryImpl(
                             status = row.status,
                             artwork = ArtworkRef(row.artworkKey, row.artworkUrl, row.artworkVersion),
                             artworkAvgArgb = row.artworkAvgArgb,
-                            health = healthOf(row.gone, row.needsCredentials, row.failureCount, row.lastSuccessAt, row.lastErrorKind, row.subscribedAt),
+                            health =
+                                healthOf(
+                                    row.gone,
+                                    row.needsCredentials,
+                                    row.failureCount,
+                                    row.lastSuccessAt,
+                                    row.lastErrorKind,
+                                    row.subscribedAt,
+                                ),
                             latestEpisodeAt = row.latestEpisodeAt,
                             subscribedAt = row.subscribedAt,
                             unplayedCount = row.unplayedCount,
                         )
-                    }
-                    .sortedWith { a, b -> a.displayTitle.compareTo(b.displayTitle, ignoreCase = true) }
+                    }.sortedWith { a, b -> a.displayTitle.compareTo(b.displayTitle, ignoreCase = true) }
             }
 
     override fun observePodcast(podcastId: Long): Flow<PodcastDetail?> =
@@ -153,15 +161,13 @@ internal class PodcastRepositoryImpl(
     override suspend fun setCredentials(
         podcastId: Long,
         credentials: BasicCredentials,
-    ): Outcome<Unit, AddPodcastError> =
-        throw UnsupportedOperationException("setCredentials is M1b")
+    ): Outcome<Unit, AddPodcastError> = throw UnsupportedOperationException("setCredentials is M1b")
 
     /** 03 Edit URL: feed moves and `new-feed-url` aliases land in M1b. */
     override suspend fun editFeedUrl(
         podcastId: Long,
         input: String,
-    ): Outcome<Unit, AddPodcastError> =
-        throw UnsupportedOperationException("editFeedUrl is M1b")
+    ): Outcome<Unit, AddPodcastError> = throw UnsupportedOperationException("editFeedUrl is M1b")
 
     /**
      * "Try again" (03 Per-feed states): flush the batcher, clear the failure block, then a

@@ -162,7 +162,8 @@ internal class SubscribeUseCaseImpl(
 
                     // Step 3.5: requested group memberships (`OrderKey.after` per group).
                     for (groupId in groupIds) {
-                        db.groupDao()
+                        db
+                            .groupDao()
                             .insertMember(
                                 PodcastGroupMemberEntity(
                                     groupId = groupId,
@@ -189,10 +190,17 @@ internal class SubscribeUseCaseImpl(
 
         val (podcastId, ingest) =
             when (result) {
-                is TxOutcome.Duplicate ->
+                is TxOutcome.Duplicate -> {
                     return Outcome.Failure(SubscribeError.AlreadySubscribed(result.podcastId))
-                is TxOutcome.Inserted -> result.podcastId to result.ingest
-                TxOutcome.Missing -> return Outcome.Failure(SubscribeError.Storage)
+                }
+
+                is TxOutcome.Inserted -> {
+                    result.podcastId to result.ingest
+                }
+
+                TxOutcome.Missing -> {
+                    return Outcome.Failure(SubscribeError.Storage)
+                }
             }
 
         // Step 4: the initial-fetch event, the pending paging run, the rebase, the cache drop.

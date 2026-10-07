@@ -12,6 +12,9 @@ import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+import kotlinx.coroutines.test.runTest
+import mockwebserver3.junit4.MockWebServerRule
+import org.junit.Rule
 import java.io.File
 import kotlin.io.encoding.Base64
 import kotlin.test.AfterTest
@@ -22,9 +25,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlinx.coroutines.test.runTest
-import mockwebserver3.junit4.MockWebServerRule
-import org.junit.Rule
 
 /**
  * 03 Add podcast flow — the M1a slice of `AddPodcastResolverImpl` over the real fetch/parse stack:
@@ -43,7 +43,10 @@ class AddPodcastResolverTest {
 
     @BeforeTest
     fun setUp() {
-        root = kotlin.io.path.createTempDirectory("nd-add-test").toFile()
+        root =
+            kotlin.io.path
+                .createTempDirectory("nd-add-test")
+                .toFile()
         bundle = newResolver(root, db, clock)
     }
 
@@ -159,10 +162,11 @@ class AddPodcastResolverTest {
         runTest {
             server.enqueue(
                 mockResponse(
-                    body = rssBody(
-                        title = "The Show",
-                        items = arrayOf(rssItem("e1", title = "First")),
-                    ),
+                    body =
+                        rssBody(
+                            title = "The Show",
+                            items = arrayOf(rssItem("e1", title = "First")),
+                        ),
                     headers = arrayOf("ETag" to "\"e1\""),
                 ),
             )
@@ -196,11 +200,9 @@ class AddPodcastResolverTest {
                 assertIs<AddResolution.Failure>(bundle.resolver.resolve(feedUrl())).error,
             )
 
-            server.enqueue(
-                mockResponse(
-                    body = """<?xml version="1.0"?><opml version="1.0"><head/><body><outline text="x"/></body></opml>""",
-                ),
-            )
+            val opmlBody =
+                """<?xml version="1.0"?><opml version="1.0"><head/><body><outline text="x"/></body></opml>"""
+            server.enqueue(mockResponse(body = opmlBody))
             val opml = assertIs<AddResolution.Failure>(bundle.resolver.resolve(feedUrl()))
             assertEquals(AddPodcastError.SubscriptionList(feedUrl()), opml.error)
         }

@@ -4,10 +4,10 @@ package ch.lkmc.neutrodyne.core.data.fetch
 
 import ch.lkmc.neutrodyne.core.common.StoragePaths
 import dev.zacsweers.metro.Inject
-import kotlin.random.Random
 import okio.FileSystem
 import okio.Path
 import okio.Path.Companion.toPath
+import kotlin.random.Random
 
 /**
  * The fetch pipeline's temp-file owner (03 Body, hashing and sniffing):

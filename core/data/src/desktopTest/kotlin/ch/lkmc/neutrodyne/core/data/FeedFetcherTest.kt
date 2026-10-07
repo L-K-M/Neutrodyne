@@ -15,8 +15,8 @@ import mockwebserver3.MockWebServer
 import mockwebserver3.junit4.MockWebServerRule
 import okhttp3.Headers.Companion.headersOf
 import okio.Buffer
-import okio.FileSystem
 import okio.ByteString.Companion.encodeUtf8
+import okio.FileSystem
 import org.junit.After
 import org.junit.Rule
 import org.junit.Test
@@ -42,7 +42,10 @@ class FeedFetcherTest {
 
     private fun setUpRoot() {
         if (!::root.isInitialized) {
-            root = kotlin.io.path.createTempDirectory("nd-fetch-test").toFile()
+            root =
+                kotlin.io.path
+                    .createTempDirectory("nd-fetch-test")
+                    .toFile()
         }
     }
 
@@ -51,9 +54,7 @@ class FeedFetcherTest {
         if (::root.isInitialized) root.deleteRecursively()
     }
 
-    private fun fetcher(
-        credentials: CredentialLookup = CredentialLookup.None,
-    ): FetcherBundle {
+    private fun fetcher(credentials: CredentialLookup = CredentialLookup.None): FetcherBundle {
         setUpRoot()
         return newFetcher(root, credentials, clock)
     }
@@ -424,7 +425,8 @@ class FeedFetcherTest {
                 }
             server.enqueue(
                 mockResponse(code = 200, body = "").let {
-                    it.newBuilder()
+                    it
+                        .newBuilder()
                         .headers(headersOf("Content-Encoding", "gzip"))
                         .body(Buffer().write(gzipped))
                         .build()

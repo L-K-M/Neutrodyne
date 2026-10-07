@@ -2350,6 +2350,13 @@ private fun firstNonBlank(vararg values: String?): String? = values.firstOrNull 
 /** Drops ASCII whitespace before the first byte of markup (see [XmlPullFeedParser.parse] step 3). */
 private fun ByteArray.withoutLeadingWhitespace(): ByteArray {
     var i = 0
-    while (i < size && (this[i] == ' '.code.toByte() || this[i] == '\t'.code.toByte() || this[i] == '\r'.code.toByte() || this[i] == '\n'.code.toByte())) i++
+    while (i < size &&
+        (
+            this[i] == ' '.code.toByte() || this[i] == '\t'.code.toByte() || this[i] == '\r'.code.toByte() ||
+                this[i] == '\n'.code.toByte()
+        )
+    ) {
+        i++
+    }
     return if (i == 0) this else copyOfRange(i, size)
 }

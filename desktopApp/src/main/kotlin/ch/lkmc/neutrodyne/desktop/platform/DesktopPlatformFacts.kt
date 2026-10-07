@@ -7,8 +7,8 @@ import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.DesktopArch
 import ch.lkmc.neutrodyne.core.model.DesktopOs
 import ch.lkmc.neutrodyne.core.model.InstallKind
-import java.util.Locale
 import kotlinx.collections.immutable.toImmutableList
+import java.util.Locale
 
 /**
  * [PlatformInfo] and the interim [BuildInfo] for the desktop shell, from `System.getProperty` and

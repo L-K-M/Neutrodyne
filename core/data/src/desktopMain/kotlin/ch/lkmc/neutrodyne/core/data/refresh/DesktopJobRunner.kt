@@ -18,13 +18,6 @@ import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.ExposeImplBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
-import java.util.concurrent.ConcurrentHashMap
-import kotlin.coroutines.cancellation.CancellationException
-import kotlin.math.min
-import kotlin.time.Duration
-import kotlin.time.Duration.Companion.minutes
-import kotlin.time.Duration.Companion.seconds
-import kotlin.time.Instant
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -40,6 +33,13 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.cancellation.CancellationException
+import kotlin.math.min
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Instant
 
 /**
  * A lane's diagnostics row (11 Runner diagnostics): the Diagnostics screen lists one per lane. All
@@ -187,7 +187,8 @@ class DesktopJobRunner
                                     val backoffMinutes =
                                         min(
                                             BACKOFF_CAP_MINUTES.toDouble(),
-                                            BACKOFF_BASE_MINUTES.toDouble() * (1 shl (state.failures - 1).coerceIn(0, 5)),
+                                            BACKOFF_BASE_MINUTES.toDouble() *
+                                                (1 shl (state.failures - 1).coerceIn(0, 5)),
                                         ).toLong()
                                     state.backoffUntil =
                                         Instant.fromEpochMilliseconds(clock.now()) + backoffMinutes.minutes
@@ -196,7 +197,10 @@ class DesktopJobRunner
                                         it.copy(
                                             running = false,
                                             lastEndAt = Instant.fromEpochMilliseconds(clock.now()),
-                                            lastError = Redactor.text(throwable.message ?: throwable::class.simpleName ?: "error"),
+                                            lastError =
+                                                Redactor.text(
+                                                    throwable.message ?: throwable::class.simpleName ?: "error",
+                                                ),
                                             runs = it.runs + 1,
                                             failures = it.failures + 1,
                                             backoffUntil = state.backoffUntil,
@@ -252,9 +256,13 @@ class DesktopJobRunner
         /** Read across the tick and lane coroutines, so every shared field is volatile. */
         private class LaneState {
             @Volatile var job: Job? = null
+
             @Volatile var running: Boolean = false
+
             @Volatile var rerun: Boolean = false
+
             @Volatile var failures: Int = 0
+
             @Volatile var backoffUntil: Instant? = null
         }
 

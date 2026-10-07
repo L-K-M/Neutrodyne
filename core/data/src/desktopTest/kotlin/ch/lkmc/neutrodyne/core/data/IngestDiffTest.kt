@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.testing.database.episodeStateEntity
 import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
 import ch.lkmc.neutrodyne.feeds.model.WarningCode
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -21,7 +22,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
-import kotlinx.coroutines.test.runTest
 
 /**
  * PLAN M1 acceptance 3/6 — the diff algorithm of 03 "Ingestion and diff" against an in-memory
@@ -79,7 +79,8 @@ class IngestDiffTest {
                         ),
                 )
 
-            val result = ingest(id, feed, mode = IngestMode.INITIAL, meta = fetchMeta(etag = "e1", sha256Hex = "f".repeat(64)))
+            val result =
+                ingest(id, feed, mode = IngestMode.INITIAL, meta = fetchMeta(etag = "e1", sha256Hex = "f".repeat(64)))
 
             assertEquals(2, result.inserted.size)
             assertEquals(2, result.accepted)
@@ -213,8 +214,20 @@ class IngestDiffTest {
                 parsedFeed(
                     items =
                         listOf(
-                            parsedEpisode(0, guid = "g1", enclosureUrl = "https://cdn.example.com/a.mp3", pubDate = NOW - DAY),
-                            parsedEpisode(1, guid = "g2", enclosureUrl = "https://cdn.example.com/b.mp3", pubDate = NOW - 2 * DAY),
+                            parsedEpisode(
+                                0,
+                                guid = "g1",
+                                enclosureUrl = "https://cdn.example.com/a.mp3",
+                                pubDate =
+                                    NOW - DAY,
+                            ),
+                            parsedEpisode(
+                                1,
+                                guid = "g2",
+                                enclosureUrl = "https://cdn.example.com/b.mp3",
+                                pubDate =
+                                    NOW - 2 * DAY,
+                            ),
                         ),
                 ),
                 mode = IngestMode.INITIAL,
@@ -229,8 +242,20 @@ class IngestDiffTest {
                     parsedFeed(
                         items =
                             listOf(
-                                parsedEpisode(0, guid = "x1", enclosureUrl = "https://cdn.example.com/a.mp3", pubDate = NOW - DAY),
-                                parsedEpisode(1, guid = "x2", enclosureUrl = "https://cdn.example.com/b.mp3", pubDate = NOW - 2 * DAY),
+                                parsedEpisode(
+                                    0,
+                                    guid = "x1",
+                                    enclosureUrl = "https://cdn.example.com/a.mp3",
+                                    pubDate =
+                                        NOW - DAY,
+                                ),
+                                parsedEpisode(
+                                    1,
+                                    guid = "x2",
+                                    enclosureUrl = "https://cdn.example.com/b.mp3",
+                                    pubDate =
+                                        NOW - 2 * DAY,
+                                ),
                             ),
                     ),
                 )
@@ -347,7 +372,10 @@ class IngestDiffTest {
             val before = db.episodeDao().byIdentityKey(id, "g:a")!!
 
             val result =
-                ingest(id, parsedFeed(items = listOf(parsedEpisode(0, guid = "a", title = "New", descriptionHtml = "d2"))))
+                ingest(
+                    id,
+                    parsedFeed(items = listOf(parsedEpisode(0, guid = "a", title = "New", descriptionHtml = "d2"))),
+                )
 
             assertEquals(1, result.updated)
             val after = db.episodeDao().byId(before.id)!!
@@ -428,11 +456,19 @@ class IngestDiffTest {
                 mode = IngestMode.INITIAL,
             )
             val episodeId = db.episodeDao().byIdentityKey(id, "g:a")!!.id
-            db.chapterDao()
+            db
+                .chapterDao()
                 .replace(
                     episodeId,
                     ChapterSource.PODCASTING20_JSON,
-                    listOf(ChapterEntity(episodeId = episodeId, source = ChapterSource.PODCASTING20_JSON, ordinal = 0, startMs = 0)),
+                    listOf(
+                        ChapterEntity(
+                            episodeId = episodeId,
+                            source = ChapterSource.PODCASTING20_JSON,
+                            ordinal = 0,
+                            startMs = 0,
+                        ),
+                    ),
                 )
             assertEquals(1, db.chapterDao().ofSource(episodeId, ChapterSource.PODCASTING20_JSON).size)
 
@@ -558,8 +594,19 @@ class IngestDiffTest {
                 parsedFeed(
                     items =
                         listOf(
-                            parsedEpisode(0, enclosureUrl = "https://cdn.example.com/x.mp3", title = "B", pubDate = day),
-                            parsedEpisode(1, guid = "gc", enclosureUrl = "https://cdn.example.com/x.mp3", title = "C", pubDate = day),
+                            parsedEpisode(
+                                0,
+                                enclosureUrl = "https://cdn.example.com/x.mp3",
+                                title = "B",
+                                pubDate = day,
+                            ),
+                            parsedEpisode(
+                                1,
+                                guid = "gc",
+                                enclosureUrl = "https://cdn.example.com/x.mp3",
+                                title = "C",
+                                pubDate = day,
+                            ),
                             parsedEpisode(2, enclosureUrl = null, externalMediaId = "m1", title = "T", pubDate = day),
                         ),
                 ),
@@ -575,8 +622,18 @@ class IngestDiffTest {
                     parsedFeed(
                         items =
                             listOf(
-                                parsedEpisode(0, enclosureUrl = "https://cdn.example.com/x.mp3", title = "B2", pubDate = day),
-                                parsedEpisode(1, enclosureUrl = "https://cdn.example.com/x.mp3", title = "T", pubDate = day),
+                                parsedEpisode(
+                                    0,
+                                    enclosureUrl = "https://cdn.example.com/x.mp3",
+                                    title = "B2",
+                                    pubDate = day,
+                                ),
+                                parsedEpisode(
+                                    1,
+                                    enclosureUrl = "https://cdn.example.com/x.mp3",
+                                    title = "T",
+                                    pubDate = day,
+                                ),
                             ),
                     ),
                 )
@@ -599,7 +656,8 @@ class IngestDiffTest {
             // The subscribe path: ingestInTransaction inside a caller's write transaction.
             val result =
                 db.withWriteTransaction {
-                    db.podcastDao()
+                    db
+                        .podcastDao()
                         .insertAlias(
                             ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity(
                                 url = "https://alias.example.com/feed",

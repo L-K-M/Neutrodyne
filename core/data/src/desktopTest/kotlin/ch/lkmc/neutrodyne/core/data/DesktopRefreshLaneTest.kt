@@ -14,13 +14,13 @@ import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import dev.zacsweers.metro.Provider
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Instant
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.test.runTest
 
 /**
  * 03 Desktop refresh — the `refresh` lane: an offline run is free, queued requests drain in order
@@ -157,8 +157,7 @@ class DesktopRefreshLaneTest {
             assertNull(db.podcastDao().byId(b)!!.lastAttemptAt)
         }
 
-    private suspend fun summaryCount(): Int =
-        if (settings.get(FeedsSettingKeys.LAST_RUN_SUMMARY).isEmpty()) 0 else 1
+    private suspend fun summaryCount(): Int = if (settings.get(FeedsSettingKeys.LAST_RUN_SUMMARY).isEmpty()) 0 else 1
 
     private fun queue(scope: CoroutineScope): DesktopRefreshScheduler =
         DesktopRefreshScheduler(

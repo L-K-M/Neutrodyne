@@ -151,7 +151,13 @@ class RefreshForegroundObserverTest {
     }
 
     private fun TestScope.deps(): Deps =
-        Deps(FakeRefreshScheduler(), FakeSettingsRepository(), FakeNetworkMonitor(FakeNetworkMonitor.ONLINE), TestClock(), this)
+        Deps(
+            FakeRefreshScheduler(),
+            FakeSettingsRepository(),
+            FakeNetworkMonitor(FakeNetworkMonitor.ONLINE),
+            TestClock(),
+            this,
+        )
 
     private companion object {
         const val MINUTE_MS = 60_000L
