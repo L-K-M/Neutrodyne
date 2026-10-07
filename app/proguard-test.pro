@@ -7,3 +7,8 @@
 -keep class ch.lkmc.neutrodyne.** { *; }
 -dontwarn junit.**
 -dontwarn org.junit.**
+# Test-APK compile-time-only references that never exist on the device (minifyReleaseAndroidTest
+# missing-class errors, 2026-10-06): material still names appcompat's removed DrawableWrapper, and
+# errorprone annotations carry javax.lang.model members.
+-dontwarn androidx.appcompat.graphics.drawable.DrawableWrapper
+-dontwarn javax.lang.model.element.Modifier
