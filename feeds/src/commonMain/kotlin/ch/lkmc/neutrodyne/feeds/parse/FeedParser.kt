@@ -26,7 +26,7 @@ public interface FeedParser {
          * whenever a change would alter any value ingestion writes for an existing golden fixture
          * (03 Limits and version policy).
          */
-        public const val VERSION: Int = 2
+        public const val VERSION: Int = 3
     }
 }
 

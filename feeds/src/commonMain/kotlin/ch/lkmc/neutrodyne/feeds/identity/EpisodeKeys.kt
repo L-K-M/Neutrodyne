@@ -128,6 +128,9 @@ public object EpisodeContentHash {
                     .encodeUtf8()
                     .sha256()
                     .hex(),
+                // The interpretation is a stored column too: text→HTML with identical bytes must
+                // still flip the hash or the update gate keeps the stale flag (03 Ingestion diff).
+                e.descriptionIsHtml.toString(),
                 list(e.transcripts) { listOf(it.url, it.type.orEmpty(), it.language.orEmpty(), it.rel.orEmpty()) },
                 list(e.alternateEnclosures) {
                     listOf(

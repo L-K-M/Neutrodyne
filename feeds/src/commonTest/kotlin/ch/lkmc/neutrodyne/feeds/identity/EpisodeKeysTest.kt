@@ -19,6 +19,7 @@ class EpisodeKeysTest {
         pubDate: Long? = null,
         link: String? = null,
         description: String? = null,
+        descriptionIsHtml: Boolean = false,
     ): ParsedEpisode {
         val enclosure = enclosureUrl?.let { Enclosure(it, "audio/mpeg", 1, "audio/mpeg") }
         return ParsedEpisode(
@@ -27,6 +28,7 @@ class EpisodeKeysTest {
             title = title,
             pubDate = pubDate,
             descriptionHtml = description,
+            descriptionIsHtml = descriptionIsHtml,
             link = link,
             enclosures = listOfNotNull(enclosure),
             primaryEnclosure = enclosure,
@@ -149,5 +151,13 @@ class EpisodeKeysTest {
             )
         assertEquals(EpisodeContentHash.of(base), EpisodeContentHash.of(base.copy(feedOrder = 7)))
         assertNotEquals(EpisodeContentHash.of(base), EpisodeContentHash.of(base.copy(title = "T2")))
+    }
+
+    /** W10: text-vs-HTML interpretation alone changes the hash — the description bytes need not. */
+    @Test
+    fun contentHashCoversDescriptionIsHtml() {
+        val text = episode(description = "<b>Hello</b>")
+        val html = episode(description = "<b>Hello</b>", descriptionIsHtml = true)
+        assertNotEquals(EpisodeContentHash.of(text), EpisodeContentHash.of(html))
     }
 }
