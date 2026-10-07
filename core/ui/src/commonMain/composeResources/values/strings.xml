@@ -373,4 +373,5 @@
     <string name="feeds_images_always">Always</string>
     <string name="feeds_images_wifi">On Wi-Fi only</string>
     <string name="feeds_images_tap">Only after I tap</string>
+    <string name="feeds_not_on_desktop">Not used on computers</string>
 </resources>

@@ -353,4 +353,5 @@
     <string name="feeds_images_always">Immer</string>
     <string name="feeds_images_wifi">Nur über WLAN</string>
     <string name="feeds_images_tap">Nur nach meinem Tippen</string>
+    <string name="feeds_not_on_desktop">Wird auf Computern nicht verwendet</string>
 </resources>
