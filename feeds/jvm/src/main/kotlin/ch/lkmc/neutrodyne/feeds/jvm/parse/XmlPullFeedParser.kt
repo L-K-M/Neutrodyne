@@ -43,27 +43,14 @@ internal class DepthLimitExceeded(
 /**
  * The streaming feed parser (03 Parser): one hand-written walk over `XmlPullParser` mapping RSS 2.0,
  * Atom, RSS 1.0/RDF, iTunes, Podcasting 2.0, Media RSS and Podlove Simple Chapters onto one normalised
- * model. Runs with either platform parser through [PullParserFactory]; never throws for malformed input.
+ * model. Runs with either platform parser through [PullParserFactory]; never throws for malformed
+ * input. All mutable state lives in a fresh [ParseSession] per pass, so the documented two concurrent
+ * parses on one instance cannot interfere (03 Threading model).
  */
 public class XmlPullFeedParser(
     private val factory: PullParserFactory,
     private val limits: ParseLimits = ParseLimits(),
 ) : FeedParser {
-    /** One pass over the document. */
-    private inner class Pass(
-        val feed: ParsedFeed,
-        val textChars: Long,
-        val replacementChars: Long,
-    )
-
-    private inner class Counters {
-        var textChars = 0L
-        var replacementChars = 0L
-    }
-
-    private val counters = Counters()
-    private var warnings = mutableListOf<ParseWarning>()
-
     /**
      * Parses one document (03 Parser). The document is read through [open] once and buffered, so the
      * charset re-parse (step 5) compares two passes over the same bytes instead of calling [open] twice.
@@ -97,10 +84,10 @@ public class XmlPullFeedParser(
         }
 
         // Step 3: first pass with encoding sniffing (never a Reader, never the HTTP charset).
-        val first = runPass(bytes, charsetOverride = null, baseUrl)
+        val first = ParseSession(factory, limits).runPass(bytes, charsetOverride = null, baseUrl)
         if (first is ParseResult) return first
 
-        val stats = first as Pass
+        val stats = first as ParseSession.Pass
 
         // Step 5: re-parse heuristic. More than 0.5 % replacement characters triggers one second pass
         // with the HTTP charset when it differs from the detected one, else windows-1252; the result
@@ -108,13 +95,13 @@ public class XmlPullFeedParser(
         val replacementRatio =
             if (stats.textChars == 0L) 0.0 else stats.replacementChars.toDouble() / stats.textChars
         if (replacementRatio > REPLACEMENT_RATIO_THRESHOLD) {
-            val detected = detectedEncoding
+            val detected = stats.detectedEncoding
             val secondCharset =
                 httpCharset?.trim()?.takeIf { it.isNotEmpty() && !sameCharset(it, detected) }
                     ?: WINDOWS_1252.takeIf { !sameCharset(it, detected) }
             if (secondCharset != null) {
-                val second = runPass(bytes, secondCharset, baseUrl)
-                if (second is Pass && second.replacementChars < stats.replacementChars) {
+                val second = ParseSession(factory, limits).runPass(bytes, secondCharset, baseUrl)
+                if (second is ParseSession.Pass && second.replacementChars < stats.replacementChars) {
                     val reparseWarning =
                         ParseWarning(WarningCode.CHARSET_REPARSED, detail = "re-parsed as $secondCharset")
                     return ParseResult.Ok(second.feed.copy(warnings = second.feed.warnings + reparseWarning))
@@ -125,22 +112,59 @@ public class XmlPullFeedParser(
         return ParseResult.Ok(stats.feed)
     }
 
+    public companion object {
+        /** The desktop binding: XmlPull discovery (kxml2 at run time, 03 Parser). */
+        public fun discovered(limits: ParseLimits = ParseLimits()): FeedParser =
+            XmlPullFeedParser(PullParserFactory.Discovered, limits)
+
+        private const val REPLACEMENT_RATIO_THRESHOLD = 0.005
+        private const val WINDOWS_1252 = "windows-1252"
+    }
+}
+
+/**
+ * All mutable state of one parse pass: the document walk, the channel and item builders, and the
+ * per-document namespace binding, warning and encoding bookkeeping. [XmlPullFeedParser.parse]
+ * creates a fresh session for every pass — including the charset re-parse — so the documented two
+ * concurrent parses on one parser instance share nothing (03 Threading model).
+ */
+private class ParseSession(
+    private val factory: PullParserFactory,
+    private val limits: ParseLimits,
+) {
+    /** One pass over the document: the feed, the charset counters and the detected encoding. */
+    class Pass(
+        val feed: ParsedFeed,
+        val textChars: Long,
+        val replacementChars: Long,
+        val detectedEncoding: String?,
+    )
+
+    private class Counters {
+        var textChars = 0L
+        var replacementChars = 0L
+    }
+
+    private val counters = Counters()
+    private var warnings = mutableListOf<ParseWarning>()
     private var detectedEncoding: String? = null
+    private var itemsTruncated = false
+
+    /**
+     * The root element's namespace when the document parsed as Atom (03 step 7: `feed` with the Atom
+     * namespace or none). Elements in that same namespace then carry the Atom key — a namespace-free
+     * Atom document's `<entry>`/`<title>` otherwise resolve as RSS.
+     */
+    private var atomNamespace: String? = null
+
+    private val undeclaredPrefixesSeen = mutableSetOf<String>()
 
     /** One parse pass: `ParseResult` when it failed structurally, otherwise the feed with its stats. */
-    private fun runPass(
+    fun runPass(
         bytes: ByteArray,
         charsetOverride: String?,
         baseUrl: String,
     ): Any {
-        counters.textChars = 0
-        counters.replacementChars = 0
-        warnings = mutableListOf()
-        itemsTruncated = false
-        undeclaredPrefixesSeen.clear()
-        atomNamespace = null
-        detectedEncoding = null
-
         val parser = factory.create()
         return try {
             parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, true)
@@ -180,7 +204,7 @@ public class XmlPullFeedParser(
             val feed =
                 parseDocument(parser, baseUrl)
                     ?: return ParseResult.Failed(ParseFailure.NOT_A_FEED, "root element was not rss, feed or RDF")
-            Pass(feed, counters.textChars, counters.replacementChars)
+            Pass(feed, counters.textChars, counters.replacementChars, detectedEncoding)
         } catch (e: DepthLimitExceeded) {
             ParseResult.Failed(ParseFailure.TOO_DEEP, "element nesting over ${limits.maxDepth}")
         } catch (e: XmlPullParserException) {
@@ -388,15 +412,6 @@ public class XmlPullFeedParser(
         warnings.add(ParseWarning(WarningCode.ITEMS_TRUNCATED, detail = "stopped after ${limits.maxItems} items"))
     }
 
-    private var itemsTruncated = false
-
-    /**
-     * The root element's namespace when the document parsed as Atom (03 step 7: `feed` with the Atom
-     * namespace or none). Elements in that same namespace then carry the Atom key — a namespace-free
-     * Atom document's `<entry>`/`<title>` otherwise resolve as RSS.
-     */
-    private var atomNamespace: String? = null
-
     /**
      * The registry key of the element the parser sits on; inside a namespace-free (or
      * unrecognized-namespace) Atom document, unprefixed elements in the document's own namespace read
@@ -407,18 +422,6 @@ public class XmlPullFeedParser(
         if (atomNamespace == null || key == Namespaces.Key.ATOM) return key
         if (!parser.prefix.isNullOrEmpty() || parser.namespace.orEmpty() != atomNamespace) return key
         return if (key == null || key == Namespaces.Key.RSS) Namespaces.Key.ATOM else key
-    }
-
-    /** Whether two charset names denote the same charset (`utf-16` vs `UTF-16`, `utf8` vs `UTF-8`). */
-    private fun sameCharset(
-        a: String,
-        b: String?,
-    ): Boolean {
-        if (b == null) return false
-        val ca = runCatching { Charset.forName(a) }.getOrNull()
-        val cb = runCatching { Charset.forName(b) }.getOrNull()
-        if (ca != null && cb != null) return ca == cb
-        return a.equals(b, ignoreCase = true)
     }
 
     /**
@@ -2227,8 +2230,6 @@ public class XmlPullFeedParser(
         }
     }
 
-    private val undeclaredPrefixesSeen = mutableSetOf<String>()
-
     private fun attr(
         parser: XmlPullParser,
         name: String,
@@ -2266,16 +2267,10 @@ public class XmlPullFeedParser(
         }
     }
 
-    public companion object {
-        /** The desktop binding: XmlPull discovery (kxml2 at run time, 03 Parser). */
-        public fun discovered(limits: ParseLimits = ParseLimits()): FeedParser =
-            XmlPullFeedParser(PullParserFactory.Discovered, limits)
-
+    private companion object {
         private const val RELAXED_FEATURE = "http://xmlpull.org/v1/doc/features.html#relaxed"
         private const val PODCAST_NS = "https://podcastindex.org/namespace/1.0"
         private const val REPLACEMENT_CHAR = '�'
-        private const val REPLACEMENT_RATIO_THRESHOLD = 0.005
-        private const val WINDOWS_1252 = "windows-1252"
         private const val XML_NS = "http://www.w3.org/XML/1998/namespace"
         private const val XML_BASE_NAME = "base"
         private const val FUNDING_TITLE_MAX_CHARS = 128
@@ -2339,6 +2334,18 @@ public class XmlPullFeedParser(
                 DescriptionSlot.MEDIA_DESCRIPTION,
             )
     }
+}
+
+/** Whether two charset names denote the same charset (`utf-16` vs `UTF-16`, `utf8` vs `UTF-8`). */
+private fun sameCharset(
+    a: String,
+    b: String?,
+): Boolean {
+    if (b == null) return false
+    val ca = runCatching { Charset.forName(a) }.getOrNull()
+    val cb = runCatching { Charset.forName(b) }.getOrNull()
+    if (ca != null && cb != null) return ca == cb
+    return a.equals(b, ignoreCase = true)
 }
 
 private fun firstNonBlank(vararg values: String?): String? = values.firstOrNull { !it.isNullOrBlank() }
