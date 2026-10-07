@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.AppScope
 import dev.zacsweers.metro.ContributesIntoSet
 import dev.zacsweers.metro.Inject
+import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -20,12 +21,13 @@ import kotlinx.coroutines.withContext
 internal class PeriodicRefreshInitializer
     @Inject
     constructor(
-        private val scheduler: RefreshScheduler,
+        // Lazy (01 DI rule 7): the scheduler reaches the database, which band 100 opens first.
+        private val scheduler: Provider<RefreshScheduler>,
     ) : AppInitializer {
         override val order: Int = 200
 
         override suspend fun run() {
-            scheduler.reschedulePeriodic()
+            scheduler().reschedulePeriodic()
         }
     }
 
@@ -38,13 +40,14 @@ internal class PeriodicRefreshInitializer
 internal class RefreshForegroundObserverInitializer
     @Inject
     constructor(
-        private val observer: RefreshForegroundObserver,
+        // Lazy (01 DI rule 7): the observer's scheduler reaches the database (band 100 opens it).
+        private val observer: Provider<RefreshForegroundObserver>,
     ) : AppInitializer {
         override val order: Int = 220
 
         override suspend fun run() {
             withContext(Dispatchers.Main) {
-                ProcessLifecycleOwner.get().lifecycle.addObserver(observer)
+                ProcessLifecycleOwner.get().lifecycle.addObserver(observer())
             }
         }
     }

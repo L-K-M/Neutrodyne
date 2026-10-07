@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.AppScope
 import dev.zacsweers.metro.ContributesIntoSet
 import dev.zacsweers.metro.Inject
+import dev.zacsweers.metro.Provider
 
 /**
  * Starts the desktop job runner at band 200 (11 Start-up: "`DesktopJobRunner.start()` in place of
@@ -18,11 +19,12 @@ import dev.zacsweers.metro.Inject
 internal class DesktopRunnerInitializer
     @Inject
     constructor(
-        private val runner: DesktopJobRunner,
+        // Lazy (01 DI rule 7): the runner's lanes reach the database (band 100 opens it).
+        private val runner: Provider<DesktopJobRunner>,
     ) : AppInitializer {
         override val order: Int = 200
 
         override suspend fun run() {
-            runner.start()
+            runner().start()
         }
     }

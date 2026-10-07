@@ -114,12 +114,31 @@ internal object FeedHttpHeaders {
         val authority = base.substring(0, baseSchemeEnd + 3) +
             base.substring(baseSchemeEnd + 3).substringBefore('/')
         if (loc.startsWith("//")) return base.substring(0, baseSchemeEnd) + ":" + loc
-        if (loc.startsWith("/")) return authority + loc
+        if (loc.startsWith("/")) return authority + normalizePath(loc)
         val path = base.substringAfter("://").substringAfter('/', "")
         val dir = path.substringBeforeLast('/', "")
         val basePath = base.substringBefore("://") + "://" +
             base.substringAfter("://").substringBefore('/')
-        return if (dir.isEmpty()) "$basePath/$loc" else "$basePath/$dir/$loc"
+        val joined = if (dir.isEmpty()) "/$loc" else "/$dir/$loc"
+        return basePath + normalizePath(joined)
+    }
+
+    /** RFC 3986 §5.2.4 dot-segment removal; a `..` past the root clamps (servers treat it as absent). */
+    private fun normalizePath(path: String): String {
+        if (!path.contains('.')) return path
+        val out = ArrayDeque<String>()
+        val trailingSlash = path.endsWith("/")
+        for (segment in path.split('/')) {
+            when (segment) {
+                "", "." -> Unit
+                ".." -> if (out.isNotEmpty()) out.removeLast()
+                else -> out.addLast(segment)
+            }
+        }
+        if (out.isEmpty()) return "/"
+        var result = "/" + out.joinToString("/")
+        if (trailingSlash) result += "/"
+        return result
     }
 
     private fun Char.isSchemeChar(): Boolean = isLetterOrDigit() || this == '+' || this == '-' || this == '.'
