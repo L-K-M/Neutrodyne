@@ -30,6 +30,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." >/dev/null 2>&1 && pwd -P)"
+export REPO_ROOT
 cd "$REPO_ROOT"
 
 TAG=""
@@ -133,12 +134,52 @@ if [ "$MAJOR" -ge 1 ]; then MAC_KIND=dmg; else MAC_KIND=mac-zip; fi
 
 EXPECTED="$(PRODUCTS="$PRODUCTS" MAC_EXT="$([ "$MAC_KIND" = dmg ] && echo dmg || echo zip)" \
     python3 - "$REPO_ROOT/release-assets.json" "$VERSION" <<'PYEOF'
-import json, os, sys
+import json, os, re, sys
 
 doc = json.load(open(sys.argv[1], encoding="utf-8"))
 version = sys.argv[2]
 products = set(os.environ["PRODUCTS"].split(","))
 mac_ext = os.environ["MAC_EXT"]
+root = os.environ["REPO_ROOT"]
+
+# The {jdk}/{wix} placeholders come from the lockfiles' versions; {ffmpeg} and
+# {pbsTag} resolve only once their milestones' locks carry a version — until then
+# the asset does not ship and the name drops out of the expected list.
+def prop(path, key):
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if line.startswith(key + "="):
+                    return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return None
+
+def toml_section_prop(path, section, key):
+    try:
+        in_sec = False
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                s = line.strip()
+                if s == f"[{section}]":
+                    in_sec = True
+                    continue
+                if s.startswith("["):
+                    in_sec = False
+                if in_sec and s.startswith(key):
+                    return s.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return None
+
+placeholders = {
+    "{jdk}": prop(os.path.join(root, "desktopApp/runtime.lock"), "version"),
+    "{wix}": prop(os.path.join(root, "desktopApp/wix.lock"), "version"),
+    "{ffmpeg}": prop(os.path.join(root, "playback/native/ffmpeg-components.lock"), "version"),
+    "{pbsTag}": toml_section_prop(
+        os.path.join(root, "youtube/ytdlp-desktop/python-components.lock"),
+        "pbsSource", "tag"),
+}
 
 names = list(doc["always"])
 for group in products:
@@ -147,7 +188,15 @@ for group in products:
         sys.exit(f"verify-tag: release-assets.json has no group '{group}'")
     names += files
 for n in names:
-    print(n.replace("{v}", version).replace("{mac_ext}", mac_ext))
+    n = n.replace("{v}", version).replace("{mac_ext}", mac_ext)
+    unresolved = re.findall(r"\{[a-zA-Z]+\}", n)
+    if unresolved:
+        for ph in unresolved:
+            if placeholders.get(ph):
+                n = n.replace(ph, placeholders[ph])
+        if re.search(r"\{[a-zA-Z]+\}", n):
+            continue  # the component does not ship in this release
+    print(n)
 PYEOF
 )" || exit 1
 

@@ -232,6 +232,151 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: scripts/ci/report-nightly.sh release-build-smoke --close
 
+  desktop-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x64
+            runs-on: windows-2025
+          - target: macos-arm64
+            runs-on: macos-15
+          - target: linux-x64
+            runs-on: ubuntu-24.04
+          - target: linux-arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      issues: write
+    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'desktop'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: |
+            25
+            21
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Android SDK (the KMP android targets configure AGP in every module)
+        run: scripts/ci/install-android-sdk.sh "$HOME/android-sdk" && echo "ANDROID_HOME=$HOME/android-sdk" >> "$GITHUB_ENV"
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+          cache-read-only: true
+      # jlink's strip needs objcopy; jpackage's DEB step needs fakeroot/dpkg-deb and
+      # the RPM step rpmbuild; xvfb+dbus for the packaged smoke starts.
+      - name: Packaging tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq binutils fakeroot rpm xvfb dbus-x11
+      - name: Unit tests on this host
+        run: ./gradlew allTests test -Proborazzi.test.verify=true --continue
+      # One image per install kind: the kind rides the Gradle property into the
+      # image's build-info, and the matching package task consumes that image.
+      - name: Package the target's formats
+        shell: bash
+        run: |
+          set -e
+          case "${{ matrix.target }}" in
+            windows-x64)
+              ./gradlew createDistributable packageMsi -Pneutrodyne.installKind=msi
+              ./gradlew createDistributable packageZip -Pneutrodyne.installKind=zip ;;
+            macos-arm64)
+              ./gradlew createDistributable -Pneutrodyne.installKind=mac-zip ;;
+            linux-*)
+              ./gradlew createDistributable packageDeb -Pneutrodyne.installKind=deb
+              ./gradlew createDistributable packageRpm -Pneutrodyne.installKind=rpm
+              ./gradlew createDistributable packageTarGz -Pneutrodyne.installKind=tar.gz ;;
+          esac
+      - name: macOS 0.x ZIP (PO-39; the DMG joins at 1.0.0)
+        if: matrix.target == 'macos-arm64'
+        run: |
+          mkdir -p dist
+          v="$(grep '^neutrodyne.versionName=' gradle.properties | cut -d= -f2)"
+          app="desktopApp/build/compose/binaries/main/app/Neutrodyne.app"
+          scripts/desktop/mac-zip.sh --app "$app" --version "$v" --out "dist/neutrodyne-$v-macos-arm64.zip"
+      - name: Collect the outputs
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp -r desktopApp/build/compose/binaries/main/app/Neutrodyne* dist/ 2>/dev/null || true
+          find desktopApp/build/compose/binaries/main \( -name '*.msi' -o -name '*.dmg' \) -print0 | xargs -0 -r -I{} cp {} dist/
+          find desktopApp/build/desktop-packaging -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.tar.gz' -o -name '*.zip' \) -print0 | xargs -0 -r -I{} cp {} dist/
+          ls -la dist/
+      # Every package gets the packaged smoke start (11 Testing); the SMOKE lines
+      # feed check-runtime-sources.sh below.
+      - name: Smoke start every package
+        shell: bash
+        run: |
+          set -e
+          mkdir -p /tmp/smoke-img
+          touch smoke.txt
+          smoke() { scripts/desktop/smoke-start.sh "$1" | tee -a smoke.txt; }
+          case "${{ matrix.target }}" in
+            linux-*)
+              sudo dpkg -i dist/*.deb
+              xvfb-run -a dbus-run-session bash -c 'scripts/desktop/smoke-start.sh /opt/neutrodyne | tee -a smoke.txt'
+              rpm2cpio dist/*.rpm | (cd /tmp/smoke-img && cpio -idm --quiet)
+              xvfb-run -a dbus-run-session bash -c 'scripts/desktop/smoke-start.sh /tmp/smoke-img/opt/neutrodyne | tee -a smoke.txt'
+              tar -xzf dist/*.tar.gz -C /tmp/smoke-img
+              xvfb-run -a dbus-run-session bash -c 'scripts/desktop/smoke-start.sh /tmp/smoke-img/Neutrodyne | tee -a smoke.txt' ;;
+            windows-x64)
+              powershell -NoProfile -Command "Start-Process msiexec -Wait -ArgumentList '/i','$(cygpath -w "$(pwd)/dist/"*.msi)','/qn','/norestart'"
+              smoke "$LOCALAPPDATA/Programs/Neutrodyne"
+              python -m zipfile -e dist/*.zip /tmp/smoke-img
+              smoke /tmp/smoke-img/Neutrodyne ;;
+            macos-arm64)
+              ditto -x -k dist/*.zip /tmp/smoke-img
+              smoke /tmp/smoke-img/Neutrodyne.app ;;
+          esac
+          grep -c '^SMOKE {' smoke.txt
+      - name: Image and runtime checks
+        shell: bash
+        run: |
+          set -e
+          img="$(ls -d dist/Neutrodyne dist/Neutrodyne.app 2>/dev/null | head -1)"
+          inputs=("$img")
+          while IFS= read -r f; do inputs+=("$f"); done \
+            < <(find dist -maxdepth 1 -type f \( -name '*.msi' -o -name '*.deb' -o -name '*.rpm' -o -name '*.tar.gz' -o -name '*.zip' \))
+          scripts/ci/check-desktop-image.sh "${inputs[@]}"
+          scripts/ci/check-runtime-sources.sh --image "$img" --smoke smoke.txt
+          if [ "${{ matrix.target }}" = "macos-arm64" ]; then
+            codesign --verify --deep --strict "$img"
+          fi
+      - name: Sizes into the summary (PB27 trend)
+        shell: bash
+        run: |
+          img="$(ls -d dist/Neutrodyne dist/Neutrodyne.app 2>/dev/null | head -1)"
+          {
+            echo "| file | MiB |"
+            echo "| --- | --- |"
+            for f in "$img" dist/*; do
+              [ -e "$f" ] || continue
+              echo "| $(basename "$f") | $(( $(du -sk "$f" | cut -f1) / 1024 )) |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh desktop-matrix-${{ matrix.target }}
+      - name: Report recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh desktop-matrix-${{ matrix.target }} --close
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: desktop-matrix-${{ matrix.target }}
+          path: dist/
+
   repro:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
