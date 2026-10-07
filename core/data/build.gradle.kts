@@ -25,6 +25,8 @@ kotlin {
         }
         androidMain.dependencies {
             implementation(project(":feeds:jvm"))
+            implementation(libs.androidx.work.runtime)
+            implementation(libs.androidx.lifecycle.process)
         }
         desktopMain.dependencies {
             implementation(project(":feeds:jvm"))
