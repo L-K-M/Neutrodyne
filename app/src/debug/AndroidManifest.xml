@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <!-- S5's test host (debug builds only): instrumentation for an application module launches
+         activities in the app under test, so the host lives in the debug APK, not the test APK
+         (an androidTest manifest entry is unresolvable there). It owns its setContent, so
+         ActivityScenario.recreate() re-composes it with the restored saved state. -->
+    <activity
+      android:name=".SpikeRootActivity"
+      android:exported="false" />
+  </application>
+</manifest>
