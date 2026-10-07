@@ -286,7 +286,7 @@ private class ParseSession(
             if (event == XmlPullParser.START_TAG) {
                 if (parser.depth > limits.maxDepth) throw DepthLimitExceeded(limits.maxDepth)
                 if (parser.name.equals("item", ignoreCase = true)) {
-                    readItem(parser, channel, items)
+                    readItem(parser, channel, items, channel.base)
                 } else {
                     parseChannelElement(parser, channel)
                 }
@@ -325,8 +325,10 @@ private class ParseSession(
                         }
                     }
 
+                    // RDF items are siblings of the channel, not children: they inherit the root's
+                    // effective base, while the channel-local base applies only inside the channel.
                     parser.name.equals("item", ignoreCase = true) -> {
-                        readItem(parser, channel, items)
+                        readItem(parser, channel, items, base)
                     }
 
                     else -> {
@@ -363,18 +365,23 @@ private class ParseSession(
         return channel.build(FeedFormat.ATOM, items)
     }
 
-    /** Reads one item-ish element (RSS item or RDF item); assumes the parser sits on its START_TAG. */
+    /**
+     * Reads one item-ish element (RSS item or RDF item); assumes the parser sits on its START_TAG.
+     * [parentBase] is the base the item inherits: the channel's own `xml:base` for RSS items (they
+     * are children of `channel`), the document root's for RDF items (they are its siblings).
+     */
     private fun readItem(
         parser: XmlPullParser,
         channel: ChannelBuilder,
         items: MutableList<ParsedEpisode>,
+        parentBase: String,
     ) {
         if (items.size >= limits.maxItems) {
             stopRecordingItems()
             skipElement(parser)
             return
         }
-        val item = ItemBuilder(items.size, baseOf(parser, channel.base))
+        val item = ItemBuilder(items.size, baseOf(parser, parentBase))
         val depth = parser.depth
         var event = nextEvent(parser)
         while (event != XmlPullParser.END_DOCUMENT) {
