@@ -2767,6 +2767,19 @@ Serves N1, N4, N6. Expected failures arrive as values (01 [Errors](01-foundation
 | [MD5](../PLAN.md#md5-desktop-packaging-and-release) | The desktop Install & updates help sections final (macOS, Windows, Linux, screen readers, uninstalling), compared step by step with 11's walkthroughs (MD5 AC5); the desktop Licences screen complete (MD5 AC2); the installed icons reviewed on each OS (macOS 26 included) |
 | [M13](../PLAN.md#74-after-v10-v1x-themes) | Glance widgets on Android ([Widgets (v1.x)](#widgets-v1x)) |
 
+### Implementation deviations (2026-10-07, M1a UI half)
+
+1. Coil 3.6.3's public `crossfade` takes a Boolean whose fixed duration is 200 ms; the documented 150 ms becomes Coil's default while the on/off semantics (including `LocalReducedMotion`) are unchanged (`Covers.request`).
+2. Discover at M1a is the empty state plus the "Add by URL" affordance; the search field, charts, import card and YouTube channel entry are M7/M3/M8's, so the M1a Discover screen carries no search bar.
+3. The sheet's "Add to groups" chips are M2's (the group feed does not exist yet); `SubscribeUseCase` is always invoked with `groupIds = emptySet`.
+4. `NoMedia` renders as the input field's error line (with Retry), not as a preview card with a disabled Subscribe: `AddPodcastResolver` reports it as `AddResolution.Failure`, so no preview exists to disable the button against. Every other resolver failure shares that row.
+5. Credentials typed into the sheet die with the preview cache (M1b's `SecretStore`/`CredentialCommitCoordinator` persist them) and the subscribe transaction does not pin artwork yet (M4) — both recorded in [03's M1a data-half deviations](03-feeds-and-discovery.md#implementation-deviations-2026-10-07-m1a-data-half); the UI surfaces no affordance for either.
+6. The sheet's preview cover builds a plain `ArtworkRef(key = url, url, version = 0)`: nothing is pinned at preview time, so `ArtworkRefMapper` falls back to fetching the URL and the monogram covers placeholder and error states.
+7. Settings › Feeds is reachable through the Settings home row only — the design's row order places it among the M1 rows; Wi-Fi-only shows the new "Not used on computers" line on the desktop (11's Android-only-row rule) instead of hiding the row.
+8. `ReportDrawnWhen` is bound through `LocalDrawnReporter` provided by `MainActivity` (a `core:ui` composition local with a no-op default, since `NeutrodyneRoot` cannot see `:app`); the desktop window's binding arrives with M0b.
+9. `metroViewModel`/`assistedMetroViewModel` resolve through `LocalMetroViewModelFactory`, provided at the shell root — 01's seam, named here because the M1a screens are its first consumers. `PodcastViewModel`/`EpisodeViewModel`/`PodcastSettingsViewModel` use `ManualViewModelAssistedFactory`, so Metro's own `ViewModelAssistedFactory` map is declared `allowEmpty` until a Metro-assisted VM ships.
+10. The screens' desktop-JVM tests (`runComposeUiTest`) stand in for the M1a desktop-window variant, whose shell is M0b's; `NdScrollbar`, context menus and the refresh button land with it.
+
 ---
 
 ## New names introduced here
