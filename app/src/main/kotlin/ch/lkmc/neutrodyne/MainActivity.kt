@@ -7,6 +7,7 @@ import android.os.LocaleList
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
@@ -70,13 +71,23 @@ class MainActivity : AppCompatActivity() {
     /**
      * S11 (2026-10-07): below API 33 AppCompat applies the per-app language to this activity's
      * configuration only, while Compose resources resolve their locale from the process default
-     * (`Locale.current`, i.e. `LocaleList.getDefault()`). Mirroring the activity's locales into the
-     * defaults lets the root relabel on the recreation AppCompat triggers; from API 33 the
-     * framework's `LocaleManager` changes the process default itself.
+     * (`Locale.current`, i.e. `LocaleList.getDefault()`). The default takes the user's requested
+     * app locales, not the activity configuration: the framework reorders that list so a locale the
+     * APK's Android resources ship comes first (`en-US,de` for a requested `de` on an en-only APK),
+     * while the Compose resources carry every language. Without a request it follows the
+     * configuration (the system locales). From API 33 `LocaleManager` sets the default itself.
      */
     private fun mirrorActivityLocalesToDefault() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) return
-        val locales = resources.configuration.locales
+        val requested = AppCompatDelegate.getApplicationLocales()
+        val locales =
+            if (requested.isEmpty) {
+                resources.configuration.locales
+            } else {
+                LocaleList.forLanguageTags(
+                    requested.toLanguageTags(),
+                )
+            }
         LocaleList.setDefault(locales)
         Locale.setDefault(locales[0])
     }
