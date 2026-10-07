@@ -32,6 +32,8 @@ kotlin {
         androidMain.dependencies {
             implementation(libs.junit4)
             implementation(libs.truth)
+            // TestSqliteDriverBindings: the framework driver for Robolectric tests (01 Test overrides)
+            implementation(libs.androidx.sqlite.framework)
         }
         desktopMain.dependencies {
             implementation(libs.junit4)
