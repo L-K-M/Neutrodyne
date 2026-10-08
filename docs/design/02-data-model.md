@@ -1129,7 +1129,7 @@ Stored as `TEXT` in `episode.identityKey`, unique per podcast. Grammar: `key := 
 | `u` | `UrlNormalizer.forIdentity(primaryEnclosureUrl)` | `u:` + normalised URL |
 | `t` | lowercase hex SHA-1 of `title.trim().lowercase(Locale.ROOT)`, then `"\|"`, then `pubDate.truncatedTo(DAYS).toString()`, concatenated | `t:3f2a…` (40 hex) |
 | `l` | lowercase hex SHA-1 of `link.trim()` | `l:9c1b…` |
-| `h` | lowercase hex SHA-1 of `title.orEmpty() + description.orEmpty().take(500)` | `h:07de…` |
+| `h` | lowercase hex SHA-1 of `title.orEmpty()` + U+001F + `description.orEmpty().take(500)` | `h:07de…` |
 
 YouTube episodes always take the `g` branch (`guid = yt:video:{videoId}`). A GUID repeated inside one document falls back to `u` for the second occurrence (03).
 
