@@ -22,17 +22,17 @@ import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.date_today
 import ch.lkmc.neutrodyne.core.ui.resources.date_yesterday
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertIs
-import kotlin.test.assertTrue
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.flow.take
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 /**
  * `FeedsViewModel` on the desktop JVM (09 Test matrix): feed paging against
@@ -161,7 +161,8 @@ class FeedsViewModelTest : MainDispatcherTest() {
             backgroundScope.launch { viewModel.uiState.collect {} }
             runCurrent()
 
-            refreshController.status.value = RefreshStatus(running = true, scope = RefreshScope.All, done = 0, total = 1, lastRunFinishedAt = null)
+            refreshController.status.value =
+                RefreshStatus(running = true, scope = RefreshScope.All, done = 0, total = 1, lastRunFinishedAt = null)
             runCurrent()
             assertTrue(viewModel.uiState.value.refreshing)
 

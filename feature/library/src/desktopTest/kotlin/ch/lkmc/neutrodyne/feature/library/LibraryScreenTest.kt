@@ -38,12 +38,12 @@ import ch.lkmc.neutrodyne.core.ui.platform.FileSaver
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
 import ch.lkmc.neutrodyne.core.ui.platform.PlatformActions
+import kotlinx.collections.immutable.toImmutableList
 import java.util.Locale
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlinx.collections.immutable.toImmutableList
 
 /**
  * The Library grid through `runComposeUiTest` (08 Library, AC5/AC10): the skeleton, onboarding,

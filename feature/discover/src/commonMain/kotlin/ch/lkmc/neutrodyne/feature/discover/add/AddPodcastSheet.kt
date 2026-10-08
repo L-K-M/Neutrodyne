@@ -401,10 +401,14 @@ private fun PreviewCard(step: AddSheetStep.Preview) {
                     modifier = Modifier.padding(top = CARD_GAP),
                 )
             }
-            preview.alreadySubscribed?.let { dup ->
+            // A subscribe-time dedupe hit (step.alreadySubscribedId) is an exact match even when
+            // the preview's earlier check was tentative — show "Already subscribed" either way.
+            val alreadyExact =
+                step.alreadySubscribedId != null || preview.alreadySubscribed?.exact == true
+            if (alreadyExact || preview.alreadySubscribed != null) {
                 Text(
                     stringResource(
-                        if (dup.exact) {
+                        if (alreadyExact) {
                             Res.string.add_already_subscribed
                         } else {
                             Res.string.add_might_be_subscribed
@@ -412,7 +416,7 @@ private fun PreviewCard(step: AddSheetStep.Preview) {
                     ),
                     style = MaterialTheme.typography.bodyMedium,
                     color =
-                        if (dup.exact) {
+                        if (alreadyExact) {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         } else {
                             MaterialTheme.colorScheme.error

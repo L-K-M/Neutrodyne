@@ -297,19 +297,27 @@ class ShowNotesRendererTest {
             val text = semanticsText("bold italic under code")
             assertEquals(
                 FontWeight.Bold,
-                text.spanStyles.single { it.covers(text.text, "bold") }.item.fontWeight,
+                text.spanStyles
+                    .single { it.covers(text.text, "bold") }
+                    .item.fontWeight,
             )
             assertEquals(
                 FontStyle.Italic,
-                text.spanStyles.single { it.covers(text.text, "italic") }.item.fontStyle,
+                text.spanStyles
+                    .single { it.covers(text.text, "italic") }
+                    .item.fontStyle,
             )
             assertEquals(
                 TextDecoration.Underline,
-                text.spanStyles.single { it.covers(text.text, "under") }.item.textDecoration,
+                text.spanStyles
+                    .single { it.covers(text.text, "under") }
+                    .item.textDecoration,
             )
             assertEquals(
                 FontFamily.Monospace,
-                text.spanStyles.single { it.covers(text.text, "code") }.item.fontFamily,
+                text.spanStyles
+                    .single { it.covers(text.text, "code") }
+                    .item.fontFamily,
             )
         }
 

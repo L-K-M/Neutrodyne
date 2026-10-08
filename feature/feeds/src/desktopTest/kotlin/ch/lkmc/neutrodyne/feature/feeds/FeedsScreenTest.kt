@@ -45,12 +45,12 @@ import ch.lkmc.neutrodyne.core.ui.platform.FileSaver
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
 import ch.lkmc.neutrodyne.core.ui.platform.PlatformActions
+import kotlinx.coroutines.flow.Flow
 import java.util.Locale
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlinx.coroutines.flow.Flow
 
 /**
  * The All feed driven through `runComposeUiTest` on the desktop JVM (09): the onboarding empty
@@ -248,8 +248,8 @@ class FeedsScreenTest {
         lateinit var pagingItems: androidx.paging.compose.LazyPagingItems<FeedItem>
         val feed: Flow<PagingData<FeedItem>> =
             Pager(PagingConfig(pageSize = pageSize, initialLoadSize = pageSize)) {
-                    source ?: PagedListSource(listOf(rows))
-                }.flow
+                source ?: PagedListSource(listOf(rows))
+            }.flow
                 .withDayHeaders(TestClock.DEFAULT_NOW)
         setContent {
             CompositionLocalProvider(
@@ -305,7 +305,8 @@ private class PagedListSource(
     override fun getRefreshKey(state: PagingState<Int, EpisodeRow>): Int? = null
 
     companion object {
-        fun failing(error: Throwable = IllegalStateException("boom")) = PagedListSource(emptyList(), refreshError = error)
+        fun failing(error: Throwable = IllegalStateException("boom")) =
+            PagedListSource(emptyList(), refreshError = error)
     }
 }
 

@@ -24,16 +24,16 @@ import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
 import ch.lkmc.neutrodyne.core.testing.testFeedInfo
 import ch.lkmc.neutrodyne.core.testing.testPodcastDetail
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.take
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.advanceUntilIdle
-import kotlinx.coroutines.test.TestScope
-import kotlinx.coroutines.test.runTest
 
 /**
  * `PodcastViewModel` on the desktop JVM (09): detail/feed-info state, the episode page keyed by
@@ -120,7 +120,8 @@ class PodcastViewModelTest : MainDispatcherTest() {
     fun persistedOrderWinsOverShowType() =
         runTest {
             val viewModel = viewModel()
-            podcasts.detail.value = testPodcastDetail(7, showType = ShowType.SERIAL, episodeOrder = FeedOrder.NEWEST_FIRST)
+            podcasts.detail.value =
+                testPodcastDetail(7, showType = ShowType.SERIAL, episodeOrder = FeedOrder.NEWEST_FIRST)
 
             viewModel.feed.take(1).asSnapshot()
             advanceUntilIdle()
@@ -135,7 +136,10 @@ class PodcastViewModelTest : MainDispatcherTest() {
             viewModel.setOrder(FeedOrder.OLDEST_FIRST)
             advanceUntilIdle()
 
-            assertEquals(mapOf<FeedSource, FeedOrder>(FeedSource.Podcast(7) to FeedOrder.OLDEST_FIRST), feeds.orders.value)
+            assertEquals(
+                mapOf<FeedSource, FeedOrder>(FeedSource.Podcast(7) to FeedOrder.OLDEST_FIRST),
+                feeds.orders.value,
+            )
         }
 
     @Test
@@ -166,16 +170,29 @@ class PodcastViewModelTest : MainDispatcherTest() {
 
             // A refresh covering another podcast does not spin this screen's indicator.
             refreshController.status.value =
-                RefreshStatus(running = true, scope = RefreshScope.Podcasts(listOf(9L)), done = 0, total = 1, lastRunFinishedAt = null)
+                RefreshStatus(
+                    running = true,
+                    scope = RefreshScope.Podcasts(listOf(9L)),
+                    done = 0,
+                    total = 1,
+                    lastRunFinishedAt = null,
+                )
             advanceUntilIdle()
             assertTrue(!viewModel.uiState.value.refreshing)
 
             refreshController.status.value =
-                RefreshStatus(running = true, scope = RefreshScope.Podcasts(listOf(7L, 9L)), done = 0, total = 2, lastRunFinishedAt = null)
+                RefreshStatus(
+                    running = true,
+                    scope = RefreshScope.Podcasts(listOf(7L, 9L)),
+                    done = 0,
+                    total = 2,
+                    lastRunFinishedAt = null,
+                )
             advanceUntilIdle()
             assertTrue(viewModel.uiState.value.refreshing)
 
-            refreshController.status.value = RefreshStatus(running = false, scope = null, done = 0, total = 0, lastRunFinishedAt = null)
+            refreshController.status.value =
+                RefreshStatus(running = false, scope = null, done = 0, total = 0, lastRunFinishedAt = null)
             advanceUntilIdle()
             assertTrue(!viewModel.uiState.value.refreshing)
         }

@@ -22,7 +22,7 @@ import ch.lkmc.neutrodyne.core.model.ShowNotes
 import ch.lkmc.neutrodyne.core.model.ShowType
 import ch.lkmc.neutrodyne.core.model.SourceType
 
-/**
+/*
  * Deterministic `core:model` fixtures for screen and ViewModel tests (09 Shared helpers). Each
  * builder defaults every field so a test names only the values it asserts on; ids and keys are
  * stable so golden output never drifts between runs.
@@ -32,7 +32,8 @@ import ch.lkmc.neutrodyne.core.model.SourceType
 fun testCoverArtwork(
     url: String = "https://example.com/art.jpg",
     version: Int = 1,
-): ArtworkRef = ArtworkRef(key = "u-" + url.encodeToByteArray().contentHashCode().toString(16), url = url, version = version)
+): ArtworkRef =
+    ArtworkRef(key = "u-" + url.encodeToByteArray().contentHashCode().toString(16), url = url, version = version)
 
 /** A monogram reference (`m-` key — `CoverArt` paints it live, no load). */
 fun testMonogramArtwork(seed: String): ArtworkRef =

@@ -15,14 +15,14 @@ import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.testLibraryTile
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.advanceUntilIdle
-import kotlinx.coroutines.test.TestScope
-import kotlinx.coroutines.test.runTest
 
 /**
  * `LibraryViewModel` on the desktop JVM (09): tile sorting per `appearance.library_sort`,
@@ -46,7 +46,16 @@ class LibraryViewModelTest : MainDispatcherTest() {
             ): Int = a.compareTo(b, ignoreCase = true)
         }
 
-    private fun viewModel() = LibraryViewModel(podcasts, episodes, refreshController, UnsubscribeUseCase(podcasts), settings, collator, network)
+    private fun viewModel() =
+        LibraryViewModel(
+            podcasts,
+            episodes,
+            refreshController,
+            UnsubscribeUseCase(podcasts),
+            settings,
+            collator,
+            network,
+        )
 
     private fun TestScope.collect(viewModel: LibraryViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
@@ -63,7 +72,8 @@ class LibraryViewModelTest : MainDispatcherTest() {
         runTest {
             val viewModel = viewModel()
             collect(viewModel)
-            podcasts.tiles.value = listOf(testLibraryTile(1, "Zulu"), testLibraryTile(2, "alpha"), testLibraryTile(3, "Mike"))
+            podcasts.tiles.value =
+                listOf(testLibraryTile(1, "Zulu"), testLibraryTile(2, "alpha"), testLibraryTile(3, "Mike"))
             advanceUntilIdle()
 
             val state = viewModel.uiState.value
@@ -80,15 +90,41 @@ class LibraryViewModelTest : MainDispatcherTest() {
             val day = 24 * 3_600_000L
             podcasts.tiles.value =
                 listOf(
-                    testLibraryTile(1, "A", latestEpisodeAt = TestClock.DEFAULT_NOW - 3 * day, unplayedCount = 1, subscribedAt = TestClock.DEFAULT_NOW - day),
-                    testLibraryTile(2, "B", latestEpisodeAt = TestClock.DEFAULT_NOW, unplayedCount = 0, subscribedAt = TestClock.DEFAULT_NOW - 2 * day),
-                    testLibraryTile(3, "C", latestEpisodeAt = null, unplayedCount = 5, subscribedAt = TestClock.DEFAULT_NOW - 3 * day),
+                    testLibraryTile(
+                        1,
+                        "A",
+                        latestEpisodeAt = TestClock.DEFAULT_NOW - 3 * day,
+                        unplayedCount = 1,
+                        subscribedAt =
+                            TestClock.DEFAULT_NOW - day,
+                    ),
+                    testLibraryTile(
+                        2,
+                        "B",
+                        latestEpisodeAt = TestClock.DEFAULT_NOW,
+                        unplayedCount = 0,
+                        subscribedAt =
+                            TestClock.DEFAULT_NOW - 2 * day,
+                    ),
+                    testLibraryTile(
+                        3,
+                        "C",
+                        latestEpisodeAt = null,
+                        unplayedCount = 5,
+                        subscribedAt =
+                            TestClock.DEFAULT_NOW - 3 * day,
+                    ),
                 )
 
             for ((sort, expected) in SORT_ORDERS) {
                 settings.set(AppearanceSettingKeys.LIBRARY_SORT, sort)
                 advanceUntilIdle()
-                assertEquals(expected, viewModel.uiState.value.tiles.map { it.podcastId }, "sort=$sort")
+                assertEquals(
+                    expected,
+                    viewModel.uiState.value.tiles
+                        .map { it.podcastId },
+                    "sort=$sort",
+                )
             }
         }
 

@@ -14,15 +14,15 @@ import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import ch.lkmc.neutrodyne.core.testing.testFeedInfo
 import ch.lkmc.neutrodyne.core.testing.testPodcastDetail
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.advanceUntilIdle
-import kotlinx.coroutines.test.TestScope
-import kotlinx.coroutines.test.runTest
 
 /**
  * `PodcastSettingsViewModel` on the desktop JVM (09): the combined detail/feed-info state, 05's
@@ -79,7 +79,8 @@ class PodcastSettingsViewModelTest : MainDispatcherTest() {
             advanceUntilIdle()
             assertEquals(FeedOrder.OLDEST_FIRST, viewModel.uiState.value.effectiveOrder)
 
-            podcasts.detail.value = testPodcastDetail(7, showType = ShowType.SERIAL, episodeOrder = FeedOrder.NEWEST_FIRST)
+            podcasts.detail.value =
+                testPodcastDetail(7, showType = ShowType.SERIAL, episodeOrder = FeedOrder.NEWEST_FIRST)
             advanceUntilIdle()
             assertEquals(FeedOrder.NEWEST_FIRST, viewModel.uiState.value.effectiveOrder)
         }
@@ -101,7 +102,10 @@ class PodcastSettingsViewModelTest : MainDispatcherTest() {
             val viewModel = viewModel()
             viewModel.setOrder(FeedOrder.OLDEST_FIRST)
             advanceUntilIdle()
-            assertEquals(mapOf<FeedSource, FeedOrder>(FeedSource.Podcast(7) to FeedOrder.OLDEST_FIRST), feeds.orders.value)
+            assertEquals(
+                mapOf<FeedSource, FeedOrder>(FeedSource.Podcast(7) to FeedOrder.OLDEST_FIRST),
+                feeds.orders.value,
+            )
         }
 
     @Test

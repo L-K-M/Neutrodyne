@@ -52,12 +52,12 @@ import ch.lkmc.neutrodyne.core.ui.platform.FileSaver
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
 import ch.lkmc.neutrodyne.core.ui.platform.PlatformActions
+import kotlinx.coroutines.flow.Flow
 import java.util.Locale
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlinx.coroutines.flow.Flow
 
 /**
  * The podcast detail screen through `runComposeUiTest` (08 Podcast detail): loading, the header
@@ -314,8 +314,8 @@ class PodcastScreenTest {
         lateinit var pagingItems: LazyPagingItems<EpisodeRow>
         val feed: Flow<PagingData<EpisodeRow>> =
             Pager(PagingConfig(pageSize = 20, initialLoadSize = 20)) {
-                    source ?: PagedListSource(listOf(rows))
-                }.flow
+                source ?: PagedListSource(listOf(rows))
+            }.flow
         setContent {
             CompositionLocalProvider(
                 LocalPlatformKind provides PlatformKind.DESKTOP,
