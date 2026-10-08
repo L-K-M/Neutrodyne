@@ -209,6 +209,28 @@ check_ffmpeg() {
 # classpath JAR as a stub named after the stub's own md5 and extracts the
 # libskiko native beside it with a .sha256 sidecar. is_skiko_stub constrains the
 # exemption to exactly that shape — any other skiko-named jar is a violation.
+
+# jar_stub_only <jar> — the stub is a real jar whose entries are only directory
+# and META-INF metadata: the classpath jar's payload lives in the extracted
+# native, so a .class or any other payload under the stub name is the real jar
+# (or worse) in disguise. python3 is the same interpreter check_no_tests uses
+# for jar entries; without it the exemption cannot be verified and does not
+# apply.
+jar_stub_only() {
+    command -v python3 >/dev/null 2>&1 || return 1
+    python3 - "$1" <<'PYEOF'
+import sys, zipfile
+try:
+    with zipfile.ZipFile(sys.argv[1]) as z:
+        ok = all(n.endswith('/') or
+                 (n.startswith('META-INF/') and not n.endswith('.class'))
+                 for n in z.namelist())
+    sys.exit(0 if ok else 1)
+except Exception:
+    sys.exit(1)
+PYEOF
+}
+
 is_skiko_stub() {
     local path="$1" manifest="$2" base dir padded unpadded i byte rest os arch so
     base="${path##*/}"
@@ -239,6 +261,7 @@ is_skiko_stub() {
     os="$(printf '%s' "$os" | sed 's/[].[^$*\/]/\\&/g')"
     arch="$(printf '%s' "$arch" | sed 's/[].[^$*\/]/\\&/g')"
     grep -qE "  skiko-awt-runtime-${os}-${arch}-[^ ]+\.jar\$" "$manifest" || return 1
+    jar_stub_only "$path" || return 1
     # The native lands beside the stub with a .sha256 sidecar pinning its bytes.
     dir="${path%/*}"
     local found=0 ok=1

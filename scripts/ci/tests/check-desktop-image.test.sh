@@ -8,8 +8,10 @@
 # being Compose's `<base>-<md5>.jar` mangle) names it exactly and its SHA-256
 # equals the row's. Compose's skiko-awt-runtime stub JAR is the one documented
 # off-manifest case: its name carries the stub's own md5, the manifest carries a
-# skiko-awt-runtime-<os>-<arch>-*.jar entry, and the extracted native sits beside
-# it with a matching .sha256 sidecar.
+# skiko-awt-runtime-<os>-<arch>-*.jar entry, the extracted native sits beside it
+# with a matching .sha256 sidecar, and the jar itself is a manifest-only zip —
+# a class-bearing jar under the stub's name is the classpath jar in disguise.
+# All jar fixtures are genuine tiny ZIPs, like the artifacts the scan reads.
 #
 # The scan resolves runtime.lock and the manifest relative to its own path, so
 # each run copies it into a fixture repo root — no repository state is touched.
@@ -69,14 +71,59 @@ new_image() {
     echo "$img"
 }
 
-# mkjar <dir> <name> <content> — a jar carrying Compose's image name
+# jar_zip <path> [entry...] — a real zip: META-INF/MANIFEST.MF plus each named
+# entry filled with its own name as content.
+jar_zip() {
+    local out="$1"
+    shift
+    python3 - "$out" "$@" <<'PY'
+import sys, zipfile
+out, entries = sys.argv[1], sys.argv[2:]
+with zipfile.ZipFile(out, 'w') as z:
+    z.writestr('META-INF/', '')
+    z.writestr('META-INF/MANIFEST.MF', 'Manifest-Version: 1.0\n')
+    for e in entries:
+        z.writestr(e, e + ' bytes')
+PY
+}
+
+# mkjar <dir> <name> [entry...] — a jar carrying Compose's image name
 # <name>-<unpadded md5>.jar; prints "basename<TAB>sha256".
 mkjar() {
-    local dir="$1" name="$2" content="$3" f
-    printf '%s' "$content" > "$dir/.tmp-jar"
+    local dir="$1" name="$2" f
+    shift 2
+    jar_zip "$dir/.tmp-jar" "$@"
     f="$dir/${name}-$(unpadded_md5 "$dir/.tmp-jar").jar"
     mv "$dir/.tmp-jar" "$f"
     printf '%s\t%s\n' "${f##*/}" "$(sha_of "$f")"
+}
+
+# mkstub <dir> [entry...] — Compose's stub shape: a manifest-only zip named
+# skiko-awt-runtime-linux-x64-0.150.1-<own unpadded md5>.jar. The zip variant
+# loops until the md5 carries a leading-zero byte, so the name exercises
+# Compose's %x rendering dropping it (padded hex would not match). Extra
+# entries turn the "stub" into whatever content the case needs. Prints the path.
+mkstub() {
+    local dir="$1" i=0 f padded j
+    shift
+    while :; do
+        jar_zip "$dir/.stub" "META-INF/stub-$i" "$@"
+        padded="$(md5_of "$dir/.stub")"
+        for ((j = 0; j < ${#padded}; j += 2)); do
+            [ "${padded:j:1}" = 0 ] && break
+        done
+        [ "$j" -lt "${#padded}" ] && break
+        i=$((i + 1))
+    done
+    f="$dir/skiko-awt-runtime-linux-x64-0.150.1-$(unpadded_md5 "$dir/.stub").jar"
+    mv "$dir/.stub" "$f"
+    echo "$f"
+}
+
+# native_next_to <img> — the extracted libskiko with its .sha256 sidecar.
+native_next_to() {
+    printf 'native bytes' > "$1/lib/app/libskiko-linux-x64.so"
+    sha_of "$1/lib/app/libskiko-linux-x64.so" > "$1/lib/app/libskiko-linux-x64.so.sha256"
 }
 
 manifest_row() { printf '%s  %s\n' "$1" "$2" >> "$MANIFEST"; }
@@ -103,7 +150,7 @@ expect_fail() { # <pattern> <case name>
 #    to the row's sha256, is a classpath jar. (The old base-name lookup rejected
 #    every real image jar.)
 img="$(new_image a)"
-read -r name sha < <(mkjar "$img/lib/app" neutrodyne-core "payload-a")
+read -r name sha < <(mkjar "$img/lib/app" neutrodyne-core ch/lkmc/neutrodyne/MainKt.class)
 manifest_row "$sha" "$name"
 if run_scan "$img"; then
     t_ok "image jar named on the manifest with matching sha256 is accepted"
@@ -114,44 +161,28 @@ fi
 
 # 2. Same name, different bytes: the row's sha256 binds the artifact.
 img="$(new_image b)"
-read -r name _sha < <(mkjar "$img/lib/app" neutrodyne-core "payload-b")
+read -r name _sha < <(mkjar "$img/lib/app" neutrodyne-core ch/lkmc/neutrodyne/MainKt.class)
 manifest_row "$(printf 'tampered' | sha256sum | cut -d' ' -f1)" "$name"
 expect_fail 'JAR differs from the Licensee-checked classpath artifact' \
     "manifest-named jar with wrong bytes is rejected"
 
 # 3. A mangled-looking jar absent from the manifest is rejected.
 img="$(new_image c)"
-mkjar "$img/lib/app" intruder "payload-c" >/dev/null
+mkjar "$img/lib/app" intruder ch/lkmc/neutrodyne/Intruder.class >/dev/null
 expect_fail 'not on the Licensee-checked runtime classpath' \
     "jar missing from the manifest is rejected"
 
-# 4. The skiko stub under its documented conditions: name suffix is the stub's
-#    own md5, the manifest carries a skiko-awt-runtime-<os>-<arch>-*.jar entry
-#    (the classpath jar stays manifest-only), and the extracted native verifies
-#    against its .sha256 sidecar. The stub bytes are chosen so the md5 carries a
-#    leading-zero byte — Compose's %x rendering drops it from the name.
+# 4. The skiko stub under its documented conditions: a manifest-only zip whose
+#    name suffix is its own md5, the manifest carries a
+#    skiko-awt-runtime-<os>-<arch>-*.jar entry (the classpath jar stays
+#    manifest-only), and the extracted native verifies against its .sha256
+#    sidecar.
 img="$(new_image d)"
-real_skiko="$WORK/real-skiko.jar"
-printf 'real skiko classpath jar' > "$real_skiko"
-manifest_row "$(sha_of "$real_skiko")" \
-    "skiko-awt-runtime-linux-x64-0.150.1-$(unpadded_md5 "$real_skiko").jar"
-stub_body="$(python3 - <<'PY'
-import hashlib
-i = 0
-while True:
-    body = 'stub-%d' % i
-    digest = hashlib.md5(body.encode()).hexdigest()
-    if any(digest[j] == '0' for j in range(0, 32, 2)):
-        print(body)
-        break
-    i += 1
-PY
-)"
-printf '%s' "$stub_body" > "$img/lib/app/.stub"
-mv "$img/lib/app/.stub" \
-    "$img/lib/app/skiko-awt-runtime-linux-x64-0.150.1-$(unpadded_md5 "$img/lib/app/.stub").jar"
-printf 'native bytes' > "$img/lib/app/libskiko-linux-x64.so"
-sha_of "$img/lib/app/libskiko-linux-x64.so" > "$img/lib/app/libskiko-linux-x64.so.sha256"
+read -r skiko_name skiko_sha \
+    < <(mkjar "$WORK" skiko-awt-runtime-linux-x64-0.150.1 org/jetbrains/skiko/SkiaLayer.class)
+manifest_row "$skiko_sha" "$skiko_name"
+mkstub "$img/lib/app" >/dev/null
+native_next_to "$img"
 if run_scan "$img"; then
     t_ok "skiko stub is accepted under the documented conditions"
 else
@@ -161,11 +192,8 @@ fi
 
 # 5. The stub without a manifest skiko entry is just another off-manifest jar.
 img="$(new_image e)"
-printf 'stub' > "$img/lib/app/.stub"
-mv "$img/lib/app/.stub" \
-    "$img/lib/app/skiko-awt-runtime-linux-x64-0.150.1-$(unpadded_md5 "$img/lib/app/.stub").jar"
-printf 'native bytes' > "$img/lib/app/libskiko-linux-x64.so"
-sha_of "$img/lib/app/libskiko-linux-x64.so" > "$img/lib/app/libskiko-linux-x64.so.sha256"
+mkstub "$img/lib/app" >/dev/null
+native_next_to "$img"
 expect_fail 'not on the Licensee-checked runtime classpath' \
     "skiko stub without a manifest entry is rejected"
 
@@ -174,35 +202,59 @@ expect_fail 'not on the Licensee-checked runtime classpath' \
 img="$(new_image f)"
 manifest_row "$(printf 'x' | sha256sum | cut -d' ' -f1)" \
     "skiko-awt-runtime-linux-x64-0.150.1-00000000000000000000000000000000.jar"
-printf 'squatter' \
-    > "$img/lib/app/skiko-awt-runtime-linux-x64-0.150.1-11111111111111111111111111111111.jar"
-printf 'native bytes' > "$img/lib/app/libskiko-linux-x64.so"
-sha_of "$img/lib/app/libskiko-linux-x64.so" > "$img/lib/app/libskiko-linux-x64.so.sha256"
+jar_zip "$img/lib/app/.squat"
+mv "$img/lib/app/.squat" \
+    "$img/lib/app/skiko-awt-runtime-linux-x64-0.150.1-11111111111111111111111111111111.jar"
+native_next_to "$img"
 expect_fail 'not on the Licensee-checked runtime classpath' \
     "skiko-named jar whose suffix is not its own md5 is rejected"
 
 # 7. The stub without the extracted native and its sidecar is rejected (the
 #    exemption exists because the classpath jar's payload lands as the native).
 img="$(new_image g)"
-manifest_row "$(printf 'x' | sha256sum | cut -d' ' -f1)" \
-    "skiko-awt-runtime-linux-x64-0.150.1-$(unpadded_md5 "$real_skiko").jar"
-printf 'stub' > "$img/lib/app/.stub"
-mv "$img/lib/app/.stub" \
-    "$img/lib/app/skiko-awt-runtime-linux-x64-0.150.1-$(unpadded_md5 "$img/lib/app/.stub").jar"
+manifest_row "$skiko_sha" "$skiko_name"
+mkstub "$img/lib/app" >/dev/null
 expect_fail 'not on the Licensee-checked runtime classpath' \
     "skiko stub without the extracted native and .sha256 sidecar is rejected"
 
 # 8. A manifest skiko entry for a different os-arch does not cover the stub.
+#    The stub here carries its md5 zero-padded — the accepted alternative
+#    rendering — and still fails at the os-arch gate.
 img="$(new_image h)"
-manifest_row "$(printf 'x' | sha256sum | cut -d' ' -f1)" \
-    "skiko-awt-runtime-windows-x64-0.150.1-$(unpadded_md5 "$real_skiko").jar"
-printf 'stub' > "$img/lib/app/.stub"
-mv "$img/lib/app/.stub" \
-    "$img/lib/app/skiko-awt-runtime-linux-x64-0.150.1-$(unpadded_md5 "$img/lib/app/.stub").jar"
-printf 'native bytes' > "$img/lib/app/libskiko-linux-x64.so"
-sha_of "$img/lib/app/libskiko-linux-x64.so" > "$img/lib/app/libskiko-linux-x64.so.sha256"
+manifest_row "$skiko_sha" "skiko-awt-runtime-windows-x64-0.150.1-${skiko_name##*-0.150.1-}"
+stub="$(mkstub "$img/lib/app")"
+mv "$stub" "$img/lib/app/skiko-awt-runtime-linux-x64-0.150.1-$(md5_of "$stub").jar"
+native_next_to "$img"
 expect_fail 'not on the Licensee-checked runtime classpath' \
     "skiko stub whose manifest entry names another os-arch is rejected"
+
+# 9. A "stub" carrying executable classes is the classpath jar in disguise: the
+#    exemption is for Compose's manifest-only stub, not for the name alone.
+img="$(new_image i)"
+manifest_row "$skiko_sha" "$skiko_name"
+mkstub "$img/lib/app" org/jetbrains/skiko/SkiaLayer.class >/dev/null
+native_next_to "$img"
+expect_fail 'not on the Licensee-checked runtime classpath' \
+    "skiko-named jar carrying a .class is rejected"
+
+# 10. Non-class payload outside META-INF is unexpected stub content too.
+img="$(new_image j)"
+manifest_row "$skiko_sha" "$skiko_name"
+mkstub "$img/lib/app" skiko/linux/x64/libskiko.so >/dev/null
+native_next_to "$img"
+expect_fail 'not on the Licensee-checked runtime classpath' \
+    "skiko-named jar carrying a non-META-INF payload is rejected"
+
+# 11. A file under the stub's correctly-mangled name that is not a jar at all
+#     is not the stub.
+img="$(new_image k)"
+manifest_row "$skiko_sha" "$skiko_name"
+printf 'not a zip' > "$img/lib/app/.raw"
+mv "$img/lib/app/.raw" \
+    "$img/lib/app/skiko-awt-runtime-linux-x64-0.150.1-$(unpadded_md5 "$img/lib/app/.raw").jar"
+native_next_to "$img"
+expect_fail 'not on the Licensee-checked runtime classpath' \
+    "skiko-named non-zip is rejected"
 
 echo
 if [ "$FAILED" -gt 0 ]; then
