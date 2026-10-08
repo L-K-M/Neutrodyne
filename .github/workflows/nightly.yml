@@ -189,6 +189,7 @@ jobs:
             timeout 120 adb shell 'until cmd overlay enable com.android.internal.systemui.navbar.threebutton; do sleep 2; done'
             timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
             adb shell 'getprop init.svc.surfaceflinger' | grep -q running || { echo "::error::surfaceflinger not running after boot"; exit 1; }
+            test -r "$RUNNER_TEMP/logcat-api37-debug.txt" && test -s "$RUNNER_TEMP/logcat-api37-debug.txt" || { echo "::error::logcat capture missing, empty or unreadable"; exit 1; }
             ! grep -q 'hasReadColorBufferDma' "$RUNNER_TEMP/logcat-api37-debug.txt" || { echo "::error::goldfish mapper aborted on color-buffer DMA"; exit 1; }
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true connectedDebugAndroidTest
       - name: Release smoke on API 37
@@ -223,6 +224,7 @@ jobs:
             timeout 120 adb shell 'until cmd overlay enable com.android.internal.systemui.navbar.threebutton; do sleep 2; done'
             timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
             adb shell 'getprop init.svc.surfaceflinger' | grep -q running || { echo "::error::surfaceflinger not running after boot"; exit 1; }
+            test -r "$RUNNER_TEMP/logcat-api37-release.txt" && test -s "$RUNNER_TEMP/logcat-api37-release.txt" || { echo "::error::logcat capture missing, empty or unreadable"; exit 1; }
             ! grep -q 'hasReadColorBufferDma' "$RUNNER_TEMP/logcat-api37-release.txt" || { echo "::error::goldfish mapper aborted on color-buffer DMA"; exit 1; }
             ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true :app:connectedReleaseAndroidTest
             # TODO (M6b): :benchmark's out-of-process release smoke journeys join here.

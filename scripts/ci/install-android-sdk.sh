@@ -68,7 +68,9 @@ else
     # google's zip contains a top-level cmdline-tools/; sdkmanager wants <sdk>/cmdline-tools/latest/.
     # Stage the verified tree inside cmdline-tools/ first so the rm/mv on latest stays
     # same-filesystem — and never let sdkmanager upgrade itself (it would land in a
-    # sibling latest-2 that nothing puts on PATH).
+    # sibling latest-2 that nothing puts on PATH). A leftover latest.new from an
+    # interrupted run must go first: mv into an existing dir would nest the tree.
+    rm -rf "$SDK_DIR/cmdline-tools/latest.new"
     mv "$tmp/tools/cmdline-tools" "$SDK_DIR/cmdline-tools/latest.new"
     rm -rf "$SDK_DIR/cmdline-tools/latest"
     mv "$SDK_DIR/cmdline-tools/latest.new" "$SDK_DIR/cmdline-tools/latest"
