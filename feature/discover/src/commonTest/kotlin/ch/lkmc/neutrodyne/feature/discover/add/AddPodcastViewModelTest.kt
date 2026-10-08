@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.testing.FakeAddPodcastResolver
 import ch.lkmc.neutrodyne.core.testing.FakeSubscribeUseCase
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -174,6 +175,42 @@ class AddPodcastViewModelTest : MainDispatcherTest() {
         }
 
     @Test
+    fun staleSubscribeFailureKeepsNewerPreview() =
+        runTest {
+            resolver.nextResolution = AddResolution.Feed(Preview)
+            viewModel.resolve("https://a.example.com/feed")
+            advanceUntilIdle()
+
+            // Subscribe A parks at the gate; a newer resolve lands preview B meanwhile.
+            subscribe.nextOutcome = Outcome.Failure(SubscribeError.Storage)
+            subscribe.gate = CompletableDeferred()
+            viewModel.subscribe()
+            advanceUntilIdle()
+
+            resolver.nextResolution = AddResolution.Feed(PreviewB)
+            viewModel.resolve("https://b.example.com/feed")
+            advanceUntilIdle()
+            assertEquals(
+                PreviewB.previewId,
+                assertIs<AddSheetStep.Preview>(viewModel.uiState.value.step).preview.previewId,
+            )
+
+            // A's late failure belongs to A's preview and must not clobber B's step.
+            subscribe.gate!!.complete(Unit)
+            advanceUntilIdle()
+            val step = assertIs<AddSheetStep.Preview>(viewModel.uiState.value.step)
+            assertEquals(PreviewB.previewId, step.preview.previewId)
+            assertNull(step.subscribeError)
+            assertTrue(!step.subscribing)
+
+            // The next Subscribe acts on B, not on the stale preview A.
+            subscribe.nextOutcome = Outcome.Success(9L)
+            viewModel.subscribe()
+            advanceUntilIdle()
+            assertEquals("preview-b", subscribe.subscribed.last().first)
+        }
+
+    @Test
     fun subscribeWithoutPreviewDoesNothing() =
         runTest {
             viewModel.subscribe()
@@ -196,7 +233,7 @@ class AddPodcastViewModelTest : MainDispatcherTest() {
         val Preview =
             FeedPreview(
                 previewId = "preview-1",
-                feedUrl = "https://example.com/feed",
+                feedUrl = "https://a.example.com/feed",
                 title = "A Show",
                 author = "An Author",
                 description = null,
@@ -213,5 +250,8 @@ class AddPodcastViewModelTest : MainDispatcherTest() {
                 alreadySubscribed = null,
                 emptyFeed = false,
             )
+
+        val PreviewB =
+            Preview.copy(previewId = "preview-b", feedUrl = "https://b.example.com/feed", title = "B Show")
     }
 }

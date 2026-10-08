@@ -20,6 +20,7 @@ import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metrox.viewmodel.ViewModelKey
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -127,7 +128,9 @@ public class AddPodcastViewModel(
 
     /**
      * 03 Subscribe transaction: nothing is written until this runs. `AlreadySubscribed` surfaces
-     * as the "Already subscribed — Open" affordance, everything else as an inline error.
+     * as the "Already subscribed — Open" affordance, everything else as an inline error. The
+     * operation is tagged by `previewId`: a result arriving after the sheet moved to a newer
+     * preview is dropped rather than restoring the captured step over it.
      */
     public fun subscribe() {
         val step = mutableState.value.step as? AddSheetStep.Preview ?: return
@@ -142,19 +145,23 @@ public class AddPodcastViewModel(
                 }
 
                 is Outcome.Failure -> {
-                    mutableState.update {
-                        it.copy(
+                    mutableState.update { state ->
+                        val current = state.step as? AddSheetStep.Preview
+                        if (current?.preview?.previewId != step.preview.previewId) {
+                            return@update state
+                        }
+                        state.copy(
                             step =
                                 when (val error = outcome.error) {
                                     is SubscribeError.AlreadySubscribed -> {
-                                        step.copy(
+                                        current.copy(
                                             subscribing = false,
                                             alreadySubscribedId = error.podcastId,
                                         )
                                     }
 
                                     else -> {
-                                        step.copy(
+                                        current.copy(
                                             subscribing = false,
                                             subscribeError = SubscribeErrorText.describe(error),
                                         )
@@ -172,7 +179,10 @@ public class AddPodcastViewModel(
         resolveJob =
             viewModelScope.launch {
                 mutableState.update { it.copy(step = AddSheetStep.Resolving) }
-                apply(block())
+                val resolution = block()
+                // A result of a superseded resolve is dropped: a newer operation owns the step.
+                ensureActive()
+                apply(resolution)
             }
     }
 
