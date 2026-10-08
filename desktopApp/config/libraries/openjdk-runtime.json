@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:openjdk-runtime",
+  "name": "OpenJDK runtime (Temurin 25)",
+  "artifactVersion": "Temurin-25.0.4.1+1",
+  "description": "Unmodified jlink-trimmed runtime bundled with the desktop installers and the server image; the version follows desktopApp/runtime.lock. Unmodified; its source is attached to every release: openjdk-25.0.4.1+1-temurin-sources.tar.gz",
+  "website": "https://adoptium.net",
+  "developers": [],
+  "tag": "bundled",
+  "licenses": [
+    "openjdk_gpl_2_0_ce"
+  ]
+}

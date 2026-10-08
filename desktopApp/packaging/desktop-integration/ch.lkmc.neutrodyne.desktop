@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Unlicense
+#
+# ch.lkmc.neutrodyne.desktop — the DEB's desktop entry (11 Links and files from the OS,
+# D61's frozen name). Installed to /usr/share/applications by our postinstall script.
+[Desktop Entry]
+Type=Application
+Name=Neutrodyne
+GenericName=Podcast player
+Comment=Podcasts organised in groups
+Exec=/opt/neutrodyne/bin/Neutrodyne %U
+TryExec=/opt/neutrodyne/bin/Neutrodyne
+Icon=neutrodyne
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+MimeType=text/x-opml;x-scheme-handler/neutrodyne;x-scheme-handler/feed;x-scheme-handler/podcast;x-scheme-handler/pcast;x-scheme-handler/itpc;
+StartupWMClass=ch-lkmc-neutrodyne-desktop-MainKt
