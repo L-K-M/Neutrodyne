@@ -5,15 +5,24 @@ package ch.lkmc.neutrodyne.feature.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.ShowNotesImages
+import ch.lkmc.neutrodyne.core.ui.UiText
+import ch.lkmc.neutrodyne.core.ui.UserMessage
+import ch.lkmc.neutrodyne.core.ui.UserMessages
+import ch.lkmc.neutrodyne.feature.settings.resources.Res
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_save_failed
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metrox.viewmodel.ViewModelKey
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -27,6 +36,7 @@ public data class FeedsSettingsUiState(
     val refreshOnAppOpen: Boolean = FeedsSettingKeys.REFRESH_ON_APP_OPEN.default,
     val backfillPagedFeeds: Boolean = FeedsSettingKeys.BACKFILL_PAGED_FEEDS.default,
     val showNotesImages: ShowNotesImages = FeedsSettingKeys.SHOW_NOTES_IMAGES.default,
+    val messages: ImmutableList<UserMessage> = persistentListOf(),
 )
 
 /**
@@ -42,6 +52,8 @@ public class FeedsSettingsViewModel(
     private val settings: SettingsRepository,
     private val refreshController: RefreshController,
 ) : ViewModel() {
+    private val userMessages = UserMessages()
+
     public val uiState: StateFlow<FeedsSettingsUiState> =
         combine(
             settings.observe(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES),
@@ -50,7 +62,9 @@ public class FeedsSettingsViewModel(
             settings.observe(FeedsSettingKeys.BACKFILL_PAGED_FEEDS),
             settings.observe(FeedsSettingKeys.SHOW_NOTES_IMAGES),
             ::FeedsSettingsUiState,
-        ).stateIn(viewModelScope, SHARING, FeedsSettingsUiState())
+        ).combine(userMessages.flow) { state, messages ->
+            state.copy(messages = messages)
+        }.stateIn(viewModelScope, SHARING, FeedsSettingsUiState())
 
     /** The interval chooser's write; 03 rebases the periodic tick on success. */
     public fun setRefreshIntervalMinutes(minutes: Int) {
@@ -77,15 +91,23 @@ public class FeedsSettingsViewModel(
         set(FeedsSettingKeys.SHOW_NOTES_IMAGES, choice)
     }
 
+    /** The screen acks a shown snackbar so its [UserMessage] leaves the state. */
+    public fun onMessageShown(id: Long) {
+        userMessages.shown(id)
+    }
+
     /** Writes the key, then rebases the periodic tick only when the write took. */
     private fun <T : Any> setRescheduling(
         key: SettingKey<T>,
         value: T,
     ) {
         viewModelScope.launch {
-            if (settings.set(key, value) is Outcome.Success) {
-                refreshController.reschedulePeriodic()
+            val outcome = suspendRunCatching { settings.set(key, value) }.getOrNull()
+            if (outcome !is Outcome.Success) {
+                reportWriteFailed(null)
+                return@launch
             }
+            suspendRunCatching { refreshController.reschedulePeriodic() }.onFailure(::reportWriteFailed)
         }
     }
 
@@ -93,10 +115,20 @@ public class FeedsSettingsViewModel(
         key: SettingKey<T>,
         value: T,
     ) {
-        viewModelScope.launch { settings.set(key, value) }
+        viewModelScope.launch {
+            val outcome = suspendRunCatching { settings.set(key, value) }.getOrNull()
+            if (outcome !is Outcome.Success) reportWriteFailed(null)
+        }
+    }
+
+    /** A failed write is logged and surfaces as a snackbar — it never escapes the scope. */
+    private fun reportWriteFailed(t: Throwable?) {
+        Log.w(TAG, t) { "settings write failed" }
+        userMessages.post(UiText.Res(Res.string.settings_save_failed))
     }
 
     private companion object {
+        const val TAG = "FeedsSettingsViewModel"
         val SHARING = SharingStarted.WhileSubscribed(5_000)
     }
 }

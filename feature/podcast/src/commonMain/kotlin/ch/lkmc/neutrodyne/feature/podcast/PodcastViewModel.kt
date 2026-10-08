@@ -7,8 +7,10 @@ import androidx.lifecycle.viewModelScope
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
 import ch.lkmc.neutrodyne.core.domain.FeedRepository
@@ -25,6 +27,11 @@ import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.PodcastDetail
 import ch.lkmc.neutrodyne.core.model.ShowType
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
+import ch.lkmc.neutrodyne.core.ui.UiText
+import ch.lkmc.neutrodyne.core.ui.UserMessage
+import ch.lkmc.neutrodyne.core.ui.UserMessages
+import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import dev.zacsweers.metro.Assisted
 import dev.zacsweers.metro.AssistedFactory
 import dev.zacsweers.metro.AssistedInject
@@ -63,6 +70,7 @@ public class PodcastViewModel
     ) : ViewModel() {
         private val filters = MutableStateFlow(FeedFilters())
         private val detail = podcasts.observePodcast(podcastId)
+        private val userMessages = UserMessages()
 
         @OptIn(ExperimentalCoroutinesApi::class)
         public val feed: Flow<PagingData<EpisodeRow>> =
@@ -88,15 +96,15 @@ public class PodcastViewModel
                     offline = !online,
                     refreshing = refreshing,
                 )
+            }.combine(userMessages.flow) { state, messages ->
+                state.copy(messages = messages)
             }.stateIn(viewModelScope, SHARING, PodcastUiState())
 
         /** Repository-owned row actions; the route owns navigation and external URLs. */
         public fun onRowAction(action: EpisodeAction) {
             when (action) {
                 is EpisodeAction.SetPlayed -> {
-                    viewModelScope.launch {
-                        episodes.setPlayed(listOf(action.episodeId), action.played)
-                    }
+                    write { episodes.setPlayed(listOf(action.episodeId), action.played) }
                 }
 
                 // PlayToggle/queue actions need the player (M4); DownloadToggle needs M6.
@@ -112,9 +120,7 @@ public class PodcastViewModel
 
         /** The "Newest first" chip (05: persisted in `podcast.episodeOrder`). */
         public fun setOrder(order: FeedOrder) {
-            viewModelScope.launch {
-                feedRepository.setFeedOrder(FeedSource.Podcast(podcastId), order)
-            }
+            write { feedRepository.setFeedOrder(FeedSource.Podcast(podcastId), order) }
         }
 
         /** The top bar's refresh (03: forced, user-initiated). */
@@ -129,7 +135,7 @@ public class PodcastViewModel
 
         /** The banner's "Try again" (03 Per-feed states: clears `gone`/`needsCredentials`). */
         public fun retryFeed() {
-            viewModelScope.launch { podcasts.retry(podcastId) }
+            write { podcasts.retry(podcastId) }
         }
 
         /** The "Enter password" dialog's commit (03 Basic auth; M1b API already bound). */
@@ -137,15 +143,32 @@ public class PodcastViewModel
             podcasts.setCredentials(podcastId, credentials)
 
         public fun unsubscribe() {
-            viewModelScope.launch { unsubscribe(listOf(podcastId)) }
+            write { unsubscribe(listOf(podcastId)) }
         }
 
         public fun markAllPlayed() {
-            viewModelScope.launch { episodes.markFeedPlayed(FeedSource.Podcast(podcastId), null) }
+            write { episodes.markFeedPlayed(FeedSource.Podcast(podcastId), null) }
+        }
+
+        /** The screen acks a shown snackbar so its [UserMessage] leaves the state. */
+        public fun onMessageShown(id: Long) {
+            userMessages.shown(id)
         }
 
         /** The unsubscribe confirmation's downloaded-episode count (08's wording). */
         public suspend fun downloadedCount(): Int = podcasts.downloadedEpisodeIds(listOf(podcastId)).size
+
+        /** A failed write is logged and surfaces as a snackbar — it never escapes the scope. */
+        private fun write(block: suspend () -> Unit) {
+            viewModelScope.launch {
+                suspendRunCatching { block() }.onFailure(::reportWriteFailed)
+            }
+        }
+
+        private fun reportWriteFailed(t: Throwable) {
+            Log.w(TAG, t) { "write failed" }
+            userMessages.post(UiText.Res(Res.string.write_failed))
+        }
 
         @AssistedFactory
         @ManualViewModelAssistedFactoryKey(Factory::class)
@@ -155,6 +178,7 @@ public class PodcastViewModel
         }
 
         private companion object {
+            const val TAG = "PodcastViewModel"
             val SHARING = SharingStarted.WhileSubscribed(5_000)
         }
     }

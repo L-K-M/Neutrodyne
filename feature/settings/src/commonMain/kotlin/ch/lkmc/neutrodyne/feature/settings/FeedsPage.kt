@@ -48,6 +48,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.feeds_on_open
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_refresh_interval
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_wifi_only
 import ch.lkmc.neutrodyne.core.ui.resources.settings_feeds
+import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
 import dev.zacsweers.metrox.viewmodel.metroViewModel
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
@@ -69,6 +70,8 @@ internal fun FeedsPage(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var showIntervalDialog by rememberSaveable { mutableStateOf(false) }
     var showImagesDialog by rememberSaveable { mutableStateOf(false) }
+
+    ShowUserMessages(state.messages, viewModel::onMessageShown)
 
     Column(Modifier.fillMaxSize()) {
         NdTopAppBar(

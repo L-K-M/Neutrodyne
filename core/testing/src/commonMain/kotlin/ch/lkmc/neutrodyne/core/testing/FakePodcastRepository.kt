@@ -33,6 +33,9 @@ class FakePodcastRepository : PodcastRepository {
 
     val calls = mutableListOf<String>()
 
+    /** When set, every write throws it (the Room implementation's failure path). */
+    var writeError: Throwable? = null
+
     override fun observeLibraryTiles(groupId: Long?): Flow<List<LibraryTile>> = tiles
 
     override fun observePodcast(podcastId: Long): Flow<PodcastDetail?> = detail
@@ -43,6 +46,7 @@ class FakePodcastRepository : PodcastRepository {
         podcastIds: List<Long>,
         origin: ChangeOrigin,
     ): List<Long> {
+        writeError?.let { throw it }
         calls += "unsubscribe($podcastIds)"
         subscribedIds.value -= podcastIds.toSet()
         return podcastIds
@@ -53,6 +57,7 @@ class FakePodcastRepository : PodcastRepository {
         winnerId: Long,
         origin: ChangeOrigin,
     ) {
+        writeError?.let { throw it }
         calls += "merge($loserId, $winnerId)"
     }
 
@@ -60,6 +65,7 @@ class FakePodcastRepository : PodcastRepository {
     val downloadedIds = MutableStateFlow<Map<Long, List<Long>>>(emptyMap())
 
     override suspend fun downloadedEpisodeIds(podcastIds: List<Long>): List<Long> {
+        writeError?.let { throw it }
         calls += "downloadedEpisodeIds($podcastIds)"
         return podcastIds.flatMap { downloadedIds.value[it].orEmpty() }
     }
@@ -68,6 +74,7 @@ class FakePodcastRepository : PodcastRepository {
         podcastId: Long,
         include: Boolean,
     ) {
+        writeError?.let { throw it }
         calls += "setIncludeInAll($podcastId, $include)"
     }
 
@@ -75,6 +82,7 @@ class FakePodcastRepository : PodcastRepository {
         podcastId: Long,
         title: String?,
     ) {
+        writeError?.let { throw it }
         calls += "setCustomTitle($podcastId, $title)"
     }
 
@@ -98,6 +106,7 @@ class FakePodcastRepository : PodcastRepository {
         podcastId: Long,
         refresh: Boolean,
     ) {
+        writeError?.let { throw it }
         calls += "retry($podcastId, $refresh)"
     }
 

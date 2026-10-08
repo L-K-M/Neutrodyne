@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.ui.dispatchEpisodeRoute
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
+import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
 import dev.zacsweers.metrox.viewmodel.metroViewModel
 
 /**
@@ -37,4 +38,6 @@ internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
         onAddPodcast = { navigator.push(AddPodcastKey(null)) },
         onSearch = { navigator.selectTab(DiscoverKey) },
     )
+
+    ShowUserMessages(state.messages, viewModel::onMessageShown)
 }

@@ -10,6 +10,9 @@ import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.ui.FeedDates
 import ch.lkmc.neutrodyne.core.ui.UiText
+import ch.lkmc.neutrodyne.core.ui.UserMessage
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -25,6 +28,7 @@ public data class FeedsUiState(
     val offline: Boolean = false,
     val refreshing: Boolean = false,
     val hasSubscriptions: Boolean = true,
+    val messages: ImmutableList<UserMessage> = persistentListOf(),
 )
 
 /** One list entry of the feed: a day header or an episode row (08 `FeedItem`). */

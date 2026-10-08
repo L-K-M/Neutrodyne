@@ -24,12 +24,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
+import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_dynamic_color
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_dynamic_color_summary
@@ -38,6 +41,7 @@ import ch.lkmc.neutrodyne.feature.settings.resources.appearance_theme_dark
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_theme_light
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_theme_system
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_appearance
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_save_failed
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
@@ -62,7 +66,19 @@ internal fun AppearancePage(
             .observe(AppearanceSettingKeys.DYNAMIC_COLOR)
             .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.DYNAMIC_COLOR.default)
     val scope = rememberCoroutineScope()
+    val snackbarHost = LocalSnackbarHost.current
+    val saveFailed = stringResource(Res.string.settings_save_failed)
     var showThemeDialog by rememberSaveable { mutableStateOf(false) }
+
+    // A failed write leaves the stored value, which the rows show, unchanged; the snackbar says so.
+    fun <T : Any> save(
+        key: SettingKey<T>,
+        value: T,
+    ) {
+        scope.launch {
+            if (settings.set(key, value) is Outcome.Failure) snackbarHost.showSnackbar(saveFailed)
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
         NdTopAppBar(
@@ -82,7 +98,7 @@ internal fun AppearancePage(
                     summary = stringResource(Res.string.appearance_dynamic_color_summary),
                     checked = dynamicColor,
                     onCheckedChange = { checked ->
-                        scope.launch { settings.set(AppearanceSettingKeys.DYNAMIC_COLOR, checked) }
+                        save(AppearanceSettingKeys.DYNAMIC_COLOR, checked)
                     },
                 )
             }
@@ -94,7 +110,7 @@ internal fun AppearancePage(
             selected = theme,
             onSelect = { mode ->
                 showThemeDialog = false
-                scope.launch { settings.set(AppearanceSettingKeys.THEME, mode) }
+                save(AppearanceSettingKeys.THEME, mode)
             },
             onDismissRequest = { showThemeDialog = false },
         )

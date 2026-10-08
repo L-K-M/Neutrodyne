@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.feature.library
 
 import ch.lkmc.neutrodyne.core.common.TitleCollator
+import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
@@ -15,6 +16,9 @@ import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.testLibraryTile
+import ch.lkmc.neutrodyne.core.ui.UiText
+import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
@@ -191,6 +195,56 @@ class LibraryViewModelTest : MainDispatcherTest() {
 
             assertEquals(listOf("unsubscribe([7])"), podcasts.calls)
             assertEquals(setOf(8L), podcasts.subscribedIds.value)
+        }
+
+    /** A throwing repository write becomes a snackbar message — not an uncaught exception (01). */
+    @Test
+    fun markAllPlayedWriteFailurePostsAMessage() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            episodes.writeError = Exception("disk full")
+
+            viewModel.markAllPlayed(7)
+            advanceUntilIdle()
+
+            assertTrue(episodes.calls.isEmpty())
+            val message = viewModel.uiState.value.messages.single()
+            assertEquals(Res.string.write_failed, (message.text as UiText.Res).id)
+
+            viewModel.onMessageShown(message.id)
+            advanceUntilIdle()
+            assertTrue(viewModel.uiState.value.messages.isEmpty())
+        }
+
+    @Test
+    fun unsubscribeWriteFailurePostsAMessage() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            podcasts.writeError = Exception("disk full")
+
+            viewModel.unsubscribe(7)
+            advanceUntilIdle()
+
+            assertTrue(podcasts.calls.isEmpty())
+            assertTrue(viewModel.uiState.value.messages.isNotEmpty())
+        }
+
+    /** A settings `Outcome.Failure` posts the same message — the switch stays where it was. */
+    @Test
+    fun setSortFailurePostsAMessage() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            settings.failNextSet = SettingsError.WriteFailed
+
+            viewModel.setSort(LibrarySort.MOST_UNPLAYED)
+            advanceUntilIdle()
+
+            assertEquals(listOf("set(appearance.library_sort)"), settings.calls)
+            assertTrue(viewModel.uiState.value.messages.isNotEmpty())
+            assertTrue(settings.get(AppearanceSettingKeys.LIBRARY_SORT) != LibrarySort.MOST_UNPLAYED)
         }
 
     private companion object {

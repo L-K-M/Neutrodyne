@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.ui.resolve
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_removed
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
+import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
 import ch.lkmc.neutrodyne.core.ui.whenOutcome
 import dev.zacsweers.metrox.viewmodel.assistedMetroViewModel
 import kotlinx.coroutines.launch
@@ -62,4 +63,6 @@ internal fun PodcastSettingsRoute(key: PodcastSettingsKey) {
             }
         },
     )
+
+    ShowUserMessages(state.messages, viewModel::onMessageShown)
 }

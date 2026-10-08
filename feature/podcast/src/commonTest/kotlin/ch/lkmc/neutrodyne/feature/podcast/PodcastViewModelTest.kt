@@ -24,6 +24,9 @@ import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
 import ch.lkmc.neutrodyne.core.testing.testFeedInfo
 import ch.lkmc.neutrodyne.core.testing.testPodcastDetail
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
+import ch.lkmc.neutrodyne.core.ui.UiText
+import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
@@ -278,5 +281,66 @@ class PodcastViewModelTest : MainDispatcherTest() {
             viewModel.onRowAction(EpisodeAction.SetPlayed(42, played = false))
             advanceUntilIdle()
             assertEquals(listOf("setPlayed([42], false)"), episodes.calls)
+        }
+
+    /** A throwing repository write becomes a snackbar message — not an uncaught exception (01). */
+    @Test
+    fun setPlayedWriteFailurePostsAMessage() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            episodes.writeError = Exception("disk full")
+
+            viewModel.onRowAction(EpisodeAction.SetPlayed(42, played = true))
+            advanceUntilIdle()
+
+            assertTrue(episodes.calls.isEmpty())
+            val message = viewModel.uiState.value.messages.single()
+            assertEquals(Res.string.write_failed, (message.text as UiText.Res).id)
+
+            viewModel.onMessageShown(message.id)
+            advanceUntilIdle()
+            assertTrue(viewModel.uiState.value.messages.isEmpty())
+        }
+
+    @Test
+    fun unsubscribeWriteFailurePostsAMessage() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            podcasts.writeError = Exception("disk full")
+
+            viewModel.unsubscribe()
+            advanceUntilIdle()
+
+            assertTrue(podcasts.calls.isEmpty())
+            assertTrue(viewModel.uiState.value.messages.isNotEmpty())
+        }
+
+    @Test
+    fun feedOrderWriteFailurePostsAMessage() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            feeds.writeError = Exception("disk full")
+
+            viewModel.setOrder(FeedOrder.OLDEST_FIRST)
+            advanceUntilIdle()
+
+            assertTrue(viewModel.uiState.value.messages.isNotEmpty())
+        }
+
+    @Test
+    fun markAllPlayedWriteFailurePostsAMessage() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            episodes.writeError = Exception("disk full")
+
+            viewModel.markAllPlayed()
+            advanceUntilIdle()
+
+            assertTrue(episodes.calls.isEmpty())
+            assertTrue(viewModel.uiState.value.messages.isNotEmpty())
         }
 }

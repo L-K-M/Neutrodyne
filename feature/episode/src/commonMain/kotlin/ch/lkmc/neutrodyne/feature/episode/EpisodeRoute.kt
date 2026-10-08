@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.ui.dispatchEpisodeRoute
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
+import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
 import dev.zacsweers.metrox.viewmodel.assistedMetroViewModel
 
 /**
@@ -32,4 +33,6 @@ internal fun EpisodeRoute(key: EpisodeKey) {
         },
         onFavorite = viewModel::setFavorite,
     )
+
+    ShowUserMessages(state.messages, viewModel::onMessageShown)
 }

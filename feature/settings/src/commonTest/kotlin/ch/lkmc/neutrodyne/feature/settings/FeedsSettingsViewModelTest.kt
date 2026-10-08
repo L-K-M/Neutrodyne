@@ -8,7 +8,12 @@ import ch.lkmc.neutrodyne.core.model.settings.ShowNotesImages
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
+import ch.lkmc.neutrodyne.core.ui.UiText
+import ch.lkmc.neutrodyne.feature.settings.resources.Res
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_save_failed
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -26,6 +31,10 @@ class FeedsSettingsViewModelTest : MainDispatcherTest() {
     private val refreshController = FakeRefreshController()
 
     private fun viewModel() = FeedsSettingsViewModel(settings, refreshController)
+
+    private fun TestScope.collect(viewModel: FeedsSettingsViewModel) {
+        backgroundScope.launch { viewModel.uiState.collect {} }
+    }
 
     @Test
     fun intervalChangePersistsThenReschedules() =
@@ -58,6 +67,25 @@ class FeedsSettingsViewModelTest : MainDispatcherTest() {
             advanceUntilIdle()
 
             assertTrue(refreshController.calls.isEmpty())
+        }
+
+    /** A failed write posts a snackbar message instead of silently dropping the failure (01). */
+    @Test
+    fun failedWritePostsAMessage() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            settings.failNextSet = SettingsError.WriteFailed
+
+            viewModel.setRefreshOnAppOpen(false)
+            advanceUntilIdle()
+
+            val message = viewModel.uiState.value.messages.single()
+            assertEquals(Res.string.settings_save_failed, (message.text as UiText.Res).id)
+
+            viewModel.onMessageShown(message.id)
+            advanceUntilIdle()
+            assertTrue(viewModel.uiState.value.messages.isEmpty())
         }
 
     @Test

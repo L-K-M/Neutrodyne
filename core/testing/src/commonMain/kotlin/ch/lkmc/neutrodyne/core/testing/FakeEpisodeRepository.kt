@@ -20,6 +20,9 @@ class FakeEpisodeRepository : EpisodeRepository {
 
     val calls = mutableListOf<String>()
 
+    /** When set, every write throws it (the Room implementation's failure path). */
+    var writeError: Throwable? = null
+
     override fun observeEpisode(episodeId: Long): Flow<EpisodeDetail?> = episodes.map { it[episodeId] }
 
     override fun observeShowNotes(episodeId: Long): Flow<ShowNotes?> = notes.map { it[episodeId] }
@@ -28,6 +31,7 @@ class FakeEpisodeRepository : EpisodeRepository {
         episodeIds: List<Long>,
         played: Boolean,
     ) {
+        writeError?.let { throw it }
         calls += "setPlayed($episodeIds, $played)"
     }
 
@@ -35,6 +39,7 @@ class FakeEpisodeRepository : EpisodeRepository {
         source: FeedSource,
         sortDateBefore: Long?,
     ) {
+        writeError?.let { throw it }
         calls += "markFeedPlayed($source, $sortDateBefore)"
     }
 
@@ -42,6 +47,7 @@ class FakeEpisodeRepository : EpisodeRepository {
         episodeId: Long,
         favorite: Boolean,
     ) {
+        writeError?.let { throw it }
         calls += "setFavorite($episodeId, $favorite)"
     }
 }

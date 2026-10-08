@@ -22,9 +22,11 @@ import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.date_today
 import ch.lkmc.neutrodyne.core.ui.resources.date_yesterday
+import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
@@ -49,6 +51,10 @@ class FeedsViewModelTest : MainDispatcherTest() {
     private val clock = TestClock()
 
     private fun viewModel() = FeedsViewModel(feeds, episodes, refreshController, network, podcasts, clock)
+
+    private fun TestScope.collect(viewModel: FeedsViewModel) {
+        backgroundScope.launch { viewModel.uiState.collect {} }
+    }
 
     @Test
     fun initialStateBeforeSubscription() =
@@ -207,6 +213,40 @@ class FeedsViewModelTest : MainDispatcherTest() {
             viewModel.onRowAction(EpisodeAction.DownloadToggle(42))
             advanceUntilIdle()
             assertTrue(episodes.calls.isEmpty())
+        }
+
+    /** A throwing repository write becomes a snackbar message — not an uncaught exception (01). */
+    @Test
+    fun setPlayedWriteFailurePostsAMessage() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            episodes.writeError = Exception("disk full")
+
+            viewModel.onRowAction(EpisodeAction.SetPlayed(42, played = true))
+            advanceUntilIdle()
+
+            assertTrue(episodes.calls.isEmpty())
+            val message = viewModel.uiState.value.messages.single()
+            assertEquals(Res.string.write_failed, (message.text as UiText.Res).id)
+
+            viewModel.onMessageShown(message.id)
+            advanceUntilIdle()
+            assertTrue(viewModel.uiState.value.messages.isEmpty())
+        }
+
+    @Test
+    fun markAllPlayedWriteFailurePostsAMessage() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            episodes.writeError = Exception("disk full")
+
+            viewModel.markAllPlayed()
+            advanceUntilIdle()
+
+            assertTrue(episodes.calls.isEmpty())
+            assertTrue(viewModel.uiState.value.messages.isNotEmpty())
         }
 
     private companion object {

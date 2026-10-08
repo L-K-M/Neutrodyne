@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.feature.library
 import androidx.compose.runtime.Immutable
 import ch.lkmc.neutrodyne.core.model.LibraryTile
 import ch.lkmc.neutrodyne.core.model.settings.LibrarySort
+import ch.lkmc.neutrodyne.core.ui.UserMessage
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 
@@ -20,4 +21,5 @@ public data class LibraryUiState(
     val showTitles: Boolean = false,
     val sort: LibrarySort = LibrarySort.TITLE,
     val offline: Boolean = false,
+    val messages: ImmutableList<UserMessage> = persistentListOf(),
 )

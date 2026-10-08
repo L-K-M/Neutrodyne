@@ -37,4 +37,5 @@
         <item quantity="one">%1$d Bibliothek</item>
         <item quantity="other">%1$d Bibliotheken</item>
     </plurals>
+    <string name="settings_save_failed">Die Einstellung konnte nicht gespeichert werden</string>
 </resources>

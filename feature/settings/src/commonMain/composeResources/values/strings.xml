@@ -43,4 +43,5 @@
         <item quantity="one">%1$d library</item>
         <item quantity="other">%1$d libraries</item>
     </plurals>
+    <string name="settings_save_failed">Couldn&apos;t save the setting</string>
 </resources>

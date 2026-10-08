@@ -7,6 +7,9 @@ import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.PodcastDetail
 import ch.lkmc.neutrodyne.core.model.ShowType
+import ch.lkmc.neutrodyne.core.ui.UserMessage
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
 
 /**
  * The podcast detail screen's state (08 Podcast detail): [loaded] distinguishes the header
@@ -23,6 +26,7 @@ public data class PodcastUiState(
     val filters: FeedFilters = FeedFilters(),
     val offline: Boolean = false,
     val refreshing: Boolean = false,
+    val messages: ImmutableList<UserMessage> = persistentListOf(),
 ) {
     public val gone: Boolean
         get() = loaded && detail == null

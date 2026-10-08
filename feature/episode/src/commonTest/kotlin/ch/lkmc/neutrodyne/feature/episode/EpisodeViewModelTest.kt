@@ -11,6 +11,9 @@ import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import ch.lkmc.neutrodyne.core.testing.testEpisodeDetail
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.ShowNotesImageMode
+import ch.lkmc.neutrodyne.core.ui.UiText
+import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
@@ -143,5 +146,39 @@ class EpisodeViewModelTest : MainDispatcherTest() {
             viewModel.onAction(EpisodeAction.DownloadToggle(9))
             advanceUntilIdle()
             assertTrue(episodes.calls.isEmpty())
+        }
+
+    /** A throwing repository write becomes a snackbar message — not an uncaught exception (01). */
+    @Test
+    fun setPlayedWriteFailurePostsAMessage() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            episodes.writeError = Exception("disk full")
+
+            viewModel.setPlayed(true)
+            advanceUntilIdle()
+
+            assertTrue(episodes.calls.isEmpty())
+            val message = viewModel.uiState.value.messages.single()
+            assertEquals(Res.string.write_failed, (message.text as UiText.Res).id)
+
+            viewModel.onMessageShown(message.id)
+            advanceUntilIdle()
+            assertTrue(viewModel.uiState.value.messages.isEmpty())
+        }
+
+    @Test
+    fun setFavoriteWriteFailurePostsAMessage() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            episodes.writeError = Exception("disk full")
+
+            viewModel.setFavorite(true)
+            advanceUntilIdle()
+
+            assertTrue(episodes.calls.isEmpty())
+            assertTrue(viewModel.uiState.value.messages.isNotEmpty())
         }
 }

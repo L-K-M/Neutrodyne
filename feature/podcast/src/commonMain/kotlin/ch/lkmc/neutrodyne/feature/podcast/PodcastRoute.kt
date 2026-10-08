@@ -11,6 +11,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.compose.collectAsLazyPagingItems
+import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastSettingsKey
@@ -19,7 +20,9 @@ import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.resolve
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_removed
+import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
+import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
 import ch.lkmc.neutrodyne.core.ui.whenOutcome
 import dev.zacsweers.metrox.viewmodel.assistedMetroViewModel
 import kotlinx.coroutines.launch
@@ -80,7 +83,13 @@ internal fun PodcastRoute(key: PodcastKey) {
         onUnsubscribeRequest = {
             scope.launch {
                 val title = state.detail?.displayTitle ?: return@launch
-                pending = PendingUnsubscribe(title, viewModel.downloadedCount())
+                // A failed count read must not crash — and the dialog can't show without it.
+                val count =
+                    suspendRunCatching { viewModel.downloadedCount() }.getOrNull() ?: run {
+                        snackbar.showSnackbar(getString(Res.string.write_failed))
+                        return@launch
+                    }
+                pending = PendingUnsubscribe(title, count)
             }
         },
         onConfirmUnsubscribe = {
@@ -89,4 +98,6 @@ internal fun PodcastRoute(key: PodcastKey) {
         },
         onDismissUnsubscribe = { pending = null },
     )
+
+    ShowUserMessages(state.messages, viewModel::onMessageShown)
 }

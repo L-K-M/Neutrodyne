@@ -25,6 +25,9 @@ class FakeFeedRepository : FeedRepository {
     var lastRequest: Triple<FeedSource, FeedFilters, FeedOrder>? = null
         private set
 
+    /** When set, [setFeedOrder] throws it (the Room implementation's failure path). */
+    var writeError: Throwable? = null
+
     override fun pagedFeed(
         source: FeedSource,
         filters: FeedFilters,
@@ -38,6 +41,7 @@ class FakeFeedRepository : FeedRepository {
         source: FeedSource,
         order: FeedOrder,
     ) {
+        writeError?.let { throw it }
         if (source is FeedSource.All || source is FeedSource.Ungrouped) {
             throw IllegalArgumentException("feed order is fixed for $source")
         }
