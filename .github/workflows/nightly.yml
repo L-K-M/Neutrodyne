@@ -83,7 +83,7 @@ jobs:
               -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
               -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest,ch.lkmc.neutrodyne.SmokeTest
           else
-            ./gradlew --max-workers=2 nightlyGroupDebugAndroidTest \
+            ./gradlew --max-workers=2 nightlyGroupDebugAndroidTest nightlyGroupAndroidDeviceTest \
               -Pneutrodyne.testScope=nightly \
               -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
               -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
@@ -173,6 +173,7 @@ jobs:
             timeout 120 adb shell 'until cmd overlay enable com.android.internal.systemui.navbar.threebutton; do sleep 2; done'
             timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true connectedDebugAndroidTest
+            ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly connectedAndroidDeviceTest
       - name: Release smoke on API 37
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:

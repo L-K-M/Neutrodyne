@@ -12,6 +12,9 @@ import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.PowerEvent
 import ch.lkmc.neutrodyne.core.common.PowerMonitor
 import ch.lkmc.neutrodyne.core.common.StoragePaths
+import ch.lkmc.neutrodyne.core.database.DatabaseFactory
+import ch.lkmc.neutrodyne.core.database.DesktopDatabaseFactory
+import ch.lkmc.neutrodyne.core.database.StrictMigrations
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
@@ -31,7 +34,7 @@ import kotlinx.coroutines.flow.flowOf
 /**
  * Platform basics of the desktop process (01 Components and scopes, the `DesktopCoreBindings`
  * row): the two dispatchers, the `@ApplicationScope` scope, `DesktopClock`, `PlatformInfo` and
- * `StoragePaths` built from the factory's [AppDirs].
+ * `StoragePaths` built from the factory's [AppDirs], plus M1a's database plumbing.
  *
  * 01 defines no `Main` dispatcher qualifier (`NeutrodyneDispatchers` is `IO`/`Default` only) —
  * Compose code uses `Dispatchers.Main` from `kotlinx-coroutines-swing` directly, so no `Main`
@@ -89,6 +92,18 @@ object DesktopCoreBindings {
     @Provides
     @SingleIn(AppScope::class)
     fun storagePaths(dirs: AppDirs): StoragePaths = StoragePaths(dirs)
+
+    @Provides
+    @SingleIn(AppScope::class)
+    fun databaseFactory(dirs: AppDirs): DatabaseFactory = DesktopDatabaseFactory(dirs)
+
+    /**
+     * Development runs (`BuildInfo.debug`, true exactly for `InstallKind.DEV`) rethrow migration
+     * failures; packaged images quarantine them (02 Error handling and recovery).
+     */
+    @Provides
+    @StrictMigrations
+    fun strictMigrations(buildInfo: BuildInfo): Boolean = buildInfo.debug
 
     /**
      * Interim: no suspend/resume notices exist until `:desktop:system`'s `OsPowerMonitor` (MD2)

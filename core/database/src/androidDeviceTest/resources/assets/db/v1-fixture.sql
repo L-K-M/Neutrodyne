@@ -1,0 +1,1 @@
+../../../../../src/desktopTest/resources/db/v1-fixture.sql
