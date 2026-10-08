@@ -38,7 +38,12 @@ internal fun loadInvalidConfig(
         is ServerConfigResult.Valid -> error("test configuration is unexpectedly valid: ${result.config}")
     }
 
-internal fun tempDataDir(): Path = Files.createTempDirectory("neutrodyne-server-test")
+internal fun tempDataDir(): Path {
+    // deleteOnExit cannot remove non-empty directories, so register a shutdown hook instead.
+    val dir = Files.createTempDirectory("neutrodyne-server-test")
+    Runtime.getRuntime().addShutdownHook(Thread { dir.toFile().deleteRecursively() })
+    return dir
+}
 
 /** Installs the module under test with a fixed version and clock. */
 internal fun Application.installTestModule(config: ServerConfig) {

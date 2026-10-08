@@ -5,8 +5,9 @@ package ch.lkmc.neutrodyne.sync.server
  * Resolves the calling client's address and transport scheme (10 Ktor setup): Ktor's
  * XForwardedHeaders plugin is not installed because it offers no check of the immediate peer
  * against a trusted list, so `X-Forwarded-For` and `X-Forwarded-Proto` are believed only when the
- * TCP peer is in `NEUTRODYNE_SERVER_TRUSTED_PROXIES`, and the client is then the right-most
- * address in the chain that is not itself a trusted proxy.
+ * TCP peer is in `NEUTRODYNE_SERVER_TRUSTED_PROXIES` or loopback, and the client is then the
+ * right-most chain entry that is neither a trusted proxy nor loopback. An entry that is not an
+ * IP literal ends the walk and the peer address is used.
  */
 internal class ClientAddress(
     private val trustedProxies: List<IpCidr>,
@@ -38,11 +39,17 @@ internal class ClientAddress(
                 .flatMap { header -> header.split(',') }
                 .map { entry -> entry.trim() }
                 .filter { entry -> entry.isNotEmpty() }
-        val client =
-            chain.lastOrNull { entry ->
-                val address = IpLiterals.parse(entry)
-                address == null || trustedProxies.none { cidr -> cidr.matches(address) }
-            }
+        // Walk left past hops that are trusted like the peer itself (N13): trusted proxies and
+        // loopback. The first entry that is neither is the client only when it is an IP
+        // literal; anything else ends the walk — looking further left would trust
+        // client-supplied text.
+        var client: String? = null
+        for (entry in chain.asReversed()) {
+            val address = IpLiterals.parse(entry) ?: break
+            if (address.isLoopbackAddress || trustedProxies.any { cidr -> cidr.matches(address) }) continue
+            client = entry
+            break
+        }
 
         // A trusted proxy may forward several proto values; the right-most is the nearest hop.
         val proto = forwardedProto.lastOrNull()?.trim()?.lowercase()

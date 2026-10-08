@@ -266,7 +266,20 @@ jobs:
         run: |
           jar="$(echo sync/server/build/libs/neutrodyne-server-*.jar)"
           export NEUTRODYNE_SERVER_DATA="$(mktemp -d)" NEUTRODYNE_SERVER_LISTEN=0.0.0.0:8787
-          if java -jar "$jar" serve; then
+          set +e
+          output="$(timeout 30 java -jar "$jar" serve 2>&1)"
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ]; then
             echo "::error::server accepted a non-loopback listen without the opt-in"
+            exit 1
+          fi
+          if [ "$status" -eq 124 ]; then
+            echo "::error::server was still serving after 30s: the non-loopback listen was not refused"
+            exit 1
+          fi
+          if ! echo "$output" | grep -q "refusing to listen on 0.0.0.0:8787"; then
+            echo "::error::server exited $status without the expected refusal message"
             exit 1
           fi

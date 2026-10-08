@@ -67,6 +67,34 @@ class ListenRuleTest {
     }
 
     @Test
+    fun `the public URL scheme is case-insensitive`() {
+        // RFC 3986: schemes compare lower-case; the parsed URI is normalised so the listen
+        // rule and publicUrlIsHttps see "https".
+        for (url in listOf("HTTPS://sync.example.org", "HttpS://sync.example.org")) {
+            val config =
+                loadValidConfig(
+                    env =
+                        mapOf(
+                            ServerEnv.LISTEN to "0.0.0.0:8787",
+                            ServerEnv.PUBLIC_URL to url,
+                        ),
+                )
+            assertTrue(config.publicUrlIsHttps, url)
+            assertEquals("https://sync.example.org", config.publicUrl.toString())
+        }
+
+        val errors =
+            loadInvalidConfig(
+                env =
+                    mapOf(
+                        ServerEnv.LISTEN to "0.0.0.0:8787",
+                        ServerEnv.PUBLIC_URL to "HTTP://sync.example.org",
+                    ),
+            )
+        assertTrue(errors.single().contains("refusing to listen"), errors.single())
+    }
+
+    @Test
     fun `insecure-lan allows a non-loopback listener`() {
         val config =
             loadValidConfig(
@@ -124,6 +152,24 @@ class ListenRuleTest {
             }
             assertEquals(HttpStatusCode.OK, client.get(HealthRoutes.HEALTH_PATH).status)
             assertEquals(HttpStatusCode.OK, client.get(HealthRoutes.READY_PATH).status)
+        }
+
+    @Test
+    fun `a trailing-slash health path is not routed but also not 421`() =
+        testApplication {
+            application {
+                installTestModule(loadValidConfig(env = mapOf(ServerEnv.PUBLIC_URL to "https://sync.example.org")))
+            }
+            // Without the IgnoreTrailingSlash plugin Ktor does not serve "/healthz/" — pin the
+            // 404 — and the guard must not 421 it either, so an untrusted client sees the same
+            // response as anyone else.
+            for (path in listOf("/healthz/", "/readyz/")) {
+                val response =
+                    client.get(path) {
+                        headers.append("X-Forwarded-For", "203.0.113.7")
+                    }
+                assertEquals(HttpStatusCode.NotFound, response.status, path)
+            }
         }
 
     @Test

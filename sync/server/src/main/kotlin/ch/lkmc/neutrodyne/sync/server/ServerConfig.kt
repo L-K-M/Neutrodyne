@@ -404,6 +404,9 @@ internal object ServerConfigLoader {
             }
         } catch (e: IOException) {
             throw IOException("cannot read ${path.fileName ?: path}: ${e.message}", e)
+        } catch (e: IllegalArgumentException) {
+            // Properties.load throws on a malformed \uXXXX escape, which is a parse error here.
+            throw IOException("cannot parse ${path.fileName ?: path}: ${e.message}", e)
         }
     }
 
@@ -411,9 +414,13 @@ internal object ServerConfigLoader {
 
     private fun parsePublicUrl(text: String): URI? {
         val uri = runCatching { URI(text) }.getOrNull() ?: return null
+        // RFC 3986: the scheme is case-insensitive; normalise it so the listen rule and
+        // publicUrlIsHttps compare lower-case too.
         val scheme = uri.scheme?.lowercase()
         val allowed = scheme == ServerConfig.HTTP_SCHEME || scheme == ServerConfig.HTTPS_SCHEME
-        return if (allowed && !uri.host.isNullOrEmpty()) uri else null
+        if (!allowed || uri.host.isNullOrEmpty()) return null
+        if (uri.scheme == scheme) return uri
+        return runCatching { URI(scheme + text.substring(uri.scheme.length)) }.getOrNull()
     }
 
     private fun parseTrustedProxies(

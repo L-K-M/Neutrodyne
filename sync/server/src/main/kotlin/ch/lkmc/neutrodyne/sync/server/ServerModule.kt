@@ -43,7 +43,9 @@ internal class InsecureTransportGuard(
 ) {
     fun install(application: Application) {
         application.intercept(ApplicationCallPipeline.Plugins) {
-            if (call.request.path() in HealthRoutes.PATHS) return@intercept
+            // A probe path with a stray trailing slash is not routed (Ktor merges it only with
+            // IgnoreTrailingSlash installed) but must still escape the 421 guard.
+            if (call.request.path().trimEnd('/') in HealthRoutes.PATHS) return@intercept
             if (!config.publicUrlIsHttps) return@intercept
 
             val resolved =

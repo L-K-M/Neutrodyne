@@ -75,7 +75,7 @@ internal class ServerCli(
                     serverStarter(result.config)
                     ExitCodes.OK
                 } catch (e: Exception) {
-                    err.println("serve failed: ${e.message}")
+                    err.println("serve failed: ${e.message ?: e}")
                     ExitCodes.ERROR
                 }
             }
