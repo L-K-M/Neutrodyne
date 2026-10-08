@@ -187,12 +187,15 @@ internal class FeedIngestor(
             }
         }
 
-        // Pass 2 (03 step 5, deviation 14): the fallback relations run as global strength
-        // tiers — each tier finishes for every unmatched item before the next starts, and a
-        // match inside a tier is made only when it is unique on both sides — so a weak
-        // relation can never take a row a stronger one would claim (r4 F2). Eligible rows are
-        // every row pass 1 left unclaimed, including a `g:` row whose claim the reuse guard
-        // rejected: reserving it would strand exactly the episodes this pass recovers (r3 F1).
+        // Pass 2 (03 step 5, deviations 14/16): the fallback relations run as global strength
+        // tiers — each tier finishes for every unmatched item before the next starts, a match
+        // inside a tier is made only when it is unique on both sides, and the tiers repeat
+        // until a full pass claims nothing — so a weak relation can never take a row a
+        // stronger one would claim (r4 F2), a row is reused only on evidence that identifies
+        // the same episode (r5 F1), and a later claim clears an earlier ambiguity (r5 F2).
+        // Eligible rows are every row pass 1 left unclaimed, including a `g:` row whose claim
+        // the reuse guard rejected: reserving it would strand exactly the episodes this pass
+        // recovers (r3 F1).
         val fallbacks = Pass2Index(existing, taken)
         for ((item, row) in fallbacks.matches(prepared.items)) {
             if (claimRow(ingestDao, storedKeys, item, row)) rekeyed++

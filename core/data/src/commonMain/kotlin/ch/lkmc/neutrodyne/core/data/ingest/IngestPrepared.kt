@@ -47,9 +47,9 @@ internal class PreparedItem(
     val enclosureIdentity: String?,
     /** `UrlNormalizer.forIdentityNoQuery(enclosure.url)` — pass-2 tier B's map key. */
     val enclosureNoQuery: String?,
-    /** `TitleMatch.normalise(title)` or null when absent/blank — tier B's title corroboration. */
+    /** `TitleMatch.normalise(title)` or null when absent/blank — the title half of tiers B/C. */
     val titleNorm: String?,
-    /** The item's UTC publication-day bucket — tier B's day corroboration. */
+    /** The item's UTC publication-day bucket — the day half of tiers B/C. */
     val pubDayUtc: Long?,
     /** `titleNorm + "|" + pubDayUtc` — pass-2 tier C's map key. */
     val titleDayKey: String?,
@@ -251,12 +251,18 @@ internal class PreparedItem(
 }
 
 /**
- * The pass-2 matcher of 03 step 5 as *global strength tiers* (deviation 14): a tier finishes
+ * The pass-2 matcher of 03 step 5 as *global strength tiers* (deviation 14) under deviation
+ * 16's rule: a stored row is reused only on evidence that identifies the same episode, so a
+ * duplicate is preferred to a state transfer whenever the evidence is weak. A tier finishes
  * for every unmatched item before the next starts, so a weak relation can never take a row a
  * stronger one would claim (r4 F2). Inside a tier a pair matches only when it is unique on
  * both sides — exactly one eligible row relates to the item and exactly one unmatched item
- * relates to that row; ambiguous pairs skip the tier and can still match under a later,
- * corroborated one (r4 F1).
+ * relates to that row; ambiguous pairs skip the tier and can still match on a later pass
+ * (r4 F1, r5 F2).
+ *
+ * The whole A → B → C sequence *iterates*: a claim can clear an ambiguity an earlier pass
+ * left behind, so after any productive pass the tiers run again over what remains, until a
+ * full pass claims nothing.
  *
  * Eligible rows are every stored row pass 1 left unclaimed — the design's reservation of
  * "primary keys of document items" stays narrowed to *claimed* rows (deviation 12): an
@@ -280,20 +286,28 @@ internal class Pass2Index(
         }
 
     /**
-     * The (item, row) claims in tier order — ENCLOSURE, ENCLOSURE_NO_QUERY, TITLE_DAY. Rows and
-     * items a tier claims leave the pool before the next tier starts; unmatched items insert.
+     * The (item, row) claims in claim order. Rows and items a tier claims leave the pool
+     * before the next tier starts; each pass runs ENCLOSURE → ENCLOSURE_NO_QUERY → TITLE_DAY
+     * over what remains, and the passes repeat until one claims nothing — every productive
+     * pass takes at least one item, so the starting item count bounds the loop. Items still
+     * unmatched afterwards insert.
      */
     fun matches(items: List<PreparedItem>): List<Pair<PreparedItem, ExistingEpisodeKey>> {
         val unmatched = items.filterTo(mutableSetOf()) { it.matchedTo == null && !it.dropped }
         val free = candidates.mapTo(HashSet()) { it.id }
         val claims = mutableListOf<Pair<PreparedItem, ExistingEpisodeKey>>()
-        for (tier in FallbackTier.entries) {
-            if (unmatched.isEmpty() || free.isEmpty()) break
-            for ((item, row) in uniquePairs(unmatched, free, tier)) {
-                claims += item to row
-                unmatched -= item
-                free -= row.id
+        repeat(unmatched.size) {
+            var claimed = false
+            for (tier in FallbackTier.entries) {
+                if (unmatched.isEmpty() || free.isEmpty()) break
+                for ((item, row) in uniquePairs(unmatched, free, tier)) {
+                    claims += item to row
+                    unmatched -= item
+                    free -= row.id
+                    claimed = true
+                }
             }
+            if (!claimed) return claims
         }
         return claims
     }
@@ -348,16 +362,18 @@ internal class Pass2Index(
         }
 
     /**
-     * Tier B's corroboration (r4 F1): the query-less URL alone cannot pick an episode — a
-     * rolling feed's `/download?id=N` rows share it — so the pair needs an equal `TitleMatch`
-     * or the same UTC publication day on top.
+     * Tier B's corroboration (r5 F1, deviation 16): the query-less URL plus *one* of title or
+     * day still cannot pick an episode — a rolling feed's `/download?id=N` rows share the day
+     * or a generic title across different episodes — so the pair needs an equal `TitleMatch`
+     * *and* the same UTC publication day on top. A pure query-token rotation keeps both and
+     * still matches.
      */
     private fun corroborates(
         item: PreparedItem,
         row: ExistingEpisodeKey,
     ): Boolean =
-        (item.titleNorm != null && item.titleNorm == titleNorms[row.id]) ||
-            (item.pubDayUtc != null && item.pubDayUtc == pubDays[row.id])
+        item.titleNorm != null && item.titleNorm == titleNorms[row.id] &&
+            item.pubDayUtc != null && item.pubDayUtc == pubDays[row.id]
 
     /** The guards of 03 step 5: known durations within 10 min, known MIME majors equal. */
     private fun guardsPass(
@@ -379,12 +395,12 @@ internal class Pass2Index(
         return storedMajor == null || itemMajor == null || storedMajor == itemMajor
     }
 
-    /** The pass-2 strength tiers of deviation 14, strongest first. */
+    /** The pass-2 strength tiers of deviations 14/16, strongest first. */
     private enum class FallbackTier {
         /** Equal normalised enclosure URL (`UrlNormalizer.forIdentity`). */
         ENCLOSURE,
 
-        /** Equal query-less URL (`forIdentityNoQuery`) + corroboration + the guards. */
+        /** Equal query-less URL (`forIdentityNoQuery`) + equal `TitleMatch` + same UTC day + the guards. */
         ENCLOSURE_NO_QUERY,
 
         /** Equal `TitleMatch` + same UTC day + the guards. */
