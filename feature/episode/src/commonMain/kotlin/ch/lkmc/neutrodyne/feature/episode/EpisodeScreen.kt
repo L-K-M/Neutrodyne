@@ -156,8 +156,10 @@ internal fun EpisodeScreen(
                     } else {
                         showNotes(
                             notes = notes,
+                            // The per-episode reveal belongs to TAP_TO_LOAD alone; a stale flag
+                            // must never lift the Wi-Fi-only block on a metered link (03).
                             imageMode =
-                                if (imagesRevealed) {
+                                if (imagesRevealed && state.imageMode == ShowNotesImageMode.TAP_TO_LOAD) {
                                     ShowNotesImageMode.SHOWN
                                 } else {
                                     state.imageMode

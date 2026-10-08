@@ -8,6 +8,8 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -39,8 +41,9 @@ import kotlin.test.assertTrue
  * The `LazyListScope.showNotes` renderer through `runComposeUiTest` (08 Show notes renderer): one
  * test per `ShowNoteBlock` type of 03's model, plus the span semantics — links and in-range
  * timestamps are clickable `LinkAnnotation`s that report back through `onLink`/`onTimestamp`, a
- * timestamp past the episode duration renders as plain text, and TAP_TO_LOAD images gate on the
- * "Image: {alt}" row (03 Images and links). `installFakeImageLoader` keeps SHOWN images off the
+ * timestamp past the episode duration renders as plain text, TAP_TO_LOAD images gate on the
+ * "Image: {alt}" row, and BLOCKED (Wi-Fi-only on a metered link) keeps the row without the tap
+ * (03 Images and links). `installFakeImageLoader` keeps SHOWN images off the
  * network (09's deterministic-only rule).
  */
 @OptIn(ExperimentalTestApi::class)
@@ -190,6 +193,23 @@ class ShowNotesRendererTest {
             )
             onNodeWithText("Image: diagram").assertIsDisplayed().performClick()
             assertEquals(1, loads)
+        }
+
+    @Test
+    fun blockedImageShowsPlaceholderRowWithoutATap() =
+        runComposeUiTest {
+            var loads = 0
+            setNotes(
+                notesOf(ShowNoteBlock.Image(url = "https://example.com/pic.png", alt = "diagram")),
+                imageMode = ShowNotesImageMode.BLOCKED,
+                onLoadImages = { loads++ },
+            )
+            // Wi-Fi-only on a metered link keeps the 48 dp row but drops the click action, so
+            // nothing in the episode can switch the images back on (03 Images and links).
+            onNodeWithText("Image: diagram").assertIsDisplayed()
+            onAllNodes(hasText("Image: diagram") and hasClickAction()).assertCountEquals(0)
+            onNodeWithContentDescription("diagram").assertDoesNotExist()
+            assertEquals(0, loads)
         }
 
     @Test

@@ -32,7 +32,7 @@ import kotlinx.coroutines.launch
  * settled emission; [gone] (a `null` episode after the first emission) renders "no longer
  * available". `combine` only fires once every input has emitted, so a `null` [notes] already
  * means "no notes" and gets the empty text. [imageMode] folds `feeds.show_notes_images` and the
- * metered state into the renderer's two modes.
+ * metered state into the renderer's three modes.
  */
 @Immutable
 public data class EpisodeUiState(
@@ -112,7 +112,7 @@ public class EpisodeViewModel
         }
     }
 
-/** `feeds.show_notes_images` + metered → the renderer's two modes (03 Images and links, PO-21). */
+/** `feeds.show_notes_images` + metered → the renderer's three modes (03 Images and links, PO-21). */
 private fun imageMode(
     setting: ShowNotesImages,
     metered: Boolean,
@@ -127,6 +127,6 @@ private fun imageMode(
         }
 
         ShowNotesImages.WIFI_ONLY -> {
-            if (metered) ShowNotesImageMode.TAP_TO_LOAD else ShowNotesImageMode.SHOWN
+            if (metered) ShowNotesImageMode.BLOCKED else ShowNotesImageMode.SHOWN
         }
     }

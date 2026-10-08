@@ -9,7 +9,9 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
@@ -306,6 +308,27 @@ class EpisodeScreenTest {
             // The reveal is screen-local state: the row swaps to the real image (alt as
             // contentDescription) without calling back out.
             onNodeWithContentDescription("diagram").assertIsDisplayed()
+        }
+
+    @Test
+    fun wifiOnlyOnMeteredRowCannotBeTapped() =
+        runComposeUiTest {
+            setEpisode(
+                loadedState(
+                    imageMode = ShowNotesImageMode.BLOCKED,
+                    notes =
+                        ShowNotes(
+                            listOf(
+                                ShowNoteBlock.Image("https://example.com/pic.png", alt = "diagram"),
+                            ),
+                        ),
+                ),
+            )
+            // Wi-Fi-only on a metered link offers no tap escape (03): the placeholder row has no
+            // click action, so no tap can flip the screen's images to SHOWN.
+            scrollTo(hasText("Image: diagram")).assertIsDisplayed()
+            onAllNodes(hasText("Image: diagram") and hasClickAction()).assertCountEquals(0)
+            onNodeWithContentDescription("diagram").assertDoesNotExist()
         }
 
     private fun loadedState(

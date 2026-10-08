@@ -60,6 +60,12 @@ public enum class ShowNotesImageMode {
 
     /** `TAP_TO_LOAD` before the tap: a 48 dp placeholder row; `onLoadImages` reveals them. */
     TAP_TO_LOAD,
+
+    /**
+     * `WIFI_ONLY` on a metered link (03): images stay unloaded and the same 48 dp placeholder
+     * row shows, but without the tap — the Wi-Fi-only setting offers no per-episode escape.
+     */
+    BLOCKED,
 }
 
 /**
@@ -211,9 +217,11 @@ private fun NoteQuote(
 }
 
 /**
- * Inline image at its intrinsic aspect (max width, ≤ 480 dp); TAP_TO_LOAD renders the 48 dp
- * "Image: {alt}" row whose tap calls [onLoadImages] (08's privacy gate). The model is a plain URL
- * string so the artwork mapper does not apply (08).
+ * Inline image at its intrinsic aspect (max width, ≤ 480 dp); otherwise the 48 dp
+ * "Image: {alt}" row (08). TAP_TO_LOAD's row calls [onLoadImages] on tap (08's privacy gate);
+ * BLOCKED (Wi-Fi-only on a metered link) shows the same row without the tap, because that
+ * setting has no per-episode escape (03). The model is a plain URL string so the artwork mapper
+ * does not apply (08).
  */
 @Composable
 private fun NoteImage(
@@ -221,21 +229,27 @@ private fun NoteImage(
     imageMode: ShowNotesImageMode,
     onLoadImages: () -> Unit,
 ) {
-    if (imageMode == ShowNotesImageMode.TAP_TO_LOAD) {
+    if (imageMode != ShowNotesImageMode.SHOWN) {
+        val tapToLoad = imageMode == ShowNotesImageMode.TAP_TO_LOAD
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier =
                 Modifier
                     .fillMaxWidth()
                     .heightIn(min = TOUCH_TARGET)
-                    .clickable(onClick = onLoadImages)
+                    .let { m -> if (tapToLoad) m.clickable(onClick = onLoadImages) else m }
                     .padding(bottom = PARAGRAPH_GAP),
         ) {
             Icon(NdIcons.Image, contentDescription = null, modifier = Modifier.size(ICON_SIZE))
             Text(
                 stringResource(Res.string.shownotes_image, block.alt ?: block.url),
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary,
+                color =
+                    if (tapToLoad) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                 modifier = Modifier.padding(start = TEXT_GAP),
             )
         }

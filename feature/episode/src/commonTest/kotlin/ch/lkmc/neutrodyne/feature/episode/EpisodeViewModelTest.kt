@@ -95,14 +95,15 @@ class EpisodeViewModelTest : MainDispatcherTest() {
             advanceUntilIdle()
             assertEquals(ShowNotesImageMode.SHOWN, viewModel.uiState.value.imageMode)
 
-            // WIFI_ONLY shows images unmetered and hides them on a metered link (PO-21).
+            // WIFI_ONLY shows images unmetered and blocks them on a metered link (PO-21): the
+            // Wi-Fi-only setting has no tap-to-load escape (03 Images and links).
             settings.set(FeedsSettingKeys.SHOW_NOTES_IMAGES, ShowNotesImages.WIFI_ONLY)
             advanceUntilIdle()
             assertEquals(ShowNotesImageMode.SHOWN, viewModel.uiState.value.imageMode)
 
             network.setStatus(FakeNetworkMonitor.ONLINE.copy(isMetered = true))
             advanceUntilIdle()
-            assertEquals(ShowNotesImageMode.TAP_TO_LOAD, viewModel.uiState.value.imageMode)
+            assertEquals(ShowNotesImageMode.BLOCKED, viewModel.uiState.value.imageMode)
         }
 
     @Test
