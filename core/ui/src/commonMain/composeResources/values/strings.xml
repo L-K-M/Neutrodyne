@@ -129,7 +129,7 @@
     <string name="action_retry">Retry</string>
     <string name="episode_opens_youtube">Opens in YouTube</string>
     <string name="episode_offline_row">Offline</string>
-    <string name="episode_offline_toast">Offline — this episode isn\'t downloaded</string>
+    <string name="episode_offline_toast">Offline — this episode isn&apos;t downloaded</string>
     <string name="action_play">Play</string>
 
     <!-- Row summary parts (08 Row summary). -->
@@ -162,7 +162,7 @@
     <string name="dl_tap_resume">Tap to resume</string>
     <string name="dl_paused">Paused</string>
     <string name="dl_missing">File missing</string>
-    <string name="dl_storage_unavailable">Storage isn\'t available</string>
+    <string name="dl_storage_unavailable">Storage isn&apos;t available</string>
     <string name="dl_percent">%1$d %</string>
     <string name="dl_err_no_longer">The file is no longer on the server</string>
     <string name="dl_err_auth">The server asked for a password</string>
@@ -173,7 +173,7 @@
     <string name="dl_err_size">The file was incomplete</string>
     <string name="dl_err_storage">Not enough storage space</string>
     <string name="dl_err_yt">YouTube download failed</string>
-    <string name="dl_err_stream">This format isn\'t supported</string>
+    <string name="dl_err_stream">This format isn&apos;t supported</string>
     <string name="dl_err_failed">Download failed</string>
 
     <!-- AvailabilityText (08; wording adopted from 04). -->
@@ -181,18 +181,18 @@
     <string name="availability_members_only">Members only</string>
     <string name="availability_region_blocked">Not available in your country</string>
     <string name="availability_private">Private video</string>
-    <string name="availability_kids">Made for kids — can\'t be played here</string>
+    <string name="availability_kids">Made for kids — can&apos;t be played here</string>
     <string name="availability_unavailable">No longer available</string>
     <string name="availability_upcoming">Premieres soon</string>
     <string name="availability_live">Live now</string>
 
     <!-- FeedErrorText (08 String mappers) and NetErrorText. -->
-    <string name="net_offline">You\'re offline</string>
-    <string name="net_timeout">The server didn\'t answer in time</string>
-    <string name="net_dns">Couldn\'t find the server</string>
-    <string name="net_connection">Couldn\'t connect</string>
-    <string name="net_lan">Feeds on your local network aren\'t supported yet</string>
-    <string name="net_tls_untrusted">The server\'s certificate isn\'t trusted</string>
+    <string name="net_offline">You&apos;re offline</string>
+    <string name="net_timeout">The server didn&apos;t answer in time</string>
+    <string name="net_dns">Couldn&apos;t find the server</string>
+    <string name="net_connection">Couldn&apos;t connect</string>
+    <string name="net_lan">Feeds on your local network aren&apos;t supported yet</string>
+    <string name="net_tls_untrusted">The server&apos;s certificate isn&apos;t trusted</string>
     <string name="net_tls_handshake">Secure connection failed</string>
     <string name="net_cancelled">Cancelled</string>
     <string name="net_other">Something went wrong</string>
@@ -204,7 +204,7 @@
     <string name="feed_err_server">Server error</string>
     <string name="feed_err_redirects">Too many redirects</string>
     <string name="feed_err_too_large">The feed is too large</string>
-    <string name="feed_err_not_a_feed">This isn\'t a podcast feed</string>
+    <string name="feed_err_not_a_feed">This isn&apos;t a podcast feed</string>
     <string name="feed_err_no_media">No audio or video in this feed</string>
     <string name="feed_err_storage">Not enough storage space</string>
     <string name="feed_err_moved">The feed moved to a new address</string>
@@ -213,12 +213,12 @@
     <string name="feed_err_auth_failed">Authentication failed</string>
 
     <!-- Offline banner (08 Banners, priority 6). -->
-    <string name="offline_banner">You\'re offline — downloaded episodes still play</string>
+    <string name="offline_banner">You&apos;re offline — downloaded episodes still play</string>
 
     <!-- Feeds (08 Feeds). -->
     <string name="feeds_refresh">Refresh</string>
-    <string name="feeds_load_error">Couldn\'t load episodes</string>
-    <string name="feeds_caught_up">You\'re all caught up</string>
+    <string name="feeds_load_error">Couldn&apos;t load episodes</string>
+    <string name="feeds_caught_up">You&apos;re all caught up</string>
     <string name="feeds_show_played">Show played episodes</string>
     <string name="feeds_clear_filters">Clear filters</string>
     <string name="feeds_onboarding_title">Your feeds live here</string>
@@ -271,7 +271,7 @@
     <string name="podcast_needs_password">This feed needs a password</string>
     <string name="podcast_enter_password">Enter password</string>
     <string name="podcast_gone">This feed no longer exists</string>
-    <string name="podcast_maybe_moved">This feed hasn\'t updated since %1$s — it may have moved</string>
+    <string name="podcast_maybe_moved">This feed hasn&apos;t updated since %1$s — it may have moved</string>
     <string name="podcast_load_older">Load older episodes</string>
     <string name="podcast_mark_played">Mark all as played</string>
     <string name="podcast_copy_feed">Copy feed address</string>
@@ -345,14 +345,14 @@
     <string name="add_subscription_list">This is a subscription list — a file of feeds to subscribe to all at once.</string>
     <string name="add_import_later">Import arrives with a later milestone — pick a single feed address meanwhile.</string>
     <string name="add_error_not_a_url">Enter a feed address</string>
-    <string name="add_error_invalid_url">That doesn\'t look like a feed address</string>
+    <string name="add_error_invalid_url">That doesn&apos;t look like a feed address</string>
     <string name="add_error_http">The server answered %1$d</string>
     <string name="add_error_malformed">The feed could not be read</string>
-    <string name="add_error_list_feed">This kind of feed isn\'t supported</string>
+    <string name="add_error_list_feed">This kind of feed isn&apos;t supported</string>
     <string name="add_error_apple_only">This show has no public feed</string>
     <string name="add_error_spotify">Spotify shows have no public feed — search by name</string>
     <string name="add_error_directory_busy">Search is busy — try again in a moment</string>
-    <string name="add_error_youtube">YouTube channels aren\'t supported yet</string>
+    <string name="add_error_youtube">YouTube channels aren&apos;t supported yet</string>
     <string name="add_subscribed_toast">Subscribed to %1$s</string>
     <string name="add_already_subscribed">Already subscribed</string>
     <string name="add_might_be_subscribed">You may already be subscribed to this show. Subscribe anyway?</string>

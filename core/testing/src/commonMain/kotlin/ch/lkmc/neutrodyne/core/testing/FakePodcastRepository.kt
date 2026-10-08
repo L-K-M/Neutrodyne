@@ -27,6 +27,10 @@ class FakePodcastRepository : PodcastRepository {
     /** Removed by [unsubscribe]; the ids the cascade actually dropped. */
     val subscribedIds = MutableStateFlow<Set<Long>>(emptySet())
 
+    /** Canned answers for the `Outcome` writes — success by default. */
+    var credentialsOutcome: Outcome<Unit, AddPodcastError> = Outcome.Success(Unit)
+    var editUrlOutcome: Outcome<Unit, AddPodcastError> = Outcome.Success(Unit)
+
     val calls = mutableListOf<String>()
 
     override fun observeLibraryTiles(groupId: Long?): Flow<List<LibraryTile>> = tiles
@@ -52,7 +56,13 @@ class FakePodcastRepository : PodcastRepository {
         calls += "merge($loserId, $winnerId)"
     }
 
-    override suspend fun downloadedEpisodeIds(podcastIds: List<Long>): List<Long> = emptyList()
+    /** The `episode.id`s a podcast has downloaded — feeds `downloadedEpisodeIds`. */
+    val downloadedIds = MutableStateFlow<Map<Long, List<Long>>>(emptyMap())
+
+    override suspend fun downloadedEpisodeIds(podcastIds: List<Long>): List<Long> {
+        calls += "downloadedEpisodeIds($podcastIds)"
+        return podcastIds.flatMap { downloadedIds.value[it].orEmpty() }
+    }
 
     override suspend fun setIncludeInAll(
         podcastId: Long,
@@ -71,12 +81,18 @@ class FakePodcastRepository : PodcastRepository {
     override suspend fun setCredentials(
         podcastId: Long,
         credentials: BasicCredentials,
-    ): Outcome<Unit, AddPodcastError> = Outcome.Success(Unit)
+    ): Outcome<Unit, AddPodcastError> {
+        calls += "setCredentials($podcastId, ${credentials.username})"
+        return credentialsOutcome
+    }
 
     override suspend fun editFeedUrl(
         podcastId: Long,
         input: String,
-    ): Outcome<Unit, AddPodcastError> = Outcome.Success(Unit)
+    ): Outcome<Unit, AddPodcastError> {
+        calls += "editFeedUrl($podcastId, $input)"
+        return editUrlOutcome
+    }
 
     override suspend fun retry(
         podcastId: Long,
