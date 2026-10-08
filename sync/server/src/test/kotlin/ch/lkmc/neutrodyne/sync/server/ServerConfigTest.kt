@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.sync.server
 
 import java.nio.file.Files
+import java.nio.file.Path
 import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -14,7 +15,7 @@ class ServerConfigTest {
     fun `defaults match the configuration table`() {
         val config = loadValidConfig()
 
-        assertEquals("./data", config.dataDir.toString())
+        assertEquals(Path.of("./data"), config.dataDir)
         assertEquals(ListenAddress("127.0.0.1", 8787), config.listen)
         assertNull(config.publicUrl)
         assertEquals(IpCidr.parseAll("127.0.0.1/32,::1/128"), config.trustedProxies)
@@ -50,7 +51,7 @@ class ServerConfigTest {
                     ),
             )
 
-        assertEquals("/var/lib/neutrodyne-server", config.dataDir.toString())
+        assertEquals(Path.of("/var/lib/neutrodyne-server"), config.dataDir)
         assertEquals(ListenAddress("0.0.0.0", 8787), config.listen)
         assertEquals("https://sync.example.org", config.publicUrl.toString())
         assertEquals(2, config.trustedProxies.size)
