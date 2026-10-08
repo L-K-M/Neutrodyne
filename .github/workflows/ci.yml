@@ -94,6 +94,12 @@ jobs:
           --continue
       - name: Frozen schemas
         run: scripts/ci/check-frozen-schemas.sh
+      # The CI scripts' own boundary regressions (scripts/ci/tests): fixtures
+      # and stubs only, no build outputs — bash, coreutils and python3's stdlib.
+      - name: CI script fixture tests
+        run: |
+          scripts/ci/tests/install-android-sdk.test.sh
+          python3 scripts/ci/tests/report-nightly.test.py
 
   unit:
     runs-on: ubuntu-24.04
