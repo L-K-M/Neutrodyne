@@ -1,0 +1,9 @@
+#!/bin/sh
+# SPDX-License-Identifier: Unlicense
+#
+# Neutrodyne's DEB pre-install: a no-op on purpose — the package has no service to
+# stop and no files to divert. It exists so jpackage does not fall back to its own
+# GPL-2.0+CE maintainer-script templates, which are never shipped (D3).
+set -e
+
+exit 0

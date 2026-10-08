@@ -1,0 +1,28 @@
+#!/bin/sh
+# SPDX-License-Identifier: Unlicense
+#
+# Neutrodyne's DEB post-remove (11 Uninstall and data retention): removes the desktop
+# entry and the hicolor icons on remove, never on upgrade. The user's data directories
+# are never touched.
+set -e
+
+if [ "$1" != "remove" ] && [ "$1" != "purge" ]; then
+    exit 0
+fi
+
+APPLICATIONS_DIR="/usr/share/applications"
+ICONS_DIR="/usr/share/icons/hicolor"
+
+rm -f "$APPLICATIONS_DIR/ch.lkmc.neutrodyne.desktop"
+# An absent hicolor tree must not fail the removal under set -e.
+if [ -d "$ICONS_DIR" ]; then
+    find "$ICONS_DIR" -type f -name 'neutrodyne.png' -exec rm -f {} +
+fi
+
+# Optional caches; absent tools are not an error.
+command -v update-desktop-database >/dev/null 2>&1 &&
+    update-desktop-database "$APPLICATIONS_DIR" || true
+command -v gtk-update-icon-cache >/dev/null 2>&1 &&
+    gtk-update-icon-cache -q -t -f "$ICONS_DIR" || true
+
+exit 0

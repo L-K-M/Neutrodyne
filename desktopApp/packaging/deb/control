@@ -1,0 +1,21 @@
+Package: APPLICATION_PACKAGE
+Version: APPLICATION_VERSION_WITH_RELEASE
+Section: APPLICATION_SECTION
+Priority: optional
+Architecture: APPLICATION_ARCH
+Maintainer: APPLICATION_MAINTAINER
+Installed-Size: APPLICATION_INSTALLED_SIZE
+Provides: APPLICATION_PACKAGE
+Depends: libc6 (>= 2.31), libasound2t64 | libasound2, libx11-6, libxext6, libxi6, libxrender1, libxtst6, libfreetype6, libfontconfig1, zlib1g
+Recommends: libpulse0 | pipewire-pulse, libgl1, libgtk-3-0
+Description: Podcast player organised around groups
+ Neutrodyne plays podcasts and YouTube channels in user-defined groups, each
+ with its own newest-first episode feed, on Windows, macOS and Linux. It works
+ fully offline and syncs through an optional self-hosted server.
+X-Comment: Neutrodyne's DEB control file (11 Linux DEB, RPM and tar.gz).
+ dpkg-deb rejects # comments, so notes ride as X- fields; jpackage's
+ APPLICATION_* tokens are substituted at package time. The portable Depends
+ names (>= bullseye, or bookworm's libasound2t64 alternative) cover the sonames
+ the JARs' natives and the JVM need; the maintainer scripts install the frozen
+ desktop entry.
+X-Spdx-License-Identifier: Unlicense

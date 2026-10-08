@@ -136,6 +136,13 @@ jobs:
         with:
           cache-provider: basic
           cache-read-only: true
+      # Build every APK the two emulator steps install before the first emulator boots: compiling
+      # beside a 4-core emulator starved it, and system_server lost its providers mid-run
+      # (nightly 2026-10-08: "Cannot access system provider: 'settings'" at install time).
+      - name: Build the test APKs before the emulators boot
+        run: |
+          ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true assembleDebug assembleDebugAndroidTest
+          ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true :app:assembleRelease :app:assembleReleaseAndroidTest
       - name: Debug suite on the API 37 16 KB image
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
@@ -148,10 +155,23 @@ jobs:
           ram-size: 4096M
           disk-size: 6000M
           emulator-boot-timeout: 1200
+          # Guest-side rendering and three-button navigation: with host rendering this image's
+          # gralloc mapper aborts surfaceflinger whenever SystemUI samples the gesture handle's
+          # region ("Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma"), and each
+          # abort restarts system_server (nightly 2026-10-08: 4-12 aborts in 3 min under
+          # swiftshader_indirect, swangle_indirect, emulator 37.3.3 and the 37.1 image; none
+          # with -gpu guest after the switch to three-button navigation).
+          emulator-options: -no-window -gpu guest -no-snapshot -noaudio -no-boot-anim
           # android-emulator-runner runs each script line as its own `sh -c`, so a command
           # must fit on one line (a `\` continuation becomes a literal argument).
+          # sys.boot_completed can precede the settings and package services; the wait line
+          # holds the run until both answer (5 min cap).
           script: |
+            adb logcat -v threadtime > "$RUNNER_TEMP/logcat-api37-debug.txt" 2>&1 &
             test "$(adb shell getconf PAGE_SIZE | tr -d '\r')" = "16384" || { echo "PAGE_SIZE != 16384"; exit 1; }
+            timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
+            timeout 120 adb shell 'until cmd overlay enable com.android.internal.systemui.navbar.threebutton; do sleep 2; done'
+            timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true connectedDebugAndroidTest
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly connectedAndroidDeviceTest
       - name: Release smoke on API 37
@@ -166,9 +186,29 @@ jobs:
           ram-size: 4096M
           disk-size: 6000M
           emulator-boot-timeout: 1200
+          # Guest-side rendering and three-button navigation: with host rendering this image's
+          # gralloc mapper aborts surfaceflinger whenever SystemUI samples the gesture handle's
+          # region ("Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma"), and each
+          # abort restarts system_server (nightly 2026-10-08: 4-12 aborts in 3 min under
+          # swiftshader_indirect, swangle_indirect, emulator 37.3.3 and the 37.1 image; none
+          # with -gpu guest after the switch to three-button navigation).
+          emulator-options: -no-window -gpu guest -no-snapshot -noaudio -no-boot-anim
           script: |
+            adb logcat -v threadtime > "$RUNNER_TEMP/logcat-api37-release.txt" 2>&1 &
+            timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
+            timeout 120 adb shell 'until cmd overlay enable com.android.internal.systemui.navbar.threebutton; do sleep 2; done'
+            timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
             ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true :app:connectedReleaseAndroidTest
             # TODO (M6b): :benchmark's out-of-process release smoke journeys join here.
+      # The device log of both emulator steps, for diagnosing a failed run (system_server state).
+      - name: Upload the emulator logs
+        if: ${{ !success() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: api37-16k-logcat
+          path: ${{ runner.temp }}/logcat-api37-*.txt
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Build the release APKs for the alignment check
         run: ./gradlew assembleRelease -Pneutrodyne.abiSplits=true
       - name: 16 KB alignment on the release x86_64 APK (PLAN M11 AC7)

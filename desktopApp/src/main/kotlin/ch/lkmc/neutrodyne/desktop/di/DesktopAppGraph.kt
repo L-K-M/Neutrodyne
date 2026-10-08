@@ -5,29 +5,62 @@ import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
+import ch.lkmc.neutrodyne.core.common.CrashContext
+import ch.lkmc.neutrodyne.core.common.CrashReporter
+import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
+import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
+import ch.lkmc.neutrodyne.desktop.youtube.DesktopYouTubeBindingsModule
+import dev.zacsweers.metro.Binds
 import dev.zacsweers.metro.DependencyGraph
 import dev.zacsweers.metro.Provides
+import dev.zacsweers.metro.createGraphFactory
 import kotlinx.coroutines.CoroutineScope
 
 /**
- * The desktop shell's Metro graph (01 "Dependency injection", D82; 11 Desktop shell). M1a adds the
- * database plumbing: `AppDirs` is a factory input because `main` resolves it before the graph (the
- * single-instance lock needs it earlier); the window, `BuildInfo` and `DesktopJobRunner` arrive
- * with the M0b shell.
+ * The desktop shell's composition root (11 DesktopAppGraph, 01 Dependency injection). It
+ * contributes the desktop implementations of the shared interfaces and nothing Android has.
+ *
+ * `AppDirs`, `BuildInfo` and the shell's [DesktopCrashReporter] come in through the factory (the
+ * crash reporter is constructed by `MainKt` before the graph so 11's start-up order — logging,
+ * crash handler, `session.json` before the graph — holds; 01's sketch is amended accordingly,
+ * 2026-10-06). M1a adds the database plumbing: [databaseOpener] drives the open at initializer
+ * band 100 and the window's start-up gate. `DesktopJobRunner` (as `jobRunner`) and the media/OS
+ * bindings of `:desktop:system` join with their milestones.
  */
-@DependencyGraph(AppScope::class)
+@DependencyGraph(AppScope::class, bindingContainers = [DesktopYouTubeBindingsModule::class])
 interface DesktopAppGraph {
     val dirs: AppDirs
+
+    val buildInfo: BuildInfo
 
     @ApplicationScope
     val appScope: CoroutineScope
 
     val initializers: Set<AppInitializer>
 
+    /** Every feature's navigation entries (01 Feature entry installers). */
+    val entryInstallers: Set<EntryProviderInstaller>
+
+    /** The shell's shared bindings (the M0b graph test resolves these; 01 Graph tests). */
+    val settingsRepository: SettingsRepository
+
+    val networkMonitor: NetworkMonitor
+
+    val crashReporter: CrashReporter
+
     /** The window maps `openState` onto the start-up gate (01 Splash and start-up gate). */
     val databaseOpener: DatabaseOpener
+
+    @Binds
+    val DesktopCrashReporter.asCrashReporter: CrashReporter
+
+    @Binds
+    val DesktopCrashReporter.asCrashContext: CrashContext
 
     /**
      * The one database accessor (02 Error handling and recovery): blocks a background caller until
@@ -40,6 +73,20 @@ interface DesktopAppGraph {
     fun interface Factory {
         fun create(
             @Provides dirs: AppDirs,
+            @Provides buildInfo: BuildInfo,
+            @Provides crashReporter: DesktopCrashReporter,
         ): DesktopAppGraph
     }
 }
+
+/** Builds the graph from the shell's pre-graph instances (single construction path, also smoke's). */
+internal fun createDesktopGraph(
+    dirs: AppDirs,
+    buildInfo: BuildInfo,
+    crashReporter: DesktopCrashReporter,
+): DesktopAppGraph =
+    createGraphFactory<DesktopAppGraph.Factory>().create(
+        dirs = dirs,
+        buildInfo = buildInfo,
+        crashReporter = crashReporter,
+    )

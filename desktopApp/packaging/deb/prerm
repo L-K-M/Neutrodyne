@@ -1,0 +1,10 @@
+#!/bin/sh
+# SPDX-License-Identifier: Unlicense
+#
+# Neutrodyne's DEB pre-remove: a no-op on purpose — nothing runs that must be
+# stopped; the desktop entry and icons the postinst installed outside the package
+# tree are removed by the postrm on remove and purge. It exists so jpackage does
+# not fall back to its own GPL-2.0+CE maintainer-script templates (D3).
+set -e
+
+exit 0
