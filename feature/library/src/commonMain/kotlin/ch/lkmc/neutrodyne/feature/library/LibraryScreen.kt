@@ -81,15 +81,15 @@ internal data class PendingUnsubscribe(
 internal fun LibraryScreen(
     state: LibraryUiState,
     pendingUnsubscribe: PendingUnsubscribe?,
-    pendingMarkPlayed: Long?,
+    pendingMarkAll: Long?,
     onSort: (LibrarySort) -> Unit,
     onToggleTitles: (Boolean) -> Unit,
     onOpenPodcast: (Long) -> Unit,
     onTileAction: (podcastId: Long, action: TileAction) -> Unit,
     onConfirmUnsubscribe: (LibraryTile) -> Unit,
     onDismissUnsubscribe: () -> Unit,
-    onConfirmMarkPlayed: (Long) -> Unit,
-    onDismissMarkPlayed: () -> Unit,
+    onConfirmMarkAll: (Long) -> Unit,
+    onDismissMarkAll: () -> Unit,
     onAddPodcast: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -145,16 +145,16 @@ internal fun LibraryScreen(
 
     // 08's required confirmation before the write (UI review round 2); the "Older than"
     // options of the dialog table wait on M2's `countUnplayed` (deviation recorded).
-    if (pendingMarkPlayed != null) {
+    if (pendingMarkAll != null) {
         NdDialog(
-            onDismissRequest = onDismissMarkPlayed,
+            onDismissRequest = onDismissMarkAll,
             icon = NdIcons.DoneAll,
             title = stringResource(Res.string.podcast_mark_played),
             confirm =
                 NdDialogAction(stringResource(Res.string.podcast_mark_played)) {
-                    onConfirmMarkPlayed(pendingMarkPlayed)
+                    onConfirmMarkAll(pendingMarkAll)
                 },
-            dismiss = NdDialogAction(stringResource(Res.string.action_cancel), onDismissMarkPlayed),
+            dismiss = NdDialogAction(stringResource(Res.string.action_cancel), onDismissMarkAll),
         )
     }
 }

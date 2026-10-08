@@ -282,7 +282,11 @@ class AddPodcastViewModelTest : MainDispatcherTest() {
 
             second.complete(Unit)
             advanceUntilIdle()
-            assertEquals(9L, viewModel.uiState.value.done?.podcastId)
+            assertEquals(
+                9L,
+                viewModel.uiState.value.done
+                    ?.podcastId,
+            )
         }
 
     @Test

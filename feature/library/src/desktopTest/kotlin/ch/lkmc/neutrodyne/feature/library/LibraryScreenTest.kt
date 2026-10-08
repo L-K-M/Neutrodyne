@@ -346,15 +346,15 @@ class LibraryScreenTest {
     private fun ComposeUiTest.setLibrary(
         state: LibraryUiState,
         pendingUnsubscribe: PendingUnsubscribe? = null,
-        pendingMarkPlayed: Long? = null,
+        pendingMarkAll: Long? = null,
         onSort: (LibrarySort) -> Unit = {},
         onToggleTitles: (Boolean) -> Unit = {},
         onOpenPodcast: (Long) -> Unit = {},
         onTileAction: (Long, TileAction) -> Unit = { _, _ -> },
         onConfirmUnsubscribe: (LibraryTile) -> Unit = {},
         onDismissUnsubscribe: () -> Unit = {},
-        onConfirmMarkPlayed: (Long) -> Unit = {},
-        onDismissMarkPlayed: () -> Unit = {},
+        onConfirmMarkAll: (Long) -> Unit = {},
+        onDismissMarkAll: () -> Unit = {},
         onAddPodcast: () -> Unit = {},
     ) {
         setContent {
@@ -368,15 +368,15 @@ class LibraryScreenTest {
                     LibraryScreen(
                         state = state,
                         pendingUnsubscribe = pendingUnsubscribe,
-                        pendingMarkPlayed = pendingMarkPlayed,
+                        pendingMarkAll = pendingMarkAll,
                         onSort = onSort,
                         onToggleTitles = onToggleTitles,
                         onOpenPodcast = onOpenPodcast,
                         onTileAction = onTileAction,
                         onConfirmUnsubscribe = onConfirmUnsubscribe,
                         onDismissUnsubscribe = onDismissUnsubscribe,
-                        onConfirmMarkPlayed = onConfirmMarkPlayed,
-                        onDismissMarkPlayed = onDismissMarkPlayed,
+                        onConfirmMarkAll = onConfirmMarkAll,
+                        onDismissMarkAll = onDismissMarkAll,
                         onAddPodcast = onAddPodcast,
                     )
                 }
