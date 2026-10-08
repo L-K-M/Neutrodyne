@@ -53,9 +53,10 @@ class YtxProcessStartTest {
     @Before
     fun setUp() {
         context = InstrumentationRegistry.getInstrumentation().targetContext
-        // A stale marker or an already-running :ytx would miss the probe window.
-        ProcessStartProbe.dir(context).deleteRecursively()
+        // A stale marker or an already-running :ytx would miss the probe window; the kill comes
+        // first so a stale :ytx cannot rewrite a report after the directory is cleared.
         killYtx()
+        ProcessStartProbe.dir(context).deleteRecursively()
     }
 
     @After
@@ -108,6 +109,9 @@ class YtxProcessStartTest {
         assertThat(databasesDir().exists()).isFalse()
 
         // 04's idle stop and hang kill rely on a same-UID kill leaving the main process alone.
+        // Unbind first: a still-bound BIND_AUTO_CREATE service would be restarted in a new :ytx.
+        connection?.let(context::unbindService)
+        connection = null
         Process.killProcess(ytxPid)
         assertTrue(":ytx is still running after killProcess", awaitYtxGone())
         assertThat(ProcessRole.current()).isEqualTo(ProcessRole.MAIN)
@@ -118,7 +122,7 @@ class YtxProcessStartTest {
         // The platform instantiates a provider in :ytx only when the provider's processName is
         // :ytx or it declares multiprocess — so a manifest with neither proves no
         // default-process ContentProvider can be created there.
-        val spawning = providers().filter { it.processName.endsWith(YTX_SUFFIX) || it.multiprocess }
+        val spawning = providers().filter { it.processName?.endsWith(YTX_SUFFIX) == true || it.multiprocess }
         assertThat(spawning.map { it.name }).isEmpty()
     }
 

@@ -45,9 +45,9 @@ internal fun installAcra(
     app: Application,
     mailTo: String = BuildConfig.ACRA_MAILTO,
 ) {
-    ProcessStartProbe.record(ProcessStartProbe.Event.ACRA_INSTALLED)
     ACRA.log = RedactingAcraLog // before init: ACRA logs the original exception before redaction runs
     app.initAcra(acraConfiguration(app, mailTo))
+    ProcessStartProbe.record(ProcessStartProbe.Event.ACRA_INSTALLED)
 }
 
 private fun acraConfiguration(
