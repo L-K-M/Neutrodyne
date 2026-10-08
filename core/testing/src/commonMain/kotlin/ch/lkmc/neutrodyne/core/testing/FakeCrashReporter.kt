@@ -21,17 +21,16 @@ class FakeCrashReporter(
     override val isAvailable: Boolean
         get() = _isAvailable.value
 
+    /** One flow carries both projections: `calls` and `reported` stay in sync by construction. */
+    private val recorded = MutableStateFlow(listOf<Pair<String, Throwable>>())
+
     /** The recorded calls as `where` names, in order. */
     val calls: List<String>
-        get() = _calls.value
-
-    private val _calls = MutableStateFlow(listOf<String>())
+        get() = recorded.value.map { it.first }
 
     /** The reported throwables, in order. */
     val reported: List<Throwable>
-        get() = _reported.value
-
-    private val _reported = MutableStateFlow(listOf<Throwable>())
+        get() = recorded.value.map { it.second }
 
     fun setAvailable(available: Boolean) {
         _isAvailable.value = available
@@ -41,8 +40,7 @@ class FakeCrashReporter(
         t: Throwable,
         where: String,
     ) {
-        _calls.value = _calls.value + where
-        _reported.value = _reported.value + t
+        recorded.value = recorded.value + (where to t)
     }
 }
 

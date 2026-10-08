@@ -72,9 +72,17 @@ internal fun ApplicationScope.NeutrodyneWindow(
     val icon = remember { WindowIcons.windowIconPainter() }
     var hidden by remember { mutableStateOf(false) }
 
+    // The Compose-side `hidden` owns visibility; a hand-off reveal clears it first, so the
+    // activator's direct `isVisible` never fights the next recomposition.
+    DisposableEffect(activator) {
+        activator.unhide = { hidden = false }
+        onDispose { activator.unhide = {} }
+    }
+
     Window(
         onCloseRequest = { requestClose(onQuitRequest) { hidden = it } },
         state = state,
+        visible = !hidden,
         title = stringResource(Res.string.window_title),
         icon = icon,
         onKeyEvent = { event -> windowShortcut(event) { requestClose(onQuitRequest) { hidden = it } } },

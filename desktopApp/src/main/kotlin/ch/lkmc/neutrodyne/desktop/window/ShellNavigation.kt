@@ -44,6 +44,14 @@ internal class WindowActivator {
     @Volatile
     private var window: Window? = null
 
+    /**
+     * Clears the window's hidden state before a reveal (the "from the tray if hidden" half of
+     * 11's Hand-off row) — the composition owns `visible = !hidden`, so a reveal that skipped
+     * this would be undone by the next recomposition. Set by the window's composition.
+     */
+    @Volatile
+    var unhide: () -> Unit = {}
+
     fun register(window: Window) {
         this.window = window
     }
@@ -55,6 +63,7 @@ internal class WindowActivator {
     fun bringToFront() {
         val current = window ?: return
         SwingUtilities.invokeLater {
+            unhide()
             current.isVisible = true
             if (current is Frame && current.state == Frame.ICONIFIED) current.state = Frame.NORMAL
             current.toFront()

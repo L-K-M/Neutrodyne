@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.shell
 
+import java.awt.EventQueue
 import java.awt.GraphicsEnvironment
 import javax.swing.JOptionPane
 import javax.swing.SwingUtilities
@@ -27,6 +28,11 @@ internal object ShellDialogs {
     fun showError(message: String) {
         if (GraphicsEnvironment.isHeadless()) {
             System.err.println(message)
+            return
+        }
+        // On the EDT invokeAndWait would deadlock — the modal dialog blocks there itself.
+        if (EventQueue.isDispatchThread()) {
+            JOptionPane.showMessageDialog(null, message, APP_TITLE, JOptionPane.ERROR_MESSAGE)
             return
         }
         try {

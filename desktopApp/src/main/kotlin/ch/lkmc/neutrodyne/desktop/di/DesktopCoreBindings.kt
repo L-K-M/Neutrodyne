@@ -42,7 +42,11 @@ import kotlinx.coroutines.flow.flowOf
 object DesktopCoreBindings {
     private const val TAG = "AppScope"
 
-    /** Debug builds crash fast on an uncaught scope failure (01 Errors); `halt` keeps the exit unclean. */
+    /**
+     * Debug builds crash fast on an uncaught scope failure (01 Errors); `halt` keeps the exit
+     * unclean. Release builds only log — 01's rule 4: "release builds never crash on a logged
+     * error", the same as Android's handler, which rethrows only in debug.
+     */
     private const val DEBUG_CRASH_EXIT = 1
 
     @Provides
@@ -65,8 +69,9 @@ object DesktopCoreBindings {
             CoroutineExceptionHandler { _, throwable ->
                 Log.e(TAG, throwable) { "uncaught failure in the application scope" }
                 if (buildInfo.debug) {
-                    // Debug builds crash fast (01 Errors); the file records why, halt keeps the exit unclean.
-                    crashReporter.recordUnhandled(Thread.currentThread(), throwable)
+                    // The file records why the process died. reportNonFatal is uncapped, so a
+                    // spent background-files budget cannot skip the record right before halt.
+                    crashReporter.reportNonFatal(throwable, where = "application-scope")
                     Runtime.getRuntime().halt(DEBUG_CRASH_EXIT)
                 }
             }

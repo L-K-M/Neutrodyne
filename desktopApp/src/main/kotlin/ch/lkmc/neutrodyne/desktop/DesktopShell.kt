@@ -38,7 +38,6 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.security.SecureRandom
 import java.util.concurrent.Executors
-import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * The shell start-up in 11's order: `AppDirs` → `SingleInstanceLock` → directories, log, crash
@@ -66,13 +65,15 @@ internal object DesktopShell {
     private const val REASON_WINDOW_CLOSED = "window closed"
 
     fun start(rawArgs: Array<String>): Int {
-        // Step 1: split `--background` (start at login) from inputs; unknown flags ignored.
+        // Step 1: split `--background` (start at login) from inputs. No sinks are installed yet,
+        // so unknown flags are collected and logged once the owner side opens the log.
         var background = false
         val inputs = mutableListOf<String>()
+        val unknownFlags = mutableListOf<String>()
         for (arg in rawArgs) {
             when {
                 arg == BACKGROUND_FLAG -> background = true
-                arg.startsWith(FLAG_PREFIX) -> Log.w(TAG) { "ignoring unknown flag $arg" }
+                arg.startsWith(FLAG_PREFIX) -> unknownFlags += arg
                 else -> inputs += arg
             }
         }
@@ -98,7 +99,7 @@ internal object DesktopShell {
             )
         return when (lock.tryAcquire()) {
             SingleInstanceLock.Acquire.HeldByOther -> handOffToOwner(dirs, inputs, buildInfo)
-            SingleInstanceLock.Acquire.Acquired -> runOwner(dirs, inputs, background, buildInfo, lock)
+            SingleInstanceLock.Acquire.Acquired -> runOwner(dirs, inputs, unknownFlags, background, buildInfo, lock)
         }
     }
 
@@ -127,6 +128,7 @@ internal object DesktopShell {
     private fun runOwner(
         dirs: AppDirs,
         inputs: List<String>,
+        unknownFlags: List<String>,
         background: Boolean,
         buildInfo: BuildInfo,
         lock: SingleInstanceLock,
@@ -138,12 +140,13 @@ internal object DesktopShell {
         } catch (e: IOException) {
             return dataDirFailure(dirs.data, e)
         }
-        if (background) Log.i(TAG) { "--background start; the window starts iconified" }
 
         val recentLogs = RecentLogBuffer()
         val fileSink = RollingFileSink(dirs.logs, if (buildInfo.debug) LogLevel.DEBUG else LogLevel.INFO)
         val sinks = if (buildInfo.debug) arrayOf(recentLogs, fileSink, ConsoleSink) else arrayOf(recentLogs, fileSink)
         Log.install(*sinks)
+        for (flag in unknownFlags) Log.w(TAG) { "ignoring unknown flag $flag" }
+        if (background) Log.i(TAG) { "--background start; the window starts iconified" }
         Log.i(
             TAG,
         ) { "Neutrodyne ${buildInfo.versionName} starting (install kind ${buildInfo.desktop?.installKind?.wire})" }
@@ -151,11 +154,13 @@ internal object DesktopShell {
         val crashReporter = DesktopCrashReporter(dirs, buildInfo, DesktopClock, recentLogs)
         crashReporter.installAsDefaultExceptionHandler()
         reviewPreviousSession(dirs, crashReporter)
+        // The session's start instant, also carried by the clean-exit rewrite at shutdown.
+        val sessionStartedAtMs = DesktopClock.now()
         SessionFile.write(
             dirs.state,
             SessionState(
                 pid = ProcessHandle.current().pid(),
-                startedAtMs = DesktopClock.now(),
+                startedAtMs = sessionStartedAtMs,
                 versionName = buildInfo.versionName,
                 cleanExit = false,
             ),
@@ -197,6 +202,7 @@ internal object DesktopShell {
                     handshakeDispatcher.close()
                     graph.appScope.cancel()
                 },
+                startedAtMs = sessionStartedAtMs,
             )
         Runtime.getRuntime().addShutdownHook(
             Thread(

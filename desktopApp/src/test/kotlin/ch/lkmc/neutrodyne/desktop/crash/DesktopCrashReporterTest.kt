@@ -24,7 +24,9 @@ class DesktopCrashReporterTest {
     private val clock = TestClock()
     private val recentLogs = RecentLogBuffer(timeSource = { Instant.parse("2026-10-06T00:00:00Z") })
     private val buildInfo = BuildInfoLoader.load()
-    private val reporter = DesktopCrashReporter(dirs, buildInfo, clock, recentLogs)
+    private val exits = mutableListOf<Int>()
+    private val reporter =
+        DesktopCrashReporter(dirs, buildInfo, clock, recentLogs, processExit = { exits += it })
 
     @Test
     fun `an uncaught exception writes the field set, redacted`() {
@@ -66,6 +68,27 @@ class DesktopCrashReporterTest {
         val content = Files.readString(singleCrashFile())
         assertThat(content).contains("where=startup-gate")
         assertThat(content).contains("database recovery needed")
+    }
+
+    @Test
+    fun `a main or EDT thread crash ends the process after writing the file`() {
+        // Until the "has to close" dialog arrives with the window milestone, a fatal crash
+        // ends the process through the injected exit — never a silent zombie.
+        reporter.recordUnhandled(Thread.currentThread(), RuntimeException("main died"))
+        assertThat(crashFiles()).hasSize(1)
+        assertThat(exits).containsExactly(1)
+
+        exits.clear()
+        reporter.recordUnhandled(Thread {}.apply { name = "AWT-EventQueue-0" }, RuntimeException("edt died"))
+        assertThat(exits).containsExactly(1)
+    }
+
+    @Test
+    fun `a background thread crash leaves the process running`() {
+        val worker = Thread {}.apply { name = "pool-1" }
+        reporter.recordUnhandled(worker, RuntimeException("worker died"))
+        assertThat(crashFiles()).hasSize(1)
+        assertThat(exits).isEmpty()
     }
 
     @Test
