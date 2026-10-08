@@ -4,6 +4,8 @@ package ch.lkmc.neutrodyne.core.ui.root
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.resolve
 import kotlinx.collections.immutable.ImmutableList
@@ -16,9 +18,12 @@ import kotlinx.collections.immutable.ImmutableList
 @Composable
 public fun ShowUserMessages(
     messages: ImmutableList<UserMessage>,
-    onMessageShown: (Long) -> Unit,
+    onAcknowledgeMessage: (Long) -> Unit,
 ) {
     val snackbar = LocalSnackbarHost.current
+    // Keep the current acknowledgement without restarting the visible snackbar.
+    val acknowledge by rememberUpdatedState(onAcknowledgeMessage)
+
     LaunchedEffect(messages) {
         for (message in messages) {
             snackbar.showSnackbar(
@@ -26,7 +31,7 @@ public fun ShowUserMessages(
                 actionLabel = message.action?.resolve(),
                 withDismissAction = message.action != null,
             )
-            onMessageShown(message.id)
+            acknowledge(message.id)
         }
     }
 }

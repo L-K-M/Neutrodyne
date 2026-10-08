@@ -80,12 +80,17 @@ class FeedsSettingsViewModelTest : MainDispatcherTest() {
             viewModel.setRefreshOnAppOpen(false)
             advanceUntilIdle()
 
-            val message = viewModel.uiState.value.messages.single()
+            val message =
+                viewModel.uiState.value.messages
+                    .single()
             assertEquals(Res.string.settings_save_failed, (message.text as UiText.Res).id)
 
             viewModel.onMessageShown(message.id)
             advanceUntilIdle()
-            assertTrue(viewModel.uiState.value.messages.isEmpty())
+            assertTrue(
+                viewModel.uiState.value.messages
+                    .isEmpty(),
+            )
         }
 
     @Test

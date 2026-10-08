@@ -209,12 +209,17 @@ class LibraryViewModelTest : MainDispatcherTest() {
             advanceUntilIdle()
 
             assertTrue(episodes.calls.isEmpty())
-            val message = viewModel.uiState.value.messages.single()
+            val message =
+                viewModel.uiState.value.messages
+                    .single()
             assertEquals(Res.string.write_failed, (message.text as UiText.Res).id)
 
             viewModel.onMessageShown(message.id)
             advanceUntilIdle()
-            assertTrue(viewModel.uiState.value.messages.isEmpty())
+            assertTrue(
+                viewModel.uiState.value.messages
+                    .isEmpty(),
+            )
         }
 
     @Test
@@ -228,7 +233,10 @@ class LibraryViewModelTest : MainDispatcherTest() {
             advanceUntilIdle()
 
             assertTrue(podcasts.calls.isEmpty())
-            assertTrue(viewModel.uiState.value.messages.isNotEmpty())
+            assertTrue(
+                viewModel.uiState.value.messages
+                    .isNotEmpty(),
+            )
         }
 
     /** A settings `Outcome.Failure` posts the same message — the switch stays where it was. */
@@ -243,7 +251,10 @@ class LibraryViewModelTest : MainDispatcherTest() {
             advanceUntilIdle()
 
             assertEquals(listOf("set(appearance.library_sort)"), settings.calls)
-            assertTrue(viewModel.uiState.value.messages.isNotEmpty())
+            assertTrue(
+                viewModel.uiState.value.messages
+                    .isNotEmpty(),
+            )
             assertTrue(settings.get(AppearanceSettingKeys.LIBRARY_SORT) != LibrarySort.MOST_UNPLAYED)
         }
 

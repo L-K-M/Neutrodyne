@@ -219,93 +219,93 @@ private fun FeedList(
             item(key = "header", contentType = "header") {
                 FeedHeader(state.filters, onFiltersChange, onRefresh, onMarkAllPlayedClick)
             }
-        items(
-            count = items.itemCount,
-            key =
-                items.itemKey { item ->
-                    when (item) {
-                        is FeedItem.Day -> item.key
-                        is FeedItem.Episode -> item.row.id
-                    }
-                },
-            contentType =
-                items.itemContentType { item ->
-                    when (item) {
-                        is FeedItem.Day -> {
-                            CONTENT_DAY
+            items(
+                count = items.itemCount,
+                key =
+                    items.itemKey { item ->
+                        when (item) {
+                            is FeedItem.Day -> item.key
+                            is FeedItem.Episode -> item.row.id
                         }
+                    },
+                contentType =
+                    items.itemContentType { item ->
+                        when (item) {
+                            is FeedItem.Day -> {
+                                CONTENT_DAY
+                            }
 
-                        is FeedItem.Episode -> {
-                            if (item.row.sourceType == SourceType.RSS) CONTENT_RSS else CONTENT_YOUTUBE
+                            is FeedItem.Episode -> {
+                                if (item.row.sourceType == SourceType.RSS) CONTENT_RSS else CONTENT_YOUTUBE
+                            }
+                        }
+                    },
+            ) { index ->
+                when (val item = items[index]) {
+                    is FeedItem.Day -> {
+                        Text(
+                            item.label.asString(),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(
+                                        start = DAY_PADDING,
+                                        end = DAY_PADDING,
+                                        top = DAY_TOP,
+                                        bottom = DAY_BOTTOM,
+                                    ),
+                        )
+                    }
+
+                    is FeedItem.Episode -> {
+                        EpisodeRow(
+                            row = item.row,
+                            live = null,
+                            style = EpisodeRowStyle.FEED,
+                            caps = RowCaps.FULL.copy(offline = state.offline),
+                            highlightNew = true,
+                            selected = null,
+                            onAction = onAction,
+                        )
+                    }
+
+                    null -> {
+                        SkeletonRow()
+                    }
+                }
+            }
+            when (items.loadState.append) {
+                is LoadState.Loading -> {
+                    item(key = "appendLoading", contentType = "status") {
+                        Box(
+                            Modifier.fillMaxWidth().padding(FOOTER_PAD),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator(Modifier.size(FOOTER_SPINNER))
                         }
                     }
-                },
-        ) { index ->
-            when (val item = items[index]) {
-                is FeedItem.Day -> {
-                    Text(
-                        item.label.asString(),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(
-                                    start = DAY_PADDING,
-                                    end = DAY_PADDING,
-                                    top = DAY_TOP,
-                                    bottom = DAY_BOTTOM,
+                }
+
+                is LoadState.Error -> {
+                    item(key = "appendError", contentType = "status") {
+                        NdBanner(
+                            message = stringResource(Res.string.feeds_load_error),
+                            icon = NdIcons.Error,
+                            primary =
+                                NdDialogAction(
+                                    stringResource(Res.string.action_retry),
+                                    items::retry,
                                 ),
-                    )
-                }
-
-                is FeedItem.Episode -> {
-                    EpisodeRow(
-                        row = item.row,
-                        live = null,
-                        style = EpisodeRowStyle.FEED,
-                        caps = RowCaps.FULL.copy(offline = state.offline),
-                        highlightNew = true,
-                        selected = null,
-                        onAction = onAction,
-                    )
-                }
-
-                null -> {
-                    SkeletonRow()
-                }
-            }
-        }
-        when (items.loadState.append) {
-            is LoadState.Loading -> {
-                item(key = "appendLoading", contentType = "status") {
-                    Box(
-                        Modifier.fillMaxWidth().padding(FOOTER_PAD),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator(Modifier.size(FOOTER_SPINNER))
+                        )
                     }
                 }
-            }
 
-            is LoadState.Error -> {
-                item(key = "appendError", contentType = "status") {
-                    NdBanner(
-                        message = stringResource(Res.string.feeds_load_error),
-                        icon = NdIcons.Error,
-                        primary =
-                            NdDialogAction(
-                                stringResource(Res.string.action_retry),
-                                items::retry,
-                            ),
-                    )
+                else -> {
+                    Unit
                 }
             }
-
-            else -> {
-                Unit
-            }
-        }
         }
     }
 }

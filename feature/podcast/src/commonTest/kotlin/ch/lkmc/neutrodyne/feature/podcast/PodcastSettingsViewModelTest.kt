@@ -162,12 +162,17 @@ class PodcastSettingsViewModelTest : MainDispatcherTest() {
             advanceUntilIdle()
 
             assertTrue(podcasts.calls.isEmpty())
-            val message = viewModel.uiState.value.messages.single()
+            val message =
+                viewModel.uiState.value.messages
+                    .single()
             assertEquals(Res.string.write_failed, (message.text as UiText.Res).id)
 
             viewModel.onMessageShown(message.id)
             advanceUntilIdle()
-            assertTrue(viewModel.uiState.value.messages.isEmpty())
+            assertTrue(
+                viewModel.uiState.value.messages
+                    .isEmpty(),
+            )
         }
 
     @Test
@@ -181,7 +186,10 @@ class PodcastSettingsViewModelTest : MainDispatcherTest() {
             advanceUntilIdle()
 
             assertTrue(podcasts.calls.isEmpty())
-            assertTrue(viewModel.uiState.value.messages.isNotEmpty())
+            assertTrue(
+                viewModel.uiState.value.messages
+                    .isNotEmpty(),
+            )
         }
 
     @Test
@@ -194,6 +202,9 @@ class PodcastSettingsViewModelTest : MainDispatcherTest() {
             viewModel.setOrder(FeedOrder.OLDEST_FIRST)
             advanceUntilIdle()
 
-            assertTrue(viewModel.uiState.value.messages.isNotEmpty())
+            assertTrue(
+                viewModel.uiState.value.messages
+                    .isNotEmpty(),
+            )
         }
 }
