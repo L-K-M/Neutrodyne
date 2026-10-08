@@ -71,6 +71,7 @@ jobs:
           echo "JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64" >> "$GITHUB_ENV"
           scripts/ci/install-android-sdk.sh /opt/android-sdk
           echo "ANDROID_HOME=/opt/android-sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=/opt/android-sdk" >> "$GITHUB_ENV"
       # Nothing else from the runner enters the build; signing comes from the
       # committed keystore (neutrodynePublic). After Podcast Index's written
       # permission (PO-3 option A) this job also passes
@@ -138,12 +139,21 @@ jobs:
         with:
           python-version: "3.14"
       - name: Android SDK (AGP configures in every module)
-        run: scripts/ci/install-android-sdk.sh "$HOME/android-sdk" && echo "ANDROID_HOME=$HOME/android-sdk" >> "$GITHUB_ENV"
+        shell: bash
+        run: |
+          scripts/ci/install-android-sdk.sh "$HOME/android-sdk"
+          # One SDK location for AGP (see nightly.yml): no inherited
+          # ANDROID_SDK_ROOT disagreement, Windows gets the C:\ form.
+          sdk_dir="$HOME/android-sdk"
+          command -v cygpath >/dev/null 2>&1 && sdk_dir="$(cygpath -w "$sdk_dir")"
+          echo "ANDROID_HOME=$sdk_dir" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk_dir" >> "$GITHUB_ENV"
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-disabled: true
       - name: Packaging tools (Linux)
         if: runner.os == 'Linux'
+        shell: bash
         run: sudo apt-get update -qq && sudo apt-get install -y -qq binutils fakeroot rpm xvfb dbus-x11
       # The build, the packaged smoke starts and the checks run in a two-attempt
       # loop — an immutable release cannot gain assets later, so a runner flake
@@ -211,7 +221,10 @@ jobs:
         with:
           python-version: "3.14"
       - name: Android SDK (AGP configures in every module)
-        run: scripts/ci/install-android-sdk.sh "$HOME/android-sdk" && echo "ANDROID_HOME=$HOME/android-sdk" >> "$GITHUB_ENV"
+        run: |
+          scripts/ci/install-android-sdk.sh "$HOME/android-sdk"
+          echo "ANDROID_HOME=$HOME/android-sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> "$GITHUB_ENV"
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-disabled: true
