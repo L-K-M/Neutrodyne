@@ -18,13 +18,25 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.v2.runComposeUiTest
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import ch.lkmc.neutrodyne.core.common.PlatformKind
+import ch.lkmc.neutrodyne.core.common.TitleCollator
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
+import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
+import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.LibraryTile
 import ch.lkmc.neutrodyne.core.model.settings.LibrarySort
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
+import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
+import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
+import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
+import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
 import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
@@ -59,6 +71,22 @@ import kotlin.test.assertEquals
 class LibraryScreenTest {
     private lateinit var previousLocale: Locale
     private val navigator = RecordingAppNavigator()
+
+    // The route tests drive the real ViewModel so `episodes.calls` proves the write path.
+    private val podcasts = FakePodcastRepository()
+    private val episodes = FakeEpisodeRepository()
+    private val refreshController = FakeRefreshController()
+    private val settings = FakeSettingsRepository()
+    private val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
+
+    /** Case-insensitive ordering so the sort assertions are locale-free and deterministic. */
+    private val collator =
+        object : TitleCollator {
+            override fun compare(
+                a: String,
+                b: String,
+            ): Int = a.compareTo(b, ignoreCase = true)
+        }
 
     @BeforeTest
     fun setUp() {
@@ -272,6 +300,43 @@ class LibraryScreenTest {
         }
 
     @Test
+    fun markAllPlayedConfirmsBeforeWriting() =
+        runComposeUiTest {
+            // 08's required confirmation: the tile action must not write until confirmed.
+            setLibraryRoute()
+
+            onNodeWithContentDescription("Tap Show")
+                .performCustomAccessibilityActionWithLabel("Mark all as played…")
+            waitForIdle()
+
+            // The dialog's title and its confirm button both read "Mark all as played".
+            onAllNodes(hasText("Mark all as played")).assertCountEquals(2)
+            assertEquals(emptyList(), episodes.calls)
+
+            onAllNodes(hasText("Mark all as played") and hasClickAction()).onFirst().performClick()
+            waitForIdle()
+            assertEquals(
+                listOf("markFeedPlayed(${FeedSource.Podcast(5)}, null)"),
+                episodes.calls,
+            )
+        }
+
+    @Test
+    fun markAllPlayedCancelWritesNothing() =
+        runComposeUiTest {
+            setLibraryRoute()
+
+            onNodeWithContentDescription("Tap Show")
+                .performCustomAccessibilityActionWithLabel("Mark all as played…")
+            waitForIdle()
+
+            onNodeWithText("Cancel").performClick()
+            waitForIdle()
+            assertEquals(emptyList(), episodes.calls)
+            onNodeWithText("Mark all as played").assertDoesNotExist()
+        }
+
+    @Test
     fun offlineBannerShowsWhenOffline() =
         runComposeUiTest {
             setLibrary(LibraryUiState(loaded = true, offline = true))
@@ -281,12 +346,15 @@ class LibraryScreenTest {
     private fun ComposeUiTest.setLibrary(
         state: LibraryUiState,
         pendingUnsubscribe: PendingUnsubscribe? = null,
+        pendingMarkPlayed: Long? = null,
         onSort: (LibrarySort) -> Unit = {},
         onToggleTitles: (Boolean) -> Unit = {},
         onOpenPodcast: (Long) -> Unit = {},
         onTileAction: (Long, TileAction) -> Unit = { _, _ -> },
         onConfirmUnsubscribe: (LibraryTile) -> Unit = {},
         onDismissUnsubscribe: () -> Unit = {},
+        onConfirmMarkPlayed: (Long) -> Unit = {},
+        onDismissMarkPlayed: () -> Unit = {},
         onAddPodcast: () -> Unit = {},
     ) {
         setContent {
@@ -300,18 +368,65 @@ class LibraryScreenTest {
                     LibraryScreen(
                         state = state,
                         pendingUnsubscribe = pendingUnsubscribe,
+                        pendingMarkPlayed = pendingMarkPlayed,
                         onSort = onSort,
                         onToggleTitles = onToggleTitles,
                         onOpenPodcast = onOpenPodcast,
                         onTileAction = onTileAction,
                         onConfirmUnsubscribe = onConfirmUnsubscribe,
                         onDismissUnsubscribe = onDismissUnsubscribe,
+                        onConfirmMarkPlayed = onConfirmMarkPlayed,
+                        onDismissMarkPlayed = onDismissMarkPlayed,
                         onAddPodcast = onAddPodcast,
                     )
                 }
             }
         }
         waitForIdle()
+    }
+
+    /**
+     * The route driven with the real [LibraryViewModel] on fakes (09): the tile menu's "Mark
+     * all as played…" has to reach `episodes.calls` only through the confirmation dialog.
+     */
+    private fun ComposeUiTest.setLibraryRoute() {
+        podcasts.tiles.value = listOf(testLibraryTile(5, displayTitle = "Tap Show"))
+        val viewModel =
+            LibraryViewModel(
+                podcasts,
+                episodes,
+                refreshController,
+                UnsubscribeUseCase(podcasts),
+                settings,
+                collator,
+                network,
+            )
+        setContent {
+            // collectAsStateWithLifecycle (rule 10) needs a started owner; a bare compose
+            // scene provides none, so the test installs a RESUMED one.
+            CompositionLocalProvider(LocalLifecycleOwner provides ResumedLifecycleOwner()) {
+                CompositionLocalProvider(
+                    LocalPlatformKind provides PlatformKind.DESKTOP,
+                    LocalUiClock provides TestClock(),
+                    LocalAppNavigator provides navigator,
+                    LocalPlatformActions provides TestPlatformActions,
+                ) {
+                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                        LibraryRoute(viewModel = viewModel)
+                    }
+                }
+            }
+        }
+        waitForIdle()
+    }
+
+    /** `createUnsafe` skips the main-thread checks so the test can resume it off the UI thread. */
+    private class ResumedLifecycleOwner : LifecycleOwner {
+        override val lifecycle = LifecycleRegistry.createUnsafe(this)
+
+        init {
+            lifecycle.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        }
     }
 }
 

@@ -55,6 +55,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.library_sort_recent
 import ch.lkmc.neutrodyne.core.ui.resources.library_sort_title
 import ch.lkmc.neutrodyne.core.ui.resources.library_sort_unplayed
 import ch.lkmc.neutrodyne.core.ui.resources.nav_library
+import ch.lkmc.neutrodyne.core.ui.resources.podcast_mark_played
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_settings
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_unsubscribe
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_unsubscribe_downloads
@@ -80,12 +81,15 @@ internal data class PendingUnsubscribe(
 internal fun LibraryScreen(
     state: LibraryUiState,
     pendingUnsubscribe: PendingUnsubscribe?,
+    pendingMarkPlayed: Long?,
     onSort: (LibrarySort) -> Unit,
     onToggleTitles: (Boolean) -> Unit,
     onOpenPodcast: (Long) -> Unit,
     onTileAction: (podcastId: Long, action: TileAction) -> Unit,
     onConfirmUnsubscribe: (LibraryTile) -> Unit,
     onDismissUnsubscribe: () -> Unit,
+    onConfirmMarkPlayed: (Long) -> Unit,
+    onDismissMarkPlayed: () -> Unit,
     onAddPodcast: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -136,6 +140,21 @@ internal fun LibraryScreen(
                     onConfirmUnsubscribe(pending.tile)
                 },
             dismiss = NdDialogAction(stringResource(Res.string.action_cancel), onDismissUnsubscribe),
+        )
+    }
+
+    // 08's required confirmation before the write (UI review round 2); the "Older than"
+    // options of the dialog table wait on M2's `countUnplayed` (deviation recorded).
+    if (pendingMarkPlayed != null) {
+        NdDialog(
+            onDismissRequest = onDismissMarkPlayed,
+            icon = NdIcons.DoneAll,
+            title = stringResource(Res.string.podcast_mark_played),
+            confirm =
+                NdDialogAction(stringResource(Res.string.podcast_mark_played)) {
+                    onConfirmMarkPlayed(pendingMarkPlayed)
+                },
+            dismiss = NdDialogAction(stringResource(Res.string.action_cancel), onDismissMarkPlayed),
         )
     }
 }

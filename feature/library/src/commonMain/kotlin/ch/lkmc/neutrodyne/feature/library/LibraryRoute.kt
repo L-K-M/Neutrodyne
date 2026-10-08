@@ -27,10 +27,12 @@ internal fun LibraryRoute(viewModel: LibraryViewModel = metroViewModel()) {
     val navigator = LocalAppNavigator.current
     val scope = rememberCoroutineScope()
     var pending by remember { mutableStateOf<PendingUnsubscribe?>(null) }
+    var pendingMarkPlayed by remember { mutableStateOf<Long?>(null) }
 
     LibraryScreen(
         state = state,
         pendingUnsubscribe = pending,
+        pendingMarkPlayed = pendingMarkPlayed,
         onSort = viewModel::setSort,
         onToggleTitles = viewModel::setShowTitles,
         onOpenPodcast = { navigator.pushDetail(PodcastKey(it)) },
@@ -45,7 +47,7 @@ internal fun LibraryRoute(viewModel: LibraryViewModel = metroViewModel()) {
                 }
 
                 TileAction.MARK_PLAYED -> {
-                    viewModel.markAllPlayed(podcastId)
+                    pendingMarkPlayed = podcastId
                 }
 
                 TileAction.UNSUBSCRIBE -> {
@@ -61,6 +63,11 @@ internal fun LibraryRoute(viewModel: LibraryViewModel = metroViewModel()) {
             viewModel.unsubscribe(it.podcastId)
         },
         onDismissUnsubscribe = { pending = null },
+        onConfirmMarkPlayed = {
+            pendingMarkPlayed = null
+            viewModel.markAllPlayed(it)
+        },
+        onDismissMarkPlayed = { pendingMarkPlayed = null },
         onAddPodcast = { navigator.push(AddPodcastKey(null)) },
     )
 }
