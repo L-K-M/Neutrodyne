@@ -34,8 +34,11 @@ public object PrivateFeedUrls {
     /** Hosts whose feeds are private by nature (heuristic list, extended from bug reports). */
     private val privateHosts = listOf("patreon.com", "supercast.tech", "memberful.com", "memberfulcontent.com")
 
-    /** A long token in a path segment or query value; must contain both a letter and a digit. */
+    /** A long token in a query value; must contain both a letter and a digit. */
     private val longToken = Regex("""[A-Za-z0-9_-]{20,}""")
+
+    /** Path-segment tokens are separator-free runs, so hyphenated slugs like "my-show-42" stay public. */
+    private val pathLongToken = Regex("""[A-Za-z0-9]{20,}""")
 
     /** Whether [url] looks like a private (token-carrying) feed URL. */
     public fun looksPrivate(url: String): Boolean {
@@ -59,15 +62,18 @@ public object PrivateFeedUrls {
         if (looksLikeTokenQueryValue(query)) return true
 
         // Long tokens as part of any path segment ("/feeds/xKd93lskSKEa1zl/").
-        return parts.path.split('/').any { segment -> tokenIn(segment) != null }
+        return parts.path.split('/').any { segment -> tokenIn(segment, pathLongToken) != null }
     }
 
     private fun looksLikeTokenQueryValue(query: String): Boolean =
         query.split('&').map { it.substringAfter('=', "") }.any { value -> tokenIn(value) != null }
 
     /** The long token inside [text] when it contains one with both a letter and a digit. */
-    private fun tokenIn(text: String): String? =
-        longToken
+    private fun tokenIn(
+        text: String,
+        pattern: Regex = longToken,
+    ): String? =
+        pattern
             .findAll(text)
             .firstOrNull { match -> match.value.any { it.isDigit() } && match.value.any { it.isLetter() } }
             ?.value

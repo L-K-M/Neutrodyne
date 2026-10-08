@@ -15,6 +15,7 @@ public object UrlNormalizer {
 
     private val unreservedChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~".toSet()
     private val hexDigits = "0123456789abcdefABCDEF".toSet()
+    private val schemeWithAuthority = Regex("""^[A-Za-z][A-Za-z0-9+.\-]*://""")
 
     /**
      * The identity form of an HTTP(S) URL, or null when the URL is not `http(s)` or has no valid host:
@@ -47,11 +48,15 @@ public object UrlNormalizer {
      */
     public fun splitUserInfo(url: String): Pair<String, UrlUserInfo?> {
         val trimmed = url.trim()
-        val schemeMatch = Regex("""^[A-Za-z][A-Za-z0-9+.\-]*://""").find(trimmed) ?: return trimmed to null
+        val schemeMatch = schemeWithAuthority.find(trimmed) ?: return trimmed to null
         val afterScheme = trimmed.substring(schemeMatch.range.last + 1)
         // The authority ends at the first `/`, `?` or `#`: text in the query or fragment is never
         // credentials, so `https://host#x@evil` carries no userinfo and its host never moves.
-        val authority = afterScheme.substringBefore('/').substringBefore('?').substringBefore('#')
+        // For http(s), `\` ends it too — the fetch client (OkHttp) treats it as a path separator.
+        var authority = afterScheme.substringBefore('/').substringBefore('?').substringBefore('#')
+        if (schemeMatch.value.dropLast(3).lowercase() in setOf("http", "https")) {
+            authority = authority.substringBefore('\\')
+        }
         val atIndex = authority.lastIndexOf('@')
         if (atIndex < 0) return trimmed to null
 
@@ -112,9 +117,12 @@ public object UrlNormalizer {
         return if (isDefaultPort(parts.scheme, port, schemeFree)) null else port
     }
 
-    /** Empty path → `/`; percent-encoding normalised; dot segments removed; one trailing `/` removed. */
+    /**
+     * Empty path → `/`; `\` → `/` like the fetch client ([identity] only ever sees http(s));
+     * percent-encoding normalised; dot segments removed; one trailing `/` removed.
+     */
     private fun normalisePath(rawPath: String): String {
-        var path = if (rawPath.isEmpty()) "/" else rawPath
+        var path = if (rawPath.isEmpty()) "/" else rawPath.replace('\\', '/')
         path = normalisePercentEncoding(path)
         path = removeDotSegments(path)
         if (path.length > 1 && path.endsWith("/")) path = path.dropLast(1)

@@ -39,6 +39,18 @@ class TimestampLinkifierTest {
     }
 
     @Test
+    fun timesOfDayExcludedAcrossRepeatedAndNonBreakingWhitespace() {
+        // The exclusion tolerates any whitespace run — including NBSP and the narrow no-break
+        // space common in typeset German ("20:15 Uhr").
+        assertEquals(emptyList(), timestamps("listen at 10:30  am"))
+        assertEquals(emptyList(), timestamps("listen at 10:30\u00A0am"))
+        assertEquals(emptyList(), timestamps("sendezeit 20:15\u00A0Uhr"))
+        assertEquals(emptyList(), timestamps("runtime 10:30\u202Fh"))
+        // Whitespace before a word that merely starts with h must still linkify.
+        assertEquals(listOf("12:34" to 754_000L), timestamps("at 12:34  hello"))
+    }
+
+    @Test
     fun boundaryLookbehind() {
         // A digit, colon or dot before the timestamp blocks the match.
         assertEquals(emptyList(), timestamps("2026:10:03"))

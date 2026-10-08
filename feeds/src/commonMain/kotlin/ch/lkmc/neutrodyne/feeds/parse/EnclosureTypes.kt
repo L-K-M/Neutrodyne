@@ -47,8 +47,10 @@ public object EnclosureTypes {
 
     /**
      * The effective media type: lowercase and parameter-stripped, aliases mapped; when the result is not
-     * of the audio or video families or `application/x-mpegurl`, the URL path extension decides. Null
-     * when neither yields a playable type.
+     * of the audio or video families or `application/x-mpegurl`, the URL path extension decides; an
+     * unplayable declared type survives when the extension is unknown (it is stored verbatim and is
+     * never chosen as the primary enclosure — [primary] re-checks the playable prefixes). Null only
+     * when neither a declared type nor a known extension exists.
      */
     public fun effective(
         type: String?,

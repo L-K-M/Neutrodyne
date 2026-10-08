@@ -27,6 +27,8 @@ class PodcastGuidTest {
         assertNull(PodcastGuid.parse("9b024349-ccf0-5f69-a609-6b82873eab3z")) // non-hex
         assertNull(PodcastGuid.parse(""))
         assertNull(PodcastGuid.parse("not a guid"))
+        // The nil UUID is junk, not an identity: two broken feeds must not dedupe to the same show.
+        assertNull(PodcastGuid.parse("00000000-0000-0000-0000-000000000000"))
     }
 
     @Test

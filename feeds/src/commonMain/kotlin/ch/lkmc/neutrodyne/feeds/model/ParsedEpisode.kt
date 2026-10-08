@@ -32,6 +32,8 @@ public data class ParsedEpisode(
     val chaptersType: String? = null,
     val inlineChapters: List<InlineChapter> = emptyList(),
     val transcripts: List<TranscriptRef> = emptyList(),
+    /** Null when the item declares no `podcast:person` — the channel list then applies; an item-level
+     * list REPLACES it (Podcasting 2.0). The parser never emits an empty list. */
     val persons: List<Person>? = null,
     val funding: List<Funding> = emptyList(),
     /** Raw `yt:videoId`; interpreted by 04 (04 Atom feed ingestion). */

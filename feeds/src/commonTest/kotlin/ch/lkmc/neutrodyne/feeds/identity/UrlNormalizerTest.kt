@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.feeds.identity
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -84,10 +85,13 @@ class UrlNormalizerTest {
     @Test
     fun dotSegmentRemovalIsLinear() {
         UrlNormalizer.forIdentity(dotDoc(1_000)) // warm-up outside the measurements
-        val small = measureTime { UrlNormalizer.forIdentity(dotDoc(DOT_SMALL)) }
+        // Best-of-3 per size: a single noisy run (GC, shared CI CPU) must not fail the ratio.
+        val small = (1..3).minOf { measureTime { UrlNormalizer.forIdentity(dotDoc(DOT_SMALL)) } }
         val large =
-            measureTime {
-                assertEquals("example.com/x", UrlNormalizer.forIdentity(dotDoc(DOT_SMALL * 4)))
+            (1..3).minOf {
+                measureTime {
+                    assertEquals("example.com/x", UrlNormalizer.forIdentity(dotDoc(DOT_SMALL * 4)))
+                }
             }
         assertTrue(
             large < BUDGET,
@@ -205,6 +209,45 @@ class UrlNormalizerTest {
         assertEquals("https://example.com/feed?x=@evil", url)
         assertEquals("user", credentials?.username)
         assertEquals("pass", credentials?.password)
+    }
+
+    @Test
+    fun backslashEndsHttpAuthority() {
+        // WHATWG/OkHttp parse `\` in an http(s) URL as a path separator: the authority ends there,
+        // so the host before it wins and the remainder — including any `@` — is path text.
+        assertEquals(
+            "good.com/@evil.com/feed",
+            UrlNormalizer.forIdentity("https://good.com\\@evil.com/feed"),
+        )
+        assertEquals("example.com/feed", UrlNormalizer.forIdentity("https://example.com\\feed"))
+        // Dot-segment removal runs on the converted path, matching the client (OkHttp 5.5.0).
+        assertEquals("example.com/a/c", UrlNormalizer.forIdentity("https://example.com/a\\b/../c"))
+    }
+
+    @Test
+    fun splitUserInfoBackslashKeepsGenuineCredentials() {
+        // Credentials before the first `\` are real: OkHttp contacts evil.com with user:pass.
+        val (url, credentials) =
+            UrlNormalizer.splitUserInfo("https://user:pass@evil.com\\@good.com/feed")
+        assertEquals("https://evil.com\\@good.com/feed", url)
+        assertEquals("user", credentials?.username)
+        assertEquals("pass", credentials?.password)
+    }
+
+    @Test
+    fun splitUserInfoBackslashAfterHostIsPathText() {
+        // `@` after the first `\` sits in the path, so this URL carries no credentials.
+        val (url, credentials) = UrlNormalizer.splitUserInfo("https://good.com\\@evil.com/feed")
+        assertEquals("https://good.com\\@evil.com/feed", url)
+        assertNull(credentials)
+    }
+
+    @Test
+    fun urlUserInfoToStringRedactsPassword() {
+        // The generated data-class toString would print the secret into logs.
+        val info = UrlUserInfo("alice", "secret")
+        assertTrue("alice" in info.toString())
+        assertFalse("secret" in info.toString())
     }
 
     @Test

@@ -90,5 +90,9 @@ class EnclosureTypesTest {
         assertSame(audio, EnclosureTypes.primary(listOf(video, audio)))
         assertNull(EnclosureTypes.primary(listOf(unknown)))
         assertNull(EnclosureTypes.primary(emptyList()))
+        // Equal precedence: document order decides, not length or anything else.
+        val audioLong = Enclosure("https://e.example/b.mp3", "audio/mpeg", 2, "audio/mpeg")
+        assertSame(audio, EnclosureTypes.primary(listOf(audio, audioLong)))
+        assertSame(audioLong, EnclosureTypes.primary(listOf(audioLong, audio)))
     }
 }

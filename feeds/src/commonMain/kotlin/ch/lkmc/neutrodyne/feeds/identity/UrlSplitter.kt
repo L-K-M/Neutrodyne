@@ -9,7 +9,10 @@ package ch.lkmc.neutrodyne.feeds.identity
 public data class UrlUserInfo(
     val username: String,
     val password: String,
-)
+) {
+    // The generated data-class toString would print the password into logs and crash reports.
+    override fun toString(): String = "UrlUserInfo(username=$username, password=<redacted>)"
+}
 
 /** One URL broken into parts by [splitLenient], before any normalisation. */
 internal class UrlParts(
@@ -46,7 +49,11 @@ internal fun splitLenient(raw: String): UrlParts {
     val pathAndQuery: String
 
     if (hasAuthority) {
-        val authorityEnd = rest.indexOfFirst { it == '/' || it == '?' }
+        // For http(s), `\` ends the authority exactly like `/`: WHATWG URL and the fetch client
+        // (OkHttp) both treat it as a path separator, so an `@` after it is path text, not
+        // userinfo — `https://good.com\@evil.com/` is fetched from good.com.
+        val specialHttp = scheme == "http" || scheme == "https"
+        val authorityEnd = rest.indexOfFirst { it == '/' || it == '?' || (specialHttp && it == '\\') }
         val authority = if (authorityEnd < 0) rest else rest.substring(0, authorityEnd)
         pathAndQuery = if (authorityEnd < 0) "" else rest.substring(authorityEnd)
 

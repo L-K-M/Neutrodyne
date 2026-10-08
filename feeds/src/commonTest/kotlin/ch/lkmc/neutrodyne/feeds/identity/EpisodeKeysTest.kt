@@ -76,10 +76,22 @@ class EpisodeKeysTest {
     }
 
     @Test
+    fun headKeySeparatesTitleFromDescription() {
+        // "AB"+"C…" and "A"+"BC…" must not hash to the same h: key.
+        assertNotEquals(
+            EpisodeKeys.primary(episode(title = "AB", description = "C")),
+            EpisodeKeys.primary(episode(title = "A", description = "BC")),
+        )
+    }
+
+    @Test
     fun precedenceGuidEnclosureTitleLinkHead() {
         val both = episode(guid = "g-1", enclosureUrl = "https://example.com/a.mp3")
         assertEquals("g:g-1", EpisodeKeys.primary(both))
         assertTrue(EpisodeKeys.primary(episode(enclosureUrl = "https://example.com/a.mp3")).startsWith("u:"))
+        // Title-day outranks link when neither guid nor enclosure is present.
+        val titleAndLink = episode(title = "T", pubDate = 1791030896000L, link = "https://example.com/ep-1")
+        assertTrue(EpisodeKeys.primary(titleAndLink).startsWith("t:"))
     }
 
     @Test
@@ -151,6 +163,25 @@ class EpisodeKeysTest {
             )
         assertEquals(EpisodeContentHash.of(base), EpisodeContentHash.of(base.copy(feedOrder = 7)))
         assertNotEquals(EpisodeContentHash.of(base), EpisodeContentHash.of(base.copy(title = "T2")))
+    }
+
+    @Test
+    fun contentHashCoversRawPubDateSeparately() {
+        // rawPubDate is a stored column: a raw-text change at the same instant must flip the hash.
+        val base = episode(pubDate = 1791030896000L).copy(rawPubDate = "Sat, 03 Oct 2026 12:34:56 GMT")
+        assertNotEquals(
+            EpisodeContentHash.of(base),
+            EpisodeContentHash.of(base.copy(rawPubDate = "2026-10-03T12:34:56Z")),
+        )
+    }
+
+    @Test
+    fun contentHashSeparatesChaptersPair() {
+        // A "|" inside chaptersUrl must not let the pair collide with a different split.
+        assertNotEquals(
+            EpisodeContentHash.of(episode().copy(chaptersUrl = "a|b")),
+            EpisodeContentHash.of(episode().copy(chaptersUrl = "a", chaptersType = "b")),
+        )
     }
 
     /** W10: text-vs-HTML interpretation alone changes the hash — the description bytes need not. */

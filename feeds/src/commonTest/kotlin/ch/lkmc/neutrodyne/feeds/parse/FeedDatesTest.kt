@@ -74,6 +74,23 @@ class FeedDatesTest {
     }
 
     @Test
+    fun isoSpaceBeforeColonlessOffset() {
+        // "YYYY-MM-DD HH:MM:SS ±HHMM" needs the space-strip and the colon insertion to compose.
+        assertEquals(
+            FeedDates.parse("2024-06-15T12:00:00+02:00"),
+            FeedDates.parse("2024-06-15 12:00:00 +0200"),
+        )
+        assertEquals(
+            FeedDates.parse("2026-10-03T12:34:56-07:00"),
+            FeedDates.parse("2026-10-03 12:34:56 -0700"),
+        )
+        assertEquals(
+            FeedDates.parse("2026-10-03T12:34:56Z"),
+            FeedDates.parse("2026-10-03 12:34:56 Z"),
+        )
+    }
+
+    @Test
     fun whitespaceCollapses() {
         assertEquals(1791030896000L, FeedDates.parse("  Sat,   03   Oct   2026  12:34:56  +0000  "))
     }

@@ -79,7 +79,9 @@ public object EpisodeKeys {
     private fun headKey(
         title: String?,
         description: String?,
-    ): String = "h:" + (title.orEmpty() + description.orEmpty().take(500)).encodeUtf8().sha1().hex()
+    ): String =
+        // The U+001F separator cannot occur in XML text, so the boundary is collision-free.
+        "h:" + (title.orEmpty() + "\u001F" + description.orEmpty().take(500)).encodeUtf8().sha1().hex()
 }
 
 /** A stored episode's key inputs (02's columns); the restore and sync paths build this. */
@@ -106,7 +108,8 @@ public object EpisodeContentHash {
         val fields =
             listOf(
                 e.title.orEmpty(),
-                e.pubDate?.toString() ?: e.rawPubDate.orEmpty(),
+                e.pubDate?.toString().orEmpty(),
+                e.rawPubDate.orEmpty(),
                 enclosureFields(e.primaryEnclosure),
                 (e.primaryEnclosure?.effectiveType?.startsWith("video/") == true).toString(),
                 e.durationMs?.toString().orEmpty(),
@@ -121,7 +124,7 @@ public object EpisodeContentHash {
                     ?.url
                     .orEmpty(),
                 e.link.orEmpty(),
-                e.chaptersUrl.orEmpty() + "|" + e.chaptersType.orEmpty(),
+                e.chaptersUrl.orEmpty() + FIELD_SEPARATOR + e.chaptersType.orEmpty(),
                 e.externalMediaId.orEmpty(),
                 e.descriptionHtml
                     .orEmpty()

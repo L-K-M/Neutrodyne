@@ -33,12 +33,24 @@ class PrivateFeedUrlsTest {
     }
 
     @Test
+    fun hyphenatedSlugIsNotAToken() {
+        // Path tokens are separator-free runs: wordy slugs with digits stay public.
+        assertFalse(PrivateFeedUrls.looksPrivate("https://example.com/feeds/my-podcast-episode-123-rss/"))
+        assertFalse(PrivateFeedUrls.looksPrivate("https://example.com/podcast/the-show-2025/feed"))
+        assertTrue(PrivateFeedUrls.looksPrivate("https://example.com/feeds/xKd93lskSKEa1zl4dQeF1/"))
+        // Query values keep the permissive pattern (UUID-shaped tokens still match there).
+        assertTrue(PrivateFeedUrls.looksPrivate("https://example.com/feed?k=someLongRandomToken12345"))
+    }
+
+    @Test
     fun privateHosts() {
         assertTrue(PrivateFeedUrls.looksPrivate("https://patreon.com/rss/xyz"))
         assertTrue(PrivateFeedUrls.looksPrivate("https://rss.patreon.com/xyz"))
         assertTrue(PrivateFeedUrls.looksPrivate("https://example.supercast.tech/xyz"))
         assertTrue(PrivateFeedUrls.looksPrivate("https://example.memberful.com/feed"))
         assertTrue(PrivateFeedUrls.looksPrivate("https://cdn.memberfulcontent.com/f"))
+        // Host matching is case-insensitive (DNS is).
+        assertTrue(PrivateFeedUrls.looksPrivate("https://PATREON.COM/rss/xyz"))
         // The suffix check does not match unrelated hosts.
         assertFalse(PrivateFeedUrls.looksPrivate("https://notpatreon.com/feed"))
         assertFalse(PrivateFeedUrls.looksPrivate("https://patreon.com.evil.example/feed"))

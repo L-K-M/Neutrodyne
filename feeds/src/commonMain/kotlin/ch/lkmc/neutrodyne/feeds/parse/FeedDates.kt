@@ -99,8 +99,9 @@ public object FeedDates {
     /** An ISO offset without a colon (`+0200`) gets one so kotlinx-datetime's format accepts it. */
     private val offsetWithoutColon = Regex("""([+-]\d{2})(\d{2})$""")
 
-    /** A space before a trailing ISO offset ("…12:34:56 +02:00") is removed for the ISO fallback. */
-    private val spaceBeforeOffset = Regex("""\s+([+-]\d{2}:\d{2}|Z)$""")
+    /** A space before a trailing ISO offset ("…12:34:56 +02:00", "… +0200") is removed so the
+     * space-strip and the colon insertion below compose for "YYYY-MM-DD HH:MM:SS ±HHMM". */
+    private val spaceBeforeOffset = Regex("""\s+([+-]\d{2}:?\d{2}|Z)$""")
     private val utcMidnightOffset = UtcOffset.ZERO
 
     /** Parses a feed date to epoch milliseconds UTC, or null when no form matches (03 Dates). */

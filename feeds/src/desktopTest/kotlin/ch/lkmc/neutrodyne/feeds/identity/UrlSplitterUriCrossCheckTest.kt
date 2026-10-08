@@ -11,13 +11,6 @@ import kotlin.test.assertTrue
  * authority/path/query, and the cases where `java.net.URI` throws are accepted by our lenient splitter.
  */
 class UrlSplitterUriCrossCheckTest {
-    private data class Expected(
-        val host: String?,
-        val port: Int?,
-        val path: String,
-        val query: String?,
-    )
-
     private val urls =
         listOf(
             "https://feeds.example.com/show.rss",
@@ -51,7 +44,11 @@ class UrlSplitterUriCrossCheckTest {
             assertEquals(uri.rawQuery?.takeIf { it.isNotEmpty() }, parts.query, "query of $url")
             compared++
         }
-        assertTrue(compared >= urls.size / 2, "expected to compare most URLs, got $compared")
+        assertEquals(
+            urls.size,
+            compared,
+            "every fixture URL should be accepted by java.net.URI, compared only $compared",
+        )
     }
 
     @Test
