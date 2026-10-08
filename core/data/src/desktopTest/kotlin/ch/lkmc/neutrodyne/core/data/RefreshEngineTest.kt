@@ -779,10 +779,12 @@ class RefreshEngineTest {
             assertEquals(0L, db.podcastDao().byId(b)!!.nextRefreshAt)
 
             // B's stale outcome buffers; the batcher's 5 s deadline flushes it while A's fetch
-            // still holds the engine mutex.
+            // still holds the engine mutex. The deadline runs on the monotonic clock, so the
+            // 5 s bump must move `elapsedMs`, not only the wall `nowMs`.
             gateB.complete(Unit)
             testScheduler.runCurrent()
             clock.nowMs += 5_001L
+            clock.elapsedMs += 5_001L
             advanceTimeBy(5_001L)
             testScheduler.runCurrent()
             assertTrue((db.podcastDao().byId(b)!!.nextRefreshAt ?: 0) > 0)
@@ -898,6 +900,7 @@ class RefreshEngineTest {
         gateB.complete(Unit)
         testScheduler.runCurrent()
         clock.nowMs += 5_001L
+        clock.elapsedMs += 5_001L
         advanceTimeBy(5_001L)
         testScheduler.runCurrent()
         assertTrue(
