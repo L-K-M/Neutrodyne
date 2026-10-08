@@ -217,7 +217,9 @@ abstract class SetupBundledRuntime : DefaultTask() {
         // nests the tree under Contents/Home.
         val javaCandidates = listOf("bin/java", "bin/java.exe", "Contents/Home/bin/java")
         if (javaCandidates.none { File(staging, it).isFile }) {
-            throw GradleException("the pinned Temurin archive did not unpack to a JDK tree (no bin/java)")
+            throw GradleException(
+                "the pinned Temurin archive has no Java launcher (expected ${javaCandidates.joinToString()})",
+            )
         }
         if (!staging.renameTo(homeDir)) {
             throw GradleException("cannot move the unpacked runtime to ${homeDir.absolutePath}")

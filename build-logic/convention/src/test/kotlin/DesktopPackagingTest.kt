@@ -10,6 +10,8 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * Packaging helpers of 11 (Packaging pipeline, Links and files from the OS):
@@ -48,10 +50,10 @@ class DesktopPackagingTest {
     fun `hosts outside the packaging matrix resolve to no target`() {
         // An Intel Mac and a Windows arm64 laptop are dev hosts; an unrecognized os.name
         // is never guessed into a target.
-        assert(desktopPackagingTargetOf("Mac OS X", "x86_64") == null)
-        assert(desktopPackagingTargetOf("Windows 11", "aarch64") == null)
-        assert(desktopPackagingTargetOf("FreeBSD", "amd64") == null)
-        assert(desktopPackagingTargetOf("SunOS", "x86") == null)
+        assertNull(desktopPackagingTargetOf("Mac OS X", "x86_64"))
+        assertNull(desktopPackagingTargetOf("Windows 11", "aarch64"))
+        assertNull(desktopPackagingTargetOf("FreeBSD", "amd64"))
+        assertNull(desktopPackagingTargetOf("SunOS", "x86"))
     }
 
     @Test
@@ -65,7 +67,7 @@ class DesktopPackagingTest {
 
             task.setup()
 
-            assert(File(root, "jdk/bin/java.exe").isFile)
+            assertTrue(File(root, "jdk/bin/java.exe").isFile)
         } finally {
             root.deleteRecursively()
         }
@@ -80,7 +82,7 @@ class DesktopPackagingTest {
 
             task.setup()
 
-            assert(File(root, "jdk/bin/java").isFile)
+            assertTrue(File(root, "jdk/bin/java").isFile)
         } finally {
             root.deleteRecursively()
         }
@@ -96,7 +98,7 @@ class DesktopPackagingTest {
 
             task.setup()
 
-            assert(File(root, "jdk/Contents/Home/bin/java").isFile)
+            assertTrue(File(root, "jdk/Contents/Home/bin/java").isFile)
         } finally {
             root.deleteRecursively()
         }
