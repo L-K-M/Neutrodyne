@@ -78,7 +78,12 @@ case "$TARGET" in
         cp desktopApp/build/desktop-packaging/rpm/*.rpm "$DIST/neutrodyne-$V-linux-$arch.rpm"
         cp "desktopApp/build/desktop-packaging/tar-gz/neutrodyne-$V-linux-$arch.tar.gz" "$DIST/"
         sudo dpkg -i "$DIST/neutrodyne-$V-linux-$arch.deb"
-        xsmoke /opt/neutrodyne
+        # The installed tree is root-owned: smoke-start.sh appends its
+        # java-option to the image .cfg, so the DEB leg smokes the extracted
+        # payload (the same installKind=deb bits) — no chmod of /opt
+        # (nightly 37831500506).
+        dpkg-deb -x "$DIST/neutrodyne-$V-linux-$arch.deb" "$SMOKE_IMG/deb-payload"
+        xsmoke "$SMOKE_IMG/deb-payload/opt/neutrodyne"
         rpm2cpio "$DIST/neutrodyne-$V-linux-$arch.rpm" | (cd "$SMOKE_IMG" && cpio -idm --quiet)
         xsmoke "$SMOKE_IMG/opt/neutrodyne"
         tar -xzf "$DIST/neutrodyne-$V-linux-$arch.tar.gz" -C "$SMOKE_IMG"

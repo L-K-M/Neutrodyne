@@ -389,7 +389,12 @@ jobs:
           case "${{ matrix.target }}" in
             linux-*)
               sudo dpkg -i dist/*.deb
-              xsmoke /opt/neutrodyne
+              # The installed tree is root-owned: the smoke appends its
+              # java-option to the image .cfg, so the DEB leg smokes the
+              # extracted payload (the same installKind=deb bits) instead of
+              # chmod'ing /opt (nightly 37831500506).
+              dpkg-deb -x dist/*.deb /tmp/smoke-img/deb-payload
+              xsmoke /tmp/smoke-img/deb-payload/opt/neutrodyne
               rpm2cpio dist/*.rpm | (cd /tmp/smoke-img && cpio -idm --quiet)
               xsmoke /tmp/smoke-img/opt/neutrodyne
               tar -xzf dist/*.tar.gz -C /tmp/smoke-img

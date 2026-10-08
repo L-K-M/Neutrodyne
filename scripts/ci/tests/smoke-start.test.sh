@@ -110,6 +110,22 @@ printf 'launcher noise only\n' > "$OUT"
 launcher 0
 expect_fail "no SMOKE line fails"
 
+# 7. An installed image's .cfg is root-owned: the append must fail with a clear
+#    directive to smoke a writable copy, not an opaque 'Permission denied' from
+#    bash (nightly 37831500506, the installed DEB at /opt/neutrodyne).
+chmod a-w "$IMG/lib/app/Neutrodyne.cfg"
+printf '%s\n' "$JSON_OK" > "$OUT"
+launcher 0
+if run; then
+    t_fail "a read-only image .cfg fails with a clear message"
+elif grep -qi 'not writable\|writable copy' "$WORK/sm.err"; then
+    t_ok "a read-only image .cfg fails with a clear message"
+else
+    t_fail "a read-only image .cfg fails with a clear message"
+    sed 's/^/    /' "$WORK/sm.err" >&2
+fi
+chmod +w "$IMG/lib/app/Neutrodyne.cfg"
+
 echo
 if [ "$FAILED" -gt 0 ]; then
     echo "smoke-start.test: $FAILED case(s) failing" >&2

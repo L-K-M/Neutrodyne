@@ -65,6 +65,16 @@ if [ -z "$LAUNCHER" ] || [ -z "$CFG" ]; then
     exit 1
 fi
 
+# The smoke flag reaches the launcher only as an appended .cfg line (removed
+# again by the EXIT trap). An installed package's tree is root-owned, so a
+# .cfg this invocation cannot write is a caller error: smoke a writable copy
+# of the image instead (the installed DEB leg extracts the payload first —
+# nightly 37831500506).
+if [ ! -w "$CFG" ]; then
+    echo "smoke-start: $CFG is not writable — smoke a writable copy of the image" >&2
+    exit 1
+fi
+
 SMOKE_OPT='java-options=-Dneutrodyne.smoke=true'
 # shellcheck disable=SC2329 # invoked indirectly as the EXIT trap
 restore() {

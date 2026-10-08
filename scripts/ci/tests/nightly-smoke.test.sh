@@ -4,10 +4,15 @@
 # nightly-smoke.test.sh — the desktop-matrix "Smoke start every package" step of
 # .github/workflows/nightly.yml, executed for real: the step text is extracted
 # from the YAML, `${{ matrix.target }}` is bound to linux-x64, and the runner
-# commands (sudo, dpkg, xvfb-run, dbus-run-session, rpm2cpio, cpio) plus
-# scripts/desktop/smoke-start.sh are stubs around it. A smoke-start that fails
-# or stays silent must fail the step — a plain `bash -c` without pipefail lets
-# tee mask the failure and a >=1 SMOKE count then lets it pass.
+# commands (sudo, dpkg, dpkg-deb, xvfb-run, dbus-run-session, rpm2cpio, cpio)
+# plus scripts/desktop/smoke-start.sh are stubs around it. A smoke-start that
+# fails or stays silent must fail the step — a plain `bash -c` without pipefail
+# lets tee mask the failure and a >=1 SMOKE count then lets it pass.
+#
+# The installed DEB is also asserted smoke-safe: `dpkg -i` lands a root-owned
+# /opt/neutrodyne that smoke-start.sh's .cfg append cannot write (nightly
+# 37831500506, linux-x64), so the step must smoke a CI-owned package-payload
+# extract and must never pass the installed path to the launcher.
 #
 # Also asserted: every checkout in nightly.yml pins github.sha (the `ref` input
 # is gone; a job may never check out anything but the run's head_sha).
@@ -75,16 +80,21 @@ mkdir -p "$STUBBIN" "$RUNDIR/dist" "$RUNDIR/scripts/desktop" "$WORK/smoke-img"
 
 stub() { printf '#!/usr/bin/env bash\n%s\n' "$2" > "$STUBBIN/$1"; chmod +x "$STUBBIN/$1"; }
 stub sudo 'exec "$@"'
-stub dpkg 'exit 0'
+stub dpkg 'touch "$DID_INSTALL"'
+# The step smokes the package payload extracted under its own scratch dir;
+# the stub materialises the installed layout so the launcher lookup matches.
+stub dpkg-deb 'mkdir -p "$3/opt/neutrodyne"'
 stub xvfb-run '[ "${1:-}" = "-a" ] && shift; exec "$@"'
 stub dbus-run-session 'exec "$@"'
 stub rpm2cpio 'exit 0'
 stub cpio 'exit 0'
 
 # The fake packaged app: exits 1 when its image dir matches SMOKE_FAIL_AT,
-# succeeds silently on SMOKE_QUIET_AT, else prints its SMOKE line.
+# succeeds silently on SMOKE_QUIET_AT, else prints its SMOKE line. Every image
+# dir it was pointed at is logged so the DEB leg's target can be checked.
 cat > "$RUNDIR/scripts/desktop/smoke-start.sh" <<'EOF'
 #!/usr/bin/env bash
+echo "$1" >> "$SMOKE_ARGS"
 [ "$1" = "${SMOKE_FAIL_AT:-}" ] && exit 1
 [ "$1" = "${SMOKE_QUIET_AT:-}" ] && exit 0
 echo "SMOKE {\"image\":\"$1\"}"
@@ -99,7 +109,8 @@ mkdir -p "$WORK/tar-src" && tar -czf "$RUNDIR/dist/neutrodyne-0.1.0-linux-x64.ta
 # run_step — execute the step text the way `shell: bash` does (the outer shell
 # carries -eo pipefail; the step's own `set` line may add more).
 run_step() {
-    (cd "$RUNDIR" && PATH="$STUBBIN:$PATH" bash -eo pipefail "$WORK/step.sh" > "$WORK/step.out" 2>&1)
+    (cd "$RUNDIR" && DID_INSTALL="$WORK/did-install" SMOKE_ARGS="$WORK/smoke-args" \
+        PATH="$STUBBIN:$PATH" bash -eo pipefail "$WORK/step.sh" > "$WORK/step.out" 2>&1)
 }
 
 smoke_lines() { grep -c '^SMOKE {' "$RUNDIR/smoke.txt" 2>/dev/null || true; }
@@ -119,14 +130,29 @@ fi
 # 2. The DEB smoke fails: the step must fail even though the RPM and tar.gz
 #    smokes still print their lines (the nested bash needs its own pipefail).
 rm -f "$RUNDIR/smoke.txt"
-if SMOKE_FAIL_AT=/opt/neutrodyne run_step; then
+if SMOKE_FAIL_AT="$WORK/smoke-img/deb-payload/opt/neutrodyne" run_step; then
     t_fail "a failing DEB smoke fails the step"
     sed 's/^/    /' "$WORK/step.out" >&2
 else
     t_ok "a failing DEB smoke fails the step"
 fi
 
-# 3. A package smoke that produces no SMOKE line at all must not pass on the
+# 3. The installed /opt/neutrodyne is root-owned — smoke-start.sh appends its
+#    smoke java-option to the image .cfg, so the DEB leg must smoke the
+#    extracted package payload instead. `dpkg -i` still runs (install coverage)
+#    and no launcher argument may be the installed path.
+rm -f "$RUNDIR/smoke.txt" "$WORK/smoke-args" "$WORK/did-install"
+run_step
+if [ ! -f "$WORK/did-install" ]; then
+    t_fail "the DEB package is still installed before its smoke"
+elif grep -qxF '/opt/neutrodyne' "$WORK/smoke-args"; then
+    t_fail "the DEB smoke never targets the read-only installed image"
+    sed 's/^/    /' "$WORK/smoke-args" >&2
+else
+    t_ok "the DEB smoke never targets the read-only installed image"
+fi
+
+# 4. A package smoke that produces no SMOKE line at all must not pass on the
 #    strength of the other two — every package's own smoke counts.
 rm -f "$RUNDIR/smoke.txt"
 if SMOKE_QUIET_AT="$WORK/smoke-img/opt/neutrodyne" run_step; then
@@ -136,7 +162,20 @@ else
     t_ok "a silent RPM smoke fails the step"
 fi
 
-# 4. Checkout discipline: every actions/checkout in nightly.yml pins github.sha
+# 5. The release path shares the installed-DEB rule: build-desktop-release.sh
+#    keeps `dpkg -i` install coverage but must smoke the extracted payload,
+#    never the root-owned /opt/neutrodyne.
+REL="$REPO_ROOT/scripts/ci/build-desktop-release.sh"
+if grep -q 'dpkg -i' "$REL" \
+    && grep -q 'dpkg-deb -x' "$REL" \
+    && ! grep -nE '\bx?smoke +["'"'"']?/opt/neutrodyne' "$REL"; then
+    t_ok "the release DEB smoke also spares the installed image"
+else
+    t_fail "the release DEB smoke also spares the installed image"
+    grep -nE 'dpkg|smoke' "$REL" >&2
+fi
+
+# 6. Checkout discipline: every actions/checkout in nightly.yml pins github.sha
 #    (its step's first `ref:` under `with:`) and the removed `ref` input is
 #    neither declared under workflow_dispatch nor referenced. Line-scan, no YAML
 #    library.
