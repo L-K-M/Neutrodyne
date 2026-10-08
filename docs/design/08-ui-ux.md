@@ -2786,6 +2786,12 @@ Serves N1, N4, N6. Expected failures arrive as values (01 [Errors](01-foundation
 1. The Podcast settings rows "Edit feed address" and "Username and password" and the podcast detail banner's "Enter password" action are hidden behind `FEED_ACCOUNT_CONTROLS_ENABLED` until M1b: `PodcastRepository.editFeedUrl`/`setCredentials`/`merge` are M1b semantics and their M1a implementations throw `UnsupportedOperationException`, so the controls must not be reachable (UI review round 1, P1). M1b flips the flag and restores the rows of the Feed section and the banner action.
 2. "Show in All" reads `PodcastDetail.includeInAll` and writes `PodcastRepository.setIncludeInAll` (03's M1a port); the scoped `ScopedSettingsView`/`ScopeSettingsRepository.observePodcast` this section names as the data source arrives with M5's effective-settings resolution, so the field rides the M1a `observePodcast` read model alongside custom title and episode order.
 
+### Implementation deviations (2026-10-08, UI review round 2)
+
+1. Every M1a "Mark all as played…" confirmation (Feeds and Podcast overflow entries, and the Library tile menu added in round 2) is a plain confirm/cancel `NdDialog`: the dialog table's "All" / "Older than 1 week / 1 month / 3 months" options and `countUnplayed` arrive with M2's group data (`FeedRepository.countUnplayed` does not exist yet; `markFeedPlayed(source, sortDateBefore)` already takes the cutoff). Confirming marks the whole feed via `markFeedPlayed(source, null)` (UI review round 2, P2).
+2. `EpisodeRow`'s PODCAST date block is `defaultMinSize(48 dp)` rather than the spec's fixed 48 dp so the enlarged day and month stay inside it at `fontScale ≥ 1.5`; the accessibility row's full stack (leading art + title / meta + status / end-aligned buttons) remains the M10 accessibility pass (UI review round 2, P2).
+3. Show-notes `<img>` `width`/`height` attributes that are zero, negative or produce an absurd aspect ratio (e.g. 3 × 10000) are treated as unknown by the renderer: an image cannot request a layout larger than the 480 dp cap, and `AspectRatio` candidates that violate the constraints are unreachable (UI review round 2, P1). The feeds/jvm sanitizer still passes the declared values through unchanged — the renderer is the layout-safety layer; a matching clamp there is optional hardening for the feeds package.
+
 ---
 
 ## New names introduced here
@@ -2817,6 +2823,7 @@ Serves N1, N4, N6. Expected failures arrive as values (01 [Errors](01-foundation
 | `DownloadEntryRow` | Downloads screen row over 07's `DownloadEntry` | `:feature:downloads` |
 | `ArtworkSyncScheduler.enqueueNow`, `ArtworkRepository.observeColors(key, fallbackPodcastId)` | artwork scheduling and colours | `:core:artwork`, `:core:domain` |
 | Test tags `feeds_pager`, `feed_list`, `library_grid`, `mini_player`, `player_sheet`, `podcast_list` | UI Automator handles for 09's journeys (also used by the desktop's `runComposeUiTest`) | `:feature:*` |
+| Test tag `episode_date_block` | the PODCAST date block's `testTag` (used by the desktop `runComposeUiTest` regression for 200 % text) | `:core:ui` |
 | Sync screen composables and ViewModels (`SyncSettingsScreen`, `LinkSetupScreen`, `SyncApproveSheet`, `SyncDevicesScreen`, `HeldChangesDialog`, `SyncDiagnosticsScreen`, their `*ViewModel`s) | Sync UI | `:feature:sync` |
 | `DesktopIntegrationImpl` | `DesktopIntegration` over 11's registrars | `:desktopApp` |
 | Tests `BrandColorsTest`, `GraphemesTest`, `SyncSettingsScreenTest`, `LinkFlowScreenTest`, `LocalNetworkRationaleTest`, `HeldChangesDialogTest`, `RestoreWhileLinkedPromptTest`, `ContinueOnThisDeviceCardTest`, `DesktopSettingsScreenTest`, `ContextMenuCatalogueTest`, `KeyboardReachabilityTest`, `DesktopSemanticsAuditTest`, `DesktopUpdatesCardTest`, `ArtworkSyncRunnerTest`, `DesktopArtworkLaneTest`, `DesktopImageMemoryTest` | this document's new tests | per row of [Testing](#testing) |
