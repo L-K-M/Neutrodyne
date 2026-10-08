@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.feature.settings
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
@@ -11,6 +12,7 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -61,9 +63,16 @@ class FeedsPageTest {
             onAllNodesWithText("Refresh interval").onFirst().performClick()
 
             // Seven radio rows overflow a landscape-height window: the lowest option has to
-            // scroll into view and stay selectable (08's dialog rule).
-            onNodeWithText("Every 24 hours").performScrollTo().assertIsDisplayed()
-            onNodeWithText("Every 24 hours").performClick()
+            // scroll into view and stay selectable (08's dialog rule). The desktop dialog is
+            // window-backed, so a coordinate click can land mid-settle on the wrong row —
+            // scroll and click through semantics actions, waiting for the test clock to idle.
+            val option = onNodeWithText("Every 24 hours")
+            option.performScrollTo()
+            waitForIdle()
+            option.assertIsDisplayed()
+            // selectable merges its children, so the matched node is the row itself.
+            option.performSemanticsAction(SemanticsActions.OnClick)
+            waitForIdle()
             assertEquals(
                 24 * 60,
                 runBlocking { settings.get(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES) },
