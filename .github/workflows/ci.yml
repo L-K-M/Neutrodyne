@@ -100,6 +100,7 @@ jobs:
         run: |
           scripts/ci/tests/check-desktop-image.test.sh
           scripts/ci/tests/check-runtime-sources.test.sh
+          scripts/ci/tests/desktop-packaging.test.sh
           scripts/ci/tests/install-android-sdk.test.sh
           scripts/ci/tests/nightly-smoke.test.sh
           python3 scripts/ci/tests/report-nightly.test.py

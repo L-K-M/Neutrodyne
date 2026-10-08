@@ -1215,7 +1215,11 @@ compose.desktop.application {
         macOS {
             bundleID = "ch.lkmc.neutrodyne"; dockName = "Neutrodyne"; minimumSystemVersion = "13.0"
             appCategory = "public.app-category.music"; iconFile.set(file("icons/neutrodyne.icns"))
-            fileAssociation("text/x-opml", "opml", "OPML subscription list", file("icons/neutrodyne.icns"))
+            // no iconFile on this association (2026-10-08, nightly 37831500506): Compose copies
+            // an FA icon into Contents/Resources under its source basename while jpackage is
+            // already writing the app icon to <app>.icns — a same-named FA icon collides on the
+            // case-insensitive volume; a null FA icon falls back to the app icon
+            fileAssociation("text/x-opml", "opml", "OPML subscription list")
             infoPlist { extraKeysRawXml = MAC_URL_TYPES + MAC_LOCAL_NETWORK_USAGE }
             // no signing block: jpackage signs ad hoc
         }
