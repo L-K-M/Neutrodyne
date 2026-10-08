@@ -1,19 +1,34 @@
 # Handoff — state of the Neutrodyne work
 
-This file lets another person or agent take over the work at any point. It is updated at every stage. **Last updated: 2026-10-07.** The plan is final on `main`; **implementation has started with M0a.1** (see §0). The implementation brief is [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md).
+This file lets another person or agent take over the work at any point. **Last updated: 2026-10-08.** M0a is merged; M0b and M1a are in progress (see §0). Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
 ## 0. Implementation status
 
 | Milestone | State | Branch / PR | Notes |
 |---|---|---|---|
-| M0a.1 | merged 2026-10-07 (`e0c3722`) | [PR #10](https://github.com/L-K-M/Neutrodyne/pull/10) | Scaffold, Android shell, CI and release pipeline; spikes S1, S7, S8, S9 (desktop), S11 (desktop), S12, S19 (partial) go; S7 finding: no CPython on x86_64 Android 8.x. Reviewed by seven Codex Sol rounds; GLM review waived by the owner (the diff exceeds the 6-hour runner limit). Next: green nightly on `main`, tag `v0.1.0`. |
-| M0a.2 | PR open | `impl/m0a2-spikes` | Room spikes S2, S3, S4 (Android migration tests fall back to GMD), S6, S10 (Linux x64) go; Android legs of S5, S9, S11 (`Nav3SpikeTest`, `PerAppLanguageTest`, `LocaleConfigTest`, `ComposeResourcesWorkerTest`) run on the CI GMDs. |
-| M0b | in progress | `impl/m0b-desktop` | Server skeleton, desktop shell, packaging and desktop CI, the window on `NeutrodyneRoot`, macOS app menu, tray stub, shell dialogs, desktop Licences. Next: merge `main`, split into small PRs (GLM review budget), S13 on the reference laptops (PO-43). |
-| M1a | in progress | `impl/m1a` (packages `wip/m1a-db`, `wip/m1a-feeds`, `wip/m1a-data`, `wip/m1a-ui`) | Schema v1 and DAOs, feed parser and golden corpus, fetch/ingest/refresh/subscribe, screens; each package goes through Codex review rounds and lands as its own small PR after M0a.2. |
+| M0a.1 | code merged; tester release pending | [PR #10](https://github.com/L-K-M/Neutrodyne/pull/10), merge `e0c3722` | Scaffold, Android shell, policy gates and release pipeline. Seven Codex Sol review rounds; GLM waived after repeated timeouts. Release fixes and verification gaps landed in PRs #15, #16, #17, #18, #23 and #24. Next: green scheduled nightly, then `v0.1.0`; checklist [#20](https://github.com/L-K-M/Neutrodyne/issues/20). |
+| M0a.2 | merged | [PR #13](https://github.com/L-K-M/Neutrodyne/pull/13), merge `49bc849` | Library spikes and Android UI/resource tests passed on API 26 and 36. Below API 33 the language-switch test skips while only `en-US` ships as Android resources; recorded in 01/09. No separate tester build. |
+| M0b | server and desktop merged; CI/release pending | [PR #19](https://github.com/L-K-M/Neutrodyne/pull/19), [PR #25](https://github.com/L-K-M/Neutrodyne/pull/25); `impl/m0b-3-ci` | Server skeleton, desktop window, single-instance handshake, crash/log files and packaging configuration are on `main` (`9805dbf`). Prepare the remaining CI/release scripts, preserving later main fixes; publish Android `v0.1.0` before merging desktop release jobs. S13 reference-hardware checks remain (PO-43). |
+| M1a database | draft PR; integration verified locally | `impl/m1a-db`, [PR #26](https://github.com/L-K-M/Neutrodyne/pull/26) | Schema v1, DAOs, recovery, migrations and sync identity types. Three Codex package rounds completed. Database device tests passed on API 26/36 before the desktop merge; fresh CI is required on integration commit `1a61083`. Local desktop smoke opened the database; real-window smoke remains a CI check. |
+| M1a feeds | part 1 in GLM review; part 2 draft | `impl/m1a-feeds-1`, [PR #22](https://github.com/L-K-M/Neutrodyne/pull/22); `impl/m1a-feeds-2`, [PR #32](https://github.com/L-K-M/Neutrodyne/pull/32) | Common model/identity helpers, then the JVM parser, sanitiser and golden corpus. Five Codex package rounds completed. Part 2 is stacked on part 1; retarget it to `main` after #22 merges. |
+| M1a data/UI | package branches; not merged | `wip/m1a-data`, `wip/m1a-ui` | Fetch/ingest/refresh/subscribe completed six Codex review rounds; residual matching risks recorded in 03 (`d21dc1b`, pushed). UI screen/ViewModel tests exist; Devin is addressing Codex UI round 3. Integrate latest database/feeds and split UI PRs before review. |
 
 **Toolchain used locally:** Temurin 21 and 25 (Gradle toolchains via `org.gradle.java.installations.paths` in `~/.gradle/gradle.properties`), Android SDK with build tools 36/37 and platform 37, host CPython 3.14 for Chaquopy's `buildPython` (`neutrodyne.buildPython` in `~/.gradle/gradle.properties`; builds need `LANG=C.UTF-8`). No KVM on the development machine: instrumented tests and Gradle Managed Devices run only on CI. Compose UI tests on the desktop JVM need a GL library; locally a user-level Mesa is unpacked in `~/.local/gfx` (`source ~/.local/gfx/env.sh`).
 
-**Resume:** `git fetch && git checkout impl/m0a1-scaffold`; read the M0 checklist in `docs/design/01-foundation.md`; `export JAVA_HOME=<jdk21> ANDROID_HOME=<sdk> LANG=C.UTF-8`; `./gradlew assembleDebug assembleRelease desktopTest`. Helper worktrees live under `~/nd-wt/` (one branch each, prompts in `~/nd-wt/prompts/`).
+**Owner execution instructions, retain through compaction:**
+
+- Follow `docs/IMPLEMENTATION-PROMPT.md` milestone by milestone through published v1.0.
+- Use available helpers, especially free models, Devin SWE-2 and direct Z.ai GLM-5.3 through pi or opencode. Check helper results before integration.
+- Periodically have Codex Sol 6.1 at maximum reasoning review merged `main`.
+- Keep PRs small and GLM reviews serial to protect the Z.ai quota. Avoid pushes that cancel an active review. The owner allows waiving GLM after repeated integration failures; record the gap and waiver, never claim approval.
+
+**Release gate:** the latest scheduled nightly ([run 37753068764](https://github.com/L-K-M/Neutrodyne/actions/runs/37753068764)) failed `api37-16k`. PR #28 (`e4ef42d`) fixed the emulator's surfaceflinger crash using guest rendering, with that job passing on a branch dispatch. The next scheduled nightly must pass before tagging; `repro` remains report-only. No release has been published. Predictive back, install-over with preserved data and debug/release side-by-side still need the owner's device checks, tracked in #20.
+
+**Review queue:** #22, then #26 after its fresh CI, then #32. The remaining M0b CI branch is held for the Android release; data follows database/feeds; UI lands in parts. Draft PRs run CI without consuming the GLM review slot.
+
+**Resume:** fetch first; cut new task branches from `origin/main`, or merge it into existing work before edits. Check PR heads, CI and review comments before acting. Worktrees are under `~/nd-wt/`, prompts and reports under `~/nd-wt/prompts/` and `~/nd-wt/reviews/`. Use `export JAVA_HOME=$HOME/.local/jdks/jdk21 ANDROID_HOME=$HOME/android-sdk LANG=C.UTF-8`; source `~/.local/gfx/env.sh` for Compose JVM tests. Watch free disk space; prune only verified merged worktrees and regenerable outputs, never active helper work.
+
+**Deferred follow-ups:** restrict nightly issue reporting to `main`; make process-start probe reports atomic; guard `SettingStore.observe` against a key from the wrong file; optionally clamp image dimensions in the sanitiser (the UI renderer already bounds them). These are not blanket release approvals or completed work.
 
 ## 1. What this repository is
 
@@ -52,8 +67,8 @@ Neutrodyne is an open-source podcast player in development. The sources of truth
   - the README.
 
   Link and anchor checks report 0 problems, and all 78 Mermaid diagrams parse.
-- **Branch `ccr-ac54917e-u0kl2v`** is identical to `main`. The PR for the replan ([#4](https://github.com/L-K-M/Neutrodyne/pull/4)) is merged by fast-forward.
-- **No code exists yet.** Implementation starts with **M0a.1** (see `docs/PLAN.md` §7).
+- The replan ([PR #4](https://github.com/L-K-M/Neutrodyne/pull/4)) and planning-review follow-ups are merged.
+- `main` now includes the KMP scaffold, Android shell, library spikes, sync-server skeleton and desktop shell. §0 tracks unmerged implementation and outstanding release checks.
 
 ### Progress log
 
@@ -98,12 +113,12 @@ Most important first:
 
 ## 4. How to resume if this session stops
 
-1. **Find where the replan stopped:** `git fetch && git log --oneline origin/ccr-ac54917e-u0kl2v` and `git diff --stat origin/main...origin/ccr-ac54917e-u0kl2v`. The progress log above and the newest checkpoint commits show which docs were already reworked.
-2. **Get the brief:** read the binding decisions in §5 and, if it exists, `docs/research/briefs/change-brief-3-kmp.md`. If the brief is missing, write it first. Use the format of `change-brief-1/2` in the same folder: canonical names, D/PO/R/N/M changes, a checklist per doc, and outlines for `10-sync.md` and `11-desktop.md`.
-3. **Finish the remaining steps** of §3 in order. Ground every claim in `docs/research/2026-10-05-kmp-desktop-sync/` and `docs/research/2026-10-05-stack-choice/`, or verify it on the web, and cite source URLs in the docs. Never link to the research notes from the plan docs.
+1. **Refresh:** fetch, inspect worktree status and read §0 plus `docs/IMPLEMENTATION-PROMPT.md`. Preserve active helper changes.
+2. **Reconcile:** inspect open PRs, latest-commit CI and completed review comments. Resume the serial GLM queue; do not duplicate running helper tasks.
+3. **Implement:** follow PLAN §7's dependencies and acceptance criteria. Resolve important review findings test-first and record design deviations.
 4. **Run the checks:** `python3 tools/doccheck/checkdocs.py .` and the Mermaid checker. Both must report 0 problems.
-5. **Publish:** commit, push the branch, then fast-forward `main` (`git push origin HEAD:main`, never force). If `main` moved, merge `origin/main` into the branch first; the owner sometimes pushes to `main` directly.
-6. **Hand back:** update this file, then give the owner a short summary and the list of open PO questions.
+5. **Merge and release:** commit and push focused branches, open PRs, finish CI/review and merge through GitHub. Publish milestone tester builds only after their release gates pass.
+6. **Hand back:** update this file with exact heads, completed checks, remaining gaps and owner instructions. Report unmerged work as work in progress.
 
 ## 5. Binding decisions for the replan (S0–S13)
 
