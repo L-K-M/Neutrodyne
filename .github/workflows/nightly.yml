@@ -334,10 +334,30 @@ jobs:
       - name: Packaging tools (Linux)
         if: runner.os == 'Linux'
         shell: bash
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq binutils fakeroot rpm xvfb dbus-x11
+        run: |
+          sudo apt-get update -qq
+          pkgs="binutils fakeroot rpm xvfb dbus-x11"
+          # skiko-linux-arm64 links libEGL.so.1, which the arm image lacks (its
+          # other NEEDED entries already resolve); libegl1 pulls the Mesa EGL
+          # vendor for the software path (nightly 37831500506).
+          [ "${{ matrix.target }}" = linux-arm64 ] && pkgs="$pkgs libegl1"
+          sudo apt-get install -y -qq $pkgs
+      # linux-arm64 cannot run the Android host tests: the SDK's aapt2/aidl and
+      # Gradle's aapt2 are x86_64 binaries and Robolectric ships no linux/aarch64
+      # runtime (nightly 37831500506). Excluding that task family also prunes its
+      # Android prerequisites (process*UnitTestResources, compile*Aidl); the
+      # desktop JVM and JVM-island suites still run, and ci.yml's unit job keeps
+      # the Android host coverage on linux-x64.
       - name: Unit tests on this host
         shell: bash
-        run: ./gradlew allTests test -Proborazzi.test.verify=true --continue
+        run: |
+          if [ "${{ matrix.target }}" = linux-arm64 ]; then
+            ./gradlew allTests test \
+              -x testAndroidHostTest -x testDebugUnitTest \
+              -Proborazzi.test.verify=true --continue
+          else
+            ./gradlew allTests test -Proborazzi.test.verify=true --continue
+          fi
       # One image per install kind: the kind rides the Gradle property into the
       # image's build-info, and the matching package task consumes that image.
       - name: Package the target's formats

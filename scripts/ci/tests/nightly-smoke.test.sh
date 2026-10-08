@@ -224,6 +224,46 @@ else
     t_fail "every checkout pins github.sha and inputs.ref is gone"
 fi
 
+# 7. The linux-arm64 leg cannot run the Android host tests: the SDK build-tools
+#    are x86_64 binaries and Robolectric has no linux/aarch64 runtime (nightly
+#    37831500506). The desktop-matrix unit-test step must exclude exactly those
+#    tasks on linux-arm64 while every other leg runs the full `allTests test`.
+if python3 - "$NIGHTLY" <<'PY'
+import re, sys
+
+lines = open(sys.argv[1]).read().splitlines()
+indent = lambda s: len(s) - len(s.lstrip(' '))
+
+job = next(i for i, l in enumerate(lines) if l.strip() == 'desktop-matrix:')
+job_end = next((i for i in range(job + 1, len(lines))
+                if lines[i].strip() and indent(lines[i]) <= indent(lines[job])),
+               len(lines))
+step = next(i for i in range(job, job_end)
+            if lines[i].strip() == '- name: Unit tests on this host')
+step_end = next((i for i in range(step + 1, job_end)
+                 if lines[i].strip().startswith('- ')
+                 and indent(lines[i]) <= indent(lines[step])), job_end)
+body = '\n'.join(lines[step:step_end])
+
+problems = []
+if 'linux-arm64' not in body:
+    problems.append('the step has no linux-arm64 branch')
+for task in ('testAndroidHostTest', 'testDebugUnitTest'):
+    if not re.search(r'linux-arm64[^`]*-x %s\b' % task, body, re.S):
+        problems.append('linux-arm64 branch does not exclude -x %s' % task)
+arm, _, rest = body.partition('linux-arm64')
+if not re.search(r'gradlew allTests test\b(?!.*-x test)', rest, re.S):
+    problems.append('the non-arm64 leg lost the unfiltered `allTests test` line')
+for p in problems:
+    print('problem:', p, file=sys.stderr)
+sys.exit(1 if problems else 0)
+PY
+then
+    t_ok "linux-arm64 excludes only the Android host test tasks"
+else
+    t_fail "linux-arm64 excludes only the Android host test tasks"
+fi
+
 echo
 if [ "$FAILED" -gt 0 ]; then
     echo "nightly-smoke.test: $FAILED case(s) failing" >&2

@@ -154,7 +154,12 @@ jobs:
       - name: Packaging tools (Linux)
         if: runner.os == 'Linux'
         shell: bash
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq binutils fakeroot rpm xvfb dbus-x11
+        run: |
+          sudo apt-get update -qq
+          pkgs="binutils fakeroot rpm xvfb dbus-x11"
+          # Same arm64 gap as nightly.yml: skiko needs libEGL.so.1 (libegl1).
+          [ "${{ matrix.target }}" = linux-arm64 ] && pkgs="$pkgs libegl1"
+          sudo apt-get install -y -qq $pkgs
       # The build, the packaged smoke starts and the checks run in a two-attempt
       # loop — an immutable release cannot gain assets later, so a runner flake
       # gets one retry while a deterministic failure fails twice (09 release.yml
