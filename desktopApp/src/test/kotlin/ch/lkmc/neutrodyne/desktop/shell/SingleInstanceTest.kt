@@ -232,7 +232,7 @@ class SingleInstanceTest {
             // The idle peer was dropped without a reply (11's "timeout → close" rule): a real EOF,
             // not a local read timeout.
             idle.soTimeout = IDLE_PEER_BOUND_MS.toInt()
-            assertThat(runCatching { idle.inputStream.read() }.getOrNull()).isEqualTo(-1)
+            assertThat(idle.inputStream.read()).isEqualTo(-1)
             idle.close()
 
             serveJob.cancelAndJoin()
@@ -260,7 +260,7 @@ class SingleInstanceTest {
             peer.outputStream.write("{\"v\":1,\"tok".toByteArray())
             peer.outputStream.flush()
 
-            assertThat(runCatching { peer.inputStream.read() }.getOrNull()).isEqualTo(-1)
+            assertThat(peer.inputStream.read()).isEqualTo(-1)
             peer.close()
 
             serveJob.cancelAndJoin()

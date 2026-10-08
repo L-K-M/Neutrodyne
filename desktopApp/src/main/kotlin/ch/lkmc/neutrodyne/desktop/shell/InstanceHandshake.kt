@@ -39,12 +39,12 @@ import kotlin.time.Duration.Companion.seconds
  * invokes [serve]'s callback in arrival order after replying, so the sender can exit at once.
  *
  * The `serve` loop is cancellable: `runInterruptible` turns coroutine cancellation into a closed
- * channel, and the `finally` removes `instance.port` / `instance.token` again. Per-connection IO
- * is bounded and cancellable the same way — `SO_TIMEOUT` does not apply to `SocketChannel`
+ * channel, and the `finally` removes `instance.port` / `instance.token` again. Per-connection
+ * reads are bounded and cancellable the same way — `SO_TIMEOUT` does not apply to `SocketChannel`
  * reads, so the line budget is a coroutine timeout around an interruptible read (the interrupt
- * closes the channel); an idle or stalled peer can neither park the sequential server nor hold
- * it past a shutdown. The client uses a plain `Socket`, where `SO_TIMEOUT` does apply, re-armed
- * to the remaining reply budget before each read.
+ * closes the channel). Server writes are cancellable but have no independent deadline. The
+ * client uses a plain `Socket`, where `SO_TIMEOUT` does apply, re-armed to the remaining reply
+ * budget before each read; its request write is not deadline-bounded.
  */
 class InstanceHandshake(
     private val dirs: AppDirs,
@@ -255,8 +255,7 @@ class InstanceHandshake(
     /**
      * Runs a blocking channel call on the current IO lane with coroutine cancellation turned
      * into a thread interrupt — the interrupt closes the channel, which is what unblocks the
-     * call — and clears the consumed interrupt flag so it cannot leak into the next task this
-     * pooled worker runs.
+     * call. The block also clears the consumed interrupt before the library unwinds.
      */
     private suspend fun <T> interruptible(block: () -> T): T =
         runInterruptible {
