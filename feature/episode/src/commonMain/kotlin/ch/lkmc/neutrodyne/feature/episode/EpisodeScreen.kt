@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -416,8 +418,10 @@ private fun metaLine(episode: EpisodeDetail): UiText {
  * The action row (08 Episode detail): the primary play affordance — "Watch on YouTube" for
  * YouTube sources while external mode is the only mode (M8 adds the engine's Play), the
  * offline-undownloaded state shows `cloud_off` "Offline" and toasts on tap — plus Download, Up
- * next and the played toggle as icon-label buttons.
+ * next and the played toggle as icon-label buttons. `FlowRow` wraps them onto extra lines so
+ * every action stays reachable at 200 % text on a compact width (08's fontScale ≥ 1.5 rule).
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ActionRow(
     episode: EpisodeDetail,
@@ -431,8 +435,8 @@ private fun ActionRow(
     val playableOffline = !state.offline || downloaded
     var upNextMenu by remember { mutableStateOf(false) }
 
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
+    FlowRow(
+        verticalArrangement = Arrangement.spacedBy(BUTTON_GAP),
         horizontalArrangement = Arrangement.spacedBy(BUTTON_GAP),
         modifier = Modifier.padding(top = BUTTONS_TOP),
     ) {

@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.feature.episode
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.ClipboardManager
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
@@ -19,8 +20,10 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.Density
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
@@ -331,6 +334,18 @@ class EpisodeScreenTest {
             onNodeWithContentDescription("diagram").assertDoesNotExist()
         }
 
+    @Test
+    fun actionsStayReachableAtLargeFontOnCompactWidth() =
+        runDesktopComposeUiTest(width = 360, height = 640) {
+            val actions = mutableListOf<EpisodeAction>()
+            setEpisode(loadedState(), onAction = { actions += it }, fontScale = 2f)
+            // At 200 % text on a compact width every header action wraps into view (08's
+            // fontScale ≥ 1.5 rule): "Mark played" must stay on screen and dispatch.
+            scrollTo(hasText("Mark played")).assertIsDisplayed()
+            onAllNodes(hasText("Mark played") and hasClickAction()).onFirst().performClick()
+            assertEquals(listOf<EpisodeAction>(EpisodeAction.SetPlayed(9, played = true)), actions)
+        }
+
     private fun loadedState(
         episode: EpisodeDetail =
             testEpisodeDetail(9, podcastId = 7, title = "The Interview", podcastTitle = "The Show"),
@@ -349,6 +364,7 @@ class EpisodeScreenTest {
         state: EpisodeUiState,
         onAction: (EpisodeAction) -> Unit = {},
         onFavorite: (Boolean) -> Unit = {},
+        fontScale: Float = 1f,
     ) {
         setContent {
             CompositionLocalProvider(
@@ -359,7 +375,16 @@ class EpisodeScreenTest {
                 LocalClipboardManager provides clipboard,
             ) {
                 NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
-                    EpisodeScreen(state = state, onAction = onAction, onFavorite = onFavorite)
+                    val density = LocalDensity.current
+                    CompositionLocalProvider(
+                        LocalDensity provides Density(density.density, fontScale),
+                    ) {
+                        EpisodeScreen(
+                            state = state,
+                            onAction = onAction,
+                            onFavorite = onFavorite,
+                        )
+                    }
                 }
             }
         }
