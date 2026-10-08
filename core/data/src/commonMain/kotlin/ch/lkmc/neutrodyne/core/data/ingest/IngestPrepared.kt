@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.EpisodeType
 import ch.lkmc.neutrodyne.core.model.OwnerType
+import ch.lkmc.neutrodyne.feeds.identity.TitleMatch
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.model.ParsedEpisode
 import ch.lkmc.neutrodyne.feeds.parse.EnclosureTypes
@@ -42,11 +43,15 @@ internal class PreparedItem(
     val claimKeys: List<String>,
     /** `EpisodeKeys.fallbacks(episode)` — the re-derive pool when [docKey] collides at insert. */
     val fallbackKeys: List<String>,
-    /** `UrlNormalizer.forIdentity(enclosure.url)` — pass-2 enclosure map key. */
+    /** `UrlNormalizer.forIdentity(enclosure.url)` — pass-2 tier A's map key. */
     val enclosureIdentity: String?,
-    /** `UrlNormalizer.forIdentityNoQuery(enclosure.url)` — pass-2 query-less map key. */
+    /** `UrlNormalizer.forIdentityNoQuery(enclosure.url)` — pass-2 tier B's map key. */
     val enclosureNoQuery: String?,
-    /** `TitleMatch.normalise(title) + "|" + utcDay(pubDate)` — pass-2 title-day key. */
+    /** `TitleMatch.normalise(title)` or null when absent/blank — tier B's title corroboration. */
+    val titleNorm: String?,
+    /** The item's UTC publication-day bucket — tier B's day corroboration. */
+    val pubDayUtc: Long?,
+    /** `titleNorm + "|" + pubDayUtc` — pass-2 tier C's map key. */
     val titleDayKey: String?,
     val contentHash: Long,
     /** The non-empty stored title (03 Accepted items: date, then file name, then `…`). */
@@ -246,41 +251,115 @@ internal class PreparedItem(
 }
 
 /**
- * The pass-2 lookup structure of 03 step 5: every stored row pass 1 left unclaimed. The
- * design's reservation of "primary keys of document items" is narrowed to *claimed* rows —
- * an unclaimed row whose `identityKey` is an assigned document key can only be a `g:` claim
- * the reuse guard rejected, and keeping it reserved would strand exactly the episodes pass 2
- * exists to recover (r3 F1). Indexed by normalised enclosure URL, query-less enclosure URL
- * and title-day. Match order is the spec's: enclosure URL → query-less URL → title+day with
- * guards.
+ * The pass-2 matcher of 03 step 5 as *global strength tiers* (deviation 14): a tier finishes
+ * for every unmatched item before the next starts, so a weak relation can never take a row a
+ * stronger one would claim (r4 F2). Inside a tier a pair matches only when it is unique on
+ * both sides — exactly one eligible row relates to the item and exactly one unmatched item
+ * relates to that row; ambiguous pairs skip the tier and can still match under a later,
+ * corroborated one (r4 F1).
+ *
+ * Eligible rows are every stored row pass 1 left unclaimed — the design's reservation of
+ * "primary keys of document items" stays narrowed to *claimed* rows (deviation 12): an
+ * unclaimed doc-keyed row can only be a `g:` claim the reuse guard rejected, and reserving it
+ * would strand exactly the episodes this pass exists to recover.
  */
 internal class Pass2Index(
     existing: List<ExistingEpisodeKey>,
     alreadyMatched: Set<Long>,
 ) {
-    private val candidates =
-        existing.filter { it.id !in alreadyMatched }
+    private val candidates = existing.filter { it.id !in alreadyMatched }
+    private val titleNorms = candidates.associate { it.id to titleNormOf(it.title) }
+    private val pubDays = candidates.associate { it.id to it.pubDate?.div(PreparedItem.DAY_MS) }
 
     private val byEnclosure = candidates.grouped { it.enclosureUrl?.let(UrlNormalizer::forIdentity) }
     private val byEnclosureNoQuery =
         candidates.grouped { it.enclosureUrl?.let(UrlNormalizer::forIdentityNoQuery) }
-    private val byTitleDay = candidates.grouped { rowTitleDayKey(it) }
+    private val byTitleDay =
+        candidates.grouped { row ->
+            titleNorms[row.id]?.let { norm -> pubDays[row.id]?.let { "$norm|$it" } }
+        }
 
-    fun match(
-        item: PreparedItem,
-        taken: Set<Long>,
-    ): ExistingEpisodeKey? {
-        item.enclosureIdentity?.let { key ->
-            byEnclosure[key]?.firstOrNull { it.id !in taken }?.let { return it }
+    /**
+     * The (item, row) claims in tier order — ENCLOSURE, ENCLOSURE_NO_QUERY, TITLE_DAY. Rows and
+     * items a tier claims leave the pool before the next tier starts; unmatched items insert.
+     */
+    fun matches(items: List<PreparedItem>): List<Pair<PreparedItem, ExistingEpisodeKey>> {
+        val unmatched = items.filterTo(mutableSetOf()) { it.matchedTo == null && !it.dropped }
+        val free = candidates.mapTo(HashSet()) { it.id }
+        val claims = mutableListOf<Pair<PreparedItem, ExistingEpisodeKey>>()
+        for (tier in FallbackTier.entries) {
+            if (unmatched.isEmpty() || free.isEmpty()) break
+            for ((item, row) in uniquePairs(unmatched, free, tier)) {
+                claims += item to row
+                unmatched -= item
+                free -= row.id
+            }
         }
-        item.enclosureNoQuery?.let { key ->
-            byEnclosureNoQuery[key]?.firstOrNull { it.id !in taken }?.let { return it }
-        }
-        val dayKey = item.titleDayKey ?: return null
-        return byTitleDay[dayKey]?.firstOrNull { it.id !in taken && guardsPass(it, item) }
+        return claims
     }
 
-    /** The title-day guards (03 step 5): known durations within 10 min, known MIME majors equal. */
+    /**
+     * One tier's claims: an item takes its row only when it relates to exactly one free row
+     * and that row relates to exactly one unmatched item.
+     */
+    private fun uniquePairs(
+        items: Set<PreparedItem>,
+        free: Set<Long>,
+        tier: FallbackTier,
+    ): List<Pair<PreparedItem, ExistingEpisodeKey>> {
+        val soleRow = HashMap<PreparedItem, ExistingEpisodeKey>()
+        val suitors = HashMap<Long, Int>()
+        for (item in items) {
+            val related = relatedRows(item, tier, free)
+            if (related.size == 1) soleRow[item] = related.single()
+            for (row in related) suitors.merge(row.id, 1, Int::plus)
+        }
+        return items.mapNotNull { item ->
+            val row = soleRow[item] ?: return@mapNotNull null
+            if (suitors.getValue(row.id) == 1) item to row else null
+        }
+    }
+
+    /** The item's rows under [tier]: the tier index's bucket, filtered to free and related. */
+    private fun relatedRows(
+        item: PreparedItem,
+        tier: FallbackTier,
+        free: Set<Long>,
+    ): List<ExistingEpisodeKey> {
+        val bucket =
+            when (tier) {
+                FallbackTier.ENCLOSURE -> item.enclosureIdentity?.let(byEnclosure::get)
+                FallbackTier.ENCLOSURE_NO_QUERY -> item.enclosureNoQuery?.let(byEnclosureNoQuery::get)
+                FallbackTier.TITLE_DAY -> item.titleDayKey?.let(byTitleDay::get)
+            } ?: return emptyList()
+        return bucket.filter { it.id in free && relationHolds(item, it, tier) }
+    }
+
+    /** The tier's pair predicate beyond its index key (the index keys are equal by lookup). */
+    private fun relationHolds(
+        item: PreparedItem,
+        row: ExistingEpisodeKey,
+        tier: FallbackTier,
+    ): Boolean =
+        when (tier) {
+            FallbackTier.ENCLOSURE -> true
+            FallbackTier.ENCLOSURE_NO_QUERY -> corroborates(item, row) && guardsPass(row, item)
+            FallbackTier.TITLE_DAY -> guardsPass(row, item)
+        }
+
+    /**
+     * Tier B's corroboration (r4 F1): the query-less URL alone cannot pick an episode — a
+     * rolling feed's `/download?id=N` rows share it — so the pair needs an equal `TitleMatch`
+     * or the same UTC publication day on top.
+     */
+    private fun corroborates(
+        item: PreparedItem,
+        row: ExistingEpisodeKey,
+    ): Boolean =
+        (item.titleNorm != null && item.titleNorm == titleNorms[row.id]) ||
+            (item.pubDayUtc != null && item.pubDayUtc == pubDays[row.id])
+
+    /** The guards of 03 step 5: known durations within 10 min, known MIME majors equal. */
     private fun guardsPass(
         row: ExistingEpisodeKey,
         item: PreparedItem,
@@ -300,9 +379,16 @@ internal class Pass2Index(
         return storedMajor == null || itemMajor == null || storedMajor == itemMajor
     }
 
-    private fun rowTitleDayKey(row: ExistingEpisodeKey): String? {
-        val day = row.pubDate ?: return null
-        return titleDayKeyOf(row.title, day)
+    /** The pass-2 strength tiers of deviation 14, strongest first. */
+    private enum class FallbackTier {
+        /** Equal normalised enclosure URL (`UrlNormalizer.forIdentity`). */
+        ENCLOSURE,
+
+        /** Equal query-less URL (`forIdentityNoQuery`) + corroboration + the guards. */
+        ENCLOSURE_NO_QUERY,
+
+        /** Equal `TitleMatch` + same UTC day + the guards. */
+        TITLE_DAY,
     }
 
     private companion object {
@@ -310,12 +396,9 @@ internal class Pass2Index(
     }
 }
 
-internal fun titleDayKeyOf(
-    title: String,
-    pubDateMs: Long,
-): String =
-    ch.lkmc.neutrodyne.feeds.identity.TitleMatch
-        .normalise(title) + "|" + pubDateMs / PreparedItem.DAY_MS
+/** `TitleMatch.normalise` or null when the title is missing or folds to empty. */
+private fun titleNormOf(title: String?): String? =
+    title?.let(TitleMatch::normalise)?.takeIf(String::isNotEmpty)
 
 private fun List<ExistingEpisodeKey>.grouped(
     keyOf: (ExistingEpisodeKey) -> String?,

@@ -187,15 +187,14 @@ internal class FeedIngestor(
             }
         }
 
-        // Pass 2 (03 step 5): rewritten-GUID and query-rotation fallbacks over every row pass 1
-        // left unclaimed — including a `g:` row whose claim the reuse guard rejected; an
-        // unclaimed doc-keyed row can only be such a rejected `g:` row, so reserving it would
-        // strand exactly the episodes this pass exists to recover. Only claimed rows are
-        // protected, through `taken` (r3 F1).
+        // Pass 2 (03 step 5, deviation 14): the fallback relations run as global strength
+        // tiers — each tier finishes for every unmatched item before the next starts, and a
+        // match inside a tier is made only when it is unique on both sides — so a weak
+        // relation can never take a row a stronger one would claim (r4 F2). Eligible rows are
+        // every row pass 1 left unclaimed, including a `g:` row whose claim the reuse guard
+        // rejected: reserving it would strand exactly the episodes this pass recovers (r3 F1).
         val fallbacks = Pass2Index(existing, taken)
-        for (item in prepared.items) {
-            if (item.matchedTo != null || item.dropped) continue
-            val row = fallbacks.match(item, taken) ?: continue
+        for ((item, row) in fallbacks.matches(prepared.items)) {
             if (claimRow(ingestDao, storedKeys, item, row)) rekeyed++
             taken += row.id
         }
@@ -529,6 +528,8 @@ internal class FeedIngestor(
                 e.artwork.firstOrNull()?.url?.takeUnless {
                     UrlNormalizer.forIdentity(it) == artworkIdentity
                 }
+            val titleNorm = e.title?.let(TitleMatch::normalise)?.takeIf(String::isNotEmpty)
+            val pubDayUtc = e.pubDate?.div(PreparedItem.DAY_MS)
             items +=
                 PreparedItem(
                     episode = e,
@@ -540,7 +541,10 @@ internal class FeedIngestor(
                     fallbackKeys = EpisodeKeys.fallbacks(e),
                     enclosureIdentity = e.primaryEnclosure?.url?.let(UrlNormalizer::forIdentity),
                     enclosureNoQuery = e.primaryEnclosure?.url?.let(UrlNormalizer::forIdentityNoQuery),
-                    titleDayKey = titleDayKey(e),
+                    titleNorm = titleNorm,
+                    pubDayUtc = pubDayUtc,
+                    titleDayKey =
+                        if (titleNorm != null && pubDayUtc != null) "$titleNorm|$pubDayUtc" else null,
                     contentHash = contentHash,
                     title = resolvedTitle(e),
                     imageUrl = imageUrl,
@@ -576,13 +580,6 @@ internal class FeedIngestor(
         }
         warnings += ParseWarning(WarningCode.DUPLICATE_ITEM, index, e.guid.orEmpty().shorten())
         return null
-    }
-
-    /** Pass-2's `TitleMatch + same UTC day` key — needs a non-blank title and a parsed pubDate. */
-    private fun titleDayKey(e: ParsedEpisode): String? {
-        val title = e.title?.takeUnless { it.isBlank() } ?: return null
-        val day = e.pubDate ?: return null
-        return TitleMatch.normalise(title) + "|" + day / PreparedItem.DAY_MS
     }
 
     /** A `Date` header >24 h off the local clock wins `firstSeenAt` (03 sortDate and clock). */
