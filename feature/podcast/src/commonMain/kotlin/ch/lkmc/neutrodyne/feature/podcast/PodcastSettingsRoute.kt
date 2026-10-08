@@ -44,6 +44,7 @@ internal fun PodcastSettingsRoute(key: PodcastSettingsKey) {
         state = state,
         onCustomTitle = viewModel::setCustomTitle,
         onOrderChange = viewModel::setOrder,
+        onIncludeInAll = viewModel::setIncludeInAll,
         onEditFeedUrl = { input ->
             scope.launch {
                 viewModel.editFeedUrl(input).whenOutcome(

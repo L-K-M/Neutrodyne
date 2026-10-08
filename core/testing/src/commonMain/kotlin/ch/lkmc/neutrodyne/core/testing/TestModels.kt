@@ -152,6 +152,7 @@ fun testPodcastDetail(
     isPrivate: Boolean = false,
     episodeOrder: FeedOrder? = null,
     showType: ShowType? = ShowType.EPISODIC,
+    includeInAll: Boolean = true,
     hasOlderPages: Boolean = false,
 ): PodcastDetail =
     PodcastDetail(
@@ -170,6 +171,7 @@ fun testPodcastDetail(
         isPrivate = isPrivate,
         episodeOrder = episodeOrder,
         showType = showType,
+        includeInAll = includeInAll,
         hasOlderPages = hasOlderPages,
     )
 

@@ -11,12 +11,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -82,6 +84,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.ps_move_reason_other
 import ch.lkmc.neutrodyne.core.ui.resources.ps_move_reason_redirect
 import ch.lkmc.neutrodyne.core.ui.resources.ps_never
 import ch.lkmc.neutrodyne.core.ui.resources.ps_ok
+import ch.lkmc.neutrodyne.core.ui.resources.ps_show_in_all
 import ch.lkmc.neutrodyne.core.ui.resources.section_feed
 import ch.lkmc.neutrodyne.core.ui.resources.section_general
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
@@ -92,14 +95,15 @@ import org.jetbrains.compose.resources.stringResource
  * Podcast settings (08 Podcast settings — General and Feed of M1): a scroll list of rows; writes
  * are fire-and-forget repository calls while `editFeedUrl`/`setCredentials` surface their
  * `AddPodcastError` as a snackbar. The playback/downloads/notifications/refresh sections arrive
- * with their milestones; "Show in All" waits for the M5 scope-settings read model (deviation in
- * 08), and the M1b edit-address/credentials rows hide behind [FEED_ACCOUNT_CONTROLS_ENABLED].
+ * with their milestones, and the M1b edit-address/credentials rows hide behind
+ * [FEED_ACCOUNT_CONTROLS_ENABLED].
  */
 @Composable
 internal fun PodcastSettingsScreen(
     state: PodcastSettingsUiState,
     onCustomTitle: (String?) -> Unit,
     onOrderChange: (FeedOrder) -> Unit,
+    onIncludeInAll: (Boolean) -> Unit,
     onEditFeedUrl: (String) -> Unit,
     onCredentials: (BasicCredentials) -> Unit,
     modifier: Modifier = Modifier,
@@ -128,7 +132,7 @@ internal fun PodcastSettingsScreen(
         }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             SectionHeader(stringResource(Res.string.section_general))
-            GeneralSection(detail, state.effectiveOrder, onCustomTitle, onOrderChange)
+            GeneralSection(detail, state.effectiveOrder, onCustomTitle, onIncludeInAll, onOrderChange)
 
             if (feedInfo != null) {
                 SectionHeader(stringResource(Res.string.section_feed))
@@ -143,6 +147,7 @@ private fun GeneralSection(
     detail: PodcastDetail,
     order: FeedOrder,
     onCustomTitle: (String?) -> Unit,
+    onIncludeInAll: (Boolean) -> Unit,
     onOrderChange: (FeedOrder) -> Unit,
 ) {
     var titleDialog by rememberSaveable { mutableStateOf(false) }
@@ -155,6 +160,12 @@ private fun GeneralSection(
             // The read model exposes only the effective title; the dialog pre-fills it (deviation).
             summary = detail.displayTitle,
             onClick = { titleDialog = true },
+        )
+        SettingsSwitchRow(
+            icon = NdIcons.DynamicFeed,
+            title = stringResource(Res.string.ps_show_in_all),
+            checked = detail.includeInAll,
+            onCheckedChange = onIncludeInAll,
         )
         SettingsRow(
             icon = NdIcons.Sort,
@@ -381,6 +392,27 @@ private fun SettingsRow(
             Modifier
                 .clickable(onClick = onClick)
                 .semantics { role = Role.Button },
+    )
+}
+
+/** The settings module's switch row with this section's leading icon; the whole row toggles. */
+@Composable
+private fun SettingsSwitchRow(
+    icon: ImageVector,
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    ListItem(
+        headlineContent = { Text(title) },
+        leadingContent = { Icon(icon, contentDescription = null) },
+        trailingContent = { Switch(checked = checked, onCheckedChange = null) },
+        modifier =
+            Modifier.toggleable(
+                value = checked,
+                role = Role.Switch,
+                onValueChange = onCheckedChange,
+            ),
     )
 }
 

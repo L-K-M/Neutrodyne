@@ -30,9 +30,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
- * The podcast settings screen's state (08 Podcast settings): [detail] drives the General rows and
- * [feedInfo] the Feed section. [gone] means the podcast was removed and the route pops. The "Show
- * in All" row is deferred — `includeInAll` is not in the M1a read models (deviation in 08).
+ * The podcast settings screen's state (08 Podcast settings): [detail] drives the General rows —
+ * including the "Show in All" switch on [PodcastDetail.includeInAll] — and [feedInfo] the Feed
+ * section. [gone] means the podcast was removed and the route pops.
  */
 @Immutable
 public data class PodcastSettingsUiState(
@@ -85,6 +85,11 @@ public class PodcastSettingsViewModel
             viewModelScope.launch {
                 feedRepository.setFeedOrder(FeedSource.Podcast(podcastId), order)
             }
+        }
+
+        /** "Show in All" — 03's `setIncludeInAll` removes the podcast's episodes from the All feed. */
+        public fun setIncludeInAll(include: Boolean) {
+            viewModelScope.launch { podcasts.setIncludeInAll(podcastId, include) }
         }
 
         /** "Edit feed address" (03 Edit URL; RSS rows only). */

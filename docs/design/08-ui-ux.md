@@ -2781,6 +2781,11 @@ Serves N1, N4, N6. Expected failures arrive as values (01 [Errors](01-foundation
 10. The screens' desktop-JVM tests (`runComposeUiTest`) stand in for the M1a desktop-window variant, whose shell is M0b's; `NdScrollbar`, context menus and the refresh button land with it.
 11. `LocalUiClock` and `LocalPlatformKind` (`:core:ui`) are CompositionLocals this doc did not name: the clock backs every relative-date label so tests inject `TestClock`, and the platform kind picks 07's per-platform copy (storage wording) and the desktop refresh button. Both are on 09's `.editorconfig` allowlist together with `LocalDrawnReporter`.
 
+### Implementation deviations (2026-10-08, UI review round 1)
+
+1. The Podcast settings rows "Edit feed address" and "Username and password" and the podcast detail banner's "Enter password" action are hidden behind `FEED_ACCOUNT_CONTROLS_ENABLED` until M1b: `PodcastRepository.editFeedUrl`/`setCredentials`/`merge` are M1b semantics and their M1a implementations throw `UnsupportedOperationException`, so the controls must not be reachable (UI review round 1, P1). M1b flips the flag and restores the rows of the Feed section and the banner action.
+2. "Show in All" reads `PodcastDetail.includeInAll` and writes `PodcastRepository.setIncludeInAll` (03's M1a port); the scoped `ScopedSettingsView`/`ScopeSettingsRepository.observePodcast` this section names as the data source arrives with M5's effective-settings resolution, so the field rides the M1a `observePodcast` read model alongside custom title and episode order.
+
 ---
 
 ## New names introduced here

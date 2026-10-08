@@ -109,6 +109,20 @@ class PodcastSettingsViewModelTest : MainDispatcherTest() {
         }
 
     @Test
+    fun setIncludeInAllWritesTheRepository() =
+        runTest {
+            val viewModel = viewModel()
+            viewModel.setIncludeInAll(false)
+            advanceUntilIdle()
+            viewModel.setIncludeInAll(true)
+            advanceUntilIdle()
+            assertEquals(
+                listOf("setIncludeInAll(7, false)", "setIncludeInAll(7, true)"),
+                podcasts.calls,
+            )
+        }
+
+    @Test
     fun editFeedUrlReturnsTheOutcome() =
         runTest {
             val viewModel = viewModel()

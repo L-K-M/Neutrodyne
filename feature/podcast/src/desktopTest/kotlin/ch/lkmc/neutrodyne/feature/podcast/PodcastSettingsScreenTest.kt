@@ -87,6 +87,7 @@ class PodcastSettingsScreenTest {
             )
             onNodeWithText("Podcast settings · The Show").assertIsDisplayed()
             onNodeWithText("Custom title").assertIsDisplayed()
+            onNodeWithText("Show in All").assertIsDisplayed()
             onNodeWithText("Episode order").assertIsDisplayed()
             onNodeWithText("Feed address").assertIsDisplayed()
             // The address stays redacted until tapped.
@@ -162,6 +163,37 @@ class PodcastSettingsScreenTest {
         }
 
     @Test
+    fun showInAllSwitchToggles() =
+        runComposeUiTest {
+            var include: Boolean? = null
+            setSettings(
+                PodcastSettingsUiState(
+                    detail = testPodcastDetail(7, includeInAll = true),
+                    loaded = true,
+                ),
+                onIncludeInAll = { include = it },
+            )
+            // 08's General section: the whole row is the toggle target.
+            onNodeWithText("Show in All").assertIsDisplayed().performClick()
+            assertEquals(false, include)
+        }
+
+    @Test
+    fun showInAllSwitchReflectsTheReadModel() =
+        runComposeUiTest {
+            var include: Boolean? = null
+            setSettings(
+                PodcastSettingsUiState(
+                    detail = testPodcastDetail(7, includeInAll = false),
+                    loaded = true,
+                ),
+                onIncludeInAll = { include = it },
+            )
+            onNodeWithText("Show in All").performClick()
+            assertEquals(true, include)
+        }
+
+    @Test
     fun orderDialogWrites() =
         runComposeUiTest {
             var order: FeedOrder? = null
@@ -208,6 +240,7 @@ class PodcastSettingsScreenTest {
         state: PodcastSettingsUiState,
         onCustomTitle: (String?) -> Unit = {},
         onOrderChange: (FeedOrder) -> Unit = {},
+        onIncludeInAll: (Boolean) -> Unit = {},
         onEditFeedUrl: (String) -> Unit = {},
         onCredentials: (BasicCredentials) -> Unit = {},
     ) {
@@ -223,6 +256,7 @@ class PodcastSettingsScreenTest {
                         state = state,
                         onCustomTitle = onCustomTitle,
                         onOrderChange = onOrderChange,
+                        onIncludeInAll = onIncludeInAll,
                         onEditFeedUrl = onEditFeedUrl,
                         onCredentials = onCredentials,
                     )
