@@ -160,8 +160,8 @@ jobs:
           # sys.boot_completed can precede the settings and package services; the wait line
           # holds the run until both answer (5 min cap).
           script: |
-            test "$(adb shell getconf PAGE_SIZE | tr -d '\r')" = "16384" || { echo "PAGE_SIZE != 16384"; exit 1; }
             adb logcat -v threadtime > "$RUNNER_TEMP/logcat-api37-debug.txt" 2>&1 &
+            test "$(adb shell getconf PAGE_SIZE | tr -d '\r')" = "16384" || { echo "PAGE_SIZE != 16384"; exit 1; }
             timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true connectedDebugAndroidTest
       - name: Release smoke on API 37
