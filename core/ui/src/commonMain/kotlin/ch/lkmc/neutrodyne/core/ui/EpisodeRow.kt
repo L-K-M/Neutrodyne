@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -33,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -341,14 +343,21 @@ private fun LeadingSlot(
     }
 }
 
-/** The PODCAST style's 48 dp date block: day `titleMedium` over month `labelSmall` (08). */
+/**
+ * The PODCAST style's date block: day `titleMedium` over month `labelSmall`, at least 48 dp (08).
+ * A minimum, not a fixed size — at 200 % text the two lines grow past 48 dp and a fixed box
+ * would clip the month (08's "no fixed heights" accessibility rule).
+ */
 @Composable
 private fun DateBlock(row: EpisodeRow) {
     val epochMs = row.pubDate ?: row.sortDate
     val (day, month) = remember(epochMs) { FeedDates.dayMonth(epochMs) }
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.size(DATE_BLOCK_SIZE),
+        modifier =
+            Modifier
+                .defaultMinSize(minWidth = DATE_BLOCK_SIZE, minHeight = DATE_BLOCK_SIZE)
+                .testTag(DATE_BLOCK_TAG),
         verticalArrangement = Arrangement.Center,
     ) {
         Text(day, style = MaterialTheme.typography.titleMedium, maxLines = 1)
@@ -674,6 +683,9 @@ private val TOUCH_TARGET = 48.dp
 private val OVERFLOW_END_PAD = 4.dp
 private val PROGRESS_TOP_GAP = 4.dp
 private val PROGRESS_LABEL_GAP = 8.dp
+
+/** Semantics tag locating the PODCAST date block in UI tests. */
+internal const val DATE_BLOCK_TAG = "episode_date_block"
 private const val DIMMED_ALPHA = 0.6f
 private const val PERCENT = 100L
 private const val MS_PER_MINUTE = 60_000L
