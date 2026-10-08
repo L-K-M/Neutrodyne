@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:packaging",
+  "name": "packaging",
+  "description": "Vendored in setuptools' pkg_resources/_vendor inside assets/chaquopy/bootstrap.imy (com.chaquo.python.runtime:bootstrap:17.1.0). Copyright (c) Donald Stufft and individual contributors; dual-licensed Apache-2.0 OR BSD-2-Clause.",
+  "website": "https://github.com/pypa/packaging",
+  "developers": [],
+  "licenses": [
+    "apache-bsd-packaging"
+  ],
+  "artifactVersion": "23.1",
+  "tag": "bundled"
+}

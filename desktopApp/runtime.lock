@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: Unlicense
+#
+# The OpenJDK runtime every desktop image bundles (11 Lockfiles, D3's runtime exception,
+# D89): one vendor and version per release, unmodified, jlink-trimmed. Renovate detects
+# new Temurin releases (regex manager); the PR that bumps one version updates every
+# checksum together, taking each SHA-256 from Adoptium's release-name API:
+#   https://api.adoptium.net/v3/assets/release_name/eclipse/jdk-<version>
+# (jdk-image packages of the four targets plus the sources package).
+#
+# Keys read by build-logic (DesktopPackaging.kt) and scripts/ci/check-runtime-sources.sh:
+#   vendor, vendorVersion, version, javaVersion, javaRuntimeVersion,
+#   sourceTarball.{name,url,sha256},
+#   <target>.{archiveUrl,sha256} for windows-x64, macos-arm64, linux-x64, linux-arm64.
+# javaVersion is JAVA_VERSION of the JDK's release file (what a jlink'd runtime/release
+# carries); javaRuntimeVersion is the java.runtime.version system property (the version
+# with HotSpot's -LTS suffix); version keeps the Adoptium build suffix. Temurin 25
+# archives ship no jmods/ but are built with --enable-linkable-runtime (JEP 493), so
+# jlink links from them (verified 2026-10-06, recorded in 11 jlink modules).
+vendor=Eclipse Adoptium
+vendorVersion=Temurin-25.0.4.1+1
+version=25.0.4.1+1
+javaVersion=25.0.4.1
+javaRuntimeVersion=25.0.4.1+1-LTS
+releaseUrl=https://github.com/adoptium/temurin25-binaries/releases/tag/jdk-25.0.4.1%2B1
+
+windows-x64.archiveUrl=https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.4.1%2B1/OpenJDK25U-jdk_x64_windows_hotspot_25.0.4.1_1.zip
+windows-x64.sha256=00c847d804f4a78e9f04f2683faf14fed898535b177b7fc704486cb0284e9283
+
+macos-arm64.archiveUrl=https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.4.1%2B1/OpenJDK25U-jdk_aarch64_mac_hotspot_25.0.4.1_1.tar.gz
+macos-arm64.sha256=61979887f7506a24a57439ff99adb8b3a7fc89977d9cfe3b8984f58a981b7b9d
+
+linux-x64.archiveUrl=https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.4.1%2B1/OpenJDK25U-jdk_x64_linux_hotspot_25.0.4.1_1.tar.gz
+linux-x64.sha256=dbb698396d478e7fa2b1e50f4103324b2a99b90569ee27c33f2261f9215cf41e
+
+linux-arm64.archiveUrl=https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.4.1%2B1/OpenJDK25U-jdk_aarch64_linux_hotspot_25.0.4.1_1.tar.gz
+linux-arm64.sha256=69df11a02cfa3ef7d7ca645e03edce6778ec090e100f6ae2b42097865730ac52
+
+sourceTarball.name=OpenJDK25U-jdk-sources_25.0.4.1_1.tar.gz
+sourceTarball.url=https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.4.1%2B1/OpenJDK25U-jdk-sources_25.0.4.1_1.tar.gz
+sourceTarball.sha256=cb9e50d2eb3de72ffd28466d7c511b4039b4bc4bd8f0d276d1e4cf81e30fdf09

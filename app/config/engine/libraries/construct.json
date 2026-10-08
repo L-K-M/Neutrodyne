@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:construct",
+  "name": "Construct",
+  "description": "Binary-structure parser vendored inside pyelftools' elftools/construct inside assets/chaquopy/bootstrap.imy (com.chaquo.python.runtime:bootstrap:17.1.0). Copyright (C) 2009 Tomer Filiba, 2010-2011 Corbin Simpson.",
+  "website": "https://github.com/construct/construct",
+  "developers": [],
+  "licenses": [
+    "mit-construct"
+  ],
+  "artifactVersion": "2.06",
+  "tag": "bundled"
+}
