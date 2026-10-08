@@ -168,6 +168,21 @@ val generateBuildInfoProperties =
                 put("youtubeEngine", youtubeEngine.toString())
                 put("installKind", installKind)
                 put("acraMailto", providers.gradleProperty("neutrodyne.acraMailto").orElse("").get())
+                put("podcastIndexKey", providers.gradleProperty("neutrodyne.podcastIndexKey").orElse("").get())
+                put("podcastIndexSecret", providers.gradleProperty("neutrodyne.podcastIndexSecret").orElse("").get())
+                // The shared shipped-locales list of both apps (09 Shipped locales; :app reads
+                // the same file for its BuildConfig field).
+                put(
+                    "shippedLocales",
+                    providers
+                        .fileContents(rootProject.layout.projectDirectory.file("app/policy/locales.txt"))
+                        .asText
+                        .get()
+                        .lineSequence()
+                        .map { it.trim() }
+                        .filter { it.isNotEmpty() && !it.startsWith("#") }
+                        .joinToString(","),
+                )
                 // The packaging target's identity: os/arch/runtime of the image, absent in dev builds
                 // so BuildInfoLoader derives them from the running JVM (11 DesktopAppGraph).
                 if (installKind != "dev") {
