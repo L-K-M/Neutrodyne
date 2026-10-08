@@ -9,6 +9,7 @@ import androidx.compose.ui.window.application
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.runInitializers
+import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
@@ -23,6 +24,8 @@ import ch.lkmc.neutrodyne.desktop.window.DesktopMenuActions
 import ch.lkmc.neutrodyne.desktop.window.NeutrodyneWindowContent
 import ch.lkmc.neutrodyne.desktop.window.WindowIcons
 import ch.lkmc.neutrodyne.desktop.window.rememberNeutrodyneWindowState
+import ch.lkmc.neutrodyne.desktop.window.toGateState
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -42,9 +45,9 @@ import kotlin.time.TimeSource
  * one `SMOKE {json}` line, exit 0 — or exit 1 naming the failed step; a watchdog exits 1 after
  * 60 s. Under `java.awt.headless=true` the window step is skipped and the JSON says so.
  *
- * Still pending from 11's step list (the milestone rows): the database open, the five
- * destinations through `AppNavigator`, FFmpeg, `ndmedia`, the engine child, the D-Bus step, the
- * AOT-cache flag and the RSS line — the JSON lists them as pending.
+ * Still pending from 11's step list (the milestone rows): the five destinations through
+ * `AppNavigator`, FFmpeg, `ndmedia`, the engine child, the D-Bus step, the AOT-cache flag and
+ * the RSS line — the JSON lists them as pending.
  */
 internal class SmokeMode(
     private val output: (String) -> Unit = ::println,
@@ -67,6 +70,9 @@ internal class SmokeMode(
                     val crashReporter = DesktopCrashReporter(dirs, buildInfo, DesktopClock, RecentLogBuffer())
                     createDesktopGraph(dirs, buildInfo, crashReporter)
                 }
+            // The database open gets its own step ahead of the bands, so the timing is real;
+            // band 100's `DatabaseOpenInitializer` then returns at once (11 Smoke mode, M1a).
+            step("database") { runBlocking { graph.databaseOpener.awaitOpen() } }
             step("initializers") { runBlocking { runInitializers(graph.initializers) } }
 
             // 11 step 2's window half: show it, wait for the first frame, close it again.
@@ -156,7 +162,6 @@ internal class SmokeMode(
         /** Steps 11 defines that this milestone cannot run yet (11 Smoke mode). */
         internal val PENDING_STEPS =
             listOf(
-                "database",
                 "destinations",
                 "ffmpeg",
                 "ndmedia",
@@ -190,7 +195,17 @@ internal class SmokeMode(
                     title = stringResource(Res.string.window_title),
                     icon = remember { WindowIcons.windowIconPainter() },
                 ) {
-                    NeutrodyneWindowContent(installers = graph.entryInstallers, menuActions = menuActions)
+                    NeutrodyneWindowContent(
+                        installers = graph.entryInstallers,
+                        menuActions = menuActions,
+                        startup =
+                            graph.databaseOpener.openState.value
+                                .toGateState(),
+                        onRetryStartup = {
+                            graph.appScope.launch { suspendRunCatching { graph.databaseOpener.awaitOpen() } }
+                        },
+                        dataDir = graph.dirs.data,
+                    )
 
                     val openedAt = remember { TimeSource.Monotonic.markNow() }
                     LaunchedEffect(Unit) {
