@@ -4,20 +4,28 @@
 # install-android-sdk.sh [sdk-dir]
 #
 # Installs the Android SDK pieces the builds need, pinned and checksum-verified
-# (09 CI scripts, 01 Toolchain and versions): the command-line tools build below,
-# `platforms;android-37` and `build-tools;36.0.0`. Used inside the release/repro
-# container (repro-build.sh) and on bare runners. Existing installations are
-# reused; the script is idempotent.
+# (09 CI scripts, 01 Toolchain and versions): the host's cmdline-tools archive
+# from android-sdk.lock beside this script, `platforms;android-37.0` and
+# `build-tools;36.0.0`. Used inside the release/repro container (repro-build.sh)
+# and on bare runners. Existing installations are reused; the script is
+# idempotent.
 #
 # sdk-dir defaults to $ANDROID_HOME (or $ANDROID_SDK_ROOT), then to
 # $HOME/android-sdk.
+#
+# Hosts: cmdline-tools 23.x's bin/sdkmanager only delegates to the native
+# bin/android launcher, which Google ships for linux-x64, macosx-x86_64 and
+# windows-x64 — there is no linux/arm64 archive and the macOS archive's
+# launcher is x86_64-only (nightly 2026-10-08: "Exec format error" on
+# ubuntu-24.04-arm and macos-15). linux-x64 runs the shipped bin/sdkmanager
+# unchanged; the other supported hosts run the pure-Java SdkManagerCli the
+# archive still carries in lib/ — no native code executes. Any other host
+# fails explicitly.
 
 set -euo pipefail
 
-CMDLINE_TOOLS_BUILD="16111833"
-CMDLINE_TOOLS_ZIP="commandlinetools-linux-${CMDLINE_TOOLS_BUILD}_latest.zip"
-CMDLINE_TOOLS_URL="https://dl.google.com/android/repository/${CMDLINE_TOOLS_ZIP}"
-CMDLINE_TOOLS_SHA256="0877a1d048fe4a24efe2eff536ca4223f7adeb58648bb81909d33c446918cfa8"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
+LOCK_FILE="$SCRIPT_DIR/android-sdk.lock"
 
 SDK_PACKAGES=(                                     # 01 Toolchain and versions
     "platforms;android-37.0"                       # minor-versioned since the 36.1 repackaging
@@ -25,6 +33,14 @@ SDK_PACKAGES=(                                     # 01 Toolchain and versions
 )
 
 SDK_DIR="${1:-${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/android-sdk}}}"
+
+case "$(uname -s)/$(uname -m)" in
+    Linux/x86_64)                        HOST=linux-x64 ;;
+    Linux/aarch64|Linux/arm64)           HOST=linux-arm64 ;;
+    Darwin/arm64)                        HOST=macos-arm64 ;;
+    MINGW*/x86_64|MSYS*/x86_64|CYGWIN*/x86_64) HOST=windows-x64 ;;
+    *) echo "install-android-sdk: unsupported host $(uname -s)/$(uname -m)" >&2; exit 2 ;;
+esac
 
 command -v curl >/dev/null 2>&1 || { echo "install-android-sdk: curl not found" >&2; exit 2; }
 # unzip first; bare hosts (and the slim Python container before its apt line)
@@ -34,6 +50,28 @@ if ! command -v unzip >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1; t
 fi
 command -v java  >/dev/null 2>&1 || { echo "install-android-sdk: java not found (set JAVA_HOME)" >&2; exit 2; }
 
+lock_prop() { # lock_prop <key>
+    local v
+    v="$(grep -E "^$1=" "$LOCK_FILE" 2>/dev/null | tail -1 | cut -d= -f2-)"
+    [ -n "$v" ] || { echo "install-android-sdk: $LOCK_FILE has no '$1'" >&2; exit 2; }
+    printf '%s\n' "$v"
+}
+ARCHIVE_URL="$(lock_prop "cmdline-tools.$HOST.archiveUrl")"
+ARCHIVE_SHA256="$(lock_prop "cmdline-tools.$HOST.sha256")"
+
+verify_sha256() { # verify_sha256 <hex> <file>
+    if command -v sha256sum >/dev/null 2>&1; then
+        echo "$1  $2" | sha256sum -c - >/dev/null
+    elif command -v shasum >/dev/null 2>&1; then
+        echo "$1  $2" | shasum -a 256 -c - >/dev/null
+    else
+        python3 - "$1" "$2" <<'PY'
+import hashlib, sys
+sys.exit(0 if hashlib.sha256(open(sys.argv[2], 'rb').read()).hexdigest() == sys.argv[1] else 1)
+PY
+    fi
+}
+
 unzip_dir() { # unzip_dir <zip> <dest>
     if command -v unzip >/dev/null 2>&1; then
         unzip -q "$1" -d "$2"
@@ -42,27 +80,53 @@ unzip_dir() { # unzip_dir <zip> <dest>
     fi
 }
 
-SDKMANAGER="$SDK_DIR/cmdline-tools/latest/bin/sdkmanager"
-if [ ! -x "$SDKMANAGER" ]; then
-    echo "install-android-sdk: installing cmdline-tools $CMDLINE_TOOLS_BUILD into $SDK_DIR"
+TOOLS_DIR="$SDK_DIR/cmdline-tools/latest"
+
+# sdkmanager <args> — the classic CLI on every host. linux-x64 execs the shipped
+# bin/sdkmanager (which delegates to the native bin/android), keeping the
+# release/repro container byte-identical. The other hosts run the pure-Java
+# SdkManagerCli still inside lib/ instead: no linux/arm64 launcher exists and
+# the macOS archive's bin/android is x86_64-only; windows-x64 could run
+# android.exe but shares the Java path so every non-linux-x64 host is one code
+# path. Windows java.exe needs native C:\ paths and a ';' classpath separator —
+# cygpath converts the MSYS forms.
+sdkmanager() {
+    if [ "$HOST" = linux-x64 ]; then
+        "$TOOLS_DIR/bin/sdkmanager" "$@"
+        return
+    fi
+    local cp toolsdir="$TOOLS_DIR" sdkroot="$SDK_DIR"
+    cp="$(find "$TOOLS_DIR/lib" -name '*.jar' | sort | paste -sd: -)"
+    if [ "$HOST" = windows-x64 ]; then
+        cp="$(cygpath -pw "$cp")"
+        toolsdir="$(cygpath -w "$toolsdir")"
+        sdkroot="$(cygpath -w "$sdkroot")"
+    fi
+    java -Dcom.android.sdkmanager.toolsdir="$toolsdir" -cp "$cp" \
+        com.android.sdklib.tool.sdkmanager.SdkManagerCli --sdk_root="$sdkroot" "$@"
+}
+
+if [ ! -d "$TOOLS_DIR" ]; then
+    echo "install-android-sdk: installing $(basename "$ARCHIVE_URL") into $SDK_DIR ($HOST)"
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
-    curl -fsSL "$CMDLINE_TOOLS_URL" -o "$tmp/$CMDLINE_TOOLS_ZIP"
-    echo "$CMDLINE_TOOLS_SHA256  $tmp/$CMDLINE_TOOLS_ZIP" | sha256sum -c - >/dev/null
+    curl -fsSL "$ARCHIVE_URL" -o "$tmp/cmdline-tools.zip"
+    verify_sha256 "$ARCHIVE_SHA256" "$tmp/cmdline-tools.zip" \
+        || { echo "install-android-sdk: SHA-256 mismatch for $ARCHIVE_URL" >&2; exit 1; }
     mkdir -p "$SDK_DIR/cmdline-tools"
-    unzip_dir "$tmp/$CMDLINE_TOOLS_ZIP" "$tmp/tools"
+    unzip_dir "$tmp/cmdline-tools.zip" "$tmp/tools"
     # google's zip contains a top-level cmdline-tools/; sdkmanager wants <sdk>/cmdline-tools/latest/
-    rm -rf "$SDK_DIR/cmdline-tools/latest"
-    mv "$tmp/tools/cmdline-tools" "$SDK_DIR/cmdline-tools/latest"
+    rm -rf "$TOOLS_DIR"
+    mv "$tmp/tools/cmdline-tools" "$TOOLS_DIR"
     # python's zipfile path drops the zip's unix mode bits — restore them
-    chmod +x "$SDK_DIR/cmdline-tools/latest/bin/"* 2>/dev/null || true
+    chmod +x "$TOOLS_DIR/bin/"* 2>/dev/null || true
     rm -rf "$tmp"
     trap - EXIT
 else
     echo "install-android-sdk: cmdline-tools already present"
 fi
 
-export PATH="$SDK_DIR/cmdline-tools/latest/bin:$PATH"
+export PATH="$TOOLS_DIR/bin:$PATH"
 
 if [ -d "$SDK_DIR/platforms/android-37.0" ] && [ -d "$SDK_DIR/build-tools/36.0.0" ]; then
     echo "install-android-sdk: required packages already installed"
@@ -70,7 +134,7 @@ if [ -d "$SDK_DIR/platforms/android-37.0" ] && [ -d "$SDK_DIR/build-tools/36.0.0
 fi
 
 # Accept the licences once (build machines are throwaway; the file lands in the SDK dir).
-yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
-"$SDKMANAGER" --install "${SDK_PACKAGES[@]}"
+yes | sdkmanager --licenses >/dev/null 2>&1 || true
+sdkmanager --install "${SDK_PACKAGES[@]}"
 
 echo "install-android-sdk: done — $SDK_DIR"
