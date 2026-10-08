@@ -1188,6 +1188,8 @@ flowchart TB
 
 Each target builds only on its own runner ([Supported targets](#supported-targets)). Compose's package tasks are used for MSI and DMG; DEB, RPM and the archive formats go through the convention plugin's own tasks around `jpackage --app-image` and the archive writers, because Compose 1.12.1 exposes no `--resource-dir` or per-format `--install-dir` hook — one `createDistributable` per install kind, keyed by `-Pneutrodyne.installKind` (2026-10-06; Resources layout). jlink's `--strip-debug` execs `objcopy`, so binutils must be on PATH on every packaging runner (the workflows install it). The ProGuard `*Release*` tasks are never registered or run ([D89](../PLAN.md#3-key-decisions); `verifyDependencyPolicy` bans `com.guardsquare:proguard*`).
 
+*Recorded 2026-10-08 (implementation):* the packaging host is matched against the official JVM `os.name` families (`Windows …`, `Mac OS X`, `Linux`), and `setupBundledRuntime` chooses the unpacker by magic bytes (`PK` ZIP vs `1f 8b` gzip'd tar) because the verified archive is staged without an extension; a Windows tree is recognised by `bin/java.exe`.
+
 ### nativeDistributions configuration
 
 ```kotlin
