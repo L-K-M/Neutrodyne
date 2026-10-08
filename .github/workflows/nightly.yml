@@ -176,7 +176,7 @@ jobs:
           # the files it wrote: the descriptor gets target=android-0 and config.ini loses its
           # target= line entirely when the tools cannot parse the dotted level (2026-10-08).
           pre-emulator-launch-script: |
-            test "$(grep '^target=' "$ANDROID_AVD_HOME/test.ini")" = "target=android-37.0" || { echo "::error::AVD descriptor target wrong: $(cat "$ANDROID_AVD_HOME/test.ini")"; exit 1; }
+            test "$(grep '^target=' "$ANDROID_AVD_HOME/test.ini")" = "target=android-37.0" || { cat "$ANDROID_AVD_HOME/test.ini"; echo "::error::AVD descriptor target wrong (expected target=android-37.0, see test.ini above)"; exit 1; }
             grep -q '^target=android-37\.0$' "$ANDROID_AVD_HOME/test.avd/config.ini" || { echo "::error::AVD config.ini lacks target=android-37.0"; exit 1; }
           # android-emulator-runner runs each script line as its own `sh -c`, so a command
           # must fit on one line (a `\` continuation becomes a literal argument).
@@ -216,7 +216,7 @@ jobs:
           # the files it wrote: the descriptor gets target=android-0 and config.ini loses its
           # target= line entirely when the tools cannot parse the dotted level (2026-10-08).
           pre-emulator-launch-script: |
-            test "$(grep '^target=' "$ANDROID_AVD_HOME/test.ini")" = "target=android-37.0" || { echo "::error::AVD descriptor target wrong: $(cat "$ANDROID_AVD_HOME/test.ini")"; exit 1; }
+            test "$(grep '^target=' "$ANDROID_AVD_HOME/test.ini")" = "target=android-37.0" || { cat "$ANDROID_AVD_HOME/test.ini"; echo "::error::AVD descriptor target wrong (expected target=android-37.0, see test.ini above)"; exit 1; }
             grep -q '^target=android-37\.0$' "$ANDROID_AVD_HOME/test.avd/config.ini" || { echo "::error::AVD config.ini lacks target=android-37.0"; exit 1; }
           script: |
             adb logcat -v threadtime > "$RUNNER_TEMP/logcat-api37-release.txt" 2>&1 &

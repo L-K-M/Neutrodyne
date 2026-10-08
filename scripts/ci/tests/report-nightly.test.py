@@ -16,8 +16,18 @@ class ReportMode(Enum):
     RECOVERY = "recovery"
 
 
+class IssuePresence(Enum):
+    ABSENT = "absent"
+    MATCHING = "matching"
+
+
+# Bounds a single report-nightly.sh run in the fixture.
+SCRIPT_TIMEOUT_SECONDS = 30
+
+
 class NightlyReportTest(unittest.TestCase):
-    def run_report(self, ref, mode=ReportMode.FAILURE, existing=False):
+    def run_report(self, ref, mode=ReportMode.FAILURE,
+                   presence=IssuePresence.ABSENT):
         script = Path(__file__).resolve().parents[1] / "report-nightly.sh"
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -33,7 +43,7 @@ class NightlyReportTest(unittest.TestCase):
             )
             gh.chmod(0o755)
             issues = ([{"number": 7, "body": "<!-- nightly-job:test-job -->"}]
-                      if existing else [])
+                      if presence is IssuePresence.MATCHING else [])
             env = {k: v for k, v in os.environ.items()
                    if not k.startswith(("GITHUB_", "GH_", "CI"))}
             env.update(
@@ -47,7 +57,8 @@ class NightlyReportTest(unittest.TestCase):
             args = ["bash", str(script), "test-job"]
             if mode is ReportMode.RECOVERY:
                 args.append("--close")
-            result = subprocess.run(args, env=env, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(args, env=env, capture_output=True, text=True,
+                                    timeout=SCRIPT_TIMEOUT_SECONDS)
             calls = []
             if trace.exists():
                 calls = [json.loads(line) for line in trace.read_text().splitlines()]
@@ -62,12 +73,14 @@ class NightlyReportTest(unittest.TestCase):
         self.assertIn("<!-- nightly-job:test-job -->", " ".join(creates[0]))
 
     def test_main_recovery_closes_its_issue(self):
-        result, calls = self.run_report("refs/heads/main", ReportMode.RECOVERY, existing=True)
+        result, calls = self.run_report("refs/heads/main", ReportMode.RECOVERY,
+                                        IssuePresence.MATCHING)
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertTrue(any(call[:3] == ["issue", "close", "7"] for call in calls))
 
     def test_main_failure_with_open_issue_comments_not_creates(self):
-        result, calls = self.run_report("refs/heads/main", existing=True)
+        result, calls = self.run_report("refs/heads/main",
+                                        presence=IssuePresence.MATCHING)
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertTrue(any(call[:3] == ["issue", "comment", "7"] for call in calls))
         self.assertFalse(any(call[:2] == ["issue", "create"] for call in calls))
@@ -94,6 +107,11 @@ class NightlyReportTest(unittest.TestCase):
 
     def test_pr_ref_makes_no_github_calls(self):
         result, calls = self.run_report("refs/pull/42/merge")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual([], calls)
+
+    def test_empty_ref_makes_no_github_calls(self):
+        result, calls = self.run_report("")
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual([], calls)
 
