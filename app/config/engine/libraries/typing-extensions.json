@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:typing-extensions",
+  "name": "typing_extensions",
+  "description": "Vendored in setuptools' pkg_resources/_vendor inside assets/chaquopy/bootstrap.imy (com.chaquo.python.runtime:bootstrap:17.1.0). Copyright (c) Python Software Foundation (PSF-2.0 licence stack).",
+  "website": "https://github.com/python/typing_extensions",
+  "developers": [],
+  "licenses": [
+    "psf-2.0-typing-extensions"
+  ],
+  "artifactVersion": "4.4.0",
+  "tag": "bundled"
+}

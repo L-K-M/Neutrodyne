@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:more-itertools",
+  "name": "more-itertools",
+  "description": "Vendored in setuptools' pkg_resources/_vendor inside assets/chaquopy/bootstrap.imy (com.chaquo.python.runtime:bootstrap:17.1.0). Copyright (c) 2012 Erik Rose.",
+  "website": "https://github.com/more-itertools/more-itertools",
+  "developers": [],
+  "licenses": [
+    "mit-more-itertools"
+  ],
+  "artifactVersion": "9.1.0",
+  "tag": "bundled"
+}

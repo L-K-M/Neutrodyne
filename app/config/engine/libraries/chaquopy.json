@@ -1,7 +1,7 @@
 {
   "uniqueId": "neutrodyne:chaquopy",
   "name": "Chaquopy runtime",
-  "description": "Java/JNI bridge and bootstrap of the embedded Python",
+  "description": "Java/JNI bridge of the embedded Python, plus the bootstrap.imy host — its vendored third-party Python packages (pyelftools, setuptools/pkg_resources) have their own entries",
   "website": "https://chaquo.com/chaquopy/",
   "developers": [],
   "licenses": [
