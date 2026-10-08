@@ -136,6 +136,13 @@ jobs:
         with:
           cache-provider: basic
           cache-read-only: true
+      # Build every APK the two emulator steps install before the first emulator boots: compiling
+      # beside a 4-core emulator starved it, and system_server lost its providers mid-run
+      # (nightly 2026-10-08: "Cannot access system provider: 'settings'" at install time).
+      - name: Build the test APKs before the emulators boot
+        run: |
+          ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true assembleDebug assembleDebugAndroidTest
+          ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true :app:assembleRelease :app:assembleReleaseAndroidTest
       - name: Debug suite on the API 37 16 KB image
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
@@ -150,8 +157,11 @@ jobs:
           emulator-boot-timeout: 1200
           # android-emulator-runner runs each script line as its own `sh -c`, so a command
           # must fit on one line (a `\` continuation becomes a literal argument).
+          # sys.boot_completed can precede the settings and package services; the wait line
+          # holds the run until both answer (5 min cap).
           script: |
             test "$(adb shell getconf PAGE_SIZE | tr -d '\r')" = "16384" || { echo "PAGE_SIZE != 16384"; exit 1; }
+            timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true connectedDebugAndroidTest
       - name: Release smoke on API 37
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
@@ -166,6 +176,7 @@ jobs:
           disk-size: 6000M
           emulator-boot-timeout: 1200
           script: |
+            timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
             ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true :app:connectedReleaseAndroidTest
             # TODO (M6b): :benchmark's out-of-process release smoke journeys join here.
       - name: Build the release APKs for the alignment check
