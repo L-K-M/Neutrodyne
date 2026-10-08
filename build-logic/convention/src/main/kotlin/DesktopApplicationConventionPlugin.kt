@@ -48,16 +48,20 @@ class DesktopApplicationConventionPlugin : Plugin<Project> {
             // Off the packaging matrix (a developer's Intel Mac, a Windows arm64 laptop) the toolchain
             // JDK serves `run` and tests; every packaging task refuses instead (11 Platform matrix).
             val bundledRuntimeHome = hostTarget?.let { layout.buildDirectory.dir("bundled-runtime/${it.id}/jdk") }
+            // parseBundledRuntimeLock throws on a bad runtime.lock rather than returning null,
+            // so on a matrix host all three are non-null; the guard also keeps it that way if
+            // the parse ever learns to return null.
             val setupBundledRuntime =
-                hostTarget?.let { targetKind ->
-                    val lock = runtimeLock!!
+                if (hostTarget != null && runtimeLock != null && bundledRuntimeHome != null) {
                     tasks.register<SetupBundledRuntime>("setupBundledRuntime") {
                         description = "Fetches, verifies and unpacks the runtime.lock Temurin 25 archive (11)."
-                        archiveUrl.set(lock.archiveUrl)
-                        sha256.set(lock.sha256)
-                        archive.set(layout.buildDirectory.file("bundled-runtime/${targetKind.id}/archive"))
-                        home.set(bundledRuntimeHome!!)
+                        archiveUrl.set(runtimeLock.archiveUrl)
+                        sha256.set(runtimeLock.sha256)
+                        archive.set(layout.buildDirectory.file("bundled-runtime/${hostTarget.id}/archive"))
+                        home.set(bundledRuntimeHome)
                     }
+                } else {
+                    null
                 }
 
             val compose = extensions.getByType<ComposeExtension>()
@@ -68,18 +72,19 @@ class DesktopApplicationConventionPlugin : Plugin<Project> {
                 mainClass = "$BASE_PACKAGE.desktop.MainKt"
                 // Off the packaging matrix a missing JDK 25 must not fail configuration (the Android release
                 // container has only JDK 21; review 2026-10-06): the default then stays and only `run` fails
-                bundledRuntimeHome
-                    ?.get()
-                    ?.asFile
-                    ?.resolve(hostTarget!!.homeSubdir)
-                    ?.absolutePath
-                    ?.let { javaHome = it }
-                    ?: runCatching {
-                        toolchainJdk25
-                            .get()
-                            .metadata.installationPath.asFile.absolutePath
-                    }.getOrNull()
-                        ?.let { javaHome = it }
+                val packagingJavaHome =
+                    bundledRuntimeHome
+                        ?.get()
+                        ?.asFile
+                        ?.resolve(hostTarget!!.homeSubdir)
+                        ?.absolutePath
+                        ?: runCatching {
+                            toolchainJdk25
+                                .get()
+                                .metadata.installationPath.asFile.absolutePath
+                        }.getOrNull()
+                // javaHome is non-nullable in the Compose DSL; null means "keep the default".
+                if (packagingJavaHome != null) javaHome = packagingJavaHome
                 jvmArgs += desktopJvmOptions(hostTarget)
                 // Compose resolves ProGuard (GPL-2.0, D3) through a detached configuration inside the release
                 // task actions, so it never lands on a named configuration to scan. Disabling the release
@@ -175,6 +180,8 @@ internal val RUNTIME_IMAGE_CONSUMERS =
         "checkRuntime",
         "createRuntimeImage",
         "createDistributable",
+        // Compose 1.12.1's jdeps task (11 jlink modules' suggestModules) — its real task name.
+        "suggestRuntimeModules",
         "run",
         "runDistributable",
         "packageMsi",
@@ -227,7 +234,11 @@ private fun configureNativeDistributions(
 ) = with(app) {
     nativeDistributions {
         packageName = DESKTOP_PACKAGE_NAME
-        packageVersion = project.providers.gradleProperty("neutrodyne.versionName").get()
+        val projectVersion =
+            requireNotNull(project.providers.gradleProperty("neutrodyne.versionName").orNull) {
+                "neutrodyne.versionName gradle property is required for desktop packaging (packageVersion)"
+            }
+        packageVersion = projectVersion
         description = DESKTOP_DESCRIPTION
         vendor = DESKTOP_VENDOR
         licenseFile.set(project.rootProject.file("LICENSE"))
@@ -273,8 +284,9 @@ private fun configureNativeDistributions(
             infoPlist { extraKeysRawXml = MAC_URL_TYPES + MAC_LOCAL_NETWORK_USAGE }
             // jpackage refuses a macOS version whose first number is 0 (11 macOS DMG, ad-hoc signing
             // and the 0.x ZIP): before 1.0.0 the image carries the 1.0.0 placeholder and
-            // scripts/desktop/mac-zip.sh writes the real 0.Y.Z into Info.plist (PO-39).
-            if (packageVersion?.startsWith("0.") == true) packageVersion = MAC_PLACEHOLDER_VERSION
+            // scripts/desktop/mac-zip.sh writes the real 0.Y.Z into Info.plist (PO-39). The macOS
+            // block's own packageVersion starts null — the check reads the project version.
+            if (projectVersion.startsWith("0.")) packageVersion = MAC_PLACEHOLDER_VERSION
             // no signing block: jpackage signs ad hoc (11 macOS DMG, ad-hoc signing and the 0.x ZIP)
         }
         linux {

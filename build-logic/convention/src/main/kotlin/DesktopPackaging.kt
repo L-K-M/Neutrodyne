@@ -61,6 +61,28 @@ internal enum class DesktopPackagingTarget(
 /** `neutrodyne-<size>.png`, the committed hicolor source names (desktopApp/icons/png). */
 private val HICOLOR_ICON_NAME = Regex("neutrodyne-(\\d+)\\.png")
 
+/**
+ * Maps `icons/png` to (file, size) pairs for the hicolor tree, sorted by name. Stray non-PNG
+ * entries (`.DS_Store`, editor backups, directories) are ignored; a PNG outside the naming
+ * scheme or a missing/empty directory fails loudly rather than ship an icon-less package.
+ */
+internal fun hicolorIconEntries(iconsPngDir: File): List<Pair<File, String>> {
+    val icons =
+        iconsPngDir
+            .listFiles { f -> f.isFile && f.extension.equals("png", ignoreCase = true) }
+            .orEmpty()
+            .sortedBy { it.name }
+    if (icons.isEmpty()) {
+        throw GradleException("icons/png carries no neutrodyne-<size>.png icons (hicolor mapping)")
+    }
+    return icons.map { icon ->
+        val size =
+            HICOLOR_ICON_NAME.matchEntire(icon.name)?.groupValues?.get(1)
+                ?: throw GradleException("unexpected icon name ${icon.name} (hicolor mapping)")
+        icon to size
+    }
+}
+
 /** The target this host can package for, or null on a host outside the matrix (dev machines). */
 internal fun desktopPackagingTargetOf(
     osName: String,
@@ -227,8 +249,27 @@ abstract class SetupBundledRuntime : DefaultTask() {
 }
 
 /**
+ * The name a classpath file carries inside the image. Compose mangles JARs to
+ * `<base>-<md5>.jar` when it fills the app dir (`FileUtilsKt.mangledName`, compose-gradle-plugin
+ * 1.12.1; `mangleJarFilesNames` defaults on — only the never-used uber-jar path disables it);
+ * other files keep their name. The manifest lists image names so `check-desktop-image.sh`
+ * matches the actual `app/` entries.
+ */
+internal fun imageJarName(file: File): String {
+    if (!file.isFile || !file.name.endsWith(".jar", ignoreCase = true)) return file.name
+    // Compose's contentHash is the file's MD5 rendered with Integer.toHexString per byte —
+    // no zero padding — so a byte below 0x10 gives a single hex digit.
+    val md5 = MessageDigest.getInstance("MD5").digest(file.readBytes())
+    val hash = md5.joinToString("") { Integer.toHexString(it.toInt() and 0xFF) }
+    return "${file.nameWithoutExtension}-$hash.${file.extension}"
+}
+
+/**
  * Writes the Licensee-checked runtime classpath as `sha256  name` lines (09 Build-output
  * checks): `check-desktop-image.sh` asserts every JAR of an image is one of these files.
+ * Same-named JARs — `api-desktop.jar` comes from four modules, and androidx artefacts appear
+ * twice via the `org.jetbrains.androidx` republish — are no collision here: the recorded name
+ * is the mangled image name, which differs by content.
  */
 abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
     @get:InputFiles
@@ -243,8 +284,9 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
         val lines =
             runtimeClasspath.files
                 .filter { it.isFile }
-                .sortedBy { it.name }
-                .joinToString("") { file -> "${sha256Of(file)}  ${file.name}\n" }
+                .map { "${sha256Of(it)}  ${imageJarName(it)}" }
+                .toSortedSet()
+                .joinToString("\n", postfix = "\n")
         manifest.get().asFile.writeText(lines)
     }
 
@@ -314,22 +356,46 @@ internal fun Project.registerDesktopPackagingTasks(
     // The desktop entry and hicolor icons the DEB/RPM scriptlets install travel inside the
     // image through appResourcesRootDir (11 Links and files from the OS). The PNG set comes
     // from the committed brand assets (desktopApp/icons/png), mapped into the hicolor layout.
-    // On the other targets nothing is merged; the task still runs so the resources dir exists.
+    // This is the one task writing desktop-resources: Gradle's Sync deletes destination files
+    // it did not copy, so a second Sync into the same root would wipe this task's payload
+    // (a separate syncWindowIcons did exactly that until 2026-10-08).
+    // Every from() below is a directory or an eachFile mapping so the file listing is walked
+    // at execution: a per-file spec would freeze today's listing in the configuration cache
+    // and silently drop an added icon on reuse (and the empty-dir check would never run).
+    val iconsPngDir = file("icons/png")
+    val iconsTrayDir = file("icons/tray")
     tasks.register<org.gradle.api.tasks.Sync>("syncDesktopIntegrationResources") {
         // Compose merges appResourcesRootDir/{common,<os>,<os>-<arch>} into the image's
         // resources dir, so the Linux payload nests under its <os> dir.
         into(layout.buildDirectory.dir("desktop-resources"))
+        // The window and tray icons ride along on every target under common/icons, so a
+        // packaged app loads the same committed PNGs a dev run reads from icons/ (11
+        // Resources layout).
+        from(iconsPngDir) { into("common/icons/png") }
+        from(iconsTrayDir) { into("common/icons/tray") }
         if (target.osWire == "linux") {
             from("packaging/desktop-integration") { into("linux/desktop-integration") }
             // neutrodyne-48.png -> linux/desktop-integration/hicolor/48x48/apps/neutrodyne.png
-            file("icons/png").listFiles().orEmpty().forEach { icon ->
-                val size =
-                    HICOLOR_ICON_NAME.matchEntire(icon.name)?.groupValues?.get(1)
-                        ?: throw GradleException("unexpected icon name ${icon.name} (hicolor mapping)")
-                from(icon) {
-                    into("linux/desktop-integration/hicolor/${size}x$size/apps")
-                    rename { "neutrodyne.png" }
+            // (eachFile's path is relative to the task destination, not this spec's into).
+            from(iconsPngDir) {
+                eachFile {
+                    if (isDirectory || !name.endsWith(".png", ignoreCase = true)) {
+                        exclude()
+                    } else {
+                        val size =
+                            HICOLOR_ICON_NAME.matchEntire(name)?.groupValues?.get(1)
+                                ?: throw GradleException("unexpected icon name $name (hicolor mapping)")
+                        path = "linux/desktop-integration/hicolor/${size}x$size/apps/neutrodyne.png"
+                    }
                 }
+            }
+        }
+        // Presence and naming are validated at execution, where a configuration-cache hit
+        // cannot skip them.
+        doLast {
+            hicolorIconEntries(iconsPngDir)
+            if (iconsTrayDir.listFiles().isNullOrEmpty()) {
+                throw GradleException("icons/tray carries no icons (11 Resources layout)")
             }
         }
     }
@@ -360,6 +426,10 @@ internal fun Project.registerDesktopPackagingTasks(
             .get()
             .asFile
     val jpackagePath = jpackage.get().absolutePath
+    // appImage stays a provider: it maps over createDistributable's destinationDir, which
+    // Gradle refuses to query before that task has run, so the packaging tasks resolve it
+    // inside their argument providers and from() specs — the lazy wiring the comment above
+    // describes is for the values that *can* be read at configuration time.
 
     /** Packaging tasks refuse when the image does not carry their install kind (11 Resources layout). */
     fun org.gradle.api.Task.requireInstallKind(kind: String) =

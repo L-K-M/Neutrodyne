@@ -148,6 +148,7 @@ if (packagingInstallKind.isPresent) {
         packaging.installKinds
             .get()
             .split(',')
+            .map(String::trim)
             .filter(String::isNotEmpty)
     check(kind in allowed) {
         "neutrodyne.installKind='$kind' is not one of this target's install kinds $allowed " +
@@ -205,23 +206,6 @@ extensions
         packageOfResClass = "ch.lkmc.neutrodyne.desktop.resources"
         generateResClass = ResourcesExtension.ResourceClassGeneration.Always
     }
-
-// The window and tray icons travel into packaged images through appResourcesRootDir (11
-// Resources layout): the Compose merge picks them up from common/icons, so a packaged window
-// and tray load the same committed PNGs a dev run reads from icons/ in the project directory.
-if (packaging.targetId.isPresent && packaging.targetId.get().isNotEmpty()) {
-    val syncWindowIcons =
-        tasks.register<Sync>("syncWindowIcons") {
-            // Same output root as build-logic's syncDesktopIntegrationResources: this one must
-            // run after it, or Gradle flags the shared directory as an overlapping output.
-            mustRunAfter("syncDesktopIntegrationResources")
-            into(layout.buildDirectory.dir("desktop-resources"))
-            from("icons/png") { into("common/icons/png") }
-            from("icons/tray") { into("common/icons/tray") }
-        }
-    tasks.matching { it.name == "createDistributable" }.configureEach { dependsOn(syncWindowIcons) }
-    tasks.matching { it.name == "prepareAppResources" }.configureEach { dependsOn(syncWindowIcons) }
-}
 
 // `-Pneutrodyne.smoke` (=true) forwards -Dneutrodyne.smoke=true to the application JVM through
 // compose.desktop.application.jvmArgs (11 Smoke mode); the recommended invocation is
