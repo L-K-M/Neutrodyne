@@ -48,9 +48,20 @@ case "$TARGET" in
         ./gradlew createDistributable packageZip -Pneutrodyne.installKind=zip
         cp desktopApp/build/compose/binaries/main/msi/*.msi "$DIST/neutrodyne-$V-windows-x64.msi"
         cp desktopApp/build/desktop-packaging/zip/*.zip "$DIST/neutrodyne-$V-windows-x64.zip"
-        powershell -NoProfile -Command \
-            "Start-Process msiexec -Wait -ArgumentList '/i','$(cygpath -w "$DIST/neutrodyne-$V-windows-x64.msi")','/qn','/norestart'"
-        smoke "$LOCALAPPDATA/Programs/Neutrodyne"
+        # Same install gate as nightly.yml: Start-Process -Wait alone hides a
+        # failed msiexec, and bash's -d test needs the cygpath -u POSIX form of
+        # the per-user install root (nightly 37858231006).
+        msi="$(cygpath -w "$DIST/neutrodyne-$V-windows-x64.msi")"
+        rc="$(powershell -NoProfile -Command \
+            "\$p = Start-Process msiexec -Wait -PassThru -ArgumentList '/i','$msi','/qn','/norestart','/l*v','msiexec-install.log'; \$p.ExitCode" | tr -d '\r')"
+        echo "msiexec ExitCode=$rc"
+        case "$rc" in
+            0|3010) ;;
+            *) tail -50 msiexec-install.log 2>/dev/null; echo "::error::msiexec exited $rc"; exit 1 ;;
+        esac
+        inst="$(cygpath -u "${LOCALAPPDATA:?LOCALAPPDATA unset}")/Programs/Neutrodyne"
+        [ -d "$inst" ] || { echo "::error::MSI succeeded but $inst is missing"; exit 1; }
+        smoke "$inst"
         python -m zipfile -e "$DIST/neutrodyne-$V-windows-x64.zip" "$SMOKE_IMG"
         smoke "$SMOKE_IMG/Neutrodyne" ;;
     macos-arm64)

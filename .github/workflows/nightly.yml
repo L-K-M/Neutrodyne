@@ -420,8 +420,21 @@ jobs:
               tar -xzf dist/*.tar.gz -C /tmp/smoke-img
               xsmoke /tmp/smoke-img/Neutrodyne ;;
             windows-x64)
-              powershell -NoProfile -Command "Start-Process msiexec -Wait -ArgumentList '/i','$(cygpath -w "$(pwd)/dist/"*.msi)','/qn','/norestart'"
-              smoke "$LOCALAPPDATA/Programs/Neutrodyne"
+              # Start-Process -Wait alone hides a failed install — the smoke
+              # then dies at the missing image with no msiexec evidence
+              # (nightly 37858231006). -PassThru exposes the ExitCode, /l*v
+              # keeps the installer log, and cygpath -u gives bash's -d test
+              # the POSIX form of the per-user install root.
+              msi="$(cygpath -w "$(pwd)/dist/"*.msi)"
+              rc="$(powershell -NoProfile -Command "\$p = Start-Process msiexec -Wait -PassThru -ArgumentList '/i','$msi','/qn','/norestart','/l*v','msiexec-install.log'; \$p.ExitCode" | tr -d '\r')"
+              echo "msiexec ExitCode=$rc"
+              case "$rc" in
+                0|3010) ;;
+                *) tail -50 msiexec-install.log 2>/dev/null; echo "::error::msiexec exited $rc"; exit 1 ;;
+              esac
+              inst="$(cygpath -u "${LOCALAPPDATA:?LOCALAPPDATA unset}")/Programs/Neutrodyne"
+              [ -d "$inst" ] || { echo "::error::MSI succeeded but $inst is missing"; ls -la "$(cygpath -u "$LOCALAPPDATA")/Programs" 2>&1 | head -20; exit 1; }
+              smoke "$inst"
               python -m zipfile -e dist/*.zip /tmp/smoke-img
               smoke /tmp/smoke-img/Neutrodyne ;;
             macos-arm64)
@@ -435,7 +448,14 @@ jobs:
         shell: bash
         run: |
           set -e
-          img="$(ls -d dist/Neutrodyne dist/Neutrodyne.app 2>/dev/null | head -1)"
+          # The image dir name is fixed per target — an `ls -d A B | head -1`
+          # pick exits nonzero under pipefail when only one glob matches
+          # (nightly 37858231006), killing the step before any check runs.
+          case "${{ matrix.target }}" in
+            macos-arm64) img="dist/Neutrodyne.app" ;;
+            *) img="dist/Neutrodyne" ;;
+          esac
+          [ -d "$img" ] || { echo "::error::packaged image $img missing"; exit 1; }
           inputs=("$img")
           while IFS= read -r f; do inputs+=("$f"); done \
             < <(find dist -maxdepth 1 -type f \( -name '*.msi' -o -name '*.deb' -o -name '*.rpm' -o -name '*.tar.gz' -o -name '*.zip' \))
@@ -447,7 +467,11 @@ jobs:
       - name: Sizes into the summary (PB27 trend)
         shell: bash
         run: |
-          img="$(ls -d dist/Neutrodyne dist/Neutrodyne.app 2>/dev/null | head -1)"
+          case "${{ matrix.target }}" in
+            macos-arm64) img="dist/Neutrodyne.app" ;;
+            *) img="dist/Neutrodyne" ;;
+          esac
+          [ -d "$img" ] || { echo "::error::packaged image $img missing"; exit 1; }
           {
             echo "| file | MiB |"
             echo "| --- | --- |"
