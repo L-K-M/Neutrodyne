@@ -22,6 +22,7 @@ import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.cancel
+import org.junit.After
 import org.junit.Test
 
 /**
@@ -36,22 +37,24 @@ class DesktopAppGraphTest {
     private val reporter = DesktopCrashReporter(dirs, buildInfo, DesktopClock, RecentLogBuffer())
     private val graph = createDesktopGraph(dirs, buildInfo, reporter)
 
+    /** JUnit builds a fresh instance per test, so every test's scope is cancelled here. */
+    @After
+    fun tearDown() {
+        graph.appScope.cancel()
+    }
+
     @Test
     fun theGraphBuildsWithTemporaryAppDirsAndResolvesTheSharedBindings() {
-        try {
-            assertThat(graph.dirs).isSameInstanceAs(dirs)
-            assertThat(graph.buildInfo).isSameInstanceAs(buildInfo)
-            assertThat(graph.settingsRepository).isNotNull()
-            assertThat(graph.networkMonitor).isInstanceOf(
-                ch.lkmc.neutrodyne.core.network.DesktopNetworkMonitor::class.java,
-            )
-            // The shell's pre-graph instance is the graph's crash reporter, not a second one.
-            assertThat(graph.crashReporter).isSameInstanceAs(reporter)
-            assertThat(graph.initializers).isNotNull()
-            assertThat(graph.appScope).isNotNull()
-        } finally {
-            graph.appScope.cancel()
-        }
+        assertThat(graph.dirs).isSameInstanceAs(dirs)
+        assertThat(graph.buildInfo).isSameInstanceAs(buildInfo)
+        assertThat(graph.settingsRepository).isNotNull()
+        assertThat(graph.networkMonitor).isInstanceOf(
+            ch.lkmc.neutrodyne.core.network.DesktopNetworkMonitor::class.java,
+        )
+        // The shell's pre-graph instance is the graph's crash reporter, not a second one.
+        assertThat(graph.crashReporter).isSameInstanceAs(reporter)
+        assertThat(graph.initializers).isNotNull()
+        assertThat(graph.appScope).isNotNull()
     }
 
     /** The same keys as `app/src/test/.../AndroidAppGraphTest` (01 Graph tests rule 11). */

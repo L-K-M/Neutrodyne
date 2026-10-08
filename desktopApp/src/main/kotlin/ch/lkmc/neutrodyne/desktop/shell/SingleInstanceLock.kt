@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.desktop.shell
 
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import kotlinx.serialization.Serializable
+import java.io.IOException
 import java.nio.channels.FileChannel
 import java.nio.channels.OverlappingFileLockException
 import java.nio.file.Files
@@ -59,6 +60,9 @@ class SingleInstanceLock(
             } catch (_: OverlappingFileLockException) {
                 // A holder inside this JVM: not us (each instance uses its own channel).
                 null
+            } catch (e: IOException) {
+                channel.close()
+                throw e
             }
         if (lock == null) {
             channel.close()
