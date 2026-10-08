@@ -58,6 +58,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIsNot
 
 /**
  * The podcast detail screen through `runComposeUiTest` (08 Podcast detail): loading, the header
@@ -301,6 +302,64 @@ class PodcastScreenTest {
         }
 
     @Test
+    fun refreshErrorOffersRetry() =
+        runComposeUiTest {
+            // A failed first page shows the paged-list error state with Retry (08's
+            // Failed shape): the retry lands on a working source.
+            val source =
+                PagedListSource(
+                    pages = listOf(List(5) { i -> testEpisodeRow(i + 1L, podcastId = 7, title = "Ep ${i + 1}") }),
+                    failRefresh = true,
+                )
+            val pagingItems =
+                setPodcast(PodcastUiState(detail = testPodcastDetail(7), loaded = true), source = source)
+
+            onNodeWithText("Couldn't load episodes").assertIsDisplayed()
+            onNodeWithText("Retry").performClick()
+            // Poll rather than waitForIdle: the retry's NdLoading spinner animates forever.
+            waitUntil(timeoutMillis = 5_000) { pagingItems.itemCount == 5 }
+            onNodeWithText("Ep 1").assertIsDisplayed()
+        }
+
+    @Test
+    fun appendErrorOffersRetry() =
+        runComposeUiTest {
+            // A failed append shows the convention's footer row with Retry (`items.retry()`).
+            // Page one is sized past the viewport + prefetch distance so the failing append
+            // is triggered by an access hint from scrolling — the hint is what `retry()`
+            // replays; an auto-append after refresh carries no hint and cannot be retried.
+            val source =
+                PagedListSource(
+                    pages =
+                        listOf(
+                            List(60) { i -> testEpisodeRow(i + 1L, podcastId = 7, title = "Ep ${i + 1}") },
+                            List(10) { i -> testEpisodeRow(61L + i, podcastId = 7, title = "Ep ${61 + i}") },
+                        ),
+                    failNextAppend = true,
+                )
+            val pagingItems =
+                setPodcast(
+                    PodcastUiState(detail = testPodcastDetail(7), loaded = true),
+                    source = source,
+                )
+            onNodeWithText("Ep 1").assertIsDisplayed()
+
+            onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToNode(hasText("Ep 59"))
+            waitUntil(timeoutMillis = 5_000) { pagingItems.loadState.append is LoadState.Error }
+
+            onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToNode(hasText("Retry"))
+            onNodeWithText("Retry").assertIsDisplayed()
+            onNodeWithText("Retry").performClick()
+            // Poll state, not idle: the retry's append spinner animates indefinitely.
+            waitUntil(timeoutMillis = 5_000) { pagingItems.itemCount == 70 }
+
+            // The retry replayed the failed append (load #3); the footer cleared with it.
+            assertEquals(3, source.loads)
+            assertEquals("Ep 70", pagingItems.itemSnapshotList[69]?.title)
+            assertIsNot<LoadState.Error>(pagingItems.loadState.append)
+        }
+
+    @Test
     fun filteredEmptyOffersShowPlayed() =
         runComposeUiTest {
             var filters: FeedFilters? = null
@@ -382,19 +441,36 @@ class PodcastScreenTest {
 /** The restore test's catalogue; index 100 lands among the placeholders past the 80 loaded rows. */
 private const val CATALOGUE_SIZE = 300
 
-/** Named pages served by [Pager] — one page's worth per `load`; [firstLoadGate] parks load 0. */
+/**
+ * Named pages served by [Pager] — one page's worth per `load`; [firstLoadGate] parks load 0
+ * and the `fail*` flags make the matching load fail once, so a Retry lands on a working source.
+ */
 private class PagedListSource(
     private val pages: List<List<EpisodeRow>>,
     private val firstLoadGate: CompletableDeferred<Unit>? = null,
+    private var failRefresh: Boolean = false,
+    private var failNextAppend: Boolean = false,
 ) : PagingSource<Int, EpisodeRow>() {
+    var loads = 0
+        private set
+
     private var firstLoad = true
 
     override suspend fun load(params: LoadParams<Int>): LoadResult<Int, EpisodeRow> {
+        loads++
         if (firstLoad) {
             firstLoad = false
             firstLoadGate?.await()
         }
         val index = params.key ?: 0
+        if (index == 0 && failRefresh) {
+            failRefresh = false
+            return LoadResult.Error(IllegalStateException("boom"))
+        }
+        if (index > 0 && failNextAppend) {
+            failNextAppend = false
+            return LoadResult.Error(IllegalStateException("boom"))
+        }
         return LoadResult.Page(
             data = pages[index],
             prevKey = if (index == 0) null else index - 1,

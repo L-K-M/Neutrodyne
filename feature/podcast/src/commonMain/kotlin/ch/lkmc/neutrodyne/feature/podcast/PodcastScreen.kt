@@ -83,6 +83,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_watch_on_youtube
 import ch.lkmc.neutrodyne.core.ui.resources.add_auth_password
 import ch.lkmc.neutrodyne.core.ui.resources.add_auth_title
 import ch.lkmc.neutrodyne.core.ui.resources.add_auth_username
+import ch.lkmc.neutrodyne.core.ui.resources.feeds_load_error
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_refresh
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_show_played
 import ch.lkmc.neutrodyne.core.ui.resources.order_newest
@@ -259,6 +260,20 @@ internal fun PodcastScreen(
                         }
                     }
 
+                    // 08's Failed shape for a first-page error — the header and chips stay
+                    // visible and the state sits where the episodes would.
+                    if (items.loadState.refresh is LoadState.Error && items.itemCount == 0) {
+                        item(key = "refreshError", contentType = "status") {
+                            EmptyState(
+                                icon = NdIcons.Error,
+                                title = stringResource(Res.string.feeds_load_error),
+                                body = "",
+                                actionLabel = stringResource(Res.string.action_retry),
+                                onAction = items::retry,
+                            )
+                        }
+                    }
+
                     items(
                         count = items.itemCount,
                         key = items.itemKey { it.id },
@@ -305,6 +320,21 @@ internal fun PodcastScreen(
                             ) {
                                 NdLoading()
                             }
+                        }
+                    }
+                    // 08's paged-list convention: a LoadState.Error becomes a footer row with
+                    // Retry (`items.retry()`), same as the Feeds list.
+                    if (items.loadState.append is LoadState.Error) {
+                        item(key = "appendError", contentType = "status") {
+                            NdBanner(
+                                message = stringResource(Res.string.feeds_load_error),
+                                icon = NdIcons.Error,
+                                primary =
+                                    NdDialogAction(
+                                        stringResource(Res.string.action_retry),
+                                        items::retry,
+                                    ),
+                            )
                         }
                     }
                 }
