@@ -155,11 +155,13 @@ jobs:
           ram-size: 4096M
           disk-size: 6000M
           emulator-boot-timeout: 1200
-          # The action's defaults plus GLDMA off: with color-buffer DMA advertised, this image's
-          # gralloc mapper aborts surfaceflinger in RegionSampling ("Assertion failed:
-          # !rcEnc->featureInfo()->hasReadColorBufferDma"), and each abort restarts
-          # system_server (nightly 2026-10-08, five times in 90 s).
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -feature -GLDMA,-GLDMA2
+          # Guest-side rendering and three-button navigation: with host rendering this image's
+          # gralloc mapper aborts surfaceflinger whenever SystemUI samples the gesture handle's
+          # region ("Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma"), and each
+          # abort restarts system_server (nightly 2026-10-08: 4-12 aborts in 3 min under
+          # swiftshader_indirect, swangle_indirect, emulator 37.3.3 and the 37.1 image; none
+          # with -gpu guest after the switch to three-button navigation).
+          emulator-options: -no-window -gpu guest -no-snapshot -noaudio -no-boot-anim
           # android-emulator-runner runs each script line as its own `sh -c`, so a command
           # must fit on one line (a `\` continuation becomes a literal argument).
           # sys.boot_completed can precede the settings and package services; the wait line
@@ -167,6 +169,8 @@ jobs:
           script: |
             adb logcat -v threadtime > "$RUNNER_TEMP/logcat-api37-debug.txt" 2>&1 &
             test "$(adb shell getconf PAGE_SIZE | tr -d '\r')" = "16384" || { echo "PAGE_SIZE != 16384"; exit 1; }
+            timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
+            timeout 120 adb shell 'until cmd overlay enable com.android.internal.systemui.navbar.threebutton; do sleep 2; done'
             timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true connectedDebugAndroidTest
       - name: Release smoke on API 37
@@ -181,13 +185,17 @@ jobs:
           ram-size: 4096M
           disk-size: 6000M
           emulator-boot-timeout: 1200
-          # The action's defaults plus GLDMA off: with color-buffer DMA advertised, this image's
-          # gralloc mapper aborts surfaceflinger in RegionSampling ("Assertion failed:
-          # !rcEnc->featureInfo()->hasReadColorBufferDma"), and each abort restarts
-          # system_server (nightly 2026-10-08, five times in 90 s).
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -feature -GLDMA,-GLDMA2
+          # Guest-side rendering and three-button navigation: with host rendering this image's
+          # gralloc mapper aborts surfaceflinger whenever SystemUI samples the gesture handle's
+          # region ("Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma"), and each
+          # abort restarts system_server (nightly 2026-10-08: 4-12 aborts in 3 min under
+          # swiftshader_indirect, swangle_indirect, emulator 37.3.3 and the 37.1 image; none
+          # with -gpu guest after the switch to three-button navigation).
+          emulator-options: -no-window -gpu guest -no-snapshot -noaudio -no-boot-anim
           script: |
             adb logcat -v threadtime > "$RUNNER_TEMP/logcat-api37-release.txt" 2>&1 &
+            timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
+            timeout 120 adb shell 'until cmd overlay enable com.android.internal.systemui.navbar.threebutton; do sleep 2; done'
             timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
             ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true :app:connectedReleaseAndroidTest
             # TODO (M6b): :benchmark's out-of-process release smoke journeys join here.
