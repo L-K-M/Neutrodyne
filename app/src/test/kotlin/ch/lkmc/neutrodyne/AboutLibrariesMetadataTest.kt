@@ -209,6 +209,18 @@ class AboutLibrariesMetadataTest {
                 "neutrodyne:sqlite" to listOf("disclaims copyright"),
                 "neutrodyne:unicode-ucd" to listOf("Unicode, Inc"),
                 "neutrodyne:okhttp-public-suffix-list" to listOf("Mozilla Public License"),
+                // the third-party Python packages Chaquopy's bootstrap.imy carries (01 inventory)
+                "neutrodyne:pyelftools" to listOf("public domain"),
+                "neutrodyne:construct" to listOf("Tomer Filiba", "Corbin Simpson"),
+                "neutrodyne:setuptools" to listOf("Python Packaging Authority"),
+                "neutrodyne:jaraco-context" to listOf("Jason R. Coombs"),
+                "neutrodyne:jaraco-functools" to listOf("Jason R. Coombs"),
+                "neutrodyne:jaraco-text" to listOf("Jason R. Coombs"),
+                "neutrodyne:zipp" to listOf("Jason R. Coombs"),
+                "neutrodyne:more-itertools" to listOf("Erik Rose"),
+                "neutrodyne:packaging" to listOf("Donald Stufft"),
+                "neutrodyne:platformdirs" to listOf("platformdirs developers"),
+                "neutrodyne:typing-extensions" to listOf("Python Software Foundation"),
             )
     }
 }
