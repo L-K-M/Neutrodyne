@@ -1,0 +1,92 @@
+{
+  "artwork": [
+    {
+      "source": "ITUNES_IMAGE",
+      "url": "https://cdn.example.com/cover-1400.jpg"
+    },
+    {
+      "height": 3000,
+      "source": "PODCAST_IMAGE",
+      "url": "https://cdn.example.com/cover-3000.jpg",
+      "width": 3000
+    },
+    {
+      "source": "PODCAST_IMAGES",
+      "url": "https://cdn.example.com/legacy-1400.jpg",
+      "width": 1400
+    },
+    {
+      "source": "MEDIA_THUMBNAIL",
+      "url": "https://cdn.example.com/thumb-300.jpg",
+      "width": 300
+    },
+    {
+      "source": "RSS_IMAGE",
+      "url": "https://cdn.example.com/rss-image-144.png"
+    },
+    {
+      "source": "GOOGLEPLAY_IMAGE",
+      "url": "https://cdn.example.com/gp-500.jpg"
+    }
+  ],
+  "bannerUrl": "https://cdn.example.com/banner-3200.jpg",
+  "format": "RSS2",
+  "items": [
+    {
+      "artwork": [
+        {
+          "source": "ITUNES_IMAGE",
+          "url": "https://cdn.example.com/ep-art.jpg"
+        },
+        {
+          "source": "MEDIA_THUMBNAIL",
+          "url": "https://cdn.example.com/ep-thumb.jpg",
+          "width": 300
+        }
+      ],
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/ar1.mp3"
+        }
+      ],
+      "feedOrder": 0,
+      "guid": "art-1",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/ar1.mp3"
+      },
+      "title": "Episode art"
+    },
+    {
+      "artwork": [
+        {
+          "source": "ITUNES_IMAGE",
+          "url": "https://cdn.example.com/ep-art-as-text.jpg"
+        }
+      ],
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/ar2.mp3"
+        }
+      ],
+      "feedOrder": 1,
+      "guid": "art-2",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/ar2.mp3"
+      },
+      "title": "Text-only itunes:image quirk"
+    }
+  ],
+  "title": "Artwork Precedence"
+}
