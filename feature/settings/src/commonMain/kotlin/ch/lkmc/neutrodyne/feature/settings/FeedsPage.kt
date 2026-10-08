@@ -192,7 +192,8 @@ private fun <T> FeedsChoiceDialog(
         icon = icon,
         title = title,
     ) {
-        Column {
+        // The chooser's rows must stay reachable in a landscape-height window (08's dialog rule).
+        Column(Modifier.verticalScroll(rememberScrollState())) {
             for (option in options) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
