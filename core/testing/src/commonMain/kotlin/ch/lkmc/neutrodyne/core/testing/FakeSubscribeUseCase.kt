@@ -5,7 +5,6 @@ package ch.lkmc.neutrodyne.core.testing
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.SubscribeError
 import ch.lkmc.neutrodyne.core.domain.SubscribeUseCase
-
 import kotlinx.coroutines.CompletableDeferred
 
 /**
