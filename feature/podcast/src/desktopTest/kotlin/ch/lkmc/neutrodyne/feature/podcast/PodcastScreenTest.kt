@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
@@ -16,6 +17,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.paging.LoadState
@@ -348,8 +350,10 @@ class PodcastScreenTest {
             waitUntil(timeoutMillis = 5_000) { pagingItems.loadState.append is LoadState.Error }
 
             onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToNode(hasText("Retry"))
-            onNodeWithText("Retry").assertIsDisplayed()
-            onNodeWithText("Retry").performClick()
+            // The error is offered twice: the footer row at the failure's spot and the
+            // banner pinned under the app bar — both retry through `items.retry()`.
+            onAllNodes(hasText("Retry")).assertCountEquals(2)
+            onAllNodes(hasText("Retry"))[1].performClick()
             // Poll state, not idle: the retry's append spinner animates indefinitely.
             waitUntil(timeoutMillis = 5_000) { pagingItems.itemCount == 70 }
 
@@ -357,6 +361,113 @@ class PodcastScreenTest {
             assertEquals(3, source.loads)
             assertEquals("Ep 70", pagingItems.itemSnapshotList[69]?.title)
             assertIsNot<LoadState.Error>(pagingItems.loadState.append)
+        }
+
+    @Test
+    fun appendErrorBannerStaysVisibleMidList() =
+        runComposeUiTest {
+            // Review round 3: at catalogue scale the append failure's footer sits hundreds of
+            // placeholder rows below the viewport — the pinned banner must surface it where
+            // the user is. 80 loaded rows of 300, placeholders on like production's config.
+            val source = CatalogueSource(CATALOGUE_SIZE)
+            val pagingItems =
+                setPodcast(
+                    PodcastUiState(detail = testPodcastDetail(7), loaded = true),
+                    source = source,
+                    paging =
+                        PagingConfig(
+                            pageSize = 20,
+                            initialLoadSize = 80,
+                            enablePlaceholders = true,
+                        ),
+                )
+            assertEquals(CATALOGUE_SIZE, pagingItems.itemCount)
+            assertEquals(listOf<EpisodeRow?>(null), pagingItems.itemSnapshotList.subList(85, 86))
+
+            // Accessing the placeholder edge of the loaded page triggers the failing append.
+            source.failNextAppend = true
+            onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(85)
+            waitUntil(timeoutMillis = 5_000) { pagingItems.loadState.append is LoadState.Error }
+
+            // The error banner is already on screen — no scroll to the faraway footer.
+            onNodeWithText("Couldn't load episodes").assertIsDisplayed()
+            onNodeWithText("Retry").performClick()
+            // The retried append lands (a successful page can retrigger appends for the
+            // placeholders still in view, so wait for the row itself, not a load count).
+            waitUntil(timeoutMillis = 5_000) {
+                pagingItems.itemSnapshotList[85]?.title == "Ep 86"
+            }
+            assertIsNot<LoadState.Error>(pagingItems.loadState.append)
+        }
+
+    @Test
+    fun prependErrorBannerHasNoFooterToHideBehind() =
+        runComposeUiTest {
+            // A prepend failure has no list row at all: the first page loads 200 rows into a
+            // 300-row catalogue, so everything newer exists only as placeholders above. Any
+            // placeholder access already counts as approaching the prepend edge (its hint's
+            // distance is negative), so the flag is armed before composition.
+            val source =
+                CatalogueSource(CATALOGUE_SIZE, firstLoadOffset = 200).apply {
+                    failNextPrepend = true
+                }
+            val pagingItems =
+                setPodcast(
+                    PodcastUiState(detail = testPodcastDetail(7), loaded = true),
+                    source = source,
+                    paging =
+                        PagingConfig(
+                            pageSize = 20,
+                            initialLoadSize = 80,
+                            enablePlaceholders = true,
+                        ),
+                )
+            assertEquals(CATALOGUE_SIZE, pagingItems.itemCount)
+
+            // Scrolling to a placeholder guarantees the access hint if the tall header kept
+            // every episode row off the initial viewport.
+            onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(10)
+            waitUntil(timeoutMillis = 5_000) { pagingItems.loadState.prepend is LoadState.Error }
+
+            onNodeWithText("Couldn't load episodes").assertIsDisplayed()
+            onNodeWithText("Retry").performClick()
+            // The retried prepend lands the page at catalogue offset 120.
+            waitUntil(timeoutMillis = 5_000) {
+                pagingItems.itemSnapshotList[120]?.title == "Ep 121"
+            }
+            assertIsNot<LoadState.Error>(pagingItems.loadState.prepend)
+        }
+
+    @Test
+    fun refreshErrorWithContentShowsTheBanner() =
+        runComposeUiTest {
+            // A failed refresh while episodes are on screen has no in-list error either —
+            // the empty-list error state only covers `itemCount == 0`. Each invalidated
+            // source is replaced, so the fail flag is armed per creation.
+            var failNextRefresh = false
+            val pagingItems =
+                setPodcast(
+                    PodcastUiState(detail = testPodcastDetail(7), loaded = true),
+                    sourceFactory = {
+                        CatalogueSource(CATALOGUE_SIZE).also { it.failNextRefresh = failNextRefresh }
+                    },
+                    paging =
+                        PagingConfig(
+                            pageSize = 20,
+                            initialLoadSize = 80,
+                            enablePlaceholders = true,
+                        ),
+                )
+            onNodeWithText("Ep 1").assertIsDisplayed()
+
+            failNextRefresh = true
+            runOnIdle { pagingItems.refresh() }
+            waitUntil(timeoutMillis = 5_000) { pagingItems.loadState.refresh is LoadState.Error }
+
+            onNodeWithText("Couldn't load episodes").assertIsDisplayed()
+            failNextRefresh = false
+            onNodeWithText("Retry").performClick()
+            waitUntil(timeoutMillis = 5_000) { pagingItems.loadState.refresh !is LoadState.Error }
         }
 
     @Test
@@ -381,6 +492,8 @@ class PodcastScreenTest {
         state: PodcastUiState,
         rows: List<EpisodeRow> = emptyList(),
         source: PagingSource<Int, EpisodeRow>? = null,
+        // Invalidation needs a fresh instance — `Pager` rejects a re-used source.
+        sourceFactory: (() -> PagingSource<Int, EpisodeRow>)? = null,
         paging: PagingConfig = PagingConfig(pageSize = 20, initialLoadSize = 20),
         listState: LazyListState = LazyListState(),
         waitForFirstPage: Boolean = true,
@@ -400,7 +513,9 @@ class PodcastScreenTest {
     ): LazyPagingItems<EpisodeRow> {
         lateinit var pagingItems: LazyPagingItems<EpisodeRow>
         val feed: Flow<PagingData<EpisodeRow>> =
-            Pager(paging) { source ?: PagedListSource(listOf(rows)) }.flow
+            Pager(paging) {
+                sourceFactory?.invoke() ?: source ?: PagedListSource(listOf(rows))
+            }.flow
         setContent {
             CompositionLocalProvider(
                 LocalPlatformKind provides PlatformKind.DESKTOP,
@@ -489,15 +604,40 @@ private class PagedListSource(
 private class CatalogueSource(
     private val total: Int,
     private val firstLoadGate: CompletableDeferred<Unit>? = null,
+    /** The first load's offset, so prepend tests can park the loaded page mid-catalogue. */
+    private val firstLoadOffset: Int = 0,
 ) : PagingSource<Int, EpisodeRow>() {
+    var failNextAppend = false
+    var failNextPrepend = false
+    var failNextRefresh = false
+
+    var loads = 0
+        private set
+
     private var firstLoad = true
 
     override suspend fun load(params: LoadParams<Int>): LoadResult<Int, EpisodeRow> {
-        if (firstLoad) {
-            firstLoad = false
-            firstLoadGate?.await()
+        loads++
+        val offset =
+            if (firstLoad) {
+                firstLoad = false
+                firstLoadGate?.await()
+                firstLoadOffset
+            } else {
+                params.key ?: 0
+            }
+        if (params is LoadParams.Append && failNextAppend) {
+            failNextAppend = false
+            return LoadResult.Error(IllegalStateException("boom"))
         }
-        val offset = params.key ?: 0
+        if (params is LoadParams.Prepend && failNextPrepend) {
+            failNextPrepend = false
+            return LoadResult.Error(IllegalStateException("boom"))
+        }
+        if (params is LoadParams.Refresh && failNextRefresh) {
+            failNextRefresh = false
+            return LoadResult.Error(IllegalStateException("boom"))
+        }
         val data =
             (offset until minOf(offset + params.loadSize, total)).map {
                 testEpisodeRow(it + 1L, podcastId = 7, title = "Ep ${it + 1}")

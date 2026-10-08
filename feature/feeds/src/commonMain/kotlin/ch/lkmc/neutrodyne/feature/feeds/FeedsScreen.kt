@@ -209,11 +209,16 @@ private fun FeedList(
         return
     }
 
-    LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-        offlineBannerItem(state.offline)
-        item(key = "header", contentType = "header") {
-            FeedHeader(state.filters, onFiltersChange, onRefresh, onMarkAllPlayedClick)
-        }
+    Column(Modifier.fillMaxSize()) {
+        // 08's paging-error rule, applied where the user actually is: an append failure's
+        // footer can sit thousands of placeholder rows away and a prepend failure has none —
+        // the error pins a banner under the app bar (2026-10-08 deviation in 08).
+        LoadErrorBanner(items)
+        LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
+            offlineBannerItem(state.offline)
+            item(key = "header", contentType = "header") {
+                FeedHeader(state.filters, onFiltersChange, onRefresh, onMarkAllPlayedClick)
+            }
         items(
             count = items.itemCount,
             key =
@@ -301,7 +306,29 @@ private fun FeedList(
                 Unit
             }
         }
+        }
     }
+}
+
+/**
+ * The paged list's load error, pinned where the user is (08's paging-error rule, 2026-10-08):
+ * a refresh failure with episodes still shown, or an append/prepend failure whose footer row
+ * may be thousands of placeholders away (a prepend failure has no footer at all), surfaces as
+ * a banner under the app bar. Retry replays every failed load via `items.retry()`; the empty
+ * first-page failure keeps the standalone error state instead.
+ */
+@Composable
+private fun LoadErrorBanner(items: LazyPagingItems<*>) {
+    val failed =
+        items.loadState.prepend is LoadState.Error ||
+            items.loadState.append is LoadState.Error ||
+            (items.loadState.refresh is LoadState.Error && items.itemCount > 0)
+    if (!failed) return
+    NdBanner(
+        message = stringResource(Res.string.feeds_load_error),
+        icon = NdIcons.Error,
+        primary = NdDialogAction(stringResource(Res.string.action_retry), items::retry),
+    )
 }
 
 /**

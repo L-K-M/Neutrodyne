@@ -213,7 +213,13 @@ internal fun PodcastScreen(
             }
 
             else -> {
-                LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+                // 08's paging-error rule, applied where the user actually is: with placeholders
+                // on, an append failure's footer sits thousands of rows away and a prepend
+                // failure has no footer at all — the error pins a banner under the app bar
+                // instead (2026-10-08 deviation in 08). The footer row still marks the spot
+                // the failure happened.
+                LoadErrorBanner(items)
+                LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
                     offlineBannerItem(state.offline)
                     item(key = "header", contentType = "header") {
                         Column {
@@ -721,6 +727,27 @@ private fun EpisodeRowPlaceholder() {
             )
         }
     }
+}
+
+/**
+ * The paged list's load error, pinned where the user is (08's paging-error rule, 2026-10-08):
+ * a refresh failure with episodes still shown, or an append/prepend failure whose footer row
+ * may be thousands of placeholders away (a prepend failure has no footer at all), surfaces as
+ * a banner under the app bar. Retry replays every failed load via `items.retry()`; the empty
+ * first-page failure keeps the in-list error state instead.
+ */
+@Composable
+private fun LoadErrorBanner(items: LazyPagingItems<*>) {
+    val failed =
+        items.loadState.prepend is LoadState.Error ||
+            items.loadState.append is LoadState.Error ||
+            (items.loadState.refresh is LoadState.Error && items.itemCount > 0)
+    if (!failed) return
+    NdBanner(
+        message = stringResource(Res.string.feeds_load_error),
+        icon = NdIcons.Error,
+        primary = NdDialogAction(stringResource(Res.string.action_retry), items::retry),
+    )
 }
 
 /** The header placeholder while `observePodcast` has not emitted (08's skeleton). */
