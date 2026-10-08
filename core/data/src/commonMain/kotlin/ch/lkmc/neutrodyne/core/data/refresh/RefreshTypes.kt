@@ -81,6 +81,12 @@ internal data class RefreshReport(
     val newEpisodes: List<NewEpisodes>,
     val remaining: Int,
     val stoppedByDeadline: Boolean,
+    /**
+     * The run never owned the engine mutex and re-enqueued its request through
+     * [RefreshScheduler.enqueueNow] with scope/force/pagesOnly/origin intact (r4 F3): the
+     * caller must not chain a continuation on top of it.
+     */
+    val reenqueued: Boolean = false,
 )
 
 /** One per-feed outcome emission (03 API); 05's import runner collects these. */

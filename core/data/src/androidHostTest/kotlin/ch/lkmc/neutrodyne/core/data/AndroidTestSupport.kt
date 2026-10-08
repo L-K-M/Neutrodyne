@@ -59,7 +59,9 @@ internal fun newRefresher(
     tempFiles: FeedTempFiles = FeedTempFiles(StoragePaths(context), FileSystem.SYSTEM),
     random: Random = Random(1),
     ingestor: FeedIngestor = newIngestor(db, clock, settings),
-): FeedRefresher = FeedRefresher(db, adapters, ingestor, eventBus, syncHook, tempFiles, settings, clock, random)
+    scheduler: RefreshScheduler = FakeRefreshScheduler(),
+): FeedRefresher =
+    FeedRefresher(db, adapters, ingestor, eventBus, syncHook, tempFiles, settings, clock, random, scheduler)
 
 /** A subscribed podcast row whose `feedKey` matches [feedUrl]; returns the new id. */
 internal suspend fun seedPodcast(

@@ -24,6 +24,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
@@ -801,6 +802,143 @@ class RefreshEngineTest {
             engine.run(request())
             assertEquals(2, adapter.calls.count { it.first == b })
         }
+
+    @Test
+    fun aTimedOutRetryReenqueuesSoALateBackoffCannotEraseIt() =
+        runTest {
+            timedOutRetryScenario(
+                AdapterResult.Failed(
+                    FeedErrorKind.HTTP_SERVER,
+                    http = 500,
+                    retryAfterMs = null,
+                    transient = true,
+                ),
+                FeedOutcome.Failed(FeedErrorKind.HTTP_SERVER, 500),
+            )
+        }
+
+    @Test
+    fun aTimedOutRetryReenqueuesSoALateGoneCannotEraseIt() =
+        runTest {
+            timedOutRetryScenario(
+                AdapterResult.Failed(
+                    FeedErrorKind.HTTP_GONE,
+                    http = 410,
+                    retryAfterMs = null,
+                    transient = false,
+                ),
+                FeedOutcome.Failed(FeedErrorKind.HTTP_GONE, 410),
+            )
+        }
+
+    /**
+     * The r4 F3 reproduction, both stale-outcome legs: feed A's fetch holds the engine mutex
+     * past the scoped retry's 30 s wait margin; B's fetch is released only *after* the retry
+     * timed out, so its stale backoff/`gone` lands on the marks the timeout re-applied. A
+     * request carrying intent must re-enqueue itself — scope, force and `RETRY` origin intact —
+     * rather than degrade to a non-forced continuation that neither forces the feed nor
+     * clears its block; when the re-enqueued request runs, its intent is re-applied under the
+     * mutex and the retry executes.
+     */
+    private suspend fun TestScope.timedOutRetryScenario(
+        stale: AdapterResult,
+        expectedOutcome: FeedOutcome,
+    ) {
+        val db = newDb(clock, queryContext = StandardTestDispatcher(testScheduler))
+        val gateA = CompletableDeferred<Unit>()
+        val gateB = CompletableDeferred<Unit>()
+        val a =
+            seedPodcast(
+                db,
+                feedUrl = "https://a.example.com/f",
+                nextRefreshAt = NOW - 1,
+                subscribedAt = NOW - 30 * DAY,
+            )
+        val b =
+            seedPodcast(
+                db,
+                feedUrl = "https://b.example.com/f",
+                nextRefreshAt = NOW - 1,
+                subscribedAt = NOW - 30 * DAY,
+                failureCount = 3,
+            )
+        val adapter =
+            stubAdapter(onFetch = { feed, _ ->
+                (if (feed.id == a) gateA else gateB).await()
+                stale
+            })
+        val scheduler = FakeRefreshScheduler()
+        val engine = newRefresher(db, mapOf(SourceType.RSS to adapter), clock, settings, scheduler = scheduler)
+        val automatic = backgroundScope.async { engine.run(request()) }
+        testScheduler.runCurrent()
+        assertEquals(setOf(a, b), adapter.calls.map { it.first }.toSet())
+
+        // `PodcastRepository.retry`'s legs: the immediate block clear, then the scoped forced
+        // RETRY request that queues behind the automatic run's mutex.
+        db.podcastDao().clearRefreshBlock(b)
+        val retry =
+            backgroundScope.async {
+                engine.run(
+                    request(
+                        scope = RefreshScope.Podcasts(listOf(b)),
+                        force = true,
+                        origin = RefreshOrigin.RETRY,
+                        deadlineElapsedMs = clock.elapsedRealtime() + 60_000L,
+                    ),
+                )
+            }
+        testScheduler.runCurrent()
+        assertEquals(0L, db.podcastDao().byId(b)!!.nextRefreshAt)
+
+        advanceTimeBy(31_000L)
+        val report = retry.await()
+
+        assertTrue(report.stoppedByDeadline)
+        assertTrue(report.reenqueued)
+        assertEquals(
+            listOf(
+                FakeRefreshScheduler.NowRequest(
+                    RefreshScope.Podcasts(listOf(b)),
+                    force = true,
+                    pagesOnly = false,
+                    origin = RefreshOrigin.RETRY,
+                ),
+            ),
+            scheduler.nowRequests,
+        )
+
+        // B's fetch resolves *after* the retry timed out: the stale outcome commits on top of
+        // the timeout's re-applied marks and erases them — the swallow the request alone
+        // could not survive.
+        gateB.complete(Unit)
+        testScheduler.runCurrent()
+        clock.nowMs += 5_001L
+        advanceTimeBy(5_001L)
+        testScheduler.runCurrent()
+        assertTrue(
+            db.podcastDao()
+                .dueForRefresh(clock.now(), scopeAll = false, ids = listOf(b))
+                .isEmpty(),
+        )
+
+        gateA.complete(Unit)
+        automatic.await()
+
+        // What was enqueued is the original request: its intent is re-applied under the
+        // mutex, so the stale outcome cannot consume the retry — B is fetched again.
+        val reenqueued = scheduler.nowRequests.single()
+        val rerun =
+            engine.run(
+                request(
+                    scope = reenqueued.scope,
+                    force = reenqueued.force,
+                    pagesOnly = reenqueued.pagesOnly,
+                    origin = reenqueued.origin,
+                ),
+            )
+        assertEquals(2, adapter.calls.count { it.first == b })
+        assertEquals(expectedOutcome, rerun.outcomes[b])
+    }
 
     @Test
     fun pagingRechecksTheBudgetAfterPermitWaits() =

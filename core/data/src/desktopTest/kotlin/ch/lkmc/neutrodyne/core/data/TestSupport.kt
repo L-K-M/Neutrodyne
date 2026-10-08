@@ -273,7 +273,9 @@ internal fun newRefresher(
     tempFiles: FeedTempFiles = FeedTempFiles(storagePathsFor(File("build/tmp/m1a-refresh")), FileSystem.SYSTEM),
     random: Random = Random(1),
     ingestor: FeedIngestor = newIngestor(db, clock, settings),
-): FeedRefresher = FeedRefresher(db, adapters, ingestor, eventBus, syncHook, tempFiles, settings, clock, random)
+    scheduler: RefreshScheduler = FakeRefreshScheduler(),
+): FeedRefresher =
+    FeedRefresher(db, adapters, ingestor, eventBus, syncHook, tempFiles, settings, clock, random, scheduler)
 
 internal fun fetchMeta(
     finalUrl: String = "https://example.com/feed.xml",

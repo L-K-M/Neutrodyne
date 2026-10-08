@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.data
 
 import ch.lkmc.neutrodyne.core.common.JobLanePoker
+import ch.lkmc.neutrodyne.core.data.refresh.AdapterResult
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopRefreshLane
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopRefreshScheduler
 import ch.lkmc.neutrodyne.core.data.refresh.NextRefreshRebaser
@@ -22,6 +23,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Instant
@@ -159,6 +161,52 @@ class DesktopRefreshLaneTest {
             assertEquals(listOf(a), adapter.calls.map { it.first })
             assertTrue(db.podcastDao().byId(a)!!.lastAttemptAt != null)
             assertNull(db.podcastDao().byId(b)!!.lastAttemptAt)
+        }
+
+    @Test
+    fun aQueuedRetrySurvivesAStaleOutcomeCommittedBeforeTheDrain() =
+        laneTest {
+            // r4 F3 desktop leg: the queued request itself carries the retry's scope, force
+            // and origin — a stale outcome landing between enqueue and drain cannot consume
+            // it, because the RETRY origin re-applies the clear and the force mark under the
+            // engine mutex when the drain runs it.
+            val id =
+                seedPodcast(
+                    db,
+                    "https://a.example.com/f",
+                    nextRefreshAt = NOW + 60 * DAY,
+                    failureCount = 3,
+                )
+            val adapter =
+                stubAdapter(
+                    mutableMapOf(
+                        "https://a.example.com/f" to AdapterResult.NotModified(meta = null),
+                    ),
+                )
+            val q = queue(this)
+            val lane = lane(adapter, q)
+
+            // `PodcastRepository.retry`'s legs: the immediate clear, then the queued request.
+            db.podcastDao().clearRefreshBlock(id)
+            q.enqueueNow(
+                scope = RefreshScope.Podcasts(listOf(id)),
+                force = true,
+                pagesOnly = false,
+                origin = RefreshOrigin.RETRY,
+            )
+            testScheduler.advanceUntilIdle()
+
+            // The older run's outcome lands before the lane drains: the block is re-set and
+            // the due mark pushed out — erasing the marks alone.
+            db.podcastDao().updateFetchStates(
+                listOf(fetchState(id, nextRefreshAt = NOW + 60 * DAY).copy(failureCount = 3, gone = true)),
+            )
+
+            lane.run(Instant.fromEpochMilliseconds(NOW))
+
+            assertEquals(listOf(id), adapter.calls.map { it.first })
+            assertFalse(db.podcastDao().byId(id)!!.gone)
+            assertEquals(0, db.podcastDao().byId(id)!!.failureCount)
         }
 
     private suspend fun summaryCount(): Int = if (settings.get(FeedsSettingKeys.LAST_RUN_SUMMARY).isEmpty()) 0 else 1

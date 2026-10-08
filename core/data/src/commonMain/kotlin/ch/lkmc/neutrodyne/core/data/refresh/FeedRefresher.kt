@@ -71,6 +71,7 @@ internal class FeedRefresher(
     private val settings: SettingsRepository,
     private val clock: Clock,
     private val random: Random,
+    private val scheduler: RefreshScheduler,
 ) {
     private val mutex = Mutex()
 

@@ -156,6 +156,28 @@ class RefreshSchedulerTest {
         }
 
     @Test
+    fun `a scoped retry rides refresh-now with its intent`() =
+        runTest {
+            val scheduler = scheduler()
+
+            scheduler.enqueueNow(
+                RefreshScope.Podcasts(listOf(5L)),
+                force = true,
+                pagesOnly = false,
+                origin = RefreshOrigin.RETRY,
+            )
+
+            // The re-enqueued mutex-timeout request carries the full intent in its input
+            // data (r4 F3): RETRY stays user-driven and lands on `refresh-now`.
+            val spec = specOf(uniqueWork(WorkManagerRefreshScheduler.WORK_NOW).id.toString())
+            val request = RefreshWorkData.request(spec.input, 0, 0, 0)
+            assertThat(request.scope).isEqualTo(RefreshScope.Podcasts(listOf(5L)))
+            assertThat(request.force).isTrue()
+            assertThat(request.origin).isEqualTo(RefreshOrigin.RETRY)
+            assertThat(spec.constraints.requiresBatteryNotLow()).isFalse()
+        }
+
+    @Test
     fun `enqueueNow groups encode their group id`() =
         runTest {
             val scheduler = scheduler()
