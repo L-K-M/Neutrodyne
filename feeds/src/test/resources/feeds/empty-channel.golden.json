@@ -1,0 +1,18 @@
+{
+  "categories": [
+    [
+      "Technology",
+      "Tech News"
+    ],
+    [
+      "Society & Culture",
+      "Documentary"
+    ]
+  ],
+  "descriptionHtml": "A show without episodes yet.",
+  "format": "RSS2",
+  "language": "en-US",
+  "link": "https://example.com/new-show",
+  "title": "Empty Channel, New Show",
+  "ttlMinutes": 60
+}
