@@ -155,6 +155,11 @@ jobs:
           ram-size: 4096M
           disk-size: 6000M
           emulator-boot-timeout: 1200
+          # The action's defaults plus GLDMA off: with color-buffer DMA advertised, this image's
+          # gralloc mapper aborts surfaceflinger in RegionSampling ("Assertion failed:
+          # !rcEnc->featureInfo()->hasReadColorBufferDma"), and each abort restarts
+          # system_server (nightly 2026-10-08, five times in 90 s).
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -feature -GLDMA,-GLDMA2
           # android-emulator-runner runs each script line as its own `sh -c`, so a command
           # must fit on one line (a `\` continuation becomes a literal argument).
           # sys.boot_completed can precede the settings and package services; the wait line
@@ -176,6 +181,11 @@ jobs:
           ram-size: 4096M
           disk-size: 6000M
           emulator-boot-timeout: 1200
+          # The action's defaults plus GLDMA off: with color-buffer DMA advertised, this image's
+          # gralloc mapper aborts surfaceflinger in RegionSampling ("Assertion failed:
+          # !rcEnc->featureInfo()->hasReadColorBufferDma"), and each abort restarts
+          # system_server (nightly 2026-10-08, five times in 90 s).
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -feature -GLDMA,-GLDMA2
           script: |
             adb logcat -v threadtime > "$RUNNER_TEMP/logcat-api37-release.txt" 2>&1 &
             timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
