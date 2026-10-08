@@ -60,7 +60,21 @@ component's own upstream notice at the pinned version:
   data inside CPython.
 - **Chaquopy runtime 17.0.0 payloads** (published as 17.1.0 from `third_party/chaquopy-maven`,
   self-built master `a41f0c9`, 01 S7) — MIT — Copyright (c) 2017-2025 Chaquo Ltd and contributors —
-  Java/JNI bridge and bootstrap.
+  Java/JNI bridge and the `bootstrap.imy` host. Chaquopy's bootstrap archive
+  (`assets/chaquopy/bootstrap.imy`, `com.chaquo.python.runtime:bootstrap`) also carries third-party
+  Python code, each with its own Licences entry:
+  - **pyelftools 0.26** (`java/_vendor/elftools`) — public domain (Unlicense text) — by Eli
+    Bendersky and contributors; it bundles **Construct 2.06** (`elftools/construct`) — MIT —
+    Copyright (C) 2009 Tomer Filiba, 2010-2011 Corbin Simpson.
+  - **setuptools 68.2.2** (`pkg_resources`) — MIT — Python Packaging Authority (its licence file
+    carries no copyright line); its `pkg_resources/_vendor` wheels (versions per setuptools
+    v68.2.2's `vendored.txt` and `*-dist-info` directories): **importlib_resources 5.10.2** —
+    Apache-2.0 — author Barry Warsaw and contributors; **jaraco.context 4.3.0**,
+    **jaraco.functools 3.6.0**, **jaraco.text 3.7.0** and **zipp 3.7.0** — MIT — Copyright Jason
+    R. Coombs; **more-itertools 9.1.0** — MIT — Copyright (c) 2012 Erik Rose; **packaging 23.1** —
+    Apache-2.0 OR BSD-2-Clause — Copyright (c) Donald Stufft and individual contributors;
+    **platformdirs 2.6.2** — MIT — Copyright (c) 2010-202x The platformdirs developers;
+    **typing_extensions 4.4.0** — PSF-2.0 — Copyright (c) Python Software Foundation.
 - **LLVM libc++** — Apache-2.0 WITH LLVM-exception — statically linked into Chaquopy's JNI
   libraries (part of the LLVM Project).
 - **certifi CA bundle 2026.7.22** — MPL-2.0 — unmodified data (`kind = "data"`); certificate data

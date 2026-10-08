@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:platformdirs",
+  "name": "platformdirs",
+  "description": "Vendored in setuptools' pkg_resources/_vendor inside assets/chaquopy/bootstrap.imy (com.chaquo.python.runtime:bootstrap:17.1.0). Copyright (c) 2010-202x The platformdirs developers (year range verbatim from upstream).",
+  "website": "https://github.com/platformdirs/platformdirs",
+  "developers": [],
+  "licenses": [
+    "mit-platformdirs"
+  ],
+  "artifactVersion": "2.6.2",
+  "tag": "bundled"
+}

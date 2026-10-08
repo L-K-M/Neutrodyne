@@ -2168,7 +2168,7 @@ aboutLibrariesId = "certifi-cacert"
 
 **Native allow-list** (`NativeLicencePolicy.kt`): the permissive set above plus `MIT-0` and `Unlicense OR MIT-0` (miniaudio, `elected = "MIT-0"`), and `LGPL-2.1-or-later` (or `LGPL-3.0-or-later`, which D3 also allows, for a component other than FFmpeg, such as the libmpv fallback) **only** for entries with `kind = "lgpl-shared"`, `linking = "dynamic"`, a `source` entry with URL and SHA-256, and a configure line without `--enable-gpl`, `--enable-version3` or `--enable-nonfree`.
 
-Inventory (S7 read the versions from the runtime on 2026-10-06 — CPython's own `Android/android.py` dep pins confirmed by the version strings inside the shipped `.so` files; the lockfile carries the details. The ABI-independent `assets/chaquopy/` payloads — both 64-bit `bootstrap-native` sets and the stdlib `.imy` files — also ship unchanged in the `armeabi-v7a` APK, where they are dead weight the ABI split cannot drop; measured in [S7](#s7-chaquopy-under-agp-941). Licences per [CPython's licence page](https://docs.python.org/3/license.html), [yt-dlp](https://github.com/yt-dlp/yt-dlp#licensing), [yt-dlp-ejs](https://github.com/yt-dlp/ejs), [Chaquopy](https://github.com/chaquo/chaquopy), [quickjs-kt](https://github.com/dokar3/quickjs-kt)):
+Inventory (S7 read the versions from the runtime on 2026-10-06 — CPython's own `Android/android.py` dep pins confirmed by the version strings inside the shipped `.so` files; the lockfile carries the details. The ABI-independent `assets/chaquopy/` payloads — both 64-bit `bootstrap-native` sets and the stdlib `.imy` files — also ship unchanged in the `armeabi-v7a` APK, where they are dead weight the ABI split cannot drop; measured in [S7](#s7-chaquopy-under-agp-941). Licences per [CPython's licence page](https://docs.python.org/3/license.html), [yt-dlp](https://github.com/yt-dlp/yt-dlp#licensing), [yt-dlp-ejs](https://github.com/yt-dlp/ejs), [Chaquopy](https://github.com/chaquo/chaquopy), [quickjs-kt](https://github.com/dokar3/quickjs-kt), and — for the `bootstrap.imy` contents, inventoried 2026-10-08 — the archive's own `*-dist-info` licence files, [pyelftools](https://github.com/eliben/pyelftools) and setuptools v68.2.2's [`pkg_resources/_vendor/vendored.txt`](https://github.com/pypa/setuptools/blob/v68.2.2/pkg_resources/_vendor/vendored.txt)):
 
 | Component | Version (measured by S7, 2026-10-06) | Licence | Ships in |
 |---|---|---|---|
@@ -2185,7 +2185,19 @@ Inventory (S7 read the versions from the runtime on 2026-10-06 — CPython's own
 | xz (liblzma) | 5.4.6 | public domain (`LicenseRef-PublicDomain`; xz 5.4.6's COPYING puts liblzma in the public domain — corrected from `0BSD` on 2026-10-06) | all three APKs |
 | bzip2 | 1.0.8 | bzip2-1.0.6 | all three APKs |
 | zlib | 1.2.8 (NDK r28.2 sysroot build) | Zlib | all three APKs |
-| Chaquopy runtime (Java, JNI, bootstrap) | plugin 17.1.0 self-built @ `a41f0c9`; runtime payloads = released 17.0.0 republished under 17.1.0 (`third_party/chaquopy-maven`) | MIT | all three APKs |
+| Chaquopy runtime (Java, JNI bridge; hosts `bootstrap.imy`, whose third-party Python contents are the rows below) | plugin 17.1.0 self-built @ `a41f0c9`; runtime payloads = released 17.0.0 republished under 17.1.0 (`third_party/chaquopy-maven`) | MIT | all three APKs |
+| pyelftools (`java/_vendor/elftools` inside `bootstrap.imy`) | 0.26 | Unlicense (public-domain dedication) | all three APKs |
+| Construct (vendored inside pyelftools' `elftools/construct`) | 2.06 | MIT | all three APKs |
+| setuptools (`pkg_resources` inside `bootstrap.imy`) | 68.2.2 | MIT | all three APKs |
+| importlib_resources (`pkg_resources/_vendor`) | 5.10.2 | Apache-2.0 | all three APKs |
+| jaraco.context (`pkg_resources/_vendor`, vendored transitively) | 4.3.0 | MIT | all three APKs |
+| jaraco.functools (`pkg_resources/_vendor`, vendored transitively) | 3.6.0 | MIT | all three APKs |
+| jaraco.text (`pkg_resources/_vendor`) | 3.7.0 | MIT | all three APKs |
+| more-itertools (`pkg_resources/_vendor`, vendored transitively) | 9.1.0 | MIT | all three APKs |
+| packaging (`pkg_resources/_vendor`) | 23.1 | Apache-2.0 OR BSD-2-Clause (BSD-2-Clause elected) | all three APKs |
+| platformdirs (`pkg_resources/_vendor`) | 2.6.2 | MIT | all three APKs |
+| typing_extensions (`pkg_resources/_vendor`) | 4.4.0 | PSF-2.0 | all three APKs |
+| zipp (`pkg_resources/_vendor`) | 3.7.0 | MIT | all three APKs |
 | LLVM libc++ (statically linked into Chaquopy's JNI libraries; no `libc++_shared.so` ships) | NDK r28.2 | Apache-2.0 WITH LLVM-exception | all three APKs |
 | CA certificate bundle (certifi `cacert.pem`, shipped by Chaquopy) | 2026.7.22 | MPL-2.0, data only | all three APKs |
 | yt-dlp (official zipimport release) | 2026.08.19 | Unlicense | 64-bit APKs, engine updates — vendored from M9a, not yet in the lockfile |
