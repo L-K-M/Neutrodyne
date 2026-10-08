@@ -246,6 +246,8 @@ jobs:
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
           name: desktop-image-linux-x64
+          # upload-artifact strips the shared desktopApp/build prefix.
+          path: desktopApp/build
       # xvfb-run and dbus-run-session wrap the packaged smoke start (11 Smoke
       # mode); objdump/ar serve the image scan's glibc and package rules.
       - name: Smoke and scan tools
