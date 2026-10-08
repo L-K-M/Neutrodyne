@@ -172,15 +172,19 @@ jobs:
           name: debug-apks
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 5
-      # The image plus the files its checks need: the Licensee classpath manifest
-      # and the pinned Temurin tree the runtime files are compared against.
+      # Archive the image and check inputs together: download-artifact otherwise
+      # strips executable modes, and the packaged launcher cannot start.
+      - name: Archive the desktop image and its check inputs
+        run: |
+          mkdir -p build/ci-artifacts
+          tar -czf build/ci-artifacts/desktop-image-linux-x64.tar.gz \
+            desktopApp/build/compose/binaries/main/app/Neutrodyne \
+            desktopApp/build/desktop-packaging/runtime-classpath.txt \
+            desktopApp/build/bundled-runtime/linux-x64/jdk
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: desktop-image-linux-x64
-          path: |
-            desktopApp/build/compose/binaries/main/app/Neutrodyne
-            desktopApp/build/desktop-packaging/runtime-classpath.txt
-            desktopApp/build/bundled-runtime/linux-x64/jdk
+          path: build/ci-artifacts/desktop-image-linux-x64.tar.gz
           retention-days: 1
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -246,8 +250,12 @@ jobs:
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
           name: desktop-image-linux-x64
-          # upload-artifact strips the shared desktopApp/build prefix.
-          path: desktopApp/build
+          path: build/ci-artifacts
+      - name: Restore the desktop image and its executable modes
+        run: |
+          tar -xzf build/ci-artifacts/desktop-image-linux-x64.tar.gz
+          test -x desktopApp/build/compose/binaries/main/app/Neutrodyne/bin/Neutrodyne
+          test -x desktopApp/build/bundled-runtime/linux-x64/jdk/bin/java
       # xvfb-run and dbus-run-session wrap the packaged smoke start (11 Smoke
       # mode); objdump/ar serve the image scan's glibc and package rules.
       - name: Smoke and scan tools
