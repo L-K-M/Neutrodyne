@@ -94,6 +94,14 @@ jobs:
           --continue
       - name: Frozen schemas
         run: scripts/ci/check-frozen-schemas.sh
+      # The CI scripts' own boundary regressions (scripts/ci/tests): fixtures
+      # and stubs only, no build outputs — bash, coreutils and python3's stdlib.
+      - name: CI script fixture tests
+        run: |
+          scripts/ci/tests/check-desktop-image.test.sh
+          scripts/ci/tests/check-runtime-sources.test.sh
+          scripts/ci/tests/nightly-smoke.test.sh
+          scripts/ci/tests/smoke-start.test.sh
 
   unit:
     runs-on: ubuntu-24.04

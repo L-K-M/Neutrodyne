@@ -30,13 +30,39 @@ t_ok() { echo "ok: $1"; }
 
 # --- extract the step ------------------------------------------------------------
 
-python3 - "$NIGHTLY" > "$WORK/step.sh" <<'PY'
-import sys, yaml
-doc = yaml.safe_load(open(sys.argv[1]))
-steps = doc["jobs"]["desktop-matrix"]["steps"]
-run = next(s["run"] for s in steps if s.get("name") == "Smoke start every package")
-sys.stdout.write(run)
+# stdlib-only YAML handling: the step's `run: |` literal block is located by
+# indentation, so the test runs anywhere bash+python3 do — no PyYAML. A missing
+# step or a non-literal `run:` is an extraction failure, not an empty pass.
+if ! python3 - "$NIGHTLY" > "$WORK/step.sh" <<'PY'
+import re, sys
+
+lines = open(sys.argv[1]).read().splitlines()
+indent = lambda s: len(s) - len(s.lstrip(' '))
+
+job = next(i for i, l in enumerate(lines) if l.strip() == 'desktop-matrix:')
+job_end = next((i for i in range(job + 1, len(lines))
+                if lines[i].strip() and indent(lines[i]) <= indent(lines[job])),
+               len(lines))
+step = next(i for i in range(job, job_end)
+            if lines[i].strip() == '- name: Smoke start every package')
+step_end = next((i for i in range(step + 1, job_end)
+                 if lines[i].strip().startswith('- ')
+                 and indent(lines[i]) <= indent(lines[step])), job_end)
+run = next(i for i in range(step, step_end)
+           if re.fullmatch(r'\s*run:\s*\|\s*', lines[i]))
+run_indent = indent(lines[run])
+body = []
+for l in lines[run + 1:]:
+    if l.strip() and indent(l) <= run_indent:
+        break
+    body.append(l)
+base = min(indent(l) for l in body if l.strip())
+sys.stdout.write(''.join(l[base:] + '\n' for l in body))
 PY
+then
+    echo "not ok: cannot extract the 'Smoke start every package' literal run block" >&2
+    exit 1
+fi
 # The matrix bind and the scratch path are environment details, not the boundary
 # under test; everything else in the step runs as committed.
 sed -i "s/\${{ matrix\.target }}/linux-x64/g; s|/tmp/smoke-img|$WORK/smoke-img|g" "$WORK/step.sh"
@@ -111,27 +137,46 @@ else
 fi
 
 # 4. Checkout discipline: every actions/checkout in nightly.yml pins github.sha
-#    and the removed `ref` input is referenced nowhere.
+#    (its step's first `ref:` under `with:`) and the removed `ref` input is
+#    neither declared under workflow_dispatch nor referenced. Line-scan, no YAML
+#    library.
 if python3 - "$NIGHTLY" <<'PY'
-import sys, yaml
-path = sys.argv[1]
-text = open(path).read()
-doc = yaml.safe_load(text)
+import re, sys
+
+text = open(sys.argv[1]).read()
+lines = text.splitlines()
+indent = lambda s: len(s) - len(s.lstrip(' '))
+
 problems = []
-for job_name, job in doc["jobs"].items():
-    for step in job.get("steps", []):
-        if str(step.get("uses", "")).startswith("actions/checkout@"):
-            ref = (step.get("with") or {}).get("ref")
-            if ref != "${{ github.sha }}":
-                problems.append(f"{job_name}: checkout ref={ref!r}")
-triggers = doc.get("on", doc.get(True)) or {}
-dispatch_inputs = (triggers.get("workflow_dispatch") or {}).get("inputs") or {}
-if "ref" in dispatch_inputs:
-    problems.append("workflow_dispatch still declares the removed 'ref' input")
-if "inputs.ref" in text:
-    problems.append("inputs.ref is still referenced")
+for i, l in enumerate(lines):
+    s = l.strip()
+    if not (s.startswith('- uses:') and 'actions/checkout@' in s):
+        continue
+    step_indent, ref = indent(l), None
+    for l2 in lines[i + 1:]:
+        s2 = l2.strip()
+        if s2 and indent(l2) <= step_indent:
+            break
+        m = re.match(r'ref:\s*([^#]+?)\s*$', s2)
+        if m:
+            ref = m.group(1)
+            break
+    if ref != '${{ github.sha }}':
+        problems.append('checkout step at line %d: ref=%r' % (i + 1, ref))
+
+wd = next((i for i, l in enumerate(lines) if l.strip() == 'workflow_dispatch:'), None)
+if wd is not None:
+    end = next((i for i in range(wd + 1, len(lines))
+                if lines[i].strip() and indent(lines[i]) <= indent(lines[wd])),
+               len(lines))
+    for l in lines[wd + 1:end]:
+        if re.match(r'ref\s*:', l.strip()):
+            problems.append("workflow_dispatch still declares the removed 'ref' input")
+            break
+if 'inputs.ref' in text:
+    problems.append('inputs.ref is still referenced')
 for p in problems:
-    print("problem:", p, file=sys.stderr)
+    print('problem:', p, file=sys.stderr)
 sys.exit(1 if problems else 0)
 PY
 then
