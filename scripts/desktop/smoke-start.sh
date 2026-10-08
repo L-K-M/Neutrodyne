@@ -15,8 +15,11 @@
 # 2026-10-06 in 11 Smoke mode).
 #
 # <image dir> is a jpackage app image: `Neutrodyne/` (Windows and Linux), or
-# `Neutrodyne.app` (macOS). Exit 0 = the SMOKE line printed; 1 = the launcher failed,
-# printed no SMOKE line or hit the watchdog (60 s by default, Smoke mode's budget).
+# `Neutrodyne.app` (macOS). Exit 0 = the launcher exited 0 and its last SMOKE
+# line carries no `failed` field; 1 = the launcher exited nonzero, printed no
+# SMOKE line, reported a failed step, or hit the watchdog (60 s by default,
+# Smoke mode's budget). The JSON is the verdict because smoke mode prints its
+# SMOKE line and exits 1 when a step failed.
 
 set -euo pipefail
 
@@ -87,6 +90,20 @@ fi
 
 if ! grep -q '^SMOKE {' "$OUT"; then
     echo "smoke-start: no SMOKE line (launcher exit $rc)" >&2
+    sed 's/^/  | /' "$OUT" >&2 | head -40
+    rm -f "$OUT"
+    exit 1
+fi
+# A SMOKE line is the report, not the verdict: `"failed":` is the JSON key and
+# cannot appear inside an escaped value (the closing quote would be \" too).
+if grep '^SMOKE {' "$OUT" | grep -q '"failed":'; then
+    echo "smoke-start: smoke run reported a failed step:" >&2
+    grep '^SMOKE {' "$OUT" | tail -1 >&2
+    rm -f "$OUT"
+    exit 1
+fi
+if [ "$rc" -ne 0 ]; then
+    echo "smoke-start: launcher exited $rc despite a SMOKE line" >&2
     sed 's/^/  | /' "$OUT" >&2 | head -40
     rm -f "$OUT"
     exit 1
