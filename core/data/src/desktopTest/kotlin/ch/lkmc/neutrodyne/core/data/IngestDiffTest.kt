@@ -1034,6 +1034,306 @@ class IngestDiffTest {
             assertEquals(3, db.podcastDao().episodeCount(id))
         }
 
+    // --- Weak evidence prefers a duplicate; tiers iterate (deviation 16) --------------------------
+
+    /**
+     * r5 F1's first half: a rolling `/download?id=N` feed replaces "News" (09:00) with
+     * "Weather" (10:00) on the same UTC day. Under the round-4 tiers the shared query-less
+     * URL plus the shared day alone corroborated, so the new episode inherited the old row's
+     * played state; under deviation 16 the query-less relation needs title *and* day, so the
+     * new episode inserts and the old row keeps its identity, fields and state while leaving
+     * the feed.
+     */
+    @Test
+    fun sameDayRollingFeedInsertsInsteadOfTransferringState() =
+        runTest {
+            val id = podcastId()
+            val dayStart = NOW - NOW % DAY - DAY
+            ingest(
+                id,
+                parsedFeed(
+                    items =
+                        listOf(
+                            parsedEpisode(
+                                0,
+                                guid = "e101",
+                                enclosureUrl = "https://cdn.example.com/download?id=101",
+                                title = "News",
+                                pubDate = dayStart + 9 * 3_600_000L,
+                                durationMs = 180_000,
+                            ),
+                        ),
+                ),
+                mode = IngestMode.INITIAL,
+            )
+            val aBefore = db.episodeDao().byIdentityKey(id, "g:e101")!!
+            db.episodeStateDao().upsert(episodeStateEntity(aBefore.id, playedAt = NOW - 1_000))
+
+            val result =
+                ingest(
+                    id,
+                    parsedFeed(
+                        items =
+                            listOf(
+                                parsedEpisode(
+                                    0,
+                                    guid = "e102",
+                                    enclosureUrl = "https://cdn.example.com/download?id=102",
+                                    title = "Weather",
+                                    pubDate = dayStart + 10 * 3_600_000L,
+                                    durationMs = 180_000,
+                                ),
+                            ),
+                    ),
+                )
+
+            assertEquals(1, result.inserted.size)
+            val aAfter = db.episodeDao().byId(aBefore.id)!!
+            assertEquals("https://cdn.example.com/download?id=101", aAfter.enclosureUrl)
+            assertEquals("News", aAfter.title)
+            assertFalse(aAfter.inFeed)
+            assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(aBefore.id)!!.playedAt)
+            assertEquals(2, db.podcastDao().episodeCount(id))
+        }
+
+    /**
+     * r5 F1's second half: the same generic title "Daily" on a *different* UTC day also used
+     * to corroborate the rolling `/download?id=N` URL. Title alone never corroborates either —
+     * a visible duplicate row beats a silent state transfer.
+     */
+    @Test
+    fun sameGenericTitleOnAnotherDayInsertsInsteadOfTransferringState() =
+        runTest {
+            val id = podcastId()
+            ingest(
+                id,
+                parsedFeed(
+                    items =
+                        listOf(
+                            parsedEpisode(
+                                0,
+                                guid = "n201",
+                                enclosureUrl = "https://cdn.example.com/download?id=201",
+                                title = "Daily",
+                                pubDate = NOW - 10 * DAY,
+                                durationMs = 180_000,
+                            ),
+                        ),
+                ),
+                mode = IngestMode.INITIAL,
+            )
+            val aBefore = db.episodeDao().byIdentityKey(id, "g:n201")!!
+            db.episodeStateDao().upsert(episodeStateEntity(aBefore.id, playedAt = NOW - 1_000))
+
+            val result =
+                ingest(
+                    id,
+                    parsedFeed(
+                        items =
+                            listOf(
+                                parsedEpisode(
+                                    0,
+                                    guid = "n202",
+                                    enclosureUrl = "https://cdn.example.com/download?id=202",
+                                    title = "Daily",
+                                    pubDate = NOW - DAY,
+                                    durationMs = 180_000,
+                                ),
+                            ),
+                    ),
+                )
+
+            assertEquals(1, result.inserted.size)
+            val aAfter = db.episodeDao().byId(aBefore.id)!!
+            assertEquals("https://cdn.example.com/download?id=201", aAfter.enclosureUrl)
+            assertEquals("Daily", aAfter.title)
+            assertFalse(aAfter.inFeed)
+            assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(aBefore.id)!!.playedAt)
+            assertEquals(2, db.podcastDao().episodeCount(id))
+        }
+
+    /**
+     * r5 F2's scenario under the new rules: two GUID-less items "News" and "Weather" share a
+     * UTC day and the query-less `/download` URL. When both tokens rotate and "News" is
+     * renamed in the same refresh, the renamed+rotated item keeps no evidence identifying
+     * its old row and inserts as a duplicate — deviation 16's accepted consequence — while
+     * "Weather" still claims its own row. No row's state moves to a different episode.
+     */
+    @Test
+    fun renamedAndTokenRotatedItemInsertsBesideItsOldRow() =
+        runTest {
+            val id = podcastId()
+            val day = NOW - DAY
+            ingest(
+                id,
+                parsedFeed(
+                    items =
+                        listOf(
+                            parsedEpisode(
+                                0,
+                                enclosureUrl = "https://cdn.example.com/download?id=101&token=old",
+                                title = "News",
+                                pubDate = day,
+                            ),
+                            parsedEpisode(
+                                1,
+                                enclosureUrl = "https://cdn.example.com/download?id=102&token=old",
+                                title = "Weather",
+                                pubDate = day,
+                            ),
+                        ),
+                ),
+                mode = IngestMode.INITIAL,
+            )
+            val newsBefore =
+                db.ingestDao().existing(id).single {
+                    it.enclosureUrl == "https://cdn.example.com/download?id=101&token=old"
+                }
+            val weatherBefore =
+                db.ingestDao().existing(id).single {
+                    it.enclosureUrl == "https://cdn.example.com/download?id=102&token=old"
+                }
+            db.episodeStateDao().upsert(episodeStateEntity(newsBefore.id, playedAt = NOW - 1_000))
+
+            val result =
+                ingest(
+                    id,
+                    parsedFeed(
+                        items =
+                            listOf(
+                                parsedEpisode(
+                                    0,
+                                    enclosureUrl = "https://cdn.example.com/download?id=101&token=new",
+                                    title = "News (updated)",
+                                    pubDate = day,
+                                ),
+                                parsedEpisode(
+                                    1,
+                                    enclosureUrl = "https://cdn.example.com/download?id=102&token=new",
+                                    title = "Weather",
+                                    pubDate = day,
+                                ),
+                            ),
+                    ),
+                )
+
+            assertEquals(1, result.inserted.size)
+            assertEquals("News (updated)", db.episodeDao().byId(result.inserted.single())!!.title)
+            // "News"'s old row keeps its identity, its columns and its played state.
+            val newsAfter = db.episodeDao().byId(newsBefore.id)!!
+            assertEquals("https://cdn.example.com/download?id=101&token=old", newsAfter.enclosureUrl)
+            assertEquals("News", newsAfter.title)
+            assertFalse(newsAfter.inFeed)
+            assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(newsBefore.id)!!.playedAt)
+            // "Weather" claims its own row: a token rotation keeps title and day.
+            val weatherAfter = db.episodeDao().byId(weatherBefore.id)!!
+            assertEquals("https://cdn.example.com/download?id=102&token=new", weatherAfter.enclosureUrl)
+            assertTrue(weatherAfter.inFeed)
+            assertEquals(3, db.podcastDao().episodeCount(id))
+        }
+
+    /**
+     * Deviation 16's iteration (r5 F2): a claim can resolve an ambiguity an earlier pass left
+     * behind. Stored: two same-title same-day rows `x.mp3`/`y.mp3` and a "Wild" row sharing
+     * `x.mp3` under a `t:` key. Document: "Zed" (`x.mp3`) is tier-A-ambiguous between the two
+     * `x.mp3` rows; a new "Daily" item (`gone.mp3`) is title/day-ambiguous over both
+     * same-title same-day rows. Pass one's tier C hands "Wild" its row; on the *next* pass
+     * tier A claims one of the `x.mp3` rows for "Zed" first, then tier C hands the other
+     * "Daily" row to the new item. Without iteration both leftovers insert as duplicates.
+     */
+    @Test
+    fun aLaterClaimResolvesAnEarlierAmbiguityOnTheNextPass() =
+        runTest {
+            val id = podcastId()
+            val day = NOW - DAY
+            val otherDay = NOW - 2 * DAY
+            ingest(
+                id,
+                parsedFeed(
+                    items =
+                        listOf(
+                            parsedEpisode(
+                                0,
+                                enclosureUrl = "https://cdn.example.com/x.mp3",
+                                title = "Daily",
+                                pubDate = day,
+                            ),
+                            parsedEpisode(
+                                1,
+                                enclosureUrl = "https://cdn.example.com/y.mp3",
+                                title = "Daily",
+                                pubDate = day,
+                            ),
+                            parsedEpisode(
+                                2,
+                                enclosureUrl = "https://cdn.example.com/x.mp3",
+                                title = "Wild",
+                                pubDate = otherDay,
+                            ),
+                        ),
+                ),
+                mode = IngestMode.INITIAL,
+            )
+            val dailyX =
+                db.ingestDao().existing(id).single {
+                    it.identityKey == "u:cdn.example.com/x.mp3"
+                }
+            val dailyY =
+                db.ingestDao().existing(id).single {
+                    it.identityKey == "u:cdn.example.com/y.mp3"
+                }
+            val wild =
+                db.ingestDao().existing(id).single {
+                    it.identityKey.startsWith("t:")
+                }
+            db.episodeStateDao().upsert(episodeStateEntity(dailyX.id, playedAt = NOW - 1_000))
+            db.episodeStateDao().upsert(episodeStateEntity(dailyY.id, playedAt = NOW - 2_000))
+
+            val result =
+                ingest(
+                    id,
+                    parsedFeed(
+                        items =
+                            listOf(
+                                parsedEpisode(
+                                    0,
+                                    guid = "z",
+                                    enclosureUrl = "https://cdn.example.com/x.mp3",
+                                    title = "Zed",
+                                    pubDate = NOW - 3 * DAY,
+                                ),
+                                parsedEpisode(
+                                    1,
+                                    enclosureUrl = "https://cdn.example.com/gone.mp3",
+                                    title = "Daily",
+                                    pubDate = day,
+                                ),
+                                parsedEpisode(
+                                    2,
+                                    enclosureUrl = "https://cdn.example.com/w2.mp3",
+                                    title = "Wild",
+                                    pubDate = otherDay,
+                                ),
+                            ),
+                    ),
+                )
+
+            assertEquals(emptyList(), result.inserted)
+            // "Zed" took the u: row once "Wild" left it alone; both rows keep their state.
+            val dailyXAfter = db.episodeDao().byId(dailyX.id)!!
+            assertEquals("Zed", dailyXAfter.title)
+            assertTrue(dailyXAfter.inFeed)
+            assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(dailyX.id)!!.playedAt)
+            val dailyYAfter = db.episodeDao().byId(dailyY.id)!!
+            assertEquals("https://cdn.example.com/gone.mp3", dailyYAfter.enclosureUrl)
+            assertTrue(dailyYAfter.inFeed)
+            assertEquals(NOW - 2_000, db.episodeStateDao().byEpisode(dailyY.id)!!.playedAt)
+            val wildAfter = db.episodeDao().byId(wild.id)!!
+            assertEquals("https://cdn.example.com/w2.mp3", wildAfter.enclosureUrl)
+            assertTrue(wildAfter.inFeed)
+            assertEquals(3, db.podcastDao().episodeCount(id))
+        }
+
     // --- Column rules on update ------------------------------------------------------------------
 
     @Test
