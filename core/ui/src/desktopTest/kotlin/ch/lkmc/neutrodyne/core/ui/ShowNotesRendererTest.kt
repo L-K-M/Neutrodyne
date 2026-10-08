@@ -2,7 +2,10 @@
 
 package ch.lkmc.neutrodyne.core.ui
 
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -30,7 +33,9 @@ import ch.lkmc.neutrodyne.core.model.ShowNoteBlock
 import ch.lkmc.neutrodyne.core.model.ShowNoteSpan
 import ch.lkmc.neutrodyne.core.model.ShowNotes
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
+import coil3.test.FakeImage
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -261,6 +266,43 @@ class ShowNotesRendererTest {
         }
 
     @Test
+    fun dimensionlessTallImageFitsWholeInsideTheCap() =
+        runComposeUiTest {
+            // A feed image without declared dimensions: the loaded 600×1200 bitmap must
+            // scale down to fit inside the 360 dp column and the 480 dp cap — 240×480 —
+            // not fill the width and crop 120 dp off each end (UI review round 3).
+            installFakeImageLoader(mapOf(TALL_IMAGE_URL to FakeImage(600, 1200)))
+            setContent {
+                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    Column(Modifier.width(360.dp)) {
+                        LazyColumn {
+                            showNotes(
+                                notes =
+                                    notesOf(
+                                        ShowNoteBlock.Image(url = TALL_IMAGE_URL, alt = "tall"),
+                                    ),
+                                imageMode = ShowNotesImageMode.SHOWN,
+                                durationMs = null,
+                                onLink = {},
+                                onTimestamp = {},
+                                onLoadImages = {},
+                            )
+                        }
+                    }
+                }
+            }
+            val density = onNodeWithContentDescription("tall").fetchSemanticsNode().layoutInfo.density
+            val expectedWidth = with(density) { 240.dp.toPx() }
+            val capPx = with(density) { IMAGE_MAX_HEIGHT_PX.toPx() }
+            // The bitmap arrives asynchronously — poll the laid-out bounds until it settles.
+            waitUntil(timeoutMillis = 5_000) {
+                val bounds =
+                    onNodeWithContentDescription("tall").fetchSemanticsNode().boundsInRoot
+                abs(bounds.width - expectedWidth) <= 1 && abs(bounds.height - capPx) <= 1
+            }
+        }
+
+    @Test
     fun linkSpanIsClickableAndReportsTheUrl() =
         runComposeUiTest {
             val opened = mutableListOf<String>()
@@ -422,6 +464,8 @@ class ShowNotesRendererTest {
     private companion object {
         /** 08's show-notes image height cap, converted to px through the node's density. */
         val IMAGE_MAX_HEIGHT_PX = 480.dp
+
+        const val TALL_IMAGE_URL = "https://example.com/tall.png"
 
         const val STYLE_BOLD = 1
         const val STYLE_ITALIC = 2

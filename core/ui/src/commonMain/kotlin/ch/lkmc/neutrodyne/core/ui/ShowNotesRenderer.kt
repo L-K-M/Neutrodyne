@@ -23,7 +23,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -224,11 +227,12 @@ private fun NoteQuote(
  * does not apply (08).
  *
  * The feed's `width`/`height` attributes only pre-size the box: [declaredAspect] returns them
- * as an aspect ratio when they are positive and sane, so the modifier chain is
+ * as an aspect ratio when they are positive and sane; without them (or once the bitmap lands,
+ * correcting a wrong hint) the loaded image's own aspect takes over, so the modifier chain is
  * `heightIn(max)` + `aspectRatio` — the cap bounds the height and a too-tall ratio trades
- * width for it. An absurd pair (3 × 10000) would make `aspectRatio` fall back to a
- * constraints-free candidate and throw on the unrepresentable size, so it is treated like
- * absent dimensions and the loaded bitmap's own aspect applies inside the same cap.
+ * width for it instead of clipping (UI review round 3: `Fit`, never `FillWidth`). An absurd
+ * pair (3 × 10000) would make `aspectRatio` fall back to a constraints-free candidate and
+ * throw on the unrepresentable size, so it is treated like absent dimensions.
  */
 @Composable
 private fun NoteImage(
@@ -265,17 +269,25 @@ private fun NoteImage(
 
     val context = LocalPlatformContext.current
     val request = remember(block.url) { ImageRequest.Builder(context).data(block.url).build() }
-    val aspect = declaredAspect(block.width, block.height)
+    var loadedAspect by remember(block.url) { mutableStateOf<Float?>(null) }
+    val aspect = declaredAspect(block.width, block.height) ?: loadedAspect
     AsyncImage(
         model = request,
         contentDescription = block.alt,
-        contentScale = ContentScale.FillWidth,
+        contentScale = ContentScale.Fit,
+        onSuccess = { state ->
+            val image = state.result.image
+            if (image.width > 0 && image.height > 0) {
+                loadedAspect = image.width.toFloat() / image.height
+            }
+        },
         modifier =
             Modifier
+                // The inter-block gap sits outside the capped image box.
+                .padding(bottom = PARAGRAPH_GAP)
                 .let { m -> if (aspect == null) m.fillMaxWidth() else m }
                 .heightIn(max = IMAGE_MAX_HEIGHT)
-                .let { m -> if (aspect != null) m.aspectRatio(aspect) else m }
-                .padding(bottom = PARAGRAPH_GAP),
+                .let { m -> if (aspect != null) m.aspectRatio(aspect) else m },
     )
 }
 
