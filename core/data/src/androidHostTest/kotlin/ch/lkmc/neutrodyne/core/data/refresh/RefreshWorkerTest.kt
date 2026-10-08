@@ -206,7 +206,11 @@ class RefreshWorkerTest {
             val deps =
                 deps(
                     db = db,
-                    adapter = stubAdapter(onFetch = { _, _ -> gate.await(); adapterFailed() }),
+                    adapter =
+                        stubAdapter(onFetch = { _, _ ->
+                            gate.await()
+                            adapterFailed()
+                        }),
                     clock = DeadlineClock(),
                 )
             // An unrelated run owns the engine mutex behind its parked fetch; the retry work's
@@ -277,7 +281,6 @@ class RefreshWorkerTest {
                 adapters = mapOf(SourceType.RSS to adapter),
                 clock = clock,
                 settings = settings,
-                scheduler = scheduler,
             )
         return Deps(adapter, scheduler, settings, clock, refresher)
     }

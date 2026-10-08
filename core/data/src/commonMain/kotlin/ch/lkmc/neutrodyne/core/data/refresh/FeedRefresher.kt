@@ -71,7 +71,6 @@ internal class FeedRefresher(
     private val settings: SettingsRepository,
     private val clock: Clock,
     private val random: Random,
-    private val scheduler: RefreshScheduler,
 ) {
     private val mutex = Mutex()
 
@@ -139,6 +138,20 @@ internal class FeedRefresher(
                 // An older run's outcome could have overwritten this request's marks while it
                 // waited: re-apply them so the scope stays due for the next selection (r3 F3).
                 reapplyIntent(request)
+                if (request.hasUncontinuableIntent()) {
+                    // …but the still-running run can commit another stale outcome *after* this
+                    // re-apply and erase the marks a second time. The intent therefore rides the
+                    // request itself: the caller re-enqueues it unchanged — the WorkManager
+                    // input data on Android, the queued RefreshRequest on the desktop — and it
+                    // is re-applied under the mutex when it runs (r4 F3).
+                    return RefreshReport(
+                        outcomes = emptyMap(),
+                        newEpisodes = emptyList(),
+                        remaining = selectDue(request).size,
+                        stoppedByDeadline = true,
+                        reenqueued = true,
+                    )
+                }
                 // 03 step 1: a timed-out second run reports the scope's due count as remaining.
                 return RefreshReport(
                     outcomes = emptyMap(),
@@ -873,6 +886,16 @@ internal class FeedRefresher(
         if (request.origin == RefreshOrigin.RETRY) clearBlocks(request.scope)
         if (request.force) forceDue(request.scope)
     }
+
+    /**
+     * Whether the request carries intent a generic `refresh-continuation` cannot express — an
+     * `All`, unforced, full pass with no origin behaviour: a forced mark set, a narrowed
+     * scope, a pages-only pass or the `RETRY` block clear. Such a request re-enqueues itself
+     * on a mutex timeout (r4 F3); a plain due run keeps reporting `remaining` for the
+     * caller's continuation chain.
+     */
+    private fun RefreshRequest.hasUncontinuableIntent(): Boolean =
+        force || pagesOnly || scope != RefreshScope.All || origin == RefreshOrigin.RETRY
 
     /** The scoped variant of 03's `PodcastDao.clearRefreshBlock` ("Try again"). */
     private suspend fun clearBlocks(scope: RefreshScope) {

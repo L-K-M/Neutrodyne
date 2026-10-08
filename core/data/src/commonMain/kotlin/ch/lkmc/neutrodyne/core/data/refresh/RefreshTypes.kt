@@ -82,9 +82,9 @@ internal data class RefreshReport(
     val remaining: Int,
     val stoppedByDeadline: Boolean,
     /**
-     * The run never owned the engine mutex and re-enqueued its request through
-     * [RefreshScheduler.enqueueNow] with scope/force/pagesOnly/origin intact (r4 F3): the
-     * caller must not chain a continuation on top of it.
+     * The run never owned the engine mutex and carries intent a continuation cannot express
+     * (r4 F3): the caller re-enqueues the same request through its platform scheduler with
+     * scope/force/pagesOnly/origin intact, and must not chain a continuation on top of it.
      */
     val reenqueued: Boolean = false,
 )

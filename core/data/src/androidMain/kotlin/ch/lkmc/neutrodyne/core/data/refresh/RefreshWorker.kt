@@ -54,6 +54,14 @@ class RefreshWorker
                 val report = refresher.run(request)
                 val more = report.remaining > 0 || report.stoppedByDeadline
                 return when {
+                    // A request that timed out on the engine mutex re-enqueues itself with its
+                    // intent intact (r4 F3): WorkManager carries scope/force/pagesOnly/origin,
+                    // and a non-forced continuation must not chain on top of it.
+                    report.reenqueued -> {
+                        scheduler.enqueueNow(request.scope, request.force, request.pagesOnly, request.origin)
+                        Result.success()
+                    }
+
                     // Per-feed failures live on the podcast rows, not in WorkManager retries.
                     !more -> {
                         Result.success()

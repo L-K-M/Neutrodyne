@@ -397,8 +397,7 @@ internal class Pass2Index(
 }
 
 /** `TitleMatch.normalise` or null when the title is missing or folds to empty. */
-private fun titleNormOf(title: String?): String? =
-    title?.let(TitleMatch::normalise)?.takeIf(String::isNotEmpty)
+private fun titleNormOf(title: String?): String? = title?.let(TitleMatch::normalise)?.takeIf(String::isNotEmpty)
 
 private fun List<ExistingEpisodeKey>.grouped(
     keyOf: (ExistingEpisodeKey) -> String?,
