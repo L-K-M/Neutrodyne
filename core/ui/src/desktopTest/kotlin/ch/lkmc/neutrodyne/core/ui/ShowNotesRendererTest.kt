@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
@@ -223,6 +224,43 @@ class ShowNotesRendererTest {
         }
 
     @Test
+    fun absurdImageDimensionsStayUnderTheHeightCap() =
+        runComposeUiTest {
+            // Feed-declared <img> dimensions are untrusted hints: "3 x 10000" (and the mirrored
+            // "10000 x 3") must not let the renderer request an unrepresentable height — the
+            // laid-out image stays under 08's 480 dp cap.
+            setNotes(
+                notesOf(
+                    ShowNoteBlock.Image(
+                        url = "https://example.com/tall.png",
+                        alt = "tall",
+                        width = 3,
+                        height = 10_000,
+                    ),
+                    ShowNoteBlock.Image(
+                        url = "https://example.com/wide.png",
+                        alt = "wide",
+                        width = 10_000,
+                        height = 3,
+                    ),
+                ),
+                imageMode = ShowNotesImageMode.SHOWN,
+            )
+            val capPx =
+                with(onNodeWithContentDescription("tall").fetchSemanticsNode().layoutInfo.density) {
+                    IMAGE_MAX_HEIGHT_PX.toPx()
+                }
+            onNodeWithContentDescription("tall").assertIsDisplayed()
+            onNodeWithContentDescription("wide").assertIsDisplayed()
+            for (alt in listOf("tall", "wide")) {
+                assertTrue(
+                    onNodeWithContentDescription(alt).fetchSemanticsNode().boundsInRoot.height <= capPx,
+                    "image '$alt' exceeded the 480 dp cap",
+                )
+            }
+        }
+
+    @Test
     fun linkSpanIsClickableAndReportsTheUrl() =
         runComposeUiTest {
             val opened = mutableListOf<String>()
@@ -382,6 +420,9 @@ class ShowNotesRendererTest {
     }
 
     private companion object {
+        /** 08's show-notes image height cap, converted to px through the node's density. */
+        val IMAGE_MAX_HEIGHT_PX = 480.dp
+
         const val STYLE_BOLD = 1
         const val STYLE_ITALIC = 2
         const val STYLE_UNDERLINE = 4

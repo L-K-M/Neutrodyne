@@ -222,6 +222,13 @@ private fun NoteQuote(
  * BLOCKED (Wi-Fi-only on a metered link) shows the same row without the tap, because that
  * setting has no per-episode escape (03). The model is a plain URL string so the artwork mapper
  * does not apply (08).
+ *
+ * The feed's `width`/`height` attributes only pre-size the box: [declaredAspect] returns them
+ * as an aspect ratio when they are positive and sane, so the modifier chain is
+ * `heightIn(max)` + `aspectRatio` — the cap bounds the height and a too-tall ratio trades
+ * width for it. An absurd pair (3 × 10000) would make `aspectRatio` fall back to a
+ * constraints-free candidate and throw on the unrepresentable size, so it is treated like
+ * absent dimensions and the loaded bitmap's own aspect applies inside the same cap.
  */
 @Composable
 private fun NoteImage(
@@ -258,20 +265,28 @@ private fun NoteImage(
 
     val context = LocalPlatformContext.current
     val request = remember(block.url) { ImageRequest.Builder(context).data(block.url).build() }
-    val w = block.width
-    val h = block.height
-    val aspect = if (w != null && h != null && h > 0) w.toFloat() / h else null
+    val aspect = declaredAspect(block.width, block.height)
     AsyncImage(
         model = request,
         contentDescription = block.alt,
         contentScale = ContentScale.FillWidth,
         modifier =
             Modifier
-                .fillMaxWidth()
+                .let { m -> if (aspect == null) m.fillMaxWidth() else m }
                 .heightIn(max = IMAGE_MAX_HEIGHT)
                 .let { m -> if (aspect != null) m.aspectRatio(aspect) else m }
                 .padding(bottom = PARAGRAPH_GAP),
     )
+}
+
+/** The `width`/`height` attribute pair as an aspect ratio, or null when absent or absurd. */
+private fun declaredAspect(
+    width: Int?,
+    height: Int?,
+): Float? {
+    if (width == null || height == null || width <= 0 || height <= 0) return null
+    val aspect = width.toFloat() / height
+    return if (aspect in MIN_IMAGE_ASPECT..MAX_IMAGE_ASPECT) aspect else null
 }
 
 private fun ShowNoteBlock.contentType(): String =
@@ -384,6 +399,14 @@ private val QUOTE_BAR_WIDTH = 4.dp
 private val QUOTE_INDENT = 12.dp
 private val RULE_GAP = 12.dp
 private val IMAGE_MAX_HEIGHT = 480.dp
+
+/**
+ * Declared `width`/`height` ratios outside this range (a 3 × 10000 banner, a 10000 × 3 strip)
+ * are treated as unknown dimensions: they would either vanish or make `aspectRatio` request a
+ * size `Constraints` cannot represent (UI review round 2, P1).
+ */
+private const val MIN_IMAGE_ASPECT = 1f / 16
+private const val MAX_IMAGE_ASPECT = 16f
 private val TOUCH_TARGET = 48.dp
 private val ICON_SIZE = 24.dp
 private val TEXT_GAP = 12.dp
