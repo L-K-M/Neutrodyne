@@ -230,7 +230,10 @@ class SingleInstanceTest {
 
             // A single-threaded caller lane, like the UI's: blocking hand-off work must
             // never occupy it.
-            val lane = Executors.newSingleThreadExecutor { task -> Thread(task, "caller-lane") }
+            val lane =
+                Executors.newSingleThreadExecutor { task ->
+                    Thread(task, "caller-lane").apply { isDaemon = true }
+                }
             val callerThread = lane.submit(Callable { Thread.currentThread() }).get()
             var callbackThread: Thread? = null
             val received = Channel<HandoffRequest>(Channel.UNLIMITED)

@@ -61,7 +61,7 @@ class SingleInstanceLock(
                 // A holder inside this JVM: not us (each instance uses its own channel).
                 null
             } catch (e: IOException) {
-                channel.close()
+                runCatching { channel.close() }.exceptionOrNull()?.let(e::addSuppressed)
                 throw e
             }
         if (lock == null) {

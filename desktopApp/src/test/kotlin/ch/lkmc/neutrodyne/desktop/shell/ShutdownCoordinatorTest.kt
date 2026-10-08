@@ -27,6 +27,7 @@ class ShutdownCoordinatorTest {
                 lock = lock,
                 fileSink = sink,
                 stopServices = { stops++ },
+                startedAtMs = SESSION_START_MS,
             )
 
         coordinator.shutdown(REASON_ONE)
@@ -87,6 +88,7 @@ class ShutdownCoordinatorTest {
                 lock = lock,
                 fileSink = sink,
                 stopServices = {},
+                startedAtMs = SESSION_START_MS,
             )
 
         coordinator.shutdown(REASON_ONE)
@@ -113,6 +115,7 @@ class ShutdownCoordinatorTest {
                 lock = lock,
                 fileSink = sink,
                 stopServices = { throw RuntimeException("service stop blew up") },
+                startedAtMs = SESSION_START_MS,
             )
 
         coordinator.shutdown(REASON_TWO)

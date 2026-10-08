@@ -4,7 +4,6 @@ package ch.lkmc.neutrodyne.desktop.shell
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.desktop.log.RollingFileSink
-import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -28,7 +27,7 @@ internal class ShutdownCoordinator(
     private val lock: SingleInstanceLock,
     private val fileSink: RollingFileSink,
     private val stopServices: () -> Unit,
-    private val startedAtMs: Long = DesktopClock.now(),
+    private val startedAtMs: Long,
 ) {
     private val done = AtomicBoolean(false)
 
