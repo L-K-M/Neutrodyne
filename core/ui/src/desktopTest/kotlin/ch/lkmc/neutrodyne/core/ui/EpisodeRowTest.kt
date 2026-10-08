@@ -4,12 +4,15 @@ package ch.lkmc.neutrodyne.core.ui
 
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runDesktopComposeUiTest
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
@@ -21,6 +24,7 @@ import java.util.Locale
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -52,6 +56,23 @@ class EpisodeRowTest {
             setRow(row, fontScale = 2f)
             val (day, month) = FeedDates.dayMonth(row.pubDate ?: row.sortDate)
 
+            // Semantics bounds alone don't prove the text laid out or wasn't clipped — the real
+            // TextLayoutResult does. didOverflowWidth trips on subpixel rounding even when the
+            // text fits, so the unclipped check is the height axis (the dimension size(48.dp)
+            // squeezed); width is covered by the nonzero and in-block bounds checks.
+            val dayLayout = textLayoutOf(day)
+            val monthLayout = textLayoutOf(month)
+            for ((text, layout) in listOf(day to dayLayout, month to monthLayout)) {
+                assertTrue(
+                    layout.size.width > 0 && layout.size.height > 0,
+                    "'$text' must have a nonzero text layout (was ${layout.size})",
+                )
+                assertFalse(
+                    layout.didOverflowHeight,
+                    "'$text' overflowed its text layout height (was ${layout.size})",
+                )
+            }
+
             val dayBounds =
                 onNodeWithText(day, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
             val monthBounds =
@@ -61,6 +82,11 @@ class EpisodeRowTest {
                     .fetchSemanticsNode()
                     .boundsInRoot
 
+            // A fixed 48 dp block can't hold two 200 % lines — the block must have grown.
+            assertTrue(
+                blockBounds.height > with(density) { 48.dp.toPx() },
+                "At 200 % text the date block must exceed 48 dp (was $blockBounds)",
+            )
             assertTrue(
                 dayBounds.top >= blockBounds.top &&
                     dayBounds.bottom <= blockBounds.bottom &&
@@ -70,6 +96,16 @@ class EpisodeRowTest {
                     "(day=$dayBounds, month=$monthBounds, block=$blockBounds)",
             )
         }
+
+    private fun ComposeUiTest.textLayoutOf(text: String): TextLayoutResult {
+        val node = onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode()
+        val action =
+            node.config.getOrElseNullable(SemanticsActions.GetTextLayoutResult) { null }
+                ?: error("'$text' exposes no GetTextLayoutResult action")
+        val results = mutableListOf<TextLayoutResult>()
+        action.action?.invoke(results)
+        return results.single()
+    }
 
     private fun ComposeUiTest.setRow(
         row: ch.lkmc.neutrodyne.core.model.EpisodeRow,
