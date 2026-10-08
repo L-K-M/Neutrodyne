@@ -18,7 +18,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -30,7 +29,6 @@ import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
-import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.ShowNotesImages
 import ch.lkmc.neutrodyne.core.ui.UiText
@@ -50,7 +48,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.feeds_on_open
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_refresh_interval
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_wifi_only
 import ch.lkmc.neutrodyne.core.ui.resources.settings_feeds
-import kotlinx.coroutines.launch
+import dev.zacsweers.metrox.viewmodel.metroViewModel
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
@@ -65,30 +63,10 @@ import org.jetbrains.compose.resources.stringResource
  */
 @Composable
 internal fun FeedsPage(
-    settings: SettingsRepository,
     platform: PlatformKind,
+    viewModel: FeedsSettingsViewModel = metroViewModel(),
 ) {
-    val interval by
-        settings
-            .observe(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES)
-            .collectAsStateWithLifecycle(initialValue = FeedsSettingKeys.REFRESH_INTERVAL_MINUTES.default)
-    val wifiOnly by
-        settings
-            .observe(FeedsSettingKeys.REFRESH_WIFI_ONLY)
-            .collectAsStateWithLifecycle(initialValue = FeedsSettingKeys.REFRESH_WIFI_ONLY.default)
-    val onOpen by
-        settings
-            .observe(FeedsSettingKeys.REFRESH_ON_APP_OPEN)
-            .collectAsStateWithLifecycle(initialValue = FeedsSettingKeys.REFRESH_ON_APP_OPEN.default)
-    val backfill by
-        settings
-            .observe(FeedsSettingKeys.BACKFILL_PAGED_FEEDS)
-            .collectAsStateWithLifecycle(initialValue = FeedsSettingKeys.BACKFILL_PAGED_FEEDS.default)
-    val images by
-        settings
-            .observe(FeedsSettingKeys.SHOW_NOTES_IMAGES)
-            .collectAsStateWithLifecycle(initialValue = FeedsSettingKeys.SHOW_NOTES_IMAGES.default)
-    val scope = rememberCoroutineScope()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
     var showIntervalDialog by rememberSaveable { mutableStateOf(false) }
     var showImagesDialog by rememberSaveable { mutableStateOf(false) }
 
@@ -101,25 +79,21 @@ internal fun FeedsPage(
             SettingsRow(
                 icon = NdIcons.Schedule,
                 title = stringResource(Res.string.feeds_refresh_interval),
-                summary = feedsIntervalText(interval).asString(),
+                summary = feedsIntervalText(state.intervalMinutes).asString(),
                 onClick = { showIntervalDialog = true },
             )
             if (platform == PlatformKind.ANDROID) {
                 SettingsSwitchRow(
                     title = stringResource(Res.string.feeds_wifi_only),
                     summary = null,
-                    checked = wifiOnly,
-                    onCheckedChange = { checked ->
-                        scope.launch { settings.set(FeedsSettingKeys.REFRESH_WIFI_ONLY, checked) }
-                    },
+                    checked = state.wifiOnly,
+                    onCheckedChange = viewModel::setRefreshWifiOnly,
                 )
                 SettingsSwitchRow(
                     title = stringResource(Res.string.feeds_on_open),
                     summary = null,
-                    checked = onOpen,
-                    onCheckedChange = { checked ->
-                        scope.launch { settings.set(FeedsSettingKeys.REFRESH_ON_APP_OPEN, checked) }
-                    },
+                    checked = state.refreshOnAppOpen,
+                    onCheckedChange = viewModel::setRefreshOnAppOpen,
                 )
             } else {
                 ListItem(
@@ -133,15 +107,13 @@ internal fun FeedsPage(
             SettingsSwitchRow(
                 title = stringResource(Res.string.feeds_backfill),
                 summary = stringResource(Res.string.feeds_backfill_summary),
-                checked = backfill,
-                onCheckedChange = { checked ->
-                    scope.launch { settings.set(FeedsSettingKeys.BACKFILL_PAGED_FEEDS, checked) }
-                },
+                checked = state.backfillPagedFeeds,
+                onCheckedChange = viewModel::setBackfillPagedFeeds,
             )
             SettingsRow(
                 icon = NdIcons.Image,
                 title = stringResource(Res.string.feeds_notes_images),
-                summary = stringResource(showNotesImagesLabel(images)),
+                summary = stringResource(showNotesImagesLabel(state.showNotesImages)),
                 onClick = { showImagesDialog = true },
             )
         }
@@ -152,11 +124,11 @@ internal fun FeedsPage(
             icon = NdIcons.Schedule,
             title = stringResource(Res.string.feeds_refresh_interval),
             options = REFRESH_INTERVAL_OPTIONS,
-            selected = interval,
+            selected = state.intervalMinutes,
             label = { feedsIntervalText(it).asString() },
             onSelect = { minutes ->
                 showIntervalDialog = false
-                scope.launch { settings.set(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES, minutes) }
+                viewModel.setRefreshIntervalMinutes(minutes)
             },
             onDismissRequest = { showIntervalDialog = false },
         )
@@ -166,11 +138,11 @@ internal fun FeedsPage(
             icon = NdIcons.Image,
             title = stringResource(Res.string.feeds_notes_images),
             options = FeedsSettingKeys.SHOW_NOTES_IMAGES.values,
-            selected = images,
+            selected = state.showNotesImages,
             label = { stringResource(showNotesImagesLabel(it)) },
             onSelect = { choice ->
                 showImagesDialog = false
-                scope.launch { settings.set(FeedsSettingKeys.SHOW_NOTES_IMAGES, choice) }
+                viewModel.setShowNotesImages(choice)
             },
             onDismissRequest = { showImagesDialog = false },
         )
