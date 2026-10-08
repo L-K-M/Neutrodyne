@@ -10,8 +10,10 @@ plugins {
 kotlin {
     // Host (Robolectric) tests for the SQLite drivers (S4, 2026-10-06); sqlite-framework
     // comes from neutrodyne.room. The task is `testAndroidHostTest`.
-    // Device (GMD) tests keep the Android side of migration/rebuild honest (02 Testing); the
-    // task is `testDebugAndroidTest…` on a Gradle Managed Device.
+    // Device (GMD) tests keep the Android side of migration/rebuild honest (02 Testing).
+    // neutrodyne.kmp.library gives the device-test compilation 09's GMD table and runner
+    // settings; the tasks are `<device>AndroidDeviceTest` / `<group>GroupAndroidDeviceTest`
+    // (`ciGroupAndroidDeviceTest`, `nightlyGroupAndroidDeviceTest`, `connectedAndroidDeviceTest`).
     targets.named("android") {
         (this as KotlinMultiplatformAndroidLibraryTarget).apply {
             withHostTest { }
