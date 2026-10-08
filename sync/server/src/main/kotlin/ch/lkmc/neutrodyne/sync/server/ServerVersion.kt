@@ -14,12 +14,20 @@ internal object ServerVersion {
 
     private fun fromResource(): String? =
         ServerVersion::class.java.getResourceAsStream(RESOURCE)?.use { stream ->
-            Properties().apply { load(stream) }.getProperty(VERSION_KEY)?.takeIf { version -> version.isNotBlank() }
+            Properties().apply { load(stream) }.getProperty(VERSION_KEY)?.let(::usableVersion)
         }
 
-    private fun fromManifest(): String? = ServerVersion::class.java.`package`?.implementationVersion
+    private fun fromManifest(): String? =
+        ServerVersion::class.java.`package`
+            ?.implementationVersion
+            ?.let(::usableVersion)
+
+    /** Blank values and Gradle's `unspecified` (written when the version is unset) count as absent. */
+    internal fun usableVersion(version: String): String? =
+        version.takeIf { it.isNotBlank() && it != GRADLE_UNSPECIFIED }
 
     private const val RESOURCE = "/neutrodyne-server.properties"
     private const val VERSION_KEY = "serverVersion"
     private const val DEV_VERSION = "dev"
+    private const val GRADLE_UNSPECIFIED = "unspecified"
 }

@@ -17,6 +17,7 @@ import androidx.compose.ui.test.runComposeUiTest
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
+import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.DesktopArch
 import ch.lkmc.neutrodyne.core.model.DesktopOs
@@ -181,6 +182,25 @@ class SettingsScreensTest {
 
             onNodeWithText("Dark").assertIsDisplayed()
             assertEquals(ThemeMode.DARK, runBlocking { settings.get(AppearanceSettingKeys.THEME) })
+        }
+
+    @Test
+    fun aFailedAppearanceWriteSaysSoAndKeepsTheTheme() =
+        runComposeUiTest {
+            val settings = FakeSettingsRepository().apply { failNextSet = SettingsError.WriteFailed }
+            setSettingsRoot(settingsRepository = settings)
+            openSettings()
+            onAllNodesWithText("Appearance").onFirst().performClick()
+            waitForIdle()
+
+            onNodeWithText("Theme").performClick()
+            waitForIdle()
+            onNodeWithText("Dark").performClick()
+            waitForIdle()
+
+            onNodeWithText("Couldn’t save the setting").assertIsDisplayed()
+            onNodeWithText("System default").assertIsDisplayed()
+            assertEquals(ThemeMode.SYSTEM, runBlocking { settings.get(AppearanceSettingKeys.THEME) })
         }
 
     @Test

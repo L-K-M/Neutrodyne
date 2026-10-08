@@ -1250,7 +1250,7 @@ Ktor 3.6.0 with the CIO engine, `embeddedServer(CIO, host, port)` with `connecti
 | DefaultHeaders (`ktor-server-default-headers`) | security headers ([Web sessions and CSRF](#web-sessions-and-csrf)) |
 | HTML builder (`ktor-server-html-builder`, kotlinx.html 0.12.0) | the web UI |
 
-Ktor's XForwardedHeaders plugin is not installed: it offers no check of the immediate peer against a trusted list ([forwarded headers](https://ktor.io/docs/server-forward-headers.html)), so `ClientAddress` applies `X-Forwarded-For` and `X-Forwarded-Proto` only when the TCP peer is in `NEUTRODYNE_SERVER_TRUSTED_PROXIES`, taking the right-most untrusted address.
+Ktor's XForwardedHeaders plugin is not installed: it offers no check of the immediate peer against a trusted list ([forwarded headers](https://ktor.io/docs/server-forward-headers.html)), so `ClientAddress` applies `X-Forwarded-For` and `X-Forwarded-Proto` only when the TCP peer is in `NEUTRODYNE_SERVER_TRUSTED_PROXIES` or loopback, taking the right-most untrusted address (M0b deviation 2026-10-06: the walk also skips loopback entries, consistent with the loopback-peer rule, and an entry that is not an IP literal ends the walk — the resolved address falls back to the TCP peer instead of reporting the raw text or trusting entries further left).
 
 ### Request pipeline
 
