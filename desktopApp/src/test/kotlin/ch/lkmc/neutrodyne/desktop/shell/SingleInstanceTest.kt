@@ -24,6 +24,8 @@ import java.security.SecureRandom
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.thread
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
@@ -187,6 +189,145 @@ class SingleInstanceTest {
         }
 
     @Test
+    fun `an idle connection is dropped at the read deadline and a later hand-off still arrives`() =
+        runBlocking {
+            val owner = SingleInstanceLock(dirs)
+            assertThat(owner.tryAcquire()).isEqualTo(SingleInstanceLock.Acquire.Acquired)
+
+            val received = Channel<HandoffRequest>(Channel.UNLIMITED)
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            val serveJob = scope.launch { fastHandshake().serve { received.send(it) } }
+            val port = awaitPortFile()
+
+            // The reported reproduction: a peer that connects and sends nothing. SO_TIMEOUT does
+            // not apply to SocketChannel.read, so only a real deadline frees the sequential
+            // server for the next connection.
+            val idle = Socket()
+            idle.connect(
+                InetSocketAddress(InetAddress.getLoopbackAddress(), port),
+                CONNECT_TIMEOUT_MS.toInt(),
+            )
+
+            val client = fastHandshake(attempts = 400, retryDelayMs = 15, replyTimeoutMs = 250)
+            val request =
+                HandoffRequest.fromLaunchArgs(
+                    token = "", // send() re-reads instance.token on every attempt
+                    args = listOf("feed:x"),
+                    cwd = "/w",
+                )
+            // send() is blocking; run it on its own thread with a hard bound so a regression is a
+            // failure here, not a hang.
+            val sender = Executors.newSingleThreadExecutor()
+            val outcome =
+                try {
+                    sender
+                        .submit(Callable { client.send(request) })
+                        .get(IDLE_PEER_BOUND_MS, TimeUnit.MILLISECONDS)
+                } finally {
+                    sender.shutdownNow()
+                }
+            assertThat(outcome).isEqualTo(HandoffOutcome.Delivered)
+            assertThat(withTimeout(5.seconds) { received.receive() }.args).containsExactly("feed:x")
+
+            // The idle peer was dropped without a reply (11's "timeout → close" rule): a real EOF,
+            // not a local read timeout.
+            idle.soTimeout = IDLE_PEER_BOUND_MS.toInt()
+            assertThat(runCatching { idle.inputStream.read() }.getOrNull()).isEqualTo(-1)
+            idle.close()
+
+            serveJob.cancelAndJoin()
+            owner.close()
+            scope.cancel()
+        }
+
+    @Test
+    fun `a partial line is dropped at the read deadline without a reply`() =
+        runBlocking {
+            val owner = SingleInstanceLock(dirs)
+            assertThat(owner.tryAcquire()).isEqualTo(SingleInstanceLock.Acquire.Acquired)
+
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            val serveJob = scope.launch { fastHandshake().serve { } }
+            val port = awaitPortFile()
+
+            val peer = Socket()
+            peer.connect(
+                InetSocketAddress(InetAddress.getLoopbackAddress(), port),
+                CONNECT_TIMEOUT_MS.toInt(),
+            )
+            peer.soTimeout = PARTIAL_BOUND_MS.toInt()
+            // Half a request line, then silence: the deadline closes it without a reply.
+            peer.outputStream.write("{\"v\":1,\"tok".toByteArray())
+            peer.outputStream.flush()
+
+            assertThat(runCatching { peer.inputStream.read() }.getOrNull()).isEqualTo(-1)
+            peer.close()
+
+            serveJob.cancelAndJoin()
+            owner.close()
+            scope.cancel()
+        }
+
+    @Test
+    fun `shutdown cancels the server while a peer is connected and idle`() =
+        runBlocking {
+            val owner = SingleInstanceLock(dirs)
+            assertThat(owner.tryAcquire()).isEqualTo(SingleInstanceLock.Acquire.Acquired)
+
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            val serveJob = scope.launch { fastHandshake().serve { } }
+            val port = awaitPortFile()
+
+            val idle = Socket()
+            idle.connect(
+                InetSocketAddress(InetAddress.getLoopbackAddress(), port),
+                CONNECT_TIMEOUT_MS.toInt(),
+            )
+            // Let the accepted connection settle into its blocking read before the cancel.
+            delay(300)
+
+            val stopped =
+                withTimeoutOrNull(SHUTDOWN_BOUND_MS.milliseconds) {
+                    serveJob.cancelAndJoin()
+                    true
+                }
+            assertThat(stopped).isNotNull()
+            assertThat(Files.exists(portFile)).isFalse()
+            assertThat(Files.exists(tokenFile)).isFalse()
+
+            idle.close()
+            owner.close()
+            scope.cancel()
+        }
+
+    @Test
+    fun `a listener that never answers fails the delivery instead of hanging the client`() {
+        // A stale instance.port may point at a process that accepts but never replies; send() must
+        // still observe the reply timeout and come back with NoAnswer (11's Client row).
+        val silent = ServerSocket(0)
+        val accepted = AtomicReference<Socket>()
+        thread(isDaemon = true) { runCatching { accepted.set(silent.accept()) } }
+
+        Files.writeString(portFile, silent.localPort.toString())
+        Files.writeString(tokenFile, "token")
+        val client = fastHandshake(attempts = 3, retryDelayMs = 10, replyTimeoutMs = 300)
+        val request = HandoffRequest(token = "token", args = listOf("feed:x"), cwd = "/w")
+
+        val sender = Executors.newSingleThreadExecutor()
+        val outcome =
+            try {
+                sender
+                    .submit(Callable { client.send(request) })
+                    .get(SILENT_LISTENER_BOUND_MS, TimeUnit.MILLISECONDS)
+            } finally {
+                sender.shutdownNow()
+                runCatching { accepted.get()?.close() }
+                silent.close()
+            }
+        assertThat(outcome).isEqualTo(HandoffOutcome.NoAnswer)
+    }
+
+    @Test
     fun `a throwing hand-off callback never stops the serve loop`() =
         runBlocking {
             val owner = SingleInstanceLock(dirs)
@@ -314,5 +455,9 @@ class SingleInstanceTest {
         const val OWNER_START_DELAY_MS = 300L
         const val CONNECT_TIMEOUT_MS = 2_000L
         const val READ_TIMEOUT_MS = 1_500L
+        const val IDLE_PEER_BOUND_MS = 10_000L
+        const val PARTIAL_BOUND_MS = 10_000L
+        const val SHUTDOWN_BOUND_MS = 5_000L
+        const val SILENT_LISTENER_BOUND_MS = 5_000L
     }
 }
