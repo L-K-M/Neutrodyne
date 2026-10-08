@@ -93,7 +93,7 @@ import org.jetbrains.compose.resources.stringResource
  * are fire-and-forget repository calls while `editFeedUrl`/`setCredentials` surface their
  * `AddPodcastError` as a snackbar. The playback/downloads/notifications/refresh sections arrive
  * with their milestones; "Show in All" waits for the M5 scope-settings read model (deviation in
- * 08).
+ * 08), and the M1b edit-address/credentials rows hide behind [FEED_ACCOUNT_CONTROLS_ENABLED].
  */
 @Composable
 internal fun PodcastSettingsScreen(
@@ -273,7 +273,8 @@ private fun FeedSection(
             )
         }
 
-        if (detail.sourceType == SourceType.RSS) {
+        // M1b's edit-address and credentials rows stay hidden while their repository methods throw.
+        if (FEED_ACCOUNT_CONTROLS_ENABLED && detail.sourceType == SourceType.RSS) {
             SettingsRow(
                 icon = NdIcons.Edit,
                 title = stringResource(Res.string.ps_edit_url),
@@ -281,12 +282,14 @@ private fun FeedSection(
                 onClick = { editDialog = true },
             )
         }
-        SettingsRow(
-            icon = NdIcons.Key,
-            title = stringResource(Res.string.ps_credentials),
-            summary = null,
-            onClick = { credentialsDialog = true },
-        )
+        if (FEED_ACCOUNT_CONTROLS_ENABLED) {
+            SettingsRow(
+                icon = NdIcons.Key,
+                title = stringResource(Res.string.ps_credentials),
+                summary = null,
+                onClick = { credentialsDialog = true },
+            )
+        }
     }
 
     if (revealWarning) {

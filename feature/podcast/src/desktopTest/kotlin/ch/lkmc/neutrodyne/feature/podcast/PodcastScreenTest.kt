@@ -9,7 +9,6 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToIndexAction
-import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -17,7 +16,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.test.performScrollToNode
-import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.paging.LoadState
 import androidx.paging.Pager
@@ -155,24 +153,17 @@ class PodcastScreenTest {
         }
 
     @Test
-    fun needsCredentialsOpensPasswordDialog() =
+    fun needsCredentialsHidesPasswordAction() =
         runComposeUiTest {
-            var credentials: BasicCredentials? = null
             setPodcast(
                 PodcastUiState(
                     detail = testPodcastDetail(7, health = testFeedHealth(needsCredentials = true)),
                     loaded = true,
                 ),
-                onEnterCredentials = { credentials = it },
             )
             onNodeWithText("This feed needs a password").assertIsDisplayed()
-            onAllNodes(hasClickAction() and hasText("Enter password")).onFirst().performClick()
-            onNodeWithText("Username").assertIsDisplayed()
-
-            onAllNodes(hasSetTextAction()).onFirst().performTextInput("alice")
-            onAllNodes(hasSetTextAction())[1].performTextInput("s3cret")
-            onAllNodes(hasClickAction() and hasText("Save")).onFirst().performClick()
-            assertEquals(BasicCredentials("alice", "s3cret"), credentials)
+            // `setCredentials` is M1b: the banner keeps its warning but no entry point.
+            onNodeWithText("Enter password").assertDoesNotExist()
         }
 
     @Test

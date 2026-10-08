@@ -454,10 +454,15 @@ private fun FeedStateBanner(
             NdBanner(
                 message = stringResource(Res.string.podcast_needs_password),
                 icon = NdIcons.Key,
+                // `setCredentials` is M1b: the warning stays, the entry point waits for the flag.
                 primary =
-                    NdDialogAction(
-                        stringResource(Res.string.podcast_enter_password),
-                    ) { credentialsOpen = true },
+                    if (FEED_ACCOUNT_CONTROLS_ENABLED) {
+                        NdDialogAction(
+                            stringResource(Res.string.podcast_enter_password),
+                        ) { credentialsOpen = true }
+                    } else {
+                        null
+                    },
             )
         }
 

@@ -13,7 +13,6 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.v2.runComposeUiTest
 import ch.lkmc.neutrodyne.core.common.PlatformKind
@@ -90,7 +89,6 @@ class PodcastSettingsScreenTest {
             onNodeWithText("Custom title").assertIsDisplayed()
             onNodeWithText("Episode order").assertIsDisplayed()
             onNodeWithText("Feed address").assertIsDisplayed()
-            onNodeWithText("Username and password").assertIsDisplayed()
             // The address stays redacted until tapped.
             onNodeWithText("https://feeds.…/show.xml · Tap to show").assertIsDisplayed()
             onNodeWithText("https://feeds.example.com/show.xml").assertDoesNotExist()
@@ -177,40 +175,19 @@ class PodcastSettingsScreenTest {
         }
 
     @Test
-    fun editUrlDialogWrites() =
+    fun m1bFeedAccountControlsHidden() =
         runComposeUiTest {
-            var url: String? = null
             setSettings(
                 PodcastSettingsUiState(
                     detail = testPodcastDetail(7),
                     feedInfo = testFeedInfo(),
                     loaded = true,
                 ),
-                onEditFeedUrl = { url = it },
             )
-            onNodeWithText("Edit feed address").performClick()
-            onAllNodes(hasSetTextAction()).onFirst().performTextReplacement("https://new.example.com/feed.xml")
-            onAllNodes(hasClickAction() and hasText("Save")).onFirst().performClick()
-            assertEquals("https://new.example.com/feed.xml", url)
-        }
-
-    @Test
-    fun credentialsDialogWrites() =
-        runComposeUiTest {
-            var credentials: BasicCredentials? = null
-            setSettings(
-                PodcastSettingsUiState(
-                    detail = testPodcastDetail(7),
-                    feedInfo = testFeedInfo(),
-                    loaded = true,
-                ),
-                onCredentials = { credentials = it },
-            )
-            onNodeWithText("Username and password").performClick()
-            onAllNodes(hasSetTextAction()).onFirst().performTextInput("alice")
-            onAllNodes(hasSetTextAction())[1].performTextInput("s3cret")
-            onAllNodes(hasClickAction() and hasText("Save")).onFirst().performClick()
-            assertEquals(BasicCredentials("alice", "s3cret"), credentials)
+            // The edit-address and credentials writes are M1b's: their repository methods still
+            // throw, so the rows stay hidden until `FEED_ACCOUNT_CONTROLS_ENABLED` flips.
+            onNodeWithText("Edit feed address").assertDoesNotExist()
+            onNodeWithText("Username and password").assertDoesNotExist()
         }
 
     @Test
@@ -223,8 +200,8 @@ class PodcastSettingsScreenTest {
                     loaded = true,
                 ),
             )
-            onNodeWithText("Username and password").assertIsDisplayed()
             onNodeWithText("Edit feed address").assertDoesNotExist()
+            onNodeWithText("Username and password").assertDoesNotExist()
         }
 
     private fun ComposeUiTest.setSettings(
