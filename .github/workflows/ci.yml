@@ -245,6 +245,8 @@ jobs:
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
           name: server-jar
+          # upload-artifact drops the common prefix of the matched files
+          path: sync/server/build/libs
       - name: Start the fat JAR and check the endpoints
         run: |
           jar="$(echo sync/server/build/libs/neutrodyne-server-*.jar)"
