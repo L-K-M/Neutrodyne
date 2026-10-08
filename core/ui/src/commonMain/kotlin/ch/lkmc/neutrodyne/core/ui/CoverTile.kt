@@ -92,27 +92,33 @@ public fun CoverTile(
             buildTileDescription(tile)
         }
 
-    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+    // The merged, clickable node wraps cover and title line alike: with titles shown the cover is
+    // decorative and the tile reads the title text; hidden, the composed description stands in (08).
+    Column(
+        modifier =
+            modifier
+                .hoverable(interactionSource)
+                .onFocusChanged { focused = it.isFocused }
+                .onSecondaryClick { if (menuActions.isNotEmpty()) menuOpen = true }
+                .semantics(
+                    mergeDescendants = true,
+                ) {
+                    if (description != null) contentDescription = description
+                    customActions =
+                        menuActions.map { action ->
+                            CustomAccessibilityAction(action.label) {
+                                action.onClick()
+                                true
+                            }
+                        }
+                }.combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         Box(
             modifier =
                 Modifier
                     .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .hoverable(interactionSource)
-                    .onFocusChanged { focused = it.isFocused }
-                    .onSecondaryClick { if (menuActions.isNotEmpty()) menuOpen = true }
-                    .semantics(
-                        mergeDescendants = true,
-                    ) {
-                        if (description != null) contentDescription = description
-                        customActions =
-                            menuActions.map { action ->
-                                CustomAccessibilityAction(action.label) {
-                                    action.onClick()
-                                    true
-                                }
-                            }
-                    }.combinedClickable(onClick = onClick, onLongClick = onLongClick),
+                    .aspectRatio(1f),
         ) {
             CoverArt(
                 ref = tile.artwork,

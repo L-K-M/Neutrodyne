@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.feature.library
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
@@ -126,6 +127,48 @@ class LibraryScreenTest {
                 }
             setLibrary(LibraryUiState(tiles = tiles.toImmutableList(), loaded = true, showTitles = true))
             onNodeWithText("Show 01").assertIsDisplayed()
+        }
+
+    @Test
+    fun shownTitleMergesIntoTheClickableTile() =
+        runComposeUiTest {
+            var opened: Long? = null
+            setLibrary(
+                LibraryUiState(
+                    tiles = listOf(testLibraryTile(5, displayTitle = "Tap Show")).toImmutableList(),
+                    loaded = true,
+                    showTitles = true,
+                ),
+                onOpenPodcast = { opened = it },
+            )
+            // 08: with titles shown the cover is decorative and the merged tile reads the title
+            // text — one node carrying both the title and the click action, not a label sibling.
+            onAllNodes(hasText("Tap Show")).assertCountEquals(1)
+            onAllNodes(hasText("Tap Show") and hasClickAction())
+                .assertCountEquals(1)
+                .onFirst()
+                .performClick()
+            assertEquals(5L, opened)
+        }
+
+    @Test
+    fun hiddenTitleKeepsTheDescriptionOnTheTile() =
+        runComposeUiTest {
+            var opened: Long? = null
+            setLibrary(
+                LibraryUiState(
+                    tiles = listOf(testLibraryTile(5, displayTitle = "Tap Show")).toImmutableList(),
+                    loaded = true,
+                    showTitles = false,
+                ),
+                onOpenPodcast = { opened = it },
+            )
+            // Hidden titles land in the tile's content description ("{title}, n unplayed").
+            onAllNodes(hasContentDescription("Tap Show") and hasClickAction())
+                .assertCountEquals(1)
+                .onFirst()
+                .performClick()
+            assertEquals(5L, opened)
         }
 
     @Test
