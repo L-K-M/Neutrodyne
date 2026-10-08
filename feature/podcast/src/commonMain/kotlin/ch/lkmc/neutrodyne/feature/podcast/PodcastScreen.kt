@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -132,9 +133,9 @@ internal fun PodcastScreen(
     onConfirmUnsubscribe: () -> Unit,
     onDismissUnsubscribe: () -> Unit,
     modifier: Modifier = Modifier,
+    listState: LazyListState = rememberLazyListState(),
 ) {
     val detail = state.detail
-    val listState = rememberLazyListState()
     val headerGone by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 } }
     val nowMs = LocalUiClock.current.now()
 
@@ -175,6 +176,35 @@ internal fun PodcastScreen(
             }
 
             // `gone`: the route pops once the snackbar shows.
+            // First-page race (the Feeds screen's guard): while paging's refresh is still out the
+            // header-only list would clamp a restored scroll index before the rows exist, so the
+            // LazyColumn stays unmounted until the first page settles.
+            items.loadState.refresh is LoadState.Loading && items.itemCount == 0 -> {
+                Column(Modifier.fillMaxSize()) {
+                    PodcastHeader(detail = detail, nowMs = nowMs)
+                    FeedStateBanner(
+                        detail = detail,
+                        nowMs = nowMs,
+                        onRetryFeed = onRetryFeed,
+                        onEnterCredentials = onEnterCredentials,
+                        onOpenSettings = onOpenSettings,
+                        onUnsubscribe = onUnsubscribeRequest,
+                    )
+                    ChipsRow(
+                        filters = state.filters,
+                        order = state.effectiveOrder,
+                        onFiltersChange = onFiltersChange,
+                        onOrderChange = onOrderChange,
+                    )
+                    Box(
+                        Modifier.fillMaxWidth().padding(FOOTER_PADDING),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        NdLoading()
+                    }
+                }
+            }
+
             else -> {
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                     offlineBannerItem(state.offline)

@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.feature.podcast
 
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -50,6 +51,7 @@ import ch.lkmc.neutrodyne.core.ui.platform.FileSaver
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
 import ch.lkmc.neutrodyne.core.ui.platform.PlatformActions
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import java.util.Locale
 import kotlin.test.AfterTest
@@ -267,6 +269,33 @@ class PodcastScreenTest {
         }
 
     @Test
+    fun firstPageKeepsRestoredScrollIndex() =
+        runComposeUiTest {
+            // The restore lands while detail has arrived but paging's first page is still out:
+            // a header-only LazyColumn must not clamp index 100 before the rows exist.
+            val gate = CompletableDeferred<Unit>()
+            val listState = LazyListState(firstVisibleItemIndex = 100)
+            val pagingItems =
+                setPodcast(
+                    PodcastUiState(detail = testPodcastDetail(7), loaded = true),
+                    source =
+                        PagedListSource(
+                            pages = listOf(List(RESTORE_PAGE_SIZE) { i -> testEpisodeRow(i + 1L, podcastId = 7) }),
+                            firstLoadGate = gate,
+                        ),
+                    listState = listState,
+                    waitForFirstPage = false,
+                )
+            assertEquals(0, pagingItems.itemCount)
+
+            gate.complete(Unit)
+            waitUntil(timeoutMillis = 5_000) { pagingItems.itemCount == RESTORE_PAGE_SIZE }
+            waitForIdle()
+
+            assertEquals(100, listState.firstVisibleItemIndex)
+        }
+
+    @Test
     fun filteredEmptyOffersShowPlayed() =
         runComposeUiTest {
             var filters: FeedFilters? = null
@@ -288,6 +317,8 @@ class PodcastScreenTest {
         state: PodcastUiState,
         rows: List<EpisodeRow> = emptyList(),
         source: PagedListSource? = null,
+        listState: LazyListState = LazyListState(),
+        waitForFirstPage: Boolean = true,
         pendingUnsubscribe: PendingUnsubscribe? = null,
         onRefresh: () -> Unit = {},
         onOpenSettings: () -> Unit = {},
@@ -318,6 +349,7 @@ class PodcastScreenTest {
                     PodcastScreen(
                         state = state,
                         items = feed.collectAsLazyPagingItems().also { pagingItems = it },
+                        listState = listState,
                         pendingUnsubscribe = pendingUnsubscribe,
                         onRefresh = onRefresh,
                         onOpenSettings = onOpenSettings,
@@ -335,17 +367,29 @@ class PodcastScreenTest {
                 }
             }
         }
-        waitUntil(timeoutMillis = 5_000) { pagingItems.loadState.refresh !is LoadState.Loading }
-        waitForIdle()
+        if (waitForFirstPage) {
+            waitUntil(timeoutMillis = 5_000) { pagingItems.loadState.refresh !is LoadState.Loading }
+            waitForIdle()
+        }
         return pagingItems
     }
 }
 
-/** Named pages served by [Pager] — one page's worth per `load`. */
+/** The page served while the restore test's gate is closed; index 100 must stay visible inside it. */
+private const val RESTORE_PAGE_SIZE = 150
+
+/** Named pages served by [Pager] — one page's worth per `load`; [firstLoadGate] parks load 0. */
 private class PagedListSource(
     private val pages: List<List<EpisodeRow>>,
+    private val firstLoadGate: CompletableDeferred<Unit>? = null,
 ) : PagingSource<Int, EpisodeRow>() {
+    private var firstLoad = true
+
     override suspend fun load(params: LoadParams<Int>): LoadResult<Int, EpisodeRow> {
+        if (firstLoad) {
+            firstLoad = false
+            firstLoadGate?.await()
+        }
         val index = params.key ?: 0
         return LoadResult.Page(
             data = pages[index],
