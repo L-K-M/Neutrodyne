@@ -161,6 +161,7 @@ jobs:
           # holds the run until both answer (5 min cap).
           script: |
             test "$(adb shell getconf PAGE_SIZE | tr -d '\r')" = "16384" || { echo "PAGE_SIZE != 16384"; exit 1; }
+            adb logcat -v threadtime > "$RUNNER_TEMP/logcat-api37-debug.txt" 2>&1 &
             timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true connectedDebugAndroidTest
       - name: Release smoke on API 37
@@ -176,9 +177,19 @@ jobs:
           disk-size: 6000M
           emulator-boot-timeout: 1200
           script: |
+            adb logcat -v threadtime > "$RUNNER_TEMP/logcat-api37-release.txt" 2>&1 &
             timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
             ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true :app:connectedReleaseAndroidTest
             # TODO (M6b): :benchmark's out-of-process release smoke journeys join here.
+      # The device log of both emulator steps, for diagnosing a failed run (system_server state).
+      - name: Upload the emulator logs
+        if: ${{ !success() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: api37-16k-logcat
+          path: ${{ runner.temp }}/logcat-api37-*.txt
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Build the release APKs for the alignment check
         run: ./gradlew assembleRelease -Pneutrodyne.abiSplits=true
       - name: 16 KB alignment on the release x86_64 APK (PLAN M11 AC7)
