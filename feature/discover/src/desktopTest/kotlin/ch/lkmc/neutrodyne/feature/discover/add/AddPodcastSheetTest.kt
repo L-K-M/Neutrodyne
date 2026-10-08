@@ -7,12 +7,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -38,6 +40,7 @@ import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
 import ch.lkmc.neutrodyne.core.testing.testFeedPreview
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.LocalUiClock
+import kotlinx.coroutines.CompletableDeferred
 import java.util.Locale
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -245,6 +248,36 @@ class AddPodcastSheetTest {
 
             onNodeWithText("Not enough storage space").assertIsDisplayed()
             assertNull(viewModel.uiState.value.done)
+        }
+
+    @Test
+    fun editingTheAddressKeepsTheSheetOnB() =
+        runComposeUiTest {
+            // Review round 3's interval: subscribe A in flight, the field edited to B
+            // without submitting, then A's late success — the sheet must stay open on B.
+            resolver.nextResolution = AddResolution.Feed(testFeedPreview(title = "A Show"))
+            subscribe.nextOutcome = Outcome.Success(7L)
+            val gate = CompletableDeferred<Unit>()
+            subscribe.gate = gate
+            setSheet()
+
+            feedField().performTextInput("https://a.example.com/feed")
+            onNodeWithText("Subscribe").performClick()
+            waitForIdle()
+            onNodeWithText("Subscribe").performClick()
+            waitForIdle()
+
+            feedField().performTextReplacement("https://b.example.com/feed")
+            waitForIdle()
+            gate.complete(Unit)
+            waitForIdle()
+
+            assertNull(viewModel.uiState.value.done)
+            val field = feedField().fetchSemanticsNode()
+            assertEquals(
+                "https://b.example.com/feed",
+                field.config[SemanticsProperties.EditableText].text,
+            )
         }
 
     @Test

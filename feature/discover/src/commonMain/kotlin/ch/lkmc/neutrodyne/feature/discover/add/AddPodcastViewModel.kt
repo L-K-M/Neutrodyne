@@ -105,10 +105,11 @@ public class AddPodcastViewModel(
     private var resolvedInput: String? = null
 
     /**
-     * Allocates `operationGeneration`s. Every new resolve/subscribe attempt supersedes the
-     * previous operation: only the latest generation's completion may write `done`, clear a
-     * `subscribing` flag or land a preview — the previewId cannot stand in for it because the
-     * cache keys previews on the feed URL, which same-feed retries share.
+     * Allocates `operationGeneration`s. Every new resolve/subscribe attempt — and every edit to
+     * the address field — supersedes the previous operation: only the latest generation's
+     * completion may write `done`, clear a `subscribing` flag or land a preview — the previewId
+     * cannot stand in for it because the cache keys previews on the feed URL, which same-feed
+     * retries share.
      */
     private var operation = 0
 
@@ -138,11 +139,16 @@ public class AddPodcastViewModel(
         runResolve { resolver.resolve(input, credentials) }
     }
 
-    /** Editing the address drops a stale preview/candidate list and cancels a running lookup. */
+    /**
+     * Editing the address drops a stale preview/candidate list, cancels a running lookup and
+     * supersedes the in-flight operation: a subscribe launched for the old address must not let
+     * a late success write `done` and close a sheet whose field now holds new text (UI review
+     * round 3).
+     */
     public fun onInputChanged(text: String) {
         if (text.trim() == resolvedInput) return
         resolveJob?.cancel()
-        mutableState.update { it.copy(step = AddSheetStep.Input()) }
+        nextGeneration { it.copy(step = AddSheetStep.Input()) }
     }
 
     /** "Looking up…" is cancellable (08) — back to the editable field. */

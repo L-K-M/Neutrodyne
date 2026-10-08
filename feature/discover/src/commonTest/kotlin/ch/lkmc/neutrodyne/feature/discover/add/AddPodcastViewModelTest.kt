@@ -248,6 +248,31 @@ class AddPodcastViewModelTest : MainDispatcherTest() {
         }
 
     @Test
+    fun editingTheAddressInvalidatesAnInFlightSubscribe() =
+        runTest {
+            resolver.nextResolution = AddResolution.Feed(Preview)
+            viewModel.resolve("https://a.example.com/feed")
+            advanceUntilIdle()
+
+            // Subscribe A parks at its gate; the field is then edited to B without
+            // submitting — the interval review round 3 identified.
+            val gate = CompletableDeferred<Unit>()
+            subscribe.gate = gate
+            subscribe.nextOutcome = Outcome.Success(7L)
+            viewModel.subscribe()
+            advanceUntilIdle()
+
+            viewModel.onInputChanged("https://b.example.com/feed")
+
+            // A's late success belongs to A's operation: `done` must not land and close a
+            // sheet whose field now holds B.
+            gate.complete(Unit)
+            advanceUntilIdle()
+            assertNull(viewModel.uiState.value.done)
+            assertIs<AddSheetStep.Input>(viewModel.uiState.value.step)
+        }
+
+    @Test
     fun staleSubscribeFailureKeepsNewerAttemptSubscribing() =
         runTest {
             resolver.nextResolution = AddResolution.Feed(Preview)
