@@ -83,14 +83,28 @@ internal fun hicolorIconEntries(iconsPngDir: File): List<Pair<File, String>> {
     }
 }
 
-/** The target this host can package for, or null on a host outside the matrix (dev machines). */
+/**
+ * The target this host can package for, or null on a host outside the matrix (dev machines).
+ * `os.name` is the JVM's official versioned name ("Windows 11", "Windows Server 2025",
+ * "Mac OS X"), so only the documented families are normalized to the matrix's OS ids; any
+ * other name stays off-matrix rather than being guessed into a target.
+ */
 internal fun desktopPackagingTargetOf(
     osName: String,
     osArch: String,
-): DesktopPackagingTarget? =
-    DesktopPackagingTarget.entries.firstOrNull {
-        it.osName == osName.lowercase() && it.osArch == osArch
-    }
+): DesktopPackagingTarget? {
+    // os.name starts with "Windows" on every release ("Windows 10", "Windows Server 2025"),
+    // is exactly "Mac OS X" on macOS and exactly "Linux" on Linux.
+    val name = osName.lowercase()
+    val os =
+        when {
+            name.startsWith("windows") -> "windows"
+            name == "mac os x" -> "macos"
+            name == "linux" -> "linux"
+            else -> return null
+        }
+    return DesktopPackagingTarget.entries.firstOrNull { it.osName == os && it.osArch == osArch }
+}
 
 /** `desktopApp/runtime.lock`, already narrowed to the current target's archive (11 Lockfiles). */
 internal data class BundledRuntimeLock(
@@ -178,11 +192,17 @@ abstract class SetupBundledRuntime : DefaultTask() {
         fileSystemOperations.delete { delete(staging, homeDir) }
         staging.mkdirs()
 
+        // The staged file is named "archive" (no suffix), so the unpacker is chosen by
+        // magic bytes: Temurin ships ZIP for Windows ("PK") and gzip'd tar elsewhere (1f 8b).
         val tree =
-            if (archiveFile.name.endsWith(".zip")) {
-                archiveOperations.zipTree(archiveFile)
-            } else {
-                archiveOperations.tarTree(archiveOperations.gzip(archiveFile))
+            when (archiveFormatOf(archiveFile)) {
+                RuntimeArchiveFormat.ZIP -> {
+                    archiveOperations.zipTree(archiveFile)
+                }
+
+                RuntimeArchiveFormat.TAR_GZ -> {
+                    archiveOperations.tarTree(archiveOperations.gzip(archiveFile))
+                }
             }
         fileSystemOperations.copy {
             from(tree)
@@ -193,8 +213,10 @@ abstract class SetupBundledRuntime : DefaultTask() {
             }
         }
         // eachFile dropped the archive's single top-level directory, so staging is the JDK root.
-        val javaBin = File(staging, "bin/java")
-        if (!javaBin.isFile && !File(staging, "Contents/Home/bin/java").isFile) {
+        // Windows JDKs carry bin/java.exe where POSIX ones carry bin/java; the macOS tarball
+        // nests the tree under Contents/Home.
+        val javaCandidates = listOf("bin/java", "bin/java.exe", "Contents/Home/bin/java")
+        if (javaCandidates.none { File(staging, it).isFile }) {
             throw GradleException("the pinned Temurin archive did not unpack to a JDK tree (no bin/java)")
         }
         if (!staging.renameTo(homeDir)) {
@@ -241,6 +263,31 @@ abstract class SetupBundledRuntime : DefaultTask() {
             }
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun archiveFormatOf(file: File): RuntimeArchiveFormat {
+        val magic = file.inputStream().use { it.readNBytes(4) }
+        return when {
+            // Every ZIP record starts "PK"; 1f 8b is the gzip member header.
+            magic.size >= 2 && magic[0] == 'P'.code.toByte() && magic[1] == 'K'.code.toByte() -> {
+                RuntimeArchiveFormat.ZIP
+            }
+
+            magic.size >= 2 && magic[0] == 0x1f.toByte() && magic[1] == 0x8b.toByte() -> {
+                RuntimeArchiveFormat.TAR_GZ
+            }
+
+            else -> {
+                throw GradleException(
+                    "the pinned runtime archive is neither ZIP nor gzip'd tar (unrecognized format)",
+                )
+            }
+        }
+    }
+
+    private enum class RuntimeArchiveFormat {
+        ZIP,
+        TAR_GZ,
     }
 
     private companion object {
