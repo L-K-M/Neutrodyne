@@ -100,19 +100,27 @@ public fun PodcastHeader(
     }
 }
 
-/** The description's first three lines of plain text with a "More"/"Less" disclosure (08). */
+/**
+ * The description's first three lines of plain text with a "More"/"Less" disclosure (08). "More"
+ * follows the text layout's `hasVisualOverflow`, not the newline count: a single paragraph that
+ * wraps past [DESCRIPTION_LINES] gets the toggle, while three short lines never do.
+ */
 @Composable
 private fun Description(notes: ShowNotes) {
     val plain = remember(notes) { notes.plainText() }
     var expanded by remember { mutableStateOf(false) }
+    var overflows by remember { mutableStateOf(false) }
     Text(
         plain,
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         maxLines = if (expanded) Int.MAX_VALUE else DESCRIPTION_LINES,
         overflow = TextOverflow.Ellipsis,
+        onTextLayout = { result ->
+            if (result.hasVisualOverflow != overflows) overflows = result.hasVisualOverflow
+        },
     )
-    if (expanded || plain.lineCount() > DESCRIPTION_LINES) {
+    if (expanded || overflows) {
         NdTextButton(
             label =
                 stringResource(
@@ -186,8 +194,6 @@ private fun List<ShowNoteSpan>.plainText(): String =
             ShowNoteSpan.LineBreak -> "\n"
         }
     }
-
-private fun String.lineCount(): Int = count { it == '\n' } + 1
 
 private val HEADER_PADDING = 16.dp
 private val HEADER_TOP_GAP = 48.dp
