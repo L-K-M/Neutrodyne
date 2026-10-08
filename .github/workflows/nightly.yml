@@ -304,7 +304,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ github.sha }}
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
@@ -364,18 +364,24 @@ jobs:
       - name: Smoke start every package
         shell: bash
         run: |
-          set -e
+          set -eo pipefail
           mkdir -p /tmp/smoke-img
           touch smoke.txt
-          smoke() { scripts/desktop/smoke-start.sh "$1" | tee -a smoke.txt; }
+          # Every package's own smoke must pass: the xvfb/dbus runs are nested
+          # bash shells whose pipefail is their own — without it tee masks a
+          # launcher failure — and the count below requires one SMOKE line per
+          # run, not just any.
+          smokes=0
+          smoke() { smokes=$((smokes + 1)); scripts/desktop/smoke-start.sh "$1" | tee -a smoke.txt; }
+          xsmoke() { smokes=$((smokes + 1)); xvfb-run -a dbus-run-session bash -eo pipefail -c 'scripts/desktop/smoke-start.sh "$1" | tee -a smoke.txt' _ "$1"; }
           case "${{ matrix.target }}" in
             linux-*)
               sudo dpkg -i dist/*.deb
-              xvfb-run -a dbus-run-session bash -c 'scripts/desktop/smoke-start.sh /opt/neutrodyne | tee -a smoke.txt'
+              xsmoke /opt/neutrodyne
               rpm2cpio dist/*.rpm | (cd /tmp/smoke-img && cpio -idm --quiet)
-              xvfb-run -a dbus-run-session bash -c 'scripts/desktop/smoke-start.sh /tmp/smoke-img/opt/neutrodyne | tee -a smoke.txt'
+              xsmoke /tmp/smoke-img/opt/neutrodyne
               tar -xzf dist/*.tar.gz -C /tmp/smoke-img
-              xvfb-run -a dbus-run-session bash -c 'scripts/desktop/smoke-start.sh /tmp/smoke-img/Neutrodyne | tee -a smoke.txt' ;;
+              xsmoke /tmp/smoke-img/Neutrodyne ;;
             windows-x64)
               powershell -NoProfile -Command "Start-Process msiexec -Wait -ArgumentList '/i','$(cygpath -w "$(pwd)/dist/"*.msi)','/qn','/norestart'"
               smoke "$LOCALAPPDATA/Programs/Neutrodyne"
@@ -385,7 +391,9 @@ jobs:
               ditto -x -k dist/*.zip /tmp/smoke-img
               smoke /tmp/smoke-img/Neutrodyne.app ;;
           esac
-          grep -c '^SMOKE {' smoke.txt
+          got="$(grep -c '^SMOKE {' smoke.txt || true)"
+          [ "$got" -eq "$smokes" ] || { echo "::error::$smokes package smokes ran but smoke.txt holds $got SMOKE lines"; exit 1; }
+          echo "$got/$smokes package smokes produced a SMOKE line"
       - name: Image and runtime checks
         shell: bash
         run: |

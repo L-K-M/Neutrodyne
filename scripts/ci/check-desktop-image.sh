@@ -198,14 +198,62 @@ check_ffmpeg() {
 }
 
 # --- rule 4: every JAR is on the Licensee-checked runtime classpath -------------
-# Compose renames every jar to <name>-<md5>.jar where the md5 is rendered per byte
-# with %x (leading zeros dropped: md5 ...b2 03 3e... renders ...b233e...). An image
-# jar proves its identity when its md5 — in either rendering — matches its suffix
-# and <name>.jar is on the manifest (the Licensee-checked list written by
-# :desktopApp:writeDesktopRuntimeClasspath). A jar without a matching suffix must
-# hash-identically match its manifest row.
+# The manifest (:desktopApp:writeDesktopRuntimeClasspath) holds one
+# `sha256  <image name>` row per classpath file, the image name being Compose's
+# mangle <base>-<md5>.jar (11 Image scan rules). An image jar passes when a row
+# names it exactly and its sha256 equals the row's — the mangle's md5 needs no
+# separate check because a same-named jar with other bytes would fail the SHA.
+#
+# The one documented off-manifest jar is Compose's skiko stub (11 Image scan
+# rules): Compose ships the native-bearing skiko-awt-runtime-<os>-<arch>-<ver>
+# classpath JAR as a stub named after the stub's own md5 and extracts the
+# libskiko native beside it with a .sha256 sidecar. is_skiko_stub constrains the
+# exemption to exactly that shape — any other skiko-named jar is a violation.
+is_skiko_stub() {
+    local path="$1" manifest="$2" base dir padded unpadded i byte rest os arch so
+    base="${path##*/}"
+    case "$base" in
+        skiko-awt-runtime-*.jar) ;;
+        *) return 1 ;;
+    esac
+    padded="$(md5_of "$path")"
+    unpadded=""
+    for ((i = 0; i < ${#padded}; i += 2)); do
+        byte="${padded:i:2}"
+        unpadded+="${byte#0}"
+    done
+    case "$base" in
+        *-"$unpadded".jar | *-"$padded".jar) ;;
+        *) return 1 ;;
+    esac
+    # rest is <os>-<arch>-<ver>-<md5>.jar; the manifest must carry the real
+    # classpath jar for the same os-arch (its own md5 makes the names differ).
+    rest="${base#skiko-awt-runtime-}"
+    case "$rest" in
+        *-*-*) ;;
+        *) return 1 ;;
+    esac
+    os="${rest%%-*}"
+    arch="${rest#*-}"
+    arch="${arch%%-*}"
+    os="$(printf '%s' "$os" | sed 's/[].[^$*\/]/\\&/g')"
+    arch="$(printf '%s' "$arch" | sed 's/[].[^$*\/]/\\&/g')"
+    grep -qE "  skiko-awt-runtime-${os}-${arch}-[^ ]+\.jar\$" "$manifest" || return 1
+    # The native lands beside the stub with a .sha256 sidecar pinning its bytes.
+    dir="${path%/*}"
+    local found=0 ok=1
+    for so in "$dir"/libskiko-*.so "$dir"/libskiko-*.dylib "$dir"/skiko-*.dll; do
+        [ -f "$so" ] || continue
+        found=1
+        if [ ! -f "$so.sha256" ] || [ "$(head -1 "$so.sha256" | cut -d' ' -f1)" != "$(sha256 "$so")" ]; then
+            ok=0
+        fi
+    done
+    [ "$found" = 1 ] && [ "$ok" = 1 ]
+}
+
 check_jars() {
-    local img="$1" manifest="$2" path hash base want padded unpadded i byte
+    local img="$1" manifest="$2" path hash base
     if [ ! -f "$manifest" ]; then
         fail "runtime-classpath manifest missing: $manifest (run :desktopApp:createDistributable first)"
         return
@@ -215,22 +263,15 @@ check_jars() {
             */runtime/*) continue ;; # the JDK's own jars (jrt-fs.jar) are not classpath jars
         esac
         base="${path##*/}"
-        padded="$(md5_of "$path")"
-        unpadded=""
-        for ((i = 0; i < ${#padded}; i += 2)); do
-            byte="${padded:i:2}"
-            unpadded+="${byte#0}"
-        done
-        case "$base" in
-            *-"$unpadded".jar) want="${base%-"$unpadded".jar}.jar" ;;
-            *-"$padded".jar) want="${base%-"$padded".jar}.jar" ;;
-            *) want="$base" ;;
-        esac
-        hash="$(grep -E "  $(printf '%s' "$want" | sed 's/[].[^$*\/]/\\&/g')\$" "$manifest" | cut -d' ' -f1)"
-        if [ -z "$hash" ]; then
+        # || true: a name with no row must reach the fail branch, not abort on
+        # grep's exit status under pipefail.
+        hash="$(grep -E "  $(printf '%s' "$base" | sed 's/[].[^$*\/]/\\&/g')\$" "$manifest" | cut -d' ' -f1 || true)"
+        if [ -n "$hash" ]; then
+            if [ "$(sha256 "$path")" != "$hash" ]; then
+                fail "JAR differs from the Licensee-checked classpath artifact: ${path#"$img"/}"
+            fi
+        elif ! is_skiko_stub "$path" "$manifest"; then
             fail "JAR not on the Licensee-checked runtime classpath: ${path#"$img"/}"
-        elif [ "$want" = "$base" ] && [ "$(sha256 "$path")" != "$hash" ]; then
-            fail "JAR differs from the Licensee-checked classpath artifact: ${path#"$img"/}"
         fi
     done < <(find "$img" -name '*.jar' -print0)
 }
