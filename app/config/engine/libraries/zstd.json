@@ -5,7 +5,7 @@
   "website": "https://github.com/facebook/zstd",
   "developers": [],
   "licenses": [
-    "BSD-3-Clause"
+    "bsd-3-clause-zstd"
   ],
   "artifactVersion": "1.5.7",
   "tag": "bundled"

@@ -21,9 +21,9 @@ internal class DesktopPlatformInfo(
 
     override val userAgentPlatform: String =
         when (AppDirs.DesktopOs.current(osName)) {
+            // os.name already reads "Windows 11"
             AppDirs.DesktopOs.WINDOWS -> "$osName; ${archLabel()}"
 
-            // os.name already reads "Windows 11"
             AppDirs.DesktopOs.MACOS -> "macOS $osVersion; ${archLabel()}"
 
             AppDirs.DesktopOs.LINUX -> "Linux; ${archLabel()}"

@@ -11,10 +11,21 @@ import java.net.InetAddress
  * name handled separately.
  */
 internal object IpLiterals {
+    private const val IPV4_OCTETS = 4
+    private const val MAX_OCTET = 255
+
     fun parse(text: String): InetAddress? {
         val value = text.trim().removePrefix("[").removeSuffix("]")
         if (value.isEmpty()) return null
-        val isIpv4 = value.count { it == '.' } == 3 && value.all { it.isDigit() || it == '.' }
+        // IPv4 must validate strictly first: getByName retries a malformed IPv4-shaped string
+        // ("999.1.2.3") as a hostname, which is a blocking resolver lookup. Malformed IPv6 is
+        // safe to delegate: the JDK throws on any string containing ':' without looking it up.
+        val octets = value.split('.')
+        val isIpv4 =
+            octets.size == IPV4_OCTETS &&
+                octets.all { octet ->
+                    octet.length in 1..3 && octet.all { it in '0'..'9' } && octet.toInt() <= MAX_OCTET
+                }
         val isIpv6 = value.contains(':') && value.all { it.isHexDigit() || it == ':' || it == '.' }
         if (!isIpv4 && !isIpv6) return null
         return try {

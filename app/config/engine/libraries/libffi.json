@@ -5,7 +5,7 @@
   "website": "https://sourceware.org/libffi/",
   "developers": [],
   "licenses": [
-    "MIT"
+    "mit-libffi"
   ],
   "artifactVersion": "3.4.4",
   "tag": "bundled"

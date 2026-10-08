@@ -5,7 +5,7 @@
   "website": "https://github.com/hacl-star/hacl-star",
   "developers": [],
   "licenses": [
-    "MIT"
+    "mit-hacl-star"
   ],
   "artifactVersion": "bundled with CPython 3.14.0",
   "tag": "bundled"

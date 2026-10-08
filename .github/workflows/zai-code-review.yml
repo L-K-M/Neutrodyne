@@ -84,6 +84,11 @@ jobs:
           # the action then retries with. Bigger chunks would hit that more
           # often, not less.
           MAX_CHUNK_CHARS: 25000
+          # The action's defaults plus test fixtures and Room's exported
+          # schemas: data and generated JSON, not code. The M1a feed parser
+          # alone carries 10 MB of golden fixtures, which would otherwise be
+          # most of its chunks.
+          EXCLUDE_PATTERNS: "*.lock,package-lock.json,yarn.lock,pnpm-lock.yaml,**/src/test/resources/**,**/src/*Test/resources/**,**/schemas/**/*.json"
           ZAI_REVIEWER_NAME: GLM 5.3 Code Review
           GITHUB_TOKEN: ${{ github.token }}
 

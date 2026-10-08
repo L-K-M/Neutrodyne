@@ -166,8 +166,15 @@ class ServerConfigTest {
     }
 
     @Test
+    fun `a comma-space trusted-proxies list still parses`() {
+        // IpCidr.parse trims each entry; a plain split(',') leaves the space in place.
+        val config = loadValidConfig(env = mapOf(ServerEnv.TRUSTED_PROXIES to "10.0.0.1/32, 10.0.0.2/32"))
+        assertEquals(2, config.trustedProxies.size)
+    }
+
+    @Test
     fun `properties files parse with comments`() {
-        val file = Files.createTempFile("server", ".properties")
+        val file = Files.createTempFile("server", ".properties").also { it.toFile().deleteOnExit() }
         file.writeText(
             """
             # a comment

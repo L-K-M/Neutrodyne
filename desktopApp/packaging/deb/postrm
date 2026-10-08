@@ -14,7 +14,10 @@ APPLICATIONS_DIR="/usr/share/applications"
 ICONS_DIR="/usr/share/icons/hicolor"
 
 rm -f "$APPLICATIONS_DIR/ch.lkmc.neutrodyne.desktop"
-find "$ICONS_DIR" -type f -name 'neutrodyne.png' -exec rm -f {} +
+# An absent hicolor tree must not fail the removal under set -e.
+if [ -d "$ICONS_DIR" ]; then
+    find "$ICONS_DIR" -type f -name 'neutrodyne.png' -exec rm -f {} +
+fi
 
 # Optional caches; absent tools are not an error.
 command -v update-desktop-database >/dev/null 2>&1 &&

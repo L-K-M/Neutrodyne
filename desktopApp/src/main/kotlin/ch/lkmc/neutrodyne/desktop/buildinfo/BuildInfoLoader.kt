@@ -25,8 +25,9 @@ import java.util.Properties
  *   crash email dialog (11 Crash files and the email dialog, pending with the window), which does
  *   not read it through [BuildInfo].
  *
- * A missing resource (or a missing single key where the JVM can answer) degrades to the `DEV`
- * defaults instead of failing the start-up.
+ * A missing resource (or a missing single key the JVM can answer) degrades to the `DEV`
+ * defaults; an unmappable value — an unknown wire string, or a host `os.arch` outside
+ * x64/ARM64 — fails fast rather than report a false build.
  */
 internal object BuildInfoLoader {
     private const val RESOURCE_PATH = "build-info.properties"
@@ -60,10 +61,14 @@ internal object BuildInfoLoader {
     /** Loads the real classpath resource and derives the rest from this JVM. */
     fun load(): BuildInfo = load(resourceContent(), JVM_HOST)
 
-    /** Pure form for tests: [resource] is the properties file's text, `null` when absent. */
+    /**
+     * Pure form for tests: [resource] is the properties file's text, `null` when absent.
+     * [host] has no default — a test that needs host answers passes them explicitly, so no
+     * assertion ever depends on the CI runner's JVM.
+     */
     fun load(
         resource: String?,
-        host: Host = JVM_HOST,
+        host: Host,
     ): BuildInfo {
         val properties = Properties()
         if (resource != null) {

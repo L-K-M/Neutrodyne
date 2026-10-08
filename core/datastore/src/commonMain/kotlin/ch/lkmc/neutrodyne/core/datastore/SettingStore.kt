@@ -5,12 +5,16 @@ package ch.lkmc.neutrodyne.core.datastore
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import okio.IOException
 
 /**
  * Typed access to one preferences file, shared by [SettingsStore] (portable) and
@@ -50,13 +54,13 @@ internal class SettingStoreImpl(
     private val dataStore: DataStore<Preferences>,
 ) : SettingStore {
     override fun <T : Any> observe(key: SettingKey<T>): Flow<T> =
-        dataStore.data
+        readablePreferences()
             .map { preferences -> SettingPreferences.read(preferences, key) }
             .distinctUntilChanged()
 
     override suspend fun <T : Any> get(key: SettingKey<T>): T {
         requireFile(key)
-        return SettingPreferences.read(dataStore.data.first(), key)
+        return SettingPreferences.read(readablePreferences().first(), key)
     }
 
     override suspend fun <T : Any> set(
@@ -86,9 +90,26 @@ internal class SettingStoreImpl(
         dataStore.edit { preferences -> SettingPreferences.remove(preferences, key) }
     }
 
+    /**
+     * The file's preferences, with an expected read failure — an I/O error, or a corrupt file whose
+     * replacement failed (DataStore rethrows then, e.g. on a full disk) — read as an empty file, so
+     * every key reads its default and nothing is overwritten. The flow then completes; a later
+     * collection (the next lifecycle start) reads the file again. Bugs and cancellation propagate.
+     */
+    private fun readablePreferences(): Flow<Preferences> =
+        dataStore.data.catch { failure ->
+            if (failure !is IOException) throw failure
+            Log.w(TAG, failure) { "${file.storeName} is unreadable; reading defaults" }
+            emit(emptyPreferences())
+        }
+
     private fun requireFile(key: SettingKey<*>) {
         require(key.file == file) {
             "'${key.name}' belongs to ${key.file.storeName}, not ${file.storeName}"
         }
+    }
+
+    private companion object {
+        const val TAG = "Settings"
     }
 }

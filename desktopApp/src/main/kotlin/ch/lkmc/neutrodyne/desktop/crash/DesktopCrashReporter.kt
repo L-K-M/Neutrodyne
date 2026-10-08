@@ -38,6 +38,7 @@ class DesktopCrashReporter(
     private val recentLogs: RecentLogBuffer,
     private val processStartTimeMs: Long = ManagementFactory.getRuntimeMXBean().startTime,
     private val mainThread: Thread = Thread.currentThread(),
+    private val processExit: (Int) -> Unit = { code -> Runtime.getRuntime().halt(code) },
 ) : CrashReporter,
     CrashContext {
     override val isAvailable: Boolean = false
@@ -68,9 +69,11 @@ class DesktopCrashReporter(
 
     /**
      * One uncaught exception: the trace goes to stderr, a crash file is written, and a
-     * main-thread or EDT exception additionally ends the process (11 Shell failure modes — the
-     * "has to close" dialog and the quit through `ShutdownCoordinator` arrive with the window).
-     * Background threads continue; at most [MAX_BACKGROUND_FILES] such files per session.
+     * main-thread or EDT exception additionally ends the process through [processExit]
+     * (11 Shell failure modes — the "has to close" dialog and the quit through
+     * `ShutdownCoordinator` arrive with the window milestone; until then `halt` is the honest
+     * end of a session that cannot continue). Background threads continue; at most
+     * [MAX_BACKGROUND_FILES] such files per session.
      */
     fun recordUnhandled(
         thread: Thread,
@@ -85,6 +88,11 @@ class DesktopCrashReporter(
             return
         }
         writeCrashFile(t, threadName = thread.name, where = null)
+        if (fatal) {
+            // A dead main/EDT thread leaves a zombie process behind: AWT's own threads keep
+            // it alive without a working window. End it after the file is on disk.
+            processExit(FATAL_EXIT_CODE)
+        }
     }
 
     /**
@@ -188,6 +196,9 @@ class DesktopCrashReporter(
         val FILE_TIMESTAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
 
         const val AWT_EDT_PREFIX = "AWT-EventQueue"
+
+        /** A fatal crash exits unclean: `session.json` keeps `cleanExit = false`. */
+        const val FATAL_EXIT_CODE = 1
 
         /** 11: at most 3 background-thread crash files per session. */
         const val MAX_BACKGROUND_FILES = 3

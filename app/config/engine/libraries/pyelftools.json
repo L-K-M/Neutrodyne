@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:pyelftools",
+  "name": "pyelftools",
+  "description": "ELF/DWARF parser vendored by Chaquopy as java/_vendor/elftools inside assets/chaquopy/bootstrap.imy (com.chaquo.python.runtime:bootstrap:17.1.0); public-domain (Unlicense) dedication by Eli Bendersky and contributors.",
+  "website": "https://github.com/eliben/pyelftools",
+  "developers": [],
+  "licenses": [
+    "unlicense-pyelftools"
+  ],
+  "artifactVersion": "0.26",
+  "tag": "bundled"
+}

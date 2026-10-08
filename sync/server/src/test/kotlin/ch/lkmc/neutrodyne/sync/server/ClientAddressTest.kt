@@ -80,6 +80,48 @@ class ClientAddressTest {
     }
 
     @Test
+    fun `a loopback hop inside the chain is skipped like a trusted proxy`() {
+        // N13's loopback-is-trusted rule applies inside the chain too: two local proxies in a
+        // row leave a trailing loopback entry that is not a configured trusted proxy.
+        val resolved =
+            ClientAddress(emptyList()).resolve(
+                peerHost = "127.0.0.1",
+                forwardedFor = listOf("9.9.9.9, 127.0.0.1"),
+                forwardedProto = listOf("https"),
+            )
+        assertEquals("9.9.9.9", resolved.address)
+        assertTrue(resolved.secureTransport)
+    }
+
+    @Test
+    fun `an unparseable chain entry falls back to the peer`() {
+        // Garbage in the right-most untrusted position is never reported raw; looking further
+        // left would trust client-supplied entries.
+        val resolved =
+            ClientAddress(emptyList()).resolve(
+                peerHost = "127.0.0.1",
+                forwardedFor = listOf("9.9.9.9, unknown"),
+                forwardedProto = listOf("https"),
+            )
+        assertEquals("127.0.0.1", resolved.address)
+        assertTrue(resolved.secureTransport)
+    }
+
+    @Test
+    fun `an IPv4-mapped IPv6 loopback peer is a trusted proxy`() {
+        // Dual-stack sockets can report the peer as ::ffff:a.b.c.d; the JDK un-maps it, so the
+        // N13 loopback rule still holds.
+        val resolved =
+            ClientAddress(emptyList()).resolve(
+                peerHost = "::ffff:127.0.0.1",
+                forwardedFor = listOf("203.0.113.7"),
+                forwardedProto = listOf("https"),
+            )
+        assertEquals("203.0.113.7", resolved.address)
+        assertTrue(resolved.secureTransport)
+    }
+
+    @Test
     fun `an unparseable peer is treated as untrusted`() {
         val resolved =
             ClientAddress(IpCidr.parseAll("127.0.0.1/32")).resolve(

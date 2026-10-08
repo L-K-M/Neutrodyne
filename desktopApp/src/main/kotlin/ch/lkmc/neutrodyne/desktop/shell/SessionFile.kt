@@ -25,7 +25,7 @@ data class SessionState(
 
 /** Reads and atomically writes the session file in [stateDir]. */
 internal object SessionFile {
-    private const val FILE_NAME = "session.json"
+    internal const val FILE_NAME = "session.json"
 
     fun read(stateDir: Path): SessionState? {
         val file = stateDir.resolve(FILE_NAME)

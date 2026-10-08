@@ -3,8 +3,10 @@ package ch.lkmc.neutrodyne.desktop.shell
 
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.InetAddress
@@ -63,9 +65,13 @@ class InstanceHandshake(
                 while (true) {
                     val socket = runInterruptible(Dispatchers.IO) { server.accept() }
                     try {
-                        handle(socket, token, onHandoff)
-                    } catch (e: IOException) {
-                        // One bad connection never stops the server.
+                        // The blocking reads, the reply and the callback run on IO, never on
+                        // the caller's lane — connections stay sequential, order is kept.
+                        withContext(Dispatchers.IO) { handle(socket, token, onHandoff) }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        // One bad connection (or a crashing callback) never stops the server.
                         Log.w(TAG, e) { "hand-off connection failed" }
                     } finally {
                         runCatching { socket.close() }

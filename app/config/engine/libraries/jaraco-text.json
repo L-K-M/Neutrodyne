@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:jaraco-text",
+  "name": "jaraco.text",
+  "description": "Vendored in setuptools' pkg_resources/_vendor inside assets/chaquopy/bootstrap.imy (com.chaquo.python.runtime:bootstrap:17.1.0). Copyright Jason R. Coombs.",
+  "website": "https://github.com/jaraco/jaraco.text",
+  "developers": [],
+  "licenses": [
+    "mit-jaraco"
+  ],
+  "artifactVersion": "3.7.0",
+  "tag": "bundled"
+}

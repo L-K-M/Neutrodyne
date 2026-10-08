@@ -72,6 +72,7 @@ APPLICATION_DIRECTORY
 # The same desktop integration the DEB's maintainer scripts perform (11 Links and files
 # from the OS): the frozen desktop entry and the hicolor icons ship inside the image.
 %post
+set -e
 APP_DIR="APPLICATION_DIRECTORY"
 INTEGRATION_DIR="$APP_DIR/lib/app/resources/desktop-integration"
 APPLICATIONS_DIR="/usr/share/applications"
@@ -80,7 +81,8 @@ ICONS_DIR="/usr/share/icons/hicolor"
 install -D -m 0644 "$INTEGRATION_DIR/ch.lkmc.neutrodyne.desktop" \
     "$APPLICATIONS_DIR/ch.lkmc.neutrodyne.desktop"
 
-find "$INTEGRATION_DIR/hicolor" -type f -name '*.png' | while IFS= read -r icon; do
+# The install set matches what %postun removes: every icon is installed as neutrodyne.png.
+find "$INTEGRATION_DIR/hicolor" -type f -name 'neutrodyne.png' | while IFS= read -r icon; do
     rel="${icon#"$INTEGRATION_DIR/hicolor/"}"
     install -D -m 0644 "$icon" "$ICONS_DIR/$rel"
 done
@@ -95,6 +97,7 @@ exit 0
 # %postun's $1 is the number of packages left installed after this run: remove the
 # integration only on a real erase (0), never on an upgrade.
 %postun
+set -e
 if [ "$1" != "0" ]; then
     exit 0
 fi

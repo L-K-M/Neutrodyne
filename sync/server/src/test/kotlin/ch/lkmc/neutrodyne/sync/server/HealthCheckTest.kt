@@ -5,7 +5,6 @@ import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
-import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -43,7 +42,7 @@ class HealthCheckTest {
 
     @Test
     fun `readiness fails when the data directory is missing`() {
-        val missing = Files.createTempDirectory("neutrodyne-server-test").resolve("missing")
+        val missing = tempDataDir().resolve("missing")
         val routes = HealthRoutes(missing)
         assertFalse(routes.isReady())
     }

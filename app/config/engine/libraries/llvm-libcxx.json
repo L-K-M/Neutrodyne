@@ -1,7 +1,7 @@
 {
   "uniqueId": "neutrodyne:llvm-libcxx",
   "name": "LLVM libc++",
-  "description": "Statically linked into Chaquopy's JNI libraries",
+  "description": "Statically linked into Chaquopy's JNI libraries. Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.",
   "website": "https://libcxx.llvm.org",
   "developers": [],
   "licenses": [

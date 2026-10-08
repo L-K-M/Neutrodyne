@@ -72,6 +72,41 @@ class RollingFileSinkTest {
     }
 
     @Test
+    fun `a failed writer heals on the next log call`() {
+        // A logs directory whose parent is a regular file can never be created, so the
+        // sink starts dead; construction and logging must not throw.
+        val blocker = Files.createTempDirectory("nd-logs-blocked").resolve("file")
+        Files.writeString(blocker, "x")
+        val blockedDir = blocker.resolve("logs")
+
+        val sink = RollingFileSink(blockedDir, LogLevel.DEBUG, maxFileBytes = LARGE_CAP, timeSource = { fixedInstant })
+        sink.log(LogLevel.INFO, "T", "dropped while the directory is blocked")
+        assertThat(Files.exists(blockedDir)).isFalse()
+
+        // Once the path is usable, the next line opens a fresh writer instead of dropping.
+        Files.delete(blocker)
+        sink.log(LogLevel.INFO, "T", "healed")
+        sink.close()
+        assertThat(Files.readString(blockedDir.resolve(RollingFileSink.CURRENT_NAME))).contains("healed")
+    }
+
+    @Test
+    fun `close is final`() {
+        val sink =
+            RollingFileSink(
+                logsDir,
+                minLevel = LogLevel.DEBUG,
+                maxFileBytes = LARGE_CAP,
+                timeSource = { fixedInstant },
+            )
+        sink.use { it.log(LogLevel.INFO, "T", "before") }
+
+        sink.log(LogLevel.INFO, "T", "after close")
+        assertThat(Files.readString(logsDir.resolve(RollingFileSink.CURRENT_NAME)))
+            .doesNotContain("after close")
+    }
+
+    @Test
     fun `throwable stacks are written redacted`() {
         val sink =
             RollingFileSink(

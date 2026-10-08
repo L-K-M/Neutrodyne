@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:setuptools",
+  "name": "setuptools (pkg_resources)",
+  "description": "pkg_resources package inside assets/chaquopy/bootstrap.imy (com.chaquo.python.runtime:bootstrap:17.1.0); by the Python Packaging Authority (its licence file carries no copyright line).",
+  "website": "https://github.com/pypa/setuptools",
+  "developers": [],
+  "licenses": [
+    "mit-setuptools"
+  ],
+  "artifactVersion": "68.2.2",
+  "tag": "bundled"
+}

@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.crash
 
 import android.app.Application
 import ch.lkmc.neutrodyne.BuildConfig
+import ch.lkmc.neutrodyne.ProcessStartProbe
 import ch.lkmc.neutrodyne.R
 import org.acra.ACRA
 import org.acra.ReportField
@@ -46,6 +47,7 @@ internal fun installAcra(
 ) {
     ACRA.log = RedactingAcraLog // before init: ACRA logs the original exception before redaction runs
     app.initAcra(acraConfiguration(app, mailTo))
+    ProcessStartProbe.record(ProcessStartProbe.Event.ACRA_INSTALLED)
 }
 
 private fun acraConfiguration(

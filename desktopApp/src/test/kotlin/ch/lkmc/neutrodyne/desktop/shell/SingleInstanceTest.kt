@@ -5,6 +5,7 @@ import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
@@ -20,6 +21,8 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.nio.file.Files
 import java.security.SecureRandom
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
@@ -181,6 +184,84 @@ class SingleInstanceTest {
             serveJob.cancelAndJoin()
             owner.close()
             scope.cancel()
+        }
+
+    @Test
+    fun `a throwing hand-off callback never stops the serve loop`() =
+        runBlocking {
+            val owner = SingleInstanceLock(dirs)
+            assertThat(owner.tryAcquire()).isEqualTo(SingleInstanceLock.Acquire.Acquired)
+
+            var calls = 0
+            val received = Channel<HandoffRequest>(Channel.UNLIMITED)
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            val serveJob =
+                scope.launch {
+                    fastHandshake().serve {
+                        calls++
+                        if (calls == 1) throw RuntimeException("the hand-off callback blew up")
+                        received.send(it)
+                    }
+                }
+
+            awaitPortFile()
+            val client = fastHandshake(attempts = 50, retryDelayMs = 20, replyTimeoutMs = 1_000)
+            val request =
+                HandoffRequest.fromLaunchArgs(
+                    token = InstanceHandshake.readToken(dirs) ?: "",
+                    args = listOf("feed:a"),
+                    cwd = "/w",
+                )
+            // The reply is sent before the callback runs, so the crashing call still answers.
+            assertThat(client.send(request)).isEqualTo(HandoffOutcome.Delivered)
+            assertThat(client.send(request)).isEqualTo(HandoffOutcome.Delivered)
+            assertThat(withTimeout(5.seconds) { received.receive() }.args).containsExactly("feed:a")
+
+            serveJob.cancelAndJoin()
+            owner.close()
+            scope.cancel()
+        }
+
+    @Test
+    fun `the hand-off callback does not run on the caller's thread`() =
+        runBlocking {
+            val owner = SingleInstanceLock(dirs)
+            assertThat(owner.tryAcquire()).isEqualTo(SingleInstanceLock.Acquire.Acquired)
+
+            // A single-threaded caller lane, like the UI's: blocking hand-off work must
+            // never occupy it.
+            val lane =
+                Executors.newSingleThreadExecutor { task ->
+                    Thread(task, "caller-lane").apply { isDaemon = true }
+                }
+            val callerThread = lane.submit(Callable { Thread.currentThread() }).get()
+            var callbackThread: Thread? = null
+            val received = Channel<HandoffRequest>(Channel.UNLIMITED)
+            val scope = CoroutineScope(SupervisorJob() + lane.asCoroutineDispatcher())
+            val serveJob =
+                scope.launch {
+                    fastHandshake().serve {
+                        callbackThread = Thread.currentThread()
+                        received.send(it)
+                    }
+                }
+
+            awaitPortFile()
+            val client = fastHandshake(attempts = 50, retryDelayMs = 20, replyTimeoutMs = 1_000)
+            val request =
+                HandoffRequest.fromLaunchArgs(
+                    token = InstanceHandshake.readToken(dirs) ?: "",
+                    args = listOf("feed:a"),
+                    cwd = "/w",
+                )
+            assertThat(client.send(request)).isEqualTo(HandoffOutcome.Delivered)
+            withTimeout(5.seconds) { received.receive() }
+            assertThat(callbackThread).isNotSameInstanceAs(callerThread)
+
+            serveJob.cancelAndJoin()
+            owner.close()
+            scope.cancel()
+            lane.shutdown()
         }
 
     @Test

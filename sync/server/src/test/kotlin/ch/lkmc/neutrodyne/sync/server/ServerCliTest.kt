@@ -109,8 +109,20 @@ class ServerCliTest {
     }
 
     @Test
+    fun `a malformed properties file is a one-line configuration error`() {
+        // Properties.load throws IllegalArgumentException on a bad \uXXXX escape; it must come
+        // out as the usual one-line configuration error, not a stack trace.
+        val properties = Files.createTempFile("server", ".properties").also { it.toFile().deleteOnExit() }
+        properties.writeText("data.dir=\\uZZZZ\n")
+        val (exit, captured) = run(listOf("serve", "--config", properties.toString()))
+        assertEquals(ExitCodes.ERROR, exit)
+        assertTrue(captured.errText().contains("cannot parse"), captured.errText())
+        assertEquals(1, captured.errText().lines().count { it.isNotBlank() }, captured.errText())
+    }
+
+    @Test
     fun `serve reads a properties file and the environment overrides it`() {
-        val properties = Files.createTempFile("server", ".properties")
+        val properties = Files.createTempFile("server", ".properties").also { it.toFile().deleteOnExit() }
         properties.writeText(
             """
             # reference-style server.properties
@@ -146,5 +158,20 @@ class ServerCliTest {
             )
         assertEquals(ExitCodes.ERROR, cli.run())
         assertTrue(captured.errText().contains("port already in use"), captured.errText())
+    }
+
+    @Test
+    fun `a starter failure without a message still names the exception`() {
+        val captured = Captured()
+        val cli =
+            ServerCli(
+                arrayOf("serve"),
+                emptyMap(),
+                serverStarter = { throw RuntimeException() },
+                out = captured.outStream,
+                err = captured.errStream,
+            )
+        assertEquals(ExitCodes.ERROR, cli.run())
+        assertTrue(captured.errText().contains("serve failed: java.lang.RuntimeException"), captured.errText())
     }
 }

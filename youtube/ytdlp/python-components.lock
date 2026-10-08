@@ -66,7 +66,7 @@ aboutLibrariesId = "zstd"
 name = "xz (liblzma)"
 version = "5.4.6"            # _lzma; per the source-deps pin (xz-5.4.6-1), string confirmed in the .so
 origin = "maven:com.chaquo.python:target:3.14.0-0"
-licence = "0BSD"
+licence = "LicenseRef-PublicDomain"   # xz 5.4.6's COPYING: "liblzma is in the public domain"
 kind = "native"
 aboutLibrariesId = "xz"
 
@@ -124,7 +124,7 @@ aboutLibrariesId = "unicode-ucd"
 # (details in third_party/chaquopy-maven/README.md and 01 S7).
 
 [[component]]
-name = "Chaquopy runtime (Java, JNI bridge, bootstrap)"
+name = "Chaquopy runtime (Java, JNI bridge, bootstrap host)"
 version = "17.0.0"           # payload bytes of the released 17.0.0 artifacts, republished as :17.1.0
 origin = "maven:com.chaquo.python.runtime:chaquopy_java:17.1.0 (third_party/chaquopy-maven)"
 licence = "MIT"
@@ -146,6 +146,112 @@ origin = "maven:com.chaquo.python:gradle:17.1.0 (bundled cacert.pem)"
 licence = "MPL-2.0"
 kind = "data"                # MPL-2.0 is accepted only for kind = "data", unmodified
 aboutLibrariesId = "certifi-cacert"
+
+# Third-party Python code inside bootstrap.imy (assets/chaquopy/bootstrap.imy =
+# com.chaquo.python.runtime:bootstrap:17.1.0, classifier 3.14, third_party/chaquopy-maven):
+# java/_vendor/elftools (pyelftools, which vendors construct) and pkg_resources (setuptools) with
+# setuptools' pkg_resources/_vendor wheel set. Inventoried 2026-10-08 — the archive's own
+# *-dist-info directories pin pyelftools 0.26 and setuptools 68.2.2; the vendored wheel versions
+# are setuptools v68.2.2's pkg_resources/_vendor/vendored.txt pins and dist-info directories
+# (jaraco.context/functools and more_itertools arrive transitively, not in vendored.txt);
+# construct 2.06 is __version__ in the vendored elftools/construct/__init__.
+
+[[component]]
+name = "pyelftools (java/_vendor/elftools)"
+version = "0.26"             # java/_vendor/pyelftools-0.26.dist-info inside bootstrap.imy
+origin = "maven:com.chaquo.python.runtime:bootstrap:17.1.0 (third_party/chaquopy-maven)"
+licence = "Unlicense"        # its LICENSE.txt is the Unlicense public-domain dedication
+kind = "python"
+aboutLibrariesId = "pyelftools"
+
+[[component]]
+name = "Construct (vendored inside pyelftools' elftools/construct)"
+version = "2.06"
+origin = "maven:com.chaquo.python.runtime:bootstrap:17.1.0 (third_party/chaquopy-maven)"
+licence = "MIT"
+kind = "python"
+aboutLibrariesId = "construct"
+
+[[component]]
+name = "setuptools (pkg_resources)"
+version = "68.2.2"           # setuptools-68.2.2.dist-info inside bootstrap.imy
+origin = "maven:com.chaquo.python.runtime:bootstrap:17.1.0 (third_party/chaquopy-maven)"
+licence = "MIT"
+kind = "python"
+aboutLibrariesId = "setuptools"
+
+[[component]]
+name = "importlib_resources (pkg_resources/_vendor)"
+version = "5.10.2"           # vendored.txt pin
+origin = "maven:com.chaquo.python.runtime:bootstrap:17.1.0 (third_party/chaquopy-maven)"
+licence = "Apache-2.0"
+kind = "python"
+aboutLibrariesId = "importlib-resources"
+
+[[component]]
+name = "jaraco.context (pkg_resources/_vendor)"
+version = "4.3.0"            # vendored transitively; dist-info at setuptools tag v68.2.2
+origin = "maven:com.chaquo.python.runtime:bootstrap:17.1.0 (third_party/chaquopy-maven)"
+licence = "MIT"
+kind = "python"
+aboutLibrariesId = "jaraco-context"
+
+[[component]]
+name = "jaraco.functools (pkg_resources/_vendor)"
+version = "3.6.0"            # vendored transitively; dist-info at setuptools tag v68.2.2
+origin = "maven:com.chaquo.python.runtime:bootstrap:17.1.0 (third_party/chaquopy-maven)"
+licence = "MIT"
+kind = "python"
+aboutLibrariesId = "jaraco-functools"
+
+[[component]]
+name = "jaraco.text (pkg_resources/_vendor)"
+version = "3.7.0"            # vendored.txt pin
+origin = "maven:com.chaquo.python.runtime:bootstrap:17.1.0 (third_party/chaquopy-maven)"
+licence = "MIT"
+kind = "python"
+aboutLibrariesId = "jaraco-text"
+
+[[component]]
+name = "more-itertools (pkg_resources/_vendor)"
+version = "9.1.0"            # vendored transitively; dist-info at setuptools tag v68.2.2
+origin = "maven:com.chaquo.python.runtime:bootstrap:17.1.0 (third_party/chaquopy-maven)"
+licence = "MIT"
+kind = "python"
+aboutLibrariesId = "more-itertools"
+
+[[component]]
+name = "packaging (pkg_resources/_vendor)"
+version = "23.1"             # vendored.txt pin
+origin = "maven:com.chaquo.python.runtime:bootstrap:17.1.0 (third_party/chaquopy-maven)"
+licence = "Apache-2.0 OR BSD-2-Clause"
+elected = "BSD-2-Clause"     # packaging's LICENSE offers either; BSD-2-Clause carries the copyright line
+kind = "python"
+aboutLibrariesId = "packaging"
+
+[[component]]
+name = "platformdirs (pkg_resources/_vendor)"
+version = "2.6.2"            # vendored.txt pin
+origin = "maven:com.chaquo.python.runtime:bootstrap:17.1.0 (third_party/chaquopy-maven)"
+licence = "MIT"
+kind = "python"
+aboutLibrariesId = "platformdirs"
+
+[[component]]
+name = "typing_extensions (pkg_resources/_vendor)"
+version = "4.4.0"            # vendored.txt pin
+origin = "maven:com.chaquo.python.runtime:bootstrap:17.1.0 (third_party/chaquopy-maven)"
+licence = "PSF-2.0"          # its LICENSE is the full PSF-2.0 stack (PSF/BeOpen/CNRI/CWI)
+kind = "python"
+aboutLibrariesId = "typing-extensions"
+
+[[component]]
+name = "zipp (pkg_resources/_vendor)"
+version = "3.7.0"            # vendored.txt pin
+origin = "maven:com.chaquo.python.runtime:bootstrap:17.1.0 (third_party/chaquopy-maven)"
+licence = "MIT"
+kind = "python"
+aboutLibrariesId = "zipp"
 
 [[component]]
 name = "neutrodyne_ytx shim"
