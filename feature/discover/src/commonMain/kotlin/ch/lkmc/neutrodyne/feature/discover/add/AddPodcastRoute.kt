@@ -26,6 +26,10 @@ import org.jetbrains.compose.resources.getString
  * On a completed subscribe the sheet closes and the root snackbar offers "Open" → `PodcastKey`.
  * Popping disposes this entry mid-effect, so the close + snackbar run in `NonCancellable`; the
  * snackbar's result still arrives — the `SnackbarHostState` is root-scoped.
+ *
+ * The effect re-checks the live operation generation before popping: a newer resolve may have
+ * started after `done` was collected, and only the latest operation may close the sheet (UI
+ * review round 2).
  */
 @Composable
 internal fun AddPodcastRoute(
@@ -39,6 +43,9 @@ internal fun AddPodcastRoute(
     LaunchedEffect(state.done) {
         val done = state.done ?: return@LaunchedEffect
         withContext(NonCancellable) {
+            if (viewModel.uiState.value.operationGeneration != done.operationGeneration) {
+                return@withContext
+            }
             navigator.pop()
             val result =
                 snackbar.showSnackbar(

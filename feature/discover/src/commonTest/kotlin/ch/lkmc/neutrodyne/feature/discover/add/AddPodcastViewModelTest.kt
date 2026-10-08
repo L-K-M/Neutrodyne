@@ -140,7 +140,10 @@ class AddPodcastViewModelTest : MainDispatcherTest() {
             advanceUntilIdle()
 
             assertEquals(listOf("preview-1" to emptySet<Long>()), subscribe.subscribed)
-            assertEquals(SubscribedPodcast(7L, "A Show"), viewModel.uiState.value.done)
+            assertEquals(
+                SubscribedPodcast(7L, "A Show", viewModel.uiState.value.operationGeneration),
+                viewModel.uiState.value.done,
+            )
         }
 
     @Test
@@ -208,6 +211,78 @@ class AddPodcastViewModelTest : MainDispatcherTest() {
             viewModel.subscribe()
             advanceUntilIdle()
             assertEquals("preview-b", subscribe.subscribed.last().first)
+        }
+
+    @Test
+    fun staleSubscribeSuccessDoesNotCloseNewerResolve() =
+        runTest {
+            resolver.nextResolution = AddResolution.Feed(Preview)
+            viewModel.resolve("https://a.example.com/feed")
+            advanceUntilIdle()
+
+            // Subscribe A parks at its gate; the address is then edited and B resolved.
+            val gate = CompletableDeferred<Unit>()
+            subscribe.gate = gate
+            subscribe.nextOutcome = Outcome.Success(7L)
+            viewModel.subscribe()
+            advanceUntilIdle()
+
+            viewModel.onInputChanged("https://b.example.com/feed")
+            resolver.nextResolution = AddResolution.Feed(PreviewB)
+            viewModel.resolve("https://b.example.com/feed")
+            advanceUntilIdle()
+            assertEquals(
+                PreviewB.previewId,
+                assertIs<AddSheetStep.Preview>(viewModel.uiState.value.step).preview.previewId,
+            )
+
+            // A's late success belongs to A's operation: it must not set `done` — the route
+            // would close B's sheet — nor disturb B's preview.
+            gate.complete(Unit)
+            advanceUntilIdle()
+            assertNull(viewModel.uiState.value.done)
+            assertEquals(
+                PreviewB.previewId,
+                assertIs<AddSheetStep.Preview>(viewModel.uiState.value.step).preview.previewId,
+            )
+        }
+
+    @Test
+    fun staleSubscribeFailureKeepsNewerAttemptSubscribing() =
+        runTest {
+            resolver.nextResolution = AddResolution.Feed(Preview)
+            viewModel.resolve("https://a.example.com/feed")
+            advanceUntilIdle()
+
+            // Attempt 1 parks; the same feed is re-resolved and subscribed again. PreviewCache
+            // keys previewId on the feed URL, so identical previewIds cannot tell the attempts
+            // apart — only the operation generation can.
+            val first = CompletableDeferred<Unit>()
+            subscribe.gates += first
+            subscribe.outcomes += Outcome.Failure(SubscribeError.Storage)
+            viewModel.subscribe()
+            advanceUntilIdle()
+
+            viewModel.onInputChanged("")
+            viewModel.resolve("https://a.example.com/feed")
+            advanceUntilIdle()
+
+            val second = CompletableDeferred<Unit>()
+            subscribe.gates += second
+            subscribe.outcomes += Outcome.Success(9L)
+            viewModel.subscribe()
+            advanceUntilIdle()
+
+            // Attempt 1's late failure must not clear attempt 2's subscribing flag.
+            first.complete(Unit)
+            advanceUntilIdle()
+            val step = assertIs<AddSheetStep.Preview>(viewModel.uiState.value.step)
+            assertTrue(step.subscribing)
+            assertNull(step.subscribeError)
+
+            second.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(9L, viewModel.uiState.value.done?.podcastId)
         }
 
     @Test

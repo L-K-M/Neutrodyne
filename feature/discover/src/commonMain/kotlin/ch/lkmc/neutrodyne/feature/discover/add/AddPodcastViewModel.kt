@@ -35,12 +35,22 @@ import kotlinx.coroutines.launch
 public data class AddPodcastUiState(
     val step: AddSheetStep = AddSheetStep.Input(),
     val done: SubscribedPodcast? = null,
+    /**
+     * The identity of the newest resolve/subscribe attempt (UI review round 2). Completions
+     * tagged with an older generation are dropped; the route closes only while [done]'s
+     * generation is still this one.
+     */
+    val operationGeneration: Int = 0,
 )
 
-/** The terminal state: the sheet closes and the snackbar's "Open" leads to `PodcastKey`. */
+/**
+ * The terminal state: the sheet closes and the snackbar's "Open" leads to `PodcastKey`.
+ * [operationGeneration] is the subscribe attempt that produced it.
+ */
 public data class SubscribedPodcast(
     val podcastId: Long,
     val title: String,
+    val operationGeneration: Int,
 )
 
 /**
@@ -95,6 +105,21 @@ public class AddPodcastViewModel(
     private var resolvedInput: String? = null
 
     /**
+     * Allocates `operationGeneration`s. Every new resolve/subscribe attempt supersedes the
+     * previous operation: only the latest generation's completion may write `done`, clear a
+     * `subscribing` flag or land a preview — the previewId cannot stand in for it because the
+     * cache keys previews on the feed URL, which same-feed retries share.
+     */
+    private var operation = 0
+
+    /** Bumps the operation generation and records it (plus [update]) on the state. */
+    private inline fun nextGeneration(crossinline update: (AddPodcastUiState) -> AddPodcastUiState): Int {
+        val generation = ++operation
+        mutableState.update { update(it).copy(operationGeneration = generation, done = null) }
+        return generation
+    }
+
+    /**
      * Resolves [input] (03's pipeline). The same input re-submitted while its resolution still
      * stands (a recomposition re-fire) is skipped; in a failure step it retries — the failure's
      * Retry button and a repeated Enter are the same call.
@@ -129,27 +154,31 @@ public class AddPodcastViewModel(
     /**
      * 03 Subscribe transaction: nothing is written until this runs. `AlreadySubscribed` surfaces
      * as the "Already subscribed — Open" affordance, everything else as an inline error. The
-     * operation is tagged by `previewId`: a result arriving after the sheet moved to a newer
-     * preview is dropped rather than restoring the captured step over it.
+     * attempt takes an operation generation: a completion arriving after the sheet moved to a
+     * newer operation is dropped rather than restoring the captured step over it or closing
+     * the sheet under it.
      */
     public fun subscribe() {
         val step = mutableState.value.step as? AddSheetStep.Preview ?: return
         if (step.subscribing || step.alreadySubscribedId != null) return
-        mutableState.update { it.copy(step = step.copy(subscribing = true, subscribeError = null)) }
+        val generation =
+            nextGeneration { it.copy(step = step.copy(subscribing = true, subscribeError = null)) }
         viewModelScope.launch {
             when (val outcome = subscribeUseCase(step.preview.previewId, emptySet())) {
                 is Outcome.Success -> {
-                    mutableState.update {
-                        it.copy(done = SubscribedPodcast(outcome.value, step.preview.title))
+                    mutableState.update { state ->
+                        if (state.operationGeneration != generation) return@update state
+                        state.copy(
+                            done =
+                                SubscribedPodcast(outcome.value, step.preview.title, generation),
+                        )
                     }
                 }
 
                 is Outcome.Failure -> {
                     mutableState.update { state ->
-                        val current = state.step as? AddSheetStep.Preview
-                        if (current?.preview?.previewId != step.preview.previewId) {
-                            return@update state
-                        }
+                        if (state.operationGeneration != generation) return@update state
+                        val current = state.step as? AddSheetStep.Preview ?: return@update state
                         state.copy(
                             step =
                                 when (val error = outcome.error) {
@@ -176,18 +205,22 @@ public class AddPodcastViewModel(
 
     private fun runResolve(block: suspend () -> AddResolution) {
         resolveJob?.cancel()
+        val generation = nextGeneration { it.copy(step = AddSheetStep.Resolving) }
         resolveJob =
             viewModelScope.launch {
-                mutableState.update { it.copy(step = AddSheetStep.Resolving) }
                 val resolution = block()
                 // A result of a superseded resolve is dropped: a newer operation owns the step.
                 ensureActive()
-                apply(resolution)
+                apply(generation, resolution)
             }
     }
 
-    private fun apply(resolution: AddResolution) {
+    private fun apply(
+        generation: Int,
+        resolution: AddResolution,
+    ) {
         mutableState.update { state ->
+            if (state.operationGeneration != generation) return@update state
             state.copy(
                 step =
                     when (resolution) {

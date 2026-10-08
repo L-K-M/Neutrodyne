@@ -92,7 +92,10 @@ class AddPodcastSheetTest {
             onNodeWithText("Subscribe").performClick()
             waitForIdle()
             assertEquals(listOf("preview-1" to emptySet<Long>()), subscribe.subscribed)
-            assertEquals(SubscribedPodcast(7L, "A Show"), viewModel.uiState.value.done)
+            assertEquals(
+                SubscribedPodcast(7L, "A Show", viewModel.uiState.value.operationGeneration),
+                viewModel.uiState.value.done,
+            )
         }
 
     @Test
