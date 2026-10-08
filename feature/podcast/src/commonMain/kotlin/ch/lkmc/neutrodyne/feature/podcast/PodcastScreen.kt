@@ -2,16 +2,20 @@
 
 package ch.lkmc.neutrodyne.feature.podcast
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -27,6 +31,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
@@ -43,6 +48,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTooltipIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.FeedFilters
@@ -258,7 +264,13 @@ internal fun PodcastScreen(
                         key = items.itemKey { it.id },
                         contentType = { "episode" },
                     ) { index ->
-                        items[index]?.let { row ->
+                        val row = items[index]
+                        if (row == null) {
+                            // 05's placeholders report the full count ahead of the loaded pages:
+                            // the stub must keep a row's height or a restored scroll index past
+                            // the loaded page slides back to wherever real rows fill the view.
+                            EpisodeRowPlaceholder()
+                        } else {
                             EpisodeRow(
                                 row = row,
                                 live = null,
@@ -644,6 +656,43 @@ private fun CredentialsDialog(
     }
 }
 
+/**
+ * One skeleton stand-in for an unloaded paging placeholder (08: placeholders render skeleton
+ * rows): the PODCAST leading slot's 48 dp block plus title/meta bars, at the row's 72 dp
+ * height so unloaded items hold their scroll position (UI review round 2).
+ */
+@Composable
+private fun EpisodeRowPlaceholder() {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().height(PLACEHOLDER_HEIGHT).padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(PLACEHOLDER_GAP),
+    ) {
+        Box(
+            Modifier
+                .size(PLACEHOLDER_LEAD)
+                .clip(NeutrodyneShapes.Tile)
+                .background(MaterialTheme.colorScheme.surfaceContainer),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(PLACEHOLDER_BAR_GAP)) {
+            Box(
+                Modifier
+                    .fillMaxWidth(0.7f)
+                    .height(PLACEHOLDER_BAR_HEIGHT)
+                    .clip(RoundedCornerShape(PLACEHOLDER_BAR_CORNER))
+                    .background(MaterialTheme.colorScheme.surfaceContainer),
+            )
+            Box(
+                Modifier
+                    .fillMaxWidth(0.4f)
+                    .height(PLACEHOLDER_BAR_HEIGHT)
+                    .clip(RoundedCornerShape(PLACEHOLDER_BAR_CORNER))
+                    .background(MaterialTheme.colorScheme.surfaceContainer),
+            )
+        }
+    }
+}
+
 /** The header placeholder while `observePodcast` has not emitted (08's skeleton). */
 @Composable
 private fun LoadingBody() {
@@ -664,3 +713,10 @@ private val FOOTER_PADDING = 16.dp
 private val FIELD_GAP = 12.dp
 private val LOADING_PADDING = 32.dp
 private val LOADING_TEXT_GAP = 16.dp
+
+private val PLACEHOLDER_HEIGHT = 72.dp
+private val PLACEHOLDER_LEAD = 48.dp
+private val PLACEHOLDER_GAP = 12.dp
+private val PLACEHOLDER_BAR_GAP = 8.dp
+private val PLACEHOLDER_BAR_HEIGHT = 14.dp
+private val PLACEHOLDER_BAR_CORNER = 4.dp

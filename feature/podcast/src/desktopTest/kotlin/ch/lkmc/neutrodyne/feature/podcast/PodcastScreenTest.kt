@@ -271,17 +271,22 @@ class PodcastScreenTest {
     @Test
     fun firstPageKeepsRestoredScrollIndex() =
         runComposeUiTest {
-            // The restore lands while detail has arrived but paging's first page is still out:
-            // a header-only LazyColumn must not clamp index 100 before the rows exist.
+            // Production pages at 20 × 80 with placeholders on (05's PagingConfig): a restored
+            // index beyond the loaded page sits on a placeholder row, so the placeholder must
+            // keep a row's height — a zero-height stub makes the list back off to a nearer
+            // index instead of landing on 100. The restore also lands while paging's first
+            // page is still out: the header-only mount must not clamp it early either.
             val gate = CompletableDeferred<Unit>()
             val listState = LazyListState(firstVisibleItemIndex = 100)
             val pagingItems =
                 setPodcast(
                     PodcastUiState(detail = testPodcastDetail(7), loaded = true),
-                    source =
-                        PagedListSource(
-                            pages = listOf(List(RESTORE_PAGE_SIZE) { i -> testEpisodeRow(i + 1L, podcastId = 7) }),
-                            firstLoadGate = gate,
+                    source = CatalogueSource(CATALOGUE_SIZE, firstLoadGate = gate),
+                    paging =
+                        PagingConfig(
+                            pageSize = 20,
+                            initialLoadSize = 80,
+                            enablePlaceholders = true,
                         ),
                     listState = listState,
                     waitForFirstPage = false,
@@ -289,7 +294,7 @@ class PodcastScreenTest {
             assertEquals(0, pagingItems.itemCount)
 
             gate.complete(Unit)
-            waitUntil(timeoutMillis = 5_000) { pagingItems.itemCount == RESTORE_PAGE_SIZE }
+            waitUntil(timeoutMillis = 5_000) { pagingItems.itemCount == CATALOGUE_SIZE }
             waitForIdle()
 
             assertEquals(100, listState.firstVisibleItemIndex)
@@ -316,7 +321,8 @@ class PodcastScreenTest {
     private fun ComposeUiTest.setPodcast(
         state: PodcastUiState,
         rows: List<EpisodeRow> = emptyList(),
-        source: PagedListSource? = null,
+        source: PagingSource<Int, EpisodeRow>? = null,
+        paging: PagingConfig = PagingConfig(pageSize = 20, initialLoadSize = 20),
         listState: LazyListState = LazyListState(),
         waitForFirstPage: Boolean = true,
         pendingUnsubscribe: PendingUnsubscribe? = null,
@@ -335,9 +341,7 @@ class PodcastScreenTest {
     ): LazyPagingItems<EpisodeRow> {
         lateinit var pagingItems: LazyPagingItems<EpisodeRow>
         val feed: Flow<PagingData<EpisodeRow>> =
-            Pager(PagingConfig(pageSize = 20, initialLoadSize = 20)) {
-                source ?: PagedListSource(listOf(rows))
-            }.flow
+            Pager(paging) { source ?: PagedListSource(listOf(rows)) }.flow
         setContent {
             CompositionLocalProvider(
                 LocalPlatformKind provides PlatformKind.DESKTOP,
@@ -375,8 +379,8 @@ class PodcastScreenTest {
     }
 }
 
-/** The page served while the restore test's gate is closed; index 100 must stay visible inside it. */
-private const val RESTORE_PAGE_SIZE = 150
+/** The restore test's catalogue; index 100 lands among the placeholders past the 80 loaded rows. */
+private const val CATALOGUE_SIZE = 300
 
 /** Named pages served by [Pager] — one page's worth per `load`; [firstLoadGate] parks load 0. */
 private class PagedListSource(
@@ -395,6 +399,39 @@ private class PagedListSource(
             data = pages[index],
             prevKey = if (index == 0) null else index - 1,
             nextKey = if (index + 1 < pages.size) index + 1 else null,
+        )
+    }
+
+    override fun getRefreshKey(state: PagingState<Int, EpisodeRow>): Int? = null
+}
+
+/**
+ * An offset-keyed catalogue of [total] rows reporting `itemsBefore`/`itemsAfter`, so the Pager
+ * knows the full count and hands out null placeholders for the unloaded tail — the shape
+ * `EpisodeRowProjection`'s source produces in production.
+ */
+private class CatalogueSource(
+    private val total: Int,
+    private val firstLoadGate: CompletableDeferred<Unit>? = null,
+) : PagingSource<Int, EpisodeRow>() {
+    private var firstLoad = true
+
+    override suspend fun load(params: LoadParams<Int>): LoadResult<Int, EpisodeRow> {
+        if (firstLoad) {
+            firstLoad = false
+            firstLoadGate?.await()
+        }
+        val offset = params.key ?: 0
+        val data =
+            (offset until minOf(offset + params.loadSize, total)).map {
+                testEpisodeRow(it + 1L, podcastId = 7, title = "Ep ${it + 1}")
+            }
+        return LoadResult.Page(
+            data = data,
+            prevKey = if (offset > 0) maxOf(offset - params.loadSize, 0) else null,
+            nextKey = if (offset + data.size < total) offset + data.size else null,
+            itemsBefore = offset,
+            itemsAfter = total - offset - data.size,
         )
     }
 
