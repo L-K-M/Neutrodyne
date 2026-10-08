@@ -10,8 +10,9 @@ public data class UrlUserInfo(
     val username: String,
     val password: String,
 ) {
-    // The generated data-class toString would print the password into logs and crash reports.
-    override fun toString(): String = "UrlUserInfo(username=$username, password=<redacted>)"
+    // The generated data-class toString would print secrets into logs and crash reports; a
+    // Basic-auth token may sit in the username with an empty password, so both are masked.
+    override fun toString(): String = "UrlUserInfo(username=<redacted>, password=<redacted>)"
 }
 
 /** One URL broken into parts by [splitLenient], before any normalisation. */

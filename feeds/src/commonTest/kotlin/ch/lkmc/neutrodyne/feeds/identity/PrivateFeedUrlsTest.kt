@@ -33,13 +33,20 @@ class PrivateFeedUrlsTest {
     }
 
     @Test
-    fun hyphenatedSlugIsNotAToken() {
-        // Path tokens are separator-free runs: wordy slugs with digits stay public.
-        assertFalse(PrivateFeedUrls.looksPrivate("https://example.com/feeds/my-podcast-episode-123-rss/"))
+    fun pathTokensIncludeUuidsAndBase64Url() {
+        // Self-hosted token feeds put a UUID or base64url token in the path; both carry '-'
+        // or '_' separators, so the permissive class must apply to path segments too.
+        assertTrue(
+            PrivateFeedUrls.looksPrivate("https://selfhosted.example.com/feeds/550e8400-e29b-41d4-a716-446655440000"),
+        )
+        assertTrue(PrivateFeedUrls.looksPrivate("https://selfhosted.example.com/feeds/xKd93lskSKEa1zl4-dQeF1/"))
+        assertTrue(PrivateFeedUrls.looksPrivate("https://selfhosted.example.com/feeds/Ab3_xKd93lskSKEa1zl4dQeF1"))
+        // A long hyphenated slug containing digits is an accepted false positive: the result
+        // only feeds a warning (05 export, 10 link disclosure).
+        assertTrue(PrivateFeedUrls.looksPrivate("https://example.com/feeds/my-podcast-episode-123-rss/"))
+        // Short or digit-free slugs do not match the token shape and stay public.
         assertFalse(PrivateFeedUrls.looksPrivate("https://example.com/podcast/the-show-2025/feed"))
-        assertTrue(PrivateFeedUrls.looksPrivate("https://example.com/feeds/xKd93lskSKEa1zl4dQeF1/"))
-        // Query values keep the permissive pattern (UUID-shaped tokens still match there).
-        assertTrue(PrivateFeedUrls.looksPrivate("https://example.com/feed?k=someLongRandomToken12345"))
+        assertFalse(PrivateFeedUrls.looksPrivate("https://example.com/feeds/my-podcast-episode-archive/"))
     }
 
     @Test

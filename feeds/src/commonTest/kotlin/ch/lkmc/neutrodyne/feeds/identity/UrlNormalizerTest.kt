@@ -243,11 +243,15 @@ class UrlNormalizerTest {
     }
 
     @Test
-    fun urlUserInfoToStringRedactsPassword() {
-        // The generated data-class toString would print the secret into logs.
+    fun urlUserInfoToStringRedactsBothParts() {
+        // The generated data-class toString would print secrets into logs; 01's Redactor masks
+        // both halves, so toString must too.
         val info = UrlUserInfo("alice", "secret")
-        assertTrue("alice" in info.toString())
+        assertFalse("alice" in info.toString())
         assertFalse("secret" in info.toString())
+        // A Basic-auth token can be carried as the username with an empty password.
+        val tokenUser = UrlUserInfo("xKd93lskSKEa1zl4dQeF1", "")
+        assertFalse("xKd93lskSKEa1zl4dQeF1" in tokenUser.toString())
     }
 
     @Test
