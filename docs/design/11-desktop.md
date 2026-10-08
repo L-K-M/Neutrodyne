@@ -242,6 +242,8 @@ sealed interface HandoffOutcome { data object Delivered : HandoffOutcome; data o
 | Hand-off | The owner resolves relative paths against `cwd`, passes the inputs to `DesktopOpenHandler`, and, with `activate`, shows the window (from the tray if hidden), de-iconifies it and calls `toFront()` |
 | macOS | LaunchServices activates a running app instead of starting a second one and delivers links and files through the `java.awt.Desktop` handlers; the lock still guards `open -n` and direct launches of the binary |
 
+**Implementation notes (2026-10-08).** `SO_TIMEOUT` does not apply to `SocketChannel.read`, so the Server row's 2-s line budget is a coroutine timeout around an interruptible read: on expiry (or on `serve` cancellation) the interrupt closes the channel, which is the row's close-without-a-reply. The client sends through a plain `Socket`, where `SO_TIMEOUT` does apply, re-armed to the remaining reply budget before each blocking read so the whole answer lands within 3 s.
+
 ### AppDirs
 
 R8.11. `AppDirs` (`:core:common` `desktopMain`) is a small resolver of environment variables and documented defaults; `dev.dirs:directories` is banned (MPL-2.0 code, [D3](../PLAN.md#3-key-decisions)).

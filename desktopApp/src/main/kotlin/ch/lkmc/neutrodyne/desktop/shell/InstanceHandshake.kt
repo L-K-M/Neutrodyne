@@ -7,10 +7,13 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.OutputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.Socket
 import java.nio.ByteBuffer
 import java.nio.channels.ServerSocketChannel
 import java.nio.channels.SocketChannel
@@ -36,7 +39,12 @@ import kotlin.time.Duration.Companion.seconds
  * invokes [serve]'s callback in arrival order after replying, so the sender can exit at once.
  *
  * The `serve` loop is cancellable: `runInterruptible` turns coroutine cancellation into a closed
- * channel, and the `finally` removes `instance.port` / `instance.token` again.
+ * channel, and the `finally` removes `instance.port` / `instance.token` again. Per-connection
+ * reads are bounded and cancellable the same way — `SO_TIMEOUT` does not apply to `SocketChannel`
+ * reads, so the line budget is a coroutine timeout around an interruptible read (the interrupt
+ * closes the channel). Server writes are cancellable but have no independent deadline. The
+ * client uses a plain `Socket`, where `SO_TIMEOUT` does apply, re-armed to the remaining reply
+ * budget before each read; its request write is not deadline-bounded.
  */
 class InstanceHandshake(
     private val dirs: AppDirs,
@@ -89,8 +97,13 @@ class InstanceHandshake(
         expectedToken: String,
         onHandoff: suspend (HandoffRequest) -> Unit,
     ) {
-        socket.socket().soTimeout = READ_TIMEOUT.inWholeMilliseconds.toInt()
-        val line = runCatching { readLineCapped(socket) }.getOrNull()
+        // `SO_TIMEOUT` does not apply to SocketChannel.read, so the line deadline is a coroutine
+        // timeout around an interruptible read: on expiry (or on serve() cancellation) the
+        // interrupt closes the channel, which is already the row's "close without a reply".
+        val line =
+            withTimeoutOrNull(READ_TIMEOUT) {
+                interruptible { runCatching { readLineCapped(socket) }.getOrNull() }
+            }
         val request =
             line?.let {
                 runCatching {
@@ -118,7 +131,9 @@ class InstanceHandshake(
         val response = HandoffResponse(ok = true, pid = ProcessHandle.current().pid(), versionName = versionName)
         val sent =
             runCatching {
-                writeLine(socket, SHELL_JSON.encodeToString(HandoffResponse.serializer(), response))
+                interruptible {
+                    writeLine(socket, SHELL_JSON.encodeToString(HandoffResponse.serializer(), response))
+                }
             }.isSuccess
         if (!sent) {
             Log.w(TAG) { "hand-off reply failed; connection closed" }
@@ -154,14 +169,19 @@ class InstanceHandshake(
         // publishing its files picks the fresh token up on a later retry (11's Retry row).
         val effective = readToken()?.let { request.copy(token = it) } ?: request
         try {
-            SocketChannel.open().use { socket ->
-                socket.socket().connect(
+            Socket().use { socket ->
+                socket.connect(
                     InetSocketAddress(InetAddress.getLoopbackAddress(), port),
                     connectTimeout.inWholeMilliseconds.toInt(),
                 )
-                socket.socket().soTimeout = timeout.inWholeMilliseconds.toInt()
-                writeLine(socket, SHELL_JSON.encodeToString(HandoffRequest.serializer(), effective))
-                val reply = runCatching { readLineCapped(socket) }.getOrNull() ?: return HandoffOutcome.NoAnswer
+                val deadlineNanos = System.nanoTime() + timeout.inWholeNanoseconds
+                writeLine(
+                    socket.outputStream,
+                    SHELL_JSON.encodeToString(HandoffRequest.serializer(), effective),
+                )
+                val reply =
+                    runCatching { readLineCapped(socket, deadlineNanos) }.getOrNull()
+                        ?: return HandoffOutcome.NoAnswer
                 val response =
                     runCatching {
                         SHELL_JSON.decodeFromString(HandoffResponse.serializer(), reply)
@@ -184,19 +204,67 @@ class InstanceHandshake(
     private fun readToken(): String? =
         runCatching { Files.readString(tokenFile).trim() }.getOrNull()?.takeIf(String::isNotEmpty)
 
-    /** Reads one `\n`-terminated line, or `null` on EOF, timeout or breach of the size cap. */
+    /**
+     * Server side: the caller bounds the whole read with its deadline — `SO_TIMEOUT` does not
+     * apply to `SocketChannel` reads.
+     */
     private fun readLineCapped(socket: SocketChannel): String? {
-        val bytes = ByteArrayOutputStream()
         val one = ByteBuffer.allocate(1)
-        while (bytes.size() < HandoffRequest.MAX_LINE_BYTES) {
+        return readLineCapped {
             one.clear()
-            if (socket.read(one) < 0) return null
-            val byte = one.get(0)
-            if (byte == NEWLINE) return bytes.toString(Charsets.UTF_8).trimEnd(CARRIAGE)
-            bytes.write(byte.toInt())
+            if (socket.read(one) < 0) -1 else one.get(0).toInt() and 0xFF
+        }
+    }
+
+    /**
+     * Client side: `SO_TIMEOUT` bounds each blocking `read` on a plain [Socket], so re-arm it
+     * with the remaining reply budget before every byte — the whole answer lands within the
+     * timeout even if the owner drips bytes (11's Client row).
+     */
+    private fun readLineCapped(
+        socket: Socket,
+        deadlineNanos: Long,
+    ): String? {
+        val input = socket.inputStream
+        return readLineCapped {
+            val remainingMs = (deadlineNanos - System.nanoTime()) / 1_000_000
+            if (remainingMs <= 0) {
+                -1
+            } else {
+                socket.soTimeout = remainingMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                input.read()
+            }
+        }
+    }
+
+    /**
+     * Reads one `\n`-terminated line through [readByte] (next byte 0–255, -1 at end of stream)
+     * and returns it without the terminator, or `null` on EOF or breach of the size cap.
+     */
+    private fun readLineCapped(readByte: () -> Int): String? {
+        val bytes = ByteArrayOutputStream()
+        while (bytes.size() < HandoffRequest.MAX_LINE_BYTES) {
+            val byte = readByte()
+            if (byte < 0) return null
+            if (byte.toByte() == NEWLINE) return bytes.toString(Charsets.UTF_8).trimEnd(CARRIAGE)
+            bytes.write(byte)
         }
         return null // oversize: the connection is closed without a reply
     }
+
+    /**
+     * Runs a blocking channel call on the current IO lane with coroutine cancellation turned
+     * into a thread interrupt — the interrupt closes the channel, which is what unblocks the
+     * call. The block also clears the consumed interrupt before the library unwinds.
+     */
+    private suspend fun <T> interruptible(block: () -> T): T =
+        runInterruptible {
+            try {
+                block()
+            } finally {
+                Thread.interrupted()
+            }
+        }
 
     private fun writeLine(
         socket: SocketChannel,
@@ -205,6 +273,14 @@ class InstanceHandshake(
         val payload = (line + "\n").toByteArray(Charsets.UTF_8)
         val buffer = ByteBuffer.wrap(payload)
         while (buffer.hasRemaining()) socket.write(buffer)
+    }
+
+    private fun writeLine(
+        output: OutputStream,
+        line: String,
+    ) {
+        output.write((line + "\n").toByteArray(Charsets.UTF_8))
+        output.flush()
     }
 
     /** ASFW_ANY: only the foreground process may hand the owner the right to come to the front. */
