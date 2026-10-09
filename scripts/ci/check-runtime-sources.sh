@@ -110,8 +110,11 @@ is_pe() {
 }
 
 runtime_dir() {
+    # Inside a .app bundle jlink nests the JDK home one level deeper at
+    # Contents/runtime/Contents/Home (release, legal/, the natives all live
+    # there) — same probe order as check-desktop-image.sh's runtime_dir.
     local dir
-    for dir in "$1/lib/runtime" "$1/Contents/runtime" "$1/runtime"; do
+    for dir in "$1/lib/runtime" "$1/Contents/runtime/Contents/Home" "$1/Contents/runtime" "$1/runtime"; do
         if [ -d "$dir" ]; then
             echo "$dir"
             return 0

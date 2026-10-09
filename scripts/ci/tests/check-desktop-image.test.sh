@@ -403,6 +403,49 @@ else
     cat "$WORK/ditto.args" 2>/dev/null | sed 's/^/    /' >&2
 fi
 
+# --- macOS skiko stub shape --------------------------------------------------------
+# The real macOS artifact's stub was named
+# skiko-awt-runtime-macos-arm64-0.150.1-20151b90a8aba3e93f91242dfd61af.jar:
+# a 30-hex mangle (Compose's per-byte %x md5 is unpadded, 16-32 digits) whose
+# value no longer matches the recompressed file's md5.
+
+# 17. macOS stub under the real artifact's shape: repacked jar (its md5 does not
+#     match the suffix), manifest row for macos-arm64, stub-only entries, dylib
+#     with matching sidecar.
+img="$WORK/img-skm"
+: > "$MANIFEST"
+mkdir -p "$img/Contents/app" "$img/Contents/runtime/Contents/Home/legal"
+printf 'JAVA_VERSION="%s"\nMODULES=java.base\n' \
+    "$(grep -E '^javaVersion=' "$FIX_ROOT/desktopApp/runtime.lock" | cut -d= -f2)" \
+    > "$img/Contents/runtime/Contents/Home/release"
+: > "$img/Contents/runtime/Contents/Home/legal/NOTICE"
+manifest_row "$(printf 'skiko' | sha256sum | cut -d' ' -f1)" \
+    "skiko-awt-runtime-macos-arm64-0.150.1-0123456789abcdef0123456789abcdef.jar"
+jar_zip "$img/Contents/app/.stub"
+mv "$img/Contents/app/.stub" \
+    "$img/Contents/app/skiko-awt-runtime-macos-arm64-0.150.1-20151b90a8aba3e93f91242dfd61af.jar"
+printf 'dylib bytes' > "$img/Contents/app/libskiko-macos-arm64.dylib"
+sha_of "$img/Contents/app/libskiko-macos-arm64.dylib" \
+    > "$img/Contents/app/libskiko-macos-arm64.dylib.sha256"
+if run_scan "$img"; then
+    t_ok "macOS skiko stub with a repacked (non-md5) 30-hex mangle is accepted"
+else
+    t_fail "macOS skiko stub with a repacked (non-md5) 30-hex mangle is accepted"
+    sed 's/^/    /' "$WORK/scan.out" >&2
+fi
+
+# 18. The fallback is macOS-only: a linux-named stub whose suffix is 30 hex but
+#     not the file's own md5 is still the classpath jar squatting on the name.
+img="$(new_image m)"
+manifest_row "$(printf 'x' | sha256sum | cut -d' ' -f1)" \
+    "skiko-awt-runtime-linux-x64-0.150.1-00000000000000000000000000000000.jar"
+jar_zip "$img/lib/app/.squat"
+mv "$img/lib/app/.squat" \
+    "$img/lib/app/skiko-awt-runtime-linux-x64-0.150.1-20151b90a8aba3e93f91242dfd61af.jar"
+native_next_to "$img"
+expect_fail 'not on the Licensee-checked runtime classpath' \
+    "linux skiko stub whose suffix is not its own md5 is rejected"
+
 echo
 if [ "$FAILED" -gt 0 ]; then
     echo "check-desktop-image.test: $FAILED case(s) failing" >&2

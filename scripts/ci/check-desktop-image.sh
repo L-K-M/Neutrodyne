@@ -264,22 +264,6 @@ is_skiko_stub() {
         skiko-awt-runtime-*.jar) ;;
         *) return 1 ;;
     esac
-    # The name ends in the stub jar's own md5 — verified where packaging left the
-    # bytes alone. The macOS pipeline recompresses image jars after mangling, so
-    # there the suffix can only be required to keep the 32-hex mangle shape
-    # (nightly 37860407043); the manifest row, stub-only entries and the
-    # sidecar-pinned native below are what still bind it.
-    local sfx="${base%.jar}"
-    sfx="${sfx##*-}"
-    padded="$(md5_of "$path")"
-    unpadded=""
-    for ((i = 0; i < ${#padded}; i += 2)); do
-        byte="${padded:i:2}"
-        unpadded+="${byte#0}"
-    done
-    if [ "$sfx" != "$unpadded" ] && [ "$sfx" != "$padded" ]; then
-        printf '%s\n' "$sfx" | grep -qxE '[0-9a-f]{32}' || return 1
-    fi
     # rest is <os>-<arch>-<ver>-<md5>.jar; the manifest must carry the real
     # classpath jar for the same os-arch (its own md5 makes the names differ).
     rest="${base#skiko-awt-runtime-}"
@@ -290,6 +274,24 @@ is_skiko_stub() {
     os="${rest%%-*}"
     arch="${rest#*-}"
     arch="${arch%%-*}"
+    # The name ends in the stub jar's own md5 — verified where packaging left the
+    # bytes alone. The macOS pipeline recompresses image jars after the mangle
+    # (nightly 37860407043), so on macOS the suffix can only be required to keep
+    # the mangle's shape: Compose's per-byte %x rendering yields 16-32 lowercase
+    # hex digits, never zero-padded (the real artifact had 30). The manifest
+    # row, stub-only entries and the sidecar-pinned native below still bind it.
+    local sfx="${base%.jar}"
+    sfx="${sfx##*-}"
+    padded="$(md5_of "$path")"
+    unpadded=""
+    for ((i = 0; i < ${#padded}; i += 2)); do
+        byte="${padded:i:2}"
+        unpadded+="${byte#0}"
+    done
+    if [ "$sfx" != "$unpadded" ] && [ "$sfx" != "$padded" ]; then
+        [ "$os" = "macos" ] || return 1
+        printf '%s\n' "$sfx" | grep -qxE '[0-9a-f]{16,32}' || return 1
+    fi
     os="$(printf '%s' "$os" | sed 's/[].[^$*\/]/\\&/g')"
     arch="$(printf '%s' "$arch" | sed 's/[].[^$*\/]/\\&/g')"
     grep -qE "  skiko-awt-runtime-${os}-${arch}-[^ ]+\.jar\$" "$manifest" || return 1

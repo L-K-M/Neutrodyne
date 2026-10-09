@@ -118,6 +118,26 @@ else
 fi
 rm -f "$IMG/lib/runtime/lib/libextra.dylib"
 
+# 5. macOS layout: jlink's home inside a .app is Contents/runtime/Contents/Home
+#    — legal/, release and the natives all live there (nightly 37860407043's
+#    real bundle). The checks must follow the same nesting the image checker
+#    accepts.
+IMGMAC="$WORK/img-mac"
+mkdir -p "$IMGMAC/Contents/runtime/Contents/Home/legal" \
+         "$IMGMAC/Contents/runtime/Contents/Home/lib"
+printf 'JAVA_VERSION="%s"\nMODULES=java.base\n' \
+    "$(lock_prop "$LOCK" javaVersion)" \
+    > "$IMGMAC/Contents/runtime/Contents/Home/release"
+: > "$IMGMAC/Contents/runtime/Contents/Home/legal/NOTICE"
+macho "$IMGMAC/Contents/runtime/Contents/Home/lib/libtest.dylib" "loadable bytes" "sig-img!"
+if bash "$CHECK" --image "$IMGMAC" --jdk "$JDK" --smoke "$WORK/smoke.txt" \
+        > "$WORK/check-mac.out" 2>&1; then
+    t_ok ".app Contents/runtime/Contents/Home is the runtime root on macOS images"
+else
+    t_fail ".app Contents/runtime/Contents/Home is the runtime root on macOS images"
+    sed 's/^/    /' "$WORK/check-mac.out" >&2
+fi
+
 echo
 if [ "$FAILED" -gt 0 ]; then
     echo "check-runtime-sources.test: $FAILED case(s) failing" >&2
