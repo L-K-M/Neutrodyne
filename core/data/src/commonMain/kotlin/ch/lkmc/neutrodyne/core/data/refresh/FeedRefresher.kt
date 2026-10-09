@@ -210,6 +210,7 @@ internal class FeedRefresher(
         var timedOut = false
         var completed = false
         var report: RefreshReport? = null
+        var bodyFailure: Throwable? = null
         try {
             coroutineScope {
                 batcherLock.withLock { batcher = FetchStateBatcher(db.podcastDao(), clock, this) }
@@ -256,13 +257,21 @@ internal class FeedRefresher(
                 }
             }
             completed = true
+        } catch (e: Throwable) {
+            // The body's failure is the run's primary cause: a finalisation flush failure
+            // attaches to it as suppressed rather than replacing it.
+            bodyFailure = e
+            throw e
         } finally {
             // Finalisation survives cancellation (03 Engine run): the buffered fetch-state rows
             // flush, and the finished slots still report their committed outcomes so the summary
             // and status reflect what actually landed.
             withContext(NonCancellable) {
                 val active = batcherLock.withLock { batcher.also { batcher = null } }
-                suspendRunCatching { active?.flush() }
+                val flushFailure = suspendRunCatching { active?.flush() }.exceptionOrNull()
+                if (flushFailure != null) {
+                    Log.e(TAG, flushFailure) { "final fetch-state flush failed" }
+                }
 
                 val outcomes = mutableMapOf<Long, FeedOutcome>()
                 for ((index, feed) in due.withIndex()) {
@@ -278,16 +287,32 @@ internal class FeedRefresher(
                         remaining = due.size - outcomes.size,
                         stoppedByDeadline = timedOut || launched < due.size || !completed,
                     )
-                writeDiagnostics(request, finalReport, finishedAt)
+                // A failed flush means the outcome rows never committed: no completion
+                // diagnostics (`lastAllRunFinishedAt` would suppress the foreground trigger's
+                // next refresh for a whole tick) and no report — the failure propagates once
+                // the status reset below has run.
+                if (flushFailure == null) {
+                    writeDiagnostics(request, finalReport, finishedAt)
+                }
                 _status.value =
                     RefreshStatus(
                         running = false,
                         scope = null,
                         done = outcomes.size,
                         total = due.size,
-                        lastRunFinishedAt = finishedAt,
+                        lastRunFinishedAt =
+                            if (flushFailure == null) finishedAt else previousFinishedAt,
                     )
-                report = finalReport
+                if (flushFailure == null) {
+                    report = finalReport
+                } else {
+                    // A failed commit never reports a completed run. With no earlier failure the
+                    // flush failure is the run's failure; otherwise it rides the body's exception
+                    // as suppressed so the primary cause — including cancellation — is preserved.
+                    val primary = bodyFailure
+                    if (primary == null) throw flushFailure
+                    primary.addSuppressed(flushFailure)
+                }
             }
         }
         return report ?: error("report unset")

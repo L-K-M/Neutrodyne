@@ -428,7 +428,7 @@ dependencyResolutionManagement {
         // S7 fell back to a self-built Chaquopy master (2026-10-06): a local repository that alone serves com.chaquo.python
         exclusiveContent { forRepository { maven(uri("third_party/chaquopy-maven")) }; filter { includeGroupByRegex("com\\.chaquo\\.python.*") } }
         // The patched Room runtime is likewise the only source of androidx.room3:room3-runtime-rebuild*
-        exclusiveContent { forRepository { maven(uri("third_party/room3-maven")) }; filter { includeModule("androidx.room3", "room3-runtime-rebuild") /* …and the -android/-jvm siblings */ } }
+        exclusiveContent { forRepository { maven(uri("third_party/room3-maven")) }; filter { includeModule("androidx.room3", "room3-runtime-rebuild"); includeModule("androidx.room3", "room3-runtime-rebuild-android"); includeModule("androidx.room3", "room3-runtime-rebuild-jvm") } }
     }
     // S7 measured: the same exclusiveContent block is also needed in this file's pluginManagement{}
     // (the convention classpath resolves with pluginManagement repositories, not these) and in
@@ -438,6 +438,8 @@ dependencyResolutionManagement {
 // The root build.gradle.kts then substitutes module("androidx.room3:room3-runtime") with
 // module("androidx.room3:room3-runtime-rebuild:3.0.3") in every configuration, so consumers and the
 // transitive edges of room3-paging/room3-testing bind to the patched variant ([patched runtime](#patched-room3-runtime)).
+// A fail-fast check next to it pins the room3 catalog version to the rebuilt one, so a version bump
+// without a republished patch fails the build instead of silently keeping or dropping the patch.
 rootProject.name = "Neutrodyne"
 include(":app", ":desktopApp")
 include(":core:model", ":core:common", ":core:domain", ":core:navigation", ":core:database", ":core:datastore",

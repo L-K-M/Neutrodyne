@@ -75,6 +75,13 @@ object TableRebuild {
         connection: SQLiteConnection,
         table: String,
     ): Long? {
+        // `sqlite_sequence` exists only once a database has an AUTOINCREMENT table; a rebuild
+        // on a database without one must not abort on "no such table".
+        val hasSequenceTable =
+            connection
+                .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'")
+                .use { it.step() }
+        if (!hasSequenceTable) return null
         connection.prepare("SELECT seq FROM sqlite_sequence WHERE name = ?").use { stmt ->
             stmt.bindText(1, table)
             return if (stmt.step()) stmt.getLong(0) else null
@@ -86,10 +93,20 @@ object TableRebuild {
         table: String,
         oldSeq: Long,
     ) {
-        exec(connection, "UPDATE sqlite_sequence SET seq = MAX(seq, $oldSeq) WHERE name = '$table'")
+        connection
+            .prepare("UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = ?")
+            .use { stmt ->
+                stmt.bindLong(1, oldSeq)
+                stmt.bindText(2, table)
+                stmt.step()
+            }
         if (changes(connection) != 0) return
         // `sqlite_sequence` has no unique constraint — never INSERT OR REPLACE (02).
-        exec(connection, "INSERT INTO sqlite_sequence(name, seq) VALUES ('$table', $oldSeq)")
+        connection.prepare("INSERT INTO sqlite_sequence(name, seq) VALUES (?, ?)").use { stmt ->
+            stmt.bindText(1, table)
+            stmt.bindLong(2, oldSeq)
+            stmt.step()
+        }
     }
 
     private suspend fun changes(connection: SQLiteConnection): Int {

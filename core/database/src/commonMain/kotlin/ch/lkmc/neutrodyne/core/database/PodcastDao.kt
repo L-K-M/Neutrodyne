@@ -171,7 +171,14 @@ abstract class PodcastDao(
         scopeAll: Boolean,
         ids: List<Long> = emptyList(),
     ) {
-        ids.ifEmpty { listOf(NO_ID) }.chunked(BIND_CHUNK).forEach { forceDueChunk(scopeAll, it) }
+        // scopeAll matches every row, so the chunked id list is irrelevant — one statement.
+        if (scopeAll) {
+            forceDueChunk(true, listOf(NO_ID))
+        } else {
+            ids.ifEmpty { listOf(NO_ID) }.distinct().chunked(BIND_CHUNK).forEach {
+                forceDueChunk(false, it)
+            }
+        }
     }
 
     /** The Group variant: the same statement with the membership subquery for `id IN (:ids)`. */

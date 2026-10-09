@@ -131,9 +131,10 @@ public data class KeyInput(
 )
 
 /**
- * Content hash over everything ingestion writes for an episode row (03 Episode keys and matching
- * helpers): first 8 bytes (big-endian) of SHA-256. `feedOrder` is excluded, so re-ordering alone causes
- * no write.
+ * Hash over episode content (03 Episode keys and matching helpers): first 8 bytes (big-endian) of
+ * SHA-256. `feedOrder` is excluded, so re-ordering alone causes no content update. `guid` is also
+ * excluded because it is an identity column. Ingestion must persist matched GUID changes before
+ * consulting this hash, including when a duplicate GUID's fallback key stays unchanged.
  */
 public object EpisodeContentHash {
     private const val FIELD_SEPARATOR = "\u001F"

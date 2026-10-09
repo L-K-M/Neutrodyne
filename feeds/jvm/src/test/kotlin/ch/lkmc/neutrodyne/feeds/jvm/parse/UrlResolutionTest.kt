@@ -26,6 +26,30 @@ class UrlResolutionTest {
             .parse({ Buffer().write(xml.encodeToByteArray()) }, null, baseUrl)
             .let { assertIs<ParseResult.Ok>(it).feed }
 
+    /**
+     * The bound applies after resolution too: a base and a short relative reference can jointly
+     * produce an absolute URL over `maxUrlChars` — it must drop with BAD_URL, not be stored.
+     */
+    @Test
+    fun resolvedUrlOverMaxCharsIsDropped() {
+        val base = "https://feeds.test/" + "a".repeat(4_000) + "/dir/feed.xml"
+        val feed =
+            feedOf(
+                "<rss version=\"2.0\"><channel><item>" +
+                    "<enclosure url=\"" + "b".repeat(200) + ".mp3\" type=\"audio/mpeg\" length=\"1\"/>" +
+                    "</item></channel></rss>",
+                baseUrl = base,
+            )
+        assertTrue(
+            feed.items
+                .single()
+                .enclosures
+                .isEmpty(),
+            feed.warnings.toString(),
+        )
+        assertTrue(feed.warnings.any { it.code == WarningCode.BAD_URL })
+    }
+
     /** `"../"` × 1,000,000 must be dropped by the raw bound, not resolved quadratically (S4). */
     @Test(timeout = 10_000)
     fun dotSegmentFloodIsBoundedBeforeResolution() {

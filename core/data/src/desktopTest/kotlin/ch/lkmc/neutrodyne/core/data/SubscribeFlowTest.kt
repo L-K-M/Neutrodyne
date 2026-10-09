@@ -2,9 +2,15 @@
 
 package ch.lkmc.neutrodyne.core.data
 
+import androidx.room3.useReaderConnection
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.fetch.RedirectHop
+import ch.lkmc.neutrodyne.core.data.ingest.IngestContext
+import ch.lkmc.neutrodyne.core.data.ingest.IngestMode
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
+import ch.lkmc.neutrodyne.core.database.EpisodeDescriptionCodec
+import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
+import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
 import ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
@@ -18,12 +24,18 @@ import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+import ch.lkmc.neutrodyne.feeds.jvm.parse.XmlPullFeedParser
 import ch.lkmc.neutrodyne.feeds.model.Paging
+import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
+import ch.lkmc.neutrodyne.feeds.model.WarningCode
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
+import ch.lkmc.neutrodyne.feeds.parse.ParseLimits
+import ch.lkmc.neutrodyne.feeds.parse.ParseResult
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.junit4.MockWebServerRule
+import okio.Buffer
 import org.junit.Rule
 import java.io.File
 import kotlin.test.AfterTest
@@ -423,6 +435,166 @@ class SubscribeFlowTest {
             assertEquals(0, scheduler.rescheduleCount)
         }
 
+    // --- Description-size atomicity (02 episode_description bound, 03 Subscribe transaction) ----------
+
+    /**
+     * A producer whose `ParseLimits` admits a description past the codec's 2 MiB UTF-8 bound
+     * (02 episode_description): `prepare`'s encode rejects it, aborting the subscribe
+     * transaction — no podcast, episode, description, alias or membership row may survive,
+     * and existing user state stays byte-identical. The feed is parsed by the real
+     * `XmlPullFeedParser` from actual XML input under the producer's widened text limit.
+     */
+    @Test
+    fun anOverBoundEpisodeDescriptionRollsBackTheWholeSubscribe() =
+        runTest {
+            // Existing user state the failed subscribe must leave untouched: a podcast with one
+            // episode carrying a readable description and played/favourite state.
+            val keepId = seedPodcast(db, feedUrl = "https://b.example.com/keep")
+            newIngestor(db, clock).ingest(
+                dueFeedOf(db, keepId),
+                parsedFeed(
+                    items =
+                        listOf(parsedEpisode(0, guid = "keep-1", descriptionHtml = "seeded notes")),
+                ),
+                IngestContext(
+                    mode = IngestMode.INITIAL,
+                    partial = false,
+                    fetch = fetchMeta(finalUrl = "https://b.example.com/keep"),
+                ),
+            )
+            val keepEpisode = assertNotNull(db.episodeDao().byIdentityKey(keepId, "g:keep-1"))
+            db
+                .episodeStateDao()
+                .upsert(
+                    EpisodeStateEntity(
+                        episodeId = keepEpisode.id,
+                        playedAt = NOW - DAY,
+                        isFavorite = true,
+                        updatedAt = NOW - DAY,
+                    ),
+                )
+            val podcastBefore = db.podcastDao().byId(keepId)
+            val episodeBefore = db.episodeDao().byId(keepEpisode.id)
+            val stateBefore = db.episodeStateDao().byEpisode(keepEpisode.id)
+            val groupId =
+                db
+                    .groupDao()
+                    .insert(
+                        PodcastGroupEntity(
+                            uuid = "g-atomicity",
+                            name = "Atomicity",
+                            nameKey = "atomicity",
+                            orderKey = "a",
+                            createdAt = NOW,
+                            updatedAt = NOW,
+                        ),
+                    )
+
+            // OVER_BOUND_CHARS CJK chars sit exactly at the producer's parser cap — legally
+            // collected without truncation — but encode to 2359296 UTF-8 bytes, over the bound.
+            val url = "https://a.example.com/oversized"
+            val oversized = CJK.repeat(OVER_BOUND_CHARS)
+            val parsed =
+                parseWithProducerLimits(
+                    rssBody(
+                        items =
+                            arrayOf(
+                                rssItem("first"),
+                                rssItem("big", extra = "<description>$oversized</description>"),
+                            ),
+                    ),
+                    url,
+                )
+            assertEquals(2, parsed.items.size)
+            assertEquals(oversized, parsed.items[1].descriptionHtml)
+            assertTrue(parsed.warnings.none { it.code == WarningCode.TEXT_TRUNCATED })
+            resolverBundle.cache.put(
+                previewId = url,
+                inputUrl = url,
+                feed = parsed,
+                meta = fetchMeta(finalUrl = url),
+                hops = emptyList(),
+                credentials = null,
+            )
+
+            val outcome = subscribeBundle.useCase(url, setOf(groupId))
+
+            assertEquals(SubscribeError.Storage, assertIs<Outcome.Failure<SubscribeError>>(outcome).error)
+            // The whole transaction rolled back: nothing it wrote survives.
+            assertNull(db.podcastDao().byFeedKey(UrlNormalizer.forIdentity(url)!!))
+            assertNull(db.podcastDao().aliasOwner(UrlNormalizer.forIdentity(url)!!))
+            assertTrue(db.groupDao().membersOf(groupId).isEmpty())
+            assertEquals(1, db.rowCount("episode"))
+            assertEquals(1, db.rowCount("episode_description"))
+            // Existing user state is untouched and no post-commit side effect ran.
+            assertEquals(podcastBefore, db.podcastDao().byId(keepId))
+            assertEquals(episodeBefore, db.episodeDao().byId(keepEpisode.id))
+            assertEquals(stateBefore, db.episodeStateDao().byEpisode(keepEpisode.id))
+            assertEquals(
+                "seeded notes",
+                EpisodeDescriptionCodec.decode(
+                    assertNotNull(db.episodeDao().observeDescription(keepEpisode.id).first()),
+                ),
+            )
+            assertEquals(0, scheduler.rescheduleCount)
+            assertTrue(scheduler.nowRequests.isEmpty())
+            assertSyncInert()
+        }
+
+    /** A multibyte description sized exactly to the codec bound commits and round-trips. */
+    @Test
+    fun aDescriptionAtTheCodecBoundCommitsAndDecodes() =
+        runTest {
+            val url = "https://a.example.com/exact-bound"
+            // AT_BOUND_CJK_CHARS x 3 UTF-8 bytes + 2 ASCII bytes lands exactly on the bound.
+            val atBound = CJK.repeat(AT_BOUND_CJK_CHARS) + "ab"
+            assertEquals(CODEC_BOUND_BYTES, atBound.encodeToByteArray().size)
+            val parsed =
+                parseWithProducerLimits(
+                    rssBody(
+                        items = arrayOf(rssItem("edge", extra = "<description>$atBound</description>")),
+                    ),
+                    url,
+                )
+            assertEquals(atBound, parsed.items.single().descriptionHtml)
+            assertTrue(parsed.warnings.none { it.code == WarningCode.TEXT_TRUNCATED })
+            resolverBundle.cache.put(
+                previewId = url,
+                inputUrl = url,
+                feed = parsed,
+                meta = fetchMeta(finalUrl = url),
+                hops = emptyList(),
+                credentials = null,
+            )
+
+            val id = assertIs<Outcome.Success<Long>>(subscribeBundle.useCase(url, emptySet())).value
+
+            assertEquals(1, db.podcastDao().episodeCount(id))
+            val episode = assertNotNull(db.episodeDao().byIdentityKey(id, "g:edge"))
+            val blob = assertNotNull(db.episodeDao().observeDescription(episode.id).first())
+            assertEquals(atBound, EpisodeDescriptionCodec.decode(blob))
+        }
+
+    /** Parses [body] through the real parser under a producer's widened text limit. */
+    private fun parseWithProducerLimits(
+        body: String,
+        baseUrl: String,
+    ): ParsedFeed {
+        val parser = XmlPullFeedParser.discovered(ParseLimits(maxTextChars = PRODUCER_MAX_TEXT_CHARS))
+        return assertIs<ParseResult.Ok>(
+            parser.parse({ Buffer().writeUtf8(body) }, httpCharset = null, baseUrl = baseUrl),
+        ).feed
+    }
+
+    /** A raw `COUNT(*)` on the reader pool — the assertion targets the table, not a DAO view. */
+    private suspend fun NeutrodyneDatabase.rowCount(table: String): Long =
+        useReaderConnection { conn ->
+            conn.usePrepared("SELECT COUNT(*) FROM $table") { stmt ->
+                check(stmt.step()) { "COUNT(*) returned no row" }
+                stmt.getLong(0)
+            }
+        }
+
     // --- Paging kick (03 Subscribe transaction, RFC 5005 paging) --------------------------------------
 
     @Test
@@ -548,5 +720,21 @@ class SubscribeFlowTest {
 
     private companion object {
         const val NOW = TestClock.DEFAULT_NOW
+        const val DAY = 86_400_000L
+
+        /** The producer-side text limit that admits the oversized description (03 Limits). */
+        const val PRODUCER_MAX_TEXT_CHARS = 768 * 1024
+
+        /** Exactly at the parser cap; 786432 x 3 UTF-8 bytes = 2359296 — over the codec bound. */
+        const val OVER_BOUND_CHARS = 786_432
+
+        /** 699050 x 3 UTF-8 bytes + 2 ASCII bytes = 2097152 — exactly the codec bound. */
+        const val AT_BOUND_CJK_CHARS = 699_050
+
+        /** The codec's documented decoded-size bound (02 episode_description). */
+        const val CODEC_BOUND_BYTES = 2 * 1024 * 1024
+
+        /** '界' (U+754C): three UTF-8 bytes per character. */
+        const val CJK = "界"
     }
 }

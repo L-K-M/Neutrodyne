@@ -78,35 +78,39 @@ class RoomRuntimeServiceDeviceTest {
             "service must be declared and bindable",
             context.bindService(intent, connection, Context.BIND_AUTO_CREATE),
         )
-        assertTrue("service must connect", bound.await(10, TimeUnit.SECONDS))
-        val service =
-            requireNotNull(runBlocking { withTimeoutOrNull(5_000) { remote.await() } }) {
-                "asInterface must resolve the Stub"
-            }
-
-        // Two distinct Stub objects: RemoteCallbackList keys callbacks by IBinder, so a
-        // second register() with the same object would replace the first entry and the
-        // broadcast would skip the sole remaining client (the caller's own clientId).
-        val callback =
-            object : IMultiInstanceInvalidationCallback.Stub() {
-                override fun onInvalidation(tables: Array<out String>) {
-                    delivered.countDown()
+        try {
+            assertTrue("service must connect", bound.await(10, TimeUnit.SECONDS))
+            val service =
+                requireNotNull(runBlocking { withTimeoutOrNull(5_000) { remote.await() } }) {
+                    "asInterface must resolve the Stub"
                 }
 
-                override fun getInterfaceVersion(): Int = IMultiInstanceInvalidationCallback.VERSION
-            }
-        val other =
-            object : IMultiInstanceInvalidationCallback.Stub() {
-                override fun onInvalidation(tables: Array<out String>) = Unit
+            // Two distinct Stub objects: RemoteCallbackList keys callbacks by IBinder, so a
+            // second register() with the same object would replace the first entry and the
+            // broadcast would skip the sole remaining client (the caller's own clientId).
+            val callback =
+                object : IMultiInstanceInvalidationCallback.Stub() {
+                    override fun onInvalidation(tables: Array<out String>) {
+                        delivered.countDown()
+                    }
 
-                override fun getInterfaceVersion(): Int = IMultiInstanceInvalidationCallback.VERSION
-            }
-        val callbackId = service.registerCallback(callback, "probe.db")
-        val otherId = service.registerCallback(other, "probe.db")
-        assertTrue("two callbacks must register as distinct clients", callbackId != otherId)
-        service.broadcastInvalidation(otherId, arrayOf("probe"))
-        assertTrue("broadcast must reach the callback", delivered.await(5, TimeUnit.SECONDS))
-        context.unbindService(connection)
+                    override fun getInterfaceVersion(): Int = IMultiInstanceInvalidationCallback.VERSION
+                }
+            val other =
+                object : IMultiInstanceInvalidationCallback.Stub() {
+                    override fun onInvalidation(tables: Array<out String>) = Unit
+
+                    override fun getInterfaceVersion(): Int = IMultiInstanceInvalidationCallback.VERSION
+                }
+            val callbackId = service.registerCallback(callback, "probe.db")
+            val otherId = service.registerCallback(other, "probe.db")
+            assertTrue("two callbacks must register as distinct clients", callbackId != otherId)
+            service.broadcastInvalidation(otherId, arrayOf("probe"))
+            assertTrue("broadcast must reach the callback", delivered.await(5, TimeUnit.SECONDS))
+        } finally {
+            // A failed assert between bind and this point must not leave the service bound.
+            context.unbindService(connection)
+        }
     }
 
     @Test
@@ -130,7 +134,15 @@ class RoomRuntimeServiceDeviceTest {
                             holdLatch.await()
                         }
                     }
-                holderEntered.await()
+                // A holder that dies before completing the deferred would park a bare
+                // await() forever; propagate its cause and keep the wait bounded anyway.
+                holder.invokeOnCompletion { cause ->
+                    if (cause != null) holderEntered.completeExceptionally(cause)
+                }
+                assertNotNull(
+                    "holder must enter its write transaction",
+                    withTimeoutOrNull(POOL_PROBE_MS) { holderEntered.await() },
+                )
                 delay(300)
 
                 val waiter =
@@ -157,6 +169,11 @@ class RoomRuntimeServiceDeviceTest {
                 db.close()
             }
         }
+
+    private companion object {
+        /** Bound for the holder-entry wait and wedged-pool health probes. */
+        const val POOL_PROBE_MS = 5_000L
+    }
 
     private class ProbeDatabase : RoomDatabase() {
         override fun createOpenDelegate(): RoomOpenDelegateMarker =

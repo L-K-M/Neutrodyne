@@ -55,6 +55,26 @@ class DurationsTest {
     }
 
     @Test
+    fun shapeRejectionsAndLeniency() {
+        // Empty components, stray separators and non-`digits.fraction` shapes reject.
+        assertNull(Durations.parseMs(":30"))
+        assertNull(Durations.parseMs("1:"))
+        assertNull(Durations.parseMs("1::30"))
+        assertNull(Durations.parseMs("1."))
+        assertNull(Durations.parseMs("1.2.3"))
+        assertNull(Durations.parseMs("1,5"))
+        // `\d` is ASCII here: non-ASCII digits are not duration components.
+        assertNull(Durations.parseMs("٤٢"))
+        // Surrounding whitespace is trimmed — an accepted leniency, pinned deliberately.
+        assertEquals(42_000L, Durations.parseMs(" 42"))
+        assertEquals(42_000L, Durations.parseMs("42 "))
+        // Components are not range-checked: "0:60" is a minute of sixty seconds = 60 s.
+        assertEquals(60_000L, Durations.parseMs("0:60"))
+        // Fractions longer than 3 digits truncate to whole milliseconds, not reject.
+        assertEquals(1_999L, Durations.parseMs("1.9999"))
+    }
+
+    @Test
     fun rejectsOver48Hours() {
         assertNull(Durations.parseMs("49:00:00"))
         assertNull(Durations.parseMs("48:00:01"))

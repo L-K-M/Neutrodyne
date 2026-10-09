@@ -29,6 +29,7 @@ import ch.lkmc.neutrodyne.core.model.ShowType
 import ch.lkmc.neutrodyne.core.model.SourceKind
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.WaitReason
+import kotlin.enums.enumEntries
 
 /**
  * The database's one converter class (02 Type converters): `Enum.name` ↔ `TEXT`, one explicit pair
@@ -182,7 +183,7 @@ class NeutrodyneConverters {
 inline fun <reified E : Enum<E>> enumOr(
     name: String,
     fallback: E,
-): E = enumValues<E>().firstOrNull { it.name == name } ?: fallback
+): E = enumEntries<E>().firstOrNull { it.name == name } ?: fallback
 
 /** `name` → the enum constant, or `null` when the name is unknown (the `null` fallbacks of 02). */
-inline fun <reified E : Enum<E>> enumOrNull(name: String): E? = enumValues<E>().firstOrNull { it.name == name }
+inline fun <reified E : Enum<E>> enumOrNull(name: String): E? = enumEntries<E>().firstOrNull { it.name == name }

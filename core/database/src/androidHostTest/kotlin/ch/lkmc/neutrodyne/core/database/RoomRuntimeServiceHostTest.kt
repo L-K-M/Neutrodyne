@@ -111,7 +111,15 @@ class RoomRuntimeServiceHostTest {
                             holdLatch.await()
                         }
                     }
-                holderEntered.await()
+                // A holder that dies before completing the deferred would park a bare
+                // await() forever; propagate its cause and keep the wait bounded anyway.
+                holder.invokeOnCompletion { cause ->
+                    if (cause != null) holderEntered.completeExceptionally(cause)
+                }
+                assertNotNull(
+                    withTimeoutOrNull(POOL_PROBE_MS) { holderEntered.await() },
+                    "holder must enter its write transaction",
+                )
                 delay(300)
 
                 val waiter =
@@ -144,6 +152,11 @@ class RoomRuntimeServiceHostTest {
                 db.close()
             }
         }
+
+    private companion object {
+        /** Bound for the holder-entry wait and wedged-pool health probes. */
+        const val POOL_PROBE_MS = 5_000L
+    }
 
     private class ProbeDatabase : RoomDatabase() {
         override fun createOpenDelegate(): RoomOpenDelegateMarker =
