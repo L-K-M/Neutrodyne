@@ -12,7 +12,9 @@ kotlin {
     // comes from neutrodyne.room. The task is `testAndroidHostTest`. Device tests live in
     // `:app` (01 Convention plugins: device tests never in library modules).
     targets.named("android") {
-        (this as KotlinMultiplatformAndroidLibraryTarget).withHostTest { }
+        (this as KotlinMultiplatformAndroidLibraryTarget).apply {
+            withHostTest { }
+        }
     }
 
     sourceSets {
@@ -21,9 +23,15 @@ kotlin {
             implementation(project(":core:common"))
             implementation(libs.kotlinx.serialization.json)
         }
+        findByName("desktopTest")?.dependencies {
+            // Test-only edge (02 Testing; module-graph rule 13 does not assert test edges): the
+            // shared TestDb/MigrationInvariants/SqlEnumLiterals helpers live in :core:testing.
+            implementation(project(":core:testing"))
+        }
         findByName("androidHostTest")?.dependencies {
             implementation(libs.robolectric)
             implementation(libs.junit4)
+            implementation(project(":core:testing"))
         }
     }
 }
