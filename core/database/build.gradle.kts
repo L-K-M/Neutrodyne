@@ -9,7 +9,8 @@ plugins {
 
 kotlin {
     // Host (Robolectric) tests for the SQLite drivers (S4, 2026-10-06); sqlite-framework
-    // comes from neutrodyne.room. The task is `testAndroidHostTest`.
+    // comes from neutrodyne.room. The task is `testAndroidHostTest`. Device tests live in
+    // `:app` (01 Convention plugins: device tests never in library modules).
     targets.named("android") {
         (this as KotlinMultiplatformAndroidLibraryTarget).withHostTest { }
     }
