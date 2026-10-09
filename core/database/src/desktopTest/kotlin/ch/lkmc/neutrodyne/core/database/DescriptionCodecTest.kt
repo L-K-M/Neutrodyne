@@ -5,12 +5,13 @@ package ch.lkmc.neutrodyne.core.database
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
-import kotlin.test.assertIs
+import kotlin.test.assertFailsWith
 
 /**
  * `EpisodeDescriptionCodec` (02 episode_description): UTF-8 under 512 bytes stays raw (`0x00`),
  * at/above it is raw-DEFLATEd (`0x01`), and an unknown header byte never throws — the whole blob
- * is treated as pre-codec UTF-8.
+ * is treated as pre-codec UTF-8. Codec-owned blobs are stricter: a corrupt or truncated body,
+ * or output past the 2 MiB producer bound, fails with `IllegalStateException`.
  */
 class DescriptionCodecTest {
     @Test
@@ -65,16 +66,29 @@ class DescriptionCodecTest {
     }
 
     @Test
-    fun aCorruptDeflateBodyNeverThrows() {
-        // A recognised DEFLATED header with a bad body (truncated, bit-flipped) is
-        // decode-best-effort data, not a crash — the common contract is "never throws".
+    fun aCorruptDeflateBodyFailsControlled() {
+        // A recognised DEFLATED header with a bad body is a corruption signal — a controlled
+        // failure, never partial show notes ("never throws" covers only the unknown-header
+        // fallback).
         val encoded = EpisodeDescriptionCodec.encode("<p>${"long ".repeat(200)}</p>")
         assertEquals(DEFLATED, encoded[0])
         val truncated = encoded.copyOf(encoded.size - 4)
         val flipped =
             encoded.copyOf().also { it[it.size / 2] = (it[it.size / 2].toInt() xor 0xFF).toByte() }
-        assertIs<String>(EpisodeDescriptionCodec.decode(truncated))
-        assertIs<String>(EpisodeDescriptionCodec.decode(flipped))
+        assertFailsWith<IllegalStateException> { EpisodeDescriptionCodec.decode(truncated) }
+        assertFailsWith<IllegalStateException> { EpisodeDescriptionCodec.decode(flipped) }
+    }
+
+    @Test
+    fun aBlobInflatingPastTheProducerBoundFailsInsteadOfExpanding() {
+        // Every producer is capped at 512 Ki chars (03 ParseLimits.maxTextChars), so 2 MiB of
+        // UTF-8 bounds legitimate output — a bomb blob must die before it grows the heap.
+        val bomb = EpisodeDescriptionCodec.encode("a".repeat(3 * 1024 * 1024))
+        assertEquals(DEFLATED, bomb[0])
+        assertFailsWith<IllegalStateException> { EpisodeDescriptionCodec.decode(bomb) }
+        // The boundary stays reachable: exactly 2 MiB of inflated output still round-trips.
+        val atBound = EpisodeDescriptionCodec.encode("a".repeat(2 * 1024 * 1024))
+        assertEquals(2 * 1024 * 1024, EpisodeDescriptionCodec.decode(atBound).length)
     }
 
     private companion object {

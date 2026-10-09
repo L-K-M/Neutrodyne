@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.database
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -17,6 +18,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -174,20 +176,23 @@ class FetchStateBatcherTest {
         }
 
     @Test
-    fun aFailingDeadlineWriteKeepsItsRowsAndDoesNotKillTheScope() =
+    fun aFailingDeadlineWritePropagatesIntoTheCallerScope() =
         runTest {
-            // A transient write failure inside the detached deadline job must not cancel the
-            // refresh scope; the rows stay buffered for the next add()/flush(). A plain Job
-            // (not backgroundScope's supervisor) makes the propagation observable.
+            // The deadline job is a child of the caller's run scope: a write failure must fail
+            // the run through structured concurrency — silently completing a job whose write
+            // committed nothing would report a failed flush as success. A plain Job (not
+            // backgroundScope's supervisor) makes the propagation observable.
             val writes = mutableListOf<List<PodcastFetchState>>()
-            var failDeadline = true
-            val scope = CoroutineScope(Job() + StandardTestDispatcher(testScheduler))
+            val seen = mutableListOf<Throwable>()
+            val scope =
+                CoroutineScope(
+                    Job() +
+                        StandardTestDispatcher(testScheduler) +
+                        CoroutineExceptionHandler { _, t -> seen += t },
+                )
             val batcher =
                 FetchStateBatcher(
-                    write = { rows ->
-                        if (failDeadline) throw IllegalStateException("disk busy")
-                        writes += rows
-                    },
+                    write = { throw IllegalStateException("disk busy") },
                     clock = TestClock.from(testScheduler),
                     scope = scope,
                 )
@@ -195,12 +200,13 @@ class FetchStateBatcherTest {
             batcher.add(row(failures = 1))
             advanceTimeBy(FetchStateBatcher.MAX_DELAY_MS)
             runCurrent()
-            assertTrue(writes.isEmpty(), "the failed deadline write must not record a partial batch")
-            assertTrue(scope.isActive, "the deadline failure cancelled the caller's scope")
 
-            failDeadline = false
-            batcher.flush()
-            assertEquals(listOf(1), writes.flatten().map { it.failureCount })
+            assertTrue(writes.isEmpty(), "the failed write must not record a partial batch")
+            assertFalse(scope.isActive, "the deadline failure must cancel the run scope")
+            assertTrue(
+                seen.any { it is IllegalStateException && it.message == "disk busy" },
+                "the write failure must surface uncaught, got $seen",
+            )
             scope.cancel()
         }
 }

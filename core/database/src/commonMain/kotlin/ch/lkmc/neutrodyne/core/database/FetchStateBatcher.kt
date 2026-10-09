@@ -3,7 +3,6 @@
 package ch.lkmc.neutrodyne.core.database
 
 import ch.lkmc.neutrodyne.core.common.Clock
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -26,7 +25,9 @@ import kotlinx.coroutines.withContext
  * (a process kill still can — harmless: those feeds stay due and refetch with conditional GET).
  *
  * [scope] owns the deadline job: the refresh run's scope in production, `backgroundScope` in
- * tests so the virtual scheduler drives the deadline.
+ * tests so the virtual scheduler drives the deadline. A write failure inside the deadline job
+ * propagates into [scope] on purpose — it fails the run through structured concurrency rather
+ * than completing a job whose write silently committed nothing.
  *
  * Deviation (02, recorded 2026-10-06): the spec places this class in `:core:data`; it lives in
  * `:core:database` because the M1a package may not edit `core/data`.
@@ -57,24 +58,16 @@ class FetchStateBatcher internal constructor(
                 deadlineJob =
                     scope.launch {
                         delay(MAX_DELAY_MS)
-                        try {
-                            mutex.withLock {
-                                // The deadline is re-checked against [clock]: a test scheduler can
-                                // skip virtual time while the caller is suspended on
-                                // real-dispatcher work — flush only when the limit elapsed.
-                                if (
-                                    pending.isNotEmpty() &&
-                                    clock.elapsedRealtime() - firstPendingElapsed >= MAX_DELAY_MS
-                                ) {
-                                    flushLocked()
-                                }
+                        mutex.withLock {
+                            // The deadline is re-checked against [clock]: a test scheduler can
+                            // skip virtual time while the caller is suspended on
+                            // real-dispatcher work — flush only when the limit elapsed.
+                            if (
+                                pending.isNotEmpty() &&
+                                clock.elapsedRealtime() - firstPendingElapsed >= MAX_DELAY_MS
+                            ) {
+                                flushLocked()
                             }
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (_: Exception) {
-                            // A failed deadline write keeps its rows (flushLocked only clears
-                            // after commit) for the next add()/flush() — this detached job must
-                            // not cancel the refresh run's scope.
                         }
                     }
             }

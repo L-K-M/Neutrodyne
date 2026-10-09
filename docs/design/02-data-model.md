@@ -635,6 +635,8 @@ object EpisodeDescriptionCodec {             // the only way to read or write `h
 }
 ```
 
+`decode` never throws only on the unknown-header UTF-8 fallback (corrupt or pre-codec blobs decode as themselves). The codec-owned `0x00`/`0x01` forms fail with `IllegalStateException` on a corrupt or truncated deflate body or on decoded output past the producer bound — every supported producer is capped at 03's `ParseLimits.maxTextChars` (512 Ki chars per element), so legitimate decoded output is at most 2 MiB of UTF-8; anything past it is a corruption signal, not show notes.
+
 The column holds raw HTML from the feed (or plain text for YouTube and Atom); sanitising happens at display time ([D27](../PLAN.md#3-key-decisions), [03 Show notes](03-feeds-and-discovery.md#show-notes)). Compression shrinks the largest table to roughly a third (see [Expected size](#expected-size)); encoding runs on `Default` before the ingest transaction.
 
 ### episode_transcript
