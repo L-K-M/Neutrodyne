@@ -71,7 +71,15 @@ class RoomPoolForeignTimeoutTest {
                             holdLatch.await()
                         }
                     }
-                holderEntered.await()
+                // A holder that dies before completing the deferred would park a bare
+                // await() forever; propagate its cause and keep the wait bounded anyway.
+                holder.invokeOnCompletion { cause ->
+                    if (cause != null) holderEntered.completeExceptionally(cause)
+                }
+                assertNotNull(
+                    withTimeoutOrNull(POOL_PROBE_MS) { holderEntered.await() },
+                    "holder must enter its write transaction",
+                )
                 delay(500) // settle: holder owns the sole permit inside a write transaction
 
                 System.setErr(countingStderr(stderrBytes))
@@ -115,7 +123,13 @@ class RoomPoolForeignTimeoutTest {
                 assertTrue(plainWaiter.isCancelled, "cancelled waiter must be cancelled, not failed")
 
                 holder.cancelAndJoin() // cancelled mid-transaction: rolled back by Room
-                assertEquals(0L, countProbes(db), "cancelled transaction must roll back its insert")
+                // countProbes runs a write transaction: a wedged pool would park a bare
+                // call forever, so the rollback probe stays bounded.
+                assertEquals(
+                    0L,
+                    withTimeoutOrNull(POOL_PROBE_MS) { countProbes(db) },
+                    "cancelled transaction must roll back its insert",
+                )
 
                 val reacquired =
                     withTimeoutOrNull(5_000) {
@@ -176,7 +190,14 @@ class RoomPoolForeignTimeoutTest {
                             "released"
                         }
                     }
-                holderEntered.await()
+                // Same fail-fast entry as the first case: propagate holder failure, bound wait.
+                holder.invokeOnCompletion { cause ->
+                    if (cause != null) holderEntered.completeExceptionally(cause)
+                }
+                assertNotNull(
+                    withTimeoutOrNull(POOL_PROBE_MS) { holderEntered.await() },
+                    "holder must enter its write transaction",
+                )
                 delay(500)
 
                 System.setErr(countingStderr(stderrBytes))
@@ -240,6 +261,11 @@ class RoomPoolForeignTimeoutTest {
                 db.close()
             }
         }
+
+    private companion object {
+        /** Bound shared by holder-entry waits and wedged-pool health probes. */
+        const val POOL_PROBE_MS = 5_000L
+    }
 
     private suspend fun countProbes(db: RoomDatabase): Long =
         db.withWriteTransaction {
