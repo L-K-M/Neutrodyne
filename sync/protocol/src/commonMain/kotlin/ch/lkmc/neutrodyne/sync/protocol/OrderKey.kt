@@ -11,8 +11,9 @@ import kotlin.random.Random
  * random base-62 characters to the computed midpoint, so two devices inserting at the same spot
  * almost never produce equal keys.
  *
- * Keys sort correctly under SQLite's `BINARY` collation (digits `0-9A-Za-z` in ASCII order). A key
- * never ends in the zero digit and its integer head is a `BASE_52` length/magnitude marker.
+ * Keys sort correctly under SQLite's `BINARY` collation (digits `0-9A-Za-z` in ASCII order).
+ * Fractions never end in the zero digit; integer-only rewrite keys may (`a0`, `b00`).
+ * The integer head is a `BASE_52` length/magnitude marker.
  */
 object OrderKey {
     private const val BASE_62_DIGITS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
@@ -154,24 +155,45 @@ object OrderKey {
         val zero = BASE_62_DIGITS[0]
         if (b != null && a >= b) throw IllegalArgumentException("$a >= $b")
         if (a.endsWith(zero) || b?.endsWith(zero) == true) throw IllegalArgumentException("trailing zero")
-        if (b != null) {
-            // Remove the longest common prefix, padding `a` with zeros; `b` cannot end before `a`
-            // while they share the prefix. `drop` clamps like the reference's `slice`: the padding
-            // case leaves an empty remainder instead of throwing.
-            var n = 0
-            while ((a.getOrNull(n) ?: zero) == b.getOrNull(n)) {
-                n++
+
+        // Carry the reference's recursive prefix in one buffer. Peer-sized maximum-digit runs
+        // otherwise consume the stack and repeatedly copy their shrinking suffixes.
+        val prefix = StringBuilder()
+        var lowerOffset = 0
+        var upperOffset = 0
+        var upper = b
+
+        while (true) {
+            val upperBound = upper
+            if (upperBound != null) {
+                var shared = 0
+                while ((a.getOrNull(lowerOffset + shared) ?: zero) ==
+                    upperBound.getOrNull(upperOffset + shared)
+                ) {
+                    shared++
+                }
+                if (shared > 0) {
+                    prefix.append(upperBound, upperOffset, upperOffset + shared)
+                    lowerOffset = minOf(a.length, lowerOffset + shared)
+                    upperOffset += shared
+                    continue
+                }
             }
-            if (n > 0) return b.substring(0, n) + midpoint(a.drop(n), b.drop(n))
+
+            val digitA = if (lowerOffset == a.length) 0 else digitIndex(a[lowerOffset])
+            val digitB = if (upperBound != null) digitIndex(upperBound[upperOffset]) else BASE_62_DIGITS.length
+            if (digitB - digitA > 1) {
+                val midDigit = (digitA + digitB + 1) / 2
+                return prefix.append(BASE_62_DIGITS[midDigit]).toString()
+            }
+            if (upperBound != null && upperBound.length - upperOffset > 1) {
+                return prefix.append(upperBound[upperOffset]).toString()
+            }
+
+            prefix.append(BASE_62_DIGITS[digitA])
+            lowerOffset = minOf(a.length, lowerOffset + 1)
+            upper = null
         }
-        val digitA = if (a.isEmpty()) 0 else digitIndex(a[0])
-        val digitB = if (b != null) digitIndex(b[0]) else BASE_62_DIGITS.length
-        if (digitB - digitA > 1) {
-            val midDigit = (digitA + digitB + 1) / 2
-            return BASE_62_DIGITS[midDigit].toString()
-        }
-        if (b != null && b.length > 1) return b.substring(0, 1)
-        return BASE_62_DIGITS[digitA] + midpoint(a.drop(1), null)
     }
 
     // Head characters mark integer-part lengths: the first half of intDigits are negative-length

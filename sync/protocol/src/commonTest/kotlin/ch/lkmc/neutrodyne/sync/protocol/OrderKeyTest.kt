@@ -193,4 +193,17 @@ class OrderKeyTest {
             assertTrue(a < key && key < b, "generated key $key is not strictly between $a and $b")
         }
     }
+
+    @Test
+    fun maximumWireStringBoundDoesNotExhaustTheStack() {
+        // 10's input cap admits 4 KiB strings. A maximum-digit suffix must remain a usable bound.
+        val lower = "a0" + "z".repeat(MAX_WIRE_STRING_BYTES - "a0".length)
+        val upper = "a1"
+        val key = OrderKey.between(lower, upper, Random(42))
+        assertTrue(lower < key && key < upper)
+    }
+
+    private companion object {
+        const val MAX_WIRE_STRING_BYTES = 4 * 1024
+    }
 }
