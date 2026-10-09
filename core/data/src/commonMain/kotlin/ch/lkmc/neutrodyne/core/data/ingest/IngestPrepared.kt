@@ -266,7 +266,7 @@ internal class PreparedItem(
  *
  * Eligible rows are every stored row pass 1 left unclaimed — the design's reservation of
  * "primary keys of document items" stays narrowed to *claimed* rows (deviation 12): an
- * unclaimed doc-keyed row can only be a `g:` claim the reuse guard rejected, and reserving it
+ * unclaimed doc-keyed row can only be a `g:` claim the pass-1 guard rejected, and reserving it
  * would strand exactly the episodes this pass exists to recover.
  */
 internal class Pass2Index(
