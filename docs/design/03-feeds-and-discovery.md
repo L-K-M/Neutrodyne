@@ -1287,6 +1287,8 @@ data class BasicCredentials(val username: String, val password: String)
 6. Reject anything that is not `http(s)` after unwrapping (`file:`, `content:`, `javascript:`, …) as `InvalidUrl`; text with no URL-like token and no dot → `NotAUrl(query = text)`.
 7. `UrlNormalizer.splitUserInfo` moves `user:pass@` into credentials.
 
+The `url` query parameter in Neutrodyne and AntennaPod wrappers is percent-decoded once as UTF-8, with `+` meaning space and `%2B` meaning a literal plus. Literal Unicode is preserved alongside escaped bytes. Malformed percent triplets stay literal; invalid UTF-8 byte sequences use replacement decoding.
+
 ### Host recognition
 
 Order, first match wins (`AddPodcastResolverImpl` for the YouTube row, `HostRecognizer` for the rest):
