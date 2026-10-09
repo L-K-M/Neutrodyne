@@ -648,6 +648,8 @@ data class EpisodeTranscriptEntity(
 )
 ```
 
+The parser emits one row per `<podcast:transcript>` element verbatim; a feed repeating a URL across type/language variants collapses at the DAO (`insertTranscripts` is `REPLACE`, so the last element in document order wins) — persistence is per `(episodeId, url)`, matching the primary key.
+
 ### episode_alt_enclosure
 
 ```kotlin

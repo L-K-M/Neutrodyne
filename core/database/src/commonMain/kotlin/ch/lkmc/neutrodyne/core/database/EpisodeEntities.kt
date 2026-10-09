@@ -101,7 +101,11 @@ data class EpisodeDescriptionEntity(
     override fun hashCode(): Int = 31 * episodeId.hashCode() + html.contentHashCode()
 }
 
-/** `episode_transcript` (02): one row per `<podcast:transcript>` element. */
+/**
+ * `episode_transcript` (02): one row per `<podcast:transcript>` element, deduplicated by
+ * `(episodeId, url)` — a feed repeating a URL across type/language variants keeps the last
+ * element's attributes instead of failing the refresh.
+ */
 @Entity(
     tableName = "episode_transcript",
     primaryKeys = ["episodeId", "url"],

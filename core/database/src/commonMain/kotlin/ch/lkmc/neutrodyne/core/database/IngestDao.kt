@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.database
 
 import androidx.room3.Dao
 import androidx.room3.Insert
+import androidx.room3.OnConflictStrategy
 import androidx.room3.Query
 import androidx.room3.Update
 import androidx.room3.withWriteTransaction
@@ -215,7 +216,10 @@ abstract class IngestDao(
     @Query("DELETE FROM episode_transcript WHERE episodeId = :episodeId")
     protected abstract suspend fun deleteTranscripts(episodeId: Long)
 
-    @Insert
+    // REPLACE because the parser emits one row per <podcast:transcript> element and real feeds
+    // repeat a URL across type/language variants: the (episodeId, url) primary key would abort
+    // the whole child-table replace on the duplicate. Last element wins, document order.
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     protected abstract suspend fun insertTranscripts(rows: List<EpisodeTranscriptEntity>)
 
     @Query("DELETE FROM episode_alt_enclosure WHERE episodeId = :episodeId")
