@@ -268,8 +268,13 @@ class ConverterTest {
             setOf("OFFLINE", "IDENTITY_CONFLICT", "UNKNOWN").all { it in names<FeedErrorKind>() },
             "FeedErrorKind lost a committed anchor name",
         )
+        assertEquals(
+            committed.keys,
+            actual.keys,
+            "the committed map and the actual map must cover the same enums",
+        )
         for ((enumName, required) in committed) {
-            val have = checkNotNull(actual[enumName])
+            val have = actual.getValue(enumName)
             assertTrue(
                 have.containsAll(required),
                 "$enumName lost constants: ${required - have} (constants are append-only)",

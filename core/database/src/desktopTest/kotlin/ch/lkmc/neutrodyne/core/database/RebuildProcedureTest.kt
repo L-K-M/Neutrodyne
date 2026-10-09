@@ -87,7 +87,8 @@ class RebuildProcedureTest {
                     )
                     conn.exec("COMMIT")
                 } catch (t: Throwable) {
-                    conn.exec("ROLLBACK")
+                    // A failed rollback must not mask the original failure.
+                    runCatching { conn.exec("ROLLBACK") }
                     throw t
                 }
 
@@ -116,6 +117,33 @@ class RebuildProcedureTest {
                     conn.texts("PRAGMA foreign_key_check").isEmpty(),
                     "foreign_key_check found violations after the rebuild",
                 )
+            }
+        }
+
+    @Test
+    fun rebuildWithoutSqliteSequenceSucceeds() =
+        runTest {
+            // sqlite_sequence exists only once a database has an AUTOINCREMENT table; a rebuild
+            // on a database without one must not abort on "no such table".
+            BundledSQLiteDriver().open(dir.resolve("plain.db").toString()).use { conn ->
+                conn.exec("CREATE TABLE plain(id INTEGER PRIMARY KEY, name TEXT)")
+                conn.exec("INSERT INTO plain(name) VALUES ('a'), ('b')")
+                conn.exec("PRAGMA foreign_keys = 0")
+                conn.exec("BEGIN EXCLUSIVE")
+                try {
+                    TableRebuild.run(
+                        connection = conn,
+                        table = "plain",
+                        newTableSql = "CREATE TABLE new_plain(id INTEGER PRIMARY KEY, name TEXT)",
+                        columnMap = mapOf("id" to "id", "name" to "name"),
+                    )
+                    conn.exec("COMMIT")
+                } catch (t: Throwable) {
+                    runCatching { conn.exec("ROLLBACK") }
+                    throw t
+                }
+                assertEquals(2, conn.longQuery("SELECT COUNT(*) FROM plain"))
+                assertEquals("b", conn.stringQuery("SELECT name FROM plain WHERE id = 2"))
             }
         }
 

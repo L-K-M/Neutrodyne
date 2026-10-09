@@ -137,7 +137,30 @@ data class CredentialEntity(
     val secretCipher: ByteArray?,
     val iv: ByteArray?,
     val createdAt: Long,
-)
+) {
+    // ByteArray fields compare by reference under generated equals, which breaks Flow
+    // deduplication and diff consumers on CredentialDao.observeAll — compare by content.
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is CredentialEntity) return false
+        return id == other.id &&
+            origin == other.origin &&
+            username == other.username &&
+            secretCipher.contentEquals(other.secretCipher) &&
+            iv.contentEquals(other.iv) &&
+            createdAt == other.createdAt
+    }
+
+    override fun hashCode(): Int {
+        var result = id.hashCode()
+        result = 31 * result + origin.hashCode()
+        result = 31 * result + username.hashCode()
+        result = 31 * result + secretCipher.contentHashCode()
+        result = 31 * result + iv.contentHashCode()
+        result = 31 * result + createdAt.hashCode()
+        return result
+    }
+}
 
 /**
  * `podcast_settings` / `podcast_group_settings` shared embedded override set (02 `ScopeOverrides`):
