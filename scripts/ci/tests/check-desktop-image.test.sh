@@ -83,6 +83,7 @@ def norm_thin(b):
     csz_sum = sum(c[1] for c in cmds if c[0] == 0x1d)
     if len(blobs) > ncmds or csz_sum > sizeofcmds:
         return b, 0
+    page = 0x4000 if struct.unpack(e + 'I', b[4:8])[0] in (0x0100000c, 0x0200000c) else 0x1000
     out = bytearray(b[:16])
     out += struct.pack(e + 'I', ncmds - len(blobs))
     out += struct.pack(e + 'I', sizeofcmds - csz_sum)
@@ -95,18 +96,18 @@ def norm_thin(b):
         if cmd in (0x1, 0x19) and cb[8:24].rstrip(b'\0') == b'__LINKEDIT':
             cb = bytearray(cb)
             if is64:
-                foff, fsize = struct.unpack(e + 'QQ', cb[40:56])
+                vm, vs, foff, fsize = struct.unpack(e + 'QQQQ', cb[24:56])
                 inside = sum(d for o, d in blobs if foff <= o and o + d <= foff + fsize)
-                if inside > fsize:
+                if inside > fsize or vs not in (fsize, -(-fsize // page) * page):
                     return b, 0
-                cb[32:40] = b'\0' * 8
+                cb[32:40] = struct.pack(e + 'Q', -(-(fsize - inside) // page) * page)
                 cb[48:56] = struct.pack(e + 'Q', fsize - inside)
             else:
-                foff, fsize = struct.unpack(e + 'II', cb[32:40])
+                vm, vs, foff, fsize = struct.unpack(e + 'IIII', cb[24:40])
                 inside = sum(d for o, d in blobs if foff <= o and o + d <= foff + fsize)
-                if inside > fsize:
+                if inside > fsize or vs not in (fsize, -(-fsize // page) * page):
                     return b, 0
-                cb[28:32] = b'\0' * 4
+                cb[28:32] = struct.pack(e + 'I', -(-(fsize - inside) // page) * page)
                 cb[36:40] = struct.pack(e + 'I', fsize - inside)
         out += cb
     emit = bytes(out) + b[off:]
@@ -125,9 +126,13 @@ def norm_macho(data):
         if nfat > 64 or 8 + 20 * nfat > len(data):
             return data
         out = bytearray(data[:8])
+        prev_end = 8 + 20 * nfat
         for i in range(nfat):
             ro = 8 + 20 * i
             off, size = struct.unpack('>II', data[ro + 8:ro + 16])
+            align = struct.unpack('>I', data[ro + 16:ro + 20])[0]
+            if align > 30 or off != -(-prev_end // (1 << align)) * (1 << align):
+                return data
             if off + size > len(data):
                 return data
             emit, sigsize = norm_thin(data[off:off + size])
@@ -135,6 +140,7 @@ def norm_macho(data):
                 return data
             out += data[ro:ro + 8] + b'\0' * 4 + struct.pack('>I', size - sigsize) + data[ro + 16:ro + 20]
             out += emit
+            prev_end = off + size
         return bytes(out)
     return norm_thin(data)[0]
 PYEOF
@@ -414,15 +420,18 @@ def cs(do, ds):
 def hdr(ncmds, sizeofcmds):
     return struct.pack('<IIIIIIII', 0xfeedfacf, 0x0100000c, 0, 6,
                        ncmds, sizeofcmds, 0, 0)
+# vmsize covers the two legal signed shapes seen on real artifacts: the
+# published file may carry the raw extent (jna-x64) while re-signing writes
+# the 16K-page-rounded extent (arm64 cputype below).
 if mode == 'slot':
     do = 32 + 88 + len(content)
-    pub = hdr(2, 88) + seg64(0x3000, do + 64) + cs(do, 64) + content + b'A' * 64
-    re_ = hdr(2, 88) + seg64(0x3040, do + 128) + cs(do, 128) + content + b'B' * 128
+    pub = hdr(2, 88) + seg64(do + 64, do + 64) + cs(do, 64) + content + b'A' * 64
+    re_ = hdr(2, 88) + seg64(0x4000, do + 128) + cs(do, 128) + content + b'B' * 128
 else:
     # insert: the unsigned file has 16 zero pad bytes where the cs cmd lands
     do = 32 + 88 + len(content)
-    pub = hdr(1, 72) + seg64(0x3000, do) + b'\0' * 16 + content
-    re_ = hdr(2, 88) + seg64(0x3040, do + 128) + cs(do, 128) + content + b'B' * 128
+    pub = hdr(1, 72) + seg64(do, do) + b'\0' * 16 + content
+    re_ = hdr(2, 88) + seg64(0x4000, do + 128) + cs(do, 128) + content + b'B' * 128
 rex = bytearray(re_)
 rex[124] ^= 0xff  # payload starts at 120 (= 32 hdr + 88 cmds) in both modes
 open(base + '-pub', 'wb').write(pub)
@@ -1032,6 +1041,25 @@ f="$img/lib/app/skiko-awt-runtime-macos-arm64-0.150.1-$(unpadded_md5 "$img/lib/a
 mv "$img/lib/app/.stubsc" "$f"
 expect_fail 'not on the Licensee-checked runtime classpath' \
     "re-signed in-jar native with a mutated sizeofcmds is rejected"
+
+# 34. vmsize is not byte-reversible, but it is not a free field either: the
+#     only legal values are the file extent or its architecture page-rounded
+#     form — an arbitrary reservation fails closed.
+macho_pair slot vm
+img="$(new_image ad)"
+skiko_cp "$WORK" macos arm64 \
+    "libskiko-macos-arm64.dylib@$WORK/vm-pub" \
+    libskiko-macos-x64.dylib >> "$MANIFEST"
+python3 - "$WORK/vm-re" "$WORK/vm-re-vs" <<'PY'
+import struct, sys
+b = bytearray(open(sys.argv[1], 'rb').read())
+struct.pack_into('<Q', b, 32 + 32, 0x2222)  # not fsize, not page-rounded
+open(sys.argv[2], 'wb').write(bytes(b))
+PY
+native_next_to "$img/lib/app" macos arm64 "$WORK/vm-re-vs" "$WORK/vm-pin"
+mkstub_native "$img/lib/app" >/dev/null
+expect_fail 'not on the Licensee-checked runtime classpath' \
+    "re-signed native with an out-of-range __LINKEDIT vmsize is rejected"
 
 echo
 if [ "$FAILED" -gt 0 ]; then

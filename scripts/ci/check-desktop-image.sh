@@ -95,11 +95,15 @@ except zipfile.BadZipFile:
 # in DesktopPackaging.kt: ncmds/sizeofcmds emitted minus the signature slots
 # (re-signing may insert one over header padding), each LC_CODE_SIGNATURE
 # command emitted as zeros, __LINKEDIT's filesize emitted minus the blob
-# bytes inside it (vmsize zeroed — the signing slack is not invertible), and
-# the [dataoff, dataoff+datasize) blob region cut. Everything else — code,
-# data, every other load command, the effective non-signature layout — stays
-# byte-exact, so tampered content still differs. The extension gate keeps
-# the cafebabe fat magic away from .class.
+# bytes inside it and its vmsize emitted as the architecture-page-rounded
+# non-signature extent (the raw field must be the extent or its rounded
+# form — signing slack is not invertible but it is not free either), and
+# the [dataoff, dataoff+datasize) blob region cut. Fat slice offsets are
+# validated against deterministic lipo packing and sizes emitted minus the
+# signature bytes. Everything else — code, data, every other load command,
+# the effective non-signature layout — stays byte-exact, so tampered
+# content still differs. The extension gate keeps the cafebabe fat magic
+# away from .class.
 def norm_thin(b):
     if len(b) < 28:
         return b, 0
@@ -131,6 +135,9 @@ def norm_thin(b):
     csz_sum = sum(c[1] for c in cmds if c[0] == 0x1d)
     if len(blobs) > ncmds or csz_sum > sizeofcmds:
         return b, 0
+    # arm64/arm64_32 pages are 16K, other slices 4K — codesign rounds the
+    # linkedit VM reservation to the target's page.
+    page = 0x4000 if struct.unpack(e + 'I', b[4:8])[0] in (0x0100000c, 0x0200000c) else 0x1000
     # Effective (non-signature) header shape stays bound: ncmds/sizeofcmds
     # minus the signature slots re-signing may insert over header padding.
     out = bytearray(b[:16])
@@ -145,18 +152,21 @@ def norm_thin(b):
         if cmd in (0x1, 0x19) and cb[8:24].rstrip(b'\0') == b'__LINKEDIT':
             cb = bytearray(cb)
             if is64:
-                foff, fsize = struct.unpack(e + 'QQ', cb[40:56])
+                vm, vs, foff, fsize = struct.unpack(e + 'QQQQ', cb[24:56])
                 inside = sum(d for o, d in blobs if foff <= o and o + d <= foff + fsize)
-                if inside > fsize:
+                if inside > fsize or vs not in (fsize, -(-fsize // page) * page):
                     return b, 0
-                cb[32:40] = b'\0' * 8  # vmsize: signing slack, not invertible
+                # vmsize is not byte-reversible, but it is not free either:
+                # only the file extent or its page-rounded form is legal —
+                # emit the rounded non-signature extent, bound either way.
+                cb[32:40] = struct.pack(e + 'Q', -(-(fsize - inside) // page) * page)
                 cb[48:56] = struct.pack(e + 'Q', fsize - inside)
             else:
-                foff, fsize = struct.unpack(e + 'II', cb[32:40])
+                vm, vs, foff, fsize = struct.unpack(e + 'IIII', cb[24:40])
                 inside = sum(d for o, d in blobs if foff <= o and o + d <= foff + fsize)
-                if inside > fsize:
+                if inside > fsize or vs not in (fsize, -(-fsize // page) * page):
                     return b, 0
-                cb[28:32] = b'\0' * 4
+                cb[28:32] = struct.pack(e + 'I', -(-(fsize - inside) // page) * page)
                 cb[36:40] = struct.pack(e + 'I', fsize - inside)
         out += cb
     emit = bytes(out) + b[off:]
@@ -175,18 +185,25 @@ def norm_macho(data):
         if nfat > 64 or 8 + 20 * nfat > len(data):
             return data
         out = bytearray(data[:8])
+        prev_end = 8 + 20 * nfat
         for i in range(nfat):
             ro = 8 + 20 * i
             off, size = struct.unpack('>II', data[ro + 8:ro + 16])
+            align = struct.unpack('>I', data[ro + 16:ro + 20])[0]
+            # lipo packs slices back to back, each at its 2^align boundary —
+            # the offset is then a function of bound fields, not a free one.
+            if align > 30 or off != -(-prev_end // (1 << align)) * (1 << align):
+                return data
             if off + size > len(data):
                 return data
             emit, sigsize = norm_thin(data[off:off + size])
             if sigsize > size:
                 return data
-            # Slice offset is lipo packing of blob-carrying lengths; the
+            # Slice offset validated against deterministic packing; the
             # effective (pre-signature) slice length stays bound.
             out += data[ro:ro + 8] + b'\0' * 4 + struct.pack('>I', size - sigsize) + data[ro + 16:ro + 20]
             out += emit
+            prev_end = off + size
         return bytes(out)
     return norm_thin(data)[0]
 
@@ -450,6 +467,9 @@ def norm_thin(b):
     csz_sum = sum(c[1] for c in cmds if c[0] == 0x1d)
     if len(blobs) > ncmds or csz_sum > sizeofcmds:
         return b, 0
+    # arm64/arm64_32 pages are 16K, other slices 4K — codesign rounds the
+    # linkedit VM reservation to the target's page.
+    page = 0x4000 if struct.unpack(e + 'I', b[4:8])[0] in (0x0100000c, 0x0200000c) else 0x1000
     # Effective (non-signature) header shape stays bound: ncmds/sizeofcmds
     # minus the signature slots re-signing may insert over header padding.
     out = bytearray(b[:16])
@@ -464,18 +484,21 @@ def norm_thin(b):
         if cmd in (0x1, 0x19) and cb[8:24].rstrip(b'\0') == b'__LINKEDIT':
             cb = bytearray(cb)
             if is64:
-                foff, fsize = struct.unpack(e + 'QQ', cb[40:56])
+                vm, vs, foff, fsize = struct.unpack(e + 'QQQQ', cb[24:56])
                 inside = sum(d for o, d in blobs if foff <= o and o + d <= foff + fsize)
-                if inside > fsize:
+                if inside > fsize or vs not in (fsize, -(-fsize // page) * page):
                     return b, 0
-                cb[32:40] = b'\0' * 8  # vmsize: signing slack, not invertible
+                # vmsize is not byte-reversible, but it is not free either:
+                # only the file extent or its page-rounded form is legal —
+                # emit the rounded non-signature extent, bound either way.
+                cb[32:40] = struct.pack(e + 'Q', -(-(fsize - inside) // page) * page)
                 cb[48:56] = struct.pack(e + 'Q', fsize - inside)
             else:
-                foff, fsize = struct.unpack(e + 'II', cb[32:40])
+                vm, vs, foff, fsize = struct.unpack(e + 'IIII', cb[24:40])
                 inside = sum(d for o, d in blobs if foff <= o and o + d <= foff + fsize)
-                if inside > fsize:
+                if inside > fsize or vs not in (fsize, -(-fsize // page) * page):
                     return b, 0
-                cb[28:32] = b'\0' * 4
+                cb[28:32] = struct.pack(e + 'I', -(-(fsize - inside) // page) * page)
                 cb[36:40] = struct.pack(e + 'I', fsize - inside)
         out += cb
     emit = bytes(out) + b[off:]
@@ -494,18 +517,25 @@ def norm_macho(data):
         if nfat > 64 or 8 + 20 * nfat > len(data):
             return data
         out = bytearray(data[:8])
+        prev_end = 8 + 20 * nfat
         for i in range(nfat):
             ro = 8 + 20 * i
             off, size = struct.unpack('>II', data[ro + 8:ro + 16])
+            align = struct.unpack('>I', data[ro + 16:ro + 20])[0]
+            # lipo packs slices back to back, each at its 2^align boundary —
+            # the offset is then a function of bound fields, not a free one.
+            if align > 30 or off != -(-prev_end // (1 << align)) * (1 << align):
+                return data
             if off + size > len(data):
                 return data
             emit, sigsize = norm_thin(data[off:off + size])
             if sigsize > size:
                 return data
-            # Slice offset is lipo packing of blob-carrying lengths; the
+            # Slice offset validated against deterministic packing; the
             # effective (pre-signature) slice length stays bound.
             out += data[ro:ro + 8] + b'\0' * 4 + struct.pack('>I', size - sigsize) + data[ro + 16:ro + 20]
             out += emit
+            prev_end = off + size
         return bytes(out)
     return norm_thin(data)[0]
 

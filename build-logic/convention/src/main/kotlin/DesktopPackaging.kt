@@ -465,14 +465,16 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
      * minus the signature slots (re-signing may insert one over header
      * padding), emits each LC_CODE_SIGNATURE command as zeros (covering both
      * the re-filled pre-allocated slot and the freshly-inserted command),
-     * emits `__LINKEDIT`'s filesize minus the blob bytes inside it (vmsize is
-     * zeroed — the signing slack is not invertible), and cuts the
+     * emits `__LINKEDIT`'s filesize minus the blob bytes inside it and its
+     * vmsize as the architecture-page-rounded non-signature extent (the raw
+     * field must be the extent or its rounded form — signing slack is not
+     * invertible but it is not free either), and cuts the
      * `[dataoff, dataoff+datasize)` blob region. Anything else — including
      * every load command besides the signature bookkeeping and the effective
      * non-signature layout — stays byte-exact, so mutated content still
-     * fails. Fat binaries normalize per slice: the fat_arch offset is zeroed
-     * (it packs blob-carrying lengths) and size is emitted minus the slice's
-     * signature bytes.
+     * fails. Fat binaries normalize per slice: offsets are validated against
+     * deterministic lipo packing (a function of bound fields) and size is
+     * emitted minus the slice's signature bytes.
      */
     private fun normalizedEntryBytes(
         name: String,
@@ -485,10 +487,18 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
             if (nfat < 0 || nfat > 64 || 8 + 20L * nfat > b.size) return b
             val out = java.io.ByteArrayOutputStream(b.size)
             out.write(b, 0, 8)
+            var prevEnd = 8 + 20L * nfat
             for (i in 0 until nfat) {
                 val ro = 8 + 20 * i
                 val off = u32(b, ro + 8, be = true)
                 val size = u32(b, ro + 12, be = true)
+                val align = u32(b, ro + 16, be = true)
+                // lipo packs slices back to back, each at its 2^align
+                // boundary — the offset is then a function of bound fields,
+                // not a free one.
+                if (align > 30) return b
+                val bound = 1L shl align.toInt()
+                if (off != (prevEnd + bound - 1) / bound * bound) return b
                 if (off + size > b.size) return b
                 val thin = normalizeThinMacho(b.copyOfRange(off.toInt(), (off + size).toInt()))
                 if (thin.sigSize > size) return b
@@ -497,6 +507,7 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
                 out.write(u32Bytes(size - thin.sigSize, be = true), 0, 4)
                 out.write(b, ro + 16, 4)
                 out.write(thin.emit)
+                prevEnd = off + size
             }
             return out.toByteArray()
         }
@@ -541,6 +552,14 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
         val ncmds = u32(b, 16, be)
         val sizeofcmds = u32(b, 20, be)
         if (ncmds > 4096) return ThinResult(b, 0)
+        // arm64/arm64_32 pages are 16K, other slices 4K — codesign rounds the
+        // linkedit VM reservation to the target's page.
+        val page =
+            if (u32(b, 4, be) == CPU_TYPE_ARM64 || u32(b, 4, be) == CPU_TYPE_ARM64_32) {
+                0x4000L
+            } else {
+                0x1000L
+            }
         val cmds = mutableListOf<LongArray>()
         val blobs = mutableListOf<LongArray>()
         var off = hdr
@@ -572,12 +591,15 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
             }
             val cb = b.copyOfRange(co, co + csz)
             if ((cmd == LC_SEGMENT || cmd == LC_SEGMENT_64) && isLinkeditName(cb)) {
+                val vs: Long
                 val foff: Long
                 val fsize: Long
                 if (is64) {
+                    vs = u64(cb, 32, be)
                     foff = u64(cb, 40, be)
                     fsize = u64(cb, 48, be)
                 } else {
+                    vs = u32(cb, 28, be)
                     foff = u32(cb, 32, be)
                     fsize = u32(cb, 36, be)
                 }
@@ -585,14 +607,21 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
                     blobs
                         .filter { foff <= it[0] && it[0] + it[1] <= foff + fsize }
                         .sumOf { it[1] }
-                if (inside > fsize) return ThinResult(b, 0)
+                val rounded = (fsize + page - 1) / page * page
+                if (inside > fsize || (vs != fsize && vs != rounded)) {
+                    return ThinResult(b, 0)
+                }
+                // vmsize is not byte-reversible, but it is not free either:
+                // only the file extent or its page-rounded form is legal —
+                // emit the rounded non-signature extent, bound either way.
+                val nonSig = fsize - inside
+                val nonSigRounded = (nonSig + page - 1) / page * page
                 if (is64) {
-                    // vmsize is signing slack and not invertible.
-                    java.util.Arrays.fill(cb, 32, 40, 0.toByte())
-                    put64(cb, 48, fsize - inside, be)
+                    put64(cb, 32, nonSigRounded, be)
+                    put64(cb, 48, nonSig, be)
                 } else {
-                    java.util.Arrays.fill(cb, 28, 32, 0.toByte())
-                    put32(cb, 36, fsize - inside, be)
+                    put32(cb, 28, nonSigRounded, be)
+                    put32(cb, 36, nonSig, be)
                 }
             }
             out.write(cb)
@@ -697,6 +726,8 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
         private const val MH_MAGIC = 0xfeedfaceL
         private const val MH_MAGIC_64 = 0xfeedfacfL
         private const val MH_CIGAM = 0xcefaedfeL
+        private const val CPU_TYPE_ARM64 = 0x0100000cL
+        private const val CPU_TYPE_ARM64_32 = 0x0200000cL
         private const val MH_CIGAM_64 = 0xcffaedfeL
         private const val FAT_MAGIC = 0xcafebabeL
         private const val LC_SEGMENT = 0x1L
