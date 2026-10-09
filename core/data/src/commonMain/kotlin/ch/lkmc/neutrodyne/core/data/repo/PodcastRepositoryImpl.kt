@@ -231,6 +231,7 @@ internal class PodcastRepositoryImpl(
             isPrivate = PrivateFeedUrls.looksPrivate(p.feedUrl),
             episodeOrder = p.episodeOrder,
             showType = p.showType,
+            includeInAll = p.includeInAll,
             hasOlderPages = p.pagingNextUrl != null,
         )
 

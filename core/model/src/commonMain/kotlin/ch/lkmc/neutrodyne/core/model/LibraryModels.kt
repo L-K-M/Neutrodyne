@@ -48,6 +48,8 @@ data class PodcastDetail(
     val isPrivate: Boolean,
     val episodeOrder: FeedOrder?,
     val showType: ShowType?,
+    /** `podcast.includeInAll` — the settings row's "Show in All" switch (08). */
+    val includeInAll: Boolean,
     /** `pagingNextUrl != null` — older pages may be fetched on demand (03). */
     val hasOlderPages: Boolean,
 )

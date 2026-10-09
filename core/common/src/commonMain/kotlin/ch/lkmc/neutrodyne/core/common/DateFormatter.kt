@@ -14,4 +14,10 @@ package ch.lkmc.neutrodyne.core.common
 expect object DateFormatter {
     /** Medium-format localised date for [epochMs] in the device's default zone (`04.10.2026`). */
     fun date(epochMs: Long): String
+
+    /** The day-of-month numeral for [epochMs] in the device's default zone (08's date block). */
+    fun dayOfMonth(epochMs: Long): String
+
+    /** The abbreviated localised month name for [epochMs] (08's date block: "Oct"). */
+    fun monthShort(epochMs: Long): String
 }
