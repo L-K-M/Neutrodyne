@@ -5,6 +5,8 @@
 # 23.0, upstream build 16111833; the archives live under
 # https://dl.google.com/android/repository/.
 #
+# cmdline-tools.revision is the Pkg.Revision install-android-sdk.sh requires
+# from an existing install's source.properties — anything else is replaced.
 # Each sha256 is the SHA-256 of the downloaded archive. The same manifest
 # sdkmanager reads, https://dl.google.com/android/repository/repository2-1.xml,
 # cross-checks them with SHA-1 (read 2026-10-08):
@@ -18,7 +20,10 @@
 # linux archive and macos-arm64 the macOS one, and the packages are installed
 # through the pure-Java SdkManagerCli that still ships in lib/ instead of the
 # native launcher. Keys read by scripts/ci/install-android-sdk.sh:
-#   cmdline-tools.<host>.archiveUrl, cmdline-tools.<host>.sha256
+#   cmdline-tools.revision, cmdline-tools.<host>.archiveUrl,
+#   cmdline-tools.<host>.sha256
+cmdline-tools.revision=23.0
+
 cmdline-tools.linux-x64.archiveUrl=https://dl.google.com/android/repository/commandlinetools-linux-16111833_latest.zip
 cmdline-tools.linux-x64.sha256=0877a1d048fe4a24efe2eff536ca4223f7adeb58648bb81909d33c446918cfa8
 

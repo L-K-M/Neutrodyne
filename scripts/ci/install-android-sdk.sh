@@ -7,8 +7,11 @@
 # (09 CI scripts, 01 Toolchain and versions): the host's cmdline-tools archive
 # from android-sdk.lock beside this script, `platforms;android-37.0` and
 # `build-tools;36.0.0`. Used inside the release/repro container (repro-build.sh)
-# and on bare runners. Existing installations are reused; the script is
-# idempotent.
+# and on bare runners. An existing cmdline-tools is reused only when its
+# source.properties reports the lock's pinned revision — the ubuntu-24.04
+# runner image ships cmdline-tools 12.0, whose avdmanager cannot parse a dotted
+# api level (exits 0, writes `target=android-0` in the AVD's .ini), so "exists"
+# alone is not enough.
 #
 # sdk-dir defaults to $ANDROID_HOME (or $ANDROID_SDK_ROOT), then to
 # $HOME/android-sdk.
@@ -56,6 +59,9 @@ lock_prop() { # lock_prop <key>
     [ -n "$v" ] || { echo "install-android-sdk: $LOCK_FILE has no '$1'" >&2; exit 2; }
     printf '%s\n' "$v"
 }
+# Pkg.Revision of the locked archives; keep the lock's key in sync with the
+# archives it names.
+CMDLINE_TOOLS_REVISION="$(lock_prop "cmdline-tools.revision")"
 ARCHIVE_URL="$(lock_prop "cmdline-tools.$HOST.archiveUrl")"
 ARCHIVE_SHA256="$(lock_prop "cmdline-tools.$HOST.sha256")"
 
@@ -106,8 +112,18 @@ sdkmanager() {
         com.android.sdklib.tool.sdkmanager.SdkManagerCli --sdk_root="$sdkroot" "$@"
 }
 
-if [ ! -d "$TOOLS_DIR" ]; then
-    echo "install-android-sdk: installing $(basename "$ARCHIVE_URL") into $SDK_DIR ($HOST)"
+INSTALLED_REVISION=""
+if [ -f "$TOOLS_DIR/source.properties" ]; then
+    INSTALLED_REVISION="$(sed -n 's/^Pkg\.Revision=//p' "$TOOLS_DIR/source.properties" | head -n 1 | tr -d '\r')"
+fi
+if [ -x "$TOOLS_DIR/bin/sdkmanager" ] && [ "$INSTALLED_REVISION" = "$CMDLINE_TOOLS_REVISION" ]; then
+    echo "install-android-sdk: cmdline-tools $INSTALLED_REVISION already present"
+else
+    if [ -n "$INSTALLED_REVISION" ]; then
+        echo "install-android-sdk: replacing cmdline-tools $INSTALLED_REVISION with pinned $CMDLINE_TOOLS_REVISION"
+    else
+        echo "install-android-sdk: installing $(basename "$ARCHIVE_URL") (revision $CMDLINE_TOOLS_REVISION) into $SDK_DIR ($HOST)"
+    fi
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
     curl -fsSL "$ARCHIVE_URL" -o "$tmp/cmdline-tools.zip"
@@ -115,15 +131,20 @@ if [ ! -d "$TOOLS_DIR" ]; then
         || { echo "install-android-sdk: SHA-256 mismatch for $ARCHIVE_URL" >&2; exit 1; }
     mkdir -p "$SDK_DIR/cmdline-tools"
     unzip_dir "$tmp/cmdline-tools.zip" "$tmp/tools"
-    # google's zip contains a top-level cmdline-tools/; sdkmanager wants <sdk>/cmdline-tools/latest/
+    # google's zip contains a top-level cmdline-tools/; sdkmanager wants
+    # <sdk>/cmdline-tools/latest/. Stage the verified tree inside cmdline-tools/
+    # first so the rm/mv on latest stays same-filesystem — and never let
+    # sdkmanager upgrade itself (it would land in a sibling latest-2 that
+    # nothing puts on PATH). A leftover latest.new from an interrupted run must
+    # go first: mv into an existing dir would nest the tree.
+    rm -rf "$SDK_DIR/cmdline-tools/latest.new"
+    mv "$tmp/tools/cmdline-tools" "$SDK_DIR/cmdline-tools/latest.new"
     rm -rf "$TOOLS_DIR"
-    mv "$tmp/tools/cmdline-tools" "$TOOLS_DIR"
+    mv "$SDK_DIR/cmdline-tools/latest.new" "$TOOLS_DIR"
     # python's zipfile path drops the zip's unix mode bits — restore them
     chmod +x "$TOOLS_DIR/bin/"* 2>/dev/null || true
     rm -rf "$tmp"
     trap - EXIT
-else
-    echo "install-android-sdk: cmdline-tools already present"
 fi
 
 export PATH="$TOOLS_DIR/bin:$PATH"

@@ -2,12 +2,19 @@
 # SPDX-License-Identifier: Unlicense
 #
 # install-android-sdk.test.sh — boundary cases for scripts/ci/install-android-sdk.sh
-# (09 CI scripts). The script under test picks a pinned, checksum-verified
-# cmdline-tools archive per host and then drives the package install either
-# through the shipped bin/sdkmanager (linux-x64, where cmdline-tools 23.x's
-# native bin/android actually runs) or through the pure-Java SdkManagerCli still
-# inside lib/ (linux-arm64 — Google ships no linux/arm64 archive —, macos-arm64 —
-# the macOS archive's launcher is x86_64-only —, windows-x64).
+# (09 CI scripts). The script under test keeps two mechanisms, and this suite
+# covers both:
+#
+#   - revision pinning (merged from #47): cmdline-tools/latest is reused only
+#     when its source.properties reports the lock's pinned Pkg.Revision,
+#     otherwise the pinned archive is downloaded, SHA-256-verified, staged as
+#     latest.new and renamed over latest;
+#   - host matrix (from #34): the archive comes from android-sdk.lock per host
+#     and the package install runs through the shipped bin/sdkmanager on
+#     linux-x64 (where cmdline-tools 23.x's native bin/android actually runs) or
+#     the pure-Java SdkManagerCli inside lib/ on linux-arm64 (Google ships no
+#     linux/arm64 archive), macos-arm64 (the archive's launcher is
+#     x86_64-only) and windows-x64.
 #
 # The fixtures are tiny zips named like the upstream archives; a stub curl
 # records the requested URL and serves the matching fixture, stub java records
@@ -16,11 +23,11 @@
 # dies with the real "Exec format error" (exit 126) anywhere else — the literal
 # failure nightly 2026-10-08 hit on ubuntu-24.04-arm and macos-15.
 #
-# The script resolves android-sdk.lock beside itself, so each run copies it and
-# the lock into a fixture root — no repository state is touched. A copy of the
-# pre-fix script carries its linux pin inline; rewriting that line to the
-# fixture's real hash is what lets a regression run proceed far enough to
-# expose the launcher bug.
+# The script resolves android-sdk.lock beside itself, so each run copies both
+# into a fixture root — no repository state is touched. A copy of a pre-lock
+# script carries its linux pin inline; rewriting the CMDLINE_TOOLS_SHA256 line
+# (no-op on the lockfile script) plus writing the lock beside it lets a
+# historical copy get past verification and expose its own bug.
 #
 # Also asserted: every `run:` step of the cross-platform desktop jobs sets
 # `shell: bash` (the default pwsh on windows-2025 parses `-P…` Gradle arguments
@@ -28,6 +35,11 @@
 # install-android-sdk.sh exports ANDROID_HOME and ANDROID_SDK_ROOT to the same
 # directory (AGP fails when the inherited ANDROID_SDK_ROOT points at the runner
 # image's SDK while ANDROID_HOME points at ours).
+#
+# SCRIPT_UNDER_TEST overrides the script path so the suite can be run against a
+# historical copy (e.g. `git show 2233b01:scripts/ci/install-android-sdk.sh`
+# fails the latest.new case; the pre-pin revision check fails the stale and
+# missing-source.properties cases).
 #
 # Run: bash scripts/ci/tests/install-android-sdk.test.sh
 # Exit 0 = all cases behave; 1 = at least one regression.
@@ -55,16 +67,20 @@ REAL_CURL="$(command -v curl)"
 STUBBIN_CASE_EXTRA=""
 
 mkdir -p "$FIX_ROOT/scripts/ci" "$STUBBIN" "$STUB_LOG" "$FIXTURE_ZIPS" "$WORK/home"
-cp "$REPO_ROOT/scripts/ci/install-android-sdk.sh" "$FIX_ROOT/scripts/ci/"
+cp "${SCRIPT_UNDER_TEST:-$REPO_ROOT/scripts/ci/install-android-sdk.sh}" \
+    "$FIX_ROOT/scripts/ci/install-android-sdk.sh"
+SCRIPT_FILE="$FIX_ROOT/scripts/ci/install-android-sdk.sh"
 
-# Fixture archives: the upstream file names, but content reduced to a marker
-# naming the host archive, the launchers, and two lib jars (so the Java
-# classpath has a separator to convert on windows-x64).
+# Fixture archives: the upstream file names, content reduced to the pinned
+# source.properties, the markers each suite reads (host-marker,
+# from-pinned-archive), two lib jars (so the Java classpath has a separator to
+# convert on windows-x64) and the launchers.
 python3 - "$FIXTURE_ZIPS" <<'PY'
 import sys, zipfile, os.path
 
 out = sys.argv[1]
 
+# linux-x64's shipped shape: bin/sdkmanager delegates to the native bin/android.
 SDKMANAGER_SH = '''#!/bin/sh
 echo "sdkmanager $*" >> "$STUB_LOG/sdkmanager.log"
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -112,7 +128,8 @@ for name, marker in SPECS.items():
     win = marker == 'windows-x64'
     entries = {
         'cmdline-tools/host-marker': marker + '\n',
-        'cmdline-tools/source.properties': 'Pkg.Revision=23.0\nPkg.Path=cmdline-tools;23.0\n',
+        'cmdline-tools/from-pinned-archive': 'built by fixture\n',
+        'cmdline-tools/source.properties': 'Pkg.Revision=23.0\nPkg.Path=cmdline-tools;latest\n',
         'cmdline-tools/lib/sdklib/tools.sdklib.jar': 'fixture jar\n',
         'cmdline-tools/lib/repository/tools.repository.jar': 'fixture jar\n',
     }
@@ -135,6 +152,7 @@ WIN_SHA="$(sha_of "$FIXTURE_ZIPS/commandlinetools-win-16111833_latest.zip")"
 write_lock() { # write_lock <linux-sha> — fixture pin table beside the copy
     local lsha="$1"
     cat > "$FIX_ROOT/scripts/ci/android-sdk.lock" <<EOF
+cmdline-tools.revision=23.0
 cmdline-tools.linux-x64.archiveUrl=https://dl.google.com/android/repository/commandlinetools-linux-16111833_latest.zip
 cmdline-tools.linux-x64.sha256=$lsha
 cmdline-tools.linux-arm64.archiveUrl=https://dl.google.com/android/repository/commandlinetools-linux-16111833_latest.zip
@@ -147,11 +165,10 @@ EOF
 }
 write_lock "$LINUX_SHA"
 
-# The pre-fix script carries its linux pin inline; repoint it at the fixture's
-# real hash so the run gets past verification and exposes the launcher bug.
-# The fixed script reads android-sdk.lock, where this line does not exist.
-sed -i "s/^CMDLINE_TOOLS_SHA256=.*/CMDLINE_TOOLS_SHA256=\"$LINUX_SHA\"/" \
-    "$FIX_ROOT/scripts/ci/install-android-sdk.sh"
+# A pre-lock historical script carries its linux pin inline; repoint it at the
+# fixture's real hash so the run gets past verification and exposes the bug the
+# copy exists to exercise. The lockfile script has no such line — sed is a no-op.
+sed -i "s/^CMDLINE_TOOLS_SHA256=.*/CMDLINE_TOOLS_SHA256=\"$LINUX_SHA\"/" "$SCRIPT_FILE"
 
 # --- stubs ----------------------------------------------------------------------
 
@@ -208,16 +225,135 @@ run_install() {
     env -i PATH="$STUBBIN:$STUBBIN_CASE_EXTRA$BASEPATH" HOME="$WORK/home" \
         LANG=C.UTF-8 STUB_LOG="$STUB_LOG" FIXTURE_ZIPS="$FIXTURE_ZIPS" \
         REAL_CURL="$REAL_CURL" SIM_UNAME_S="$s" SIM_UNAME_M="$m" SIM_HOST="$host" \
-        bash "$FIX_ROOT/scripts/ci/install-android-sdk.sh" "$dir"
+        bash "$SCRIPT_FILE" "$dir"
 }
 
 has_pkg_dirs() {
     [ -d "$1/platforms/android-37.0" ] && [ -d "$1/build-tools/36.0.0" ]
 }
 
-# --- host selection and launcher cases ------------------------------------------
+# seed_tools <sdk-dir> <revision|none> — an installed cmdline-tools/latest.
+# The seeded sdkmanager is a self-contained stub for the revision cases' package
+# calls; the archive's own bin/sdkmanager keeps delegating to bin/android.
+seed_tools() {
+    mkdir -p "$1/cmdline-tools/latest/bin"
+    if [ "$2" != "none" ]; then
+        printf 'Pkg.Revision=%s\n' "$2" > "$1/cmdline-tools/latest/source.properties"
+    fi
+    cat > "$1/cmdline-tools/latest/bin/sdkmanager" <<'EOF'
+#!/bin/sh
+echo "sdkmanager $*" >> "$STUB_LOG/sdkmanager.log"
+SDK_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+install=""
+for a in "$@"; do
+  case "$a" in
+    --licenses) mkdir -p "$SDK_ROOT/licenses" ;;
+    --install) install=yes ;;
+    *) [ -n "$install" ] && mkdir -p "$SDK_ROOT/$(printf '%s' "$a" | tr ';' '/')" ;;
+  esac
+done
+exit 0
+EOF
+    chmod +x "$1/cmdline-tools/latest/bin/sdkmanager"
+}
 
-# 1. linux-x64: the linux archive lands and the shipped bin/sdkmanager (which
+seed_packages() {
+    mkdir -p "$1/platforms/android-37.0" "$1/build-tools/36.0.0"
+}
+
+latest_revision() {
+    sed -n 's/^Pkg\.Revision=//p' "$1/cmdline-tools/latest/source.properties" | tr -d '\r'
+}
+
+# pinned_layout_ok <sdk-dir> — the fixture tree landed at cmdline-tools/latest.
+pinned_layout_ok() {
+    [ -x "$1/cmdline-tools/latest/bin/sdkmanager" ] \
+        && [ "$(latest_revision "$1")" = "23.0" ] \
+        && [ -f "$1/cmdline-tools/latest/from-pinned-archive" ] \
+        && [ ! -d "$1/cmdline-tools/latest/cmdline-tools" ]
+}
+
+# --- revision pinning and staging (from #47, adapted to the lockfile installer) --
+
+# 1. A pinned install is reused: no download, no package calls, no staging.
+SDK="$WORK/sdk-reuse"
+seed_tools "$SDK" 23.0
+seed_packages "$SDK"
+if run_install Linux x86_64 linux-x64 "$SDK" > "$WORK/out" 2>&1 \
+    && grep -q 'already present' "$WORK/out" \
+    && [ ! -f "$STUB_LOG/curl.log" ] && [ ! -f "$STUB_LOG/sdkmanager.log" ] \
+    && [ ! -e "$SDK/cmdline-tools/latest/from-pinned-archive" ]; then
+    t_ok "pinned cmdline-tools 23.0 is reused without a download"
+else
+    t_fail "pinned cmdline-tools 23.0 is reused without a download"
+    sed 's/^/    /' "$WORK/out" >&2
+fi
+
+# 2. A stale-revision install is replaced by the pinned archive.
+SDK="$WORK/sdk-stale"
+seed_tools "$SDK" 12.0
+seed_packages "$SDK"
+if run_install Linux x86_64 linux-x64 "$SDK" > "$WORK/out" 2>&1 \
+    && [ "$(cat "$STUB_LOG/curl.log")" = "commandlinetools-linux-16111833_latest.zip" ] \
+    && pinned_layout_ok "$SDK" \
+    && grep -q 'replacing cmdline-tools 12.0' "$WORK/out"; then
+    t_ok "stale cmdline-tools 12.0 is replaced by the pinned archive"
+else
+    t_fail "stale cmdline-tools 12.0 is replaced by the pinned archive"
+    sed 's/^/    /' "$WORK/out" >&2
+fi
+
+# 3. A leftover latest.new from an interrupted run cannot corrupt the layout:
+#    the staging dir is removed before the verified tree is staged, so latest
+#    ends up as the archive root rather than a dir containing a nested
+#    cmdline-tools/. The previous version exited 0 here with
+#    latest/cmdline-tools/bin/sdkmanager and no latest/bin/sdkmanager.
+SDK="$WORK/sdk-staging"
+seed_tools "$SDK" 12.0
+seed_packages "$SDK"
+mkdir -p "$SDK/cmdline-tools/latest.new/leftover"
+if run_install Linux x86_64 linux-x64 "$SDK" > "$WORK/out" 2>&1 \
+    && pinned_layout_ok "$SDK" \
+    && [ ! -e "$SDK/cmdline-tools/latest.new" ] \
+    && [ ! -e "$SDK/cmdline-tools/latest/leftover" ]; then
+    t_ok "stale latest.new staging dir cannot nest the new tree"
+else
+    t_fail "stale latest.new staging dir cannot nest the new tree"
+    sed 's/^/    /' "$WORK/out" >&2
+fi
+
+# 4. An install without source.properties cannot prove its revision, so it is
+#    replaced rather than trusted.
+SDK="$WORK/sdk-noprops"
+seed_tools "$SDK" none
+seed_packages "$SDK"
+if run_install Linux x86_64 linux-x64 "$SDK" > "$WORK/out" 2>&1 \
+    && [ -f "$STUB_LOG/curl.log" ] && pinned_layout_ok "$SDK"; then
+    t_ok "missing source.properties forces a pinned reinstall"
+else
+    t_fail "missing source.properties forces a pinned reinstall"
+    sed 's/^/    /' "$WORK/out" >&2
+fi
+
+# 5. Missing packages go through the (already pinned) sdkmanager: licenses,
+#    then install of the pinned package set.
+SDK="$WORK/sdk-pkgs"
+seed_tools "$SDK" 23.0
+if run_install Linux x86_64 linux-x64 "$SDK" > "$WORK/out" 2>&1 \
+    && [ ! -f "$STUB_LOG/curl.log" ] \
+    && grep -q 'sdkmanager --licenses' "$STUB_LOG/sdkmanager.log" \
+    && grep -q 'sdkmanager --install platforms;android-37.0 build-tools;36.0.0' \
+        "$STUB_LOG/sdkmanager.log" \
+    && has_pkg_dirs "$SDK"; then
+    t_ok "missing packages are installed through the pinned sdkmanager"
+else
+    t_fail "missing packages are installed through the pinned sdkmanager"
+    sed 's/^/    /' "$WORK/out" >&2
+fi
+
+# --- host selection and launchers -------------------------------------------------
+
+# 6. linux-x64: the linux archive lands and the shipped bin/sdkmanager (which
 #    delegates to the native bin/android) performs the install — no Java
 #    SdkManagerCli. This is the path the release/repro container pins.
 SDK="$WORK/sdk-linux-x64"
@@ -234,7 +370,7 @@ else
     sed 's/^/    /' "$WORK/out" >&2
 fi
 
-# 2. linux-arm64: no upstream linux/arm64 archive exists, so the linux archive
+# 7. linux-arm64: no upstream linux/arm64 archive exists, so the linux archive
 #    lands but the packages must be installed through Java's SdkManagerCli —
 #    the shipped launcher would die with "Exec format error".
 SDK="$WORK/sdk-linux-arm64"
@@ -251,7 +387,7 @@ else
     sed 's/^/    /' "$WORK/out" >&2
 fi
 
-# 3. macos-arm64: the macOS (x86_64) archive lands, but its native launcher is
+# 8. macos-arm64: the macOS (x86_64) archive lands, but its native launcher is
 #    x86_64-only — the install must again go through the Java SdkManagerCli.
 SDK="$WORK/sdk-macos-arm64"
 if run_install Darwin arm64 macos-arm64 "$SDK" > "$WORK/out" 2>&1 \
@@ -266,11 +402,12 @@ else
     sed 's/^/    /' "$WORK/out" >&2
 fi
 
-# 4. windows-x64: the windows archive lands; the Java launcher gets a
+# 9. windows-x64: the windows archive lands; the Java launcher gets a
 #    semicolon-separated classpath through cygpath (-pw) and Windows-style
 #    paths for toolsdir/sdk_root (-w).
-mkdir -p "$STUBBIN-case"
-cat > "$STUBBIN-case/cygpath" <<'EOF'
+STUBBIN_CASE_EXTRA="$WORK/bin-case"
+mkdir -p "$STUBBIN_CASE_EXTRA"
+cat > "$STUBBIN_CASE_EXTRA/cygpath" <<'EOF'
 #!/usr/bin/env bash
 echo "cygpath $*" >> "$STUB_LOG/cygpath.log"
 case "$1" in
@@ -278,8 +415,8 @@ case "$1" in
     *)   shift; printf '%s' "$1" ;;
 esac
 EOF
-chmod +x "$STUBBIN-case/cygpath"
-STUBBIN_CASE_EXTRA="$STUBBIN-case:"
+chmod +x "$STUBBIN_CASE_EXTRA/cygpath"
+STUBBIN_CASE_EXTRA="$STUBBIN_CASE_EXTRA:"
 SDK="$WORK/sdk-windows-x64"
 if run_install MINGW64_NT-10.0 x86_64 windows-x64 "$SDK" > "$WORK/out" 2>&1 \
     && has_pkg_dirs "$SDK" \
@@ -295,8 +432,8 @@ else
 fi
 STUBBIN_CASE_EXTRA=""
 
-# 5. Unsupported host: explicit failure before anything is downloaded — no
-#    silent fallthrough onto the linux archive.
+# 10. Unsupported host: explicit failure before anything is downloaded — no
+#     silent fallthrough onto the linux archive.
 SDK="$WORK/sdk-unsupported"
 if ! run_install FreeBSD amd64 freebsd-x64 "$SDK" > "$WORK/out" 2>&1 \
     && grep -qi 'unsupported' "$WORK/out" \
@@ -309,8 +446,8 @@ fi
 
 # --- integrity and idempotence ---------------------------------------------------
 
-# 6. Checksum rejection: pin the macOS fixture's hash for the linux archive —
-#    sha256sum must refuse it and nothing may be installed.
+# 11. Checksum rejection: pin the macOS fixture's hash for the linux archive —
+#     sha256sum must refuse it and nothing may be installed.
 SDK="$WORK/sdk-badsum"
 write_lock "$MAC_SHA"
 if ! run_install Linux x86_64 linux-x64 "$SDK" > "$WORK/out" 2>&1 \
@@ -323,8 +460,8 @@ else
 fi
 write_lock "$LINUX_SHA"
 
-# 7. Idempotence: a second run on a complete SDK downloads nothing and calls no
-#    tool.
+# 12. Idempotence: a second run on a complete SDK downloads nothing and calls
+#     no tool.
 SDK="$WORK/sdk-linux-x64"
 if run_install Linux x86_64 linux-x64 "$SDK" > "$WORK/out" 2>&1 \
     && [ ! -f "$STUB_LOG/curl.log" ] && [ ! -f "$STUB_LOG/java.log" ] \
@@ -336,8 +473,8 @@ else
     sed 's/^/    /' "$WORK/out" >&2
 fi
 
-# 8. Cached tools but missing packages: no archive download, the install still
-#    runs through the host's launcher.
+# 13. Cached tools but missing packages: no archive download, the install still
+#     runs through the host's launcher.
 SDK="$WORK/sdk-partial"
 mkdir -p "$SDK/cmdline-tools"
 python3 - "$FIXTURE_ZIPS/commandlinetools-linux-16111833_latest.zip" "$SDK" <<'PY'
@@ -360,9 +497,9 @@ fi
 
 # --- workflow invariants ----------------------------------------------------------
 
-# 9. Every run: step of the cross-platform desktop jobs sets shell: bash, and
-#    every step calling install-android-sdk.sh exports ANDROID_HOME and
-#    ANDROID_SDK_ROOT with the same value to $GITHUB_ENV.
+# 14. Every run: step of the cross-platform desktop jobs sets shell: bash, and
+#     every step calling install-android-sdk.sh exports ANDROID_HOME and
+#     ANDROID_SDK_ROOT with the same value to $GITHUB_ENV.
 if ! python3 - "$REPO_ROOT" <<'PY'
 import re, sys
 
@@ -391,18 +528,16 @@ def steps(block):
     return out
 
 def run_text(step):
-    i = next((i for i, l in enumerate(step) if re.match(r'\s+run:', l)), None)
-    if i is None:
-        return None
-    if not re.match(r'\s+run:\s*[|>]', step[i]):
-        return [step[i]]
-    ind = indent(step[i])
-    body = []
-    for l in step[i + 1:]:
-        if l.strip() and indent(l) <= ind:
-            break
-        body.append(l)
-    return body
+    for i, l in enumerate(step):
+        if re.match(r'\s+run:\s*\|', l):
+            ind = indent(l)
+            body = []
+            for l in step[i + 1:]:
+                if l.strip() and indent(l) <= ind:
+                    break
+                body.append(l)
+            return body
+    return None
 
 for wf, jobs in (('.github/workflows/nightly.yml', ('desktop-matrix',)),
                  ('.github/workflows/release.yml', ('desktop',))):
@@ -445,5 +580,9 @@ fi
 
 # --- summary -----------------------------------------------------------------------
 
-[ "$FAILED" -eq 0 ] || { echo "$FAILED case(s) failing" >&2; exit 1; }
-echo "all cases pass"
+if [ "$FAILED" -eq 0 ]; then
+    echo "all install-android-sdk cases pass"
+else
+    echo "$FAILED install-android-sdk case(s) failed" >&2
+fi
+exit "$([ "$FAILED" -eq 0 ] && echo 0 || echo 1)"
