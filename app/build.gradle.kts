@@ -138,6 +138,9 @@ dependencies {
     androidTestImplementation(libs.navigation3.runtime)
     androidTestImplementation(libs.lifecycle.viewmodel.compose)
     androidTestImplementation(libs.cmp.material3)
+    // RoomRuntimeServiceDeviceTest drives the rebuilt pool directly; sqlite-bundled is an
+    // `implementation` edge of :core:database and never reaches this classpath.
+    androidTestImplementation(libs.androidx.sqlite.bundled)
 
     // S11's worker-side getString test resolves Res strings on the JVM.
     testImplementation(libs.cmp.resources)
