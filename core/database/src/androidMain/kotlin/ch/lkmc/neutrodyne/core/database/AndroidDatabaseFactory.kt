@@ -27,6 +27,9 @@ class AndroidDatabaseFactory(
     override fun exists(): Boolean = File(databasePath).exists()
 
     override fun quarantine(stamp: String) {
+        // The stamp becomes a directory name and is read back from `quarantine-pending`;
+        // an epoch-millis shape keeps it inside the quarantine directory.
+        require(stamp.toLongOrNull() != null) { "quarantine stamp must be epoch millis: $stamp" }
         val dir = File(quarantineDir, stamp)
         check(dir.isDirectory || dir.mkdirs()) { "cannot create quarantine directory $dir" }
         // Sidecars first, the main file last: a mid-sequence failure leaves the main file in
@@ -44,10 +47,12 @@ class AndroidDatabaseFactory(
         // A pending destination still awaits the rest of its files — never prune it.
         val pending = pendingQuarantine
         val dirs = quarantineDir.listFiles()?.filter { it.isDirectory && it.name != pending } ?: return
+        // Numeric order, not lexicographic ("abc" sorts above "1700000000000"): the stamp is
+        // the quarantine's epoch-millis name, with mtime as the fallback for other names.
         val keep =
             dirs
                 .filter { isFresh(it, now) }
-                .sortedByDescending { it.name }
+                .sortedByDescending { it.name.toLongOrNull() ?: it.lastModified() }
                 .take(1)
                 .toSet()
         dirs.filter { it !in keep }.forEach { it.deleteRecursively() }

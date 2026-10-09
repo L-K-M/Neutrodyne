@@ -307,7 +307,8 @@ class IngestDaoTest {
                 var due = db.podcastDao().dueForRefresh(dueBefore = 0, scopeAll = true).map { it.id }
                 assertEquals(listOf(a), due, "forceDue must only touch the requested ids")
 
-                db.podcastDao().forceDue(scopeAll = true)
+                // scopeAll ignores the id list entirely — one full-table statement.
+                db.podcastDao().forceDue(scopeAll = true, ids = listOf(a))
                 due =
                     db
                         .podcastDao()

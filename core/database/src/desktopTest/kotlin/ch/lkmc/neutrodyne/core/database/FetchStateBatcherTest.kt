@@ -5,13 +5,20 @@ package ch.lkmc.neutrodyne.core.database
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -157,11 +164,49 @@ class FetchStateBatcherTest {
             val run =
                 launch { repeat(FetchStateBatcher.MAX_BATCH) { batcher.add(row(it)) } }
             writeEntered.await()
+            // The precondition of this test: the run must be suspended inside the write —
+            // if MAX_BATCH no longer triggers a flush, cancelling here proves nothing.
+            assertTrue(run.isActive, "the run must be mid-write for the cancel to be meaningful")
             run.cancel() // the refresh run dies mid-write
             runCurrent()
             releaseWrite.complete(Unit)
             run.join()
 
             assertEquals(FetchStateBatcher.MAX_BATCH, writes.flatten().size)
+        }
+
+    @Test
+    fun aFailingDeadlineWritePropagatesIntoTheCallerScope() =
+        runTest {
+            // The deadline job is a child of the caller's run scope: a write failure must fail
+            // the run through structured concurrency — silently completing a job whose write
+            // committed nothing would report a failed flush as success. A plain Job (not
+            // backgroundScope's supervisor) makes the propagation observable.
+            val writes = mutableListOf<List<PodcastFetchState>>()
+            val seen = mutableListOf<Throwable>()
+            val scope =
+                CoroutineScope(
+                    Job() +
+                        StandardTestDispatcher(testScheduler) +
+                        CoroutineExceptionHandler { _, t -> seen += t },
+                )
+            val batcher =
+                FetchStateBatcher(
+                    write = { throw IllegalStateException("disk busy") },
+                    clock = TestClock.from(testScheduler),
+                    scope = scope,
+                )
+
+            batcher.add(row(failures = 1))
+            advanceTimeBy(FetchStateBatcher.MAX_DELAY_MS)
+            runCurrent()
+
+            assertTrue(writes.isEmpty(), "the failed write must not record a partial batch")
+            assertFalse(scope.isActive, "the deadline failure must cancel the run scope")
+            assertTrue(
+                seen.any { it is IllegalStateException && it.message == "disk busy" },
+                "the write failure must surface uncaught, got $seen",
+            )
+            scope.cancel()
         }
 }
