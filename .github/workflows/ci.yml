@@ -218,14 +218,14 @@ jobs:
       # The runner image no longer ships the emulator package; GMD needs it to boot devices
       - name: Install the Android emulator
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools > /dev/null
-      # GMD `ci` group (API 26 + 36, debug) — the group task resolves in every
-      # module that defines it (:app plus the opted-in device-test modules such
-      # as :core:database; 09, Unverified KMP task name).
+      # GMD `ci` group (API 26 + 36, debug) — each group task resolves in every
+      # module that defines it: `ciGroupDebugAndroidTest` for :app, the KMP
+      # `ciGroupAndroidDeviceTest` for :core:database (09).
       # The step timeout leaves the job time to upload the device results and logcat
       # when a test hangs; a job-level timeout would cancel the upload too.
       - name: GMD ci group (debug)
         timeout-minutes: 45
-        run: ./gradlew --max-workers=2 ciGroupDebugAndroidTest -Pneutrodyne.testScope=ci -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
+        run: ./gradlew --max-workers=2 ciGroupDebugAndroidTest ciGroupAndroidDeviceTest -Pneutrodyne.testScope=ci -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !success() }}
         with:

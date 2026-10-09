@@ -124,6 +124,8 @@ androidx-room3-compiler = { module = "androidx.room3:room3-compiler", version.re
 androidx-room3-testing = { module = "androidx.room3:room3-testing", version.ref = "room3" }
 androidx-sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "sqlite" }
 androidx-sqlite-framework = { module = "androidx.sqlite:sqlite-framework", version.ref = "sqlite" }   # Android Robolectric tests only
+# Room 2 — androidx.work's embedded database (androidHostTest reads WorkSpec rows)
+androidx-room-runtime = { module = "androidx.room:room-runtime", version = "2.7.0" }
 androidx-paging-common = { module = "androidx.paging:paging-common", version.ref = "paging" }
 androidx-paging-compose = { module = "androidx.paging:paging-compose", version.ref = "paging" }
 androidx-paging-testing = { module = "androidx.paging:paging-testing", version.ref = "paging" }

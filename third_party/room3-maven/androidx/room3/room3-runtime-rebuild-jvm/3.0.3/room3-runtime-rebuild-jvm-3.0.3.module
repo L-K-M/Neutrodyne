@@ -1,0 +1,179 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "url": "../../room3-runtime-rebuild/3.0.3/room3-runtime-rebuild-3.0.3.module",
+    "group": "androidx.room3",
+    "module": "room3-runtime-rebuild",
+    "version": "3.0.3",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "jvmApiElements-published",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "androidx.annotation",
+          "module": "annotation",
+          "version": {
+            "requires": "1.9.1"
+          }
+        },
+        {
+          "group": "androidx.collection",
+          "module": "collection",
+          "version": {
+            "requires": "1.5.0"
+          }
+        },
+        {
+          "group": "androidx.room3",
+          "module": "room3-common",
+          "version": {
+            "requires": "3.0.3"
+          }
+        },
+        {
+          "group": "androidx.sqlite",
+          "module": "sqlite",
+          "version": {
+            "requires": "2.7.1"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlinx",
+          "module": "kotlinx-coroutines-core",
+          "version": {
+            "requires": "1.9.0"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.20"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "room3-runtime-rebuild-jvm-3.0.3.jar",
+          "url": "room3-runtime-rebuild-jvm-3.0.3.jar",
+          "size": 461985,
+          "sha512": "f9a8934e6d44b9cac587cf3a71be9e3ce80018190c7c7705ab6b89cd44e5e45d73693a47d127293059de49675f78aed2731482a778c13f36a4b4839c9798ffa5",
+          "sha256": "b2e643d742d07444a002bb7735e639efc8df8f45499c57eccbefe8cf0fefece7",
+          "sha1": "47437fb4c194dfa24bf54ba2cfaa0ebbe3717ebb",
+          "md5": "767b2203512b7c1cf479fc39e0b7abe1"
+        }
+      ]
+    },
+    {
+      "name": "jvmRuntimeElements-published",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "androidx.annotation",
+          "module": "annotation",
+          "version": {
+            "requires": "1.9.1"
+          }
+        },
+        {
+          "group": "androidx.collection",
+          "module": "collection",
+          "version": {
+            "requires": "1.5.0"
+          }
+        },
+        {
+          "group": "androidx.room3",
+          "module": "room3-common",
+          "version": {
+            "requires": "3.0.3"
+          }
+        },
+        {
+          "group": "androidx.sqlite",
+          "module": "sqlite",
+          "version": {
+            "requires": "2.7.1"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlinx",
+          "module": "kotlinx-coroutines-core",
+          "version": {
+            "requires": "1.9.0"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.20"
+          }
+        },
+        {
+          "group": "androidx.sqlite",
+          "module": "sqlite-async",
+          "version": {
+            "requires": "2.7.1"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "room3-runtime-rebuild-jvm-3.0.3.jar",
+          "url": "room3-runtime-rebuild-jvm-3.0.3.jar",
+          "size": 461985,
+          "sha512": "f9a8934e6d44b9cac587cf3a71be9e3ce80018190c7c7705ab6b89cd44e5e45d73693a47d127293059de49675f78aed2731482a778c13f36a4b4839c9798ffa5",
+          "sha256": "b2e643d742d07444a002bb7735e639efc8df8f45499c57eccbefe8cf0fefece7",
+          "sha1": "47437fb4c194dfa24bf54ba2cfaa0ebbe3717ebb",
+          "md5": "767b2203512b7c1cf479fc39e0b7abe1"
+        }
+      ]
+    },
+    {
+      "name": "jvmSourcesElements-published",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "files": [
+        {
+          "name": "room3-runtime-rebuild-jvm-3.0.3-sources.jar",
+          "url": "room3-runtime-rebuild-jvm-3.0.3-sources.jar",
+          "size": 110400,
+          "sha512": "b7ad2e956187979d7466a47bf6542efa5fe35b8e8afb0cdeba66e091819a8aa4141edb529fdeb63dca0e0525df927bf718a8df95d65491c1e5459ba02d8e4261",
+          "sha256": "6a964f06762f70d8ef1f97cdc9b9b23e517be6d60f224f769ef8fe34eb906ad8",
+          "sha1": "fb2db1ac7e9f5dc3586cb303eb0e611cbacadf54",
+          "md5": "9623cd70a28f955a5e02c798fc1cc648"
+        }
+      ]
+    }
+  ]
+}

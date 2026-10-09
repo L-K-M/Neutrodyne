@@ -1,0 +1,57 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "alternateEnclosures": [
+        {
+          "bitrate": 320,
+          "codecs": "mp3",
+          "integrity": [
+            {
+              "type": "sri",
+              "value": "sha384-OQ3Hm5D1kGJiHn5tZ8m0WYq3vXc9bN2pQ4rS6tU8wA0B1C2D3E4F5G6H7I8J9K"
+            },
+            {
+              "type": "pgp",
+              "value": "ABCDEF0123456789"
+            }
+          ],
+          "isDefault": true,
+          "lang": "en-us",
+          "length": 96000000,
+          "rel": "replacement",
+          "sources": [
+            {
+              "contentType": "audio/mpeg",
+              "uri": "https://cdn.example.com/high.mp3"
+            },
+            {
+              "contentType": "audio/mpeg",
+              "uri": "https://mirror.example.com/high.mp3"
+            }
+          ],
+          "title": "High bitrate",
+          "type": "audio/mpeg"
+        }
+      ],
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 48000000,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/base.mp3"
+        }
+      ],
+      "feedOrder": 0,
+      "guid": "alt-1",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 48000000,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/base.mp3"
+      },
+      "title": "Multiple transports"
+    }
+  ],
+  "title": "Alternate Enclosure Integrity"
+}

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:podcast="https://podcastindex.org/namespace/1.0">
+  <channel>
+    <title>Alternate Enclosure Integrity</title>
+    <item>
+      <title>Multiple transports</title><guid>alt-1</guid>
+      <enclosure url="https://cdn.example.com/base.mp3" length="48000000" type="audio/mpeg"/>
+      <podcast:alternateEnclosure type="audio/mpeg" length="96000000" bitrate="320" height="0" lang="en-us"
+                                  title="High bitrate" rel="replacement" codecs="mp3" default="true">
+        <podcast:source uri="https://cdn.example.com/high.mp3" contentType="audio/mpeg"/>
+        <podcast:source uri="https://mirror.example.com/high.mp3" contentType="audio/mpeg"/>
+        <podcast:integrity type="sri" value="sha384-OQ3Hm5D1kGJiHn5tZ8m0WYq3vXc9bN2pQ4rS6tU8wA0B1C2D3E4F5G6H7I8J9K"/>
+        <podcast:integrity type="pgp" value="ABCDEF0123456789"/>
+      </podcast:alternateEnclosure>
+    </item>
+  </channel>
+</rss>
