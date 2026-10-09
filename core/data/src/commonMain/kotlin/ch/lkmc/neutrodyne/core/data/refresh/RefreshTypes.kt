@@ -13,7 +13,7 @@ import ch.lkmc.neutrodyne.core.model.NewEpisodes
  */
 
 /** Why a run exists; append-only (03 API). */
-internal enum class RefreshOrigin {
+enum class RefreshOrigin {
     PERIODIC,
     MANUAL,
     FOREGROUND,
@@ -100,7 +100,7 @@ internal data class FeedRunEvent(
  * The platform work-request port of 03 API. `WorkManagerRefreshScheduler` (Android) and
  * `DesktopRefreshScheduler` (desktop) implement it; `RefreshControllerImpl` only calls it.
  */
-internal interface RefreshScheduler {
+interface RefreshScheduler {
     /** A `refresh-now` run of [scope] (Android); on the desktop a lane poke with a queued request. */
     fun enqueueNow(
         scope: RefreshScope,

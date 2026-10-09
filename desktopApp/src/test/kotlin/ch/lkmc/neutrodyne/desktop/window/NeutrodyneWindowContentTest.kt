@@ -19,6 +19,7 @@ import ch.lkmc.neutrodyne.desktop.di.createDesktopGraph
 import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -69,6 +70,26 @@ class NeutrodyneWindowContentTest {
             }
         }
 
+    /**
+     * The VM-backed Library entry through the window's real locals (01 Feature entry installers):
+     * `metroViewModel()` inside `LibraryRoute` only resolves because the content provides
+     * `LocalMetroViewModelFactory`, and the screen reaches its loaded state only when the
+     * graph's repositories answer — graph compilation alone proves neither.
+     */
+    @Test
+    fun libraryOpensThroughTheMetroViewModelFactory() =
+        runComposeUiTest {
+            // The VM's repositories come from the graph's database accessor, which gates on the open.
+            runBlocking { graph.databaseOpener.awaitOpen() }
+            setWindowContent()
+
+            onNodeWithTag("nav_library").performClick()
+            waitUntil("the Library ViewModel loads", TIMEOUT_MS) {
+                onAllNodesWithText("Your library is empty").fetchSemanticsNodes().isNotEmpty()
+            }
+            onNodeWithText("Add a podcast").assertIsDisplayed()
+        }
+
     @Test
     fun settingsAboutShowsTheBuildIdentity() =
         runComposeUiTest {
@@ -109,6 +130,7 @@ class NeutrodyneWindowContentTest {
             NeutrodyneWindowContent(
                 installers = graph.entryInstallers,
                 menuActions = DesktopMenuActions(),
+                viewModelFactory = graph.metroViewModelFactory,
             )
         }
     }

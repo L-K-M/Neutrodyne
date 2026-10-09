@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.crash.installAcra
 import ch.lkmc.neutrodyne.di.AndroidAppGraph
 import ch.lkmc.neutrodyne.di.YtxGraph
 import ch.lkmc.neutrodyne.platform.LogcatSink
+import coil3.SingletonImageLoader
 import dev.zacsweers.metro.createGraphFactory
 import kotlinx.coroutines.launch
 
@@ -63,6 +64,9 @@ class NeutrodyneApplication :
 
         ProcessStartProbe.record(ProcessStartProbe.Event.INITIALIZERS_LAUNCHED)
         graph.appScope.launch { runInitializers(graph.initializers) }
+
+        // 08 Coil ImageLoader: every AsyncImage shares the artwork-aware singleton (D58).
+        SingletonImageLoader.setSafe(graph.imageLoaderFactory)
         ProcessStartProbe.writeReport(this)
     }
 

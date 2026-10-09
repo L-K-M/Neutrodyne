@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.di
 
+import ch.lkmc.neutrodyne.core.artwork.NeutrodyneImageLoaderFactory
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.AppScope
@@ -19,6 +20,7 @@ import dev.zacsweers.metro.Binds
 import dev.zacsweers.metro.DependencyGraph
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.createGraphFactory
+import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.coroutines.CoroutineScope
 
 /**
@@ -55,6 +57,16 @@ interface DesktopAppGraph {
 
     /** The window maps `openState` onto the start-up gate (01 Splash and start-up gate). */
     val databaseOpener: DatabaseOpener
+
+    /**
+     * `metroViewModel()`/`assistedMetroViewModel()` resolve through `LocalMetroViewModelFactory`,
+     * provided at the window root (01 Feature entry installers) — the Library grid is the first
+     * VM-backed entry.
+     */
+    val metroViewModelFactory: MetroViewModelFactory
+
+    /** The Coil `SingletonImageLoader.Factory` the shell installs once (08 Coil ImageLoader). */
+    val imageLoaderFactory: NeutrodyneImageLoaderFactory
 
     @Binds
     val DesktopCrashReporter.asCrashReporter: CrashReporter

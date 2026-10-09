@@ -2767,6 +2767,16 @@ Serves N1, N4, N6. Expected failures arrive as values (01 [Errors](01-foundation
 | [MD5](../PLAN.md#md5-desktop-packaging-and-release) | The desktop Install & updates help sections final (macOS, Windows, Linux, screen readers, uninstalling), compared step by step with 11's walkthroughs (MD5 AC5); the desktop Licences screen complete (MD5 AC2); the installed icons reviewed on each OS (macOS 26 included) |
 | [M13](../PLAN.md#74-after-v10-v1x-themes) | Glance widgets on Android ([Widgets (v1.x)](#widgets-v1x)) |
 
+### Implementation deviations (2026-10-09, M1a Library slice)
+
+1. The host wiring this document places at the shell roots lands with the Library slice, the first VM-backed and artwork-backed entry: `MainActivity` provides `LocalDrawnReporter` and `LocalMetroViewModelFactory`, `NeutrodyneApplication` installs the Coil singleton with `SingletonImageLoader.setSafe(graph.imageLoaderFactory)`, and the desktop window provides `LocalMetroViewModelFactory` while `DesktopShell` and `SmokeMode` install the same loader. Neither client renders the Library grid without them: `metroViewModel()` has no factory and an `ArtworkRef` request has no mapper in the default loader.
+2. Coil 3.6.3's public `crossfade` takes a Boolean whose fixed duration is 200 ms; the documented 150 ms becomes Coil's default while the on/off semantics (including `LocalReducedMotion`) are unchanged (`Covers.request`).
+3. `ReportDrawnWhen` is bound through `LocalDrawnReporter` provided by `MainActivity` (a `core:ui` composition local with a no-op default, since `NeutrodyneRoot` cannot see `:app`); the desktop window's binding arrives with M0b. The reporter's method is `ReportWhen`, capitalised — the enforced compose-rules naming check requires Unit-returning composables to start uppercase.
+4. `metroViewModel`/`assistedMetroViewModel` resolve through `LocalMetroViewModelFactory`, provided at both shell roots — 01's seam, named here because the Library grid is its first consumer. The Metro `ViewModelAssistedFactory` map stays `allowEmpty` until a Metro-assisted VM ships.
+5. The Library screen's desktop-JVM test (`runComposeUiTest`) stands in for the M1a desktop-window variant, whose shell is M0b's; `NdScrollbar`, context menus and the refresh button land with it.
+6. `LocalUiClock` and `LocalPlatformKind` (`:core:ui`) are CompositionLocals this doc did not name: the clock backs every relative-date label so tests inject `TestClock`, and the platform kind picks 07's per-platform copy. Both are on 09's `.editorconfig` allowlist together with `LocalDrawnReporter`.
+7. The Library tile menu's "Mark all as played…" confirmation is a plain confirm/cancel `NdDialog`: the dialog table's "All" / "Older than 1 week / 1 month / 3 months" options and `countUnplayed` arrive with M2's group data (`FeedRepository.countUnplayed` does not exist yet; `markFeedPlayed(source, sortDateBefore)` already takes the cutoff). Confirming marks the whole feed via `markFeedPlayed(source, null)` (UI review round 2, P2).
+
 ---
 
 ## New names introduced here

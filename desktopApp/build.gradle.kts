@@ -86,6 +86,13 @@ dependencies {
     implementation(compose.desktop.currentOs)
     // The generated Res class of the shell's own Compose resources (see below)
     implementation(libs.cmp.resources)
+    // Metro aggregation must read the features' @ViewModelKey/@ManualViewModelAssistedFactoryKey
+    // map keys, and the window provides LocalMetroViewModelFactory to metroViewModel().
+    implementation(libs.metrox.viewmodel)
+    implementation(libs.metrox.viewmodel.compose)
+    // The window installs the process-wide Coil singleton (08 Coil ImageLoader).
+    implementation(platform(libs.coil.bom))
+    implementation(libs.coil.core)
     implementation(libs.kotlinx.coroutines.swing)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.collections.immutable)
