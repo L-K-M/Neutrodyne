@@ -301,8 +301,9 @@ PYEOF
 
 # elf_bind <file> — what the kernel loader actually maps, on stdout: the ELF
 # header verbatim except the section-table fields strip-debug rewrites
-# (e_shoff, e_shnum, e_shstrndx zeroed), the whole program header table, then
-# the file bytes every phdr's p_offset..p_offset+p_filesz defines. Exit nonzero
+# (e_shoff, e_shnum, e_shstrndx zeroed — also where an emitted segment range
+# overlaps their absolute header offsets), the whole program header table,
+# then the file bytes every phdr's p_offset..p_offset+p_filesz defines. Exit nonzero
 # on anything unparseable. Section bytes are never emitted: objcopy -O binary
 # dumps sections, so a section header pointing at pristine bytes elsewhere
 # hides mutated LOAD ranges, and bytes a segment maps but no section covers
@@ -339,6 +340,12 @@ def bind(b):
         return None
     out = bytearray(m)
     out += b[phoff:phoff + phentsize * phnum]
+    # The first PT_LOAD usually maps from file offset 0, so the emitted range
+    # carries the ELF header's raw bytes — the three strip-rewritten fields
+    # must stay masked wherever a segment window overlaps their absolute
+    # offsets (pinned Temurin java + an updated .comment moved e_shoff
+    # 14280→14616 while every loaded byte stayed identical).
+    masked = ((40, 48), (60, 64)) if is64 else ((32, 36), (48, 52))
     for i in range(phnum):
         o = phoff + i * phentsize
         # The phdr fields define the loaded file range; a section header is
@@ -349,7 +356,12 @@ def bind(b):
             poff, pfsz = struct.unpack(e + 'II', b[o + 4:o + 8] + b[o + 16:o + 20])
         if poff + pfsz > len(b):
             return None
-        out += b[poff:poff + pfsz]
+        seg = bytearray(b[poff:poff + pfsz])
+        for ms, me in masked:
+            lo, hi = max(ms, poff), min(me, poff + pfsz)
+            if lo < hi:
+                seg[lo - poff:hi - poff] = b'\0' * (hi - lo)
+        out += seg
     return bytes(out)
 
 m = bind(open(sys.argv[1], 'rb').read())

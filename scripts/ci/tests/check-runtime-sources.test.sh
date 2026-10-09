@@ -293,21 +293,29 @@ else
     fi
 
     # 9. Toolchain-difference boundary: same loadable bytes and loader
-    #    metadata, different non-allocated section — the fallback's whole point.
+    #    metadata, different non-allocated section — the fallback's whole
+    #    point. Pinned Temurin java + objcopy updating .comment relocated the
+    #    section table (e_shoff 14280→14616) while phdrs and every loaded
+    #    byte stayed identical — the emitted segment windows must mask the
+    #    three strip-rewritten fields too (review probe of 5c0488a). The
+    #    extra non-alloc section forces e_shoff to a different value.
+    dd if=/dev/zero of="$WORK/pad.sec" bs=512 count=8 2>/dev/null
     cp "$JDK/lib/libtest.so" "$IMG/lib/runtime/lib/libtest.so"
     objcopy -g "$IMG/lib/runtime/lib/libtest.so"
     objcopy --update-section .comment="$WORK/note.sec" \
         "$IMG/lib/runtime/lib/libtest.so" 2>/dev/null \
         || objcopy --add-section .comment="$WORK/note.sec" \
             "$IMG/lib/runtime/lib/libtest.so"
+    objcopy --add-section .pad_probe="$WORK/pad.sec" \
+        "$IMG/lib/runtime/lib/libtest.so"
     if run_check; then
-        t_ok "same loads and loader metadata with a different non-alloc section verify equal"
+        t_ok "a non-alloc section rewrite relocating the section table verifies equal"
     else
-        t_fail "same loads and loader metadata with a different non-alloc section verify equal"
+        t_fail "a non-alloc section rewrite relocating the section table verifies equal"
         sed 's/^/    /' "$WORK/check.out" >&2
     fi
 
-    # 10. A zeroed entry point is invisible to -O binary but bound by elf_meta.
+    # 10. A zeroed entry point is invisible to -O binary but bound by elf_bind.
     cp "$JDK/lib/libtest.so" "$IMG/lib/runtime/lib/libtest.so"
     objcopy -g "$IMG/lib/runtime/lib/libtest.so"
     mut_elf "$IMG/lib/runtime/lib/libtest.so" \
