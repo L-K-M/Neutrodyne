@@ -349,14 +349,53 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
 
     @TaskAction
     fun write() {
-        val lines =
-            runtimeClasspath.files
-                .filter { it.isFile }
-                .map { "${canonicalSha256Of(it)}  ${imageJarName(it)}" }
-                .toSortedSet()
-                .joinToString("\n", postfix = "\n")
-        manifest.get().asFile.writeText(lines)
-        kindManifest.get().asFile.writeText(lines)
+        val lines = sortedSetOf<String>()
+        runtimeClasspath.files.filter { it.isFile }.forEach { file ->
+            val imageName = imageJarName(file)
+            lines += "${canonicalSha256Of(file)}  $imageName"
+            if (file.name.startsWith("skiko-awt-runtime-")) {
+                lines += skikoEntryRows(file, imageName)
+            }
+        }
+        val text = lines.joinToString("\n", postfix = "\n")
+        manifest.get().asFile.writeText(text)
+        kindManifest.get().asFile.writeText(text)
+    }
+
+    /**
+     * One `<entry sha256>  <image name>#<entry>` row per native or .sha256 sidecar a
+     * skiko-awt-runtime classpath jar carries. Packaging rewrites that jar into a stub:
+     * the host arch's libskiko lands loose beside it and the other targets' stay inside.
+     * The stub's own .sha256 pins only self-consistency, so the scan binds each stub
+     * native/sidecar byte to these rows of the Licensee-checked artifact.
+     */
+    private fun skikoEntryRows(
+        file: File,
+        imageName: String,
+    ): List<String> {
+        val zip =
+            try {
+                java.util.zip.ZipFile(file)
+            } catch (e: java.util.zip.ZipException) {
+                return emptyList()
+            }
+        val rows = mutableListOf<String>()
+        zip.use { z ->
+            z.entries().toList().forEach { entry ->
+                if (entry.isDirectory) return@forEach
+                val native = SKIKO_NATIVE_ENTRY.matches(entry.name)
+                val sidecar = entry.name.endsWith(".sha256") && '/' !in entry.name
+                if (!native && !sidecar) return@forEach
+                val bytes =
+                    normalizedEntryBytes(
+                        entry.name,
+                        z.getInputStream(entry).use { it.readBytes() },
+                    )
+                val hash = sha256Hex(bytes)
+                rows += "$hash  $imageName#${entry.name}"
+            }
+        }
+        return rows
     }
 
     /**
@@ -377,12 +416,9 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
                 val inner = MessageDigest.getInstance("SHA-256")
                 if (!entry.isDirectory) {
                     z.getInputStream(entry).use { input ->
-                        val buffer = ByteArray(BUFFER_BYTES)
-                        while (true) {
-                            val read = input.read(buffer)
-                            if (read < 0) break
-                            inner.update(buffer, 0, read)
-                        }
+                        inner.update(
+                            normalizedEntryBytes(entry.name, input.readBytes()),
+                        )
                     }
                 }
                 outer.update(entry.name.toByteArray(Charsets.UTF_8))
@@ -412,8 +448,168 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
+    private fun sha256Hex(bytes: ByteArray): String =
+        MessageDigest
+            .getInstance("SHA-256")
+            .digest(bytes)
+            .joinToString("") { "%02x".format(it) }
+
+    /**
+     * Mach-O entries are normalized before hashing: macOS packaging re-signs
+     * natives inside image JARs in place, and re-signing a published dylib is
+     * not byte-reversible (`codesign --remove-signature` cannot restore the
+     * pre-sign bytes — it neither shrinks the grown __LINKEDIT segment nor
+     * removes an LC_CODE_SIGNATURE slot inserted over header padding, nightly
+     * 37874042553). The normalized form — shared byte-for-byte with
+     * `norm_macho` in check-desktop-image.sh — zeroes `ncmds`/`sizeofcmds`,
+     * emits each LC_CODE_SIGNATURE command as zeros (covering both the
+     * re-filled pre-allocated slot and the freshly-inserted command),
+     * zeroes `__LINKEDIT`'s vmsize/filesize (they grow with the blob), and
+     * cuts the `[dataoff, dataoff+datasize)` blob region. Anything else —
+     * including every load command besides the signature bookkeeping — stays
+     * byte-exact, so mutated content still fails. Fat binaries normalize per
+     * slice with the fat_arch offset/size zeroed.
+     */
+    private fun normalizedEntryBytes(
+        name: String,
+        data: ByteArray,
+    ): ByteArray = if (name.substringAfterLast('.') in MACHO_EXTS) normalizeMacho(data) else data
+
+    private fun normalizeMacho(b: ByteArray): ByteArray {
+        if (b.size >= 8 && u32(b, 0, be = true) == FAT_MAGIC) {
+            val nfat = u32(b, 4, be = true).toInt()
+            if (nfat < 0 || nfat > 64 || 8 + 20L * nfat > b.size) return b
+            val out = java.io.ByteArrayOutputStream(b.size)
+            out.write(b, 0, 8)
+            for (i in 0 until nfat) {
+                val ro = 8 + 20 * i
+                val off = u32(b, ro + 8, be = true)
+                val size = u32(b, ro + 12, be = true)
+                if (off + size > b.size) return b
+                out.write(b, ro, 8)
+                out.write(ZERO8, 0, 8)
+                out.write(b, ro + 16, 4)
+                out.write(normalizeThinMacho(b.copyOfRange(off.toInt(), (off + size).toInt())))
+            }
+            return out.toByteArray()
+        }
+        return normalizeThinMacho(b)
+    }
+
+    private fun normalizeThinMacho(b: ByteArray): ByteArray {
+        if (b.size < 28) return b
+        val is64: Boolean
+        val be: Boolean
+        when (u32(b, 0, be = false)) {
+            MH_MAGIC_64 -> {
+                is64 = true
+                be = false
+            }
+
+            MH_MAGIC -> {
+                is64 = false
+                be = false
+            }
+
+            MH_CIGAM_64 -> {
+                is64 = true
+                be = true
+            }
+
+            MH_CIGAM -> {
+                is64 = false
+                be = true
+            }
+
+            else -> {
+                return b
+            }
+        }
+        val hdr = if (is64) 32 else 28
+        val ncmds = u32(b, 16, be)
+        if (ncmds > 4096) return b
+        val out = java.io.ByteArrayOutputStream(b.size)
+        out.write(b, 0, 16)
+        out.write(ZERO8, 0, 8)
+        out.write(b, 24, hdr - 24)
+        var off = hdr
+        val blobs = mutableListOf<LongArray>()
+        for (i in 0 until ncmds.toInt()) {
+            if (off + 8 > b.size) return b
+            val cmd = u32(b, off, be)
+            val csz = u32(b, off + 4, be).toInt()
+            if (csz < 8 || off + csz > b.size) return b
+            if (cmd == LC_CODE_SIGNATURE) {
+                blobs += longArrayOf(u32(b, off + 8, be), u32(b, off + 12, be))
+                out.write(ByteArray(csz))
+            } else {
+                val cb = b.copyOfRange(off, off + csz)
+                if ((cmd == LC_SEGMENT || cmd == LC_SEGMENT_64) &&
+                    isLinkeditName(cb)
+                ) {
+                    // __LINKEDIT vmsize/filesize grow with the appended blob.
+                    val fields = if (is64) listOf(32 to 8, 48 to 8) else listOf(28 to 4, 36 to 4)
+                    for ((f, len) in fields) {
+                        java.util.Arrays.fill(cb, f, f + len, 0.toByte())
+                    }
+                }
+                out.write(cb)
+            }
+            off += csz
+        }
+        var emit = out.toByteArray() + b.copyOfRange(off, b.size)
+        val base = out.size().toLong() - off
+        var shift = 0L
+        for (blob in blobs.sortedWith(compareBy({ it[0] }, { it[1] }))) {
+            val s = blob[0] + base - shift
+            if (s in 0 until emit.size) {
+                val e = minOf(emit.size.toLong(), s + blob[1]).toInt()
+                emit = emit.copyOfRange(0, s.toInt()) + emit.copyOfRange(e, emit.size)
+            }
+            shift += blob[1]
+        }
+        return emit
+    }
+
+    private fun isLinkeditName(cmdBytes: ByteArray): Boolean {
+        if (cmdBytes.size < 24) return false
+        var end = 24
+        while (end > 8 && cmdBytes[end - 1] == 0.toByte()) end--
+        return cmdBytes.copyOfRange(8, end).contentEquals("__LINKEDIT".toByteArray())
+    }
+
+    private fun u32(
+        b: ByteArray,
+        o: Int,
+        be: Boolean,
+    ): Long =
+        if (be) {
+            ((b[o].toLong() and 0xff) shl 24) or
+                ((b[o + 1].toLong() and 0xff) shl 16) or
+                ((b[o + 2].toLong() and 0xff) shl 8) or
+                (b[o + 3].toLong() and 0xff)
+        } else {
+            (b[o].toLong() and 0xff) or
+                ((b[o + 1].toLong() and 0xff) shl 8) or
+                ((b[o + 2].toLong() and 0xff) shl 16) or
+                ((b[o + 3].toLong() and 0xff) shl 24)
+        }
+
     private companion object {
         private const val BUFFER_BYTES = 1 shl 16
+        private val ZERO8 = ByteArray(8)
+        private val MACHO_EXTS = setOf("dylib", "jnilib", "so")
+        private const val MH_MAGIC = 0xfeedfaceL
+        private const val MH_MAGIC_64 = 0xfeedfacfL
+        private const val MH_CIGAM = 0xcefaedfeL
+        private const val MH_CIGAM_64 = 0xcffaedfeL
+        private const val FAT_MAGIC = 0xcafebabeL
+        private const val LC_SEGMENT = 0x1L
+        private const val LC_SEGMENT_64 = 0x19L
+        private const val LC_CODE_SIGNATURE = 0x1dL
+
+        /** Root-level `libskiko-*`/`skiko-*` natives — the same allowlist jar_stub_only uses. */
+        private val SKIKO_NATIVE_ENTRY = Regex("^(?:libskiko-|skiko-)[^/]+\\.(?:so|dylib|dll)$")
     }
 }
 

@@ -541,10 +541,12 @@ jobs:
         if: failure()
         with:
           name: desktop-matrix-${{ matrix.target }}
-          # msiexec-install.log is written next to dist/, not inside it.
+          # msiexec-install.log is written next to dist/, not inside it; the
+          # compose logs carry jpackage's stderr when packaging itself fails.
           path: |
             dist/
             msiexec-install.log
+            desktopApp/build/compose/logs/
 
   repro:
     runs-on: ubuntu-24.04

@@ -7,10 +7,12 @@
 # (writeDesktopRuntimeClasspath's `sha256  <image name>` rows, the image name
 # being Compose's `<base>-<md5>.jar` mangle) names it exactly and its SHA-256
 # equals the row's. Compose's skiko-awt-runtime stub JAR is the one documented
-# off-manifest case: its name carries the stub's own md5, the manifest carries a
-# skiko-awt-runtime-<os>-<arch>-*.jar entry, the extracted native sits beside it
-# with a matching .sha256 sidecar, and the jar itself is a manifest-only zip —
-# a class-bearing jar under the stub's name is the classpath jar in disguise.
+# off-manifest case: its name carries the stub's own md5, the manifest carries
+# a skiko-awt-runtime-<os>-<arch>-*.jar entry plus `<sha256>  <jar>#<entry>`
+# rows for the natives and sidecars that jar carries, the extracted native
+# sits beside the stub bound to those rows, and the jar itself holds only
+# metadata and the other targets' natives with their .sha256 — every byte
+# bound to the classpath artifact, never to a package-authored pin.
 # All jar fixtures are genuine tiny ZIPs, like the artifacts the scan reads.
 #
 # The scan resolves runtime.lock and the manifest relative to its own path, so
@@ -42,14 +44,91 @@ cp "$REPO_ROOT/desktopApp/packaging/rpm/"*.spec "$FIX_ROOT/desktopApp/packaging/
 MANIFEST="$FIX_ROOT/desktopApp/build/desktop-packaging/runtime-classpath.txt"
 SCAN="$FIX_ROOT/scripts/ci/check-desktop-image.sh"
 
+# norm.py — the fixture's copy of the Mach-O signature normalization
+# (norm_thin/norm_macho, identical to the checker's and to
+# normalizeThinMacho/normalizeMacho in DesktopPackaging.kt). Shared by
+# canon_of and skiko_cp so manifest rows are computed the way the build does.
+mkdir -p "$WORK/normpy"
+cat > "$WORK/normpy/norm.py" <<'PYEOF'
+import struct
+
+def norm_thin(b):
+    if len(b) < 28:
+        return b
+    m = struct.unpack('<I', b[:4])[0]
+    if m == 0xfeedfacf: is64, be = True, False
+    elif m == 0xfeedface: is64, be = False, False
+    elif m == 0xcffaedfe: is64, be = True, True
+    elif m == 0xcefaedfe: is64, be = False, True
+    else: return b
+    hdr = 32 if is64 else 28
+    e = '>' if be else '<'
+    ncmds = struct.unpack(e + 'I', b[16:20])[0]
+    if ncmds > 4096:
+        return b
+    out = bytearray(b[:16] + b'\0' * 8 + b[24:hdr])
+    off = hdr
+    blobs = []
+    for _ in range(ncmds):
+        if off + 8 > len(b):
+            return b
+        cmd, csz = struct.unpack(e + 'II', b[off:off + 8])
+        if csz < 8 or off + csz > len(b):
+            return b
+        if cmd == 0x1d:
+            blobs.append(struct.unpack(e + 'II', b[off + 8:off + 16]))
+            out += b'\0' * csz
+        else:
+            cb = b[off:off + csz]
+            if cmd in (0x1, 0x19) and cb[8:24].rstrip(b'\0') == b'__LINKEDIT':
+                cb = bytearray(cb)
+                if is64:
+                    cb[32:40] = b'\0' * 8; cb[48:56] = b'\0' * 8
+                else:
+                    cb[28:32] = b'\0' * 4; cb[36:40] = b'\0' * 4
+            out += cb
+        off += csz
+    emit = bytes(out) + b[off:]
+    base = len(out) - off
+    shift = 0
+    for do, ds in sorted(blobs):
+        s = do + base - shift
+        if 0 <= s < len(emit):
+            emit = emit[:s] + emit[min(len(emit), s + ds):]
+        shift += ds
+    return emit
+
+def norm_macho(data):
+    if len(data) >= 8 and data[:4] == b'\xca\xfe\xba\xbe':
+        nfat = struct.unpack('>I', data[4:8])[0]
+        if nfat > 64 or 8 + 20 * nfat > len(data):
+            return data
+        out = bytearray(data[:8])
+        for i in range(nfat):
+            ro = 8 + 20 * i
+            off, size = struct.unpack('>II', data[ro + 8:ro + 16])
+            if off + size > len(data):
+                return data
+            out += data[ro:ro + 8] + b'\0' * 8 + data[ro + 16:ro + 20]
+            out += norm_thin(data[off:off + size])
+        return bytes(out)
+    return norm_thin(data)
+
+def norm_entry(name, data):
+    if name.rsplit('.', 1)[-1] in ('dylib', 'jnilib', 'so'):
+        return norm_macho(data)
+    return data
+PYEOF
+
 md5_of() { md5sum "$1" | cut -d' ' -f1; }
 sha_of() { sha256sum "$1" | cut -d' ' -f1; }
 
 # canon_of <jar> — the manifest row hash: canonical content sha256, identical to
 # jar_content_hash in the scan and canonicalSha256Of in the Gradle task.
 canon_of() {
-    python3 - "$1" <<'PY'
+    PYTHONPATH="$WORK/normpy" python3 - "$1" <<'PY'
 import sys, zipfile, hashlib
+from norm import norm_entry
 path = sys.argv[1]
 try:
     z = zipfile.ZipFile(path)
@@ -59,7 +138,7 @@ except zipfile.BadZipFile:
 outer = hashlib.sha256()
 with z:
     for i in sorted(z.infolist(), key=lambda i: i.filename):
-        h = hashlib.sha256(b'' if i.is_dir() else z.read(i)).hexdigest()
+        h = hashlib.sha256(b'' if i.is_dir() else norm_entry(i.filename, z.read(i))).hexdigest()
         outer.update(i.filename.encode('utf-8') + b'\0' + h.encode('ascii') + b'\n')
 print(outer.hexdigest())
 PY
@@ -143,10 +222,109 @@ mkstub() {
     echo "$f"
 }
 
-# native_next_to <img> — the extracted libskiko with its .sha256 sidecar.
+# skiko_cp <dir> <os> <arch> [extra-native-entry...] — the Licensee-checked
+# classpath jar: META-INF plus libskiko-<os>-<arch>.<ext> + .sha256 and each
+# named extra native + .sha256 (the macOS jar carries both arches). An entry
+# written as `name@file` takes the file's bytes as content, otherwise the
+# content is the fixture's `cp-native:<name>` — the @-form carries real Mach-O
+# fixtures. Prints the manifest rows writeDesktopRuntimeClasspath emits: the
+# canonical jar row, then a <entry sha256>  <imgname>#<entry> row per
+# native/sidecar — the rows the stub's retained and extracted bytes bind to.
+skiko_cp() {
+    local dir="$1" os="$2" arch="$3" ext=so
+    shift 3
+    case "$os" in macos) ext=dylib ;; windows) ext=dll ;; esac
+    python3 - "$dir/.cp" "libskiko-${os}-${arch}.${ext}" "$@" <<'PY'
+import hashlib, sys, zipfile
+out, host, extras = sys.argv[1], sys.argv[2], sys.argv[3:]
+with zipfile.ZipFile(out, 'w') as z:
+    z.writestr('META-INF/', '')
+    z.writestr('META-INF/MANIFEST.MF', 'Manifest-Version: 1.0\n')
+    specs = list(extras)
+    if host not in [s.partition('@')[0] for s in specs]:
+        specs = [host] + specs
+    for spec in specs:
+        n, _, f = spec.partition('@')
+        native = open(f, 'rb').read() if f else ('cp-native:' + n).encode()
+        z.writestr(n, native)
+        z.writestr(n + '.sha256', hashlib.sha256(native).hexdigest())
+PY
+    local f="$dir/skiko-awt-runtime-${os}-${arch}-0.150.1-$(unpadded_md5 "$dir/.cp").jar"
+    mv "$dir/.cp" "$f"
+    PYTHONPATH="$WORK/normpy" python3 - "$f" <<'PY'
+import hashlib, re, sys, zipfile
+from norm import norm_entry
+p = sys.argv[1]
+name = p.rsplit('/', 1)[-1]
+with zipfile.ZipFile(p) as z:
+    outer = hashlib.sha256()
+    for i in sorted(z.infolist(), key=lambda i: i.filename):
+        h = hashlib.sha256(b'' if i.is_dir() else norm_entry(i.filename, z.read(i))).hexdigest()
+        outer.update(i.filename.encode('utf-8') + b'\0' + h.encode('ascii') + b'\n')
+    print('%s  %s' % (outer.hexdigest(), name))
+    for n in sorted(z.namelist()):
+        if n.endswith('/') or not (re.match(r'^(?:libskiko-|skiko-)[^/]+\.(?:so|dylib|dll)$', n)
+                                   or ('/' not in n and n.endswith('.sha256'))):
+            continue
+        print('%s  %s#%s' % (hashlib.sha256(norm_entry(n, z.read(n))).hexdigest(), name, n))
+PY
+}
+
+# native_next_to <jar-dir> [os arch [native-file [pin-file]]] — the host
+# native extracted loose beside the stub: the classpath jar's entry bytes and
+# its sidecar entry's bare hex. With a native-file, the loose bytes come from
+# it (a re-signed Mach-O); pin-file then carries the published byte pin — the
+# loose sidecar records the pre-sign hash on macOS.
 native_next_to() {
-    printf 'native bytes' > "$1/lib/app/libskiko-linux-x64.so"
-    sha_of "$1/lib/app/libskiko-linux-x64.so" > "$1/lib/app/libskiko-linux-x64.so.sha256"
+    local dir="$1" os="${2:-linux}" arch="${3:-x64}" nf="${4:-}" pf="${5:-}" ext=so n
+    case "$os" in macos) ext=dylib ;; windows) ext=dll ;; esac
+    n="libskiko-${os}-${arch}.${ext}"
+    if [ -n "$nf" ]; then
+        cat "$nf" > "$dir/$n"
+        cat "$pf" > "$dir/$n.sha256"
+    else
+        printf 'cp-native:%s' "$n" > "$dir/$n"
+        printf 'cp-native:%s' "$n" | sha256sum | cut -d' ' -f1 | tr -d '\n' \
+            > "$dir/$n.sha256"
+    fi
+}
+
+# macho_pair <mode> <name> — writes $WORK/<name>-{pub,re,re-x,pin}: a synthetic
+# thin Mach-O pair as published (adhoc-signed; mode=insert leaves the
+# LC_CODE_SIGNATURE slot out entirely, a 16-byte header pad in its place) and
+# as packaging re-signed it (slot: same load commands, grown blob; insert: the
+# cs command written over the pad). re-x is the re-signed bytes with a payload
+# byte flipped. pin is the bare sha256 hex of the pub bytes — what the
+# classpath .sha256 sidecar records.
+macho_pair() {
+    python3 - "$WORK/$2" "$1" <<'PY'
+import hashlib, struct, sys
+base, mode = sys.argv[1], sys.argv[2]
+content = b'payload bytes for ' + base.encode().rsplit(b'/', 1)[-1] + b'\n' + bytes(range(64))
+def seg64(vmsize, filesize):
+    return struct.pack('<II16sQQQQIIII', 0x19, 72, b'__LINKEDIT' + b'\0' * 6,
+                       0x1000, vmsize, 0x2000, filesize, 7, 5, 0, 0)
+def cs(do, ds):
+    return struct.pack('<IIII', 0x1d, 16, do, ds)
+def hdr(ncmds, sizeofcmds):
+    return struct.pack('<IIIIIIII', 0xfeedfacf, 0x0100000c, 0, 6,
+                       ncmds, sizeofcmds, 0, 0)
+if mode == 'slot':
+    do = 32 + 88 + len(content)
+    pub = hdr(2, 88) + seg64(0x3000, 0x2300) + cs(do, 64) + content + b'A' * 64
+    re_ = hdr(2, 88) + seg64(0x3040, 0x2380) + cs(do, 128) + content + b'B' * 128
+else:
+    # insert: the unsigned file has 16 zero pad bytes where the cs cmd lands
+    do = 32 + 88 + len(content)
+    pub = hdr(1, 72) + seg64(0x3000, 0x2300) + b'\0' * 16 + content
+    re_ = hdr(2, 88) + seg64(0x3040, 0x2380) + cs(do, 128) + content + b'B' * 128
+rex = bytearray(re_)
+rex[124] ^= 0xff  # payload starts at 120 (= 32 hdr + 88 cmds) in both modes
+open(base + '-pub', 'wb').write(pub)
+open(base + '-re', 'wb').write(bytes(re_))
+open(base + '-re-x', 'wb').write(bytes(rex))
+open(base + '-pin', 'w').write(hashlib.sha256(pub).hexdigest())
+PY
 }
 
 manifest_row() { printf '%s  %s\n' "$1" "$2" >> "$MANIFEST"; }
@@ -227,14 +405,14 @@ expect_fail 'not on the Licensee-checked runtime classpath' \
 # 4. The skiko stub under its documented conditions: a manifest-only zip whose
 #    name suffix is its own md5, the manifest carries a
 #    skiko-awt-runtime-<os>-<arch>-*.jar entry (the classpath jar stays
-#    manifest-only), and the extracted native verifies against its .sha256
-#    sidecar.
+#    manifest-only) with #entry rows for its natives/sidecars, and the
+#    extracted native beside the stub carries the classpath entry's bytes.
 img="$(new_image d)"
-read -r skiko_name skiko_sha \
-    < <(mkjar "$WORK" skiko-awt-runtime-linux-x64-0.150.1 org/jetbrains/skiko/SkiaLayer.class)
-manifest_row "$skiko_sha" "$skiko_name"
+skiko_cp "$WORK" linux x64 >> "$MANIFEST"
+skiko_name="$(head -1 "$MANIFEST" | sed 's/^[0-9a-f]*  //')"
+skiko_sha="$(head -1 "$MANIFEST" | cut -d' ' -f1)"
 mkstub "$img/lib/app" >/dev/null
-native_next_to "$img"
+native_next_to "$img/lib/app"
 if run_scan "$img"; then
     t_ok "skiko stub is accepted under the documented conditions"
 else
@@ -245,7 +423,7 @@ fi
 # 5. The stub without a manifest skiko entry is just another off-manifest jar.
 img="$(new_image e)"
 mkstub "$img/lib/app" >/dev/null
-native_next_to "$img"
+native_next_to "$img/lib/app"
 expect_fail 'not on the Licensee-checked runtime classpath' \
     "skiko stub without a manifest entry is rejected"
 
@@ -258,7 +436,7 @@ manifest_row "$(printf 'x' | sha256sum | cut -d' ' -f1)" \
 jar_zip "$img/lib/app/.squat" org/jetbrains/skiko/SkiaLayer.class
 mv "$img/lib/app/.squat" \
     "$img/lib/app/skiko-awt-runtime-linux-x64-0.150.1-11111111111111111111111111111111.jar"
-native_next_to "$img"
+native_next_to "$img/lib/app"
 expect_fail 'not on the Licensee-checked runtime classpath' \
     "class-bearing jar squatting on the skiko stub name is rejected"
 
@@ -277,7 +455,7 @@ img="$(new_image h)"
 manifest_row "$skiko_sha" "skiko-awt-runtime-windows-x64-0.150.1-${skiko_name##*-0.150.1-}"
 stub="$(mkstub "$img/lib/app")"
 mv "$stub" "$img/lib/app/skiko-awt-runtime-linux-x64-0.150.1-$(md5_of "$stub").jar"
-native_next_to "$img"
+native_next_to "$img/lib/app"
 expect_fail 'not on the Licensee-checked runtime classpath' \
     "skiko stub whose manifest entry names another os-arch is rejected"
 
@@ -286,7 +464,7 @@ expect_fail 'not on the Licensee-checked runtime classpath' \
 img="$(new_image i)"
 manifest_row "$skiko_sha" "$skiko_name"
 mkstub "$img/lib/app" org/jetbrains/skiko/SkiaLayer.class >/dev/null
-native_next_to "$img"
+native_next_to "$img/lib/app"
 expect_fail 'not on the Licensee-checked runtime classpath' \
     "skiko-named jar carrying a .class is rejected"
 
@@ -294,7 +472,7 @@ expect_fail 'not on the Licensee-checked runtime classpath' \
 img="$(new_image j)"
 manifest_row "$skiko_sha" "$skiko_name"
 mkstub "$img/lib/app" skiko/linux/x64/libskiko.so >/dev/null
-native_next_to "$img"
+native_next_to "$img/lib/app"
 expect_fail 'not on the Licensee-checked runtime classpath' \
     "skiko-named jar carrying a non-META-INF payload is rejected"
 
@@ -305,7 +483,7 @@ manifest_row "$skiko_sha" "$skiko_name"
 printf 'not a zip' > "$img/lib/app/.raw"
 mv "$img/lib/app/.raw" \
     "$img/lib/app/skiko-awt-runtime-linux-x64-0.150.1-$(unpadded_md5 "$img/lib/app/.raw").jar"
-native_next_to "$img"
+native_next_to "$img/lib/app"
 expect_fail 'not on the Licensee-checked runtime classpath' \
     "skiko-named non-zip is rejected"
 
@@ -449,14 +627,11 @@ printf 'JAVA_VERSION="%s"\nMODULES=java.base\n' \
     "$(grep -E '^javaVersion=' "$FIX_ROOT/desktopApp/runtime.lock" | cut -d= -f2)" \
     > "$img/Contents/runtime/Contents/Home/release"
 : > "$img/Contents/runtime/Contents/Home/legal/NOTICE"
-manifest_row "$(printf 'skiko' | sha256sum | cut -d' ' -f1)" \
-    "skiko-awt-runtime-macos-arm64-0.150.1-0123456789abcdef0123456789abcdef.jar"
+skiko_cp "$WORK" macos arm64 >> "$MANIFEST"
 jar_zip "$img/Contents/app/.stub"
 mv "$img/Contents/app/.stub" \
     "$img/Contents/app/skiko-awt-runtime-macos-arm64-0.150.1-20151b90a8aba3e93f91242dfd61af.jar"
-printf 'dylib bytes' > "$img/Contents/app/libskiko-macos-arm64.dylib"
-sha_of "$img/Contents/app/libskiko-macos-arm64.dylib" \
-    > "$img/Contents/app/libskiko-macos-arm64.dylib.sha256"
+native_next_to "$img/Contents/app" macos arm64
 if run_scan "$img"; then
     t_ok "macOS skiko stub with a repacked (non-md5) 30-hex mangle is accepted"
 else
@@ -472,7 +647,7 @@ manifest_row "$(printf 'x' | sha256sum | cut -d' ' -f1)" \
 jar_zip "$img/lib/app/.squat"
 mv "$img/lib/app/.squat" \
     "$img/lib/app/skiko-awt-runtime-linux-x64-0.150.1-20151b90a8aba3e93f91242dfd61af.jar"
-native_next_to "$img"
+native_next_to "$img/lib/app"
 expect_fail 'not on the Licensee-checked runtime classpath' \
     "linux skiko stub whose suffix is not its own md5 is rejected"
 
@@ -538,39 +713,52 @@ expect_fail 'not on the Licensee-checked runtime classpath' \
 # libskiko-macos-x64.dylib plus its .sha256 — while the host arch's lands loose
 # beside it (nightly 37868304885). The in-jar pair must still pin each other.
 
-# mkstub_native <dir> [no_sidecar|bad_sidecar] — a skiko-awt-runtime-macos-arm64
-# stub keeping libskiko-macos-x64.dylib + .sha256 in-jar; named by its own
-# unpadded md5 like Compose does.
+# mkstub_native <dir> [no_sidecar|bad_sidecar|mutated] [native-file [pin-file]]
+# — a skiko-awt-runtime-macos-arm64 stub keeping libskiko-macos-x64.dylib +
+# .sha256 in-jar; named by its own unpadded md5 like Compose does. The retained
+# native carries the classpath entry's bytes — except 'mutated', where the
+# in-jar native is rewritten and its sidecar is recomputed to match, a
+# self-consistent pair that never saw the Licensee-checked classpath jar.
+# With native-file the retained bytes come from it (a re-signed Mach-O);
+# pin-file then carries the classpath sidecar's published pin.
 mkstub_native() {
-    local dir="$1" mode="${2:-}" f
-    python3 - "$dir/.stubn" "$mode" <<'PY'
+    local dir="$1" mode="${2:-}" nf="${3:-}" pf="${4:-}" f
+    python3 - "$dir/.stubn" "$mode" "$nf" "$pf" <<'PY'
 import hashlib, sys, zipfile
-out, mode = sys.argv[1], sys.argv[2]
-native = b'x64 skiko native bytes'
+out, mode, nf, pf = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+n = 'libskiko-macos-x64.dylib'
+if mode == 'mutated':
+    native = b'attacker native bytes'
+elif nf:
+    native = open(nf, 'rb').read()
+else:
+    native = ('cp-native:' + n).encode()
 with zipfile.ZipFile(out, 'w') as z:
     z.writestr('META-INF/', '')
     z.writestr('META-INF/MANIFEST.MF', 'Manifest-Version: 1.0\n')
-    z.writestr('libskiko-macos-x64.dylib', native)
+    z.writestr(n, native)
     if mode != 'no_sidecar':
-        sidecar = ('0' * 64 if mode == 'bad_sidecar'
-                   else hashlib.sha256(native).hexdigest())
-        z.writestr('libskiko-macos-x64.dylib.sha256', sidecar)
+        if pf:
+            sidecar = open(pf).read()
+        elif mode == 'bad_sidecar':
+            sidecar = '0' * 64
+        else:
+            sidecar = hashlib.sha256(native).hexdigest()
+        z.writestr(n + '.sha256', sidecar)
 PY
     f="$dir/skiko-awt-runtime-macos-arm64-0.150.1-$(unpadded_md5 "$dir/.stubn").jar"
     mv "$dir/.stubn" "$f"
     echo "$f"
 }
 
-# mac_stub_image <tag> — an image whose manifest covers macos-arm64 skiko and
-# whose app dir carries the loose arm64 native + sidecar.
+# mac_stub_image <tag> — an image whose manifest carries the macos-arm64
+# classpath jar's rows (with the x64 native entry the stub retains) and whose
+# app dir has the loose arm64 native + sidecar bound to the classpath bytes.
 mac_stub_image() {
     local img
     img="$(new_image "$1")"
-    manifest_row "$(printf 'skiko' | sha256sum | cut -d' ' -f1)" \
-        "skiko-awt-runtime-macos-arm64-0.150.1-0123456789abcdef0123456789abcdef.jar"
-    printf 'dylib bytes' > "$img/lib/app/libskiko-macos-arm64.dylib"
-    sha_of "$img/lib/app/libskiko-macos-arm64.dylib" \
-        > "$img/lib/app/libskiko-macos-arm64.dylib.sha256"
+    skiko_cp "$WORK" macos arm64 libskiko-macos-x64.dylib >> "$MANIFEST"
+    native_next_to "$img/lib/app" macos arm64
     echo "$img"
 }
 
@@ -596,6 +784,105 @@ img="$(mac_stub_image u)"
 mkstub_native "$img/lib/app" bad_sidecar >/dev/null
 expect_fail 'not on the Licensee-checked runtime classpath' \
     "in-jar skiko native whose .sha256 does not match is rejected"
+
+# 26. The boundary of the exemption: mutating a retained native and recomputing
+#     its in-jar .sha256 leaves a self-consistent pair, but the manifest's
+#     #entry rows pin the Licensee-checked classpath bytes — provenance, not
+#     self-consistency, is what binds (review of nightly 37868304885's fix).
+img="$(mac_stub_image v)"
+mkstub_native "$img/lib/app" mutated >/dev/null
+expect_fail 'not on the Licensee-checked runtime classpath' \
+    "mutated in-jar native with a matching rewritten sidecar is rejected"
+
+# 27. The same attack on the loose native beside the stub.
+img="$(mac_stub_image w)"
+mkstub_native "$img/lib/app" >/dev/null
+printf 'attacker native bytes' > "$img/lib/app/libskiko-macos-arm64.dylib"
+sha_of "$img/lib/app/libskiko-macos-arm64.dylib" \
+    | tr -d ' \n' > "$img/lib/app/libskiko-macos-arm64.dylib.sha256"
+expect_fail 'not on the Licensee-checked runtime classpath' \
+    "mutated loose native with a matching rewritten sidecar is rejected"
+
+# --- Mach-O signature normalization -----------------------------------------------
+# macOS packaging re-signs natives in place: the published jar already carries
+# an ad-hoc signature (datasize grows, __LINKEDIT fields move) or is unsigned
+# and gains an LC_CODE_SIGNATURE command over header padding (nightly
+# 37874042553 showed codesign --remove-signature cannot byte-roundtrip either
+# shape). The manifest's #entry rows hash normalized published bytes; the
+# image's retained and loose natives are normalized the same way — so a
+# re-signed native binds, a mutated payload does not.
+
+# 28. Re-signed natives (pre-allocated signature slot, grown blob) match the
+#     published classpath bytes after normalization — both surfaces.
+macho_pair slot mx
+macho_pair slot ma
+img="$(new_image x)"
+skiko_cp "$WORK" macos arm64 \
+    "libskiko-macos-arm64.dylib@$WORK/ma-pub" \
+    "libskiko-macos-x64.dylib@$WORK/mx-pub" >> "$MANIFEST"
+native_next_to "$img/lib/app" macos arm64 "$WORK/ma-re" "$WORK/ma-pin"
+mkstub_native "$img/lib/app" "" "$WORK/mx-re" "$WORK/mx-pin" >/dev/null
+if run_scan "$img"; then
+    t_ok "re-signed Mach-O natives (grown slot) bind to the classpath bytes"
+else
+    t_fail "re-signed Mach-O natives (grown slot) bind to the classpath bytes"
+    sed 's/^/    /' "$WORK/scan.out" >&2
+fi
+
+# 29. The unsigned-published shape: packaging inserts the signature command
+#     over header padding — normalization still binds.
+macho_pair insert iy
+macho_pair insert ia
+img="$(new_image y)"
+skiko_cp "$WORK" macos arm64 \
+    "libskiko-macos-arm64.dylib@$WORK/ia-pub" \
+    "libskiko-macos-x64.dylib@$WORK/iy-pub" >> "$MANIFEST"
+native_next_to "$img/lib/app" macos arm64 "$WORK/ia-re" "$WORK/ia-pin"
+mkstub_native "$img/lib/app" "" "$WORK/iy-re" "$WORK/iy-pin" >/dev/null
+if run_scan "$img"; then
+    t_ok "Mach-O natives signed fresh over header padding are accepted"
+else
+    t_fail "Mach-O natives signed fresh over header padding are accepted"
+    sed 's/^/    /' "$WORK/scan.out" >&2
+fi
+
+# 30. A mutated re-signed payload on the loose surface: normalization is not a
+#     side channel — the manifest row still pins the published bytes, and the
+#     loose sidecar rewritten to the mutated hash mismatches its own row.
+macho_pair slot za
+img="$(new_image z)"
+skiko_cp "$WORK" macos arm64 \
+    "libskiko-macos-arm64.dylib@$WORK/za-pub" \
+    libskiko-macos-x64.dylib >> "$MANIFEST"
+native_next_to "$img/lib/app" macos arm64 "$WORK/za-re-x" "$WORK/za-pin"
+sha_of "$img/lib/app/libskiko-macos-arm64.dylib" \
+    | tr -d ' \n' > "$img/lib/app/libskiko-macos-arm64.dylib.sha256"
+mkstub_native "$img/lib/app" >/dev/null
+expect_fail 'not on the Licensee-checked runtime classpath' \
+    "mutated re-signed loose native with a rewritten sidecar is rejected"
+
+# 31. The same mutated re-signed payload retained inside the stub, in-jar
+#     sidecar recomputed to match it.
+macho_pair insert qx
+img="$(new_image aa)"
+skiko_cp "$WORK" macos arm64 \
+    "libskiko-macos-x64.dylib@$WORK/qx-pub" >> "$MANIFEST"
+native_next_to "$img/lib/app" macos arm64
+python3 - "$img/lib/app/.stubx" "$WORK/qx-re-x" <<'PY'
+import hashlib, sys, zipfile
+out, nf = sys.argv[1], sys.argv[2]
+native = open(nf, 'rb').read()
+with zipfile.ZipFile(out, 'w') as z:
+    z.writestr('META-INF/', '')
+    z.writestr('META-INF/MANIFEST.MF', 'Manifest-Version: 1.0\n')
+    z.writestr('libskiko-macos-x64.dylib', native)
+    z.writestr('libskiko-macos-x64.dylib.sha256',
+               hashlib.sha256(native).hexdigest())
+PY
+f="$img/lib/app/skiko-awt-runtime-macos-arm64-0.150.1-$(unpadded_md5 "$img/lib/app/.stubx").jar"
+mv "$img/lib/app/.stubx" "$f"
+expect_fail 'not on the Licensee-checked runtime classpath' \
+    "mutated re-signed in-jar native with a rewritten sidecar is rejected"
 
 echo
 if [ "$FAILED" -gt 0 ]; then

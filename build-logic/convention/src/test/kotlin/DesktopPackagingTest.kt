@@ -3,6 +3,8 @@ import org.gradle.api.GradleException
 import org.gradle.testfixtures.ProjectBuilder
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.nio.file.Files
 import java.security.MessageDigest
 import java.util.zip.GZIPOutputStream
@@ -232,6 +234,102 @@ class DesktopPackagingTest {
     }
 
     @Test
+    fun `the classpath manifest binds each skiko stub entry to the checked jar`() {
+        // Packaging rewrites skiko-awt-runtime into a stub that still carries
+        // the other targets' natives plus the extracted host native's .sha256;
+        // a stub-authored sidecar could only prove self-consistency, so the
+        // manifest also records <entry sha256>  <image name>#<entry> rows the
+        // scan binds those bytes to.
+        val root = Files.createTempDirectory("classpath-manifest").toFile()
+        try {
+            val skiko =
+                File(root, "sk")
+                    .apply { mkdirs() }
+                    .let { dir ->
+                        File(dir, "skiko-awt-runtime-linux-x64-0.150.1.jar").apply {
+                            writeBytes(
+                                zipArchive(
+                                    "META-INF/MANIFEST.MF" to byteArrayOf(1),
+                                    "libskiko-linux-x64.so" to byteArrayOf(2, 3),
+                                    "libskiko-linux-x64.so.sha256" to byteArrayOf(4),
+                                    "org/jetbrains/skiko/SkiaLayer.class" to byteArrayOf(5),
+                                ),
+                            )
+                        }
+                    }
+            val task = classpathManifestTask(root, skiko)
+
+            task.write()
+
+            val lines = File(root, "manifest.txt").readLines()
+            val imageName = imageJarName(skiko)
+            assert(lines.any { it.endsWith("  $imageName") }) { lines.joinToString("\n") }
+            assertEquals(
+                setOf("libskiko-linux-x64.so", "libskiko-linux-x64.so.sha256"),
+                lines.filter { "#" in it }.map { it.substringAfter("#") }.toSet(),
+            )
+            // The row's hash is the classpath entry's content sha256.
+            val nativeRow = lines.single { it.endsWith("$imageName#libskiko-linux-x64.so") }
+            assertEquals(sha256Hex(byteArrayOf(2, 3)), nativeRow.substringBefore("  "))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `skiko entry rows hash the signature-normalized native bytes`() {
+        // macOS packaging re-signs the natives skiko jars carry, and re-signing
+        // is not byte-reversible, so manifest rows hash a normalized form the
+        // image checker reimplements in python. The literal below is the
+        // fixture implementation's output (check-desktop-image.test.sh's
+        // macho_pair/norm.py) for these exact bytes — the four jar entries are
+        // the published/re-signed variants of both signing shapes (grown
+        // pre-allocated slot, command inserted over header padding), so a
+        // divergence between the Kotlin and python normalizers fails here.
+        val normalizedSha256 = "403787c2af527e1f4c18fa6de823d86929e194bea446ab41d71e1f1d3b1c3a86"
+        val root = Files.createTempDirectory("classpath-manifest").toFile()
+        try {
+            val skiko =
+                File(root, "sk")
+                    .apply { mkdirs() }
+                    .let { dir ->
+                        File(dir, "skiko-awt-runtime-macos-arm64-0.150.1.jar").apply {
+                            writeBytes(
+                                zipArchive(
+                                    "META-INF/MANIFEST.MF" to byteArrayOf(1),
+                                    "libskiko-slot-pub.dylib" to machoPairBytes(slot = true, resigned = false),
+                                    "libskiko-slot-re.dylib" to machoPairBytes(slot = true, resigned = true),
+                                    "libskiko-ins-pub.dylib" to machoPairBytes(slot = false, resigned = false),
+                                    "libskiko-ins-re.dylib" to machoPairBytes(slot = false, resigned = true),
+                                ),
+                            )
+                        }
+                    }
+            val task = classpathManifestTask(root, skiko)
+
+            task.write()
+
+            val imageName = imageJarName(skiko)
+            val rows =
+                File(root, "manifest.txt")
+                    .readLines()
+                    .filter { it.contains("$imageName#") }
+                    .associateBy({ it.substringAfter("#") }, { it.substringBefore("  ") })
+            assertEquals(
+                listOf(
+                    "libskiko-ins-pub.dylib",
+                    "libskiko-ins-re.dylib",
+                    "libskiko-slot-pub.dylib",
+                    "libskiko-slot-re.dylib",
+                ).associateWith { normalizedSha256 },
+                rows.toSortedMap(),
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `the hicolor mapping fails when icons png is missing or empty`() {
         val root = Files.createTempDirectory("hicolor").toFile()
         try {
@@ -277,6 +375,66 @@ class DesktopPackagingTest {
         } finally {
             root.deleteRecursively()
         }
+    }
+
+    // The synthetic thin Mach-O of check-desktop-image.test.sh's macho_pair:
+    // an LC_SEGMENT_64 __LINKEDIT plus, when published-signed or re-signed, an
+    // LC_CODE_SIGNATURE command whose blob grows on re-sign; `slot=false`
+    // published bytes carry a 16-byte header pad where signing inserts it.
+    private fun machoPairBytes(
+        slot: Boolean,
+        resigned: Boolean,
+    ): ByteArray {
+        val content =
+            "payload bytes for kt-parity\n".toByteArray() +
+                ByteArray(64) { it.toByte() }
+        val dataoff = 32 + 88 + content.size
+
+        fun buf(cap: Int) = ByteBuffer.allocate(cap).order(ByteOrder.LITTLE_ENDIAN)
+
+        val header =
+            buf(32)
+                .putInt(0xfeedfacf.toInt())
+                .putInt(0x0100000c)
+                .putInt(0)
+                .putInt(6)
+                .putInt(if (resigned || slot) 2 else 1)
+                .putInt(if (resigned || slot) 88 else 72)
+                .putInt(0)
+                .putInt(0)
+                .array()
+        val segment =
+            buf(72)
+                .putInt(0x19)
+                .putInt(72)
+                .put("__LINKEDIT".toByteArray() + ByteArray(6))
+                .putLong(0x1000)
+                .putLong(if (resigned) 0x3040 else 0x3000)
+                .putLong(0x2000)
+                .putLong(if (resigned) 0x2380 else 0x2300)
+                .putInt(7)
+                .putInt(5)
+                .putInt(0)
+                .putInt(0)
+                .array()
+        val sigCmd =
+            buf(16)
+                .putInt(0x1d)
+                .putInt(16)
+                .putInt(dataoff)
+                .putInt(if (resigned) 128 else 64)
+                .array()
+        val body =
+            if (!resigned && !slot) {
+                ByteArray(16) + content
+            } else {
+                sigCmd +
+                    content +
+                    ByteArray(if (resigned) 128 else 64) {
+                        (if (resigned) 0x42 else 0x41).toByte()
+                    }
+            }
+        return header + segment + body
     }
 
     private fun jar(

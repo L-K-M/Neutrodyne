@@ -78,7 +78,7 @@ file_bytes() { stat -c %s "$1" 2>/dev/null || stat -f %z "$1"; }
 # bytes. WriteDesktopRuntimeClasspath produces the identical digest.
 jar_content_hash() {
     python3 - "$1" <<'PYEOF'
-import os, shutil, subprocess, sys, tempfile, zipfile, hashlib
+import struct, sys, zipfile, hashlib
 path = sys.argv[1]
 try:
     z = zipfile.ZipFile(path)
@@ -86,39 +86,89 @@ except zipfile.BadZipFile:
     print(hashlib.sha256(open(path, 'rb').read()).hexdigest())
     sys.exit(0)
 
-# macOS packaging signs every Mach-O it finds, inside jars too (nightly
-# 37868304885: libsqliteJni.dylib and libjnidispatch.jnilib differ from the
-# classpath artifacts the manifest hashed). The manifest side is pre-signing,
-# so image-side Mach-O entries are compared with the signature stripped —
-# codesign --remove-signature on a scratch copy restores the unsigned bytes.
-# Only *.dylib/*.jnilib/*.so entries reach codesign: cafebabe would otherwise
-# fire on every .class file.
-CODESIGN = shutil.which('codesign')
-MACHO_MAGICS = (b'\xfe\xed\xfa\xce', b'\xce\xfa\xed\xfe',
-                b'\xfe\xed\xfa\xcf', b'\xcf\xfa\xed\xfe',
-                b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca')
+# macOS packaging signs every Mach-O it finds, inside jars too, and
+# re-signing is not byte-reversible — `codesign --remove-signature` leaves a
+# re-signed file different from the published one (nightly 37874042553): the
+# signature slot's LC_CODE_SIGNATURE datasize and __LINKEDIT sizes grow and a
+# freshly inserted command consumes header padding. Both sides therefore hash
+# the normalized form — identical to normalizedEntryBytes/normalizeThinMacho
+# in DesktopPackaging.kt: ncmds/sizeofcmds zeroed, each LC_CODE_SIGNATURE
+# command emitted as zeros (covers the re-filled pre-allocated slot and the
+# freshly inserted one alike), __LINKEDIT's vmsize/filesize zeroed, and the
+# [dataoff, dataoff+datasize) blob region cut. Everything else — code, data,
+# every other load command — stays byte-exact, so tampered content still
+# differs. The extension gate keeps the cafebabe fat magic away from .class.
+def norm_thin(b):
+    if len(b) < 28:
+        return b
+    m = struct.unpack('<I', b[:4])[0]
+    if m == 0xfeedfacf: is64, be = True, False
+    elif m == 0xfeedface: is64, be = False, False
+    elif m == 0xcffaedfe: is64, be = True, True
+    elif m == 0xcefaedfe: is64, be = False, True
+    else: return b
+    hdr = 32 if is64 else 28
+    e = '>' if be else '<'
+    ncmds = struct.unpack(e + 'I', b[16:20])[0]
+    if ncmds > 4096:
+        return b
+    out = bytearray(b[:16] + b'\0' * 8 + b[24:hdr])
+    off = hdr
+    blobs = []
+    for _ in range(ncmds):
+        if off + 8 > len(b):
+            return b
+        cmd, csz = struct.unpack(e + 'II', b[off:off + 8])
+        if csz < 8 or off + csz > len(b):
+            return b
+        if cmd == 0x1d:
+            blobs.append(struct.unpack(e + 'II', b[off + 8:off + 16]))
+            out += b'\0' * csz
+        else:
+            cb = b[off:off + csz]
+            if cmd in (0x1, 0x19) and cb[8:24].rstrip(b'\0') == b'__LINKEDIT':
+                cb = bytearray(cb)
+                if is64:
+                    cb[32:40] = b'\0' * 8; cb[48:56] = b'\0' * 8
+                else:
+                    cb[28:32] = b'\0' * 4; cb[36:40] = b'\0' * 4
+            out += cb
+        off += csz
+    emit = bytes(out) + b[off:]
+    base = len(out) - off
+    shift = 0
+    for do, ds in sorted(blobs):
+        s = do + base - shift
+        if 0 <= s < len(emit):
+            emit = emit[:s] + emit[min(len(emit), s + ds):]
+        shift += ds
+    return emit
 
-def unsigned(data, name):
-    if not (CODESIGN
-            and name.rsplit('.', 1)[-1] in ('dylib', 'jnilib', 'so')
-            and data[:4] in MACHO_MAGICS):
+def norm_macho(data):
+    if len(data) >= 8 and data[:4] == b'\xca\xfe\xba\xbe':
+        nfat = struct.unpack('>I', data[4:8])[0]
+        if nfat > 64 or 8 + 20 * nfat > len(data):
+            return data
+        out = bytearray(data[:8])
+        for i in range(nfat):
+            ro = 8 + 20 * i
+            off, size = struct.unpack('>II', data[ro + 8:ro + 16])
+            if off + size > len(data):
+                return data
+            out += data[ro:ro + 8] + b'\0' * 8 + data[ro + 16:ro + 20]
+            out += norm_thin(data[off:off + size])
+        return bytes(out)
+    return norm_thin(data)
+
+def normalized(data, name):
+    if name.rsplit('.', 1)[-1] not in ('dylib', 'jnilib', 'so'):
         return data
-    fd, tmp = tempfile.mkstemp()
-    try:
-        with os.fdopen(fd, 'wb') as f:
-            f.write(data)
-        if subprocess.run([CODESIGN, '--remove-signature', tmp],
-                          capture_output=True).returncode == 0:
-            with open(tmp, 'rb') as f:
-                return f.read()
-        return data
-    finally:
-        os.unlink(tmp)
+    return norm_macho(data)
 
 outer = hashlib.sha256()
 with z:
     for i in sorted(z.infolist(), key=lambda i: i.filename):
-        h = hashlib.sha256(b'' if i.is_dir() else unsigned(z.read(i), i.filename)).hexdigest()
+        h = hashlib.sha256(b'' if i.is_dir() else normalized(z.read(i), i.filename)).hexdigest()
         outer.update(i.filename.encode('utf-8') + b'\0' + h.encode('ascii') + b'\n')
 print(outer.hexdigest())
 PYEOF
@@ -331,6 +381,90 @@ except Exception:
 PYEOF
 }
 
+# native_sha256 <file> — sha256 of the file's signature-normalized bytes:
+# the same Mach-O normalization jar_content_hash applies to jar entries
+# (norm_thin/norm_macho — the manifest's #entry rows are computed from it in
+# DesktopPackaging.kt). Non-Mach-O bytes hash raw.
+native_sha256() {
+    python3 - "$1" <<'PYEOF'
+import hashlib, struct, sys
+
+def norm_thin(b):
+    if len(b) < 28:
+        return b
+    m = struct.unpack('<I', b[:4])[0]
+    if m == 0xfeedfacf: is64, be = True, False
+    elif m == 0xfeedface: is64, be = False, False
+    elif m == 0xcffaedfe: is64, be = True, True
+    elif m == 0xcefaedfe: is64, be = False, True
+    else: return b
+    hdr = 32 if is64 else 28
+    e = '>' if be else '<'
+    ncmds = struct.unpack(e + 'I', b[16:20])[0]
+    if ncmds > 4096:
+        return b
+    out = bytearray(b[:16] + b'\0' * 8 + b[24:hdr])
+    off = hdr
+    blobs = []
+    for _ in range(ncmds):
+        if off + 8 > len(b):
+            return b
+        cmd, csz = struct.unpack(e + 'II', b[off:off + 8])
+        if csz < 8 or off + csz > len(b):
+            return b
+        if cmd == 0x1d:
+            blobs.append(struct.unpack(e + 'II', b[off + 8:off + 16]))
+            out += b'\0' * csz
+        else:
+            cb = b[off:off + csz]
+            if cmd in (0x1, 0x19) and cb[8:24].rstrip(b'\0') == b'__LINKEDIT':
+                cb = bytearray(cb)
+                if is64:
+                    cb[32:40] = b'\0' * 8; cb[48:56] = b'\0' * 8
+                else:
+                    cb[28:32] = b'\0' * 4; cb[36:40] = b'\0' * 4
+            out += cb
+        off += csz
+    emit = bytes(out) + b[off:]
+    base = len(out) - off
+    shift = 0
+    for do, ds in sorted(blobs):
+        s = do + base - shift
+        if 0 <= s < len(emit):
+            emit = emit[:s] + emit[min(len(emit), s + ds):]
+        shift += ds
+    return emit
+
+def norm_macho(data):
+    if len(data) >= 8 and data[:4] == b'\xca\xfe\xba\xbe':
+        nfat = struct.unpack('>I', data[4:8])[0]
+        if nfat > 64 or 8 + 20 * nfat > len(data):
+            return data
+        out = bytearray(data[:8])
+        for i in range(nfat):
+            ro = 8 + 20 * i
+            off, size = struct.unpack('>II', data[ro + 8:ro + 16])
+            if off + size > len(data):
+                return data
+            out += data[ro:ro + 8] + b'\0' * 8 + data[ro + 16:ro + 20]
+            out += norm_thin(data[off:off + size])
+        return bytes(out)
+    return norm_thin(data)
+
+print(hashlib.sha256(norm_macho(open(sys.argv[1], 'rb').read())).hexdigest())
+PYEOF
+}
+
+# manifest_entry_hash <manifest> <image jar name> <entry> — the sha256 the
+# classpath manifest recorded for that entry of the Licensee-checked
+# skiko-awt-runtime jar (<hash>  <jar>#<entry> rows), empty when unbound.
+manifest_entry_hash() {
+    local m="$1" jar="$2" entry="$3"
+    jar="$(printf '%s' "$jar" | sed 's/[].[^$*\/]/\\&/g')"
+    entry="$(printf '%s' "$entry" | sed 's/[].[^$*\/]/\\&/g')"
+    grep -oE "^[0-9a-f]{64}  ${jar}#${entry}\$" "$m" | cut -d' ' -f1 || true
+}
+
 # jar_stub_natives <jar> <dir> — extract the stub's retained natives and their
 # in-jar .sha256 sidecars for sidecar_sha256_matches; fails when a native and
 # its sidecar do not pair off exactly.
@@ -389,31 +523,49 @@ is_skiko_stub() {
     fi
     os="$(printf '%s' "$os" | sed 's/[].[^$*\/]/\\&/g')"
     arch="$(printf '%s' "$arch" | sed 's/[].[^$*\/]/\\&/g')"
-    grep -qE "  skiko-awt-runtime-${os}-${arch}-[^ ]+\.jar\$" "$manifest" || return 1
+    # The manifest row names the Licensee-checked classpath jar; its #entry
+    # rows then bind every byte the stub carries — a stub-authored .sha256 only
+    # proves self-consistency otherwise (a mutated native with a rewritten
+    # in-jar sidecar would pair off but never saw the classpath artifact).
+    local tmp n ok=1 found=0 want cpjar
+    cpjar="$(grep -oE "skiko-awt-runtime-${os}-${arch}-[^ ]+\.jar\$" "$manifest" | head -1 || true)"
+    [ -n "$cpjar" ] || return 1
     jar_stub_only "$path" || return 1
-    # Natives the stub still carries for other targets must match their in-jar
-    # .sha256 sidecars — the same pin as the extracted native's, with the same
-    # signature normalization (the macOS stub's libskiko-macos-x64.dylib is
-    # signed in place, nightly 37868304885).
     dir="${path%/*}"
-    local tmp n ok=1 found=0
+    # Retained natives keep their in-jar .sha256 pair; each is bound to the
+    # classpath jar's recorded entry — natives signature-normalized (the macOS
+    # stub's libskiko-macos-x64.dylib is signed in place, nightly 37868304885),
+    # sidecar bytes exact.
     tmp="$(mktemp -d)"
     jar_stub_natives "$path" "$tmp" || ok=0
     for n in "$tmp"/*; do
         [ -e "$n" ] || break
+        want="$(manifest_entry_hash "$manifest" "$cpjar" "${n##*/}")"
+        if [ -z "$want" ]; then
+            ok=0
+            break
+        fi
         case "$n" in
-            *.sha256) continue ;;
+            *.sha256) [ "$(sha256 "$n")" = "$want" ] || ok=0 ;;
+            *) [ "$(native_sha256 "$n")" = "$want" ] || ok=0 ;;
         esac
-        sidecar_sha256_matches "$n" || ok=0
     done
     rm -rf "$tmp"
     [ "$ok" = 1 ] || return 1
-    # The native lands beside the stub with a .sha256 sidecar pinning its bytes.
-    ok=1
+    # The extracted native and its .sha256 file are bound the same way; the
+    # sidecar consistency check keeps the documented Compose contract on top.
     for so in "$dir"/libskiko-*.so "$dir"/libskiko-*.dylib "$dir"/skiko-*.dll; do
         [ -f "$so" ] || continue
         found=1
-        if [ ! -f "$so.sha256" ] || ! sidecar_sha256_matches "$so"; then
+        want="$(manifest_entry_hash "$manifest" "$cpjar" "${so##*/}")"
+        if [ -z "$want" ] || [ "$(native_sha256 "$so")" != "$want" ]; then
+            ok=0
+            continue
+        fi
+        want="$(manifest_entry_hash "$manifest" "$cpjar" "${so##*/}.sha256")"
+        if [ -z "$want" ] || [ ! -f "$so.sha256" ] \
+            || [ "$(sha256 "$so.sha256")" != "$want" ] \
+            || ! sidecar_sha256_matches "$so"; then
             ok=0
         fi
     done
@@ -421,26 +573,20 @@ is_skiko_stub() {
 }
 
 # sidecar_sha256_matches <native> — the Compose-written .sha256 pins the bytes
-# the classpath jar carried. Signing rewrites a Mach-O in place (the sidecar
-# records the pre-sign dylib, nightly 37860407043), so on a signed Mach-O the
-# compare hashes a scratch copy with the signature removed.
+# the classpath jar carried. A re-signed Mach-O can never reproduce that
+# pre-sign pin byte-wise (nightly 37874042553), so for Mach-O files this check
+# is vacuous — the caller already bound the native and the sidecar file
+# byte-exact/normalized to the manifest's #entry rows, which is the real
+# provenance gate. For anything else the raw bytes must equal the pin.
 sidecar_sha256_matches() {
-    local so="$1" want magic tmp rc
+    local so="$1" want magic
     want="$(head -1 "$so.sha256" | cut -d' ' -f1)"
     [ "$(sha256 "$so")" = "$want" ] && return 0
-    command -v codesign >/dev/null 2>&1 || return 1
     magic="$(od -An -tx1 -N4 "$so" 2>/dev/null | tr -d ' ')"
     case "$magic" in
-        feedface|feedfacf|cefaedfe|cffaedfe|cafebabe) ;;
-        *) return 1 ;;
+        feedface|feedfacf|cefaedfe|cffaedfe|cafebabe|bebafeca) return 0 ;;
     esac
-    tmp="$(mktemp -d)"
-    cp "$so" "$tmp/native"
-    codesign --remove-signature "$tmp/native" >/dev/null 2>&1 || { rm -rf "$tmp"; return 1; }
-    [ "$(sha256 "$tmp/native")" = "$want" ]
-    rc=$?
-    rm -rf "$tmp"
-    return $rc
+    return 1
 }
 
 check_jars() {
