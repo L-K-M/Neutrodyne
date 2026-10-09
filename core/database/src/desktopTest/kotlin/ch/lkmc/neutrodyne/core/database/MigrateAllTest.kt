@@ -16,6 +16,7 @@ import org.junit.Rule
 import java.nio.file.Files
 import kotlin.io.path.Path
 import kotlin.test.Test
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -98,6 +99,30 @@ class MigrateAllTest {
                 assertTrue(page is androidx.paging.PagingSource.LoadResult.Page)
             } finally {
                 db.close()
+            }
+        }
+
+    @Test
+    fun aColumnBoundarySlideStillChangesTheDigest() =
+        runTest {
+            // Two adjacent TEXT columns whose values differ only by where the 0x01 byte lands
+            // ("a\x01"/"b" vs "a"/"\x01b") would digest identically without the length prefix —
+            // the invariant would report a real data change as preserved.
+            helper.createDatabase(1).use { conn ->
+                fixtureStatements().forEach { conn.exec(it) }
+                conn.exec("UPDATE podcast SET feedKey = 'a' || char(1), feedUrl = 'b' WHERE id = 1")
+                val before = MigrationInvariants.capture(conn)
+                conn.exec("UPDATE podcast SET feedKey = 'a', feedUrl = char(1) || 'b' WHERE id = 1")
+                val after = MigrationInvariants.capture(conn)
+
+                val error =
+                    assertFailsWith<IllegalStateException> {
+                        MigrationInvariants.assertPreserved(before, after)
+                    }
+                assertTrue(
+                    "subscriptions" in error.message.orEmpty(),
+                    "the subscriptions projection must flag the slide, got ${error.message}",
+                )
             }
         }
 }

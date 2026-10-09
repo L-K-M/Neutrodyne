@@ -40,6 +40,12 @@ internal suspend fun androidx.room3.PooledConnection.longQuery(sql: String): Lon
         stmt.getLong(0)
     }
 
+internal suspend fun androidx.room3.PooledConnection.stringQuery(sql: String): String =
+    usePrepared(sql) { stmt ->
+        check(stmt.step()) { "no row for $sql" }
+        stmt.getText(0)
+    }
+
 /**
  * The `db/v1-fixture.sql` resource as individual statements: `--` comments stripped, split on
  * the statement terminator (the fixture contains no `;` inside literals).
