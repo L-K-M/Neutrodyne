@@ -4,7 +4,6 @@ package ch.lkmc.neutrodyne.core.database
 
 import androidx.room3.Dao
 import androidx.room3.Insert
-import androidx.room3.OnConflictStrategy
 import androidx.room3.Query
 import androidx.room3.Upsert
 import androidx.room3.withWriteTransaction
@@ -29,6 +28,11 @@ abstract class SyncStateDao(
     /**
      * Empties the four `sync_*` tables and resets `sync_state` except `serverUrl`, in one
      * transaction (02 Sync tables); the library is untouched.
+     *
+     * Relink contract for MS0: the first pull after a re-link must run to completion *before*
+     * capture is re-enabled, and the applier must re-seed `sync_clock` from server records —
+     * otherwise a fresh wall-clock HLC beats the server's stored clocks and LWW-clobbers peer
+     * changes made while this device was unlinked.
      */
     suspend fun unlink() {
         db.withWriteTransaction {
@@ -63,7 +67,7 @@ abstract class SyncStateDao(
 /**
  * `sync_outbox` (02): inert until a device links. The Kotlin-side captures of 10
  * (`captureLiteral`/`captureAll`/`captureAt`/`captureIntent`) arrive with MS0; this is the
- * read/delete groundwork the tests and the push order need.
+ * read groundwork the tests and the push order need (per-row ack lands with the push loop).
  */
 @Dao
 interface SyncOutboxDao {

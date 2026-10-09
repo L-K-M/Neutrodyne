@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.database
 
 import ch.lkmc.neutrodyne.core.common.Clock
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -56,16 +57,24 @@ class FetchStateBatcher internal constructor(
                 deadlineJob =
                     scope.launch {
                         delay(MAX_DELAY_MS)
-                        mutex.withLock {
-                            // The deadline is re-checked against [clock]: a test scheduler can skip
-                            // virtual time while the caller is suspended on real-dispatcher work —
-                            // flush only when the limit actually elapsed.
-                            if (
-                                pending.isNotEmpty() &&
-                                clock.elapsedRealtime() - firstPendingElapsed >= MAX_DELAY_MS
-                            ) {
-                                flushLocked()
+                        try {
+                            mutex.withLock {
+                                // The deadline is re-checked against [clock]: a test scheduler can
+                                // skip virtual time while the caller is suspended on
+                                // real-dispatcher work — flush only when the limit elapsed.
+                                if (
+                                    pending.isNotEmpty() &&
+                                    clock.elapsedRealtime() - firstPendingElapsed >= MAX_DELAY_MS
+                                ) {
+                                    flushLocked()
+                                }
                             }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Exception) {
+                            // A failed deadline write keeps its rows (flushLocked only clears
+                            // after commit) for the next add()/flush() — this detached job must
+                            // not cancel the refresh run's scope.
                         }
                     }
             }

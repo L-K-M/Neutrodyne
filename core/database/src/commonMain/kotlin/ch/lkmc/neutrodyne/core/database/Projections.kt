@@ -79,6 +79,8 @@ data class DueFeed(
 /**
  * The partial `podcast` write of batched refresh outcomes (02 Refresh selection and fetch-state
  * writes): only scheduling, error and validator columns — never feed data or user columns.
+ * Invariant for callers: one row is one *committed* fetch outcome — never construct an instance
+ * before the fetch finished, so a crash mid-fetch cannot persist a fabricated result.
  */
 data class PodcastFetchState(
     val id: Long,

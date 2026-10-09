@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.database
 
 import java.io.ByteArrayOutputStream
+import java.util.zip.DataFormatException
 import java.util.zip.Deflater
 import java.util.zip.Inflater
 
@@ -46,8 +47,16 @@ actual object EpisodeDescriptionCodec {
             val out = ByteArrayOutputStream(deflated.size * 3)
             val chunk = ByteArray(8 * 1024)
             while (!inflater.finished()) {
-                val n = inflater.inflate(chunk)
-                if (n == 0 && (inflater.needsInput() || inflater.needsDictionary())) break
+                // A corrupt deflate body throws DataFormatException; the common contract is
+                // "never throws", so a bad body (-1) returns whatever inflated so far.
+                val n =
+                    try {
+                        inflater.inflate(chunk)
+                    } catch (_: DataFormatException) {
+                        -1
+                    }
+                val stalled = n == 0 && (inflater.needsInput() || inflater.needsDictionary())
+                if (n < 0 || stalled) break
                 out.write(chunk, 0, n)
             }
             return out.toByteArray().decodeToString()

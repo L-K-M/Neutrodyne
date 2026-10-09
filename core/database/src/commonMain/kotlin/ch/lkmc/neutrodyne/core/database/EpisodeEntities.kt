@@ -89,7 +89,17 @@ data class EpisodeEntity(
 data class EpisodeDescriptionEntity(
     @PrimaryKey val episodeId: Long,
     val html: ByteArray,
-)
+) {
+    // `html` is a ByteArray: generated equals compares it by reference, which breaks Flow
+    // deduplication and diff consumers — compare by content.
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is EpisodeDescriptionEntity) return false
+        return episodeId == other.episodeId && html.contentEquals(other.html)
+    }
+
+    override fun hashCode(): Int = 31 * episodeId.hashCode() + html.contentHashCode()
+}
 
 /** `episode_transcript` (02): one row per `<podcast:transcript>` element. */
 @Entity(

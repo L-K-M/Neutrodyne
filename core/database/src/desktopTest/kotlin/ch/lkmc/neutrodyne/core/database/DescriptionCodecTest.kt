@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.database
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 
 /**
  * `EpisodeDescriptionCodec` (02 episode_description): UTF-8 under 512 bytes stays raw (`0x00`),
@@ -31,6 +32,13 @@ class DescriptionCodecTest {
     }
 
     @Test
+    fun theBoundaryCountsUtf8BytesNotChars() {
+        // 255×'é' = 510 bytes → RAW; 256×'é' = 512 bytes → DEFLATED.
+        assertEquals(RAW, EpisodeDescriptionCodec.encode("é".repeat(255))[0])
+        assertEquals(DEFLATED, EpisodeDescriptionCodec.encode("é".repeat(256))[0])
+    }
+
+    @Test
     fun megabyteOfHtmlRoundTrips() {
         val text = "<p>${"lorem ipsum dolor sit amet ".repeat(40_000)}</p> 🎙️"
         val encoded = EpisodeDescriptionCodec.encode(text)
@@ -54,6 +62,19 @@ class DescriptionCodecTest {
         assertEquals("\u007F<b>notes</b>", decoded)
         // And a plain blob without any header decodes as itself.
         assertEquals("<b>notes</b>", EpisodeDescriptionCodec.decode(legacy))
+    }
+
+    @Test
+    fun aCorruptDeflateBodyNeverThrows() {
+        // A recognised DEFLATED header with a bad body (truncated, bit-flipped) is
+        // decode-best-effort data, not a crash — the common contract is "never throws".
+        val encoded = EpisodeDescriptionCodec.encode("<p>${"long ".repeat(200)}</p>")
+        assertEquals(DEFLATED, encoded[0])
+        val truncated = encoded.copyOf(encoded.size - 4)
+        val flipped =
+            encoded.copyOf().also { it[it.size / 2] = (it[it.size / 2].toInt() xor 0xFF).toByte() }
+        assertIs<String>(EpisodeDescriptionCodec.decode(truncated))
+        assertIs<String>(EpisodeDescriptionCodec.decode(flipped))
     }
 
     private companion object {

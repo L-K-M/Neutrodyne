@@ -26,7 +26,8 @@ import kotlin.uuid.Uuid
 fun podcastEntity(
     id: Long = 0,
     syncId: String = Uuid.random().toString(),
-    feedUrl: String = "https://example.com/feed.xml",
+    // feedKey is a unique index: a second default call would collide, like syncId/artworkKey.
+    feedUrl: String = "https://example.com/f-${Uuid.random().toString().take(8)}.xml",
     feedKey: String = feedUrl,
     title: String = "Example podcast",
     artworkKey: String = "u-${Uuid.random().toString().take(8)}",
@@ -50,7 +51,8 @@ fun podcastEntity(
 fun episodeEntity(
     id: Long = 0,
     podcastId: Long,
-    identityKey: String = "ep-$id",
+    // (podcastId, identityKey) is a unique index: the default must differ per call, not per id.
+    identityKey: String = "ep-$id-${Uuid.random().toString().take(8)}",
     title: String = "Episode $id",
     sortDate: Long = 1_700_000_000_000L,
     feedOrder: Int = 0,
