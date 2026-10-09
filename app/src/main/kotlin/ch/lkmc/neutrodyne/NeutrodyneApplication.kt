@@ -27,6 +27,7 @@ class NeutrodyneApplication :
     private lateinit var role: ProcessRole
 
     override val graph: AndroidAppGraph by lazy {
+        ProcessStartProbe.record(ProcessStartProbe.Event.APP_GRAPH_REQUESTED)
         check(role == ProcessRole.MAIN) { "AndroidAppGraph exists only in the main process (D73)" }
         createGraphFactory<AndroidAppGraph.Factory>().create(this)
     }
@@ -38,6 +39,7 @@ class NeutrodyneApplication :
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
         role = ProcessRole.current()
+        ProcessStartProbe.attach(this, role)
 
         // ACRA is never installed in :ytx (D62), nor while an instrumented test runs (09 Gradle Managed Devices)
         val instrumented = System.getProperty(INSTRUMENTED_TEST_PROPERTY) != null
@@ -46,24 +48,34 @@ class NeutrodyneApplication :
 
     override fun onCreate() {
         super.onCreate()
-        if (role == ProcessRole.ACRA) return
+        if (role == ProcessRole.ACRA) {
+            ProcessStartProbe.writeReport(this)
+            return
+        }
 
         Log.install(LogcatSink(if (BuildConfig.DEBUG) LogLevel.DEBUG else LogLevel.WARN))
         if (role == ProcessRole.YTX) {
             ytxGraph = createGraphFactory<YtxGraph.Factory>().create(this)
+            ProcessStartProbe.record(ProcessStartProbe.Event.YTX_GRAPH_CREATED)
+            ProcessStartProbe.writeReport(this)
             return
         }
 
+        ProcessStartProbe.record(ProcessStartProbe.Event.INITIALIZERS_LAUNCHED)
         graph.appScope.launch { runInitializers(graph.initializers) }
+        ProcessStartProbe.writeReport(this)
     }
 
     override val workManagerConfiguration: Configuration
-        get() =
-            Configuration
+        get() {
+            // WorkManager init reaches this getter from any process that asks for it (D73: never :ytx)
+            ProcessStartProbe.record(ProcessStartProbe.Event.WORK_MANAGER_CONFIG_REQUESTED)
+            return Configuration
                 .Builder()
                 .setWorkerFactory(graph.workerFactory)
                 .setMinimumLoggingLevel(if (BuildConfig.DEBUG) android.util.Log.INFO else android.util.Log.ERROR)
                 .build()
+        }
 
     internal companion object {
         /** Set only by `NeutrodyneTestRunner` in `:app`'s instrumented tests. */

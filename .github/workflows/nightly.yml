@@ -136,22 +136,61 @@ jobs:
         with:
           cache-provider: basic
           cache-read-only: true
+      # android-emulator-runner reuses $ANDROID_HOME/cmdline-tools/latest and the ubuntu-24.04
+      # image ships revision 12.0: its avdmanager exits 0 but writes target=android-0 into the
+      # AVD descriptor for a dotted api-level like 37.0 (ReactiveCircus/android-emulator-runner
+      # PR 494, issuetracker 546200928), which mis-configures the image it boots. Install the
+      # checksum-pinned tools (23.0) before the action creates any AVD; `sdkmanager
+      # "cmdline-tools;latest"` cannot fix this — it lands in a sibling latest-2 the action
+      # never puts on PATH.
+      - name: Install the pinned SDK tools
+        run: scripts/ci/install-android-sdk.sh
+      # Build every APK the two emulator steps install before the first emulator boots: compiling
+      # beside a 4-core emulator starved it, and system_server lost its providers mid-run
+      # (nightly 2026-10-08: "Cannot access system provider: 'settings'" at install time).
+      - name: Build the test APKs before the emulators boot
+        run: |
+          ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true assembleDebug assembleDebugAndroidTest
+          ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true :app:assembleRelease :app:assembleReleaseAndroidTest
       - name: Debug suite on the API 37 16 KB image
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: "37.0"
           target: google_apis_ps16k
           arch: x86_64
+          force-avd-creation: true # never boot a retained AVD — see the target check below
           # The 16 KB-page image boots slowly on the hosted runners: with the action's 2 cores, default
           # RAM and 600 s timeout it never finished booting (nightly 2026-10-07).
           cores: 4
           ram-size: 4096M
           disk-size: 6000M
           emulator-boot-timeout: 1200
+          # Guest-side rendering and three-button navigation: with host rendering this image's
+          # gralloc mapper aborts surfaceflinger whenever SystemUI samples the gesture handle's
+          # region ("Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma"), and each
+          # abort restarts system_server (nightly 2026-10-08: 4-12 aborts in 3 min under
+          # swiftshader_indirect, swangle_indirect, emulator 37.3.3 and the 37.1 image; none
+          # with -gpu guest after the switch to three-button navigation).
+          emulator-options: -no-window -gpu guest -no-snapshot -noaudio -no-boot-anim
+          # avdmanager's exit status cannot be trusted (12.0 exits 0 on a broken AVD), so check
+          # the files it wrote: the descriptor gets target=android-0 and config.ini loses its
+          # target= line entirely when the tools cannot parse the dotted level (2026-10-08).
+          pre-emulator-launch-script: |
+            test "$(grep '^target=' "$ANDROID_AVD_HOME/test.ini")" = "target=android-37.0" || { cat "$ANDROID_AVD_HOME/test.ini"; echo "::error::AVD descriptor target wrong (expected target=android-37.0, see test.ini above)"; exit 1; }
+            grep -q '^target=android-37\.0$' "$ANDROID_AVD_HOME/test.avd/config.ini" || { echo "::error::AVD config.ini lacks target=android-37.0"; exit 1; }
           # android-emulator-runner runs each script line as its own `sh -c`, so a command
           # must fit on one line (a `\` continuation becomes a literal argument).
+          # sys.boot_completed can precede the settings and package services; the wait line
+          # holds the run until both answer (5 min cap).
           script: |
+            adb logcat -v threadtime > "$RUNNER_TEMP/logcat-api37-debug.txt" 2>&1 &
             test "$(adb shell getconf PAGE_SIZE | tr -d '\r')" = "16384" || { echo "PAGE_SIZE != 16384"; exit 1; }
+            timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
+            timeout 120 adb shell 'until cmd overlay enable com.android.internal.systemui.navbar.threebutton; do sleep 2; done'
+            timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
+            adb shell 'getprop init.svc.surfaceflinger' | grep -q running || { echo "::error::surfaceflinger not running after boot"; exit 1; }
+            test -r "$RUNNER_TEMP/logcat-api37-debug.txt" && test -s "$RUNNER_TEMP/logcat-api37-debug.txt" || { echo "::error::logcat capture missing, empty or unreadable"; exit 1; }
+            ! grep -q 'hasReadColorBufferDma' "$RUNNER_TEMP/logcat-api37-debug.txt" || { echo "::error::goldfish mapper aborted on color-buffer DMA"; exit 1; }
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true connectedDebugAndroidTest
       - name: Release smoke on API 37
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
@@ -159,15 +198,45 @@ jobs:
           api-level: "37.0"
           target: google_apis_ps16k
           arch: x86_64
+          force-avd-creation: true # never boot a retained AVD — see the target check below
           # The 16 KB-page image boots slowly on the hosted runners: with the action's 2 cores, default
           # RAM and 600 s timeout it never finished booting (nightly 2026-10-07).
           cores: 4
           ram-size: 4096M
           disk-size: 6000M
           emulator-boot-timeout: 1200
+          # Guest-side rendering and three-button navigation: with host rendering this image's
+          # gralloc mapper aborts surfaceflinger whenever SystemUI samples the gesture handle's
+          # region ("Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma"), and each
+          # abort restarts system_server (nightly 2026-10-08: 4-12 aborts in 3 min under
+          # swiftshader_indirect, swangle_indirect, emulator 37.3.3 and the 37.1 image; none
+          # with -gpu guest after the switch to three-button navigation).
+          emulator-options: -no-window -gpu guest -no-snapshot -noaudio -no-boot-anim
+          # avdmanager's exit status cannot be trusted (12.0 exits 0 on a broken AVD), so check
+          # the files it wrote: the descriptor gets target=android-0 and config.ini loses its
+          # target= line entirely when the tools cannot parse the dotted level (2026-10-08).
+          pre-emulator-launch-script: |
+            test "$(grep '^target=' "$ANDROID_AVD_HOME/test.ini")" = "target=android-37.0" || { cat "$ANDROID_AVD_HOME/test.ini"; echo "::error::AVD descriptor target wrong (expected target=android-37.0, see test.ini above)"; exit 1; }
+            grep -q '^target=android-37\.0$' "$ANDROID_AVD_HOME/test.avd/config.ini" || { echo "::error::AVD config.ini lacks target=android-37.0"; exit 1; }
           script: |
+            adb logcat -v threadtime > "$RUNNER_TEMP/logcat-api37-release.txt" 2>&1 &
+            timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
+            timeout 120 adb shell 'until cmd overlay enable com.android.internal.systemui.navbar.threebutton; do sleep 2; done'
+            timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
+            adb shell 'getprop init.svc.surfaceflinger' | grep -q running || { echo "::error::surfaceflinger not running after boot"; exit 1; }
+            test -r "$RUNNER_TEMP/logcat-api37-release.txt" && test -s "$RUNNER_TEMP/logcat-api37-release.txt" || { echo "::error::logcat capture missing, empty or unreadable"; exit 1; }
+            ! grep -q 'hasReadColorBufferDma' "$RUNNER_TEMP/logcat-api37-release.txt" || { echo "::error::goldfish mapper aborted on color-buffer DMA"; exit 1; }
             ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true :app:connectedReleaseAndroidTest
             # TODO (M6b): :benchmark's out-of-process release smoke journeys join here.
+      # The device log of both emulator steps, for diagnosing a failed run (system_server state).
+      - name: Upload the emulator logs
+        if: ${{ !success() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: api37-16k-logcat
+          path: ${{ runner.temp }}/logcat-api37-*.txt
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Build the release APKs for the alignment check
         run: ./gradlew assembleRelease -Pneutrodyne.abiSplits=true
       - name: 16 KB alignment on the release x86_64 APK (PLAN M11 AC7)

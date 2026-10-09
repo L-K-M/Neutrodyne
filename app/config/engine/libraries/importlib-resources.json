@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:importlib-resources",
+  "name": "importlib_resources",
+  "description": "importlib.resources backport vendored in setuptools' pkg_resources/_vendor inside assets/chaquopy/bootstrap.imy (com.chaquo.python.runtime:bootstrap:17.1.0). Apache-2.0; upstream author Barry Warsaw and contributors.",
+  "website": "https://github.com/python/importlib_resources",
+  "developers": [],
+  "licenses": [
+    "Apache-2.0"
+  ],
+  "artifactVersion": "5.10.2",
+  "tag": "bundled"
+}
