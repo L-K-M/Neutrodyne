@@ -32,7 +32,7 @@ import kotlinx.coroutines.sync.withLock
 @ExposeImplBinding
 class DesktopRefreshScheduler
     @Inject
-    constructor(
+    internal constructor(
         private val db: NeutrodyneDatabase,
         private val rebaser: NextRefreshRebaser,
         private val poker: Provider<JobLanePoker>,

@@ -18,7 +18,7 @@ import dev.zacsweers.metro.Inject
  * row and the fresher fetch state wins — the rebase cannot roll back columns it never read.
  */
 @Inject
-class NextRefreshRebaser(
+internal class NextRefreshRebaser(
     private val db: NeutrodyneDatabase,
     private val settings: SettingsRepository,
 ) {
