@@ -788,7 +788,7 @@ indent_size = 4
 max_line_length = 120
 ktlint_code_style = ktlint_official
 ktlint_function_naming_ignore_when_annotated_with = Composable
-compose_allowed_composition_locals = LocalAppNavigator,LocalNavTab,LocalPaneLayout,LocalMiniPlayerInset,LocalReducedMotion,LocalSnackbarHost,LocalArtworkTintEnabled,LocalScrollbars,LocalSystemUiState,LocalPlatformActions,LocalSettingsBadge
+compose_allowed_composition_locals = LocalAppNavigator,LocalNavTab,LocalPaneLayout,LocalMiniPlayerInset,LocalReducedMotion,LocalSnackbarHost,LocalArtworkTintEnabled,LocalScrollbars,LocalSystemUiState,LocalPlatformActions,LocalSettingsBadge,LocalDrawnReporter,LocalUiClock,LocalPlatformKind
 compose_disallow_material2 = true
 [*.{xml,yml,yaml,json,toml}]
 indent_size = 2

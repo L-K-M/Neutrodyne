@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.di
 
+import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
+import ch.lkmc.neutrodyne.core.artwork.ArtworkKeys
+import ch.lkmc.neutrodyne.core.artwork.ArtworkRefMapper
 import ch.lkmc.neutrodyne.core.common.CrashReporter
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenInitializer
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
@@ -21,8 +25,13 @@ import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
+import ch.lkmc.neutrodyne.feature.library.LibraryViewModel
+import coil3.PlatformContext
+import coil3.map.Mapper
+import coil3.request.Options
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Test
 
@@ -76,6 +85,48 @@ class DesktopAppGraphTest {
         }
     }
 
+    /**
+     * 01 Feature entry installers: the window root hands this to `LocalMetroViewModelFactory`, so
+     * `metroViewModel()` inside the Library route can only work if the factory resolves the VM.
+     * Graph compilation alone does not prove that — the VM is created through the public factory.
+     */
+    @Test
+    fun theMetroViewModelFactoryCarriesTheLibraryViewModel() {
+        runBlocking { graph.databaseOpener.awaitOpen() }
+
+        val viewModel =
+            graph.metroViewModelFactory.create(LibraryViewModel::class, CreationExtras.Empty)
+
+        assertThat(viewModel).isInstanceOf(LibraryViewModel::class.java)
+    }
+
+    /**
+     * 08 Coil ImageLoader: the singleton the hosts install is built here, and the `ArtworkRef`
+     * model of a `u-` key resolves through `ArtworkRefMapper` on it — the default loader has no
+     * such mapper, so a provisioning gap would surface as an unresolvable image request.
+     */
+    @Test
+    fun theCoilLoaderFactoryIsProvisionedAndMapsArtworkRefs() {
+        // `store()` inside the factory resolves `ArtworkStore`, which opens the database.
+        runBlocking { graph.databaseOpener.awaitOpen() }
+
+        val factory = graph.imageLoaderFactory
+
+        val loader = factory.newImageLoader(PlatformContext.INSTANCE)
+        assertThat(loader.memoryCache).isNotNull()
+        assertThat(loader.diskCache).isNotNull()
+
+        val ref = ArtworkRef(key = ArtworkKeys.forUrl(ARTWORK_URL), url = ARTWORK_URL, version = 0)
+        val mapper =
+            loader.components.mappers
+                .map { it.first }
+                .filterIsInstance<ArtworkRefMapper>()
+                .single()
+        val resolved = (mapper as Mapper<ArtworkRef, Any>).map(ref, Options(PlatformContext.INSTANCE))
+        assertThat(resolved).isEqualTo(ARTWORK_URL)
+        loader.shutdown()
+    }
+
     @Test
     fun initializerOrdersLieInStartupBands() {
         for (initializer in graph.initializers) {
@@ -85,6 +136,8 @@ class DesktopAppGraphTest {
 
     private companion object {
         const val FIRST_BAND = 0
+
+        const val ARTWORK_URL = "https://img.example/cover.png"
 
         /** The five destinations and the Settings screens M0 renders (01 M0 checklist step 29). */
         val M0B_KEYS: List<NavKey> =

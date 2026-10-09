@@ -28,6 +28,7 @@ import ch.lkmc.neutrodyne.desktop.shell.SingleInstanceLock
 import ch.lkmc.neutrodyne.desktop.window.DesktopMenuActions
 import ch.lkmc.neutrodyne.desktop.window.NeutrodyneWindow
 import ch.lkmc.neutrodyne.desktop.window.WindowActivator
+import coil3.SingletonImageLoader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -181,6 +182,10 @@ internal object DesktopShell {
         val graph = createDesktopGraph(dirs, buildInfo, crashReporter)
         graph.appScope.launch { runInitializers(graph.initializers) }
 
+        // 08 Coil ImageLoader: every AsyncImage shares the artwork-aware singleton (D58), so a
+        // `u-` key resolves through ArtworkRefMapper instead of the loader's default pipeline.
+        SingletonImageLoader.setSafe(graph.imageLoaderFactory)
+
         val handshakeDispatcher =
             Executors
                 .newThreadPerTaskExecutor(Thread.ofVirtual().name("nd-handshake").factory())
@@ -239,6 +244,7 @@ internal object DesktopShell {
                 databaseOpener = graph.databaseOpener,
                 appScope = graph.appScope,
                 dataDir = dirs.data,
+                viewModelFactory = graph.metroViewModelFactory,
                 onQuitRequest = ::exitApplication,
             )
         }
