@@ -2,6 +2,8 @@
 
 package ch.lkmc.neutrodyne.core.data
 
+import androidx.room3.useWriterConnection
+import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.data.ingest.IngestContext
 import ch.lkmc.neutrodyne.core.data.ingest.IngestMode
 import ch.lkmc.neutrodyne.core.data.refresh.AdapterResult
@@ -9,6 +11,7 @@ import ch.lkmc.neutrodyne.core.data.refresh.FeedOutcome
 import ch.lkmc.neutrodyne.core.data.refresh.FetchMode
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshRequest
+import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
@@ -31,6 +34,7 @@ import kotlinx.coroutines.yield
 import mockwebserver3.junit4.MockWebServerRule
 import org.junit.Rule
 import java.io.File
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -1557,7 +1561,241 @@ class RefreshEngineTest {
             }
         }
 
+    // --- Finalisation flush failure -------------------------------------------------------------
+
+    @Test
+    fun aFailedFinalFlushFailsTheRunInsteadOfReportingCompletion() =
+        runTest {
+            // A persistent write failure: the outcome's sentinel etag aborts the fetch-state
+            // UPDATE at the database, so the final flush's rows never commit.
+            val id = due("https://a.example.com/f", nextRefreshAt = NOW - 1)
+            db.installFlushFailure()
+            val adapter =
+                stubAdapter(
+                    mutableMapOf(
+                        "https://a.example.com/f" to
+                            AdapterResult.NotModified(meta = fetchMeta(etag = FLUSH_FAIL_ETAG)),
+                    ),
+                )
+            val engine = refresher(adapter)
+
+            val thrown =
+                assertNotNull(
+                    suspendRunCatching { engine.run(request()) }.exceptionOrNull(),
+                    "a failed final flush must not return a completed report",
+                )
+            assertTrue(thrown.message.orEmpty().contains(FLUSH_FAIL_ETAG))
+
+            // Cleanup still ran, but nothing claims a committed run.
+            assertFalse(engine.status.value.running)
+            assertNull(engine.status.value.lastRunFinishedAt)
+            assertEquals(0L, settings.get(FeedsSettingKeys.LAST_RUN_FINISHED_AT))
+            assertEquals(0L, settings.get(FeedsSettingKeys.LAST_ALL_RUN_FINISHED_AT))
+            assertEquals("", settings.get(FeedsSettingKeys.LAST_RUN_SUMMARY))
+
+            // The uncommitted feed stays due — the next selection self-heals it.
+            val stored = db.podcastDao().byId(id)!!
+            assertNull(stored.etag)
+            assertEquals(NOW - 1, stored.nextRefreshAt)
+            assertTrue(
+                db.podcastDao().dueForRefresh(clock.now(), scopeAll = true).any { it.id == id },
+            )
+        }
+
+    @Test
+    fun aTransientFlushFailureRecoversOnTheNextRun() =
+        runTest {
+            val id = due("https://a.example.com/f", nextRefreshAt = NOW - 1)
+            db.installFlushFailure()
+            val adapter =
+                stubAdapter(
+                    mutableMapOf(
+                        "https://a.example.com/f" to
+                            AdapterResult.NotModified(meta = fetchMeta(etag = FLUSH_FAIL_ETAG)),
+                    ),
+                )
+            val engine = refresher(adapter)
+
+            assertNotNull(suspendRunCatching { engine.run(request()) }.exceptionOrNull())
+
+            // Once the fault clears the still-due feed is refetched and its outcome commits.
+            db.clearFlushFailure()
+            adapter.results["https://a.example.com/f"] =
+                AdapterResult.NotModified(meta = fetchMeta(etag = "e-ok"))
+            val report = engine.run(request())
+
+            assertEquals(FeedOutcome.NotModified, report.outcomes[id])
+            val stored = db.podcastDao().byId(id)!!
+            assertEquals("e-ok", stored.etag)
+            assertEquals(NOW, stored.lastSuccessAt)
+            assertEquals(NOW, settings.get(FeedsSettingKeys.LAST_ALL_RUN_FINISHED_AT))
+        }
+
+    @Test
+    fun aFailedBarrierFlushPropagatesAndTheRunCommitsTheRetainedRows() =
+        runTest {
+            // The user-action barrier (unsubscribe, "Try again") surfaces a flush failure to its
+            // caller; the batcher keeps the unwritten rows, so the run's final flush still
+            // commits them once the fault clears.
+            val db = newDb(clock, queryContext = StandardTestDispatcher(testScheduler))
+            val gate = CompletableDeferred<Unit>()
+            val a =
+                seedPodcast(
+                    db,
+                    feedUrl = "https://a.example.com/f",
+                    nextRefreshAt = NOW - 1,
+                    subscribedAt = NOW - 30 * DAY,
+                )
+            val b =
+                seedPodcast(
+                    db,
+                    feedUrl = "https://b.example.com/f",
+                    nextRefreshAt = NOW - 1,
+                    subscribedAt = NOW - 30 * DAY,
+                )
+            val adapter =
+                stubAdapter(onFetch = { feed, _ ->
+                    if (feed.id == b) gate.await()
+                    AdapterResult.NotModified(
+                        meta = fetchMeta(etag = if (feed.id == a) FLUSH_FAIL_ETAG else "e-b"),
+                    )
+                })
+            db.installFlushFailure()
+            val engine = newRefresher(db, mapOf(SourceType.RSS to adapter), clock, settings)
+            val run = backgroundScope.async { engine.run(request()) }
+            testScheduler.runCurrent()
+
+            assertNotNull(
+                suspendRunCatching { engine.flushFetchStates() }.exceptionOrNull(),
+                "the barrier flush must propagate a write failure to the user action",
+            )
+
+            db.clearFlushFailure()
+            gate.complete(Unit)
+            val report = run.await()
+
+            assertEquals(setOf(a, b), report.outcomes.keys)
+            assertEquals(FLUSH_FAIL_ETAG, db.podcastDao().byId(a)!!.etag)
+            assertEquals("e-b", db.podcastDao().byId(b)!!.etag)
+        }
+
+    @Test
+    fun aCancelledRunStaysCancellationAndAttachesTheFlushFailure() =
+        runTest {
+            // The run's cancellation is the primary cause: a final flush failure on top of it
+            // attaches as suppressed instead of replacing the cancellation.
+            val db = newDb(clock, queryContext = StandardTestDispatcher(testScheduler))
+            val gate = CompletableDeferred<Unit>()
+            val a =
+                seedPodcast(
+                    db,
+                    feedUrl = "https://a.example.com/f",
+                    nextRefreshAt = NOW - 1,
+                    subscribedAt = NOW - 30 * DAY,
+                )
+            val b =
+                seedPodcast(
+                    db,
+                    feedUrl = "https://b.example.com/f",
+                    nextRefreshAt = NOW - 1,
+                    subscribedAt = NOW - 30 * DAY,
+                )
+            val adapter =
+                stubAdapter(onFetch = { feed, _ ->
+                    if (feed.id == b) gate.await()
+                    AdapterResult.NotModified(
+                        meta = fetchMeta(etag = if (feed.id == a) FLUSH_FAIL_ETAG else "e-b"),
+                    )
+                })
+            db.installFlushFailure()
+            val engine = newRefresher(db, mapOf(SourceType.RSS to adapter), clock, settings)
+            var propagated: Throwable? = null
+            val run =
+                backgroundScope.async {
+                    try {
+                        engine.run(request())
+                    } catch (t: Throwable) {
+                        propagated = t
+                        throw t
+                    }
+                }
+            testScheduler.runCurrent()
+
+            run.cancel()
+
+            val awaited =
+                try {
+                    run.await()
+                    null
+                } catch (t: Throwable) {
+                    t
+                }
+            // The deferred stays cancelled, and the exception the run() call itself propagates —
+            // what a direct caller like RefreshWorker or DesktopRefreshLane catches — carries the
+            // flush failure as suppressed.
+            assertIs<CancellationException>(assertNotNull(awaited))
+            val primary = assertIs<CancellationException>(assertNotNull(propagated))
+            assertTrue(
+                primary.suppressed.any { it.message.orEmpty().contains(FLUSH_FAIL_ETAG) },
+                "the flush failure must ride along as suppressed, not replace the cancellation",
+            )
+            assertFalse(engine.status.value.running)
+        }
+
+    @Test
+    fun aFailedFlushLeavesCommittedAndUncommittedOutcomesDistinguishable() =
+        runTest {
+            // Feed A's outcome commits inside its ingest transaction; feed B's batcher row aborts
+            // in the final flush. The run must fail: a returned report would claim both landed.
+            val a = due("https://a.example.com/f", nextRefreshAt = NOW - 1)
+            val b = due("https://b.example.com/f", nextRefreshAt = NOW - 1)
+            db.installFlushFailure()
+            val adapter =
+                stubAdapter(
+                    mutableMapOf(
+                        "https://a.example.com/f" to
+                            adapterParsed(
+                                parsedFeed(
+                                    items = listOf(parsedEpisode(0, guid = "a", pubDate = NOW)),
+                                ),
+                                meta = fetchMeta(etag = "e-committed"),
+                            ),
+                        "https://b.example.com/f" to
+                            AdapterResult.NotModified(meta = fetchMeta(etag = FLUSH_FAIL_ETAG)),
+                    ),
+                )
+            val engine = refresher(adapter)
+
+            assertNotNull(suspendRunCatching { engine.run(request()) }.exceptionOrNull())
+
+            val committed = db.podcastDao().byId(a)!!
+            assertEquals("e-committed", committed.etag)
+            assertEquals(NOW, committed.lastSuccessAt)
+            assertNotNull(db.episodeDao().byIdentityKey(a, "g:a"))
+            val lost = db.podcastDao().byId(b)!!
+            assertNull(lost.etag)
+            assertEquals(NOW - 1, lost.nextRefreshAt)
+        }
+
     // --- Helpers --------------------------------------------------------------------------------------
+
+    /** One statement on the writer connection (DDL for the flush-failure trigger). */
+    private suspend fun NeutrodyneDatabase.exec(sql: String) {
+        useWriterConnection { conn -> conn.usePrepared(sql) { it.step() } }
+    }
+
+    /**
+     * A persistent fetch-state write failure: any `podcast` UPDATE carrying the sentinel etag
+     * (the `updateFetchStates` batch row, or an ingest's `applyFeedMetadata`) aborts at SQLite.
+     */
+    private suspend fun NeutrodyneDatabase.installFlushFailure() =
+        exec(
+            "CREATE TRIGGER fail_fetch_state_flush BEFORE UPDATE OF etag ON podcast" +
+                " WHEN NEW.etag = '$FLUSH_FAIL_ETAG'" +
+                " BEGIN SELECT RAISE(ABORT, '$FLUSH_FAIL_ETAG'); END",
+        )
+
+    private suspend fun NeutrodyneDatabase.clearFlushFailure() = exec("DROP TRIGGER fail_fetch_state_flush")
 
     private fun assertInWindow(
         value: Long,
@@ -1568,5 +1806,8 @@ class RefreshEngineTest {
     private companion object {
         const val NOW = TestClock.DEFAULT_NOW
         const val DAY = 86_400_000L
+
+        /** The sentinel `etag` value that makes the `fail_fetch_state_flush` trigger abort. */
+        const val FLUSH_FAIL_ETAG = "x-flush-fail"
     }
 }
