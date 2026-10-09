@@ -203,6 +203,9 @@ class DatabaseOpener(
                         // every path. Cancellation stays cancellation — it is never classified.
                         closeQuietly(candidate?.db)
                         if (t is CancellationException) throw t
+                        // finish() reports post-open maintenance failures itself: they propagate
+                        // as open failures, never as a migration or corruption signal.
+                        if (t is DatabaseOpenException) throw t
                         // Only a migration or corruption error quarantines; a full disk, an IO
                         // error or another storage/open failure (permissions, a read-only file,
                         // a lock held by a live process) fails the open without touching the
@@ -225,12 +228,15 @@ class DatabaseOpener(
         val fresh = build()
         try {
             forceOpen(fresh.db)
+            // finish() owns the candidate until every post-open step succeeded: a failure here
+            // still closes the unpublished database instead of leaking its connections.
+            return finish(fresh.db, created = fresh.callback.created)
         } catch (t: Throwable) {
             closeQuietly(fresh.db)
             if (t is CancellationException) throw t
+            if (t is DatabaseOpenException) throw t
             throw DatabaseOpenException(classify(t), t)
         }
-        return finish(fresh.db, created = fresh.callback.created)
     }
 
     /**
@@ -280,8 +286,24 @@ class DatabaseOpener(
         created: Boolean,
     ): OpenOutcome {
         // pruneQuarantine runs only after every move succeeded — a propagated quarantine failure
-        // never reaches here (02: quarantine keeps only the newest copy, at most 14 days).
-        if (pendingRecovery != null || created) factory.pruneQuarantine(clock.now())
+        // never reaches here (02: quarantine keeps only the newest copy, at most 14 days). It is
+        // post-open maintenance, not migration recovery: a failed prune is an environment
+        // failure that propagates as the open's failure — it must never quarantine the healthy
+        // database nor delete the preserved original through a misclassified retry.
+        try {
+            if (pendingRecovery != null || created) factory.pruneQuarantine(clock.now())
+        } catch (t: Throwable) {
+            if (t is CancellationException) throw t
+            val reason = classify(t)
+            throw DatabaseOpenException(
+                if (reason == DatabaseOpenException.Reason.UNKNOWN) {
+                    DatabaseOpenException.Reason.IO
+                } else {
+                    reason
+                },
+                t,
+            )
+        }
         return OpenOutcome(db, OpenResult(created = created, recovered = pendingRecovery))
     }
 

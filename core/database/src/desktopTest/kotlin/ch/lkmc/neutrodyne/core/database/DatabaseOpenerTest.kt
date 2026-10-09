@@ -17,6 +17,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
+import java.nio.file.AccessDeniedException
 import java.nio.file.Files
 import java.nio.file.Path
 import javax.swing.SwingUtilities
@@ -745,6 +746,122 @@ class DatabaseOpenerTest {
             assertEquals(OpenResult(created = false, recovered = null), result)
             assertEquals(DatabaseOpenState.Opened(result), o.openState.value)
             o.requireDatabase().close()
+        }
+
+    @Test
+    fun aMaintenanceFailureIsAnIoErrorAndNeverQuarantinesTheReplacement() =
+        runTest {
+            dirs.ensureCreated()
+            // A seeded library makes preservation observable: applying=1 survives only in the
+            // original file (onOpen resets it in every database it opens itself).
+            val original = opener()
+            original.awaitOpen()
+            original.requireDatabase().useWriterConnection { conn ->
+                conn.exec("UPDATE sync_state SET applying = 1 WHERE id = 0")
+            }
+            original.requireDatabase().close()
+            factory.quarantineMarker = true
+
+            // Files.list throws a real AccessDeniedException when the quarantine directory loses
+            // its read bit; the delegate delivers that exact failure at the factory boundary.
+            var deny = true
+            var quarantineCalls = 0
+            val pruneBroken =
+                object : DatabaseFactory by factory {
+                    override fun quarantine(stamp: String) {
+                        quarantineCalls++
+                        factory.quarantine(stamp)
+                    }
+
+                    override fun pruneQuarantine(now: Long) {
+                        if (deny) throw AccessDeniedException(dir.resolve("quarantine").toString())
+                        factory.pruneQuarantine(now)
+                    }
+                }
+            val clock = TestClock(nowMs = T0)
+            val o = opener(clock = clock, f = pruneBroken)
+
+            // The quarantine move succeeded; only the post-open prune failed. That is an
+            // environment failure, not a migration or corruption signal.
+            val first = assertThrows { o.awaitOpen() }
+            assertIs<DatabaseOpenException>(first)
+            assertEquals(DatabaseOpenException.Reason.IO, first.reason)
+            assertTrue(factory.exists(), "the replacement stays on disk after a failed prune")
+
+            // The retried open sees the healthy replacement: its own finish fails the same way
+            // and must still not quarantine it — the preserved original is the only copy.
+            clock.nowMs = T0 + 60_000
+            val second = assertThrows { o.awaitOpen() }
+            assertIs<DatabaseOpenException>(second)
+            assertEquals(DatabaseOpenException.Reason.IO, second.reason)
+            assertEquals(
+                1,
+                quarantineCalls,
+                "a failed prune must never re-quarantine the healthy replacement",
+            )
+
+            deny = false
+            clock.nowMs = T0 + 120_000
+            val result = o.awaitOpen()
+            assertEquals(RecoveryCause.CORRUPT, result.recovered, "the cause survives the failed attempts")
+            assertFalse(result.created)
+
+            // The newest-copy prune kept exactly the original library — contents intact.
+            val copies = Files.list(dir.resolve("quarantine")).use { it.toList() }
+            assertEquals(1, copies.size)
+            BundledSQLiteDriver()
+                .open(copies.single().resolve(NeutrodyneDatabase.FILE_NAME).toString())
+                .use { conn ->
+                    conn.prepare("SELECT applying FROM sync_state WHERE id = 0").use { stmt ->
+                        assertTrue(stmt.step())
+                        assertEquals(1L, stmt.getLong(0), "the preserved copy is the original library")
+                    }
+                }
+            o.requireDatabase().close()
+        }
+
+    @Test
+    fun aFailedOpenClosesEveryUnpublishedCandidate() =
+        runTest {
+            dirs.ensureCreated()
+            var opens = 0
+            var closes = 0
+            val counting =
+                object : SQLiteDriver by BundledSQLiteDriver() {
+                    private val inner = BundledSQLiteDriver()
+
+                    override fun open(fileName: String): SQLiteConnection {
+                        val conn = inner.open(fileName)
+                        opens++
+                        return object : SQLiteConnection by conn {
+                            override fun close() {
+                                closes++
+                                conn.close()
+                            }
+                        }
+                    }
+                }
+            var deny = true
+            val pruneBroken =
+                object : DatabaseFactory by factory {
+                    override fun pruneQuarantine(now: Long) {
+                        if (deny) throw AccessDeniedException(dir.resolve("quarantine").toString())
+                        factory.pruneQuarantine(now)
+                    }
+                }
+            val o = opener(f = pruneBroken, d = counting)
+
+            // The fresh build opens and then loses its finish: the unpublished candidate must be
+            // closed on the way out instead of leaking its connections.
+            assertThrows { o.awaitOpen() }
+            assertEquals(opens, closes, "a failed attempt must not leak its candidate's connections")
+
+            deny = false
+            o.awaitOpen()
+            val db = o.requireDatabase()
+            assertTrue(opens > closes, "the published database keeps its connections until closed")
+            db.close()
+            assertEquals(opens, closes, "every connection closes with the published database")
         }
 
     private companion object {
