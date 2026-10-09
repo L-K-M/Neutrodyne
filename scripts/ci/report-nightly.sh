@@ -14,6 +14,7 @@
 #
 # The issue is matched by a marker comment (`<!-- nightly-job:<job> -->`) so a
 # renamed title still maps to its job.
+# Only main reports the shared failure streak; branch probes cannot open or close it.
 
 set -euo pipefail
 
@@ -31,6 +32,11 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "$JOB" ] || { echo "usage: $0 <job> [--label L] [--close]" >&2; exit 2; }
+if [ "${GITHUB_REF:-}" != "refs/heads/main" ]; then
+    echo "report-nightly: skipping issue updates for ${GITHUB_REF:-an unknown ref}"
+    exit 0
+fi
+
 command -v gh >/dev/null 2>&1 || { echo "report-nightly: gh not found" >&2; exit 2; }
 
 REPO="${GITHUB_REPOSITORY:-}"
