@@ -88,6 +88,20 @@ else
     t_fail "the committed icns brand asset is still present"
 fi
 
+# 3. The RPM spec override must be named <linux package name>.spec — jpackage's
+#    --resource-dir lookup resolves a resource by the name of the file it is
+#    about to write (SPECS/neutrodyne.spec), so template.spec is silently
+#    ignored and the RPM is built with jpackage's default spec — no Requires at
+#    all (nightly 37860407043).
+if [ -f "$REPO_ROOT/desktopApp/packaging/rpm/neutrodyne.spec" ] \
+    && [ ! -e "$REPO_ROOT/desktopApp/packaging/rpm/template.spec" ] \
+    && grep -qE '^Requires: +libc\.so\.6' \
+        "$REPO_ROOT/desktopApp/packaging/rpm/neutrodyne.spec"; then
+    t_ok "the RPM override is named neutrodyne.spec and carries the Requires"
+else
+    t_fail "the RPM override is named neutrodyne.spec and carries the Requires"
+fi
+
 echo
 if [ "$FAILED" -gt 0 ]; then
     echo "desktop-packaging.test: $FAILED case(s) failing" >&2

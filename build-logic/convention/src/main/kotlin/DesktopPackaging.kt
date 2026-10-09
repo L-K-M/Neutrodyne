@@ -314,11 +314,17 @@ internal fun imageJarName(file: File): String {
 }
 
 /**
- * Writes the Licensee-checked runtime classpath as `sha256  name` lines (09 Build-output
- * checks): `check-desktop-image.sh` asserts every JAR of an image is one of these files.
- * Same-named JARs — `api-desktop.jar` comes from four modules, and androidx artefacts appear
- * twice via the `org.jetbrains.androidx` republish — are no collision here: the recorded name
- * is the mangled image name, which differs by content.
+ * Writes the Licensee-checked runtime classpath as `<canonical sha256>  name` lines
+ * (09 Build-output checks): `check-desktop-image.sh` asserts every JAR of an image is
+ * one of these files. Same-named JARs — `api-desktop.jar` comes from four modules, and
+ * androidx artefacts appear twice via the `org.jetbrains.androidx` republish — are no
+ * collision here: the recorded name is the mangled image name, which differs by content.
+ *
+ * The hash is canonical jar content, not the file's bytes: packaging recompresses the
+ * image JARs on macOS after Compose has already mangled their names (nightly
+ * 37860407043), so a byte hash would report every JAR as differing. The digest covers
+ * each entry's name and uncompressed content SHA-256, sorted by entry name — the same
+ * canonicalisation `jar_content_hash` performs in the checker.
  */
 abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
     @get:InputFiles
@@ -333,10 +339,50 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
         val lines =
             runtimeClasspath.files
                 .filter { it.isFile }
-                .map { "${sha256Of(it)}  ${imageJarName(it)}" }
+                .map { "${canonicalSha256Of(it)}  ${imageJarName(it)}" }
                 .toSortedSet()
                 .joinToString("\n", postfix = "\n")
         manifest.get().asFile.writeText(lines)
+    }
+
+    /**
+     * SHA-256 over `<entry name>\0<sha256hex(uncompressed content)>\n` per entry, sorted
+     * by name — identical to `jar_content_hash` in check-desktop-image.sh. A non-zip file
+     * falls back to its raw byte hash on both sides.
+     */
+    private fun canonicalSha256Of(file: File): String {
+        val zip =
+            try {
+                java.util.zip.ZipFile(file)
+            } catch (e: java.util.zip.ZipException) {
+                return sha256Of(file)
+            }
+        val outer = MessageDigest.getInstance("SHA-256")
+        zip.use { z ->
+            z.entries().toList().sortedBy { it.name }.forEach { entry ->
+                val inner = MessageDigest.getInstance("SHA-256")
+                if (!entry.isDirectory) {
+                    z.getInputStream(entry).use { input ->
+                        val buffer = ByteArray(BUFFER_BYTES)
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            inner.update(buffer, 0, read)
+                        }
+                    }
+                }
+                outer.update(entry.name.toByteArray(Charsets.UTF_8))
+                outer.update(0)
+                outer.update(
+                    inner
+                        .digest()
+                        .joinToString("") { "%02x".format(it) }
+                        .toByteArray(Charsets.US_ASCII),
+                )
+                outer.update('\n'.code.toByte())
+            }
+        }
+        return outer.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun sha256Of(file: File): String {

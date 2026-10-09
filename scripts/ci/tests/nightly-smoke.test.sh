@@ -105,10 +105,11 @@ stub dbus-run-session 'exec "$@"'
 stub rpm2cpio 'exit 0'
 stub cpio 'exit 0'
 # windows-x64 leg stubs: powershell prints the stubbed msiexec ExitCode
-# (PS_EXIT_CODE); cygpath -u passes the (already POSIX) fixture root through
-# and -w's value is only embedded in the PowerShell command; python's
-# `zipfile -e` is a no-op — the smoke stub accepts any image dir.
-stub powershell 'echo "${PS_EXIT_CODE:-0}"'
+# (PS_EXIT_CODE) and writes a marker msiexec-install.log the diagnostics grep;
+# cygpath -u passes the (already POSIX) fixture root through and -w's value is
+# only embedded in the PowerShell command; python's `zipfile -e` is a no-op —
+# the smoke stub accepts any image dir.
+stub powershell '{ echo "Property(C): INSTALLDIR = C:\\Users\\runneradmin\\AppData\\Local\\Programs\\Neutrodyne"; echo "MSI (s) (00:00): Product: Neutrodyne -- Installation completed successfully."; } > msiexec-install.log; echo "${PS_EXIT_CODE:-0}"'
 stub cygpath '[ "$1" = -u ] && { echo "$2"; exit; }; echo "WINPATH"'
 stub python 'exit 0'
 stub codesign 'exit 0'
@@ -372,6 +373,21 @@ else
     t_fail "a failed msiexec fails the step without smoking the install dir"
     sed 's/^/    /' "$WORK/step-win.out" >&2
 fi
+# ExitCode 0 without the install root is still a failure — and it must carry the
+# installer log's evidence (nightly 37860407043: ExitCode=0, Programs/ absent).
+rm -f "$WORK/smoke-args-win" "$RUNDIR/smoke.txt"
+rm -rf "$LAPP/Programs/Neutrodyne"
+if run_win; then
+    t_fail "ExitCode 0 without the install root fails with the msiexec log"
+elif grep -q 'MSI succeeded but .* is missing' "$WORK/step-win.out" \
+      && grep -q 'INSTALLDIR' "$WORK/step-win.out" \
+      && ! grep -q 'Programs/Neutrodyne' "$WORK/smoke-args-win" 2>/dev/null; then
+    t_ok "ExitCode 0 without the install root fails with the msiexec log"
+else
+    t_fail "ExitCode 0 without the install root fails with the msiexec log"
+    sed 's/^/    /' "$WORK/step-win.out" >&2
+fi
+mkdir -p "$LAPP/Programs/Neutrodyne"
 
 # 10. Every scripts/**.sh a workflow invokes directly must carry the executable
 #     bit in the checkout — a 644 file dies with exit 126 at the step's first

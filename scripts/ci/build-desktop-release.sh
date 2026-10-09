@@ -60,7 +60,12 @@ case "$TARGET" in
             *) tail -50 msiexec-install.log 2>/dev/null; echo "::error::msiexec exited $rc"; exit 1 ;;
         esac
         inst="$(cygpath -u "${LOCALAPPDATA:?LOCALAPPDATA unset}")/Programs/Neutrodyne"
-        [ -d "$inst" ] || { echo "::error::MSI succeeded but $inst is missing"; exit 1; }
+        [ -d "$inst" ] || {
+            echo "::error::MSI succeeded but $inst is missing"
+            grep -aE 'INSTALLDIR|Dir \(target\)|Product:|Return value 3|error' msiexec-install.log 2>/dev/null | tail -30
+            tail -30 msiexec-install.log 2>/dev/null
+            exit 1
+        }
         smoke "$inst"
         python -m zipfile -e "$DIST/neutrodyne-$V-windows-x64.zip" "$SMOKE_IMG"
         smoke "$SMOKE_IMG/Neutrodyne" ;;

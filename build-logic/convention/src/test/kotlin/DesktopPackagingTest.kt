@@ -161,6 +161,53 @@ class DesktopPackagingTest {
     }
 
     @Test
+    fun `the classpath manifest hash survives jar recompression`() {
+        val root = Files.createTempDirectory("classpath-manifest").toFile()
+        try {
+            // The macOS packaging pipeline rewrites the shipped jar's container
+            // bytes after the name is mangled (entry order and compression
+            // change); the manifest pins entry names + content, not bytes. Two
+            // jars with identical content but different container bytes must
+            // carry the same canonical hash — that is what lets the image's
+            // repacked jar match the classpath row.
+            val original =
+                File(root, "one.jar").apply {
+                    writeBytes(zipArchive("a/x.txt" to byteArrayOf(1), "b/y.txt" to byteArrayOf(2)))
+                }
+            val repacked =
+                File(root, "two.jar").apply {
+                    val entries =
+                        java.util.zip.ZipFile(original).use { z ->
+                            z
+                                .entries()
+                                .toList()
+                                .reversed()
+                                .map { it.name to z.getInputStream(it).readBytes() }
+                        }
+                    writeBytes(zipArchive(*entries.toTypedArray()))
+                }
+            assert(sha256Hex(repacked.readBytes()) != sha256Hex(original.readBytes())) {
+                "repacked jar kept identical bytes"
+            }
+
+            val task = classpathManifestTask(root, original, repacked)
+            val out = File(root, "manifest.txt")
+            task.write()
+
+            val lines = out.readLines()
+            assertEquals(2, lines.size)
+            // Same canonical hash, different mangled names.
+            assertEquals(1, lines.map { it.substringBefore("  ") }.toSet().size)
+            assertEquals(
+                lines.map { it.substringAfter("  ") }.toSet(),
+                setOf(imageJarName(original), imageJarName(repacked)),
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `the hicolor mapping fails when icons png is missing or empty`() {
         val root = Files.createTempDirectory("hicolor").toFile()
         try {

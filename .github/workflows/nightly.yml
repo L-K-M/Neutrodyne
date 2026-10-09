@@ -462,7 +462,15 @@ jobs:
                 *) tail -50 msiexec-install.log 2>/dev/null; echo "::error::msiexec exited $rc"; exit 1 ;;
               esac
               inst="$(cygpath -u "${LOCALAPPDATA:?LOCALAPPDATA unset}")/Programs/Neutrodyne"
-              [ -d "$inst" ] || { echo "::error::MSI succeeded but $inst is missing"; ls -la "$(cygpath -u "$LOCALAPPDATA")/Programs" 2>&1 | head -20; exit 1; }
+              [ -d "$inst" ] || {
+                # ExitCode 0 with no install root: the msiexec log is the
+                # evidence (INSTALLDIR resolution, skipped components), so it
+                # ships in the failure artifact below, not just stderr.
+                echo "::error::MSI succeeded but $inst is missing"
+                grep -aE 'INSTALLDIR|Dir \(target\)|Product:|Return value 3|error' msiexec-install.log 2>/dev/null | tail -30
+                tail -30 msiexec-install.log 2>/dev/null
+                exit 1
+              }
               smoke "$inst"
               python -m zipfile -e dist/*.zip /tmp/smoke-img
               smoke /tmp/smoke-img/Neutrodyne ;;
@@ -525,7 +533,10 @@ jobs:
         if: failure()
         with:
           name: desktop-matrix-${{ matrix.target }}
-          path: dist/
+          # msiexec-install.log is written next to dist/, not inside it.
+          path: |
+            dist/
+            msiexec-install.log
 
   repro:
     runs-on: ubuntu-24.04

@@ -14,7 +14,7 @@
 #              :youtube:ytdlp-desktop JAR is present (emergency build, 01)
 #
 # Inputs besides the image: desktopApp/runtime.lock, desktopApp/wix.lock,
-# desktopApp/packaging/deb/control, desktopApp/packaging/rpm/template.spec, the
+# desktopApp/packaging/deb/control, desktopApp/packaging/rpm/neutrodyne.spec, the
 # Licensee-checked runtime-classpath manifest
 # (desktopApp/build/desktop-packaging/runtime-classpath.txt, written by
 # :desktopApp:writeDesktopRuntimeClasspath) and, once the engine ships
@@ -30,7 +30,7 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." >/dev/null 2>&1 && pwd -P)"
 RUNTIME_LOCK="$REPO_ROOT/desktopApp/runtime.lock"
 WIX_LOCK="$REPO_ROOT/desktopApp/wix.lock"
 DEB_CONTROL="$REPO_ROOT/desktopApp/packaging/deb/control"
-RPM_SPEC="$REPO_ROOT/desktopApp/packaging/rpm/template.spec"
+RPM_SPEC="$REPO_ROOT/desktopApp/packaging/rpm/neutrodyne.spec"
 PY_LOCK="$REPO_ROOT/youtube/ytdlp-desktop/python-components.lock"
 CLASSPATH_MANIFEST="$REPO_ROOT/desktopApp/build/desktop-packaging/runtime-classpath.txt"
 
@@ -69,6 +69,30 @@ sha256() {
 }
 
 file_bytes() { stat -c %s "$1" 2>/dev/null || stat -f %z "$1"; }
+
+# jar_content_hash <jar> — SHA-256 over the jar's canonical content: for each
+# entry sorted by name, "<name>\0<sha256hex(uncompressed content)>\n". The macOS
+# packaging pipeline recompresses image JARs after Compose names them
+# (nightly 37860407043: same entries, different container bytes), so the
+# manifest pins content, not container bytes. A non-zip file hashes as its raw
+# bytes. WriteDesktopRuntimeClasspath produces the identical digest.
+jar_content_hash() {
+    python3 - "$1" <<'PYEOF'
+import sys, zipfile, hashlib
+path = sys.argv[1]
+try:
+    z = zipfile.ZipFile(path)
+except zipfile.BadZipFile:
+    print(hashlib.sha256(open(path, 'rb').read()).hexdigest())
+    sys.exit(0)
+outer = hashlib.sha256()
+with z:
+    for i in sorted(z.infolist(), key=lambda i: i.filename):
+        h = hashlib.sha256(b'' if i.is_dir() else z.read(i)).hexdigest()
+        outer.update(i.filename.encode('utf-8') + b'\0' + h.encode('ascii') + b'\n')
+print(outer.hexdigest())
+PYEOF
+}
 
 md5_of() {
     if command -v md5sum >/dev/null 2>&1; then
@@ -145,10 +169,11 @@ check_forbidden_names() {
 
 # --- rule 2: runtime/legal and runtime/release ----------------------------------
 runtime_dir() {
-    # The jlink'd runtime sits at lib/runtime on Linux and Windows and at
-    # Contents/runtime inside a .app bundle.
+    # The jlink'd runtime sits at lib/runtime on Linux and Windows; inside a .app
+    # bundle jlink nests the JDK home one level deeper at Contents/runtime/
+    # Contents/Home (legal/ and release live there, not beside runtime's top).
     local dir
-    for dir in "$1/lib/runtime" "$1/Contents/runtime" "$1/runtime"; do
+    for dir in "$1/lib/runtime" "$1/Contents/runtime/Contents/Home" "$1/Contents/runtime" "$1/runtime"; do
         if [ -d "$dir" ]; then
             echo "$dir"
             return 0
@@ -199,10 +224,11 @@ check_ffmpeg() {
 
 # --- rule 4: every JAR is on the Licensee-checked runtime classpath -------------
 # The manifest (:desktopApp:writeDesktopRuntimeClasspath) holds one
-# `sha256  <image name>` row per classpath file, the image name being Compose's
-# mangle <base>-<md5>.jar (11 Image scan rules). An image jar passes when a row
-# names it exactly and its sha256 equals the row's — the mangle's md5 needs no
-# separate check because a same-named jar with other bytes would fail the SHA.
+# `<canonical sha256>  <image name>` row per classpath file, the image name being
+# Compose's mangle <base>-<md5>.jar (11 Image scan rules). An image jar passes
+# when a row names it exactly and its jar_content_hash equals the row's — the
+# mangle's md5 needs no separate check because a same-named jar with other
+# content would fail the SHA.
 #
 # The one documented off-manifest jar is Compose's skiko stub (11 Image scan
 # rules): Compose ships the native-bearing skiko-awt-runtime-<os>-<arch>-<ver>
@@ -238,16 +264,22 @@ is_skiko_stub() {
         skiko-awt-runtime-*.jar) ;;
         *) return 1 ;;
     esac
+    # The name ends in the stub jar's own md5 — verified where packaging left the
+    # bytes alone. The macOS pipeline recompresses image jars after mangling, so
+    # there the suffix can only be required to keep the 32-hex mangle shape
+    # (nightly 37860407043); the manifest row, stub-only entries and the
+    # sidecar-pinned native below are what still bind it.
+    local sfx="${base%.jar}"
+    sfx="${sfx##*-}"
     padded="$(md5_of "$path")"
     unpadded=""
     for ((i = 0; i < ${#padded}; i += 2)); do
         byte="${padded:i:2}"
         unpadded+="${byte#0}"
     done
-    case "$base" in
-        *-"$unpadded".jar | *-"$padded".jar) ;;
-        *) return 1 ;;
-    esac
+    if [ "$sfx" != "$unpadded" ] && [ "$sfx" != "$padded" ]; then
+        printf '%s\n' "$sfx" | grep -qxE '[0-9a-f]{32}' || return 1
+    fi
     # rest is <os>-<arch>-<ver>-<md5>.jar; the manifest must carry the real
     # classpath jar for the same os-arch (its own md5 makes the names differ).
     rest="${base#skiko-awt-runtime-}"
@@ -268,17 +300,44 @@ is_skiko_stub() {
     for so in "$dir"/libskiko-*.so "$dir"/libskiko-*.dylib "$dir"/skiko-*.dll; do
         [ -f "$so" ] || continue
         found=1
-        if [ ! -f "$so.sha256" ] || [ "$(head -1 "$so.sha256" | cut -d' ' -f1)" != "$(sha256 "$so")" ]; then
+        if [ ! -f "$so.sha256" ] || ! sidecar_sha256_matches "$so"; then
             ok=0
         fi
     done
     [ "$found" = 1 ] && [ "$ok" = 1 ]
 }
 
+# sidecar_sha256_matches <native> — the Compose-written .sha256 pins the bytes
+# the classpath jar carried. Signing rewrites a Mach-O in place (the sidecar
+# records the pre-sign dylib, nightly 37860407043), so on a signed Mach-O the
+# compare hashes a scratch copy with the signature removed.
+sidecar_sha256_matches() {
+    local so="$1" want magic tmp rc
+    want="$(head -1 "$so.sha256" | cut -d' ' -f1)"
+    [ "$(sha256 "$so")" = "$want" ] && return 0
+    command -v codesign >/dev/null 2>&1 || return 1
+    magic="$(od -An -tx1 -N4 "$so" 2>/dev/null | tr -d ' ')"
+    case "$magic" in
+        feedface|feedfacf|cefaedfe|cffaedfe|cafebabe) ;;
+        *) return 1 ;;
+    esac
+    tmp="$(mktemp -d)"
+    cp "$so" "$tmp/native"
+    codesign --remove-signature "$tmp/native" >/dev/null 2>&1 || { rm -rf "$tmp"; return 1; }
+    [ "$(sha256 "$tmp/native")" = "$want" ]
+    rc=$?
+    rm -rf "$tmp"
+    return $rc
+}
+
 check_jars() {
     local img="$1" manifest="$2" path hash base
     if [ ! -f "$manifest" ]; then
         fail "runtime-classpath manifest missing: $manifest (run :desktopApp:createDistributable first)"
+        return
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+        fail "the JAR classpath binding needs python3 (jar_content_hash)"
         return
     fi
     while IFS= read -r -d '' path; do
@@ -290,7 +349,7 @@ check_jars() {
         # grep's exit status under pipefail.
         hash="$(grep -E "  $(printf '%s' "$base" | sed 's/[].[^$*\/]/\\&/g')\$" "$manifest" | cut -d' ' -f1 || true)"
         if [ -n "$hash" ]; then
-            if [ "$(sha256 "$path")" != "$hash" ]; then
+            if [ "$(jar_content_hash "$path")" != "$hash" ]; then
                 fail "JAR differs from the Licensee-checked classpath artifact: ${path#"$img"/}"
             fi
         elif ! is_skiko_stub "$path" "$manifest"; then
@@ -428,7 +487,7 @@ check_codesign() {
         fail "a .app image needs codesign --verify --deep --strict (11 Image scan rules)"
         return
     fi
-    if ! codesign --verify --deep --strict "$img" 2>/dev/null; then
+    if ! codesign --verify --deep --strict "$img"; then
         fail "codesign --verify --deep --strict failed on $img"
     fi
 }
@@ -525,23 +584,25 @@ check_deb() {
 }
 
 check_rpm() {
-    local rpmf="$1" want missing=0
+    local rpmf="$1" want names extras
     if ! command -v rpm >/dev/null 2>&1; then
         fail "RPM check needs rpm(8) to read the package's Requires"
         return
     fi
+    # Query the package once: a piped `rpm | grep -q` loses to the SIGPIPE race
+    # — grep -q exits on the first match while rpm is still writing and
+    # pipefail reports 141 as a spurious miss (proven by the stub fixtures).
+    names="$(rpm -qp --queryformat '[%{REQUIRENAME}\n]' "$rpmf" 2>/dev/null || true)"
     while IFS= read -r want; do
         want="${want#Requires:}"
         want="${want// /}"
         [ -z "$want" ] && continue
-        if ! rpm -qp --queryformat '[%{REQUIRENAME}\n]' "$rpmf" 2>/dev/null | grep -qxF "$want"; then
+        if ! printf '%s\n' "$names" | grep -xF "$want" >/dev/null; then
             fail "RPM is missing our Requires: $want"
-            missing=1
         fi
     done < <(grep -E '^Requires:' "$RPM_SPEC")
     # rpmbuild must not have added its own discovered Requires (Autoreq: 0 in our spec).
-    local extras
-    extras="$(rpm -qp --queryformat '[%{REQUIRENAME}\n]' "$rpmf" 2>/dev/null \
+    extras="$(printf '%s\n' "$names" \
         | grep -vxF -f <(grep -E '^Requires:' "$RPM_SPEC" | sed 's/^Requires: *//; s/  */ /g' | tr ' ' '\n') \
         | grep -vE '^(rpmlib|/bin/sh|/usr/bin/env|rtld|config\()' | grep -vE '^rpmlib' || true)"
     if [ -n "$extras" ]; then
@@ -569,10 +630,22 @@ scan_dir() {
 
 extract_and_scan() {
     local pkg="$1" fmt="$2" tmp
+    # Inputs arrive relative to the caller's cwd (dist/…); the rpm extraction
+    # happens inside a subshell cd'd to $tmp, where a relative path resolves
+    # nowhere (nightly 37860407043: rpm2cpio dist/… → No such file).
+    pkg="$(cd -- "$(dirname -- "$pkg")" && pwd -P)/$(basename -- "$pkg")"
     tmp="$(mktemp -d)"
     case "$fmt" in
         tar.gz) tar -xzf "$pkg" -C "$tmp" ;;
-        zip) python3 -c 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "$pkg" "$tmp" ;;
+        zip)
+            # A signed .app must come back byte-identical: python's zipfile turns
+            # the jlink legal/ symlinks into regular files, which breaks the
+            # sealed bundle (nightly 37860407043). ditto preserves them.
+            if command -v ditto >/dev/null 2>&1; then
+                ditto -x -k "$pkg" "$tmp"
+            else
+                python3 -c 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "$pkg" "$tmp"
+            fi ;;
         deb) dpkg-deb -x "$pkg" "$tmp" ;;
         rpm)
             if command -v rpm2cpio >/dev/null 2>&1; then
