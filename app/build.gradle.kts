@@ -101,6 +101,9 @@ dependencies {
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.splashscreen)
+    // The process-wide Coil singleton install (08 Coil ImageLoader) needs the API, not Compose.
+    implementation(platform(libs.coil.bom))
+    implementation(libs.coil.core)
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.activity.compose)
     implementation(libs.cmp.runtime)
@@ -112,6 +115,10 @@ dependencies {
     implementation(libs.androidx.work.runtime)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.collections.immutable)
+    // Metro graph aggregation reads the features' map-key annotations, and the root provides
+    // LocalMetroViewModelFactory for metroViewModel()/assistedMetroViewModel().
+    implementation(libs.metrox.viewmodel)
+    implementation(libs.metrox.viewmodel.compose)
     implementation(libs.acra.mail)
     implementation(libs.acra.dialog)
 
@@ -131,6 +138,9 @@ dependencies {
     androidTestImplementation(libs.navigation3.runtime)
     androidTestImplementation(libs.lifecycle.viewmodel.compose)
     androidTestImplementation(libs.cmp.material3)
+    // RoomRuntimeServiceDeviceTest drives the rebuilt pool directly; sqlite-bundled is an
+    // `implementation` edge of :core:database and never reaches this classpath.
+    androidTestImplementation(libs.androidx.sqlite.bundled)
 
     // S11's worker-side getString test resolves Res strings on the JVM.
     testImplementation(libs.cmp.resources)

@@ -394,6 +394,11 @@ Recorded per the implementation rules; behaviour follows this document, the devi
 15. (2026-10-08, data review round 4) A request that times out waiting for the engine mutex reports `reenqueued` when it carries intent a plain `refresh-continuation` could not express — a force mark, a narrowed scope, a pages-only pass or the `RETRY` block clear — and the caller re-enqueues the request it ran, unchanged, through `RefreshScheduler.enqueueNow` instead of chaining a continuation on top. A stale outcome the holding run commits after the timeout can still erase item 13's re-applied marks; with the intent on the re-enqueued request (the WorkManager input data on Android, the queued `RefreshRequest` on the desktop) it is re-applied under the mutex when the run finally executes. Desktop runs carry no deadline, so the timeout branch cannot fire there — the lane's drain re-queues a `reenqueued` report anyway, keeping both platforms on the same contract.
 16. (2026-10-08, data review round 5) Pass 2's guiding rule: when the evidence is weak, prefer a duplicate episode to a state transfer — a duplicate is visible and harmless (the user sees two rows, nothing is lost) while a transfer silently marks a new episode played or moves a download or position onto the wrong episode. A stored row is therefore reused only on evidence that identifies the same episode, superseding item 14's tier relations: tier A is unchanged (equal normalised enclosure URL, `forIdentity`); tier B now needs an equal `TitleMatch` **and** the same UTC publication day **and** the equal query-less enclosure URL (`forIdentityNoQuery`) under the duration/MIME guards — day alone or title alone no longer corroborates, so a rolling `/download?id=N` feed whose items share only a day or only a generic title never transfers state, while a pure query-token rotation keeps title and date and still matches; tier C is unchanged (equal `TitleMatch` + same UTC day under the same guards, covering GUID and host rewrites). Each tier still claims only pairs unique on both sides among the still-unclaimed items and rows, and the tiers now **iterate**: after a pass over A → B → C that claimed anything, the tiers run again over what remains until a full pass claims nothing — a later claim can resolve an earlier pass's ambiguity (bounded by the item count). Accepted consequence: an episode renamed **and** token-rotated in the same refresh becomes a new row (a visible duplicate; its old row keeps state and leaves the feed). Residual risk, accepted (data review round 6): a feed that reuses identity across different episodes cannot be told apart from one that edits an episode or rewrites its GUIDs, so state can still follow the reused identifier — a recycled GUID with nothing else to compare (pass 1), one enclosure URL such as `/latest.mp3` shared by successive episodes (tier A), and same-title items of the same UTC day under new GUIDs in a rolling feed (tiers B and C). Tightening the tiers further (for example to the publication instant) would turn every host migration that drops the time of day into a duplicated back catalogue; the user recovers from these rare feeds with Mark unplayed.
 
+### Implementation deviations (2026-10-09, M1a library slice)
+
+1. `RefreshScheduler`, `RefreshOrigin` and the desktop `DesktopRefreshScheduler` are `public` (they were `internal`); `NextRefreshRebaser` stays `internal`. The first ViewModeled desktop screen (M1a's Library) makes `DesktopAppGraph` resolve `RefreshControllerImpl`, whose `RefreshScheduler` parameter had no binding the shell could read: `DesktopRefreshLane` injects the concrete queue, so the scheduler carries `@ExposeImplBinding`, and that annotation suppresses the generated cross-module contribution provider 01 S8 turned on. `@ExposeImplBinding` on an `internal` class therefore leaves the contributed *supertype* unresolvable outside `:core:data`. The fix follows the shape `DesktopJobRunner`/`JobLanePoker` already has — a public port, a public impl and a public `RefreshOrigin` in the port's signature. The widening stops at the graph's read edge: `DesktopRefreshScheduler`'s `@Inject` constructor and `NextRefreshRebaser` are `internal` — Metro resolves `internal` injectees across non-friend modules, verified by compiling both graphs (2026-10-09). `RefreshRequest`, `FeedOutcome` and the rest stay `internal`; the Android `WorkManagerRefreshScheduler` is unchanged.
+
+
 ---
 
 ## Fetch pipeline
@@ -825,14 +830,15 @@ data class RefreshStatus(val running: Boolean, val scope: RefreshScope?, val don
 ```
 
 ```kotlin
-// :core:data commonMain (internal); RefreshControllerImpl delegates to RefreshScheduler and FeedRefresher.status
-internal interface RefreshScheduler {        // androidMain: WorkManagerRefreshScheduler; desktopMain: DesktopRefreshScheduler
+// :core:data commonMain (public since 2026-10-09 — see the M1a library-slice deviations);
+// RefreshControllerImpl delegates to RefreshScheduler and FeedRefresher.status
+interface RefreshScheduler {                 // androidMain: WorkManagerRefreshScheduler; desktopMain: DesktopRefreshScheduler
     fun enqueueNow(scope: RefreshScope, force: Boolean, pagesOnly: Boolean, origin: RefreshOrigin)  // Android refresh-now
     suspend fun reschedulePeriodic()         // Android: tick + constraints + rebase; desktop: rebase only (NextRefreshRebaser)
     suspend fun enqueueContinuation(): Boolean  // Android: refresh-continuation, KEEP, enqueue awaited; desktop: no-op (no soft deadline)
     fun requestFirstFetch()                  // Android: import-sync; desktop: poke the refresh lane
 }
-@Inject internal class NextRefreshRebaser(/* EffectiveSettingsResolver, PodcastDao, FetchStateBatcher, Clock */) {
+@Inject class NextRefreshRebaser(/* EffectiveSettingsResolver, PodcastDao, FetchStateBatcher, Clock */) {
     suspend fun rebase()                     // step 2 of Periodic tick, shared by both schedulers
 }
 @SingleIn(AppScope::class)
