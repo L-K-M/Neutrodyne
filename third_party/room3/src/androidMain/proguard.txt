@@ -1,0 +1,5 @@
+# Consumer keep rules shipped inside upstream room3-runtime-3.0.3 aar (proguard.txt).
+# Room instantiates the generated RoomDatabase subclass reflectively.
+-keep class * extends androidx.room3.RoomDatabase { void <init>(); }
+-dontwarn androidx.room3.paging.**
+-dontwarn androidx.lifecycle.LiveData

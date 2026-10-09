@@ -45,6 +45,18 @@ dependencyResolutionManagement {
                 includeGroup("com.chaquo.python.runtime")
             }
         }
+        // Patched room3-runtime (acquisition cancellation fix) is the only source of
+        // room3-runtime-rebuild; it is rebuilt from published sources jars by
+        // third_party/room3 (provenance: third_party/room3/README.md). Every consumer request
+        // for androidx.room3:room3-runtime is substituted to it in the root build script.
+        exclusiveContent {
+            forRepository { maven(uri("third_party/room3-maven")) }
+            filter {
+                includeModule("androidx.room3", "room3-runtime-rebuild")
+                includeModule("androidx.room3", "room3-runtime-rebuild-android")
+                includeModule("androidx.room3", "room3-runtime-rebuild-jvm")
+            }
+        }
     }
 }
 
