@@ -51,6 +51,14 @@ class HlcTest {
     }
 
     @Test
+    fun parseRejectsNonCanonicalPackedHex() {
+        assertFailsWith<IllegalArgumentException> { Hlc.parse("01A10C942D800003-$node") }
+        assertFailsWith<IllegalArgumentException> { Hlc.parse("+1a10c942d800003-$node") }
+        assertFailsWith<IllegalArgumentException> { Hlc.parse("ffffffffffffffff-$node") }
+        assertEquals(Hlc(Long.MAX_VALUE, node), Hlc.parse("7fffffffffffffff-$node"))
+    }
+
+    @Test
     fun tickAdvancesPastWallAndLastClock() {
         var wall = 1_000L
         var offset = 0L
@@ -96,6 +104,20 @@ class HlcTest {
         assertEquals(1_000L, clock.packed)
         clock.clamp(500L)
         assertEquals(500L, clock.packed)
+    }
+
+    @Test
+    fun restoredClockRejectsNegativeState() {
+        assertFailsWith<IllegalArgumentException> { HlcClock(node, wallMs = { 0L }, packed = -1L) }
+    }
+
+    @Test
+    fun negativeClampLeavesTheClockUnchanged() {
+        val clock = HlcClock(node, wallMs = { 0L }, packed = 100L)
+        assertFailsWith<IllegalArgumentException> { clock.clamp(-1L) }
+        assertEquals(100L, clock.packed)
+        clock.clamp(0L)
+        assertEquals(0L, clock.packed)
     }
 
     @Test

@@ -33,6 +33,16 @@ class OrderKeyTest {
     }
 
     @Test
+    fun reversedBoundsKeepTheJitterInsideTheOrderedInterval() {
+        for ((lower, upper) in listOf("a0" to "a2", "a0" to "a00V", "Zz" to "a0")) {
+            val key = OrderKey.between(upper, lower, Random(42))
+            assertTrue(lower < key && key < upper, "$key not between $lower and $upper")
+            assertEquals(OrderKey.between(lower, upper, Random(42)), key)
+        }
+        assertFailsWith<IllegalArgumentException> { OrderKey.between("a0", "a0") }
+    }
+
+    @Test
     fun jitteredKeysDoNotEndInTheZeroDigit() {
         // The reference library rejects a fractional part ending in '0'; the appended jitter keeps
         // the last character non-zero (10 Ordered lists).
@@ -112,6 +122,24 @@ class OrderKeyTest {
     }
 
     @Test
+    fun invalidIntegerDigitsAreRejectedAtEveryListBoundary() {
+        for (key in listOf("a~", "a-", "aé", "b0~")) {
+            assertFailsWith<IllegalArgumentException>(key) { OrderKey.before(key) }
+            assertFailsWith<IllegalArgumentException>(key) { OrderKey.after(key) }
+            assertFailsWith<IllegalArgumentException>(key) { OrderKey.between(key, "b11") }
+        }
+    }
+
+    @Test
+    fun invalidFractionDigitsAreRejectedAtEveryListBoundary() {
+        for (key in listOf("a0~", "a0-", "a0é", "a0\u001F")) {
+            assertFailsWith<IllegalArgumentException>(key) { OrderKey.before(key) }
+            assertFailsWith<IllegalArgumentException>(key) { OrderKey.after(key) }
+            assertFailsWith<IllegalArgumentException>(key) { OrderKey.between(key, "b11") }
+        }
+    }
+
+    @Test
     fun prefixEdgeBoundsProduceKeysBetween() {
         // Regression for the unclamped substring in midpoint(): when the lower fraction is a
         // proper prefix of the upper one (padding `a` with '0' digits), the port used to throw
@@ -164,5 +192,18 @@ class OrderKeyTest {
             val key = OrderKey.between(a, b)
             assertTrue(a < key && key < b, "generated key $key is not strictly between $a and $b")
         }
+    }
+
+    @Test
+    fun maximumWireStringBoundDoesNotExhaustTheStack() {
+        // 10's input cap admits 4 KiB strings. A maximum-digit suffix must remain a usable bound.
+        val lower = "a0" + "z".repeat(MAX_WIRE_STRING_BYTES - "a0".length)
+        val upper = "a1"
+        val key = OrderKey.between(lower, upper, Random(42))
+        assertTrue(lower < key && key < upper)
+    }
+
+    private companion object {
+        const val MAX_WIRE_STRING_BYTES = 4 * 1024
     }
 }
