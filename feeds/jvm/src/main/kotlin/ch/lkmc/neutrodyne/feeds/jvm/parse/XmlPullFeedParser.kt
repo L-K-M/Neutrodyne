@@ -52,21 +52,19 @@ public class XmlPullFeedParser(
     private val limits: ParseLimits = ParseLimits(),
 ) : FeedParser {
     /**
-     * Parses one document (03 Parser). The document is read through [open] once and buffered — at
-     * most [ParseLimits.maxDocumentBytes] + 1 bytes, so an oversized or endless source fails
-     * `Failed(HOSTILE)` instead of exhausting the heap — so the charset re-parse (step 5) compares
-     * two passes over the same bytes instead of calling [open] twice. [httpCharset] is consulted
-     * only by that re-parse heuristic; [baseUrl] resolves relative URLs, and `xml:base` in the
-     * document wins when present.
+     * Parses one document (03 Parser). Reads [open] once and requests the first byte beyond
+     * [ParseLimits.maxDocumentBytes] before materialization. Buffered reads can read ahead one
+     * segment; oversized input returns `Failed(HOSTILE)`. The charset re-parse (step 5) compares
+     * two passes over the same bytes. [httpCharset] is consulted only by that heuristic;
+     * [baseUrl] resolves relative URLs, and `xml:base` in the document wins when present.
      */
     override fun parse(
         open: () -> okio.Source,
         httpCharset: String?,
         baseUrl: String,
     ): ParseResult {
-        // The document bound is enforced while reading, not after: `request` pulls at most
-        // maxDocumentBytes + 1 bytes into the buffer, so an endless or oversized source fails
-        // here instead of draining memory into `readByteArray()`.
+        // Check the byte bound before materialization or decoding. Okio can read ahead one
+        // segment while requesting the first byte over the bound.
         val bytes =
             try {
                 open().buffer().use { source ->
