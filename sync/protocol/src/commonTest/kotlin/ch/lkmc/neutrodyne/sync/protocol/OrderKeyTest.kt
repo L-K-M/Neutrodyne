@@ -112,6 +112,24 @@ class OrderKeyTest {
     }
 
     @Test
+    fun invalidIntegerDigitsAreRejectedAtEveryListBoundary() {
+        for (key in listOf("a~", "a-", "aé", "b0~")) {
+            assertFailsWith<IllegalArgumentException>(key) { OrderKey.before(key) }
+            assertFailsWith<IllegalArgumentException>(key) { OrderKey.after(key) }
+            assertFailsWith<IllegalArgumentException>(key) { OrderKey.between(key, "b11") }
+        }
+    }
+
+    @Test
+    fun invalidFractionDigitsAreRejectedAtEveryListBoundary() {
+        for (key in listOf("a0~", "a0-", "a0é", "a0\u001F")) {
+            assertFailsWith<IllegalArgumentException>(key) { OrderKey.before(key) }
+            assertFailsWith<IllegalArgumentException>(key) { OrderKey.after(key) }
+            assertFailsWith<IllegalArgumentException>(key) { OrderKey.between(key, "b11") }
+        }
+    }
+
+    @Test
     fun prefixEdgeBoundsProduceKeysBetween() {
         // Regression for the unclamped substring in midpoint(): when the lower fraction is a
         // proper prefix of the upper one (padding `a` with '0' digits), the port used to throw

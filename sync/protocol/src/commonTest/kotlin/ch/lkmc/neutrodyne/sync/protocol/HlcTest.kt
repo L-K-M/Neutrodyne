@@ -51,6 +51,14 @@ class HlcTest {
     }
 
     @Test
+    fun parseRejectsNonCanonicalPackedHex() {
+        assertFailsWith<IllegalArgumentException> { Hlc.parse("01A10C942D800003-$node") }
+        assertFailsWith<IllegalArgumentException> { Hlc.parse("+1a10c942d800003-$node") }
+        assertFailsWith<IllegalArgumentException> { Hlc.parse("ffffffffffffffff-$node") }
+        assertEquals(Hlc(Long.MAX_VALUE, node), Hlc.parse("7fffffffffffffff-$node"))
+    }
+
+    @Test
     fun tickAdvancesPastWallAndLastClock() {
         var wall = 1_000L
         var offset = 0L

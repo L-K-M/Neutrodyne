@@ -53,7 +53,7 @@ object OrderKey {
     /**
      * [n] evenly spaced fresh keys in ascending order (10 Ordered lists: a device that would write
      * a key longer than 64 characters rewrites the whole list with `rewrite(n)` in one
-     * transaction).
+     * transaction). Rewrites are deterministic; equal keys from peers tie-break by row ID.
      */
     fun rewrite(n: Int): List<String> = generateNKeysBetween(null, null, n)
 
@@ -191,13 +191,15 @@ object OrderKey {
         require(int.isNotEmpty() && int.length == getIntegerLength(int[0])) {
             "invalid integer part of order key: $int"
         }
+        require(int.drop(1).all { it in BASE_62_DIGITS }) { "invalid integer part of order key: $int" }
     }
 
     private fun validateOrderKey(key: String) {
         require(!isSmallestInteger(key)) { "invalid order key: $key" }
         val i = getIntegerPart(key)
+        validateInteger(i)
         val f = key.substring(i.length)
-        require(!f.endsWith(BASE_62_DIGITS[0])) { "invalid order key: $key" }
+        require(f.all { it in BASE_62_DIGITS } && !f.endsWith(BASE_62_DIGITS[0])) { "invalid order key: $key" }
     }
 
     // The smallest integer is the most-negative head followed by all-zero digits.

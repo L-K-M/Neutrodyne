@@ -24,7 +24,7 @@ value class NodeId(
         const val LENGTH = 16
         val SERVER = NodeId("0000000000000000")
 
-        /** Cryptographically random on the JVM (`SecureRandom` via `kotlin.random.Random.Default`). */
+        /** Random tie-break identity; `Random.Default` is not cryptographically secure. */
         fun random(): NodeId {
             val bytes = ByteArray(LENGTH / 2)
             Random.nextBytes(bytes)
@@ -79,7 +79,11 @@ data class Hlc(
             require(wire.length == WIRE_LENGTH && wire[PACKED_HEX] == '-') {
                 "invalid HLC wire form: $wire"
             }
-            val packed = wire.substring(0, PACKED_HEX).toLongOrNull(16)
+            val packedHex = wire.substring(0, PACKED_HEX)
+            require(packedHex.all { it in '0'..'9' || it in 'a'..'f' }) {
+                "invalid HLC wire form: $wire"
+            }
+            val packed = packedHex.toLongOrNull(16)
             require(packed != null && packed >= 0) { "invalid HLC wire form: $wire" }
             return Hlc(packed, NodeId(wire.substring(PACKED_HEX + 1)))
         }
@@ -88,8 +92,9 @@ data class Hlc(
 
 /**
  * One device's clock ([10 Hybrid logical clocks](10-sync.md)). The state lives in `sync_state`
- * (`hlc`, `nodeId`, `clockOffsetMs`); the caller persists [packed] after every [tick] and passes
- * the persisted value back in on the next start.
+ * (`hlc`, `nodeId`, `clockOffsetMs`); the caller persists [packed] after every [tick], [receive]
+ * and [clamp], with the corresponding capture/apply/restamp transaction, and restores it on start.
+ * Confine each instance to one owner or serialize its mutators; they are not thread-safe.
  *
  * `wallMs` and `clockOffsetMs` are read on every tick so a clock-offset correction ([10 Offset
  * correction](10-sync.md#hybrid-logical-clocks)) takes effect without rebuilding the clock.
@@ -114,7 +119,10 @@ class HlcClock(
         if (remote.packed > packed) packed = remote.packed
     }
 
-    /** Offset-correction clamp: a persisted clock ahead of the adjusted wall clock is lowered. */
+    /**
+     * Offset-correction clamp: a persisted clock ahead of the adjusted wall clock is lowered.
+     * Correction re-stamps pending LOCAL rows; older accepted stamps can win LWW until wall time catches up.
+     */
     fun clamp(maxPacked: Long) {
         if (packed > maxPacked) packed = maxPacked
     }
