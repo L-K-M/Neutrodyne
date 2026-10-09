@@ -10,6 +10,11 @@ import java.util.zip.Inflater
 actual object EpisodeDescriptionCodec {
     actual fun encode(text: String): ByteArray {
         val utf8 = text.encodeToByteArray()
+        // Aligned bound: a caller exceeding the producer cap (a custom ParseLimits) must be
+        // rejected here, not after persistence — encode output must always round-trip.
+        require(utf8.size <= MAX_DECODED_BYTES) {
+            "episode_description input exceeds the 2 MiB codec bound"
+        }
         if (utf8.size < COMPRESS_ABOVE_BYTES) return byteArrayOf(RAW_TAG) + utf8
 
         val deflater = Deflater(Deflater.DEFAULT_COMPRESSION, true)

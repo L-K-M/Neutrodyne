@@ -82,13 +82,45 @@ class DescriptionCodecTest {
     @Test
     fun aBlobInflatingPastTheProducerBoundFailsInsteadOfExpanding() {
         // Every producer is capped at 512 Ki chars (03 ParseLimits.maxTextChars), so 2 MiB of
-        // UTF-8 bounds legitimate output — a bomb blob must die before it grows the heap.
-        val bomb = EpisodeDescriptionCodec.encode("a".repeat(3 * 1024 * 1024))
-        assertEquals(DEFLATED, bomb[0])
+        // UTF-8 bounds legitimate output — a bomb blob must die before it grows the heap. The
+        // blob is crafted directly: encode itself now rejects input past the bound.
+        val bomb = byteArrayOf(DEFLATED) + deflatedBody("a".repeat(3 * 1024 * 1024))
         assertFailsWith<IllegalStateException> { EpisodeDescriptionCodec.decode(bomb) }
         // The boundary stays reachable: exactly 2 MiB of inflated output still round-trips.
         val atBound = EpisodeDescriptionCodec.encode("a".repeat(2 * 1024 * 1024))
         assertEquals(2 * 1024 * 1024, EpisodeDescriptionCodec.decode(atBound).length)
+    }
+
+    @Test
+    fun encodeRejectsInputPastTheCodecBoundBeforePersisting() {
+        // A custom ParseLimits (e.g. 768 Ki chars) can legally emit text the decoder would
+        // reject: encode must fail first so the blob is never written. A successful encode
+        // must always round-trip — the aligned bound keeps that invariant.
+        assertFailsWith<IllegalArgumentException> {
+            EpisodeDescriptionCodec.encode("a".repeat(2 * 1024 * 1024 + 1))
+        }
+        // The multibyte case: 786 432 CJK chars = 2 359 296 UTF-8 bytes, also past the bound.
+        assertFailsWith<IllegalArgumentException> {
+            EpisodeDescriptionCodec.encode("字".repeat(768 * 1024))
+        }
+        // 512 Ki multibyte chars inside the bound still encode and round-trip.
+        val cjk = "字".repeat(512 * 1024)
+        assertEquals(cjk, EpisodeDescriptionCodec.decode(EpisodeDescriptionCodec.encode(cjk)))
+    }
+
+    /** Raw-DEFLATE of [text]'s UTF-8 — the wire body of a `0x01` blob, built around `encode`'s own bound. */
+    private fun deflatedBody(text: String): ByteArray {
+        val deflater = java.util.zip.Deflater(java.util.zip.Deflater.DEFAULT_COMPRESSION, true)
+        try {
+            deflater.setInput(text.encodeToByteArray())
+            deflater.finish()
+            val out = java.io.ByteArrayOutputStream()
+            val chunk = ByteArray(8 * 1024)
+            while (!deflater.finished()) out.write(chunk, 0, deflater.deflate(chunk))
+            return out.toByteArray()
+        } finally {
+            deflater.end()
+        }
     }
 
     private companion object {
