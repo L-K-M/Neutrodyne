@@ -461,14 +461,18 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
      * pre-sign bytes — it neither shrinks the grown __LINKEDIT segment nor
      * removes an LC_CODE_SIGNATURE slot inserted over header padding, nightly
      * 37874042553). The normalized form — shared byte-for-byte with
-     * `norm_macho` in check-desktop-image.sh — zeroes `ncmds`/`sizeofcmds`,
-     * emits each LC_CODE_SIGNATURE command as zeros (covering both the
-     * re-filled pre-allocated slot and the freshly-inserted command),
-     * zeroes `__LINKEDIT`'s vmsize/filesize (they grow with the blob), and
-     * cuts the `[dataoff, dataoff+datasize)` blob region. Anything else —
-     * including every load command besides the signature bookkeeping — stays
-     * byte-exact, so mutated content still fails. Fat binaries normalize per
-     * slice with the fat_arch offset/size zeroed.
+     * `norm_macho` in check-desktop-image.sh — emits `ncmds`/`sizeofcmds`
+     * minus the signature slots (re-signing may insert one over header
+     * padding), emits each LC_CODE_SIGNATURE command as zeros (covering both
+     * the re-filled pre-allocated slot and the freshly-inserted command),
+     * emits `__LINKEDIT`'s filesize minus the blob bytes inside it (vmsize is
+     * zeroed — the signing slack is not invertible), and cuts the
+     * `[dataoff, dataoff+datasize)` blob region. Anything else — including
+     * every load command besides the signature bookkeeping and the effective
+     * non-signature layout — stays byte-exact, so mutated content still
+     * fails. Fat binaries normalize per slice: the fat_arch offset is zeroed
+     * (it packs blob-carrying lengths) and size is emitted minus the slice's
+     * signature bytes.
      */
     private fun normalizedEntryBytes(
         name: String,
@@ -486,18 +490,26 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
                 val off = u32(b, ro + 8, be = true)
                 val size = u32(b, ro + 12, be = true)
                 if (off + size > b.size) return b
+                val thin = normalizeThinMacho(b.copyOfRange(off.toInt(), (off + size).toInt()))
+                if (thin.sigSize > size) return b
                 out.write(b, ro, 8)
-                out.write(ZERO8, 0, 8)
+                out.write(ZERO4, 0, 4)
+                out.write(u32Bytes(size - thin.sigSize, be = true), 0, 4)
                 out.write(b, ro + 16, 4)
-                out.write(normalizeThinMacho(b.copyOfRange(off.toInt(), (off + size).toInt())))
+                out.write(thin.emit)
             }
             return out.toByteArray()
         }
-        return normalizeThinMacho(b)
+        return normalizeThinMacho(b).emit
     }
 
-    private fun normalizeThinMacho(b: ByteArray): ByteArray {
-        if (b.size < 28) return b
+    private class ThinResult(
+        val emit: ByteArray,
+        val sigSize: Long,
+    )
+
+    private fun normalizeThinMacho(b: ByteArray): ThinResult {
+        if (b.size < 28) return ThinResult(b, 0)
         val is64: Boolean
         val be: Boolean
         when (u32(b, 0, be = false)) {
@@ -522,40 +534,68 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
             }
 
             else -> {
-                return b
+                return ThinResult(b, 0)
             }
         }
         val hdr = if (is64) 32 else 28
         val ncmds = u32(b, 16, be)
-        if (ncmds > 4096) return b
-        val out = java.io.ByteArrayOutputStream(b.size)
-        out.write(b, 0, 16)
-        out.write(ZERO8, 0, 8)
-        out.write(b, 24, hdr - 24)
-        var off = hdr
+        val sizeofcmds = u32(b, 20, be)
+        if (ncmds > 4096) return ThinResult(b, 0)
+        val cmds = mutableListOf<LongArray>()
         val blobs = mutableListOf<LongArray>()
+        var off = hdr
         for (i in 0 until ncmds.toInt()) {
-            if (off + 8 > b.size) return b
+            if (off + 8 > b.size) return ThinResult(b, 0)
             val cmd = u32(b, off, be)
-            val csz = u32(b, off + 4, be).toInt()
-            if (csz < 8 || off + csz > b.size) return b
+            val csz = u32(b, off + 4, be)
+            if (csz < 8 || off + csz > b.size) return ThinResult(b, 0)
+            cmds += longArrayOf(cmd, csz, off.toLong())
             if (cmd == LC_CODE_SIGNATURE) {
                 blobs += longArrayOf(u32(b, off + 8, be), u32(b, off + 12, be))
-                out.write(ByteArray(csz))
-            } else {
-                val cb = b.copyOfRange(off, off + csz)
-                if ((cmd == LC_SEGMENT || cmd == LC_SEGMENT_64) &&
-                    isLinkeditName(cb)
-                ) {
-                    // __LINKEDIT vmsize/filesize grow with the appended blob.
-                    val fields = if (is64) listOf(32 to 8, 48 to 8) else listOf(28 to 4, 36 to 4)
-                    for ((f, len) in fields) {
-                        java.util.Arrays.fill(cb, f, f + len, 0.toByte())
-                    }
-                }
-                out.write(cb)
             }
-            off += csz
+            off += csz.toInt()
+        }
+        val cszSum = cmds.filter { it[0] == LC_CODE_SIGNATURE }.sumOf { it[1] }
+        if (blobs.size.toLong() > ncmds || cszSum > sizeofcmds) return ThinResult(b, 0)
+        val out = java.io.ByteArrayOutputStream(b.size)
+        out.write(b, 0, 16)
+        out.write(u32Bytes(ncmds - blobs.size, be), 0, 4)
+        out.write(u32Bytes(sizeofcmds - cszSum, be), 0, 4)
+        out.write(b, 24, hdr - 24)
+        for (c in cmds) {
+            val cmd = c[0]
+            val csz = c[1].toInt()
+            val co = c[2].toInt()
+            if (cmd == LC_CODE_SIGNATURE) {
+                out.write(ByteArray(csz))
+                continue
+            }
+            val cb = b.copyOfRange(co, co + csz)
+            if ((cmd == LC_SEGMENT || cmd == LC_SEGMENT_64) && isLinkeditName(cb)) {
+                val foff: Long
+                val fsize: Long
+                if (is64) {
+                    foff = u64(cb, 40, be)
+                    fsize = u64(cb, 48, be)
+                } else {
+                    foff = u32(cb, 32, be)
+                    fsize = u32(cb, 36, be)
+                }
+                val inside =
+                    blobs
+                        .filter { foff <= it[0] && it[0] + it[1] <= foff + fsize }
+                        .sumOf { it[1] }
+                if (inside > fsize) return ThinResult(b, 0)
+                if (is64) {
+                    // vmsize is signing slack and not invertible.
+                    java.util.Arrays.fill(cb, 32, 40, 0.toByte())
+                    put64(cb, 48, fsize - inside, be)
+                } else {
+                    java.util.Arrays.fill(cb, 28, 32, 0.toByte())
+                    put32(cb, 36, fsize - inside, be)
+                }
+            }
+            out.write(cb)
         }
         var emit = out.toByteArray() + b.copyOfRange(off, b.size)
         val base = out.size().toLong() - off
@@ -568,7 +608,7 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
             }
             shift += blob[1]
         }
-        return emit
+        return ThinResult(emit, blobs.sumOf { it[1] })
     }
 
     private fun isLinkeditName(cmdBytes: ByteArray): Boolean {
@@ -595,9 +635,64 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
                 ((b[o + 3].toLong() and 0xff) shl 24)
         }
 
+    private fun u64(
+        b: ByteArray,
+        o: Int,
+        be: Boolean,
+    ): Long =
+        if (be) {
+            (u32(b, o, true) shl 32) or u32(b, o + 4, true)
+        } else {
+            (u32(b, o + 4, false) shl 32) or
+                u32(b, o, false)
+        }
+
+    private fun u32Bytes(
+        v: Long,
+        be: Boolean,
+    ): ByteArray {
+        val w = ByteArray(4)
+        put32(w, 0, v, be)
+        return w
+    }
+
+    private fun put32(
+        b: ByteArray,
+        o: Int,
+        v: Long,
+        be: Boolean,
+    ) {
+        if (be) {
+            b[o] = (v shr 24).toByte()
+            b[o + 1] = (v shr 16).toByte()
+            b[o + 2] = (v shr 8).toByte()
+            b[o + 3] = v.toByte()
+        } else {
+            b[o] = v.toByte()
+            b[o + 1] = (v shr 8).toByte()
+            b[o + 2] = (v shr 16).toByte()
+            b[o + 3] = (v shr 24).toByte()
+        }
+    }
+
+    private fun put64(
+        b: ByteArray,
+        o: Int,
+        v: Long,
+        be: Boolean,
+    ) {
+        if (be) {
+            put32(b, o, v shr 32, true)
+            put32(b, o + 4, v, true)
+        } else {
+            put32(b, o, v, false)
+            put32(b, o + 4, v shr 32, false)
+        }
+    }
+
     private companion object {
         private const val BUFFER_BYTES = 1 shl 16
-        private val ZERO8 = ByteArray(8)
+        private val ZERO4 = ByteArray(4)
         private val MACHO_EXTS = setOf("dylib", "jnilib", "so")
         private const val MH_MAGIC = 0xfeedfaceL
         private const val MH_MAGIC_64 = 0xfeedfacfL

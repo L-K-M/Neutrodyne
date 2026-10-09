@@ -395,7 +395,11 @@ jobs:
           set -e
           case "${{ matrix.target }}" in
             windows-x64)
-              ./gradlew createDistributable packageMsi -Pneutrodyne.installKind=msi
+              # compose.desktop.verbose -> jpackage --verbose: light.exe's own
+              # error line otherwise never reaches the logs (37881222222's
+              # packageMsi exit-204 showed only the IOException).
+              ./gradlew createDistributable packageMsi -Pneutrodyne.installKind=msi \
+                  -Pcompose.desktop.verbose=true
               ./gradlew createDistributable packageZip -Pneutrodyne.installKind=zip ;;
             macos-arm64)
               ./gradlew createDistributable -Pneutrodyne.installKind=mac-zip ;;

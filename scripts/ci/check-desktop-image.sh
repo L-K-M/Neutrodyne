@@ -92,48 +92,73 @@ except zipfile.BadZipFile:
 # signature slot's LC_CODE_SIGNATURE datasize and __LINKEDIT sizes grow and a
 # freshly inserted command consumes header padding. Both sides therefore hash
 # the normalized form — identical to normalizedEntryBytes/normalizeThinMacho
-# in DesktopPackaging.kt: ncmds/sizeofcmds zeroed, each LC_CODE_SIGNATURE
-# command emitted as zeros (covers the re-filled pre-allocated slot and the
-# freshly inserted one alike), __LINKEDIT's vmsize/filesize zeroed, and the
-# [dataoff, dataoff+datasize) blob region cut. Everything else — code, data,
-# every other load command — stays byte-exact, so tampered content still
-# differs. The extension gate keeps the cafebabe fat magic away from .class.
+# in DesktopPackaging.kt: ncmds/sizeofcmds emitted minus the signature slots
+# (re-signing may insert one over header padding), each LC_CODE_SIGNATURE
+# command emitted as zeros, __LINKEDIT's filesize emitted minus the blob
+# bytes inside it (vmsize zeroed — the signing slack is not invertible), and
+# the [dataoff, dataoff+datasize) blob region cut. Everything else — code,
+# data, every other load command, the effective non-signature layout — stays
+# byte-exact, so tampered content still differs. The extension gate keeps
+# the cafebabe fat magic away from .class.
 def norm_thin(b):
     if len(b) < 28:
-        return b
+        return b, 0
     m = struct.unpack('<I', b[:4])[0]
     if m == 0xfeedfacf: is64, be = True, False
     elif m == 0xfeedface: is64, be = False, False
     elif m == 0xcffaedfe: is64, be = True, True
     elif m == 0xcefaedfe: is64, be = False, True
-    else: return b
+    else: return b, 0
     hdr = 32 if is64 else 28
     e = '>' if be else '<'
     ncmds = struct.unpack(e + 'I', b[16:20])[0]
+    sizeofcmds = struct.unpack(e + 'I', b[20:24])[0]
     if ncmds > 4096:
-        return b
-    out = bytearray(b[:16] + b'\0' * 8 + b[24:hdr])
-    off = hdr
+        return b, 0
+    cmds = []
     blobs = []
+    off = hdr
     for _ in range(ncmds):
         if off + 8 > len(b):
-            return b
+            return b, 0
         cmd, csz = struct.unpack(e + 'II', b[off:off + 8])
         if csz < 8 or off + csz > len(b):
-            return b
+            return b, 0
+        cmds.append((cmd, csz, off))
         if cmd == 0x1d:
             blobs.append(struct.unpack(e + 'II', b[off + 8:off + 16]))
-            out += b'\0' * csz
-        else:
-            cb = b[off:off + csz]
-            if cmd in (0x1, 0x19) and cb[8:24].rstrip(b'\0') == b'__LINKEDIT':
-                cb = bytearray(cb)
-                if is64:
-                    cb[32:40] = b'\0' * 8; cb[48:56] = b'\0' * 8
-                else:
-                    cb[28:32] = b'\0' * 4; cb[36:40] = b'\0' * 4
-            out += cb
         off += csz
+    csz_sum = sum(c[1] for c in cmds if c[0] == 0x1d)
+    if len(blobs) > ncmds or csz_sum > sizeofcmds:
+        return b, 0
+    # Effective (non-signature) header shape stays bound: ncmds/sizeofcmds
+    # minus the signature slots re-signing may insert over header padding.
+    out = bytearray(b[:16])
+    out += struct.pack(e + 'I', ncmds - len(blobs))
+    out += struct.pack(e + 'I', sizeofcmds - csz_sum)
+    out += b[24:hdr]
+    for cmd, csz, co in cmds:
+        if cmd == 0x1d:
+            out += b'\0' * csz
+            continue
+        cb = b[co:co + csz]
+        if cmd in (0x1, 0x19) and cb[8:24].rstrip(b'\0') == b'__LINKEDIT':
+            cb = bytearray(cb)
+            if is64:
+                foff, fsize = struct.unpack(e + 'QQ', cb[40:56])
+                inside = sum(d for o, d in blobs if foff <= o and o + d <= foff + fsize)
+                if inside > fsize:
+                    return b, 0
+                cb[32:40] = b'\0' * 8  # vmsize: signing slack, not invertible
+                cb[48:56] = struct.pack(e + 'Q', fsize - inside)
+            else:
+                foff, fsize = struct.unpack(e + 'II', cb[32:40])
+                inside = sum(d for o, d in blobs if foff <= o and o + d <= foff + fsize)
+                if inside > fsize:
+                    return b, 0
+                cb[28:32] = b'\0' * 4
+                cb[36:40] = struct.pack(e + 'I', fsize - inside)
+        out += cb
     emit = bytes(out) + b[off:]
     base = len(out) - off
     shift = 0
@@ -142,7 +167,7 @@ def norm_thin(b):
         if 0 <= s < len(emit):
             emit = emit[:s] + emit[min(len(emit), s + ds):]
         shift += ds
-    return emit
+    return emit, sum(d for _, d in blobs)
 
 def norm_macho(data):
     if len(data) >= 8 and data[:4] == b'\xca\xfe\xba\xbe':
@@ -155,10 +180,15 @@ def norm_macho(data):
             off, size = struct.unpack('>II', data[ro + 8:ro + 16])
             if off + size > len(data):
                 return data
-            out += data[ro:ro + 8] + b'\0' * 8 + data[ro + 16:ro + 20]
-            out += norm_thin(data[off:off + size])
+            emit, sigsize = norm_thin(data[off:off + size])
+            if sigsize > size:
+                return data
+            # Slice offset is lipo packing of blob-carrying lengths; the
+            # effective (pre-signature) slice length stays bound.
+            out += data[ro:ro + 8] + b'\0' * 4 + struct.pack('>I', size - sigsize) + data[ro + 16:ro + 20]
+            out += emit
         return bytes(out)
-    return norm_thin(data)
+    return norm_thin(data)[0]
 
 def normalized(data, name):
     if name.rsplit('.', 1)[-1] not in ('dylib', 'jnilib', 'so'):
@@ -391,40 +421,63 @@ import hashlib, struct, sys
 
 def norm_thin(b):
     if len(b) < 28:
-        return b
+        return b, 0
     m = struct.unpack('<I', b[:4])[0]
     if m == 0xfeedfacf: is64, be = True, False
     elif m == 0xfeedface: is64, be = False, False
     elif m == 0xcffaedfe: is64, be = True, True
     elif m == 0xcefaedfe: is64, be = False, True
-    else: return b
+    else: return b, 0
     hdr = 32 if is64 else 28
     e = '>' if be else '<'
     ncmds = struct.unpack(e + 'I', b[16:20])[0]
+    sizeofcmds = struct.unpack(e + 'I', b[20:24])[0]
     if ncmds > 4096:
-        return b
-    out = bytearray(b[:16] + b'\0' * 8 + b[24:hdr])
-    off = hdr
+        return b, 0
+    cmds = []
     blobs = []
+    off = hdr
     for _ in range(ncmds):
         if off + 8 > len(b):
-            return b
+            return b, 0
         cmd, csz = struct.unpack(e + 'II', b[off:off + 8])
         if csz < 8 or off + csz > len(b):
-            return b
+            return b, 0
+        cmds.append((cmd, csz, off))
         if cmd == 0x1d:
             blobs.append(struct.unpack(e + 'II', b[off + 8:off + 16]))
-            out += b'\0' * csz
-        else:
-            cb = b[off:off + csz]
-            if cmd in (0x1, 0x19) and cb[8:24].rstrip(b'\0') == b'__LINKEDIT':
-                cb = bytearray(cb)
-                if is64:
-                    cb[32:40] = b'\0' * 8; cb[48:56] = b'\0' * 8
-                else:
-                    cb[28:32] = b'\0' * 4; cb[36:40] = b'\0' * 4
-            out += cb
         off += csz
+    csz_sum = sum(c[1] for c in cmds if c[0] == 0x1d)
+    if len(blobs) > ncmds or csz_sum > sizeofcmds:
+        return b, 0
+    # Effective (non-signature) header shape stays bound: ncmds/sizeofcmds
+    # minus the signature slots re-signing may insert over header padding.
+    out = bytearray(b[:16])
+    out += struct.pack(e + 'I', ncmds - len(blobs))
+    out += struct.pack(e + 'I', sizeofcmds - csz_sum)
+    out += b[24:hdr]
+    for cmd, csz, co in cmds:
+        if cmd == 0x1d:
+            out += b'\0' * csz
+            continue
+        cb = b[co:co + csz]
+        if cmd in (0x1, 0x19) and cb[8:24].rstrip(b'\0') == b'__LINKEDIT':
+            cb = bytearray(cb)
+            if is64:
+                foff, fsize = struct.unpack(e + 'QQ', cb[40:56])
+                inside = sum(d for o, d in blobs if foff <= o and o + d <= foff + fsize)
+                if inside > fsize:
+                    return b, 0
+                cb[32:40] = b'\0' * 8  # vmsize: signing slack, not invertible
+                cb[48:56] = struct.pack(e + 'Q', fsize - inside)
+            else:
+                foff, fsize = struct.unpack(e + 'II', cb[32:40])
+                inside = sum(d for o, d in blobs if foff <= o and o + d <= foff + fsize)
+                if inside > fsize:
+                    return b, 0
+                cb[28:32] = b'\0' * 4
+                cb[36:40] = struct.pack(e + 'I', fsize - inside)
+        out += cb
     emit = bytes(out) + b[off:]
     base = len(out) - off
     shift = 0
@@ -433,7 +486,7 @@ def norm_thin(b):
         if 0 <= s < len(emit):
             emit = emit[:s] + emit[min(len(emit), s + ds):]
         shift += ds
-    return emit
+    return emit, sum(d for _, d in blobs)
 
 def norm_macho(data):
     if len(data) >= 8 and data[:4] == b'\xca\xfe\xba\xbe':
@@ -446,10 +499,15 @@ def norm_macho(data):
             off, size = struct.unpack('>II', data[ro + 8:ro + 16])
             if off + size > len(data):
                 return data
-            out += data[ro:ro + 8] + b'\0' * 8 + data[ro + 16:ro + 20]
-            out += norm_thin(data[off:off + size])
+            emit, sigsize = norm_thin(data[off:off + size])
+            if sigsize > size:
+                return data
+            # Slice offset is lipo packing of blob-carrying lengths; the
+            # effective (pre-signature) slice length stays bound.
+            out += data[ro:ro + 8] + b'\0' * 4 + struct.pack('>I', size - sigsize) + data[ro + 16:ro + 20]
+            out += emit
         return bytes(out)
-    return norm_thin(data)
+    return norm_thin(data)[0]
 
 print(hashlib.sha256(norm_macho(open(sys.argv[1], 'rb').read())).hexdigest())
 PYEOF

@@ -54,6 +54,99 @@ import struct
 
 def norm_thin(b):
     if len(b) < 28:
+        return b, 0
+    m = struct.unpack('<I', b[:4])[0]
+    if m == 0xfeedfacf: is64, be = True, False
+    elif m == 0xfeedface: is64, be = False, False
+    elif m == 0xcffaedfe: is64, be = True, True
+    elif m == 0xcefaedfe: is64, be = False, True
+    else: return b, 0
+    hdr = 32 if is64 else 28
+    e = '>' if be else '<'
+    ncmds = struct.unpack(e + 'I', b[16:20])[0]
+    sizeofcmds = struct.unpack(e + 'I', b[20:24])[0]
+    if ncmds > 4096:
+        return b, 0
+    cmds = []
+    blobs = []
+    off = hdr
+    for _ in range(ncmds):
+        if off + 8 > len(b):
+            return b, 0
+        cmd, csz = struct.unpack(e + 'II', b[off:off + 8])
+        if csz < 8 or off + csz > len(b):
+            return b, 0
+        cmds.append((cmd, csz, off))
+        if cmd == 0x1d:
+            blobs.append(struct.unpack(e + 'II', b[off + 8:off + 16]))
+        off += csz
+    csz_sum = sum(c[1] for c in cmds if c[0] == 0x1d)
+    if len(blobs) > ncmds or csz_sum > sizeofcmds:
+        return b, 0
+    out = bytearray(b[:16])
+    out += struct.pack(e + 'I', ncmds - len(blobs))
+    out += struct.pack(e + 'I', sizeofcmds - csz_sum)
+    out += b[24:hdr]
+    for cmd, csz, co in cmds:
+        if cmd == 0x1d:
+            out += b'\0' * csz
+            continue
+        cb = b[co:co + csz]
+        if cmd in (0x1, 0x19) and cb[8:24].rstrip(b'\0') == b'__LINKEDIT':
+            cb = bytearray(cb)
+            if is64:
+                foff, fsize = struct.unpack(e + 'QQ', cb[40:56])
+                inside = sum(d for o, d in blobs if foff <= o and o + d <= foff + fsize)
+                if inside > fsize:
+                    return b, 0
+                cb[32:40] = b'\0' * 8
+                cb[48:56] = struct.pack(e + 'Q', fsize - inside)
+            else:
+                foff, fsize = struct.unpack(e + 'II', cb[32:40])
+                inside = sum(d for o, d in blobs if foff <= o and o + d <= foff + fsize)
+                if inside > fsize:
+                    return b, 0
+                cb[28:32] = b'\0' * 4
+                cb[36:40] = struct.pack(e + 'I', fsize - inside)
+        out += cb
+    emit = bytes(out) + b[off:]
+    base = len(out) - off
+    shift = 0
+    for do, ds in sorted(blobs):
+        s = do + base - shift
+        if 0 <= s < len(emit):
+            emit = emit[:s] + emit[min(len(emit), s + ds):]
+        shift += ds
+    return emit, sum(d for _, d in blobs)
+
+def norm_macho(data):
+    if len(data) >= 8 and data[:4] == b'\xca\xfe\xba\xbe':
+        nfat = struct.unpack('>I', data[4:8])[0]
+        if nfat > 64 or 8 + 20 * nfat > len(data):
+            return data
+        out = bytearray(data[:8])
+        for i in range(nfat):
+            ro = 8 + 20 * i
+            off, size = struct.unpack('>II', data[ro + 8:ro + 16])
+            if off + size > len(data):
+                return data
+            emit, sigsize = norm_thin(data[off:off + size])
+            if sigsize > size:
+                return data
+            out += data[ro:ro + 8] + b'\0' * 4 + struct.pack('>I', size - sigsize) + data[ro + 16:ro + 20]
+            out += emit
+        return bytes(out)
+    return norm_thin(data)[0]
+PYEOF
+
+if [ -n "${LEGACY_NORM:-}" ]; then
+# The pre-refinement normalization (75cc476): header counts and __LINKEDIT
+# sizes zeroed wholesale. Fail-first runs pair it with the matching checker.
+cat > "$WORK/normpy/norm.py" <<'PYEOF'
+import struct
+
+def norm_thin(b):
+    if len(b) < 28:
         return b
     m = struct.unpack('<I', b[:4])[0]
     if m == 0xfeedfacf: is64, be = True, False
@@ -119,6 +212,15 @@ def norm_entry(name, data):
         return norm_macho(data)
     return data
 PYEOF
+else
+cat >> "$WORK/normpy/norm.py" <<'PYEOF'
+
+def norm_entry(name, data):
+    if name.rsplit('.', 1)[-1] in ('dylib', 'jnilib', 'so'):
+        return norm_macho(data)
+    return data
+PYEOF
+fi
 
 md5_of() { md5sum "$1" | cut -d' ' -f1; }
 sha_of() { sha256sum "$1" | cut -d' ' -f1; }
@@ -301,9 +403,12 @@ macho_pair() {
 import hashlib, struct, sys
 base, mode = sys.argv[1], sys.argv[2]
 content = b'payload bytes for ' + base.encode().rsplit(b'/', 1)[-1] + b'\n' + bytes(range(64))
+# __LINKEDIT spans the whole file like the real dylibs: fileoff=0 and
+# filesize=len, with the signature blob as the segment's tail — the real
+# pairing normalization relies on (the blob lives inside the segment).
 def seg64(vmsize, filesize):
     return struct.pack('<II16sQQQQIIII', 0x19, 72, b'__LINKEDIT' + b'\0' * 6,
-                       0x1000, vmsize, 0x2000, filesize, 7, 5, 0, 0)
+                       0x1000, vmsize, 0, filesize, 7, 5, 0, 0)
 def cs(do, ds):
     return struct.pack('<IIII', 0x1d, 16, do, ds)
 def hdr(ncmds, sizeofcmds):
@@ -311,13 +416,13 @@ def hdr(ncmds, sizeofcmds):
                        ncmds, sizeofcmds, 0, 0)
 if mode == 'slot':
     do = 32 + 88 + len(content)
-    pub = hdr(2, 88) + seg64(0x3000, 0x2300) + cs(do, 64) + content + b'A' * 64
-    re_ = hdr(2, 88) + seg64(0x3040, 0x2380) + cs(do, 128) + content + b'B' * 128
+    pub = hdr(2, 88) + seg64(0x3000, do + 64) + cs(do, 64) + content + b'A' * 64
+    re_ = hdr(2, 88) + seg64(0x3040, do + 128) + cs(do, 128) + content + b'B' * 128
 else:
     # insert: the unsigned file has 16 zero pad bytes where the cs cmd lands
     do = 32 + 88 + len(content)
-    pub = hdr(1, 72) + seg64(0x3000, 0x2300) + b'\0' * 16 + content
-    re_ = hdr(2, 88) + seg64(0x3040, 0x2380) + cs(do, 128) + content + b'B' * 128
+    pub = hdr(1, 72) + seg64(0x3000, do) + b'\0' * 16 + content
+    re_ = hdr(2, 88) + seg64(0x3040, do + 128) + cs(do, 128) + content + b'B' * 128
 rex = bytearray(re_)
 rex[124] ^= 0xff  # payload starts at 120 (= 32 hdr + 88 cmds) in both modes
 open(base + '-pub', 'wb').write(pub)
@@ -883,6 +988,50 @@ f="$img/lib/app/skiko-awt-runtime-macos-arm64-0.150.1-$(unpadded_md5 "$img/lib/a
 mv "$img/lib/app/.stubx" "$f"
 expect_fail 'not on the Licensee-checked runtime classpath' \
     "mutated re-signed in-jar native with a rewritten sidecar is rejected"
+
+# 32. A header-field mutation that normalization must still see: bumping the
+#     re-signed dylib's __LINKEDIT filesize (the non-signature extent is
+#     bound as filesize minus the enclosed signature bytes — normalization
+#     discounts the blob, not the whole field).
+macho_pair slot hf
+img="$(new_image ab)"
+skiko_cp "$WORK" macos arm64 \
+    "libskiko-macos-arm64.dylib@$WORK/hf-pub" \
+    libskiko-macos-x64.dylib >> "$MANIFEST"
+python3 - "$WORK/hf-re" "$WORK/hf-re-hdr" <<'PY'
+import struct, sys
+b = bytearray(open(sys.argv[1], 'rb').read())
+fs = struct.unpack('<Q', b[32 + 48:32 + 56])[0]
+struct.pack_into('<Q', b, 32 + 48, fs + 0x100)
+open(sys.argv[2], 'wb').write(bytes(b))
+PY
+native_next_to "$img/lib/app" macos arm64 "$WORK/hf-re-hdr" "$WORK/hf-pin"
+mkstub_native "$img/lib/app" >/dev/null
+expect_fail 'not on the Licensee-checked runtime classpath' \
+    "re-signed native with a mutated __LINKEDIT extent is rejected"
+
+# 33. The command-table size field is bound the same way: a sizeofcmds bump
+#     on a retained in-jar re-signed native (the manifest's #entry row pins
+#     sizeofcmds minus the signature slots).
+macho_pair slot sc
+img="$(new_image ac)"
+skiko_cp "$WORK" macos arm64 \
+    "libskiko-macos-x64.dylib@$WORK/sc-pub" >> "$MANIFEST"
+native_next_to "$img/lib/app" macos arm64
+python3 - "$WORK/sc-re" "$WORK/sc-pin" "$img/lib/app/.stubsc" <<'PY'
+import struct, sys, zipfile
+b = bytearray(open(sys.argv[1], 'rb').read())
+struct.pack_into('<I', b, 20, struct.unpack('<I', b[20:24])[0] + 16)
+with zipfile.ZipFile(sys.argv[3], 'w') as z:
+    z.writestr('META-INF/', '')
+    z.writestr('META-INF/MANIFEST.MF', 'Manifest-Version: 1.0\n')
+    z.writestr('libskiko-macos-x64.dylib', bytes(b))
+    z.writestr('libskiko-macos-x64.dylib.sha256', open(sys.argv[2]).read())
+PY
+f="$img/lib/app/skiko-awt-runtime-macos-arm64-0.150.1-$(unpadded_md5 "$img/lib/app/.stubsc").jar"
+mv "$img/lib/app/.stubsc" "$f"
+expect_fail 'not on the Licensee-checked runtime classpath' \
+    "re-signed in-jar native with a mutated sizeofcmds is rejected"
 
 echo
 if [ "$FAILED" -gt 0 ]; then

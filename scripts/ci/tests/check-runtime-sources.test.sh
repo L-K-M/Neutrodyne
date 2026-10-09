@@ -138,6 +138,37 @@ else
     sed 's/^/    /' "$WORK/check-mac.out" >&2
 fi
 
+# 6. The pinned JDK tree carries the same nesting on macOS: bundled-runtime's
+#    macos-arm64 jdk/ is the bundle root with the tree under Contents/Home
+#    (nightly 37881222222 flagged all 93 runtime files against the flat path).
+#    Counterpart lookup must unwrap it like the image side does.
+JDKMAC="$WORK/jdk-mac"
+mkdir -p "$JDKMAC/Contents/Home/lib" "$JDKMAC/Contents/Home/legal"
+printf 'JAVA_VERSION="%s"\nMODULES=java.base\n' \
+    "$(lock_prop "$LOCK" javaVersion)" > "$JDKMAC/Contents/Home/release"
+: > "$JDKMAC/Contents/Home/legal/NOTICE"
+macho "$JDKMAC/Contents/Home/lib/libtest.dylib" "loadable bytes" "sig-jdk!"
+if bash "$CHECK" --image "$IMGMAC" --jdk "$JDKMAC" --smoke "$WORK/smoke.txt" \
+        > "$WORK/check-macjdk.out" 2>&1; then
+    t_ok "macOS bundled-runtime root resolves Contents/Home counterparts"
+else
+    t_fail "macOS bundled-runtime root resolves Contents/Home counterparts"
+    sed 's/^/    /' "$WORK/check-macjdk.out" >&2
+fi
+
+# 7. And a file absent under the JDK's Contents/Home is still unbound.
+macho "$IMGMAC/Contents/runtime/Contents/Home/lib/libextra.dylib" "extra bytes" "sig-ext!"
+if ! bash "$CHECK" --image "$IMGMAC" --jdk "$JDKMAC" --smoke "$WORK/smoke.txt" \
+        > "$WORK/check-macjdk2.out" 2>&1 \
+    && grep -q 'no counterpart in the pinned Temurin archive: lib/libextra.dylib' \
+        "$WORK/check-macjdk2.out"; then
+    t_ok "a file absent under the JDK's Contents/Home is rejected"
+else
+    t_fail "a file absent under the JDK's Contents/Home is rejected"
+    sed 's/^/    /' "$WORK/check-macjdk2.out" >&2
+fi
+rm -f "$IMGMAC/Contents/runtime/Contents/Home/lib/libextra.dylib"
+
 echo
 if [ "$FAILED" -gt 0 ]; then
     echo "check-runtime-sources.test: $FAILED case(s) failing" >&2

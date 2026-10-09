@@ -286,7 +286,7 @@ class DesktopPackagingTest {
         // the published/re-signed variants of both signing shapes (grown
         // pre-allocated slot, command inserted over header padding), so a
         // divergence between the Kotlin and python normalizers fails here.
-        val normalizedSha256 = "403787c2af527e1f4c18fa6de823d86929e194bea446ab41d71e1f1d3b1c3a86"
+        val normalizedSha256 = "2d29e1c139760138c2391ef76f0c7ff6ba2ed552ce9b0ddd4e4a76d7a786a8e9"
         val root = Files.createTempDirectory("classpath-manifest").toFile()
         try {
             val skiko =
@@ -410,9 +410,15 @@ class DesktopPackagingTest {
                 .put("__LINKEDIT".toByteArray() + ByteArray(6))
                 .putLong(0x1000)
                 .putLong(if (resigned) 0x3040 else 0x3000)
-                .putLong(0x2000)
-                .putLong(if (resigned) 0x2380 else 0x2300)
-                .putInt(7)
+                .putLong(0)
+                .putLong(
+                    dataoff +
+                        when {
+                            resigned -> 128L
+                            slot -> 64L
+                            else -> 0L
+                        },
+                ).putInt(7)
                 .putInt(5)
                 .putInt(0)
                 .putInt(0)

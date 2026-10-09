@@ -230,6 +230,10 @@ image_compare_file() {
 
 image_check_native_files() {
     local rt="$1" img="$2" jdk="$3" path rel ref
+    # bundled-runtime/*/jdk is the JDK root — the macOS tarball's tree sits one
+    # level deeper at Contents/Home (SetupBundledRuntime), the same nesting
+    # runtime_dir unwraps on the image side.
+    [ -d "$jdk/Contents/Home" ] && jdk="$jdk/Contents/Home"
     while IFS= read -r -d '' path; do
         rel="${path#"$rt"/}"
         ref="$jdk/$rel"
