@@ -71,8 +71,12 @@ public class XmlPullFeedParser(
 
         // Step 3: first pass with encoding sniffing (never a Reader, never the HTTP charset). The
         // prolog and start-tag guards run inside runPass so the charset re-parse (step 5) is
-        // checked on the stream exactly as that pass decodes it too.
-        val first = ParseSession(factory, limits).runPass(bytes, charsetOverride = null, baseUrl)
+        // checked on the stream exactly as that pass decodes it too. Whitespace before the
+        // declaration is tolerated by kxml2's relaxed mode but refused by AOSP's KXmlParser, so
+        // both passes see it stripped (corpus leg b); a BOM is never ASCII whitespace, so
+        // encoding detection is untouched.
+        val content = bytes.withoutLeadingWhitespace()
+        val first = ParseSession(factory, limits).runPass(content, charsetOverride = null, baseUrl)
         if (first is ParseResult) return first
 
         val stats = first as ParseSession.Pass
@@ -88,7 +92,7 @@ public class XmlPullFeedParser(
                 httpCharset?.trim()?.takeIf { it.isNotEmpty() && !sameCharset(it, detected) }
                     ?: WINDOWS_1252.takeIf { !sameCharset(it, detected) }
             if (secondCharset != null) {
-                val second = ParseSession(factory, limits).runPass(bytes, secondCharset, baseUrl)
+                val second = ParseSession(factory, limits).runPass(content, secondCharset, baseUrl)
                 if (second is ParseSession.Pass && second.replacementChars < stats.replacementChars) {
                     val reparseWarning =
                         ParseWarning(WarningCode.CHARSET_REPARSED, detail = "re-parsed as $secondCharset")
@@ -2421,3 +2425,17 @@ private fun sameCharset(
 }
 
 private fun firstNonBlank(vararg values: String?): String? = values.firstOrNull { !it.isNullOrBlank() }
+
+/** Drops ASCII whitespace before the first byte of markup (see [XmlPullFeedParser.parse] step 3). */
+private fun ByteArray.withoutLeadingWhitespace(): ByteArray {
+    var i = 0
+    while (i < size &&
+        (
+            this[i] == ' '.code.toByte() || this[i] == '\t'.code.toByte() || this[i] == '\r'.code.toByte() ||
+                this[i] == '\n'.code.toByte()
+        )
+    ) {
+        i++
+    }
+    return if (i == 0) this else copyOfRange(i, size)
+}

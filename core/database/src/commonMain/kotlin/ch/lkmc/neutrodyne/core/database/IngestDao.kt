@@ -19,12 +19,29 @@ import ch.lkmc.neutrodyne.core.model.OwnerType
 abstract class IngestDao(
     private val db: NeutrodyneDatabase,
 ) {
-    /** 03 builds its identity/enclosure/guid maps from these rows. */
+    /**
+     * 03 builds its identity/enclosure/guid maps from these rows. `sortDate`, `durationMs` and
+     * `enclosureType` exist for the diff's pass-2 guards (03 Diff algorithm step 5: duration
+     * within 10 min, same MIME major type); `firstSeenAt` anchors the `sortDate` recompute and
+     * `chaptersUrl` drives the JSON-chapter invalidation of step 6 — added 2026-10-07 for the
+     * ingest half.
+     */
     @Query(
-        "SELECT id, identityKey, guid, enclosureUrl, title, pubDate, contentHash, inFeed" +
+        "SELECT id, identityKey, guid, enclosureUrl, enclosureType, title, pubDate, sortDate," +
+            " durationMs, contentHash, inFeed, firstSeenAt, chaptersUrl" +
             " FROM episode WHERE podcastId = :podcastId",
     )
     abstract suspend fun existing(podcastId: Long): List<ExistingEpisodeKey>
+
+    /** `latestEpisodeAt = max(sortDate)`, maintained by ingestion (02 podcast). */
+    @Query("SELECT MAX(sortDate) FROM episode WHERE podcastId = :podcastId")
+    abstract suspend fun maxSortDate(podcastId: Long): Long?
+
+    /**
+     * Deletes the `PODCASTING20_JSON` chapters of one episode (03 Diff step 6: a changed
+     * `chaptersUrl` invalidates the fetched document so 06 re-fetches it).
+     */
+    suspend fun deleteJsonChapters(episodeId: Long) = deleteChaptersOfSource(episodeId, JSON)
 
     /** ABORT on a duplicate `(podcastId, identityKey)`; rows in descending `feedOrder` (02). */
     @Insert
@@ -153,6 +170,17 @@ abstract class IngestDao(
     )
 
     /**
+     * 03's back-catalogue dump guard: when more than 20 inserted items qualify as `isNew`, only
+     * the newest 3 keep it — the caller passes the ids to flip back (chunked like `setInFeed`).
+     */
+    suspend fun clearIsNew(ids: List<Long>) {
+        ids.chunked(BIND_CHUNK).forEach { clearIsNewChunk(it) }
+    }
+
+    @Query("UPDATE episode SET isNew = 0 WHERE id IN (:ids)")
+    protected abstract suspend fun clearIsNewChunk(ids: List<Long>)
+
+    /**
      * Delete-and-insert per child table of a changed episode (02): description blob (already
      * encoded by `EpisodeDescriptionCodec` on `Default`), transcripts, alternate enclosures,
      * PSC chapters, and the episode's `person`/`funding` rows (`ownerType = 'EPISODE'`).
@@ -201,6 +229,18 @@ abstract class IngestDao(
     /** The ingest-side `podcast` write: metadata, validators and scheduling columns only (02). */
     @Update(entity = PodcastEntity::class)
     abstract suspend fun applyFeedMetadata(row: PodcastFeedMetadata)
+
+    /**
+     * The `OLDER_PAGE` feed write (03 RFC 5005 paging): a paging ingest changes no metadata except
+     * the paging columns — `pagingNextUrl` advances to the fetched page's own older-page link and
+     * `pagingComplete = 1` marks its last page.
+     */
+    @Query("UPDATE podcast SET pagingNextUrl = :nextUrl, pagingComplete = :complete WHERE id = :podcastId")
+    abstract suspend fun applyPaging(
+        podcastId: Long,
+        nextUrl: String?,
+        complete: Boolean,
+    )
 
     /** The `YOUTUBE_CHANNEL` variant (04): omits the YouTube-page columns 04 writes. */
     @Update(entity = PodcastEntity::class)
@@ -267,5 +307,8 @@ abstract class IngestDao(
 
         /** `ChapterSource.PSC.name` — a literal because the column is converted to TEXT. */
         const val PSC = "PSC"
+
+        /** `ChapterSource.PODCASTING20_JSON.name`, same literal-table rule as [PSC]. */
+        const val JSON = "PODCASTING20_JSON"
     }
 }
