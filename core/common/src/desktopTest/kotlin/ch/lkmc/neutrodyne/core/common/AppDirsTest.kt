@@ -2,8 +2,10 @@
 
 package ch.lkmc.neutrodyne.core.common
 
+import org.junit.Assume.assumeTrue
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.attribute.PosixFileAttributeView
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -148,17 +150,25 @@ class AppDirsTest {
     }
 
     @Test
+    fun `ensureCreated creates every directory and is idempotent`() {
+        val root = Files.createTempDirectory("neutrodyne-test")
+        val dirs = testDirs(root)
+        dirs.ensureCreated()
+        dirs.ensureCreated()
+
+        for (dir in setOf(dirs.data, dirs.config, dirs.cache, dirs.state, dirs.logs)) {
+            assertTrue(Files.isDirectory(dir), "$dir missing")
+        }
+    }
+
+    @Test
     fun `ensureCreated makes every directory user-only on posix`() {
         val root = Files.createTempDirectory("neutrodyne-test")
-        val dirs =
-            AppDirs(
-                data = root.resolve("data"),
-                config = root.resolve("data"),
-                cache = root.resolve("cache"),
-                state = root.resolve("state"),
-                logs = root.resolve("state").resolve("logs"),
-                downloadsDefault = root.resolve("data").resolve("Downloads"),
-            )
+        assumeTrue(
+            "POSIX permissions require a POSIX file store",
+            Files.getFileStore(root).supportsFileAttributeView(PosixFileAttributeView::class.java),
+        )
+        val dirs = testDirs(root)
         dirs.ensureCreated()
         for (dir in setOf(dirs.data, dirs.cache, dirs.state, dirs.logs)) {
             assertTrue(Files.isDirectory(dir), "$dir missing")
@@ -173,6 +183,16 @@ class AppDirsTest {
         // idempotent
         dirs.ensureCreated()
     }
+
+    private fun testDirs(root: Path) =
+        AppDirs(
+            data = root.resolve("data"),
+            config = root.resolve("data"),
+            cache = root.resolve("cache"),
+            state = root.resolve("state"),
+            logs = root.resolve("state").resolve("logs"),
+            downloadsDefault = root.resolve("data").resolve("Downloads"),
+        )
 
     @Test
     fun `detect maps os name strings`() {
