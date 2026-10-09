@@ -1,0 +1,57 @@
+--- a/commonMain/androidx/room3/coroutines/ConnectionPoolImpl.kt
++++ b/commonMain/androidx/room3/coroutines/ConnectionPoolImpl.kt
+@@ -40,13 +40,12 @@
+ import kotlin.time.Duration
+ import kotlin.time.Duration.Companion.seconds
+ import kotlinx.coroutines.NonCancellable
+-import kotlinx.coroutines.TimeoutCancellationException
+ import kotlinx.coroutines.currentCoroutineContext
+ import kotlinx.coroutines.sync.Mutex
+ import kotlinx.coroutines.sync.Semaphore
+ import kotlinx.coroutines.sync.withLock
+ import kotlinx.coroutines.withContext
+-import kotlinx.coroutines.withTimeout
++import kotlinx.coroutines.withTimeoutOrNull
+ 
+ internal const val THROW_TIMEOUT_EXCEPTION = 1
+ internal const val LOG_TIMEOUT_EXCEPTION = 2
+@@ -235,25 +234,24 @@
+             // Following async timeout with resources recommendation:
+             // https://kotlinlang.org/docs/cancellation-and-timeouts.html#asynchronous-timeout-and-resources
+             var connection: ConnectionWrapper? = null
+-            var exceptionThrown: Throwable? = null
++            var ownershipTransferred = false
+             try {
+-                withTimeout(timeout) { connection = acquire() }
+-            } catch (ex: Throwable) {
+-                exceptionThrown = ex
+-            }
+-            try {
+-                if (exceptionThrown is TimeoutCancellationException) {
++                // withTimeoutOrNull returns null only when this acquisition's own timeout
++                // elapsed; a foreign TimeoutCancellationException from a caller's timeout (or
++                // any other cancellation) propagates instead of re-entering the retry loop.
++                val wrapper = withTimeoutOrNull(timeout) { acquire().also { connection = it } }
++                if (wrapper == null) {
+                     onTimeout.invoke() // might throw
+-                } else if (exceptionThrown != null) {
+-                    throw exceptionThrown
+-                } else if (connection != null) {
+-                    return connection
++                } else {
++                    ownershipTransferred = true
++                    return wrapper
+                 }
+-            } catch (ex: Throwable) {
++            } finally {
+                 // If any error occurs before returning from this function and acquire() returned
+-                // such that a connection != null, then we need to recycle it.
+-                connection?.let { recycle(it) }
+-                throw ex
++                // such that a connection != null, then we need to recycle it. That includes an
++                // acquisition that raced the timeout or foreign cancellation on the way out of
++                // the timed block.
++                if (!ownershipTransferred) connection?.let { recycle(it) }
+             }
+         }
+     }
