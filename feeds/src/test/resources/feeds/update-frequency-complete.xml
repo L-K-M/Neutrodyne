@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:podcast="https://podcastindex.org/namespace/1.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>Update Frequency Complete</title>
+    <itunes:complete>no</itunes:complete>
+    <podcast:updateFrequency rrule="FREQ=WEEKLY;BYDAY=MO,FR" complete="true"/>
+    <item><title>Still here</title><guid>ufc-1</guid>
+      <enclosure url="https://cdn.example.com/uf1.mp3" length="10" type="audio/mpeg"/></item>
+  </channel>
+</rss>

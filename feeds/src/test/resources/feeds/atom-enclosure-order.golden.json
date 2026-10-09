@@ -1,0 +1,33 @@
+{
+  "format": "ATOM",
+  "items": [
+    {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/a.mp3"
+        },
+        {
+          "effectiveType": "video/mp4",
+          "length": 20,
+          "type": "video/mp4",
+          "url": "https://cdn.example.com/v.mp4"
+        }
+      ],
+      "feedOrder": 0,
+      "guid": "urn:entry:enc",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/a.mp3"
+      },
+      "pubDate": 1790856000000,
+      "rawPubDate": "2026-10-01T12:00:00Z",
+      "title": "Audio then video"
+    }
+  ],
+  "title": "Atom enclosure order"
+}

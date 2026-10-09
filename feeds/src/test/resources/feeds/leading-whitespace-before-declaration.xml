@@ -1,0 +1,3 @@
+
+   <?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Whitespace Before Declaration</title><item><title>Still parses</title><guid>lead-1</guid><enclosure url="https://cdn.example.com/lw1.mp3" length="10" type="audio/mpeg"/></item></channel></rss>
