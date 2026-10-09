@@ -83,6 +83,7 @@ unpadded_md5() {
 new_image() {
     local img="$WORK/img-$1"
     : > "$MANIFEST"
+    rm -f "${MANIFEST%.txt}"-*.txt
     mkdir -p "$img/bin" "$img/lib/app" "$img/lib/runtime/legal" "$img/lib/runtime/lib"
     : > "$img/bin/Neutrodyne"
     printf 'JAVA_VERSION="%s"\nMODULES=java.base\n' \
@@ -149,6 +150,35 @@ native_next_to() {
 }
 
 manifest_row() { printf '%s  %s\n' "$1" "$2" >> "$MANIFEST"; }
+
+# own_jar <dir> <kind> [extra entry...] — the project's own desktopApp jar
+# carrying build-info.properties with installKind=<kind>, mangled like any
+# image jar. Prints "basename<TAB>canonical sha256". check_jars picks the
+# manifest file from this kind: runtime-classpath-<kind>.txt when present.
+own_jar() {
+    local dir="$1" kind="$2" f
+    shift 2
+    python3 - "$dir/.own-jar" "$kind" "$@" <<'PY'
+import sys, zipfile
+out, kind, entries = sys.argv[1], sys.argv[2], sys.argv[3:]
+with zipfile.ZipFile(out, 'w') as z:
+    z.writestr('META-INF/', '')
+    z.writestr('META-INF/MANIFEST.MF', 'Manifest-Version: 1.0\n')
+    z.writestr('build-info.properties',
+               'installKind=%s\nversionName=0.1.0\n' % kind)
+    for e in entries:
+        z.writestr(e, e + ' bytes')
+PY
+    f="$dir/desktopApp-$(unpadded_md5 "$dir/.own-jar").jar"
+    mv "$dir/.own-jar" "$f"
+    printf '%s\t%s\n' "${f##*/}" "$(canon_of "$f")"
+}
+
+# kind_manifest <kind> — the per-install-kind manifest path
+# writeDesktopRuntimeClasspath writes beside runtime-classpath.txt.
+kind_manifest() {
+    echo "${MANIFEST%.txt}-$1.txt"
+}
 
 run_scan() {
     bash "$SCAN" "$1" > "$WORK/scan.out" 2>&1
@@ -445,6 +475,127 @@ mv "$img/lib/app/.squat" \
 native_next_to "$img"
 expect_fail 'not on the Licensee-checked runtime classpath' \
     "linux skiko stub whose suffix is not its own md5 is rejected"
+
+# --- per-install-kind manifests ---------------------------------------------------
+# installKind lands in build-info.properties inside the own-app jar, so every
+# packaging invocation mangles desktopApp.jar differently; one shared manifest
+# cannot cover all packages of a matrix job (nightly 37868304885: the deb and
+# rpm jars missed the manifest the tar.gz invocation wrote). The task writes
+# runtime-classpath-<kind>.txt and the scan resolves the image's kind file.
+
+# 19. The deb image's own jar is bound by runtime-classpath-deb.txt even though
+#     the shared runtime-classpath.txt names the tar.gz invocation's jar.
+img="$(new_image n)"
+read -r own_name own_sha \
+    < <(own_jar "$img/lib/app" deb ch/lkmc/neutrodyne/MainKt.class)
+printf '%s  %s\n' "$own_sha" "$own_name" >> "$(kind_manifest deb)"
+manifest_row "$(printf 'tar' | sha256sum | cut -d' ' -f1)" \
+    "desktopApp-25a6f515c521b1821505750593c5122.jar"
+if run_scan "$img"; then
+    t_ok "own-app jar is bound by its install kind's manifest"
+else
+    t_fail "own-app jar is bound by its install kind's manifest"
+    sed 's/^/    /' "$WORK/scan.out" >&2
+fi
+
+# 20. The kind file is authoritative when present: a jar the shared manifest
+#     names but the kind file does not is still off the classpath (a stale
+#     shared manifest must not widen the binding).
+img="$(new_image o)"
+read -r own_name own_sha \
+    < <(own_jar "$img/lib/app" rpm ch/lkmc/neutrodyne/MainKt.class)
+manifest_row "$own_sha" "$own_name"
+printf '%s  %s\n' "$(printf 'x' | sha256sum | cut -d' ' -f1)" "other-1.jar" \
+    > "$(kind_manifest rpm)"
+expect_fail 'not on the Licensee-checked runtime classpath' \
+    "kind manifest overrides the shared one when present"
+
+# 21. Without a kind file the shared manifest still covers the image (dev
+#     builds and manifests written before the per-kind split).
+img="$(new_image p)"
+read -r own_name own_sha \
+    < <(own_jar "$img/lib/app" rpm ch/lkmc/neutrodyne/MainKt.class)
+manifest_row "$own_sha" "$own_name"
+if run_scan "$img"; then
+    t_ok "shared manifest still binds when no kind file exists"
+else
+    t_fail "shared manifest still binds when no kind file exists"
+    sed 's/^/    /' "$WORK/scan.out" >&2
+fi
+
+# 22. A foreign own-app jar — desktopApp-<md5>.jar that no manifest names —
+#     stays a violation: the per-kind split is not an exemption.
+img="$(new_image q)"
+own_jar "$img/lib/app" msi ch/lkmc/neutrodyne/Evil.class >/dev/null
+printf '%s  %s\n' "$(printf 'x' | sha256sum | cut -d' ' -f1)" "other-1.jar" \
+    > "$(kind_manifest msi)"
+manifest_row "$(printf 'y' | sha256sum | cut -d' ' -f1)" "other-2.jar"
+expect_fail 'not on the Licensee-checked runtime classpath' \
+    "foreign desktopApp jar absent from every manifest is rejected"
+
+# --- in-jar natives of the skiko stub ----------------------------------------------
+# The real macOS stub keeps the natives for the other targets inside the jar —
+# libskiko-macos-x64.dylib plus its .sha256 — while the host arch's lands loose
+# beside it (nightly 37868304885). The in-jar pair must still pin each other.
+
+# mkstub_native <dir> [no_sidecar|bad_sidecar] — a skiko-awt-runtime-macos-arm64
+# stub keeping libskiko-macos-x64.dylib + .sha256 in-jar; named by its own
+# unpadded md5 like Compose does.
+mkstub_native() {
+    local dir="$1" mode="${2:-}" f
+    python3 - "$dir/.stubn" "$mode" <<'PY'
+import hashlib, sys, zipfile
+out, mode = sys.argv[1], sys.argv[2]
+native = b'x64 skiko native bytes'
+with zipfile.ZipFile(out, 'w') as z:
+    z.writestr('META-INF/', '')
+    z.writestr('META-INF/MANIFEST.MF', 'Manifest-Version: 1.0\n')
+    z.writestr('libskiko-macos-x64.dylib', native)
+    if mode != 'no_sidecar':
+        sidecar = ('0' * 64 if mode == 'bad_sidecar'
+                   else hashlib.sha256(native).hexdigest())
+        z.writestr('libskiko-macos-x64.dylib.sha256', sidecar)
+PY
+    f="$dir/skiko-awt-runtime-macos-arm64-0.150.1-$(unpadded_md5 "$dir/.stubn").jar"
+    mv "$dir/.stubn" "$f"
+    echo "$f"
+}
+
+# mac_stub_image <tag> — an image whose manifest covers macos-arm64 skiko and
+# whose app dir carries the loose arm64 native + sidecar.
+mac_stub_image() {
+    local img
+    img="$(new_image "$1")"
+    manifest_row "$(printf 'skiko' | sha256sum | cut -d' ' -f1)" \
+        "skiko-awt-runtime-macos-arm64-0.150.1-0123456789abcdef0123456789abcdef.jar"
+    printf 'dylib bytes' > "$img/lib/app/libskiko-macos-arm64.dylib"
+    sha_of "$img/lib/app/libskiko-macos-arm64.dylib" \
+        > "$img/lib/app/libskiko-macos-arm64.dylib.sha256"
+    echo "$img"
+}
+
+# 23. Stub with the retained x64 native and a matching in-jar .sha256 is
+#     accepted — the documented stub shape on macOS.
+img="$(mac_stub_image s)"
+mkstub_native "$img/lib/app" >/dev/null
+if run_scan "$img"; then
+    t_ok "skiko stub retaining an in-jar other-arch native + .sha256 is accepted"
+else
+    t_fail "skiko stub retaining an in-jar other-arch native + .sha256 is accepted"
+    sed 's/^/    /' "$WORK/scan.out" >&2
+fi
+
+# 24. The retained native without its in-jar sidecar is unbound payload.
+img="$(mac_stub_image t)"
+mkstub_native "$img/lib/app" no_sidecar >/dev/null
+expect_fail 'not on the Licensee-checked runtime classpath' \
+    "in-jar skiko native without its .sha256 entry is rejected"
+
+# 25. A sidecar pinning different bytes is not the artifact Compose wrote.
+img="$(mac_stub_image u)"
+mkstub_native "$img/lib/app" bad_sidecar >/dev/null
+expect_fail 'not on the Licensee-checked runtime classpath' \
+    "in-jar skiko native whose .sha256 does not match is rejected"
 
 echo
 if [ "$FAILED" -gt 0 ]; then

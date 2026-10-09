@@ -190,7 +190,7 @@ jobs:
           mkdir -p build/ci-artifacts
           tar -czf build/ci-artifacts/desktop-image-linux-x64.tar.gz \
             desktopApp/build/compose/binaries/main/app/Neutrodyne \
-            desktopApp/build/desktop-packaging/runtime-classpath.txt \
+            desktopApp/build/desktop-packaging/runtime-classpath*.txt \
             desktopApp/build/bundled-runtime/linux-x64/jdk
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

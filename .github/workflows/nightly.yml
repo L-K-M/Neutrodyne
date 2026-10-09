@@ -416,7 +416,15 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          cp -r desktopApp/build/compose/binaries/main/app/Neutrodyne* dist/ 2>/dev/null || true
+          app="desktopApp/build/compose/binaries/main/app/Neutrodyne.app"
+          if [ -d "$app" ]; then
+            # BSD cp -r follows symlinks — the jlink legal/ links become plain
+            # files and the sealed bundle fails --verify (nightly 37868304885:
+            # the ditto-extracted zip verified, the cp -r dist copy did not).
+            ditto "$app" dist/Neutrodyne.app
+          else
+            cp -r desktopApp/build/compose/binaries/main/app/Neutrodyne* dist/ 2>/dev/null || true
+          fi
           find desktopApp/build/compose/binaries/main \( -name '*.msi' -o -name '*.dmg' \) -print0 | xargs -0 -r -I{} cp {} dist/
           find desktopApp/build/desktop-packaging -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.tar.gz' -o -name '*.zip' \) -print0 | xargs -0 -r -I{} cp {} dist/
           ls -la dist/

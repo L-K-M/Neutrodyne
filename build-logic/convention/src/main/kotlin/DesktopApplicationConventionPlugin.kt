@@ -259,8 +259,12 @@ private fun configureNativeDistributions(
             shortcut = false
             dirChooser = false
             // Mandatory: jpackage's per-user default would be %LOCALAPPDATA%\Neutrodyne\ — the data
-            // directory its uninstaller deletes (11 Windows MSI and ZIP).
-            installationPath = "Programs\\$DESKTOP_PACKAGE_NAME"
+            // directory its uninstaller deletes (11 Windows MSI and ZIP). Forward slashes, not
+            // "Programs\\Neutrodyne": Compose feeds jpackage an @args file whose JDK parser eats
+            // the backslash as an escape, and the MSI installed to a flat ProgramsNeutrodyne
+            // (nightly 37868304885). Path.resolve still treats '/' as a separator on Windows, so
+            // the WiX Directory tree nests LocalAppDataFolder\Programs\Neutrodyne.
+            installationPath = "Programs/$DESKTOP_PACKAGE_NAME"
             iconFile.set(project.file("icons/neutrodyne.ico"))
             fileAssociation(
                 mimeType = OPML_MIME_TYPE,

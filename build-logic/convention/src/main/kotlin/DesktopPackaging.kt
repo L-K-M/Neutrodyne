@@ -331,8 +331,21 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val runtimeClasspath: ConfigurableFileCollection
 
+    @get:Input
+    abstract val installKind: Property<String>
+
     @get:OutputFile
     abstract val manifest: RegularFileProperty
+
+    /**
+     * The same rows under `runtime-classpath-<installKind>.txt`: the own-app jar embeds
+     * `installKind` in build-info.properties, so each packaging invocation's jar mangles
+     * differently and one shared manifest cannot cover every package built in one job
+     * (nightly 37868304885: the deb and rpm jars missed the manifest the tar.gz
+     * invocation wrote). check-desktop-image.sh picks the image's kind file.
+     */
+    @get:OutputFile
+    abstract val kindManifest: RegularFileProperty
 
     @TaskAction
     fun write() {
@@ -343,6 +356,7 @@ abstract class WriteDesktopRuntimeClasspath : DefaultTask() {
                 .toSortedSet()
                 .joinToString("\n", postfix = "\n")
         manifest.get().asFile.writeText(lines)
+        kindManifest.get().asFile.writeText(lines)
     }
 
     /**
@@ -677,6 +691,12 @@ internal fun Project.registerDesktopPackagingTasks(
             },
         )
         runtimeClasspath.from(tasks.named("jar"))
+        installKind.set(installKindProperty.orElse("dev"))
         manifest.set(layout.buildDirectory.file("desktop-packaging/runtime-classpath.txt"))
+        kindManifest.set(
+            installKind.flatMap { kind ->
+                layout.buildDirectory.file("desktop-packaging/runtime-classpath-$kind.txt")
+            },
+        )
     }
 }

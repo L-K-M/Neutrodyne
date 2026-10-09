@@ -208,6 +208,30 @@ class DesktopPackagingTest {
     }
 
     @Test
+    fun `the classpath manifest is duplicated under the install kind's name`() {
+        // installKind sits in build-info.properties inside the own-app jar, so
+        // every packaging invocation's desktopApp jar mangles differently and
+        // one shared manifest cannot cover all of a matrix job's packages
+        // (nightly 37868304885: the deb and rpm jars missed the manifest the
+        // tar.gz invocation wrote). The checker resolves the image's
+        // runtime-classpath-<kind>.txt, so the task must write it.
+        val root = Files.createTempDirectory("classpath-manifest").toFile()
+        try {
+            val jar = jar(File(root, "j"), "one.jar", 1)
+            val task = classpathManifestTask(root, jar)
+
+            task.write()
+
+            val shared = File(root, "manifest.txt").readText()
+            val kind = File(root, "runtime-classpath-deb.txt").readText()
+            assertEquals(shared, kind)
+            assert(kind.contains("  ${imageJarName(jar)}\n")) { kind }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `the hicolor mapping fails when icons png is missing or empty`() {
         val root = Files.createTempDirectory("hicolor").toFile()
         try {
@@ -274,7 +298,9 @@ class DesktopPackagingTest {
                 .register("writeDesktopRuntimeClasspath", WriteDesktopRuntimeClasspath::class.java)
                 .get()
         task.runtimeClasspath.from(*jars)
+        task.installKind.set("deb")
         task.manifest.fileValue(File(root, "manifest.txt"))
+        task.kindManifest.fileValue(File(root, "runtime-classpath-deb.txt"))
         return task
     }
 

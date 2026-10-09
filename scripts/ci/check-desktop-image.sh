@@ -78,17 +78,47 @@ file_bytes() { stat -c %s "$1" 2>/dev/null || stat -f %z "$1"; }
 # bytes. WriteDesktopRuntimeClasspath produces the identical digest.
 jar_content_hash() {
     python3 - "$1" <<'PYEOF'
-import sys, zipfile, hashlib
+import os, shutil, subprocess, sys, tempfile, zipfile, hashlib
 path = sys.argv[1]
 try:
     z = zipfile.ZipFile(path)
 except zipfile.BadZipFile:
     print(hashlib.sha256(open(path, 'rb').read()).hexdigest())
     sys.exit(0)
+
+# macOS packaging signs every Mach-O it finds, inside jars too (nightly
+# 37868304885: libsqliteJni.dylib and libjnidispatch.jnilib differ from the
+# classpath artifacts the manifest hashed). The manifest side is pre-signing,
+# so image-side Mach-O entries are compared with the signature stripped —
+# codesign --remove-signature on a scratch copy restores the unsigned bytes.
+# Only *.dylib/*.jnilib/*.so entries reach codesign: cafebabe would otherwise
+# fire on every .class file.
+CODESIGN = shutil.which('codesign')
+MACHO_MAGICS = (b'\xfe\xed\xfa\xce', b'\xce\xfa\xed\xfe',
+                b'\xfe\xed\xfa\xcf', b'\xcf\xfa\xed\xfe',
+                b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca')
+
+def unsigned(data, name):
+    if not (CODESIGN
+            and name.rsplit('.', 1)[-1] in ('dylib', 'jnilib', 'so')
+            and data[:4] in MACHO_MAGICS):
+        return data
+    fd, tmp = tempfile.mkstemp()
+    try:
+        with os.fdopen(fd, 'wb') as f:
+            f.write(data)
+        if subprocess.run([CODESIGN, '--remove-signature', tmp],
+                          capture_output=True).returncode == 0:
+            with open(tmp, 'rb') as f:
+                return f.read()
+        return data
+    finally:
+        os.unlink(tmp)
+
 outer = hashlib.sha256()
 with z:
     for i in sorted(z.infolist(), key=lambda i: i.filename):
-        h = hashlib.sha256(b'' if i.is_dir() else z.read(i)).hexdigest()
+        h = hashlib.sha256(b'' if i.is_dir() else unsigned(z.read(i), i.filename)).hexdigest()
         outer.update(i.filename.encode('utf-8') + b'\0' + h.encode('ascii') + b'\n')
 print(outer.hexdigest())
 PYEOF
@@ -106,6 +136,45 @@ dir_mib() {
     local kb
     kb="$(du -sk "$1" | cut -f1)"
     echo $((kb / 1024))
+}
+
+# manifest_for_image <img> — the own-app jar embeds installKind in
+# build-info.properties, so every packaging invocation mangles desktopApp.jar
+# differently and no single manifest can cover all packages of one matrix job
+# (nightly 37868304885: the deb and rpm jars missed the shared manifest the
+# tar.gz invocation wrote). writeDesktopRuntimeClasspath therefore also writes
+# runtime-classpath-<kind>.txt; when the image's kind file exists it is
+# authoritative, otherwise the shared runtime-classpath.txt covers dev images
+# and pre-kind builds. A kind outside [A-Za-z0-9._-] never reaches the path.
+manifest_for_image() {
+    local img="$1" jar kind
+    jar="$(find "$img" -name 'desktopApp-*.jar' -print -quit)"
+    kind=""
+    if [ -n "$jar" ] && command -v python3 >/dev/null 2>&1; then
+        kind="$(python3 - "$jar" <<'PYEOF'
+import sys, zipfile
+try:
+    with zipfile.ZipFile(sys.argv[1]) as z:
+        for line in z.read('build-info.properties').decode('utf-8', 'replace').splitlines():
+            if line.startswith('installKind='):
+                print(line.split('=', 1)[1].strip())
+                break
+except Exception:
+    pass
+PYEOF
+)"
+    fi
+    case "$kind" in
+        ''|*[!A-Za-z0-9._-]*)
+            echo "$CLASSPATH_MANIFEST" ;;
+        *)
+            local pk="${CLASSPATH_MANIFEST%.txt}-$kind.txt"
+            if [ -f "$pk" ]; then
+                echo "$pk"
+            else
+                echo "$CLASSPATH_MANIFEST"
+            fi ;;
+    esac
 }
 
 # ver_gt A B — true when dotted version A is above B (sort -V is GNU-only).
@@ -236,24 +305,50 @@ check_ffmpeg() {
 # libskiko native beside it with a .sha256 sidecar. is_skiko_stub constrains the
 # exemption to exactly that shape — any other skiko-named jar is a violation.
 
-# jar_stub_only <jar> — the stub is a real jar whose entries are only directory
-# and META-INF metadata: the classpath jar's payload lives in the extracted
-# native, so a .class or any other payload under the stub name is the real jar
-# (or worse) in disguise. python3 is the same interpreter check_no_tests uses
-# for jar entries; without it the exemption cannot be verified and does not
-# apply.
+# jar_stub_only <jar> — the stub is a real jar whose entries are only
+# directories, META-INF metadata and the skiko natives for the *other* targets
+# with their .sha256 sidecars: packaging extracts only the host arch's libskiko
+# loose beside the stub and leaves the rest inside (the real macOS artifact
+# kept libskiko-macos-x64.dylib + .sha256, nightly 37868304885). A .class or
+# any other payload under the stub name is the real jar (or worse) in
+# disguise. python3 is the same interpreter check_no_tests uses for jar
+# entries; without it the exemption cannot be verified and does not apply.
 jar_stub_only() {
     command -v python3 >/dev/null 2>&1 || return 1
     python3 - "$1" <<'PYEOF'
-import sys, zipfile
+import re, sys, zipfile
+NATIVE = r'^(?:libskiko-|skiko-)[^/]+\.(?:so|dylib|dll)$'
 try:
     with zipfile.ZipFile(sys.argv[1]) as z:
         ok = all(n.endswith('/') or
-                 (n.startswith('META-INF/') and not n.endswith('.class'))
+                 (n.startswith('META-INF/') and not n.endswith('.class')) or
+                 re.match(NATIVE, n) or
+                 (n.endswith('.sha256') and '/' not in n)
                  for n in z.namelist())
     sys.exit(0 if ok else 1)
 except Exception:
     sys.exit(1)
+PYEOF
+}
+
+# jar_stub_natives <jar> <dir> — extract the stub's retained natives and their
+# in-jar .sha256 sidecars for sidecar_sha256_matches; fails when a native and
+# its sidecar do not pair off exactly.
+jar_stub_natives() {
+    python3 - "$1" "$2" <<'PYEOF'
+import os, re, sys, zipfile
+NATIVE = r'^(?:libskiko-|skiko-)[^/]+\.(?:so|dylib|dll)$'
+jar, out = sys.argv[1], sys.argv[2]
+with zipfile.ZipFile(jar) as z:
+    names = set(z.namelist())
+    natives = {n for n in names if re.match(NATIVE, n)}
+    sidecars = {n[:-len('.sha256')] for n in names
+                if '/' not in n and n.endswith('.sha256')}
+    if natives != sidecars:
+        sys.exit(1)
+    for n in sorted(natives) + sorted(s + '.sha256' for s in sidecars):
+        with open(os.path.join(out, n), 'wb') as f:
+            f.write(z.read(n))
 PYEOF
 }
 
@@ -296,9 +391,25 @@ is_skiko_stub() {
     arch="$(printf '%s' "$arch" | sed 's/[].[^$*\/]/\\&/g')"
     grep -qE "  skiko-awt-runtime-${os}-${arch}-[^ ]+\.jar\$" "$manifest" || return 1
     jar_stub_only "$path" || return 1
-    # The native lands beside the stub with a .sha256 sidecar pinning its bytes.
+    # Natives the stub still carries for other targets must match their in-jar
+    # .sha256 sidecars — the same pin as the extracted native's, with the same
+    # signature normalization (the macOS stub's libskiko-macos-x64.dylib is
+    # signed in place, nightly 37868304885).
     dir="${path%/*}"
-    local found=0 ok=1
+    local tmp n ok=1 found=0
+    tmp="$(mktemp -d)"
+    jar_stub_natives "$path" "$tmp" || ok=0
+    for n in "$tmp"/*; do
+        [ -e "$n" ] || break
+        case "$n" in
+            *.sha256) continue ;;
+        esac
+        sidecar_sha256_matches "$n" || ok=0
+    done
+    rm -rf "$tmp"
+    [ "$ok" = 1 ] || return 1
+    # The native lands beside the stub with a .sha256 sidecar pinning its bytes.
+    ok=1
     for so in "$dir"/libskiko-*.so "$dir"/libskiko-*.dylib "$dir"/skiko-*.dll; do
         [ -f "$so" ] || continue
         found=1
@@ -490,6 +601,10 @@ check_codesign() {
         return
     fi
     if ! codesign --verify --deep --strict "$img"; then
+        # The terse error does not name the broken entry; the verbose rerun
+        # lists each sealed resource that fails ("file modified: …").
+        codesign --verify --deep --strict --verbose=4 "$img" 2>&1 \
+            | grep -iE 'invalid|missing|modified|mismatch' | head -10 || true
         fail "codesign --verify --deep --strict failed on $img"
     fi
 }
@@ -618,7 +733,7 @@ scan_dir() {
     check_forbidden_names "$img"
     check_runtime_layout "$img"
     check_ffmpeg "$img"
-    check_jars "$img" "$CLASSPATH_MANIFEST"
+    check_jars "$img" "$(manifest_for_image "$img")"
     check_python_tree "$img"
     check_glibc "$img"
     check_no_tests "$img"

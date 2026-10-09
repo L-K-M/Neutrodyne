@@ -102,6 +102,19 @@ else
     t_fail "the RPM override is named neutrodyne.spec and carries the Requires"
 fi
 
+# 4. The Windows installationPath uses '/', never '\'. Compose hands jpackage
+#    its arguments in an @args.txt file whose JDK parser consumes the backslash
+#    as an escape, so "Programs\Neutrodyne" arrived as a flat "ProgramsNeutrodyne"
+#    and the MSI installed to %LOCALAPPDATA%\ProgramsNeutrodyne (nightly
+#    37868304885). Path.resolve still treats '/' as a separator on Windows, so
+#    the WiX Directory tree keeps nesting LocalAppDataFolder\Programs\Neutrodyne.
+if grep -qE 'installationPath = "Programs/' "$PLUGIN" \
+    && ! grep -qE 'installationPath = "[^"]*\\\\' "$PLUGIN"; then
+    t_ok "the Windows installationPath uses '/' separators"
+else
+    t_fail "the Windows installationPath uses '/' separators"
+fi
+
 echo
 if [ "$FAILED" -gt 0 ]; then
     echo "desktop-packaging.test: $FAILED case(s) failing" >&2
