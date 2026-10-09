@@ -57,6 +57,7 @@ class TimestampLinkifierTest {
         assertEquals(emptyList(), timestamps("1.10:30"))
         // A digit or colon after it blocks too.
         assertEquals(emptyList(), timestamps("10:301"))
+        assertEquals(emptyList(), timestamps("10:30:"))
     }
 
     @Test

@@ -37,8 +37,9 @@ public object EpisodeKeys {
 
     /**
      * The key of a stored episode for [version] (restore and sync matching). Only v1 exists today.
-     * Invariant: [KeyInput.descriptionHead] must be exactly `descriptionHtml.take(500)` of the same
-     * stored description, or `h:`-fallback matching diverges between ingest and restore.
+     * Invariant: [KeyInput.descriptionHead] must be exactly the head of the same stored description —
+     * the first 500 UTF-16 code units, extended by one when the cut splits a surrogate pair —
+     * or `h:`-fallback matching diverges between ingest and restore.
      */
     public fun keyFor(
         e: KeyInput,
@@ -87,7 +88,28 @@ public object EpisodeKeys {
         // Lenient parsers can emit U+001F for &#x1F; despite XML 1.0, so field content alone
         // could forge the boundary. fieldEsc leaves no separator byte in the title; the
         // description is the last field and needs no escaping.
-        "h:" + (title.orEmpty().fieldEsc() + "\u001F" + description.orEmpty().take(500)).encodeUtf8().sha1().hex()
+        "h:" +
+            (title.orEmpty().fieldEsc() + "\u001F" + description.orEmpty().headUnits())
+                .encodeUtf8()
+                .sha1()
+                .hex()
+}
+
+/**
+ * The first [DESC_HEAD_UNITS] UTF-16 code units, extended by one when the cut would leave a lone
+ * high surrogate: a surrogate half encodes as `?` in UTF-8, so descriptions differing only past
+ * the cut would otherwise hash identically. `KeyInput.descriptionHead` must be stored under the
+ * same rule (idempotent — applying it to an already-truncated head is a no-op).
+ */
+private const val DESC_HEAD_UNITS = 500
+
+private fun String.headUnits(): String {
+    val head = take(DESC_HEAD_UNITS)
+    return if (head.lastOrNull()?.isHighSurrogate() == true && length > head.length) {
+        head + this[head.length]
+    } else {
+        head
+    }
 }
 
 /**

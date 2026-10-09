@@ -44,6 +44,14 @@ class EnclosureTypesTest {
     }
 
     @Test
+    fun declaredTypeWinsOverExtension() {
+        // A declared playable type is authoritative; the URL extension only fills in when the
+        // declared type is absent or unusable.
+        assertEquals("video/mp4", EnclosureTypes.effective("video/mp4", "https://e.example/a.mp3"))
+        assertEquals("audio/mpeg", EnclosureTypes.effective("audio/mpeg", "https://e.example/a.mp4"))
+    }
+
+    @Test
     fun unknownTypeInfersFromExtension() {
         assertEquals("audio/mpeg", EnclosureTypes.effective("application/octet-stream", "https://e.example/a.mp3"))
         assertEquals("audio/mp4", EnclosureTypes.effective(null, "https://e.example/a.m4a"))

@@ -24,7 +24,9 @@ public object FeedDates {
     private const val TWO_DIGIT_YEAR_RECENT_PREFIX = 2000
     private const val TWO_DIGIT_YEAR_OLD_PREFIX = 1900
 
-    private val weekdayPrefix = Regex("""^\p{L}{2,}\.?,?\s+""")
+    // The comma or a space ends the weekday; a comma need not be followed by a space
+    // ("Tue,1 Oct 2024" occurs in real feeds), but a bare letter-prefix is not stripped.
+    private val weekdayPrefix = Regex("""^\p{L}{2,}\.?(?:,|\s)\s*""")
 
     /** Localised month abbreviations → English (German, French, Spanish, Italian, Dutch, Portuguese; heuristic). */
     private val localisedMonths: Map<String, String> =

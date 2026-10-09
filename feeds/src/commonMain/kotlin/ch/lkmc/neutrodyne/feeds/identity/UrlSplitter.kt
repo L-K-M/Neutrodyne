@@ -35,7 +35,16 @@ private const val DEFAULT_HTTPS_PORT = "443"
  * throws; parts that are missing are null or empty.
  */
 internal fun splitLenient(raw: String): UrlParts {
-    val withoutFragment = raw.trim().substringBefore('#')
+    // WHATWG removes ASCII tab/CR/LF anywhere in the URL before parsing; match that so a feed
+    // URL copied out of HTML with a stray control still gets an identity. The `any` scan keeps
+    // the common case allocation-free.
+    val clean =
+        if (raw.any { it == '\t' || it == '\n' || it == '\r' }) {
+            raw.filterNot { it == '\t' || it == '\n' || it == '\r' }
+        } else {
+            raw
+        }
+    val withoutFragment = clean.trim().substringBefore('#')
 
     val schemeMatch = schemePrefix.find(withoutFragment)
     val scheme = schemeMatch?.groupValues?.get(1)?.lowercase()

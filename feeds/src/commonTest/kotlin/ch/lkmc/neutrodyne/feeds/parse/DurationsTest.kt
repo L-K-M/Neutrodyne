@@ -60,6 +60,10 @@ class DurationsTest {
         assertNull(Durations.parseMs("48:00:01"))
         assertEquals(48 * 3_600_000L, Durations.parseMs("48:00:00"))
         assertEquals(48 * 3_600_000L, Durations.parseMs("172800"))
+        // The cap applies after the fraction, not before: values over the cap must not truncate in.
+        assertEquals(48 * 3_600_000L - 1, Durations.parseMs("47:59:59.999"))
+        assertNull(Durations.parseMs("172800.5"))
+        assertNull(Durations.parseMs("48:00:00.1"))
         // Absurd magnitudes are rejected by the per-part cap before any multiplication — never wrapped.
         assertNull(Durations.parseMs("9223372036854775807"))
         assertNull(Durations.parseMs("999999999999999999999999"))

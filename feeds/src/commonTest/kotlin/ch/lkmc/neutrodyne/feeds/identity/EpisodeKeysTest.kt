@@ -119,6 +119,28 @@ class EpisodeKeysTest {
     }
 
     @Test
+    fun headKeyTruncationNeverEndsOnALoneSurrogate() {
+        // take(500) can cut inside a surrogate pair: the lone high surrogate encodes as '?' in
+        // UTF-8, so two descriptions differing only past the cut would hash identically. The cut
+        // extends to the code-point boundary instead.
+        val base = "x".repeat(499)
+        assertNotEquals(
+            EpisodeKeys.primary(episode(description = base + "\uD83D\uDE00")),
+            EpisodeKeys.primary(episode(description = base + "\uD83D\uDE01")),
+        )
+        // A lone high surrogate followed by a non-surrogate stays distinct too.
+        assertNotEquals(
+            EpisodeKeys.primary(episode(description = base + "\uD83Dz")),
+            EpisodeKeys.primary(episode(description = base + "\uD83Dw")),
+        )
+        // The stored-head path applies the same boundary rule, so ingest/restore agree.
+        assertEquals(
+            EpisodeKeys.primary(episode(description = base + "\uD83D\uDE00")),
+            EpisodeKeys.keyFor(KeyInput(descriptionHead = base + "\uD83D\uDE00"), 1),
+        )
+    }
+
+    @Test
     fun precedenceGuidEnclosureTitleLinkHead() {
         val both = episode(guid = "g-1", enclosureUrl = "https://example.com/a.mp3")
         assertEquals("g:g-1", EpisodeKeys.primary(both))

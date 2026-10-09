@@ -1126,9 +1126,11 @@ Stored as `TEXT` in `episode.identityKey`, unique per podcast. Grammar: `key := 
 | `u` | `UrlNormalizer.forIdentity(primaryEnclosureUrl)` | `u:` + normalised URL |
 | `t` | lowercase hex SHA-1 of `title.trim().lowercase(Locale.ROOT) + "\|" + pubDate.truncatedTo(DAYS).toString()` | `t:3f2a…` (40 hex) |
 | `l` | lowercase hex SHA-1 of `link.trim()` | `l:9c1b…` |
-| `h` | lowercase hex SHA-1 of `esc(title.orEmpty()) + "\u001F" + description.orEmpty().take(500)`, where `esc` doubles `\` and writes U+001F as the six characters `\u001F`, so title content cannot forge the boundary | `h:07de…` (40 hex) |
+| `h` | lowercase hex SHA-1 (over the input's UTF-8 bytes) of `esc(title.orEmpty()) + "\u001F"` + the description head — `description.orEmpty()` truncated to 500 UTF-16 code units, extended by one when the cut would split a surrogate pair — where `esc` doubles `\` and writes U+001F as the six ASCII characters `\u001F` (backslash, `u`, `0`, `0`, `1`, `F`), so title content cannot forge the boundary | `h:07de…` (40 hex) |
 
 YouTube episodes always take the `g` branch (`guid = yt:video:{videoId}`). A GUID repeated inside one document falls back to `u` for the second occurrence (03).
+
+The `h` and `t` concatenations are unambiguous by construction: `esc` output never contains a raw U+001F (so the first separator in the `h` input is authoritative), and an ISO-8601 date never contains `|` (so the last `|` in the `t` input is authoritative). Any change to `esc` must preserve the first property.
 
 ### Key versions
 
