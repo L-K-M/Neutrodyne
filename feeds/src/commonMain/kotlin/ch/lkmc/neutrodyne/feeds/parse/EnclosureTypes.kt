@@ -24,6 +24,9 @@ public object EnclosureTypes {
             // "application.x-mpegurl" (sic) is seen in the Podcasting 2.0 reference feed.
             "application.x-mpegurl" to "application/x-mpegurl",
             "application/vnd.apple.mpegurl" to "application/x-mpegurl",
+            // Legacy m3u MIME types are playlists (HLS fallback), not playable audio.
+            "audio/x-mpegurl" to "application/x-mpegurl",
+            "audio/mpegurl" to "application/x-mpegurl",
         )
 
     /** URL path extension → effective type, used when the declared type is not audio, video or HLS. */
@@ -62,7 +65,9 @@ public object EnclosureTypes {
                 ?.trim()
                 ?.lowercase()
                 ?.takeIf { it.isNotEmpty() }
-        val mapped = declared?.let { aliases[it] ?: it }
+        // A declared type with an empty subtype ("audio/") is garbage: dropping it keeps the
+        // prefix checks in [primary] and [isVideo] sound.
+        val mapped = declared?.let { aliases[it] ?: it }?.takeUnless { it.endsWith('/') }
         if (mapped != null &&
             (mapped.startsWith("audio/") || mapped.startsWith("video/") || mapped == "application/x-mpegurl")
         ) {

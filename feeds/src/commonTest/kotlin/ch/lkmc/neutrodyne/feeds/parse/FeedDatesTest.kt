@@ -173,4 +173,41 @@ class FeedDatesTest {
         assertNull(FeedDates.parse("2026-10-03junk"))
         assertEquals(1790985600000L, FeedDates.parse("2026-10-03"))
     }
+
+    @Test
+    fun isoSpaceBeforeOffsetStillParses() {
+        // 'T'-separated ISO with a stray space before the offset: the only space is the offset's,
+        // so the offset strip must run before the date/time ' '→'T' substitution.
+        assertEquals(
+            FeedDates.parse("2024-10-03T10:00:00+02:00"),
+            FeedDates.parse("2024-10-03T10:00:00 +02:00"),
+        )
+        assertEquals(
+            FeedDates.parse("2024-10-03T10:00:00-05:00"),
+            FeedDates.parse("2024-10-03T10:00:00 -0500"),
+        )
+        assertEquals(
+            FeedDates.parse("2024-10-03T10:00:00Z"),
+            FeedDates.parse("2024-10-03T10:00:00 z"),
+        )
+        // Named zones are rewritten to ±HHMM first and hit the same code path.
+        assertEquals(
+            FeedDates.parse("2024-10-03T10:00:00-05:00"),
+            FeedDates.parse("2024-10-03T10:00:00 EST"),
+        )
+        // The two-space form keeps working either order.
+        assertEquals(
+            FeedDates.parse("2024-10-03T10:00:00+02:00"),
+            FeedDates.parse("2024-10-03 10:00:00 +0200"),
+        )
+    }
+
+    @Test
+    fun unicodeSpaceSeparatorsParse() {
+        // The "typeset" commitment covers the whole Unicode space-separator class, not only
+        // NBSP/narrow NBSP: thin space U+2009 and ideographic space U+3000 show up in feeds.
+        val expected = FeedDates.parse("3 Oct 2024 10:00 GMT")
+        assertEquals(expected, FeedDates.parse("3 Oct\u20092024\u200910:00 GMT"))
+        assertEquals(expected, FeedDates.parse("3\u3000Oct\u30002024 10:00 GMT"))
+    }
 }

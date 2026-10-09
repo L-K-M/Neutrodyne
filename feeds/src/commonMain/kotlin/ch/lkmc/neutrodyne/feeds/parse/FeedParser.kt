@@ -61,4 +61,6 @@ public data class ParseLimits(
     val maxUrlChars: Int = 4_096,
     val maxTagAttributes: Int = 1_000,
     val prologScanBytes: Int = 64 * 1024,
+    /** Document bytes the buffered read accepts; over this the parse fails `HOSTILE` (fetch cap parity). */
+    val maxDocumentBytes: Int = 32 * 1024 * 1024,
 )
