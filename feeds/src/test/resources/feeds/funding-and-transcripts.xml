@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:podcast="https://podcastindex.org/namespace/1.0">
+  <channel>
+    <title>Funding And Transcripts</title>
+    <podcast:funding url="https://example.com/donate">Donate to the show and read a very long funding label that goes past the one hundred twenty eight character limit so the parser must cut it here and never keep more than the allowed maximum</podcast:funding>
+    <item>
+      <title>Transcribed episode</title><guid>fund-1</guid>
+      <enclosure url="https://cdn.example.com/ft1.mp3" length="10" type="audio/mpeg"/>
+      <podcast:transcript url="https://example.com/t1.vtt" type="text/vtt" language="en" rel="captions"/>
+      <podcast:transcript url="https://example.com/t1.srt" type="application/x-subrip" language="de"/>
+      <podcast:funding url="https://example.com/item-donate">Item-level funding</podcast:funding>
+    </item>
+  </channel>
+</rss>

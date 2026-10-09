@@ -1,0 +1,47 @@
+{
+  "format": "RSS2",
+  "funding": [
+    {
+      "title": "Support the show",
+      "url": "https://example.com/support"
+    }
+  ],
+  "items": [
+    {
+      "chaptersType": "application/json+chapters",
+      "chaptersUrl": "https://example.com/ch1.json",
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 1,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/p1.mp3"
+        }
+      ],
+      "episodeDisplay": "Ep. 12",
+      "episodeNumber": "12",
+      "feedOrder": 0,
+      "guid": "p20-1",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 1,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/p1.mp3"
+      },
+      "season": 3,
+      "seasonName": "Season Three",
+      "title": "P2.0 episode",
+      "transcripts": [
+        {
+          "language": "en",
+          "type": "application/srt",
+          "url": "https://example.com/t1.srt"
+        }
+      ]
+    }
+  ],
+  "locked": true,
+  "medium": "podcast",
+  "podcastGuid": "ada1e7c6-9f4e-5e8a-9e9b-2c1b5e6f7d8e",
+  "title": "Podcasting 2.0 Canonical"
+}

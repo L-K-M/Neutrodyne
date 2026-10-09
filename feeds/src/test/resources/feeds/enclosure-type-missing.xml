@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Enclosure Type Missing</title>
+    <item><title>No type attribute</title><guid>etm-1</guid>
+      <enclosure url="https://cdn.example.com/t1.mp3" length="1000"/></item>
+    <item><title>Empty type attribute</title><guid>etm-2</guid>
+      <enclosure url="https://cdn.example.com/t2.ogg" length="1000" type=""/></item>
+  </channel>
+</rss>

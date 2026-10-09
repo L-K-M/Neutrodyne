@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>CDATA Description</title>
+    <item>
+      <title>CDATA wrapped markup</title>
+      <guid>cdata-1</guid>
+      <enclosure url="https://cdn.example.com/c1.mp3" length="10" type="audio/mpeg"/>
+      <description><![CDATA[<p>Real markup <em>inside</em> CDATA with a <a href="https://example.com/x">link</a>.</p>]]></description>
+    </item>
+  </channel>
+</rss>

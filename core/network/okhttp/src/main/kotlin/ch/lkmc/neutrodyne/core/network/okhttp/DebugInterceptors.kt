@@ -3,6 +3,8 @@
 package ch.lkmc.neutrodyne.core.network.okhttp
 
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.common.ConnectionPoolEvictor
+import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.common.LocalNetworkAccess
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.UserAgentProvider
@@ -52,6 +54,28 @@ interface NetworkIslandBindings {
             hints: DnsFamilyHints,
             @DebugInterceptors debugInterceptors: Set<Interceptor>,
         ): CoreClients = CoreClients(ua, lanGuard, hints, debugInterceptors)
+
+        @Provides
+        fun authInterceptor(lookup: CredentialLookup): AuthInterceptor = AuthInterceptor(lookup)
+
+        /** The per-kind client family every purpose client derives from (01 Interceptors). */
+        @Provides
+        @SingleIn(AppScope::class)
+        fun networkClients(
+            core: CoreClients,
+            auth: AuthInterceptor,
+        ): NetworkClients = NetworkClients(core, auth)
+
+        /**
+         * M1a: no `SecretStore` yet — the lookup never answers, so the auth interceptor and
+         * `FeedFetcher`'s 401 path are inert until M1b's store replaces this binding.
+         */
+        @Provides
+        fun credentialLookup(): CredentialLookup = CredentialLookup.None
+
+        /** 11's wake path — the shared pool bound under its eviction port. */
+        @Provides
+        fun connectionPoolEvictor(core: CoreClients): ConnectionPoolEvictor = core
 
         /**
          * The shared User-Agent string, built once from the shells' `PlatformInfo` and `BuildInfo`

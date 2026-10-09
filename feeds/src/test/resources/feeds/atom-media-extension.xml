@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
+  <title>Atom with Media RSS</title>
+  <entry>
+    <id>urn:entry:media</id>
+    <title>Atom title wins</title>
+    <published>2026-10-01T12:00:00Z</published>
+    <media:title>Media title must not replace the Atom title</media:title>
+    <media:content url="https://cdn.example.com/m1.mp3" medium="audio" type="audio/mpeg" fileSize="20"/>
+    <media:description>Extension description</media:description>
+  </entry>
+</feed>

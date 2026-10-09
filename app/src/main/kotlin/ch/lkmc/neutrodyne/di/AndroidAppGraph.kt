@@ -6,6 +6,8 @@ import androidx.work.WorkerFactory
 import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
+import ch.lkmc.neutrodyne.core.database.DatabaseOpener
+import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
@@ -39,8 +41,18 @@ interface AndroidAppGraph {
     /** Every feature's navigation entries (01 Feature entry installers). */
     val entryInstallers: Set<EntryProviderInstaller>
 
+    /** `MainActivity` maps `openState` onto the start-up gate (01 Splash and start-up gate). */
+    val databaseOpener: DatabaseOpener
+
     @Binds
     val MetroWorkerFactory.bindWorkerFactory: WorkerFactory
+
+    /**
+     * The one database accessor (02 Error handling and recovery): blocks a background caller until
+     * the open finishes, throws on the main thread before that — callers hold this lazily.
+     */
+    @Provides
+    fun provideDatabase(opener: DatabaseOpener): NeutrodyneDatabase = opener.requireDatabase()
 
     @DependencyGraph.Factory
     fun interface Factory {
