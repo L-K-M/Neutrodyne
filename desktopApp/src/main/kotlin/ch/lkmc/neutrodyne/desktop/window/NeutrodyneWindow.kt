@@ -47,6 +47,8 @@ import ch.lkmc.neutrodyne.desktop.resources.tray_quit
 import ch.lkmc.neutrodyne.desktop.resources.tray_show
 import ch.lkmc.neutrodyne.desktop.resources.tray_tooltip
 import ch.lkmc.neutrodyne.desktop.resources.window_title
+import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
+import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
@@ -79,6 +81,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     databaseOpener: DatabaseOpener,
     appScope: CoroutineScope,
     dataDir: Path,
+    viewModelFactory: MetroViewModelFactory,
     onQuitRequest: () -> Unit,
 ) {
     val state = rememberNeutrodyneWindowState()
@@ -109,6 +112,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
             startup = openState.toGateState(),
             onRetryStartup = { appScope.launch { suspendRunCatching { databaseOpener.awaitOpen() } } },
             dataDir = dataDir,
+            viewModelFactory = viewModelFactory,
         )
     }
 
@@ -246,13 +250,16 @@ private fun DesktopApplicationMenu(
  * [startup] carries the database open's gate state (01 Splash and start-up gate; `Ready` by
  * default, so the UI test and smoke render straight through). [onRetryStartup] is the failed
  * gate's "Try again"; [dataDir] arms the `DISK_FULL` variant's "Manage storage", which reveals
- * the data folder (08 Banners and the startup gate). The remaining callbacks stay inert until
- * playback, notices and sync wire their milestones.
+ * the data folder (08 Banners and the startup gate). [viewModelFactory] is the graph's
+ * `metroViewModel()` seam: every VM-backed entry resolves through it here, exactly where the
+ * window, the UI test and smoke mode compose the same tree (01 Feature entry installers).
+ * The remaining callbacks stay inert until playback, notices and sync wire their milestones.
  */
 @Composable
 internal fun NeutrodyneWindowContent(
     installers: Set<EntryProviderInstaller>,
     menuActions: DesktopMenuActions,
+    viewModelFactory: MetroViewModelFactory,
     startup: StartupGateState = StartupGateState.Ready,
     onRetryStartup: () -> Unit = {},
     dataDir: Path? = null,
@@ -262,6 +269,8 @@ internal fun NeutrodyneWindowContent(
     CompositionLocalProvider(
         LocalPlatformActions provides platformActions,
         LocalScrollbars provides DesktopScrollbars.style,
+        // 01 Feature entry installers: metroViewModel()/assistedMetroViewModel() resolve here.
+        LocalMetroViewModelFactory provides viewModelFactory,
     ) {
         NeutrodyneRoot(
             state = RootUiState.READY.copy(startup = startup),

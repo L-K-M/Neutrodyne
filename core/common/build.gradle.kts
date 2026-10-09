@@ -14,6 +14,8 @@ kotlin {
         commonMain.dependencies {
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.datetime)
+            // Monogram returns :core:model's MonogramSpec (08 "Initials"/"Hue").
+            implementation(project(":core:model"))
         }
         androidMain.dependencies {
             // WorkerKey's map type names ListenableWorker (01 DI: worker factories)

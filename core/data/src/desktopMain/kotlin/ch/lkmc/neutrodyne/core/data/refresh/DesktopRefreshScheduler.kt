@@ -30,9 +30,9 @@ import kotlinx.coroutines.sync.withLock
 @ContributesBinding(AppScope::class)
 // `DesktopRefreshLane` injects the concrete queue, not the `RefreshScheduler` the binding adds.
 @ExposeImplBinding
-internal class DesktopRefreshScheduler
+class DesktopRefreshScheduler
     @Inject
-    constructor(
+    internal constructor(
         private val db: NeutrodyneDatabase,
         private val rebaser: NextRefreshRebaser,
         private val poker: Provider<JobLanePoker>,
