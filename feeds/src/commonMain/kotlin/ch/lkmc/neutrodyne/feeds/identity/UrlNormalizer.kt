@@ -16,6 +16,7 @@ public object UrlNormalizer {
     private val unreservedChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~".toSet()
     private val hexDigits = "0123456789abcdefABCDEF".toSet()
     private val schemeWithAuthority = Regex("""^[A-Za-z][A-Za-z0-9+.\-]*://""")
+    private const val MAX_PORT = 65_535L
 
     /**
      * The identity form of an HTTP(S) URL, or null when the URL is not `http(s)` or has no valid host:
@@ -100,9 +101,16 @@ public object UrlNormalizer {
         return ascii.removeSuffix(".")
     }
 
-    /** A non-numeric port makes the whole URL invalid (lenient about everything else). */
-    private fun portIsValid(parts: UrlParts): Boolean =
-        parts.port == null || (parts.port.isNotEmpty() && parts.port.all { it in '0'..'9' })
+    /**
+     * A non-numeric or out-of-range port makes the whole URL invalid (lenient about everything
+     * else): it can never be fetched, so it gets no identity.
+     */
+    private fun portIsValid(parts: UrlParts): Boolean {
+        val raw = parts.port ?: return true
+        if (raw.isEmpty() || raw.any { it !in '0'..'9' }) return false
+        val value = raw.toLongOrNull() ?: return false
+        return value <= MAX_PORT
+    }
 
     /**
      * The port to keep: null when absent or default. Identity is scheme-free, so both well-known

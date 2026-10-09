@@ -104,9 +104,12 @@ public object FeedDates {
     private val spaceBeforeOffset = Regex("""\s+([+-]\d{2}:?\d{2}|Z)$""")
     private val utcMidnightOffset = UtcOffset.ZERO
 
+    /** Whitespace runs collapse to one ASCII space; `\s` alone misses the no-break spaces of typeset dates. */
+    private val whitespaceRun = Regex("""[\s\u00A0\u202F]+""")
+
     /** Parses a feed date to epoch milliseconds UTC, or null when no form matches (03 Dates). */
     public fun parse(raw: String): Long? {
-        var text = raw.trim().replace(Regex("\\s+"), " ")
+        var text = raw.replace(whitespaceRun, " ").trim()
 
         // Step 1: drop the weekday, even a wrong or localised one ("Mié,").
         text = weekdayPrefix.replaceFirst(text, "")

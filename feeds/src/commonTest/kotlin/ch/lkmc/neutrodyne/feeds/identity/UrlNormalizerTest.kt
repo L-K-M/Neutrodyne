@@ -86,7 +86,13 @@ class UrlNormalizerTest {
     fun dotSegmentRemovalIsLinear() {
         UrlNormalizer.forIdentity(dotDoc(1_000)) // warm-up outside the measurements
         // Best-of-3 per size: a single noisy run (GC, shared CI CPU) must not fail the ratio.
-        val small = (1..3).minOf { measureTime { UrlNormalizer.forIdentity(dotDoc(DOT_SMALL)) } }
+        // The small run asserts too: its result must be computed, not optimised away.
+        val small =
+            (1..3).minOf {
+                measureTime {
+                    assertEquals("example.com/x", UrlNormalizer.forIdentity(dotDoc(DOT_SMALL)))
+                }
+            }
         val large =
             (1..3).minOf {
                 measureTime {
@@ -161,6 +167,25 @@ class UrlNormalizerTest {
     fun ipv6HostKeepsBrackets() {
         assertEquals("[2001:db8::1]/feed", UrlNormalizer.forIdentity("http://[2001:DB8::1]:80/feed"))
         assertEquals("[2001:db8::1]:8080/feed", UrlNormalizer.forIdentity("http://[2001:db8::1]:8080/feed"))
+    }
+
+    @Test
+    fun ipv6BracketResidueIsRejected() {
+        // Anything after `]` that is not `:port` is invalid — the JDK's `URI` throws on the same
+        // input — so the residue must not be silently dropped into an identity.
+        assertNull(UrlNormalizer.forIdentity("http://[2001:db8::1]junk/feed"))
+        assertNull(UrlNormalizer.forIdentity("http://[2001:db8::1]x:8080/feed"))
+        assertNull(UrlNormalizer.origin("http://[2001:db8::1]junk"))
+    }
+
+    @Test
+    fun outOfRangePortsAreRejected() {
+        // Unfetchable URLs get no identity key: ports are 0..65535 (the JDK's `URI` accepts 65536 —
+        // the splitter must not). Digit strings beyond Long never reach the range check.
+        assertNull(UrlNormalizer.forIdentity("https://example.com:65536/x"))
+        assertNull(UrlNormalizer.forIdentity("https://example.com:99999999999999999999/x"))
+        assertNull(UrlNormalizer.origin("https://example.com:70000"))
+        assertEquals("example.com:65535/x", UrlNormalizer.forIdentity("https://example.com:65535/x"))
     }
 
     @Test

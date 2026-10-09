@@ -96,6 +96,24 @@ class FeedDatesTest {
     }
 
     @Test
+    fun nonBreakingSpacesNormalize() {
+        // Typeset feeds carry NBSP/narrow-NBSP between tokens; they are whitespace runs too.
+        assertEquals(
+            1791030896000L,
+            FeedDates.parse("Sat,\u00A003\u00A0Oct\u00A02026\u00A012:34:56\u00A0+0000"),
+        )
+        assertEquals(
+            1791030896000L,
+            FeedDates.parse("Sat,\u202F03\u202FOct\u202F2026\u202F12:34:56\u202F+0000"),
+        )
+        // A leading no-break space is dropped like ordinary leading whitespace.
+        assertEquals(
+            1791030896000L,
+            FeedDates.parse("\u00A0Sat, 03 Oct 2026 12:34:56 +0000"),
+        )
+    }
+
+    @Test
     fun dayIsValidatedAgainstTheMonth() {
         assertNull(FeedDates.parse("Mon, 31 Sep 2026 12:00:00 +0000")) // September has 30 days
         assertNull(FeedDates.parse("Mon, 30 Feb 2026 12:00:00 +0000"))

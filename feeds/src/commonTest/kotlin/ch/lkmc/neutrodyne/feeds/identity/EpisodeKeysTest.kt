@@ -44,7 +44,8 @@ class EpisodeKeysTest {
     @Test
     fun enclosureKeyUsesNormalisedUrl() {
         val key = EpisodeKeys.primary(episode(enclosureUrl = "HTTPS://CDN.Example.com:443/pod/a.mp3?x=1"))
-        assertTrue(key.startsWith("u:cdn.example.com/pod/a.mp3"))
+        // The query is part of the enclosure identity, not stripped.
+        assertEquals("u:cdn.example.com/pod/a.mp3?x=1", key)
     }
 
     @Test
@@ -53,6 +54,8 @@ class EpisodeKeysTest {
         val key = EpisodeKeys.titleDayKey(" Episode 42 ", 1791030896000L)
         assertEquals("t:1f46eba7092e57135e3aef7b6570849f3712b5c1", key)
         assertEquals(key, EpisodeKeys.primary(episode(title = "Episode 42", pubDate = 1791030896000L)))
+        // 23:59:59Z is still the same UTC day; a non-UTC default timezone would bucket it to Oct 4.
+        assertEquals(key, EpisodeKeys.titleDayKey("Episode 42", 1791071999000L))
     }
 
     @Test

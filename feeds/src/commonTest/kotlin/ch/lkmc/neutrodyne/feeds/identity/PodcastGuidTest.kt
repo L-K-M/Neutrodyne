@@ -3,7 +3,6 @@ package ch.lkmc.neutrodyne.feeds.identity
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 
 /** `PodcastGuid.parse` validation and `derive` reproducing both spec examples (03 podcast:guid). */

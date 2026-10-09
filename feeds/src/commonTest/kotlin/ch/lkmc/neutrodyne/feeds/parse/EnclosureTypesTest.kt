@@ -69,6 +69,9 @@ class EnclosureTypesTest {
         assertNull(EnclosureTypes.effective(null, "https://e.example/download"))
         // A declared but unplayable type survives (stored, never chosen as primary enclosure).
         assertEquals("text/html", EnclosureTypes.effective("text/html", "https://e.example/page"))
+        val html = Enclosure("https://e.example/page", "text/html", null, "text/html")
+        val unknown = Enclosure("https://e.example/x", null, null, null)
+        assertNull(EnclosureTypes.primary(listOf(html, unknown)))
     }
 
     @Test
@@ -88,6 +91,8 @@ class EnclosureTypesTest {
         assertSame(video, EnclosureTypes.primary(listOf(video, hls, unknown)))
         assertSame(hls, EnclosureTypes.primary(listOf(hls, unknown)))
         assertSame(audio, EnclosureTypes.primary(listOf(video, audio)))
+        // The adjacent pair this rule exists for: audio must beat the HLS playlist.
+        assertSame(audio, EnclosureTypes.primary(listOf(audio, hls)))
         assertNull(EnclosureTypes.primary(listOf(unknown)))
         assertNull(EnclosureTypes.primary(emptyList()))
         // Equal precedence: document order decides, not length or anything else.

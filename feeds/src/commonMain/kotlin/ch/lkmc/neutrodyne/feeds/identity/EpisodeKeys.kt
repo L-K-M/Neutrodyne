@@ -35,7 +35,11 @@ public object EpisodeKeys {
     /** Current-version primary first, then the keys of every older supported version (v1: `[primary]`). */
     public fun candidates(e: ParsedEpisode): List<String> = listOf(primary(e))
 
-    /** The key of a stored episode for [version] (restore and sync matching). Only v1 exists today. */
+    /**
+     * The key of a stored episode for [version] (restore and sync matching). Only v1 exists today.
+     * Invariant: [KeyInput.descriptionHead] must be exactly `descriptionHtml.take(500)` of the same
+     * stored description, or `h:`-fallback matching diverges between ingest and restore.
+     */
     public fun keyFor(
         e: KeyInput,
         version: Int,
@@ -80,7 +84,7 @@ public object EpisodeKeys {
         title: String?,
         description: String?,
     ): String =
-        // The U+001F separator cannot occur in XML text, so the boundary is collision-free.
+        // U+001F is not a legal XML 1.0 character, so the boundary is collision-free.
         "h:" + (title.orEmpty() + "\u001F" + description.orEmpty().take(500)).encodeUtf8().sha1().hex()
 }
 
