@@ -473,7 +473,7 @@ jobs:
                 0|3010) ;;
                 *) tail -50 msiexec-install.log 2>/dev/null; echo "::error::msiexec exited $rc"; exit 1 ;;
               esac
-              inst="$(cygpath -u "${LOCALAPPDATA:?LOCALAPPDATA unset}")/Programs/Neutrodyne"
+              inst="$(cygpath -u "${LOCALAPPDATA:?LOCALAPPDATA unset}")/Neutrodyne-App"
               [ -d "$inst" ] || {
                 # ExitCode 0 with no install root: the msiexec log is the
                 # evidence (INSTALLDIR resolution, skipped components), so it
