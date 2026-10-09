@@ -856,9 +856,9 @@ check_msi() {
         return
     fi
 
-    # INSTALLDIR must resolve under LocalAppDataFolder\Programs (11 Windows MSI and ZIP):
+    # INSTALLDIR must resolve under LocalAppDataFolder\Neutrodyne-App (11 Windows MSI and ZIP):
     # walk each Directory row's parent chain, prepend each DefaultDir's short name, and
-    # require one resolved path of the form LocalAppDataFolder\Programs\<dir>.
+    # require one resolved path of the form LocalAppDataFolder\Neutrodyne-App[\<subdir>].
     local dirs
     dirs="$("$ps" -NoProfile -Command "
         \$wi = New-Object -ComObject WindowsInstaller.Installer
@@ -884,8 +884,8 @@ check_msi() {
                 }
                 print path
             }
-        }' | grep -qF "LocalAppDataFolder\\Programs\\"; then
-        fail "MSI INSTALLDIR does not resolve under LocalAppDataFolder\\Programs (Directory table)"
+        }' | grep -qE "LocalAppDataFolder\\\\Neutrodyne-App(\\\\|$)"; then
+        fail "MSI INSTALLDIR does not resolve under LocalAppDataFolder\\Neutrodyne-App (Directory table)"
     fi
 
     # Every Binary-table entry must be on wix.lock's binaryTable list (fnmatch).

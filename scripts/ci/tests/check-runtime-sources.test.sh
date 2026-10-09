@@ -4,12 +4,11 @@
 # check-runtime-sources.test.sh — the --image native-file boundary of
 # scripts/ci/check-runtime-sources.sh (11 Runtime exception obligations and
 # checks): every native file under runtime/ must exist in the pinned Temurin
-# tree, and a Mach-O file that differs must compare equal only after the fake
-# signature strip both copies get (jpackage re-signs ad hoc, so raw bytes
-# legitimately differ). A real byte difference must still fail.
-#
-# codesign does not exist on this host, so a stub stands in for it; the stub's
-# --remove-signature removes the 8-byte trailer these fixtures carry.
+# tree, and a Mach-O file that differs must compare equal only on its
+# signature-normalized bytes (jpackage re-signs some natives ad hoc when it
+# seals the .app, so raw bytes legitimately differ; nightly 37886973484 flagged
+# libjli.dylib and libosxui.dylib while codesign --remove-signature could not
+# restore the published bytes). A real byte difference must still fail.
 #
 # Run: bash scripts/ci/tests/check-runtime-sources.test.sh
 # Exit 0 = all cases behave; 1 = at least one regression.
@@ -37,24 +36,35 @@ LOCK="$FIX_ROOT/desktopApp/runtime.lock"
 
 lock_prop() { grep -E "^$2=" "$1" | tail -1 | cut -d= -f2-; }
 
-# A fake codesign whose --remove-signature strips the 8-byte trailer jpackage's
-# ad-hoc re-signing stands in for here.
-STUBBIN="$WORK/bin"
-mkdir -p "$STUBBIN"
-cat > "$STUBBIN/codesign" <<'EOF'
-#!/usr/bin/env bash
-while [ $# -gt 0 ]; do
-    case "$1" in
-        --remove-signature)
-            head -c -8 "$2" > "$2.unsig" && mv "$2.unsig" "$2"
-            shift 2 ;;
-        *) shift ;;
-    esac
-done
-exit 0
-EOF
-chmod +x "$STUBBIN/codesign"
-export PATH="$STUBBIN:$PATH"
+# mk_macho <file> <variant> — a structurally valid thin Mach-O dylib. 'pub' is
+# adhoc-signed like the pinned archive; 'sig' is the same file re-signed by
+# jpackage (grown signature blob, page-rounded __LINKEDIT.vmsize, the real
+# libjli/libosxui pairing); 'mut' is 'sig' with a payload byte flipped.
+mk_macho() {
+    python3 - "$1" "$2" <<'PY'
+import struct, sys
+out, variant = sys.argv[1], sys.argv[2]
+content = b'payload bytes for libtest\n' + bytes(range(64))
+def seg64(vmsize, filesize):
+    return struct.pack('<II16sQQQQIIII', 0x19, 72, b'__LINKEDIT' + b'\0' * 6,
+                       0x1000, vmsize, 0, filesize, 7, 5, 0, 0)
+def cs(do, ds):
+    return struct.pack('<IIII', 0x1d, 16, do, ds)
+def hdr(ncmds, sizeofcmds):
+    return struct.pack('<IIIIIIII', 0xfeedfacf, 0x0100000c, 0, 6,
+                       ncmds, sizeofcmds, 0, 0)
+do = 32 + 88 + len(content)
+if variant == 'pub':
+    data = hdr(2, 88) + seg64(do + 64, do + 64) + cs(do, 64) + content + b'A' * 64
+else:
+    data = hdr(2, 88) + seg64(0x4000, do + 128) + cs(do, 128) + content + b'B' * 128
+    if variant == 'mut':
+        data = bytearray(data)
+        data[124] ^= 0xff
+        data = bytes(data)
+open(out, 'wb').write(data)
+PY
+}
 
 # The image and the pinned JDK tree: release matches the lock, legal/ is
 # non-empty, lib/libtest.dylib is Mach-O (magic cffaedfe) in both trees.
@@ -73,10 +83,6 @@ printf 'SMOKE {"javaVendor":"%s","javaVendorVersion":"%s","javaRuntimeVersion":"
     "$(lock_prop "$LOCK" vendorVersion)" \
     "$(lock_prop "$LOCK" javaRuntimeVersion)" > "$WORK/smoke.txt"
 
-# macho <file> <body> <sig-tail> — Mach-O magic + body + an 8-byte trailer that
-# the fake codesign strips, like a signature.
-macho() { printf '\xcf\xfa\xed\xfe%s%s' "$2" "$3" > "$1"; }
-
 run_check() {
     bash "$CHECK" --image "$IMG" --jdk "$JDK" --smoke "$WORK/smoke.txt" \
         > "$WORK/check.out" 2>&1
@@ -84,32 +90,31 @@ run_check() {
 
 # --- cases ----------------------------------------------------------------------
 
-# 1. Same bytes modulo the signature trailer: the strip makes both copies equal.
-#    (The old cp with four operands never copied either file and killed the
-#    script mid-check instead of reaching the comparison.)
-macho "$JDK/lib/libtest.dylib" "loadable bytes" "sig-jdk!"
-macho "$IMG/lib/runtime/lib/libtest.dylib" "loadable bytes" "sig-img!"
-if run_check && ! grep -q 'cp: ' "$WORK/check.out"; then
-    t_ok "Mach-O differing only in the signature trailer verifies equal"
+# 1. Published-signed vs jpackage-resigned bytes: normalized copies compare
+#    equal (the real libjli/libosxui pairing of nightly 37886973484).
+mk_macho "$JDK/lib/libtest.dylib" pub
+mk_macho "$IMG/lib/runtime/lib/libtest.dylib" sig
+if run_check; then
+    t_ok "Mach-O differing only in the signature verifies equal"
 else
-    t_fail "Mach-O differing only in the signature trailer verifies equal"
+    t_fail "Mach-O differing only in the signature verifies equal"
     sed 's/^/    /' "$WORK/check.out" >&2
 fi
 
-# 2. A real byte difference survives the strip and is reported, not masked.
-macho "$JDK/lib/libtest.dylib" "loadable bytes" "sig-jdk!"
-macho "$IMG/lib/runtime/lib/libtest.dylib" "tampered bytes" "sig-img!"
+# 2. A real byte difference survives normalization and is reported, not masked.
+mk_macho "$JDK/lib/libtest.dylib" pub
+mk_macho "$IMG/lib/runtime/lib/libtest.dylib" mut
 if ! run_check && grep -q 'runtime file differs from the pinned Temurin archive: lib/libtest.dylib' "$WORK/check.out"; then
-    t_ok "Mach-O with different bytes is reported after the strip"
+    t_ok "Mach-O with different bytes is reported after normalization"
 else
-    t_fail "Mach-O with different bytes is reported after the strip"
+    t_fail "Mach-O with different bytes is reported after normalization"
     sed 's/^/    /' "$WORK/check.out" >&2
 fi
 
 # 3. An image file with no counterpart in the pinned tree is rejected.
-macho "$JDK/lib/libtest.dylib" "loadable bytes" "sig-jdk!"
-macho "$IMG/lib/runtime/lib/libtest.dylib" "loadable bytes" "sig-img!"
-macho "$IMG/lib/runtime/lib/libextra.dylib" "extra bytes" "sig-ext!"
+mk_macho "$JDK/lib/libtest.dylib" pub
+mk_macho "$IMG/lib/runtime/lib/libtest.dylib" sig
+mk_macho "$IMG/lib/runtime/lib/libextra.dylib" sig
 if ! run_check && grep -q 'no counterpart in the pinned Temurin archive: lib/libextra.dylib' "$WORK/check.out"; then
     t_ok "runtime file without a pinned counterpart is rejected"
 else
@@ -129,7 +134,7 @@ printf 'JAVA_VERSION="%s"\nMODULES=java.base\n' \
     "$(lock_prop "$LOCK" javaVersion)" \
     > "$IMGMAC/Contents/runtime/Contents/Home/release"
 : > "$IMGMAC/Contents/runtime/Contents/Home/legal/NOTICE"
-macho "$IMGMAC/Contents/runtime/Contents/Home/lib/libtest.dylib" "loadable bytes" "sig-img!"
+mk_macho "$IMGMAC/Contents/runtime/Contents/Home/lib/libtest.dylib" sig
 if bash "$CHECK" --image "$IMGMAC" --jdk "$JDK" --smoke "$WORK/smoke.txt" \
         > "$WORK/check-mac.out" 2>&1; then
     t_ok ".app Contents/runtime/Contents/Home is the runtime root on macOS images"
@@ -147,7 +152,7 @@ mkdir -p "$JDKMAC/Contents/Home/lib" "$JDKMAC/Contents/Home/legal"
 printf 'JAVA_VERSION="%s"\nMODULES=java.base\n' \
     "$(lock_prop "$LOCK" javaVersion)" > "$JDKMAC/Contents/Home/release"
 : > "$JDKMAC/Contents/Home/legal/NOTICE"
-macho "$JDKMAC/Contents/Home/lib/libtest.dylib" "loadable bytes" "sig-jdk!"
+mk_macho "$JDKMAC/Contents/Home/lib/libtest.dylib" pub
 if bash "$CHECK" --image "$IMGMAC" --jdk "$JDKMAC" --smoke "$WORK/smoke.txt" \
         > "$WORK/check-macjdk.out" 2>&1; then
     t_ok "macOS bundled-runtime root resolves Contents/Home counterparts"
@@ -157,7 +162,7 @@ else
 fi
 
 # 7. And a file absent under the JDK's Contents/Home is still unbound.
-macho "$IMGMAC/Contents/runtime/Contents/Home/lib/libextra.dylib" "extra bytes" "sig-ext!"
+mk_macho "$IMGMAC/Contents/runtime/Contents/Home/lib/libextra.dylib" sig
 if ! bash "$CHECK" --image "$IMGMAC" --jdk "$JDKMAC" --smoke "$WORK/smoke.txt" \
         > "$WORK/check-macjdk2.out" 2>&1 \
     && grep -q 'no counterpart in the pinned Temurin archive: lib/libextra.dylib' \

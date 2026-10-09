@@ -59,7 +59,7 @@ case "$TARGET" in
             0|3010) ;;
             *) tail -50 msiexec-install.log 2>/dev/null; echo "::error::msiexec exited $rc"; exit 1 ;;
         esac
-        inst="$(cygpath -u "${LOCALAPPDATA:?LOCALAPPDATA unset}")/Programs/Neutrodyne"
+        inst="$(cygpath -u "${LOCALAPPDATA:?LOCALAPPDATA unset}")/Neutrodyne-App"
         [ -d "$inst" ] || {
             echo "::error::MSI succeeded but $inst is missing"
             grep -aE 'INSTALLDIR|Dir \(target\)|Product:|Return value 3|error' msiexec-install.log 2>/dev/null | tail -30

@@ -102,17 +102,19 @@ else
     t_fail "the RPM override is named neutrodyne.spec and carries the Requires"
 fi
 
-# 4. The Windows installationPath uses '/', never '\'. Compose hands jpackage
-#    its arguments in an @args.txt file whose JDK parser consumes the backslash
-#    as an escape, so "Programs\Neutrodyne" arrived as a flat "ProgramsNeutrodyne"
-#    and the MSI installed to %LOCALAPPDATA%\ProgramsNeutrodyne (nightly
-#    37868304885). Path.resolve still treats '/' as a separator on Windows, so
-#    the WiX Directory tree keeps nesting LocalAppDataFolder\Programs\Neutrodyne.
-if grep -qE 'installationPath = "Programs/' "$PLUGIN" \
-    && ! grep -qE 'installationPath = "[^"]*\\\\' "$PLUGIN"; then
-    t_ok "the Windows installationPath uses '/' separators"
+# 4. The Windows installationPath is a single directory name distinct from the
+#    data directory. jpackage's per-user default "Neutrodyne" would install into
+#    the data directory its uninstaller deletes; any nested path
+#    ("Programs/Neutrodyne") authors an intermediate Directory that carries no
+#    RemoveFile component, so WiX ICE64 fails light.exe with LGHT0204 (nightly
+#    37886973484). A bare "Neutrodyne-App" is the only per-user shape jpackage
+#    can author: one Directory under LocalAppDataFolder, covered by the
+#    RemoveFolderEx jpackage always emits for INSTALLDIR.
+if grep -qE 'installationPath = "\$DESKTOP_PACKAGE_NAME-App"' "$PLUGIN" \
+    && ! grep -qE 'installationPath = "[^"]*[/\\\\]' "$PLUGIN"; then
+    t_ok "the Windows installationPath is flat and distinct from the data dir"
 else
-    t_fail "the Windows installationPath uses '/' separators"
+    t_fail "the Windows installationPath is flat and distinct from the data dir"
 fi
 
 echo

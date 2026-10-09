@@ -18,9 +18,11 @@
 #   * every file under runtime/ exists in the pinned Temurin tree and every native
 #     file matches it: byte-identical; on Linux also byte-identical after applying
 #     the same `objcopy -g` jlink's --strip-debug applies (or, failing that, after
-#     `objcopy -O binary`, which compares the loadable segments); on macOS after
-#     `codesign --remove-signature` on copies of both files (jpackage re-signs the
-#     runtime with the bundle's ad-hoc signature).
+#     `objcopy -O binary`, which compares the loadable segments); on macOS on
+#     signature-normalized copies of both files (jpackage re-signs some natives
+#     when it seals the .app, and codesign --remove-signature cannot restore
+#     the published bytes — the same norm_macho spec check-desktop-image.sh
+#     hashes).
 #     --jdk overrides the pinned tree; by default the single jdk/ under
 #     desktopApp/build/bundled-runtime/*/ is used.
 #
@@ -178,6 +180,125 @@ image_check_smoke() {
         || fail "smoke java.runtime.version '$runtime_version' != runtime.lock javaRuntimeVersion"
 }
 
+# macho_norm <file> — the file's signature-normalized bytes on stdout
+# (norm_thin/norm_macho, the same spec check-desktop-image.sh's native_sha256
+# applies and DesktopPackaging.kt's normalizeMacho mirrors): emit the effective
+# command count/table size, zero the LC_CODE_SIGNATURE command bodies, bind
+# __LINKEDIT's vmsize to its two legal signed shapes and its filesize minus the
+# enclosed signature blob, validate fat slice offsets against lipo's packing,
+# and cut the blob bytes. Malformed input passes through raw and simply fails
+# the byte compare.
+macho_norm() {
+    python3 - "$1" <<'PYEOF'
+import struct, sys
+
+def norm_thin(b):
+    if len(b) < 28:
+        return b, 0
+    m = struct.unpack('<I', b[:4])[0]
+    if m == 0xfeedfacf: is64, be = True, False
+    elif m == 0xfeedface: is64, be = False, False
+    elif m == 0xcffaedfe: is64, be = True, True
+    elif m == 0xcefaedfe: is64, be = False, True
+    else: return b, 0
+    hdr = 32 if is64 else 28
+    e = '>' if be else '<'
+    ncmds = struct.unpack(e + 'I', b[16:20])[0]
+    sizeofcmds = struct.unpack(e + 'I', b[20:24])[0]
+    if ncmds > 4096:
+        return b, 0
+    cmds = []
+    blobs = []
+    off = hdr
+    for _ in range(ncmds):
+        if off + 8 > len(b):
+            return b, 0
+        cmd, csz = struct.unpack(e + 'II', b[off:off + 8])
+        if csz < 8 or off + csz > len(b):
+            return b, 0
+        cmds.append((cmd, csz, off))
+        if cmd == 0x1d:
+            blobs.append(struct.unpack(e + 'II', b[off + 8:off + 16]))
+        off += csz
+    csz_sum = sum(c[1] for c in cmds if c[0] == 0x1d)
+    if len(blobs) > ncmds or csz_sum > sizeofcmds:
+        return b, 0
+    # arm64/arm64_32 pages are 16K, other slices 4K — codesign rounds the
+    # linkedit VM reservation to the target's page.
+    page = 0x4000 if struct.unpack(e + 'I', b[4:8])[0] in (0x0100000c, 0x0200000c) else 0x1000
+    # Effective (non-signature) header shape stays bound: ncmds/sizeofcmds
+    # minus the signature slots re-signing may insert over header padding.
+    out = bytearray(b[:16])
+    out += struct.pack(e + 'I', ncmds - len(blobs))
+    out += struct.pack(e + 'I', sizeofcmds - csz_sum)
+    out += b[24:hdr]
+    for cmd, csz, co in cmds:
+        if cmd == 0x1d:
+            out += b'\0' * csz
+            continue
+        cb = b[co:co + csz]
+        if cmd in (0x1, 0x19) and cb[8:24].rstrip(b'\0') == b'__LINKEDIT':
+            cb = bytearray(cb)
+            if is64:
+                vm, vs, foff, fsize = struct.unpack(e + 'QQQQ', cb[24:56])
+                inside = sum(d for o, d in blobs if foff <= o and o + d <= foff + fsize)
+                if inside > fsize or vs not in (fsize, -(-fsize // page) * page):
+                    return b, 0
+                # vmsize is not byte-reversible, but it is not free either:
+                # only the file extent or its page-rounded form is legal —
+                # emit the rounded non-signature extent, bound either way.
+                cb[32:40] = struct.pack(e + 'Q', -(-(fsize - inside) // page) * page)
+                cb[48:56] = struct.pack(e + 'Q', fsize - inside)
+            else:
+                vm, vs, foff, fsize = struct.unpack(e + 'IIII', cb[24:40])
+                inside = sum(d for o, d in blobs if foff <= o and o + d <= foff + fsize)
+                if inside > fsize or vs not in (fsize, -(-fsize // page) * page):
+                    return b, 0
+                cb[28:32] = struct.pack(e + 'I', -(-(fsize - inside) // page) * page)
+                cb[36:40] = struct.pack(e + 'I', fsize - inside)
+        out += cb
+    emit = bytes(out) + b[off:]
+    base = len(out) - off
+    shift = 0
+    for do, ds in sorted(blobs):
+        s = do + base - shift
+        if 0 <= s < len(emit):
+            emit = emit[:s] + emit[min(len(emit), s + ds):]
+        shift += ds
+    return emit, sum(d for _, d in blobs)
+
+def norm_macho(data):
+    if len(data) >= 8 and data[:4] == b'\xca\xfe\xba\xbe':
+        nfat = struct.unpack('>I', data[4:8])[0]
+        if nfat > 64 or 8 + 20 * nfat > len(data):
+            return data
+        out = bytearray(data[:8])
+        prev_end = 8 + 20 * nfat
+        for i in range(nfat):
+            ro = 8 + 20 * i
+            off, size = struct.unpack('>II', data[ro + 8:ro + 16])
+            align = struct.unpack('>I', data[ro + 16:ro + 20])[0]
+            # lipo packs slices back to back, each at its 2^align boundary —
+            # the offset is then a function of bound fields, not a free one.
+            if align > 30 or off != -(-prev_end // (1 << align)) * (1 << align):
+                return data
+            if off + size > len(data):
+                return data
+            emit, sigsize = norm_thin(data[off:off + size])
+            if sigsize > size:
+                return data
+            # Slice offset validated against deterministic packing; the
+            # effective (pre-signature) slice length stays bound.
+            out += data[ro:ro + 8] + b'\0' * 4 + struct.pack('>I', size - sigsize) + data[ro + 16:ro + 20]
+            out += emit
+            prev_end = off + size
+        return bytes(out)
+    return norm_thin(data)[0]
+
+sys.stdout.buffer.write(norm_macho(open(sys.argv[1], 'rb').read()))
+PYEOF
+}
+
 # Compare one image runtime file with the pinned Temurin copy (11's per-file rules).
 image_compare_file() {
     local img_file="$1" ref_file="$2" rel="$3" work=""
@@ -208,19 +329,20 @@ image_compare_file() {
             fail "objcopy unavailable for the ELF comparison of $rel"
         fi
     elif is_macho "$ref_file"; then
-        # jpackage seals the bundle with an ad-hoc signature over Adoptium's, so the
-        # comparison runs on copies of both files with signatures removed.
-        if command -v codesign >/dev/null 2>&1; then
-            cp "$ref_file" "$work/ref"
-            cp "$img_file" "$work/img"
-            codesign --remove-signature "$work/ref" 2>/dev/null || true
-            codesign --remove-signature "$work/img" 2>/dev/null || true
-            if cmp -s "$work/ref" "$work/img"; then
-                rm -rf "$work"
-                return 0
-            fi
+        # jpackage re-signs some bundled natives when it seals the .app, and
+        # codesign --remove-signature cannot restore the published bytes —
+        # re-signing grows the LC_CODE_SIGNATURE command and __LINKEDIT and may
+        # insert the command over header padding. The comparison therefore runs
+        # on signature-normalized copies (the same norm_thin/norm_macho spec
+        # check-desktop-image.sh's native_sha256 applies).
+        if command -v python3 >/dev/null 2>&1; then
+            macho_norm "$ref_file" > "$work/ref" && macho_norm "$img_file" > "$work/img" \
+                && cmp -s "$work/ref" "$work/img" && {
+                    rm -rf "$work"
+                    return 0
+                }
         else
-            fail "codesign unavailable for the Mach-O comparison of $rel"
+            fail "python3 unavailable for the Mach-O comparison of $rel"
         fi
     fi
     rm -rf "$work"
