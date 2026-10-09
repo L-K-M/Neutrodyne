@@ -84,6 +84,9 @@ class RoomRuntimeServiceDeviceTest {
                 "asInterface must resolve the Stub"
             }
 
+        // Two distinct Stub objects: RemoteCallbackList keys callbacks by IBinder, so a
+        // second register() with the same object would replace the first entry and the
+        // broadcast would skip the sole remaining client (the caller's own clientId).
         val callback =
             object : IMultiInstanceInvalidationCallback.Stub() {
                 override fun onInvalidation(tables: Array<out String>) {
@@ -92,9 +95,16 @@ class RoomRuntimeServiceDeviceTest {
 
                 override fun getInterfaceVersion(): Int = IMultiInstanceInvalidationCallback.VERSION
             }
-        service.registerCallback(callback, "probe.db")
-        val secondId = service.registerCallback(callback, "probe.db")
-        service.broadcastInvalidation(secondId, arrayOf("probe"))
+        val other =
+            object : IMultiInstanceInvalidationCallback.Stub() {
+                override fun onInvalidation(tables: Array<out String>) = Unit
+
+                override fun getInterfaceVersion(): Int = IMultiInstanceInvalidationCallback.VERSION
+            }
+        val callbackId = service.registerCallback(callback, "probe.db")
+        val otherId = service.registerCallback(other, "probe.db")
+        assertTrue("two callbacks must register as distinct clients", callbackId != otherId)
+        service.broadcastInvalidation(otherId, arrayOf("probe"))
         assertTrue("broadcast must reach the callback", delivered.await(5, TimeUnit.SECONDS))
         context.unbindService(connection)
     }

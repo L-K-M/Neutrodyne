@@ -58,6 +58,10 @@ class RoomRuntimeServiceHostTest {
         assertNotNull(remote, "asInterface must resolve the Stub")
 
         val delivered = CountDownLatch(1)
+        // Two distinct Stub objects: RemoteCallbackList keys callbacks by IBinder, so a
+        // second register() with the same object replaces the first entry on a real
+        // Binder transport (Robolectric's shadow hides that) and the broadcast would
+        // skip the sole remaining client — the caller's own clientId is filtered out.
         val callback =
             object : IMultiInstanceInvalidationCallback.Stub() {
                 override fun onInvalidation(tables: Array<out String>) {
@@ -66,15 +70,23 @@ class RoomRuntimeServiceHostTest {
 
                 override fun getInterfaceVersion(): Int = IMultiInstanceInvalidationCallback.VERSION
             }
+        val other =
+            object : IMultiInstanceInvalidationCallback.Stub() {
+                override fun onInvalidation(tables: Array<out String>) = Unit
 
-        val firstId = remote.registerCallback(callback, "probe.db")
-        val secondId = remote.registerCallback(callback, "probe.db")
-        assertTrue(firstId > 0 && secondId > firstId, "registerCallback must assign client ids")
+                override fun getInterfaceVersion(): Int = IMultiInstanceInvalidationCallback.VERSION
+            }
 
-        // Same client id is skipped by the broadcast filter; the second client's broadcast
-        // must reach this callback through the Binder round-trip.
-        remote.broadcastInvalidation(firstId, arrayOf("probe"))
-        remote.broadcastInvalidation(secondId, arrayOf("probe"))
+        val callbackId = remote.registerCallback(callback, "probe.db")
+        val otherId = remote.registerCallback(other, "probe.db")
+        assertTrue(
+            callbackId > 0 && otherId > callbackId,
+            "registerCallback must assign distinct client ids",
+        )
+
+        // The broadcaster's own clientId is skipped by the filter; the broadcast as the
+        // other client must reach `callback` through the Binder round-trip.
+        remote.broadcastInvalidation(otherId, arrayOf("probe"))
         assertTrue(delivered.await(5, TimeUnit.SECONDS), "broadcast must reach the callback")
     }
 
