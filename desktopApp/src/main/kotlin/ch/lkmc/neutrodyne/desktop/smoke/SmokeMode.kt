@@ -174,6 +174,11 @@ internal class SmokeMode(
          * rendered frame (11 step 8's first-frame figure), then closes it. A headless AWT skips
          * the window and reports `null` — CI's `desktop-smoke` job runs the same code under
          * Xvfb, where the real branch executes.
+         *
+         * `application` must return here, so `exitProcessOnExit = false`: its default
+         * `exitProcess(0)` fires the moment the smoke window closes and kills the JVM before
+         * [run] can print the `SMOKE` line — the failure the real-window CI run hit. A window
+         * that closes without a first frame is a failed window step, not `skipped-headless`.
          */
         private fun openWindowAndAwaitFirstFrame(graph: DesktopAppGraph): Long? {
             if (GraphicsEnvironment.isHeadless()) {
@@ -182,7 +187,7 @@ internal class SmokeMode(
             }
 
             val firstFrameMs = AtomicLong(FRAME_NOT_RENDERED)
-            application {
+            application(exitProcessOnExit = false) {
                 val menuActions = remember { DesktopMenuActions() }
                 Window(
                     onCloseRequest = { exitApplication() },
@@ -200,7 +205,9 @@ internal class SmokeMode(
                     }
                 }
             }
-            return firstFrameMs.get().takeIf { it != FRAME_NOT_RENDERED }
+            val elapsed = firstFrameMs.get()
+            if (elapsed == FRAME_NOT_RENDERED) error("window closed before its first frame")
+            return elapsed
         }
 
         /**

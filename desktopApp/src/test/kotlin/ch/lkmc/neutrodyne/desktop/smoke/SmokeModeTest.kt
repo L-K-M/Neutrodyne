@@ -70,6 +70,29 @@ class SmokeModeTest {
         assertThat(json.keys).doesNotContain("failed")
     }
 
+    /**
+     * A window step that throws — headed, but no frame (a close before the first frame throws in
+     * [SmokeMode]'s production branch; a real window needs a display, which only CI's
+     * `desktop-smoke` job has) — must report the failure: exit 1 with `failed`, never a silent
+     * exit and never `skipped-headless`.
+     */
+    @Test
+    fun `a failed window step names the failure and exits 1`() {
+        val lines = mutableListOf<String>()
+        val exitCode =
+            SmokeMode(
+                output = lines::add,
+                windowStep = { error("window closed before its first frame") },
+            ).run()
+
+        assertThat(exitCode).isEqualTo(1)
+        val json = Json.parseToJsonElement(lines.single().removePrefix("SMOKE ")).jsonObject
+        assertThat(json["failed"]!!.jsonPrimitive.content).contains("window")
+        assertThat(json["steps"]!!.jsonObject.keys).contains("window")
+        assertThat(json["steps"]!!.jsonObject.keys).doesNotContain(SmokeMode.FIRST_FRAME_STEP)
+        assertThat(json.keys).doesNotContain("window")
+    }
+
     @Test
     fun `isEnabled matches only the exact value true`() {
         assertThat(SmokeMode.isEnabled("true")).isTrue()
