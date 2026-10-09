@@ -18,6 +18,7 @@ public object UrlNormalizer {
     private val schemeWithAuthority = Regex("""^[A-Za-z][A-Za-z0-9+.\-]*://""")
     private const val MAX_PORT = 65_535L
     private const val IPV6_GROUPS = 8
+    private const val UTF16_PAIR_UNITS = 2
 
     /**
      * The identity form of an HTTP(S) URL, or null when the URL is not `http(s)` or has no valid host:
@@ -365,8 +366,15 @@ public object UrlNormalizer {
                 bytes.add(((high shl 4) or low).toByte())
                 i += 3
             } else {
-                for (b in c.toString().encodeToByteArray()) bytes.add(b)
-                i++
+                // Encoding each surrogate half alone replaces raw Unicode in mixed credentials.
+                val next =
+                    if (c.isHighSurrogate() && text.getOrNull(i + 1)?.isLowSurrogate() == true) {
+                        i + UTF16_PAIR_UNITS
+                    } else {
+                        i + 1
+                    }
+                for (b in text.substring(i, next).encodeToByteArray()) bytes.add(b)
+                i = next
             }
         }
         return bytes.toByteArray().decodeToString()
