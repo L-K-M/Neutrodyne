@@ -249,7 +249,9 @@ public object UrlNormalizer {
      * percent-encoding normalised; dot segments removed; one trailing `/` removed.
      */
     private fun normalisePath(rawPath: String): String {
-        var path = if (rawPath.isEmpty()) "/" else rawPath.replace('\\', '/')
+        // A raw space is what the fetcher percent-encodes on the wire — encode it the same way so
+        // the space and `%20` spellings of one resource share an identity.
+        var path = if (rawPath.isEmpty()) "/" else rawPath.replace('\\', '/').replace(" ", "%20")
         path = normalisePercentEncoding(path)
         path = removeDotSegments(path)
         if (path.length > 1 && path.endsWith("/")) path = path.dropLast(1)
