@@ -859,9 +859,9 @@ check_msi() {
     # INSTALLDIR must sit directly under LocalAppDataFolder with the name
     # Neutrodyne-App (11 Windows MSI and ZIP). DefaultDir carries the installed
     # name as "short8.3|longname"; the LocalAppDataFolder row itself resolves to
-    # "." — the Directory key, not the DefaultDir, names the root — so the check
-    # asserts a Directory row whose parent key is LocalAppDataFolder and whose
-    # DefaultDir long name is Neutrodyne-App.
+    # "." — the Directory key, not the DefaultDir, names the root. The predicate
+    # must name the INSTALLDIR row itself: a parent+name test alone accepts a
+    # wrong INSTALLDIR beside a decoy sibling, or no INSTALLDIR row at all.
     local dirs
     dirs="$("$ps" -NoProfile -Command "
         \$wi = New-Object -ComObject WindowsInstaller.Installer
@@ -880,9 +880,11 @@ check_msi() {
           for (i = 4; i <= NF; i++) dd = dd "|" $i
           # long name of "short8.3|longname"; index, not split — "|" is an ERE.
           while ((j = index(dd, "|")) > 0) dd = substr(dd, j + 1)
-          print $2 "\t" dd
+          print $1 "\t" $2 "\t" dd
         }')"
-    if ! printf '%s\n' "$resolved" | awk -F'\t' '$1 == "LocalAppDataFolder" && $2 == "Neutrodyne-App" { found = 1 } END { exit !found }'; then
+    if ! printf '%s\n' "$resolved" | awk -F'\t' \
+        '$1 == "INSTALLDIR" && $2 == "LocalAppDataFolder" && $3 == "Neutrodyne-App" { found = 1 }
+         END { exit !found }'; then
         printf '%s\n' "$resolved" >&2
         fail "MSI INSTALLDIR does not resolve under LocalAppDataFolder\\Neutrodyne-App (Directory table)"
     fi

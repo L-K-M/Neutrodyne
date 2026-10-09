@@ -174,6 +174,115 @@ else
 fi
 rm -f "$IMGMAC/Contents/runtime/Contents/Home/lib/libextra.dylib"
 
+# --- ELF loader metadata ----------------------------------------------------------
+# jlink --strip-debug strips natives with objcopy -g, so a legitimately
+# stripped ELF must compare equal. The toolchain-difference fallback dumps
+# loadable bytes with objcopy -O binary — which discards e_entry and the
+# program headers — so the checker also binds the loader metadata (elf_meta);
+# a zeroed entry point or an RX→RWX PT_LOAD must still be reported (review
+# probe on 4069f52 accepted both).
+
+ELF_SEED=""
+for c in "$(command -v true 2>/dev/null)" /bin/true /usr/bin/true; do
+    if [ -n "$c" ] && [ -f "$c" ] \
+        && [ "$(od -An -tx1 -N4 "$c" 2>/dev/null | tr -d ' ')" = "7f454c46" ]; then
+        ELF_SEED="$c"
+        break
+    fi
+done
+
+# mut_elf <in> <out> <entry|rwx> — flip a loader field on an ELF64 LE file.
+mut_elf() {
+    python3 - "$1" "$2" "$3" <<'PY'
+import struct, sys
+b = bytearray(open(sys.argv[1], 'rb').read())
+assert b[4] == 2 and b[5] == 1, 'ELF fixture needs an ELF64 little-endian seed'
+if sys.argv[3] == 'entry':
+    assert any(b[24:32]), 'seed entry point is already zero'
+    struct.pack_into('<Q', b, 24, 0)
+else:
+    phoff = struct.unpack('<Q', b[32:40])[0]
+    phnum = struct.unpack('<H', b[56:58])[0]
+    hit = False
+    for i in range(phnum):
+        o = phoff + i * 56
+        if struct.unpack('<I', b[o:o + 4])[0] == 1 \
+                and struct.unpack('<I', b[o + 4:o + 8])[0] == 5:
+            struct.pack_into('<I', b, o + 4, 7)
+            hit = True
+            break
+    assert hit, 'no RX PT_LOAD in the seed'
+open(sys.argv[2], 'wb').write(bytes(b))
+PY
+}
+
+if [ -z "$ELF_SEED" ] || ! command -v objcopy >/dev/null 2>&1; then
+    # A host without an ELF binary or without objcopy cannot run the checker's
+    # ELF path at all (the checker itself fails closed there); the cases run in
+    # CI's static job on ubuntu.
+    echo "skip: ELF loader-metadata cases need an ELF seed and objcopy" >&2
+else
+    printf 'fixture debug section\n' > "$WORK/dbg.sec"
+    printf 'different toolchain comment\n' > "$WORK/note.sec"
+
+    # 8. Legitimate stripping: the pinned ELF carries a debug section the
+    #    image's copy lost to jlink's objcopy -g — still equal.
+    cp "$ELF_SEED" "$JDK/lib/libtest.so"
+    objcopy --add-section .debug_probe="$WORK/dbg.sec" "$JDK/lib/libtest.so"
+    cp "$JDK/lib/libtest.so" "$IMG/lib/runtime/lib/libtest.so"
+    objcopy -g "$IMG/lib/runtime/lib/libtest.so"
+    if run_check; then
+        t_ok "an ELF stripped the way jlink does verifies equal"
+    else
+        t_fail "an ELF stripped the way jlink does verifies equal"
+        sed 's/^/    /' "$WORK/check.out" >&2
+    fi
+
+    # 9. Toolchain-difference boundary: same loadable bytes and loader
+    #    metadata, different non-allocated section — the fallback's whole point.
+    cp "$JDK/lib/libtest.so" "$IMG/lib/runtime/lib/libtest.so"
+    objcopy -g "$IMG/lib/runtime/lib/libtest.so"
+    objcopy --update-section .comment="$WORK/note.sec" \
+        "$IMG/lib/runtime/lib/libtest.so" 2>/dev/null \
+        || objcopy --add-section .comment="$WORK/note.sec" \
+            "$IMG/lib/runtime/lib/libtest.so"
+    if run_check; then
+        t_ok "same loads and loader metadata with a different non-alloc section verify equal"
+    else
+        t_fail "same loads and loader metadata with a different non-alloc section verify equal"
+        sed 's/^/    /' "$WORK/check.out" >&2
+    fi
+
+    # 10. A zeroed entry point is invisible to -O binary but bound by elf_meta.
+    cp "$JDK/lib/libtest.so" "$IMG/lib/runtime/lib/libtest.so"
+    objcopy -g "$IMG/lib/runtime/lib/libtest.so"
+    mut_elf "$IMG/lib/runtime/lib/libtest.so" \
+        "$IMG/lib/runtime/lib/libtest.so" entry
+    if ! run_check && grep -q \
+        'runtime file differs from the pinned Temurin archive: lib/libtest.so' \
+        "$WORK/check.out"; then
+        t_ok "an ELF with a mutated entry point is rejected"
+    else
+        t_fail "an ELF with a mutated entry point is rejected"
+        sed 's/^/    /' "$WORK/check.out" >&2
+    fi
+
+    # 11. RX → RWX on a PT_LOAD — same bytes under -O binary, different phdr.
+    cp "$JDK/lib/libtest.so" "$IMG/lib/runtime/lib/libtest.so"
+    objcopy -g "$IMG/lib/runtime/lib/libtest.so"
+    mut_elf "$IMG/lib/runtime/lib/libtest.so" \
+        "$IMG/lib/runtime/lib/libtest.so" rwx
+    if ! run_check && grep -q \
+        'runtime file differs from the pinned Temurin archive: lib/libtest.so' \
+        "$WORK/check.out"; then
+        t_ok "an ELF with a writable PT_LOAD is rejected"
+    else
+        t_fail "an ELF with a writable PT_LOAD is rejected"
+        sed 's/^/    /' "$WORK/check.out" >&2
+    fi
+    rm -f "$JDK/lib/libtest.so" "$IMG/lib/runtime/lib/libtest.so"
+fi
+
 echo
 if [ "$FAILED" -gt 0 ]; then
     echo "check-runtime-sources.test: $FAILED case(s) failing" >&2

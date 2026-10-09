@@ -1061,6 +1061,77 @@ mkstub_native "$img/lib/app" >/dev/null
 expect_fail 'not on the Licensee-checked runtime classpath' \
     "re-signed native with an out-of-range __LINKEDIT vmsize is rejected"
 
+# --- Windows MSI Directory table --------------------------------------------------
+# check_msi reads the Directory and Binary tables through the WindowsInstaller
+# COM API; a stubbed powershell.exe answers the two SELECTs. The predicate must
+# name the INSTALLDIR row itself — parent LocalAppDataFolder plus the
+# DefaultDir long name — because a name-only test accepts a wrong INSTALLDIR
+# beside a decoy sibling, or no INSTALLDIR row at all (probe on 4069f52).
+cp "$REPO_ROOT/desktopApp/wix.lock" "$FIX_ROOT/desktopApp/"
+cat >"$WORK/stubbin/powershell.exe" <<'EOF'
+#!/usr/bin/env python3
+import os, sys
+from pathlib import Path
+argv = " ".join(sys.argv)
+if "FROM Directory" in argv:
+    sys.stdout.write(Path(os.environ["MSI_ROWS"]).read_text())
+elif "FROM Binary" in argv:
+    print("JpCaDll\nWixCA\nWixUIWixca\nWixUI_Bmp_Banner\nWixUI_Bmp_Dialog\n"
+          "WixUI_Bmp_New\nWixUI_Bmp_Up\nWixUI_Ico_Exclam\nWixUI_Ico_Info")
+else:
+    sys.exit(2)
+EOF
+chmod +x "$WORK/stubbin/powershell.exe"
+: > "$WORK/dist/neutrodyne.msi"
+run_msi() {
+    MSI_ROWS="$WORK/msi.rows" PATH="$WORK/stubbin:$PATH" \
+        bash "$SCAN" "$WORK/dist/neutrodyne.msi" > "$WORK/scan.out" 2>&1
+}
+
+# 35. The real table's shape: INSTALLDIR under LocalAppDataFolder, its
+#     DefaultDir long name Neutrodyne-App behind the 8.3 short name.
+cat > "$WORK/msi.rows" <<'EOF'
+TARGETDIR||SourceDir
+LocalAppDataFolder|TARGETDIR|.
+INSTALLDIR|LocalAppDataFolder|NEUTRO~1|Neutrodyne-App
+EOF
+if run_msi; then
+    t_ok "INSTALLDIR under LocalAppDataFolder with long name Neutrodyne-App is accepted"
+else
+    t_fail "INSTALLDIR under LocalAppDataFolder with long name Neutrodyne-App is accepted"
+    sed 's/^/    /' "$WORK/scan.out" >&2
+fi
+
+# 36. A wrong INSTALLDIR with a decoy sibling carrying the right name is a
+#     violation — the predicate binds the INSTALLDIR key, not any matching row.
+cat > "$WORK/msi.rows" <<'EOF'
+TARGETDIR||SourceDir
+LocalAppDataFolder|TARGETDIR|.
+INSTALLDIR|LocalAppDataFolder|Neutrodyne
+UNUSED_DIR|LocalAppDataFolder|NEUTRO~1|Neutrodyne-App
+EOF
+if ! run_msi && grep -q 'INSTALLDIR does not resolve under LocalAppDataFolder' \
+        "$WORK/scan.out"; then
+    t_ok "wrong INSTALLDIR beside a correct decoy sibling is rejected"
+else
+    t_fail "wrong INSTALLDIR beside a correct decoy sibling is rejected"
+    sed 's/^/    /' "$WORK/scan.out" >&2
+fi
+
+# 37. No INSTALLDIR row at all fails too — a decoy alone must not satisfy it.
+cat > "$WORK/msi.rows" <<'EOF'
+TARGETDIR||SourceDir
+LocalAppDataFolder|TARGETDIR|.
+UNUSED_DIR|LocalAppDataFolder|NEUTRO~1|Neutrodyne-App
+EOF
+if ! run_msi && grep -q 'INSTALLDIR does not resolve under LocalAppDataFolder' \
+        "$WORK/scan.out"; then
+    t_ok "a Directory table without an INSTALLDIR row is rejected"
+else
+    t_fail "a Directory table without an INSTALLDIR row is rejected"
+    sed 's/^/    /' "$WORK/scan.out" >&2
+fi
+
 echo
 if [ "$FAILED" -gt 0 ]; then
     echo "check-desktop-image.test: $FAILED case(s) failing" >&2

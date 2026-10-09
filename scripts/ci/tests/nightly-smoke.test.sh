@@ -109,7 +109,7 @@ stub cpio 'exit 0'
 # cygpath -u passes the (already POSIX) fixture root through and -w's value is
 # only embedded in the PowerShell command; python's `zipfile -e` is a no-op —
 # the smoke stub accepts any image dir.
-stub powershell '{ echo "Property(C): INSTALLDIR = C:\\Users\\runneradmin\\AppData\\Local\\Programs\\Neutrodyne"; echo "MSI (s) (00:00): Product: Neutrodyne -- Installation completed successfully."; } > msiexec-install.log; echo "${PS_EXIT_CODE:-0}"'
+stub powershell '{ echo "Property(C): INSTALLDIR = C:\\Users\\runneradmin\\AppData\\Local\\Neutrodyne-App"; echo "MSI (s) (00:00): Product: Neutrodyne -- Installation completed successfully."; } > msiexec-install.log; echo "${PS_EXIT_CODE:-0}"'
 stub cygpath '[ "$1" = -u ] && { echo "$2"; exit; }; echo "WINPATH"'
 stub python 'exit 0'
 stub codesign 'exit 0'
@@ -345,7 +345,7 @@ fi
 #    install dir; the per-user root reaches bash through cygpath -u (nightly
 #    37858231006: hidden install result → smoke-start usage, rc2, zero SMOKE).
 LAPP="$WORK/lappdata"
-mkdir -p "$LAPP/Programs/Neutrodyne"
+mkdir -p "$LAPP/Neutrodyne-App"
 sed "s/\${{ matrix\.target }}/windows-x64/g; s|/tmp/smoke-img|$WORK/smoke-img|g" \
     "$WORK/step-raw.sh" > "$WORK/step-win.sh"
 run_win() {
@@ -355,7 +355,7 @@ run_win() {
 }
 rm -f "$WORK/smoke-args-win" "$RUNDIR/smoke.txt"
 if run_win \
-    && grep -qxF "$LAPP/Programs/Neutrodyne" "$WORK/smoke-args-win" \
+    && grep -qxF "$LAPP/Neutrodyne-App" "$WORK/smoke-args-win" \
     && grep -qxF "$WORK/smoke-img/Neutrodyne" "$WORK/smoke-args-win" \
     && [ "$(grep -c . "$WORK/smoke-args-win")" -eq 2 ]; then
     t_ok "windows leg gates msiexec, smokes the install root and the ZIP extract"
@@ -367,27 +367,27 @@ rm -f "$WORK/smoke-args-win" "$RUNDIR/smoke.txt"
 if PS_EXIT_CODE=1603 run_win; then
     t_fail "a failed msiexec fails the step without smoking the install dir"
 elif grep -q 'ExitCode=1603' "$WORK/step-win.out" \
-      && ! grep -q 'Programs/Neutrodyne' "$WORK/smoke-args-win" 2>/dev/null; then
+      && ! grep -q 'Neutrodyne-App' "$WORK/smoke-args-win" 2>/dev/null; then
     t_ok "a failed msiexec fails the step without smoking the install dir"
 else
     t_fail "a failed msiexec fails the step without smoking the install dir"
     sed 's/^/    /' "$WORK/step-win.out" >&2
 fi
 # ExitCode 0 without the install root is still a failure — and it must carry the
-# installer log's evidence (nightly 37860407043: ExitCode=0, Programs/ absent).
+# installer log's evidence (nightly 37860407043: ExitCode=0, install root absent).
 rm -f "$WORK/smoke-args-win" "$RUNDIR/smoke.txt"
-rm -rf "$LAPP/Programs/Neutrodyne"
+rm -rf "$LAPP/Neutrodyne-App"
 if run_win; then
     t_fail "ExitCode 0 without the install root fails with the msiexec log"
 elif grep -q 'MSI succeeded but .* is missing' "$WORK/step-win.out" \
       && grep -q 'INSTALLDIR' "$WORK/step-win.out" \
-      && ! grep -q 'Programs/Neutrodyne' "$WORK/smoke-args-win" 2>/dev/null; then
+      && ! grep -q 'Neutrodyne-App' "$WORK/smoke-args-win" 2>/dev/null; then
     t_ok "ExitCode 0 without the install root fails with the msiexec log"
 else
     t_fail "ExitCode 0 without the install root fails with the msiexec log"
     sed 's/^/    /' "$WORK/step-win.out" >&2
 fi
-mkdir -p "$LAPP/Programs/Neutrodyne"
+mkdir -p "$LAPP/Neutrodyne-App"
 
 # 10. Every scripts/**.sh a workflow invokes directly must carry the executable
 #     bit in the checkout — a 644 file dies with exit 126 at the step's first

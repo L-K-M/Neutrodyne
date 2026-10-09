@@ -299,6 +299,51 @@ sys.stdout.buffer.write(norm_macho(open(sys.argv[1], 'rb').read()))
 PYEOF
 }
 
+# elf_meta <file> — the loader-visible metadata of an ELF on stdout: the ELF
+# header verbatim except the section-table fields strip-debug rewrites
+# (e_shoff, e_shnum, e_shstrndx zeroed), then the whole program header table.
+# Exit nonzero on anything unparseable. objcopy -O binary dumps only section
+# content — it drops e_entry and the phdrs entirely, which accepted a zeroed
+# entry point and an RX→RWX PT_LOAD as equal (review probe of 4069f52).
+elf_meta() {
+    python3 - "$1" <<'PYEOF'
+import struct, sys
+
+def meta(b):
+    if len(b) < 52 or b[:4] != b'\x7fELF':
+        return None
+    if b[4] not in (1, 2) or b[5] not in (1, 2) or b[6] != 1:
+        return None
+    is64 = b[4] == 2
+    e = '>' if b[5] == 2 else '<'
+    hdr = 64 if is64 else 52
+    if len(b) < hdr:
+        return None
+    m = bytearray(b[:hdr])
+    if is64:
+        phoff = struct.unpack(e + 'Q', b[32:40])[0]
+        phentsize, phnum = struct.unpack(e + 'HH', b[54:58])
+        struct.pack_into(e + 'Q', m, 40, 0)
+        struct.pack_into(e + 'HH', m, 60, 0, 0)
+    else:
+        phoff = struct.unpack(e + 'I', b[28:32])[0]
+        phentsize, phnum = struct.unpack(e + 'HH', b[42:46])
+        struct.pack_into(e + 'I', m, 32, 0)
+        struct.pack_into(e + 'HH', m, 48, 0, 0)
+    # PN_XNUM keeps the real count in the section table this emit ignores.
+    if phnum == 0 or phnum == 0xffff:
+        return None
+    if phoff + phentsize * phnum > len(b):
+        return None
+    return bytes(m) + b[phoff:phoff + phentsize * phnum]
+
+m = meta(open(sys.argv[1], 'rb').read())
+if m is None:
+    sys.exit(1)
+sys.stdout.buffer.write(m)
+PYEOF
+}
+
 # Compare one image runtime file with the pinned Temurin copy (11's per-file rules).
 image_compare_file() {
     local img_file="$1" ref_file="$2" rel="$3" work=""
@@ -308,8 +353,8 @@ image_compare_file() {
     work="$(mktemp -d)"
     if is_elf "$ref_file"; then
         # jlink's --strip-debug runs objcopy -g on native files (Linux). Compare the
-        # archive's copy after the same treatment; fall back to the loadable
-        # segments (-O binary) when the toolchains differ.
+        # archive's copy after the same treatment; fall back to loader metadata
+        # plus the loadable segments when the toolchains differ.
         if command -v objcopy >/dev/null 2>&1; then
             cp "$ref_file" "$work/ref"
             objcopy -g "$work/ref" 2>/dev/null || true
@@ -317,11 +362,21 @@ image_compare_file() {
                 rm -rf "$work"
                 return 0
             fi
+            # Toolchain-difference fallback: same loadable bytes is not enough —
+            # -O binary discards e_entry and the program headers, so a zeroed
+            # entry point or an RX→RWX PT_LOAD compared equal. The fallback
+            # therefore requires elf_meta equality (loader metadata) AND -O
+            # binary equality (loadable content); anything else stays bound.
             cp "$ref_file" "$work/ref2"
             cp "$img_file" "$work/img2"
             objcopy -O binary "$work/ref2" "$work/ref2.bin" 2>/dev/null || true
             objcopy -O binary "$work/img2" "$work/img2.bin" 2>/dev/null || true
-            if [ -s "$work/ref2.bin" ] && cmp -s "$work/ref2.bin" "$work/img2.bin"; then
+            if [ -s "$work/ref2.bin" ] && [ -s "$work/img2.bin" ] \
+                && command -v python3 >/dev/null 2>&1 \
+                && elf_meta "$ref_file" > "$work/ref.meta" 2>/dev/null \
+                && elf_meta "$img_file" > "$work/img.meta" 2>/dev/null \
+                && cmp -s "$work/ref.meta" "$work/img.meta" \
+                && cmp -s "$work/ref2.bin" "$work/img2.bin"; then
                 rm -rf "$work"
                 return 0
             fi
