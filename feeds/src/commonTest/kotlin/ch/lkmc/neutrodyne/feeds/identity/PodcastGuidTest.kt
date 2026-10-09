@@ -53,5 +53,7 @@ class PodcastGuidTest {
         assertEquals(PodcastGuid.derive("podnews.net/rss"), PodcastGuid.derive("https://podnews.net/rss"))
         assertEquals(PodcastGuid.derive("podnews.net/rss"), PodcastGuid.derive("https://podnews.net/rss/"))
         assertEquals(PodcastGuid.derive("example.com/feed"), PodcastGuid.derive("http://example.com/feed///"))
+        // Schemes are case-insensitive (RFC 3986 §3.1): hand-typed `HTTPS://` strips too.
+        assertEquals(PodcastGuid.derive("podnews.net/rss"), PodcastGuid.derive("HTTPS://podnews.net/rss"))
     }
 }

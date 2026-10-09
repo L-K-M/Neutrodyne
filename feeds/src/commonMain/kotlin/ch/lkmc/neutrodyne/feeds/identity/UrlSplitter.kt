@@ -84,9 +84,9 @@ internal fun splitLenient(raw: String): UrlParts {
                     // After `]` only `:port` may follow; other residue is invalid (the JDK's `URI`
                     // rejects it) and must not silently drop into the parts.
                     val afterBracket = hostPort.substring(close + 1)
-                    val clean = afterBracket.isEmpty() || afterBracket.startsWith(':')
-                    host = if (clean) hostPort.substring(0, close + 1) else null
-                    port = if (clean) afterBracket.substringAfter(':').takeIf { it.isNotEmpty() } else null
+                    val validPortFollows = afterBracket.isEmpty() || afterBracket.startsWith(':')
+                    host = if (validPortFollows) hostPort.substring(0, close + 1) else null
+                    port = if (validPortFollows) afterBracket.substringAfter(':').takeIf { it.isNotEmpty() } else null
                 } else {
                     host = null
                     port = null
