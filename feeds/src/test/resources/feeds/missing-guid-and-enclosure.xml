@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Missing GUID And Enclosure</title>
+    <item><title>A blog post without media</title>
+      <link>https://example.com/posts/1</link>
+      <description>No enclosure, no guid: not an accepted item.</description></item>
+    <item><title>A real episode</title>
+      <enclosure url="https://cdn.example.com/me2.mp3" length="10" type="audio/mpeg"/></item>
+  </channel>
+</rss>

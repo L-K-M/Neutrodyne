@@ -1,0 +1,40 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 1000,
+          "url": "https://cdn.example.com/t1.mp3"
+        }
+      ],
+      "feedOrder": 0,
+      "guid": "etm-1",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 1000,
+        "url": "https://cdn.example.com/t1.mp3"
+      },
+      "title": "No type attribute"
+    },
+    {
+      "enclosures": [
+        {
+          "effectiveType": "audio/ogg",
+          "length": 1000,
+          "url": "https://cdn.example.com/t2.ogg"
+        }
+      ],
+      "feedOrder": 1,
+      "guid": "etm-2",
+      "primaryEnclosure": {
+        "effectiveType": "audio/ogg",
+        "length": 1000,
+        "url": "https://cdn.example.com/t2.ogg"
+      },
+      "title": "Empty type attribute"
+    }
+  ],
+  "title": "Enclosure Type Missing"
+}

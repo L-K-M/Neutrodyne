@@ -47,7 +47,11 @@ internal class OkHttpNeutrodyneHttpClients
                     }
                     // 10's long-lived sync stream.
                     if (kind == HttpClientKind.SYNC) install(SSE)
-                    install(ContentNegotiation) { json(NeutrodyneJson) }
+                    // Not for FEED: ContentNegotiation appends application/json to Accept, but 03's
+                    // Request rules pin the feed Accept header verbatim (and feeds are never JSON).
+                    if (kind != HttpClientKind.FEED) {
+                        install(ContentNegotiation) { json(NeutrodyneJson) }
+                    }
                     install(UserAgent) { agent = userAgent.value }
                 }
             }

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Raw HTML In Description</title>
+    <item>
+      <title>Raw markup child elements</title>
+      <guid>raw-1</guid>
+      <enclosure url="https://cdn.example.com/r1.mp3" length="10" type="audio/mpeg"/>
+      <description>Before <b>bold</b> and <i>italics with &amp; entity</i> and <a href="https://example.com/page?a=1&b=2">a link</a> after.</description>
+    </item>
+  </channel>
+</rss>

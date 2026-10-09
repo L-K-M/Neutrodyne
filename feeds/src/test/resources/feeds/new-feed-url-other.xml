@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>Moving Show</title>
+    <link>https://example.com/old-home</link>
+    <itunes:new-feed-url>https://feeds.newhost.example/moving-show.xml</itunes:new-feed-url>
+    <item><title>Episode from the old home</title><guid>nfo-1</guid>
+      <enclosure url="https://cdn.example.com/no1.mp3" length="10" type="audio/mpeg"/></item>
+  </channel>
+</rss>
