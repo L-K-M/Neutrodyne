@@ -226,8 +226,10 @@ jobs:
       - name: GMD ci group (debug)
         timeout-minutes: 45
         run: ./gradlew --max-workers=2 ciGroupDebugAndroidTest ciGroupAndroidDeviceTest -Pneutrodyne.testScope=ci -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
+      # Uploads on success too: the per-device androidTest-results XML is the proof corpus leg c
+      # (AndroidParserGoldenInstrumentedTest) actually ran on the API 26/36 GMDs.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ !success() }}
+        if: ${{ always() }}
         with:
           name: androidTest-results
           path: |
