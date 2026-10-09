@@ -174,13 +174,15 @@ else
 fi
 rm -f "$IMGMAC/Contents/runtime/Contents/Home/lib/libextra.dylib"
 
-# --- ELF loader metadata ----------------------------------------------------------
+# --- ELF loaded bytes -------------------------------------------------------------
 # jlink --strip-debug strips natives with objcopy -g, so a legitimately
-# stripped ELF must compare equal. The toolchain-difference fallback dumps
-# loadable bytes with objcopy -O binary — which discards e_entry and the
-# program headers — so the checker also binds the loader metadata (elf_meta);
-# a zeroed entry point or an RX→RWX PT_LOAD must still be reported (review
-# probe on 4069f52 accepted both).
+# stripped ELF must compare equal. The toolchain-difference fallback binds
+# what the kernel loader maps (elf_bind: masked ELF header, the program
+# header table, and every phdr's file range), never section data — sections
+# describe bytes a loader ignores, so a redirected section header or bytes
+# inside a segment no section covers would otherwise hide a mutation (review
+# probes accepted zeroed e_entry, an RX→RWX PT_LOAD, a redirected .text and
+# a padding-byte flip).
 
 ELF_SEED=""
 for c in "$(command -v true 2>/dev/null)" /bin/true /usr/bin/true; do
@@ -191,18 +193,23 @@ for c in "$(command -v true 2>/dev/null)" /bin/true /usr/bin/true; do
     fi
 done
 
-# mut_elf <in> <out> <entry|rwx> — flip a loader field on an ELF64 LE file.
+# mut_elf <in> <out> <entry|rwx|sectredir|gap> — flip loader-visible bytes on
+# an ELF64 LE file. sectredir mutates .text in place, appends the pristine
+# .text at EOF and redirects the section header to it — identical phdrs and
+# identical section-dumped bytes, different loaded bytes. gap flips a byte a
+# PT_LOAD maps but no section covers.
 mut_elf() {
     python3 - "$1" "$2" "$3" <<'PY'
 import struct, sys
 b = bytearray(open(sys.argv[1], 'rb').read())
 assert b[4] == 2 and b[5] == 1, 'ELF fixture needs an ELF64 little-endian seed'
-if sys.argv[3] == 'entry':
+phoff = struct.unpack('<Q', b[32:40])[0]
+phnum = struct.unpack('<H', b[56:58])[0]
+mode = sys.argv[3]
+if mode == 'entry':
     assert any(b[24:32]), 'seed entry point is already zero'
     struct.pack_into('<Q', b, 24, 0)
-else:
-    phoff = struct.unpack('<Q', b[32:40])[0]
-    phnum = struct.unpack('<H', b[56:58])[0]
+elif mode == 'rwx':
     hit = False
     for i in range(phnum):
         o = phoff + i * 56
@@ -212,6 +219,53 @@ else:
             hit = True
             break
     assert hit, 'no RX PT_LOAD in the seed'
+elif mode == 'sectredir':
+    shoff = struct.unpack('<Q', b[40:48])[0]
+    shents, shnum = struct.unpack('<HH', b[58:62])
+    shstrndx = struct.unpack('<H', b[62:64])[0]
+    stroff = struct.unpack('<Q',
+        b[shoff + shstrndx * shents + 24:shoff + shstrndx * shents + 32])[0]
+    target = None
+    for i in range(shnum):
+        o = shoff + i * shents
+        n = struct.unpack('<I', b[o:o + 4])[0]
+        if b[stroff + n:b.index(b'\0', stroff + n)] == b'.text':
+            target = o
+            break
+    assert target is not None, 'no .text section in the seed'
+    toff = struct.unpack('<Q', b[target + 24:target + 32])[0]
+    tsz = struct.unpack('<Q', b[target + 32:target + 40])[0]
+    text = bytes(b[toff:toff + tsz])
+    b[toff + tsz // 2] ^= 0xff
+    struct.pack_into('<Q', b, target + 24, len(b))
+    b += text
+else:  # gap
+    shoff = struct.unpack('<Q', b[40:48])[0]
+    shents, shnum = struct.unpack('<HH', b[58:62])
+    covered = [(0, phoff + 56 * phnum)]
+    for i in range(shnum):
+        o = shoff + i * shents
+        if struct.unpack('<I', b[o + 4:o + 8])[0] == 8:
+            continue
+        s = struct.unpack('<Q', b[o + 24:o + 32])[0]
+        z = struct.unpack('<Q', b[o + 32:o + 40])[0]
+        if z:
+            covered.append((s, s + z))
+    hit = False
+    for i in range(phnum):
+        o = phoff + i * 56
+        if struct.unpack('<I', b[o:o + 4])[0] != 1:
+            continue
+        po = struct.unpack('<Q', b[o + 8:o + 16])[0]
+        pz = struct.unpack('<Q', b[o + 32:o + 40])[0]
+        for f in range(po, po + pz):
+            if not any(s <= f < e for s, e in covered):
+                b[f] ^= 0xff
+                hit = True
+                break
+        if hit:
+            break
+    assert hit, 'no section-free byte inside the seed PT_LOADs'
 open(sys.argv[2], 'wb').write(bytes(b))
 PY
 }
@@ -278,6 +332,39 @@ else
         t_ok "an ELF with a writable PT_LOAD is rejected"
     else
         t_fail "an ELF with a writable PT_LOAD is rejected"
+        sed 's/^/    /' "$WORK/check.out" >&2
+    fi
+
+    # 12. .text mutated in place while its section header is redirected to a
+    #     pristine copy: identical ELF/program headers and identical
+    #     section-dumped bytes, different loaded bytes — accepted by the old
+    #     -O binary compare (review probe of 58fca12), rejected now because
+    #     the phdr-defined range carries the mutation.
+    cp "$JDK/lib/libtest.so" "$IMG/lib/runtime/lib/libtest.so"
+    objcopy -g "$IMG/lib/runtime/lib/libtest.so"
+    mut_elf "$IMG/lib/runtime/lib/libtest.so" \
+        "$IMG/lib/runtime/lib/libtest.so" sectredir
+    if ! run_check && grep -q \
+        'runtime file differs from the pinned Temurin archive: lib/libtest.so' \
+        "$WORK/check.out"; then
+        t_ok "an ELF whose section header hides mutated loaded bytes is rejected"
+    else
+        t_fail "an ELF whose section header hides mutated loaded bytes is rejected"
+        sed 's/^/    /' "$WORK/check.out" >&2
+    fi
+
+    # 13. A byte a PT_LOAD maps but no section covers — invisible to a
+    #     section-dumping compare, bound by the phdr-defined range.
+    cp "$JDK/lib/libtest.so" "$IMG/lib/runtime/lib/libtest.so"
+    objcopy -g "$IMG/lib/runtime/lib/libtest.so"
+    mut_elf "$IMG/lib/runtime/lib/libtest.so" \
+        "$IMG/lib/runtime/lib/libtest.so" gap
+    if ! run_check && grep -q \
+        'runtime file differs from the pinned Temurin archive: lib/libtest.so' \
+        "$WORK/check.out"; then
+        t_ok "an ELF with a mutated loaded byte outside every section is rejected"
+    else
+        t_fail "an ELF with a mutated loaded byte outside every section is rejected"
         sed 's/^/    /' "$WORK/check.out" >&2
     fi
     rm -f "$JDK/lib/libtest.so" "$IMG/lib/runtime/lib/libtest.so"
