@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.feeds.identity
 
 import ch.lkmc.neutrodyne.feeds.model.Enclosure
 import ch.lkmc.neutrodyne.feeds.model.ParsedEpisode
+import ch.lkmc.neutrodyne.feeds.model.TranscriptRef
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -94,6 +95,21 @@ class EpisodeKeysTest {
         assertNotEquals(
             EpisodeKeys.primary(episode(title = "A", description = "B\u001FC")),
             EpisodeKeys.primary(episode(title = "A\u001FB", description = "C")),
+        )
+        // A separator run must not slide across the boundary either: doubling alone encodes
+        // both of these pairs as A + 3×U+001F + B, so the escape needs its own prefix.
+        assertNotEquals(
+            EpisodeKeys.primary(episode(title = "A\u001F", description = "B")),
+            EpisodeKeys.primary(episode(title = "A", description = "\u001F\u001FB")),
+        )
+        assertNotEquals(
+            EpisodeKeys.primary(episode(title = "A\u001F\u001F", description = "B")),
+            EpisodeKeys.primary(episode(title = "A", description = "\u001F\u001FB")),
+        )
+        // A literal backslash-run must not conflate with an escaped separator.
+        assertNotEquals(
+            EpisodeKeys.primary(episode(title = "A\\u001F", description = "B")),
+            EpisodeKeys.primary(episode(title = "A\u001F", description = "B")),
         )
         // The stored-key path hashes the same escaped input.
         assertEquals(
@@ -203,6 +219,25 @@ class EpisodeKeysTest {
         assertNotEquals(
             EpisodeContentHash.of(episode().copy(chaptersUrl = "a|b")),
             EpisodeContentHash.of(episode().copy(chaptersUrl = "a", chaptersType = "b")),
+        )
+    }
+
+    @Test
+    fun contentHashSeparatorInsideFieldCannotForgeBoundary() {
+        // Free-text fields join by U+001F; a separator inside one must not forge neighbours'
+        // positions (feeds can inject it via &#x1F; — see headKeySeparatorInsideTitleCannotForgeBoundary).
+        assertNotEquals(
+            EpisodeContentHash.of(episode(title = "A").copy(rawPubDate = "B\u001F\u001FD")),
+            EpisodeContentHash.of(episode(title = "A\u001F\u001FB").copy(rawPubDate = "D")),
+        )
+        // The list separator U+001E inside a leaf must not forge an extra item boundary.
+        assertNotEquals(
+            EpisodeContentHash.of(
+                episode().copy(transcripts = listOf(TranscriptRef("a\u001F\u001F\u001F\u001Eb"))),
+            ),
+            EpisodeContentHash.of(
+                episode().copy(transcripts = listOf(TranscriptRef("a"), TranscriptRef("b"))),
+            ),
         )
     }
 

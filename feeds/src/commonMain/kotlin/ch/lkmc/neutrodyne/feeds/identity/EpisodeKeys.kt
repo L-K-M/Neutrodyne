@@ -84,17 +84,19 @@ public object EpisodeKeys {
         title: String?,
         description: String?,
     ): String =
-        // Lenient parsers can emit U+001F for &#x1F; despite XML 1.0, so the separator is
-        // doubled inside the title: the first unpaired U+001F is always the boundary and no
-        // field content can forge it. The description is last and needs no escaping.
-        "h:" +
-            (
-                title.orEmpty().replace(
-                    "\u001F",
-                    "\u001F\u001F",
-                ) + "\u001F" + description.orEmpty().take(500)
-            ).encodeUtf8().sha1().hex()
+        // Lenient parsers can emit U+001F for &#x1F; despite XML 1.0, so field content alone
+        // could forge the boundary. fieldEsc leaves no separator byte in the title; the
+        // description is the last field and needs no escaping.
+        "h:" + (title.orEmpty().fieldEsc() + "\u001F" + description.orEmpty().take(500)).encodeUtf8().sha1().hex()
 }
+
+/**
+ * Escapes a hash field so its content can't forge a join boundary: `\` -> `\\`,
+ * U+001F -> `\u001F`, U+001E -> `\u001E`. Escaped output contains no separator byte, so
+ * every separator in the joined preimage is structural. Lenient parsers can emit either
+ * control character for a numeric reference despite XML 1.0.
+ */
+private fun String.fieldEsc(): String = replace("\\", "\\\\").replace("\u001F", "\\u001F").replace("\u001E", "\\u001E")
 
 /** A stored episode's key inputs (02's columns); the restore and sync paths build this. */
 public data class KeyInput(
@@ -119,25 +121,38 @@ public object EpisodeContentHash {
     public fun of(e: ParsedEpisode): Long {
         val fields =
             listOf(
-                e.title.orEmpty(),
-                e.pubDate?.toString().orEmpty(),
-                e.rawPubDate.orEmpty(),
+                e.title.orEmpty().fieldEsc(),
+                e.pubDate
+                    ?.toString()
+                    .orEmpty()
+                    .fieldEsc(),
+                e.rawPubDate.orEmpty().fieldEsc(),
                 enclosureFields(e.primaryEnclosure),
-                (e.primaryEnclosure?.effectiveType?.startsWith("video/") == true).toString(),
-                e.durationMs?.toString().orEmpty(),
-                e.season?.toString().orEmpty(),
-                e.seasonName.orEmpty(),
-                e.episodeNumber.orEmpty(),
-                e.episodeDisplay.orEmpty(),
-                e.episodeType.orEmpty(),
-                e.explicit?.toString().orEmpty(),
+                (e.primaryEnclosure?.effectiveType?.startsWith("video/") == true).toString().fieldEsc(),
+                e.durationMs
+                    ?.toString()
+                    .orEmpty()
+                    .fieldEsc(),
+                e.season
+                    ?.toString()
+                    .orEmpty()
+                    .fieldEsc(),
+                e.seasonName.orEmpty().fieldEsc(),
+                e.episodeNumber.orEmpty().fieldEsc(),
+                e.episodeDisplay.orEmpty().fieldEsc(),
+                e.episodeType.orEmpty().fieldEsc(),
+                e.explicit
+                    ?.toString()
+                    .orEmpty()
+                    .fieldEsc(),
                 e.artwork
                     .firstOrNull()
                     ?.url
-                    .orEmpty(),
-                e.link.orEmpty(),
-                e.chaptersUrl.orEmpty() + FIELD_SEPARATOR + e.chaptersType.orEmpty(),
-                e.externalMediaId.orEmpty(),
+                    .orEmpty()
+                    .fieldEsc(),
+                e.link.orEmpty().fieldEsc(),
+                e.chaptersUrl.orEmpty().fieldEsc() + FIELD_SEPARATOR + e.chaptersType.orEmpty().fieldEsc(),
+                e.externalMediaId.orEmpty().fieldEsc(),
                 e.descriptionHtml
                     .orEmpty()
                     .encodeUtf8()
@@ -145,7 +160,7 @@ public object EpisodeContentHash {
                     .hex(),
                 // The interpretation is a stored column too: text→HTML with identical bytes must
                 // still flip the hash or the update gate keeps the stale flag (03 Ingestion diff).
-                e.descriptionIsHtml.toString(),
+                e.descriptionIsHtml.toString().fieldEsc(),
                 list(e.transcripts) { listOf(it.url, it.type.orEmpty(), it.language.orEmpty(), it.rel.orEmpty()) },
                 list(e.alternateEnclosures) {
                     listOf(
@@ -188,13 +203,16 @@ public object EpisodeContentHash {
                 enclosure.url,
                 enclosure.type.orEmpty(),
                 enclosure.length?.toString().orEmpty(),
-            ).joinToString(FIELD_SEPARATOR)
+            ).joinToString(FIELD_SEPARATOR) { it.fieldEsc() }
         }
 
     private fun <T> list(
         items: List<T>,
         serialize: (T) -> List<String>,
-    ): String = items.joinToString(LIST_SEPARATOR) { serialize(it).joinToString(FIELD_SEPARATOR) }
+    ): String =
+        items.joinToString(LIST_SEPARATOR) {
+            serialize(it).joinToString(FIELD_SEPARATOR) { leaf -> leaf.fieldEsc() }
+        }
 }
 
 /**
