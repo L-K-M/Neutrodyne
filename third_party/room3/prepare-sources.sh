@@ -28,6 +28,23 @@ cp -a "$OUT/android/." "$OUT/merged/"
 
 git apply --directory="$OUT/merged" patches/*.patch
 
+# AGP's KMP flat-source convention maps <set>/kotlin to javac's <set>/java, while
+# upstream ships .java files beside .kt in each source-set root. Re-stage every
+# set as <set>/kotlin + <set>/java so withJava() compiles the androidMain Binder
+# stubs; only androidMain has .java files upstream.
+for set in commonMain nonWebMain jvmAndAndroidMain jvmNativeWebMain jvmMain androidMain; do
+    root="$OUT/merged/$set"
+    [ -d "$root" ] || continue
+    mkdir -p "$root/java"
+    find "$root" -mindepth 1 -name '*.java' -not -path '*/java/*' | while IFS= read -r f; do
+        rel="${f#"$root"/}"
+        mkdir -p "$root/java/$(dirname "$rel")"
+        mv "$f" "$root/java/$rel"
+    done
+    mkdir -p "$root/kotlin"
+    find "$root" -mindepth 1 -maxdepth 1 ! -name java ! -name kotlin -exec mv -t "$root/kotlin" {} +
+done
+
 # Stage the Apache-2.0 notice for embedding in the binary artifacts, matching
 # upstream's META-INF/androidx/room3/room3-runtime/LICENSE.txt layout.
 mkdir -p "$OUT/lic-res/META-INF/androidx/room3/room3-runtime"

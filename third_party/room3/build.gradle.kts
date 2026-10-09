@@ -50,6 +50,9 @@ kotlin {
         namespace = "androidx.room3"
         compileSdk = 37 // COMPILE_SDK in build-logic/convention ProjectExtensions.kt
         minSdk = 23 // upstream manifest floor (minCompileSdk 34 is satisfied by 37)
+        // androidMain ships Java Binder stubs (IMultiInstanceInvalidation{Service,Callback});
+        // without javac the AAR loses them and the Kotlin subclasses cannot link.
+        withJava()
         compilerOptions { jvmTarget.set(JvmTarget.JVM_11) }
     }
 
@@ -66,7 +69,8 @@ kotlin {
             dependsOn(jvmNativeWebMain)
         }
 
-        fun KotlinSourceSet.upstream(dir: String) = kotlin.srcDir(mergedSources.map { it.resolve(dir) })
+        // <set>/kotlin; javac derives <set>/java itself (see prepare-sources.sh).
+        fun KotlinSourceSet.upstream(dir: String) = kotlin.srcDir(mergedSources.map { it.resolve("$dir/kotlin") })
         commonMain.upstream("commonMain")
         nonWebMain.upstream("nonWebMain")
         jvmAndAndroidMain.upstream("jvmAndAndroidMain")
@@ -92,10 +96,17 @@ kotlin {
     }
 }
 
-// AGP derives some packaged-input dirs (baseline profiles, packaged assets) next to the
-// androidMain kotlin srcDir, i.e. inside the prepared tree; give those tasks the dep.
+// AGP derives some packaged-input dirs (baseline profiles, packaged assets, the Java
+// flat-source dirs once withJava() is on) from the androidMain kotlin srcDir, i.e.
+// inside the prepared tree; give those tasks the dep.
 tasks.configureEach {
-    if (name != prepareSources.name && name.startsWith("prepareAndroidMain")) {
+    val scansPreparedTree =
+        name.startsWith("prepareAndroidMain") ||
+            name == "extractAndroidMainAnnotations" ||
+            name == "compileAndroidMainJavaWithJavac" ||
+            name == "mergeAndroidMainJavaResource" ||
+            name == "processAndroidMainJavaRes"
+    if (name != prepareSources.name && scansPreparedTree) {
         dependsOn(prepareSources)
     }
 }

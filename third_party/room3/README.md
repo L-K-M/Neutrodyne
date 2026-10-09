@@ -34,7 +34,9 @@ Gradle plugin, schema and data behaviour are upstream 3.0.3, unchanged.
 | `src/androidMain/` | upstream's `AndroidManifest.xml` service declaration (namespace/minSdk now via DSL) and the aar consumer `proguard.txt`. |
 
 `prepare-sources.sh` verifies the jars against `SHA256SUMS.txt`, extracts both, checks the
-shared source sets are identical, merges them, applies the patch and stages the
+shared source sets are identical, merges them, applies the patch, restages each source set
+as `<set>/kotlin` + `<set>/java` (AGP-KMP derives the javac flat-source dir from the kotlin
+srcDir's parent — upstream ships `.java` Binder stubs beside `.kt` files) and stages the
 `META-INF/.../LICENSE.txt` notice that upstream embeds in its artifacts.
 
 ## Rebuild
@@ -47,9 +49,19 @@ JAVA_HOME="$HOME/.local/jdks/jdk21" ANDROID_HOME="$HOME/android-sdk" \
 The Gradle/Kotlin/AGP toolchain and dependency versions follow the repository catalog
 (`../../gradle/libs.versions.toml`); compile SDK 37, min SDK 23, JVM target 11. Published
 variants: common metadata + sources, `-jvm` jar, `-android` aar — all POMs declare
-Apache-2.0. Jars are built timestamp-free; a clean rebuild currently reproduces
+Apache-2.0. Jars are built timestamp-free; a clean rebuild reproduces
 `ARTIFACT_SHA256SUMS.txt` byte-for-byte. After rebuilding, commit the refreshed
 `../room3-maven` tree together with any patch change.
+
+`check-parity.sh` diffs the published artifacts against the upstream 3.0.3 aar/jar resolved
+in the Gradle cache: named `.class` parity (compiler-synthetic names legitimately differ
+between compiler versions and the patch), the manifest's `MultiInstanceInvalidationService`
+declaration, `LICENSE.txt` and `proguard.txt`. It exists because the androidMain Java Binder
+stubs once silently missed the AAR — a 313-vs-317 class regression that
+`RoomRuntimeServiceHostTest` (Robolectric service bind + `Stub` round-trip) and the
+`:app` `androidTest` device case (`RoomRuntimeServiceDeviceTest`, run by
+`api36DebugAndroidTest` / the `run-instrumented` PR label's `ciGroupDebugAndroidTest`)
+now cover functionally.
 
 ## Removal condition
 

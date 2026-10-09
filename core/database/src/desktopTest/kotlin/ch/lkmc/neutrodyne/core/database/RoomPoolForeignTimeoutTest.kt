@@ -16,10 +16,10 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.OutputStream
@@ -64,7 +64,7 @@ class RoomPoolForeignTimeoutTest {
                 val holderEntered = CompletableDeferred<Unit>()
                 val holdLatch = CompletableDeferred<Unit>()
                 val holder =
-                    scope.launch {
+                    scope.async {
                         db.withWriteTransaction {
                             usePrepared("INSERT INTO probe(id) VALUES (1)") { it.step() }
                             holderEntered.complete(Unit)
@@ -76,26 +76,35 @@ class RoomPoolForeignTimeoutTest {
 
                 System.setErr(countingStderr(stderrBytes))
 
+                // await() rethrows a waiter failure; a zombie retry loop would make the
+                // outer withTimeoutOrNull return null instead of the awaited value.
                 val waiter =
-                    scope.launch {
+                    scope.async {
                         withTimeoutOrNull(300) {
                             db.withWriteTransaction { }
                             "ran"
-                        }
+                        } ?: "timed-out"
                     }
-                val joined =
+                val outcome =
                     withTimeoutOrNull(2_000) {
-                        waiter.join()
-                        true
+                        waiter.await()
                     }
-                assertNotNull(joined, "foreign-timeout waiter must complete, not turn zombie")
+                assertEquals(
+                    "timed-out",
+                    outcome,
+                    "foreign-timeout waiter must complete with the caller's timeout result",
+                )
+                assertTrue(waiter.isCompleted && !waiter.isCancelled, "waiter must end normally")
                 assertEquals(
                     0L,
                     stderrBytes.get(),
                     "patched pool must not log an acquisition-timeout dump for a foreign timeout",
                 )
 
-                val plainWaiter = scope.launch { db.withWriteTransaction { } }
+                // The timed-out waiter must not stay queued: the permit handed to a dead
+                // waiter would starve the next writer once the holder releases.
+
+                val plainWaiter = scope.async { db.withWriteTransaction { } }
                 delay(200)
                 val joinedAfterCancel =
                     withTimeoutOrNull(2_000) {
@@ -103,6 +112,7 @@ class RoomPoolForeignTimeoutTest {
                         true
                     }
                 assertNotNull(joinedAfterCancel, "plain cancellation of a waiting writer must join")
+                assertTrue(plainWaiter.isCancelled, "cancelled waiter must be cancelled, not failed")
 
                 holder.cancelAndJoin() // cancelled mid-transaction: rolled back by Room
                 assertEquals(0L, countProbes(db), "cancelled transaction must roll back its insert")
@@ -134,12 +144,15 @@ class RoomPoolForeignTimeoutTest {
 
     /**
      * The pool's own 30 s acquisition timeout must still fire once, log its dump and retry;
-     * a holder that outlasts it proves the retry policy survived the patch. A lost
-     * acquire-in-flight would deadlock the waiter; a double recycle would open a second
-     * connection, so `opens` staying 1 pins exactly-one recycling of the timeout race.
+     * a holder that outlasts it proves the retry policy survived the patch. The waiter is
+     * awaited for its result, so a retry path that throws fails the test and a lost
+     * acquisition handoff times the await out instead of passing via `join`. Health of the
+     * size-1 pool afterwards is the recycle proof: a leaked permit deadlocks the follow-up
+     * writer, and `opens` staying 1 shows the same connection was reused rather than
+     * replaced.
      */
     @Test
-    fun ownAcquisitionTimeoutStillRetriesAndRecyclesOnce() =
+    fun ownAcquisitionTimeoutStillRetriesAndPoolStaysHealthy() =
         runBlocking {
             val scope = CoroutineScope(Job() + Dispatchers.Default)
             val opens = AtomicInteger()
@@ -156,10 +169,11 @@ class RoomPoolForeignTimeoutTest {
 
                 val holderEntered = CompletableDeferred<Unit>()
                 val holder =
-                    scope.launch {
+                    scope.async {
                         db.withWriteTransaction {
                             holderEntered.complete(Unit)
                             delay(32_000) // hold past the pool's fixed 30 s acquisition timeout
+                            "released"
                         }
                     }
                 holderEntered.await()
@@ -167,19 +181,59 @@ class RoomPoolForeignTimeoutTest {
 
                 System.setErr(countingStderr(stderrBytes))
                 // No foreign timeout: the pool's own timeout drives the dump-and-retry path.
-                val waiter = scope.launch { db.withWriteTransaction { } }
-                val joined =
-                    withTimeoutOrNull(40_000) {
-                        waiter.join()
-                        true
+                val waiter =
+                    scope.async {
+                        db.withWriteTransaction { }
+                        "acquired"
                     }
-                assertNotNull(joined, "own-timeout waiter must acquire once the holder releases")
-                holder.join()
+                val acquired =
+                    withTimeoutOrNull(40_000) {
+                        waiter.await()
+                    }
+                assertEquals(
+                    "acquired",
+                    acquired,
+                    "own-timeout waiter must acquire once the holder releases",
+                )
+                assertEquals(
+                    "released",
+                    withTimeoutOrNull(5_000) { holder.await() },
+                    "holder transaction must still commit after the waiter's timeout",
+                )
                 assertTrue(
                     stderrBytes.get() > 0L,
                     "the pool's own timeout must still invoke the dump-and-retry handler",
                 )
-                assertEquals(1, opens.get(), "timeout/handoff race must recycle exactly once")
+                val stderrAfterAcquire = stderrBytes.get()
+                delay(500)
+                assertEquals(
+                    stderrAfterAcquire,
+                    stderrBytes.get(),
+                    "the dump-and-retry loop must stop once acquisition completes",
+                )
+
+                // The sole permit must be usable again: a timeout race that lost the
+                // acquired connection would deadlock this writer, and a second physical
+                // connection would show up in `opens`.
+                val followUpWrite =
+                    withTimeoutOrNull(5_000) {
+                        db.withWriteTransaction {
+                            usePrepared("INSERT INTO probe(id) VALUES (2)") { it.step() }
+                            "written"
+                        }
+                    }
+                assertEquals("written", followUpWrite, "fresh writer must acquire after handoff")
+                val followUpRead =
+                    withTimeoutOrNull(5_000) {
+                        db.withReadTransaction {
+                            usePrepared("SELECT count(*) FROM probe") {
+                                it.step()
+                                it.getLong(0)
+                            }
+                        }
+                    }
+                assertEquals(1L, followUpRead, "fresh reader must see the committed write")
+                assertEquals(1, opens.get(), "the pool must still serve the single connection")
             } finally {
                 System.setErr(realErr)
                 scope.cancel()
