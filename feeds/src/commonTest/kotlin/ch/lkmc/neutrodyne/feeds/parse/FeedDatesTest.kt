@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.feeds.parse
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
 /** Every date variant of 03 Dates, table-driven with fixed vectors (locale-invariant lowercase). */
@@ -43,10 +44,28 @@ class FeedDatesTest {
     }
 
     @Test
+    fun weekdayCommaWithoutSpaceStillParses() {
+        // Some generators emit "Tue,1 Oct 2024 …" — the weekday strip must not require the space.
+        assertEquals(
+            FeedDates.parse("Tue, 1 Oct 2024 10:00:00 +0000"),
+            FeedDates.parse("Tue,1 Oct 2024 10:00:00 +0000"),
+        )
+        assertNotNull(FeedDates.parse("Tue,1 Oct 2024 10:00:00 +0000"))
+    }
+
+    @Test
     fun twoDigitYearsFollowRfc5322() {
-        // 00–49 → 20xx, 50–99 → 19xx (RFC 5322 §4.3).
+        // 00–49 → 20xx, 50–99 → 19xx (RFC 5322 §4.3), boundary years included.
         assertEquals(981201600000L, FeedDates.parse("Sat, 03 Feb 01 12:00:00 +0000"))
         assertEquals(-567864000000L, FeedDates.parse("Sat, 03 Jan 52 12:00:00 +0000"))
+        assertEquals(
+            FeedDates.parse("03 Feb 2049 12:00:00 +0000"),
+            FeedDates.parse("Wed, 03 Feb 49 12:00:00 +0000"),
+        )
+        assertEquals(
+            FeedDates.parse("03 Feb 1950 12:00:00 +0000"),
+            FeedDates.parse("Fri, 03 Feb 50 12:00:00 +0000"),
+        )
     }
 
     @Test
@@ -74,14 +93,50 @@ class FeedDatesTest {
     }
 
     @Test
+    fun isoSpaceBeforeColonlessOffset() {
+        // "YYYY-MM-DD HH:MM:SS ±HHMM" needs the space-strip and the colon insertion to compose.
+        assertEquals(
+            FeedDates.parse("2024-06-15T12:00:00+02:00"),
+            FeedDates.parse("2024-06-15 12:00:00 +0200"),
+        )
+        assertEquals(
+            FeedDates.parse("2026-10-03T12:34:56-07:00"),
+            FeedDates.parse("2026-10-03 12:34:56 -0700"),
+        )
+        assertEquals(
+            FeedDates.parse("2026-10-03T12:34:56Z"),
+            FeedDates.parse("2026-10-03 12:34:56 Z"),
+        )
+    }
+
+    @Test
     fun whitespaceCollapses() {
         assertEquals(1791030896000L, FeedDates.parse("  Sat,   03   Oct   2026  12:34:56  +0000  "))
+    }
+
+    @Test
+    fun nonBreakingSpacesNormalize() {
+        // Typeset feeds carry NBSP/narrow-NBSP between tokens; they are whitespace runs too.
+        assertEquals(
+            1791030896000L,
+            FeedDates.parse("Sat,\u00A003\u00A0Oct\u00A02026\u00A012:34:56\u00A0+0000"),
+        )
+        assertEquals(
+            1791030896000L,
+            FeedDates.parse("Sat,\u202F03\u202FOct\u202F2026\u202F12:34:56\u202F+0000"),
+        )
+        // A leading no-break space is dropped like ordinary leading whitespace.
+        assertEquals(
+            1791030896000L,
+            FeedDates.parse("\u00A0Sat, 03 Oct 2026 12:34:56 +0000"),
+        )
     }
 
     @Test
     fun dayIsValidatedAgainstTheMonth() {
         assertNull(FeedDates.parse("Mon, 31 Sep 2026 12:00:00 +0000")) // September has 30 days
         assertNull(FeedDates.parse("Mon, 30 Feb 2026 12:00:00 +0000"))
+        assertNull(FeedDates.parse("Sun, 29 Feb 2026 12:00:00 +0000")) // non-leap year
         assertEquals(1835438400000L, FeedDates.parse("Tue, 29 Feb 2028 12:00:00 +0000")) // leap year
     }
 

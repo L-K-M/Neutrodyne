@@ -24,7 +24,9 @@ public object FeedDates {
     private const val TWO_DIGIT_YEAR_RECENT_PREFIX = 2000
     private const val TWO_DIGIT_YEAR_OLD_PREFIX = 1900
 
-    private val weekdayPrefix = Regex("""^\p{L}{2,}\.?,?\s+""")
+    // The comma or a space ends the weekday; a comma need not be followed by a space
+    // ("Tue,1 Oct 2024" occurs in real feeds), but a bare letter-prefix is not stripped.
+    private val weekdayPrefix = Regex("""^\p{L}{2,}\.?(?:,|\s)\s*""")
 
     /** Localised month abbreviations → English (German, French, Spanish, Italian, Dutch, Portuguese; heuristic). */
     private val localisedMonths: Map<String, String> =
@@ -99,13 +101,21 @@ public object FeedDates {
     /** An ISO offset without a colon (`+0200`) gets one so kotlinx-datetime's format accepts it. */
     private val offsetWithoutColon = Regex("""([+-]\d{2})(\d{2})$""")
 
-    /** A space before a trailing ISO offset ("…12:34:56 +02:00") is removed for the ISO fallback. */
-    private val spaceBeforeOffset = Regex("""\s+([+-]\d{2}:\d{2}|Z)$""")
+    /** A space before a trailing ISO offset ("…12:34:56 +02:00", "… +0200") is removed so the
+     * space-strip and the colon insertion below compose for "YYYY-MM-DD HH:MM:SS ±HHMM". */
+    private val spaceBeforeOffset = Regex("""\s+([+-]\d{2}:?\d{2}|Z)$""")
     private val utcMidnightOffset = UtcOffset.ZERO
 
-    /** Parses a feed date to epoch milliseconds UTC, or null when no form matches (03 Dates). */
+    /** Whitespace runs collapse to one ASCII space; `\s` alone misses the no-break spaces of typeset dates. */
+    private val whitespaceRun = Regex("""[\s\u00A0\u202F]+""")
+
+    /**
+     * Parses a feed date to epoch milliseconds UTC, or null when no form matches (03 Dates).
+     * ISO 8601's `24:00` end-of-day form and RFC 3339 leap seconds (`:60`) are intentionally
+     * rejected; such values degrade to `UNKNOWN_DATE` upstream rather than misparsing.
+     */
     public fun parse(raw: String): Long? {
-        var text = raw.trim().replace(Regex("\\s+"), " ")
+        var text = raw.replace(whitespaceRun, " ").trim()
 
         // Step 1: drop the weekday, even a wrong or localised one ("Mié,").
         text = weekdayPrefix.replaceFirst(text, "")

@@ -12,6 +12,9 @@ public object PodcastGuid {
     /** 8-4-4-4-12 hex, the form the Podcast Index spec requires. */
     private val guidPattern = Regex("""^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$""")
 
+    /** The nil UUID is junk data, not an identity: two broken feeds emitting it must not dedupe. */
+    private const val NIL_UUID = "00000000-0000-0000-0000-000000000000"
+
     /** The podcast:guid namespace for UUIDv5 derivation (podcastindex.org podcast namespace). */
     private val namespaceBytes = "ead4c236-bf58-58c6-a2c6-a6b28d128cb6".replace("-", "").decodeHex()
 
@@ -25,8 +28,16 @@ public object PodcastGuid {
 
     private val hexDigits = "0123456789abcdef"
 
-    /** Validates a feed-supplied GUID and lowercases it; null when it is not a UUID-shaped value. */
-    public fun parse(raw: String): String? = raw.trim().takeIf { guidPattern.matches(it) }?.lowercase()
+    /**
+     * Validates a feed-supplied GUID and lowercases it; null when it is not a UUID-shaped value —
+     * or is the nil UUID, which is junk rather than an identity.
+     */
+    public fun parse(raw: String): String? =
+        raw
+            .trim()
+            .takeIf { guidPattern.matches(it) }
+            ?.lowercase()
+            ?.takeIf { it != NIL_UUID }
 
     /**
      * UUIDv5 over the URL with the scheme and trailing slashes removed, namespace

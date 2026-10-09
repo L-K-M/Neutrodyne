@@ -35,7 +35,12 @@ public object EpisodeKeys {
     /** Current-version primary first, then the keys of every older supported version (v1: `[primary]`). */
     public fun candidates(e: ParsedEpisode): List<String> = listOf(primary(e))
 
-    /** The key of a stored episode for [version] (restore and sync matching). Only v1 exists today. */
+    /**
+     * The key of a stored episode for [version] (restore and sync matching). Only v1 exists today.
+     * Invariant: [KeyInput.descriptionHead] must be exactly the head of the same stored description —
+     * the first 500 UTF-16 code units, extended by one when the cut splits a surrogate pair —
+     * or `h:`-fallback matching diverges between ingest and restore.
+     */
     public fun keyFor(
         e: KeyInput,
         version: Int,
@@ -79,8 +84,41 @@ public object EpisodeKeys {
     private fun headKey(
         title: String?,
         description: String?,
-    ): String = "h:" + (title.orEmpty() + description.orEmpty().take(500)).encodeUtf8().sha1().hex()
+    ): String =
+        // Lenient parsers can emit U+001F for &#x1F; despite XML 1.0, so field content alone
+        // could forge the boundary. fieldEsc leaves no separator byte in the title; the
+        // description is the last field and needs no escaping.
+        "h:" +
+            (title.orEmpty().fieldEsc() + "\u001F" + description.orEmpty().headUnits())
+                .encodeUtf8()
+                .sha1()
+                .hex()
 }
+
+/**
+ * The first [DESC_HEAD_UNITS] UTF-16 code units, extended by one when the cut would leave a lone
+ * high surrogate: a surrogate half encodes as `?` in UTF-8, so descriptions differing only past
+ * the cut would otherwise hash identically. `KeyInput.descriptionHead` must be stored under the
+ * same rule (idempotent — applying it to an already-truncated head is a no-op).
+ */
+private const val DESC_HEAD_UNITS = 500
+
+private fun String.headUnits(): String {
+    val head = take(DESC_HEAD_UNITS)
+    return if (head.lastOrNull()?.isHighSurrogate() == true && length > head.length) {
+        head + this[head.length]
+    } else {
+        head
+    }
+}
+
+/**
+ * Escapes a hash field so its content can't forge a join boundary: `\` -> `\\`,
+ * U+001F -> `\u001F`, U+001E -> `\u001E`. Escaped output contains no separator byte, so
+ * every separator in the joined preimage is structural. Lenient parsers can emit either
+ * control character for a numeric reference despite XML 1.0.
+ */
+private fun String.fieldEsc(): String = replace("\\", "\\\\").replace("\u001F", "\\u001F").replace("\u001E", "\\u001E")
 
 /** A stored episode's key inputs (02's columns); the restore and sync paths build this. */
 public data class KeyInput(
@@ -105,24 +143,38 @@ public object EpisodeContentHash {
     public fun of(e: ParsedEpisode): Long {
         val fields =
             listOf(
-                e.title.orEmpty(),
-                e.pubDate?.toString() ?: e.rawPubDate.orEmpty(),
+                e.title.orEmpty().fieldEsc(),
+                e.pubDate
+                    ?.toString()
+                    .orEmpty()
+                    .fieldEsc(),
+                e.rawPubDate.orEmpty().fieldEsc(),
                 enclosureFields(e.primaryEnclosure),
-                (e.primaryEnclosure?.effectiveType?.startsWith("video/") == true).toString(),
-                e.durationMs?.toString().orEmpty(),
-                e.season?.toString().orEmpty(),
-                e.seasonName.orEmpty(),
-                e.episodeNumber.orEmpty(),
-                e.episodeDisplay.orEmpty(),
-                e.episodeType.orEmpty(),
-                e.explicit?.toString().orEmpty(),
+                (e.primaryEnclosure?.effectiveType?.startsWith("video/") == true).toString().fieldEsc(),
+                e.durationMs
+                    ?.toString()
+                    .orEmpty()
+                    .fieldEsc(),
+                e.season
+                    ?.toString()
+                    .orEmpty()
+                    .fieldEsc(),
+                e.seasonName.orEmpty().fieldEsc(),
+                e.episodeNumber.orEmpty().fieldEsc(),
+                e.episodeDisplay.orEmpty().fieldEsc(),
+                e.episodeType.orEmpty().fieldEsc(),
+                e.explicit
+                    ?.toString()
+                    .orEmpty()
+                    .fieldEsc(),
                 e.artwork
                     .firstOrNull()
                     ?.url
-                    .orEmpty(),
-                e.link.orEmpty(),
-                e.chaptersUrl.orEmpty() + "|" + e.chaptersType.orEmpty(),
-                e.externalMediaId.orEmpty(),
+                    .orEmpty()
+                    .fieldEsc(),
+                e.link.orEmpty().fieldEsc(),
+                e.chaptersUrl.orEmpty().fieldEsc() + FIELD_SEPARATOR + e.chaptersType.orEmpty().fieldEsc(),
+                e.externalMediaId.orEmpty().fieldEsc(),
                 e.descriptionHtml
                     .orEmpty()
                     .encodeUtf8()
@@ -130,7 +182,7 @@ public object EpisodeContentHash {
                     .hex(),
                 // The interpretation is a stored column too: text→HTML with identical bytes must
                 // still flip the hash or the update gate keeps the stale flag (03 Ingestion diff).
-                e.descriptionIsHtml.toString(),
+                e.descriptionIsHtml.toString().fieldEsc(),
                 list(e.transcripts) { listOf(it.url, it.type.orEmpty(), it.language.orEmpty(), it.rel.orEmpty()) },
                 list(e.alternateEnclosures) {
                     listOf(
@@ -173,13 +225,16 @@ public object EpisodeContentHash {
                 enclosure.url,
                 enclosure.type.orEmpty(),
                 enclosure.length?.toString().orEmpty(),
-            ).joinToString(FIELD_SEPARATOR)
+            ).joinToString(FIELD_SEPARATOR) { it.fieldEsc() }
         }
 
     private fun <T> list(
         items: List<T>,
         serialize: (T) -> List<String>,
-    ): String = items.joinToString(LIST_SEPARATOR) { serialize(it).joinToString(FIELD_SEPARATOR) }
+    ): String =
+        items.joinToString(LIST_SEPARATOR) {
+            serialize(it).joinToString(FIELD_SEPARATOR) { leaf -> leaf.fieldEsc() }
+        }
 }
 
 /**

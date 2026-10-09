@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.feeds.identity
 
 import ch.lkmc.neutrodyne.feeds.model.Enclosure
 import ch.lkmc.neutrodyne.feeds.model.ParsedEpisode
+import ch.lkmc.neutrodyne.feeds.model.TranscriptRef
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -44,7 +45,8 @@ class EpisodeKeysTest {
     @Test
     fun enclosureKeyUsesNormalisedUrl() {
         val key = EpisodeKeys.primary(episode(enclosureUrl = "HTTPS://CDN.Example.com:443/pod/a.mp3?x=1"))
-        assertTrue(key.startsWith("u:cdn.example.com/pod/a.mp3"))
+        // The query is part of the enclosure identity, not stripped.
+        assertEquals("u:cdn.example.com/pod/a.mp3?x=1", key)
     }
 
     @Test
@@ -53,6 +55,8 @@ class EpisodeKeysTest {
         val key = EpisodeKeys.titleDayKey(" Episode 42 ", 1791030896000L)
         assertEquals("t:1f46eba7092e57135e3aef7b6570849f3712b5c1", key)
         assertEquals(key, EpisodeKeys.primary(episode(title = "Episode 42", pubDate = 1791030896000L)))
+        // 23:59:59Z is still the same UTC day; a non-UTC default timezone would bucket it to Oct 4.
+        assertEquals(key, EpisodeKeys.titleDayKey("Episode 42", 1791071999000L))
     }
 
     @Test
@@ -76,10 +80,74 @@ class EpisodeKeysTest {
     }
 
     @Test
+    fun headKeySeparatesTitleFromDescription() {
+        // "AB"+"C…" and "A"+"BC…" must not hash to the same h: key.
+        assertNotEquals(
+            EpisodeKeys.primary(episode(title = "AB", description = "C")),
+            EpisodeKeys.primary(episode(title = "A", description = "BC")),
+        )
+    }
+
+    @Test
+    fun headKeySeparatorInsideTitleCannotForgeBoundary() {
+        // U+001F can reach a title/description in practice: the lenient pull parsers emit it
+        // for &#x1F; despite XML 1.0. It must not let a field forge the separator position.
+        assertNotEquals(
+            EpisodeKeys.primary(episode(title = "A", description = "B\u001FC")),
+            EpisodeKeys.primary(episode(title = "A\u001FB", description = "C")),
+        )
+        // A separator run must not slide across the boundary either: doubling alone encodes
+        // both of these pairs as A + 3×U+001F + B, so the escape needs its own prefix.
+        assertNotEquals(
+            EpisodeKeys.primary(episode(title = "A\u001F", description = "B")),
+            EpisodeKeys.primary(episode(title = "A", description = "\u001F\u001FB")),
+        )
+        assertNotEquals(
+            EpisodeKeys.primary(episode(title = "A\u001F\u001F", description = "B")),
+            EpisodeKeys.primary(episode(title = "A", description = "\u001F\u001FB")),
+        )
+        // A literal backslash-run must not conflate with an escaped separator.
+        assertNotEquals(
+            EpisodeKeys.primary(episode(title = "A\\u001F", description = "B")),
+            EpisodeKeys.primary(episode(title = "A\u001F", description = "B")),
+        )
+        // The stored-key path hashes the same escaped input.
+        assertEquals(
+            EpisodeKeys.primary(episode(title = "A\u001FB", description = "C")),
+            EpisodeKeys.keyFor(KeyInput(title = "A\u001FB", descriptionHead = "C"), 1),
+        )
+    }
+
+    @Test
+    fun headKeyTruncationNeverEndsOnALoneSurrogate() {
+        // take(500) can cut inside a surrogate pair: the lone high surrogate encodes as '?' in
+        // UTF-8, so two descriptions differing only past the cut would hash identically. The cut
+        // extends to the code-point boundary instead.
+        val base = "x".repeat(499)
+        assertNotEquals(
+            EpisodeKeys.primary(episode(description = base + "\uD83D\uDE00")),
+            EpisodeKeys.primary(episode(description = base + "\uD83D\uDE01")),
+        )
+        // A lone high surrogate followed by a non-surrogate stays distinct too.
+        assertNotEquals(
+            EpisodeKeys.primary(episode(description = base + "\uD83Dz")),
+            EpisodeKeys.primary(episode(description = base + "\uD83Dw")),
+        )
+        // The stored-head path applies the same boundary rule, so ingest/restore agree.
+        assertEquals(
+            EpisodeKeys.primary(episode(description = base + "\uD83D\uDE00")),
+            EpisodeKeys.keyFor(KeyInput(descriptionHead = base + "\uD83D\uDE00"), 1),
+        )
+    }
+
+    @Test
     fun precedenceGuidEnclosureTitleLinkHead() {
         val both = episode(guid = "g-1", enclosureUrl = "https://example.com/a.mp3")
         assertEquals("g:g-1", EpisodeKeys.primary(both))
         assertTrue(EpisodeKeys.primary(episode(enclosureUrl = "https://example.com/a.mp3")).startsWith("u:"))
+        // Title-day outranks link when neither guid nor enclosure is present.
+        val titleAndLink = episode(title = "T", pubDate = 1791030896000L, link = "https://example.com/ep-1")
+        assertTrue(EpisodeKeys.primary(titleAndLink).startsWith("t:"))
     }
 
     @Test
@@ -93,6 +161,10 @@ class EpisodeKeysTest {
         // A u-primary item's fallbacks drop the u key.
         val uPrimary = episode(enclosureUrl = "https://example.com/a.mp3", title = "T", pubDate = 1791030896000L)
         assertEquals(listOf(EpisodeKeys.titleDayKey("T", 1791030896000L)), EpisodeKeys.fallbacks(uPrimary))
+
+        // No u:/t: candidate → no fallbacks; the h: key is never a fallback.
+        assertTrue(EpisodeKeys.fallbacks(episode()).isEmpty())
+        assertTrue(EpisodeKeys.fallbacks(episode(guid = "g-1")).isEmpty())
     }
 
     @Test
@@ -151,6 +223,44 @@ class EpisodeKeysTest {
             )
         assertEquals(EpisodeContentHash.of(base), EpisodeContentHash.of(base.copy(feedOrder = 7)))
         assertNotEquals(EpisodeContentHash.of(base), EpisodeContentHash.of(base.copy(title = "T2")))
+    }
+
+    @Test
+    fun contentHashCoversRawPubDateSeparately() {
+        // rawPubDate is a stored column: a raw-text change at the same instant must flip the hash.
+        val base = episode(pubDate = 1791030896000L).copy(rawPubDate = "Sat, 03 Oct 2026 12:34:56 GMT")
+        assertNotEquals(
+            EpisodeContentHash.of(base),
+            EpisodeContentHash.of(base.copy(rawPubDate = "2026-10-03T12:34:56Z")),
+        )
+    }
+
+    @Test
+    fun contentHashSeparatesChaptersPair() {
+        // A "|" inside chaptersUrl must not let the pair collide with a different split.
+        assertNotEquals(
+            EpisodeContentHash.of(episode().copy(chaptersUrl = "a|b")),
+            EpisodeContentHash.of(episode().copy(chaptersUrl = "a", chaptersType = "b")),
+        )
+    }
+
+    @Test
+    fun contentHashSeparatorInsideFieldCannotForgeBoundary() {
+        // Free-text fields join by U+001F; a separator inside one must not forge neighbours'
+        // positions (feeds can inject it via &#x1F; — see headKeySeparatorInsideTitleCannotForgeBoundary).
+        assertNotEquals(
+            EpisodeContentHash.of(episode(title = "A").copy(rawPubDate = "B\u001F\u001FD")),
+            EpisodeContentHash.of(episode(title = "A\u001F\u001FB").copy(rawPubDate = "D")),
+        )
+        // The list separator U+001E inside a leaf must not forge an extra item boundary.
+        assertNotEquals(
+            EpisodeContentHash.of(
+                episode().copy(transcripts = listOf(TranscriptRef("a\u001F\u001F\u001F\u001Eb"))),
+            ),
+            EpisodeContentHash.of(
+                episode().copy(transcripts = listOf(TranscriptRef("a"), TranscriptRef("b"))),
+            ),
+        )
     }
 
     /** W10: text-vs-HTML interpretation alone changes the hash — the description bytes need not. */

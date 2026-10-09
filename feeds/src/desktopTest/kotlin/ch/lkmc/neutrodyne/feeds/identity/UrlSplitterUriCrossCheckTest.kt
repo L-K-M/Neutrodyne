@@ -11,13 +11,6 @@ import kotlin.test.assertTrue
  * authority/path/query, and the cases where `java.net.URI` throws are accepted by our lenient splitter.
  */
 class UrlSplitterUriCrossCheckTest {
-    private data class Expected(
-        val host: String?,
-        val port: Int?,
-        val path: String,
-        val query: String?,
-    )
-
     private val urls =
         listOf(
             "https://feeds.example.com/show.rss",
@@ -36,6 +29,9 @@ class UrlSplitterUriCrossCheckTest {
             "https://example.com/feed.xml#section",
             "https://user:pass@example.com/feed.xml",
             "https://example.com:65535/x",
+            "http://[2001:db8::1]:8080/feed",
+            "HTTPS://EXAMPLE.COM/Feed",
+            "https://example.com/Québec.rss",
         )
 
     @Test
@@ -47,26 +43,34 @@ class UrlSplitterUriCrossCheckTest {
 
             assertEquals(uri.host?.lowercase(), parts.host?.lowercase(), "host of $url")
             assertEquals(uri.port.takeIf { it >= 0 }, parts.port?.toIntOrNull(), "port of $url")
-            assertEquals(uri.rawPath.ifEmpty { "" }, parts.path, "path of $url")
+            assertEquals(uri.rawPath ?: "", parts.path, "path of $url")
             assertEquals(uri.rawQuery?.takeIf { it.isNotEmpty() }, parts.query, "query of $url")
             compared++
         }
-        assertTrue(compared >= urls.size / 2, "expected to compare most URLs, got $compared")
+        assertEquals(
+            urls.size,
+            compared,
+            "every fixture URL should be accepted by java.net.URI, compared only $compared",
+        )
     }
 
     @Test
     fun lenientCasesUriRejectsStillSplit() {
-        // `java.net.URI` throws on all of these; the splitter accepts them.
+        // `java.net.URI` throws on these, or finds no host (underscore case); the splitter accepts
+        // them all. (A non-ASCII path like Québec.rss is legal to `URI` and sits in `urls` above.)
         val lenient =
             listOf(
                 "https://example.com/a b.mp3",
                 "https://example.com/100%",
-                "https://example.com/Québec.rss",
                 "https://ex_ample.example.com/feed.xml",
             )
         for (url in lenient) {
             val parts = splitLenient(url)
             assertTrue(!parts.host.isNullOrEmpty(), "host of $url")
+            assertTrue(
+                runCatching { java.net.URI(url) }.getOrNull()?.host.isNullOrEmpty(),
+                "java.net.URI should throw or find no host for $url",
+            )
         }
     }
 }

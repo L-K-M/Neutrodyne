@@ -44,8 +44,10 @@ public object PrivateFeedUrls {
         // Credentials in the userinfo: the strongest signal.
         if (parts.userInfo != null) return true
 
-        val host = parts.host?.lowercase() ?: return false
-        if (privateHosts.any { host == it || host.endsWith(".$it") }) return true
+        // A missing host skips only the host list: query and path token checks still run on
+        // scheme-less or malformed input (a stored reference may carry the token anyway).
+        val host = parts.host?.lowercase()
+        if (host != null && privateHosts.any { host == it || host.endsWith(".$it") }) return true
 
         // Token-bearing query parameter names, then long tokens in any query value.
         val query = parts.query ?: ""
@@ -58,7 +60,9 @@ public object PrivateFeedUrls {
         }
         if (looksLikeTokenQueryValue(query)) return true
 
-        // Long tokens as part of any path segment ("/feeds/xKd93lskSKEa1zl/").
+        // Long tokens as part of any path segment ("/feeds/xKd93lskSKEa1zl/"). The permissive
+        // class deliberately keeps '-'/'_': UUID and base64url tokens carry them, and a false
+        // positive on a hyphenated slug only costs a warning.
         return parts.path.split('/').any { segment -> tokenIn(segment) != null }
     }
 

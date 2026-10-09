@@ -8,17 +8,16 @@ import ch.lkmc.neutrodyne.feeds.html.ShowNotesStyles.NONE
  * to text outside links while the sanitiser walks the DOM; the renderer shows spans beyond a known
  * episode duration as plain text.
  *
- * Grammar (03): a negative lookbehind for digit/colon/dot, then `H:MM:SS` or `M:MM` (minutes to 999,
- * seconds two-digit so ratios like 16:9 never match), then a lookahead pair excluding a following
- * digit/colon and times of day ("am", "pm", "a.m.", "p.m.", "Uhr", "10:30h").
- * — `H:MM:SS` or `M:SS` (minutes up to 999, long episodes often write "75:12"); seconds must be two
- * digits, so ratios such as "16:9" never match; times of day ("10:30 am", "20:15 Uhr", "10:30h") are
- * excluded by the look-ahead.
+ * Grammar (03): a negative lookbehind for digit/colon/dot, then `H:MM:SS` or `M:SS` (minutes up to
+ * 999, long episodes often write "75:12"; seconds must be two digits, so ratios such as "16:9" never
+ * match), then a lookahead pair excluding a following digit/colon and times of day ("10:30 am",
+ * "20:15 Uhr", "10:30h") — the time-of-day check tolerates any whitespace run, including the
+ * non-breaking and narrow no-break spaces of typeset text.
  */
 public object TimestampLinkifier {
     private val lookbehind = """(?<![\d:.])"""
     private val clock = """(?:(\d{1,2}):([0-5]\d):([0-5]\d)|(\d{1,3}):([0-5]\d))"""
-    private val lookahead = """(?![\d:])(?!\s?(?i:am|pm|a\.m\.|p\.m\.|uhr|h\b))"""
+    private val lookahead = """(?![\d:])(?![\s\h]*(?i:am|pm|a\.m\.|p\.m\.|uhr|h\b))"""
     private val timestamp = Regex(lookbehind + clock + lookahead)
 
     private const val MS_PER_SECOND = 1000L

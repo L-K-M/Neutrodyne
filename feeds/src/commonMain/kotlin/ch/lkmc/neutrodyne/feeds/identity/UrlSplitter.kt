@@ -9,7 +9,11 @@ package ch.lkmc.neutrodyne.feeds.identity
 public data class UrlUserInfo(
     val username: String,
     val password: String,
-)
+) {
+    // The generated data-class toString would print secrets into logs and crash reports; a
+    // Basic-auth token may sit in the username with an empty password, so both are masked.
+    override fun toString(): String = "UrlUserInfo(username=<redacted>, password=<redacted>)"
+}
 
 /** One URL broken into parts by [splitLenient], before any normalisation. */
 internal class UrlParts(
@@ -31,7 +35,16 @@ private const val DEFAULT_HTTPS_PORT = "443"
  * throws; parts that are missing are null or empty.
  */
 internal fun splitLenient(raw: String): UrlParts {
-    val withoutFragment = raw.trim().substringBefore('#')
+    // WHATWG removes ASCII tab/CR/LF anywhere in the URL before parsing; match that so a feed
+    // URL copied out of HTML with a stray control still gets an identity. The `any` scan keeps
+    // the common case allocation-free.
+    val clean =
+        if (raw.any { it == '\t' || it == '\n' || it == '\r' }) {
+            raw.filterNot { it == '\t' || it == '\n' || it == '\r' }
+        } else {
+            raw
+        }
+    val withoutFragment = clean.trim().substringBefore('#')
 
     val schemeMatch = schemePrefix.find(withoutFragment)
     val scheme = schemeMatch?.groupValues?.get(1)?.lowercase()
@@ -46,7 +59,11 @@ internal fun splitLenient(raw: String): UrlParts {
     val pathAndQuery: String
 
     if (hasAuthority) {
-        val authorityEnd = rest.indexOfFirst { it == '/' || it == '?' }
+        // For http(s), `\` ends the authority exactly like `/`: WHATWG URL and the fetch client
+        // (OkHttp) both treat it as a path separator, so an `@` after it is path text, not
+        // userinfo — `https://good.com\@evil.com/` is fetched from good.com.
+        val specialHttp = scheme == "http" || scheme == "https"
+        val authorityEnd = rest.indexOfFirst { it == '/' || it == '?' || (specialHttp && it == '\\') }
         val authority = if (authorityEnd < 0) rest else rest.substring(0, authorityEnd)
         pathAndQuery = if (authorityEnd < 0) "" else rest.substring(authorityEnd)
 
@@ -63,15 +80,15 @@ internal fun splitLenient(raw: String): UrlParts {
         if (hostPort.isNotEmpty()) {
             if (hostPort.startsWith("[")) {
                 val close = hostPort.indexOf(']')
-                host =
-                    if (close > 0) {
-                        hostPort.substring(0, close + 1)
-                    } else {
-                        null
-                    }
-                if (close in 0 until hostPort.length - 1 && hostPort[close + 1] == ':') {
-                    port = hostPort.substring(close + 2).takeIf { it.isNotEmpty() }
+                if (close > 0) {
+                    // After `]` only `:port` may follow; other residue is invalid (the JDK's `URI`
+                    // rejects it) and must not silently drop into the parts.
+                    val afterBracket = hostPort.substring(close + 1)
+                    val clean = afterBracket.isEmpty() || afterBracket.startsWith(':')
+                    host = if (clean) hostPort.substring(0, close + 1) else null
+                    port = if (clean) afterBracket.substringAfter(':').takeIf { it.isNotEmpty() } else null
                 } else {
+                    host = null
                     port = null
                 }
             } else {
