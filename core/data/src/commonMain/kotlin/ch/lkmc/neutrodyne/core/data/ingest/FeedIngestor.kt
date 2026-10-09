@@ -463,7 +463,9 @@ internal class FeedIngestor(
      * One pass-1 claim (03 step 4): [item] takes [row] and the identities align — the row's own
      * key when it equals [docKey], an upgrade of [docKey] to the primary the row already carries,
      * an in-place rekey to [docKey] when the assigned key is free, or adoption of the row's own
-     * key when [docKey] would collide with a different stored row. Returns whether a rekey wrote.
+     * key when [docKey] would collide with a different stored row. A claim whose key does not
+     * move still writes the item's `guid` when the stored value differs (step 6's gate never
+     * sees it). Returns whether a rekey wrote.
      */
     private suspend fun claimRow(
         ingestDao: IngestDao,
@@ -473,7 +475,7 @@ internal class FeedIngestor(
     ): Boolean {
         var rekeyed = false
         when {
-            // The stored row already carries this document's key: nothing moves.
+            // The stored row already carries this document's key: the key does not move.
             row.identityKey == item.docKey -> {}
 
             row.identityKey == item.primaryKey -> {
@@ -489,6 +491,13 @@ internal class FeedIngestor(
             else -> {
                 item.docKey = row.identityKey
             }
+        }
+        // The stored GUID tracks the document on every claim, not only on a rekey:
+        // `EpisodeContentHash` excludes it, so step 6's gate never rewrites a rotation on an
+        // unchanged item and a stale value would keep feeding the next refresh's reuse
+        // evidence. `rekey` with the same key moves nothing and counts no rekey.
+        if (!rekeyed && row.guid != item.episode.guid) {
+            ingestDao.rekey(row.id, row.identityKey, item.episode.guid)
         }
         item.matchedTo = row
         return rekeyed

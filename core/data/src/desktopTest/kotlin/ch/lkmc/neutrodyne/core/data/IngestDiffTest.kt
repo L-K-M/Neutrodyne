@@ -532,6 +532,87 @@ class IngestDiffTest {
             assertEquals(3, db.podcastDao().episodeCount(id))
         }
 
+    /**
+     * Two rows share "dup-old" — A owns the `g:` key, B a `u:` fallback. Both GUIDs rotate
+     * together with the content otherwise identical: the fallback-keyed row's stored `guid`
+     * must still follow the document, even though step 6's `contentHash` gate (which excludes
+     * the GUID) writes nothing. When B then returns alone, the rotated GUID makes A's `g:`
+     * row off limits — B reclaims its own row and A flips out with its state intact.
+     */
+    @Test
+    fun rotatedSharedGuidSyncsFallbackRowAndKeepsStates() =
+        runTest {
+            val id = podcastId()
+
+            fun doc(
+                guid: String,
+                onlyB: Boolean = false,
+            ) = parsedFeed(
+                items =
+                    listOfNotNull(
+                        if (onlyB) {
+                            null
+                        } else {
+                            parsedEpisode(
+                                0,
+                                guid = guid,
+                                enclosureUrl = "https://cdn.example.com/a.mp3",
+                                title = "A",
+                                pubDate = NOW - DAY,
+                            )
+                        },
+                        parsedEpisode(
+                            1,
+                            guid = guid,
+                            enclosureUrl = "https://cdn.example.com/b.mp3",
+                            title = "B",
+                            pubDate = NOW - 2 * DAY,
+                        ),
+                    ),
+            )
+            ingest(id, doc("dup-old"), mode = IngestMode.INITIAL)
+            val aBefore = db.episodeDao().byIdentityKey(id, "g:dup-old")!!
+            val bBefore =
+                db.ingestDao().existing(id).single {
+                    it.enclosureUrl == "https://cdn.example.com/b.mp3"
+                }
+            db.episodeStateDao().upsert(episodeStateEntity(aBefore.id, playedAt = NOW - 1_000))
+            db.episodeStateDao().upsert(episodeStateEntity(bBefore.id) { copy(isFavorite = true) })
+
+            // v2: both GUIDs rotate, content unchanged — the hash gate fires no row update.
+            val second = ingest(id, doc("dup-new"))
+
+            assertEquals(emptyList(), second.inserted)
+            assertEquals(0, second.updated)
+            // Only A's pass-2 rekey counts; B's guid write leaves the key untouched.
+            assertEquals(1, second.rekeyed)
+            val aRotated = db.episodeDao().byId(aBefore.id)!!
+            assertEquals("g:dup-new", aRotated.identityKey)
+            assertEquals("dup-new", aRotated.guid)
+            val bRotated = db.episodeDao().byId(bBefore.id)!!
+            assertEquals(bBefore.identityKey, bRotated.identityKey)
+            assertEquals("dup-new", bRotated.guid)
+
+            // v3: B returns alone under the rotated GUID.
+            val third = ingest(id, doc("dup-new", onlyB = true))
+
+            assertEquals(emptyList(), third.inserted)
+            assertEquals(0, third.updated)
+            val aAfter = db.episodeDao().byId(aBefore.id)!!
+            assertEquals("g:dup-new", aAfter.identityKey)
+            assertEquals("A", aAfter.title)
+            assertEquals("https://cdn.example.com/a.mp3", aAfter.enclosureUrl)
+            assertFalse(aAfter.inFeed)
+            assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(aBefore.id)!!.playedAt)
+            val bAfter = db.episodeDao().byId(bBefore.id)!!
+            assertEquals(bBefore.identityKey, bAfter.identityKey)
+            assertEquals("B", bAfter.title)
+            assertEquals("https://cdn.example.com/b.mp3", bAfter.enclosureUrl)
+            assertTrue(bAfter.inFeed)
+            assertTrue(db.episodeStateDao().byEpisode(bBefore.id)!!.isFavorite)
+            assertEquals(2, db.podcastDao().episodeCount(id))
+        }
+
     // --- isNew and the back-catalogue guard -----------------------------------------------------
 
     @Test
