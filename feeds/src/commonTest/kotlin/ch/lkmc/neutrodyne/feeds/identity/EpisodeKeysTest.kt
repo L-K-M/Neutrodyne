@@ -123,6 +123,10 @@ class EpisodeKeysTest {
         // A u-primary item's fallbacks drop the u key.
         val uPrimary = episode(enclosureUrl = "https://example.com/a.mp3", title = "T", pubDate = 1791030896000L)
         assertEquals(listOf(EpisodeKeys.titleDayKey("T", 1791030896000L)), EpisodeKeys.fallbacks(uPrimary))
+
+        // No u:/t: candidate → no fallbacks; the h: key is never a fallback.
+        assertTrue(EpisodeKeys.fallbacks(episode()).isEmpty())
+        assertTrue(EpisodeKeys.fallbacks(episode(guid = "g-1")).isEmpty())
     }
 
     @Test

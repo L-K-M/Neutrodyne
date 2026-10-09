@@ -107,7 +107,11 @@ public object FeedDates {
     /** Whitespace runs collapse to one ASCII space; `\s` alone misses the no-break spaces of typeset dates. */
     private val whitespaceRun = Regex("""[\s\u00A0\u202F]+""")
 
-    /** Parses a feed date to epoch milliseconds UTC, or null when no form matches (03 Dates). */
+    /**
+     * Parses a feed date to epoch milliseconds UTC, or null when no form matches (03 Dates).
+     * ISO 8601's `24:00` end-of-day form and RFC 3339 leap seconds (`:60`) are intentionally
+     * rejected; such values degrade to `UNKNOWN_DATE` upstream rather than misparsing.
+     */
     public fun parse(raw: String): Long? {
         var text = raw.replace(whitespaceRun, " ").trim()
 

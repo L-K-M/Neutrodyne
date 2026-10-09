@@ -16,6 +16,7 @@ public sealed interface NoteBlock {
     ) : NoteBlock
 
     public data class Heading(
+        /** 1..6 as produced by the sanitiser; renderers should still clamp defensively. */
         val level: Int,
         val spans: List<NoteSpan>,
     ) : NoteBlock
