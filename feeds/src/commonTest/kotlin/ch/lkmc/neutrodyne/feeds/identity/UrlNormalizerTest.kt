@@ -260,6 +260,16 @@ class UrlNormalizerTest {
     }
 
     @Test
+    fun splitUserInfoPreservesRawUnicodeNextToEscapes() {
+        // Percent escapes must not replace raw Unicode in Basic-auth credentials.
+        val (url, credentials) =
+            UrlNormalizer.splitUserInfo("https://user\uD83D\uDD12%40x:p\uD83D\uDD12%3Ass@feeds.example.com/show")
+        assertEquals("https://feeds.example.com/show", url)
+        assertEquals("user\uD83D\uDD12@x", credentials?.username)
+        assertEquals("p\uD83D\uDD12:ss", credentials?.password)
+    }
+
+    @Test
     fun splitUserInfoWithoutCredentials() {
         val (url, credentials) = UrlNormalizer.splitUserInfo("https://feeds.example.com/show")
         assertEquals("https://feeds.example.com/show", url)
