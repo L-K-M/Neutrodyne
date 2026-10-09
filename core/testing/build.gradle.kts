@@ -26,7 +26,10 @@ kotlin {
             api(libs.kotlinx.coroutines.test)
             api(libs.turbine)
             implementation(libs.kotlinx.collections.immutable)
+            implementation(libs.androidx.paging.common)
             api(project.dependencies.platform(libs.coil.bom))
+            // coil carries SingletonImageLoader; coil-test carries FakeImageLoaderEngine.
+            implementation(libs.coil.core)
             api(libs.coil.test)
         }
         androidMain.dependencies {

@@ -8,6 +8,7 @@ import androidx.room3.Insert
 import androidx.room3.Query
 import androidx.room3.Update
 import androidx.room3.withWriteTransaction
+import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import kotlinx.coroutines.flow.Flow
 
@@ -158,6 +159,13 @@ abstract class PodcastDao(
     abstract suspend fun setCustomTitle(
         podcastId: Long,
         title: String?,
+    )
+
+    /** The podcast screen's order chip (05 `FeedRepository.setFeedOrder`, `FeedSource.Podcast`). */
+    @Query("UPDATE podcast SET episodeOrder = :order WHERE id = :podcastId")
+    abstract suspend fun setEpisodeOrder(
+        podcastId: Long,
+        order: FeedOrder,
     )
 
     // --- Refresh selection and fetch-state writes (02; 03 Refresh scheduling) --------------------
