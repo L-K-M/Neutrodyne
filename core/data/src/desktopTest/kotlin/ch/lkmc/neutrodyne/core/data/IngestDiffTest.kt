@@ -613,6 +613,140 @@ class IngestDiffTest {
             assertEquals(2, db.podcastDao().episodeCount(id))
         }
 
+    /**
+     * Same sibling pair, but B's GUID goes missing for one refresh with content unchanged:
+     * the stored `guid` column must follow to null, erasing the stored proof that "dup" is
+     * shared. When B then returns alone carrying "dup", its enclosure still names its own
+     * row — the `g:` claim on A's row contradicts that ownership and must not fire, or A's
+     * content and played state are handed to B while the real B leaves the feed.
+     */
+    @Test
+    fun nullGuidIntervalKeepsSiblingRowsAndStates() =
+        runTest {
+            val id = podcastId()
+
+            fun doc(
+                bGuid: String?,
+                onlyB: Boolean = false,
+            ) = parsedFeed(
+                items =
+                    listOfNotNull(
+                        if (onlyB) {
+                            null
+                        } else {
+                            parsedEpisode(
+                                0,
+                                guid = "dup",
+                                enclosureUrl = "https://cdn.example.com/a.mp3",
+                                title = "A",
+                                pubDate = NOW - DAY,
+                            )
+                        },
+                        parsedEpisode(
+                            1,
+                            guid = bGuid,
+                            enclosureUrl = "https://cdn.example.com/b.mp3",
+                            title = "B",
+                            pubDate = NOW - 2 * DAY,
+                        ),
+                    ),
+            )
+            ingest(id, doc("dup"), mode = IngestMode.INITIAL)
+            val aBefore = db.episodeDao().byIdentityKey(id, "g:dup")!!
+            val bBefore =
+                db.ingestDao().existing(id).single {
+                    it.enclosureUrl == "https://cdn.example.com/b.mp3"
+                }
+            db.episodeStateDao().upsert(episodeStateEntity(aBefore.id, playedAt = NOW - 1_000))
+            db.episodeStateDao().upsert(episodeStateEntity(bBefore.id) { copy(isFavorite = true) })
+
+            // v2: B's guid disappears; every other field identical.
+            val second = ingest(id, doc(null))
+
+            assertEquals(emptyList(), second.inserted)
+            assertEquals(0, second.updated)
+            assertEquals(0, second.rekeyed)
+            assertEquals("dup", db.episodeDao().byId(aBefore.id)!!.guid)
+            val bNulled = db.episodeDao().byId(bBefore.id)!!
+            assertEquals(bBefore.identityKey, bNulled.identityKey)
+            assertEquals(null, bNulled.guid)
+
+            // v3: B returns alone under the shared guid again.
+            val third = ingest(id, doc("dup", onlyB = true))
+
+            assertEquals(emptyList(), third.inserted)
+            assertEquals(0, third.updated)
+            assertEquals(0, third.rekeyed)
+            val aAfter = db.episodeDao().byId(aBefore.id)!!
+            assertEquals("g:dup", aAfter.identityKey)
+            assertEquals("A", aAfter.title)
+            assertEquals("https://cdn.example.com/a.mp3", aAfter.enclosureUrl)
+            assertFalse(aAfter.inFeed)
+            assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(aBefore.id)!!.playedAt)
+            val bAfter = db.episodeDao().byId(bBefore.id)!!
+            assertEquals(bBefore.identityKey, bAfter.identityKey)
+            assertEquals("dup", bAfter.guid)
+            assertEquals("B", bAfter.title)
+            assertEquals("https://cdn.example.com/b.mp3", bAfter.enclosureUrl)
+            assertTrue(bAfter.inFeed)
+            assertTrue(db.episodeStateDao().byEpisode(bBefore.id)!!.isFavorite)
+            assertEquals(2, db.podcastDao().episodeCount(id))
+        }
+
+    /**
+     * Control for the sibling-ownership guard: a lone item whose `g:` key matches a stored
+     * row still claims it on an enclosure rewrite — no other stored row owns the new
+     * enclosure, so nothing contradicts the claim and the update lands in place.
+     */
+    @Test
+    fun uniqueGuidEnclosureRewriteStillClaimsItsRow() =
+        runTest {
+            val id = podcastId()
+            ingest(
+                id,
+                parsedFeed(
+                    items =
+                        listOf(
+                            parsedEpisode(
+                                0,
+                                guid = "g",
+                                enclosureUrl = "https://cdn.example.com/a.mp3?token=old",
+                                title = "A",
+                                pubDate = NOW - DAY,
+                            ),
+                        ),
+                ),
+                mode = IngestMode.INITIAL,
+            )
+            val before = db.episodeDao().byIdentityKey(id, "g:g")!!
+            db.episodeStateDao().upsert(episodeStateEntity(before.id, playedAt = NOW - 1_000))
+
+            val result =
+                ingest(
+                    id,
+                    parsedFeed(
+                        items =
+                            listOf(
+                                parsedEpisode(
+                                    0,
+                                    guid = "g",
+                                    enclosureUrl = "https://cdn.example.com/a.mp3?token=new",
+                                    title = "A",
+                                    pubDate = NOW - DAY,
+                                ),
+                            ),
+                    ),
+                )
+
+            assertEquals(emptyList(), result.inserted)
+            assertEquals(1, result.updated)
+            assertEquals(0, result.rekeyed)
+            val after = db.episodeDao().byId(before.id)!!
+            assertEquals("g:g", after.identityKey)
+            assertEquals("https://cdn.example.com/a.mp3?token=new", after.enclosureUrl)
+            assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(before.id)!!.playedAt)
+        }
+
     // --- isNew and the back-catalogue guard -----------------------------------------------------
 
     @Test
@@ -1578,14 +1712,16 @@ class IngestDiffTest {
 
             // A partial page-1 document covering days 7..9: stored rows newer than the window
             // floor that are absent flip out; rows older than the window are outside its
-            // coverage and stay (03 step 8's partial rule).
+            // coverage and stay (03 step 8's partial rule). The items re-declare episodes d7/d9
+            // with their own title and enclosure — a foreign enclosure would make the `g:` claim
+            // contested and hand the item to the enclosure's owning row instead.
             ingest(
                 id,
                 parsedFeed(
                     items =
                         listOf(
-                            parsedEpisode(0, guid = "d7", pubDate = NOW - 7 * DAY),
-                            parsedEpisode(1, guid = "d9", pubDate = NOW - 9 * DAY),
+                            parsedEpisode(7, guid = "d7", pubDate = NOW - 7 * DAY),
+                            parsedEpisode(9, guid = "d9", pubDate = NOW - 9 * DAY),
                         ),
                 ),
                 partial = true,

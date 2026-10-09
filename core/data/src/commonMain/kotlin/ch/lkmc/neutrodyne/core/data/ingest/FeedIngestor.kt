@@ -143,6 +143,15 @@ internal class FeedIngestor(
                 .filterValues { it > 1 }
                 .keys
 
+        // The same evidence from the other side: a stored row already carrying the item's
+        // enclosure identity proves the item is that row's episode — a sibling whose guid was
+        // nulled or rotated away erases the reuse set's memory of the shared guid, but not the
+        // row ownership it left behind.
+        val rowsByEnclosure =
+            existing
+                .mapNotNull { row -> normEnc(row)?.let { enc -> enc to row.id } }
+                .groupBy({ it.first }, { it.second })
+
         // Pass 1 (03 step 4): each item claims rows in claim-key order — its assigned document
         // key first, then its (older-version) candidates. When a repeated GUID puts two items on
         // one stored row, the item whose enclosure matches the row keeps it and the loser is
@@ -152,18 +161,27 @@ internal class FeedIngestor(
         while (pending.isNotEmpty()) {
             val item = pending.removeFirst()
             if (item.matchedTo != null) continue
-            val reusedGuid =
+            val itemGuid =
                 item.episode.guid
                     ?.trim()
-                    ?.takeIf(reusedGuids::contains)
+                    ?.takeIf(String::isNotEmpty)
+            val reusedGuid = itemGuid?.takeIf(reusedGuids::contains)
             for (key in item.claimKeys) {
                 val row = byKey[key] ?: continue
                 if (
-                    reusedGuid != null && key == "g:$reusedGuid" &&
-                    item.enclosureIdentity != normEnc(row)
+                    itemGuid != null && key == "g:$itemGuid" &&
+                    item.enclosureIdentity != normEnc(row) &&
+                    (
+                        reusedGuid != null ||
+                            item.enclosureIdentity?.let { enc ->
+                                rowsByEnclosure[enc]?.any { it != row.id }
+                            } == true
+                    )
                 ) {
-                    // The reused guid's row holds the sibling's enclosure; pass 2 (or an insert)
-                    // resolves this item's own identity instead of moving user state here.
+                    // The `g:` row's stored enclosure belongs to another episode — proven by
+                    // reuse evidence on the guid (r2 F1, r3 F2) or by the item's enclosure
+                    // already living on a different stored row. Pass 2 (or an insert) resolves
+                    // this item's own identity instead of moving user state here.
                     continue
                 }
                 val holder = claimedBy[row.id]
@@ -194,7 +212,7 @@ internal class FeedIngestor(
         // stronger one would claim (r4 F2), a row is reused only on evidence that identifies
         // the same episode (r5 F1), and a later claim clears an earlier ambiguity (r5 F2).
         // Eligible rows are every row pass 1 left unclaimed, including a `g:` row whose claim
-        // the reuse guard rejected: reserving it would strand exactly the episodes this pass
+        // the pass-1 guard rejected: reserving it would strand exactly the episodes this pass
         // recovers (r3 F1).
         val fallbacks = Pass2Index(existing, taken)
         for ((item, row) in fallbacks.matches(prepared.items)) {
