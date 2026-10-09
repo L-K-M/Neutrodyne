@@ -22,6 +22,7 @@ kotlin {
             implementation(project.dependencies.platform(libs.coil.bom))
             implementation(libs.coil.compose)
             implementation(libs.kotlinx.collections.immutable)
+            implementation(libs.kotlinx.datetime)
             implementation(libs.navigation3.ui.jb)
             // The suite type + pane directive classes are used directly here; :core:designsystem
             // holds the same artifacts as `implementation`, so they do not leak onto this classpath.
