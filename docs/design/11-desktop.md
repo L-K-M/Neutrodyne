@@ -1383,7 +1383,7 @@ Following FFmpeg's compliance checklist ([FFmpeg legal](https://ffmpeg.org/legal
 - on Linux, contains an ELF file that needs a `GLIBC_` symbol version above 2.31;
 - contains test classes, fixture directories or entry points other than smoke mode;
 - on macOS, fails `codesign --verify --deep --strict`;
-- on Windows, is an MSI whose `INSTALLDIR` does not resolve under `LocalAppDataFolder\Neutrodyne-App` ([Windows MSI and ZIP](#windows-msi-and-zip)), or whose `Binary` table holds an entry not listed in `desktopApp/wix.lock` (2026-10-05: only `wixhelper.dll`, WiX Util's custom action and the WixUI resources of the pinned WiX version, [Lockfiles](#lockfiles));
+- on Windows, is an MSI whose `INSTALLDIR` does not resolve under `LocalAppDataFolder\Neutrodyne-App` ([Windows MSI and ZIP](#windows-msi-and-zip)), or whose `Binary` table holds an entry not listed in `desktopApp/wix.lock` (2026-10-09: `JpCaDll` — jpackage's compiled wixhelper — WiX Util's `WixCA`, and `WixUIWixca` plus the `WixUI_Bmp_`/`WixUI_Ico_` resources of the pinned WiX version, [Lockfiles](#lockfiles));
 - on Linux, is a DEB whose members are not xz-compressed or whose `Depends` differs from our `control`, or an RPM without our `Requires` ([Linux DEB, RPM and tar.gz](#linux-deb-rpm-and-targz)).
 
 ### Lockfiles

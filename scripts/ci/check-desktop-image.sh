@@ -872,12 +872,15 @@ check_msi() {
         }
     " 2>/dev/null | tr -d '\r')"
     if ! printf '%s\n' "$dirs" | awk -F'|' '
-        { parent[$1] = $2; def[$1] = $3 }
+        { parent[$1] = $2; def[$1] = $3
+          for (i = 4; i <= NF; i++) def[$1] = def[$1] "|" $i }
         END {
             for (d in def) {
                 path = ""; cur = d; guard = 0
                 while (cur != "" && guard++ < 20) {
-                    dd = def[cur]; sub(/\|.*/, "", dd); if (dd == "") dd = cur
+                    # DefaultDir is "short8.3|longname": the long name is the
+                    # directory the installer writes, the short is synthesized.
+                    n = split(def[cur], a, "|"); dd = a[n]; if (dd == "") dd = cur
                     path = (path == "" ? dd : dd "\\" path)
                     if (parent[cur] == "" || parent[cur] == cur) break
                     cur = parent[cur]
