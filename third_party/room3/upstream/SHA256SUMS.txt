@@ -1,0 +1,2 @@
+353a8ac6cc748ebd593eda9a6b5954da9dcb810215b25d0c141630e7969f984d  upstream/room3-runtime-android-3.0.3-sources.jar
+a9f817319d7a47d8a32b6ac0b5e411b8a2cb433026f0c10156ae69368cc1c887  upstream/room3-runtime-jvm-3.0.3-sources.jar
