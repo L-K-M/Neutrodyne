@@ -856,9 +856,12 @@ check_msi() {
         return
     fi
 
-    # INSTALLDIR must resolve under LocalAppDataFolder\Neutrodyne-App (11 Windows MSI and ZIP):
-    # walk each Directory row's parent chain, prepend each DefaultDir's short name, and
-    # require one resolved path of the form LocalAppDataFolder\Neutrodyne-App[\<subdir>].
+    # INSTALLDIR must sit directly under LocalAppDataFolder with the name
+    # Neutrodyne-App (11 Windows MSI and ZIP). DefaultDir carries the installed
+    # name as "short8.3|longname"; the LocalAppDataFolder row itself resolves to
+    # "." — the Directory key, not the DefaultDir, names the root — so the check
+    # asserts a Directory row whose parent key is LocalAppDataFolder and whose
+    # DefaultDir long name is Neutrodyne-App.
     local dirs
     dirs="$("$ps" -NoProfile -Command "
         \$wi = New-Object -ComObject WindowsInstaller.Installer
@@ -873,26 +876,13 @@ check_msi() {
     " 2>/dev/null | tr -d '\r')"
     local resolved
     resolved="$(printf '%s\n' "$dirs" | awk -F'|' '
-        { parent[$1] = $2; def[$1] = $3
-          for (i = 4; i <= NF; i++) def[$1] = def[$1] "|" $i }
-        END {
-            for (d in def) {
-                path = ""; cur = d; guard = 0
-                while (cur != "" && guard++ < 20) {
-                    # DefaultDir is "short8.3|longname": the long name is the
-                    # directory the installer writes, the short is synthesized.
-                    # index+substr, not split — "|" is an ERE to split().
-                    dd = def[cur]
-                    while ((i = index(dd, "|")) > 0) dd = substr(dd, i + 1)
-                    if (dd == "") dd = cur
-                    path = (path == "" ? dd : dd "\\" path)
-                    if (parent[cur] == "" || parent[cur] == cur) break
-                    cur = parent[cur]
-                }
-                print path
-            }
+        { dd = $3
+          for (i = 4; i <= NF; i++) dd = dd "|" $i
+          # long name of "short8.3|longname"; index, not split — "|" is an ERE.
+          while ((j = index(dd, "|")) > 0) dd = substr(dd, j + 1)
+          print $2 "\t" dd
         }')"
-    if ! printf '%s\n' "$resolved" | grep -qE "LocalAppDataFolder\\\\Neutrodyne-App(\\\\|$)"; then
+    if ! printf '%s\n' "$resolved" | awk -F'\t' '$1 == "LocalAppDataFolder" && $2 == "Neutrodyne-App" { found = 1 } END { exit !found }'; then
         printf '%s\n' "$resolved" >&2
         fail "MSI INSTALLDIR does not resolve under LocalAppDataFolder\\Neutrodyne-App (Directory table)"
     fi
