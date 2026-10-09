@@ -84,8 +84,16 @@ public object EpisodeKeys {
         title: String?,
         description: String?,
     ): String =
-        // U+001F is not a legal XML 1.0 character, so the boundary is collision-free.
-        "h:" + (title.orEmpty() + "\u001F" + description.orEmpty().take(500)).encodeUtf8().sha1().hex()
+        // Lenient parsers can emit U+001F for &#x1F; despite XML 1.0, so the separator is
+        // doubled inside the title: the first unpaired U+001F is always the boundary and no
+        // field content can forge it. The description is last and needs no escaping.
+        "h:" +
+            (
+                title.orEmpty().replace(
+                    "\u001F",
+                    "\u001F\u001F",
+                ) + "\u001F" + description.orEmpty().take(500)
+            ).encodeUtf8().sha1().hex()
 }
 
 /** A stored episode's key inputs (02's columns); the restore and sync paths build this. */

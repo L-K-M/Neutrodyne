@@ -88,6 +88,21 @@ class EpisodeKeysTest {
     }
 
     @Test
+    fun headKeySeparatorInsideTitleCannotForgeBoundary() {
+        // U+001F can reach a title/description in practice: the lenient pull parsers emit it
+        // for &#x1F; despite XML 1.0. It must not let a field forge the separator position.
+        assertNotEquals(
+            EpisodeKeys.primary(episode(title = "A", description = "B\u001FC")),
+            EpisodeKeys.primary(episode(title = "A\u001FB", description = "C")),
+        )
+        // The stored-key path hashes the same escaped input.
+        assertEquals(
+            EpisodeKeys.primary(episode(title = "A\u001FB", description = "C")),
+            EpisodeKeys.keyFor(KeyInput(title = "A\u001FB", descriptionHead = "C"), 1),
+        )
+    }
+
+    @Test
     fun precedenceGuidEnclosureTitleLinkHead() {
         val both = episode(guid = "g-1", enclosureUrl = "https://example.com/a.mp3")
         assertEquals("g:g-1", EpisodeKeys.primary(both))
