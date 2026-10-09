@@ -33,6 +33,16 @@ class OrderKeyTest {
     }
 
     @Test
+    fun reversedBoundsKeepTheJitterInsideTheOrderedInterval() {
+        for ((lower, upper) in listOf("a0" to "a2", "a0" to "a00V", "Zz" to "a0")) {
+            val key = OrderKey.between(upper, lower, Random(42))
+            assertTrue(lower < key && key < upper, "$key not between $lower and $upper")
+            assertEquals(OrderKey.between(lower, upper, Random(42)), key)
+        }
+        assertFailsWith<IllegalArgumentException> { OrderKey.between("a0", "a0") }
+    }
+
+    @Test
     fun jitteredKeysDoNotEndInTheZeroDigit() {
         // The reference library rejects a fractional part ending in '0'; the appended jitter keeps
         // the last character non-zero (10 Ordered lists).

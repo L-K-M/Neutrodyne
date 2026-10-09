@@ -108,6 +108,10 @@ class HlcClock(
     var packed: Long = packed
         private set
 
+    init {
+        require(packed >= 0) { "packed clock out of range: $packed" }
+    }
+
     /** `hlc = max(hlc + 1, (wallMs + clockOffsetMs) << 16)`; a counter overflow carries into ms. */
     fun tick(): Hlc {
         packed = maxOf(packed + 1, (wallMs() + clockOffsetMs()) shl Hlc.COUNTER_BITS)
@@ -124,6 +128,8 @@ class HlcClock(
      * Correction re-stamps pending LOCAL rows; older accepted stamps can win LWW until wall time catches up.
      */
     fun clamp(maxPacked: Long) {
+        require(maxPacked >= 0) { "maxPacked out of range: $maxPacked" }
+
         if (packed > maxPacked) packed = maxPacked
     }
 }

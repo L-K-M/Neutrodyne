@@ -38,6 +38,9 @@ object OrderKey {
         b: String?,
         random: Random,
     ): String {
+        // The midpoint accepts either bound order; jitter must use that same upper bound.
+        if (a != null && b != null && a > b) return between(b, a, random)
+
         val midpoint = generateKeyBetween(a, b)
         val candidate = midpoint + jitter(random)
         if (b == null || candidate < b) return candidate
