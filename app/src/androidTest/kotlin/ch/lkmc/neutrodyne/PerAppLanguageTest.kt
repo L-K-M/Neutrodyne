@@ -13,10 +13,12 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.core.os.LocaleListCompat
+import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.google.common.truth.Truth.assertThat
 import org.junit.After
+import org.junit.Assert.assertThrows
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
@@ -65,12 +67,19 @@ class PerAppLanguageTest {
             AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(GERMAN))
         }
 
-        // The activity recreates itself; wait for the German resources to surface. On a timeout the
-        // failure reports the locale chain (AppCompat's app locales → the activity configuration →
-        // the process default Compose resources read), so a device run shows where it broke.
+        // The activity recreates itself; wait for the German resources to surface. While a recreate
+        // is in flight there are zero compose roots, where the strict default fetch throws
+        // "No compose hierarchies found" inside waitUntil instead of polling on (API 33 nightly
+        // finding); atLeastOneRootRequired = false returns empty and rides out the window. On a
+        // timeout the failure reports the locale chain (AppCompat's app locales → the activity
+        // configuration → the process default Compose resources read), so a device run shows where
+        // it broke.
         try {
             compose.waitUntil(RELABEL_TIMEOUT_MS) {
-                compose.onAllNodesWithText("Bibliothek").fetchSemanticsNodes().isNotEmpty()
+                compose
+                    .onAllNodesWithText("Bibliothek")
+                    .fetchSemanticsNodes(atLeastOneRootRequired = false)
+                    .isNotEmpty()
             }
         } catch (e: ComposeTimeoutException) {
             throw AssertionError("German labels did not appear: ${localeChain()}", e)
@@ -78,6 +87,28 @@ class PerAppLanguageTest {
         compose.onNodeWithTag("nav_library").assertIsDisplayed().assert(hasText("Bibliothek"))
         compose.onNodeWithTag("nav_up_next").assertIsDisplayed().assert(hasText("Als Nächstes"))
         compose.onNodeWithTag("nav_discover").assertIsDisplayed().assert(hasText("Entdecken"))
+    }
+
+    @Test
+    fun missingComposeHierarchyDoesNotFailTheRootOptionalFetch() {
+        // Deterministic stand-in for the recreate window above: a destroyed activity leaves no
+        // compose root at all. The strict default fetch throws the documented
+        // "No compose hierarchies found" error, the root-optional fetch returns empty, and the
+        // relabel leg's polling construct keeps waiting until its timeout instead of propagating
+        // that error (API 33 nightly finding, 2026-10-08).
+        compose.activityRule.scenario.moveToState(Lifecycle.State.DESTROYED)
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+
+        val nodes = compose.onAllNodesWithText("Bibliothek")
+        assertThat(nodes.fetchSemanticsNodes(atLeastOneRootRequired = false)).isEmpty()
+        assertThat(assertThrows(IllegalStateException::class.java) { nodes.fetchSemanticsNodes() })
+            .hasMessageThat()
+            .contains("No compose hierarchies")
+        assertThrows(ComposeTimeoutException::class.java) {
+            compose.waitUntil(MISSING_ROOT_TIMEOUT_MS) {
+                nodes.fetchSemanticsNodes(atLeastOneRootRequired = false).isNotEmpty()
+            }
+        }
     }
 
     @Test
@@ -119,6 +150,9 @@ class PerAppLanguageTest {
     private companion object {
         const val ANDROID_NS = "http://schemas.android.com/apk/res/android"
         const val RELABEL_TIMEOUT_MS = 10_000L
+
+        /** Short probe budget: with no activity the roots never return, so the wait always expires. */
+        const val MISSING_ROOT_TIMEOUT_MS = 500L
         const val GERMAN = "de"
 
         /** `app/policy/locales.txt`, mirrored through `BuildConfig.SHIPPED_LOCALES`. */
