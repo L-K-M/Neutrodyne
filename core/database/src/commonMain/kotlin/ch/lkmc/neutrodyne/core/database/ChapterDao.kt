@@ -23,6 +23,11 @@ abstract class ChapterDao(
         rows: List<ChapterEntity>,
     ) {
         db.withWriteTransaction {
+            // The pair identity is the method contract: rows for another episode or source must
+            // fail loudly here instead of silently landing under the wrong key.
+            require(rows.all { it.episodeId == episodeId && it.source == source }) {
+                "chapter rows must match the replaced (episodeId, source) pair"
+            }
             deleteOfSource(episodeId, source.name)
             insert(rows)
         }

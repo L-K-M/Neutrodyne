@@ -21,8 +21,9 @@ import kotlinx.coroutines.withContext
  * All state is serialized on [mutex]: buffer access, draining and the write itself. `flush()` is
  * therefore a barrier — it returns only after every earlier write has committed — which is what
  * 03's user actions (Retry, Edit URL, Enter password, unsubscribe) rely on before writing. The
- * write runs under [NonCancellable] so a killed coroutine never loses a batch it already promised
- * (a process kill still can — harmless: those feeds stay due and refetch with conditional GET).
+ * whole barrier runs under [NonCancellable] so a killed coroutine never loses a batch it already
+ * promised (a cancelled caller still drains its earlier adds, and the run-end flush still commits
+ * buffered outcomes after the run scope is dead).
  *
  * [scope] owns the deadline job: the refresh run's scope in production, `backgroundScope` in
  * tests so the virtual scheduler drives the deadline. A write failure inside the deadline job
@@ -81,9 +82,12 @@ class FetchStateBatcher internal constructor(
         }
     }
 
-    /** Writes the remaining outcomes; 03 calls it before user writes and at the run's end. */
+    /**
+     * Writes the remaining outcomes; 03 calls it before user writes and at the run's end. The
+     * lock wait is non-cancellable too — a cancelled caller still gets the barrier it asked for.
+     */
     suspend fun flush() {
-        mutex.withLock { flushLocked() }
+        withContext(NonCancellable) { mutex.withLock { flushLocked() } }
     }
 
     // Runs under [mutex]: the write happens while the buffer is still fully populated, so a

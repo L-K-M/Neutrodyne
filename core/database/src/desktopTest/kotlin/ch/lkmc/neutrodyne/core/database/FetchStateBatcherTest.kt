@@ -95,6 +95,50 @@ class FetchStateBatcherTest {
         }
 
     @Test
+    fun aCancelledCallerStillGetsTheFlushBarrier() =
+        runTest {
+            val writes = mutableListOf<List<PodcastFetchState>>()
+            val writeEntered = CompletableDeferred<Unit>()
+            val releaseWrite = CompletableDeferred<Unit>()
+            var first = true
+            val batcher =
+                FetchStateBatcher(
+                    write = { rows ->
+                        if (first) {
+                            first = false
+                            writeEntered.complete(Unit)
+                            releaseWrite.await()
+                        }
+                        writes += rows
+                    },
+                    clock = TestClock.from(testScheduler),
+                    scope = backgroundScope,
+                )
+
+            batcher.add(row(failures = 1))
+            val holder = launch { batcher.flush() }
+            writeEntered.await()
+
+            // Teardown while the flush waits on the mutex: the barrier contract is owed to the
+            // caller even when its scope is cancelled (the run-end flush runs after a dead scope).
+            val caller = CoroutineScope(Job() + StandardTestDispatcher(testScheduler))
+            var flushReturned = false
+            val waiter =
+                caller.launch {
+                    batcher.flush()
+                    flushReturned = true
+                }
+            runCurrent()
+            caller.cancel()
+            releaseWrite.complete(Unit)
+            holder.join()
+            waiter.join()
+
+            assertTrue(flushReturned, "flush() must complete the barrier even for a cancelled caller")
+            assertEquals(listOf(1), writes.flatten().map { it.failureCount })
+        }
+
+    @Test
     fun theFiveSecondLimitIsScheduledFromTheFirstPendingOutcome() =
         runTest {
             val writes = mutableListOf<List<PodcastFetchState>>()

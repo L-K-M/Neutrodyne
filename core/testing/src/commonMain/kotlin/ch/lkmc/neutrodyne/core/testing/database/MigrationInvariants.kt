@@ -171,7 +171,11 @@ object MigrationInvariants {
             if (stmt.step()) stmt.getLong(0) else 0L
         }
 
-    /** Typed canonical encoding of one column value — two representations never collide. */
+    /**
+     * Typed canonical encoding of one column value — two representations never collide. TEXT and
+     * BLOB payloads carry a fixed 8-byte length prefix: without it a value ending in another
+     * column's type tag would let the column boundary slide ("a\x01" + "b" = "a" + "\x01b").
+     */
     private fun valueBytes(
         stmt: SQLiteStatement,
         i: Int,
@@ -182,7 +186,8 @@ object MigrationInvariants {
             }
 
             stmt.getColumnType(i) == SQLITE_BLOB -> {
-                byteArrayOf(TYPE_BLOB) + stmt.getBlob(i)
+                val blob = stmt.getBlob(i)
+                byteArrayOf(TYPE_BLOB) + blob.size.toLong().toFixedBytes() + blob
             }
 
             stmt.getColumnType(i) == SQLITE_FLOAT -> {
@@ -194,7 +199,8 @@ object MigrationInvariants {
             }
 
             else -> {
-                byteArrayOf(TYPE_TEXT) + stmt.getText(i).encodeToByteArray()
+                val text = stmt.getText(i).encodeToByteArray()
+                byteArrayOf(TYPE_TEXT) + text.size.toLong().toFixedBytes() + text
             }
         }
 
