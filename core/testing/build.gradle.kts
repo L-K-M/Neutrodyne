@@ -34,10 +34,14 @@ kotlin {
             implementation(libs.truth)
             // TestSqliteDriverBindings: the framework driver for Robolectric tests (01 Test overrides)
             implementation(libs.androidx.sqlite.framework)
+            // Device tests build file DBs with the bundled driver (02 Testing).
+            implementation(libs.androidx.sqlite.bundled)
         }
         desktopMain.dependencies {
             implementation(libs.junit4)
             implementation(libs.truth)
+            // TestDb defaults to the bundled driver; it is `implementation` in :core:database.
+            implementation(libs.androidx.sqlite.bundled)
         }
     }
 }
