@@ -1,0 +1,27 @@
+{
+  "complete": true,
+  "format": "RSS2",
+  "items": [
+    {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/uf1.mp3"
+        }
+      ],
+      "feedOrder": 0,
+      "guid": "ufc-1",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/uf1.mp3"
+      },
+      "title": "Still here"
+    }
+  ],
+  "title": "Update Frequency Complete",
+  "updateFrequencyRrule": "FREQ=WEEKLY;BYDAY=MO,FR"
+}

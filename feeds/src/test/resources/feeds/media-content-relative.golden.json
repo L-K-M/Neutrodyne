@@ -1,0 +1,25 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 42,
+          "type": "audio/mpeg",
+          "url": "https://example.com/ep.mp3"
+        }
+      ],
+      "feedOrder": 0,
+      "guid": "mr-1",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 42,
+        "type": "audio/mpeg",
+        "url": "https://example.com/ep.mp3"
+      },
+      "title": "Relative media URL"
+    }
+  ],
+  "title": "Relative media:content"
+}

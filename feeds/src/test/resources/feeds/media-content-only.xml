@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+  <channel>
+    <title>Media Content Only</title>
+    <item><title>Only media:content carries the media</title><guid>mco-1</guid>
+      <media:content url="https://cdn.example.com/x1.mp3" fileSize="42000000" type="audio/mpeg" duration="2725"/></item>
+    <item><title>medium attribute variant</title><guid>mco-2</guid>
+      <media:content url="https://cdn.example.com/x2" fileSize="42000000" medium="audio"/></item>
+  </channel>
+</rss>
