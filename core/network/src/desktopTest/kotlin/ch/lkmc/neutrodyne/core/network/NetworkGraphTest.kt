@@ -4,7 +4,6 @@ package ch.lkmc.neutrodyne.core.network
 
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
-import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.common.HttpClientKind
 import ch.lkmc.neutrodyne.core.common.LocalNetworkAccess
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
@@ -46,7 +45,6 @@ interface S12AppGraph {
             @Provides platformInfo: PlatformInfo,
             @Provides buildInfo: BuildInfo,
             @Provides powerMonitor: PowerMonitor,
-            @Provides credentials: CredentialLookup,
             @Provides @ApplicationScope scope: CoroutineScope,
         ): S12AppGraph
     }
@@ -74,7 +72,6 @@ class NetworkGraphTest {
             platformInfo = fakePlatform(),
             buildInfo = testBuildInfo(),
             powerMonitor = FakePowerMonitor(),
-            credentials = CredentialLookup.None,
             scope = scope,
         )
 

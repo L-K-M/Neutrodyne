@@ -1,0 +1,31 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/h1.mp3"
+        }
+      ],
+      "feedOrder": 0,
+      "guid": "hc-1",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/h1.mp3"
+      },
+      "title": "Enclosure item"
+    }
+  ],
+  "title": "Café",
+  "warnings": [
+    {
+      "code": "CHARSET_REPARSED",
+      "detail": "re-parsed as windows-1252"
+    }
+  ]
+}

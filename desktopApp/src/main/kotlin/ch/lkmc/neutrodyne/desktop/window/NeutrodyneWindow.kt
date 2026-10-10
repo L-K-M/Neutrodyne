@@ -5,6 +5,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -24,6 +25,8 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.rememberWindowState
 import ch.lkmc.neutrodyne.core.common.AppDirs
+import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.designsystem.components.DesktopScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
@@ -38,17 +41,21 @@ import ch.lkmc.neutrodyne.core.ui.root.NeutrodyneRoot
 import ch.lkmc.neutrodyne.core.ui.root.RootActions
 import ch.lkmc.neutrodyne.core.ui.root.RootSlots
 import ch.lkmc.neutrodyne.core.ui.root.RootUiState
+import ch.lkmc.neutrodyne.core.ui.root.StartupGateState
 import ch.lkmc.neutrodyne.desktop.resources.Res
 import ch.lkmc.neutrodyne.desktop.resources.tray_quit
 import ch.lkmc.neutrodyne.desktop.resources.tray_show
 import ch.lkmc.neutrodyne.desktop.resources.tray_tooltip
 import ch.lkmc.neutrodyne.desktop.resources.window_title
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import java.awt.Desktop
 import java.awt.Dimension
 import java.awt.Frame
 import java.awt.SystemTray
+import java.nio.file.Path
 
 /**
  * The desktop's one window (11 Start-up sequence step 6, Window and tray behaviour): titled
@@ -58,7 +65,10 @@ import java.awt.SystemTray
  * the shell runs after `application { }` returns; window bounds persistence is MD4.
  *
  * [onQuitRequest] ends the application scope (`exitApplication`); [background] starts the
- * window iconified (11's state diagram, the `--background` launch of start-at-login).
+ * window iconified (11's state diagram, the `--background` launch of start-at-login). The
+ * content is gated on [databaseOpener]'s open like Android's `StartupGate` (01 Splash and
+ * start-up gate): "Try again" re-runs `awaitOpen()` on [appScope], and a `DISK_FULL` failure
+ * reveals [dataDir] in the platform file manager.
  */
 @Composable
 internal fun ApplicationScope.NeutrodyneWindow(
@@ -66,11 +76,15 @@ internal fun ApplicationScope.NeutrodyneWindow(
     menuActions: DesktopMenuActions,
     activator: WindowActivator,
     background: Boolean,
+    databaseOpener: DatabaseOpener,
+    appScope: CoroutineScope,
+    dataDir: Path,
     onQuitRequest: () -> Unit,
 ) {
     val state = rememberNeutrodyneWindowState()
     val icon = remember { WindowIcons.windowIconPainter() }
     var hidden by remember { mutableStateOf(false) }
+    val openState by databaseOpener.openState.collectAsState()
 
     // The Compose-side `hidden` owns visibility; a hand-off reveal clears it first, so the
     // activator's direct `isVisible` never fights the next recomposition.
@@ -89,7 +103,13 @@ internal fun ApplicationScope.NeutrodyneWindow(
     ) {
         WindowEffects(activator = activator, background = background)
         DesktopApplicationMenu(menuActions = menuActions, onQuit = onQuitRequest)
-        NeutrodyneWindowContent(installers = installers, menuActions = menuActions)
+        NeutrodyneWindowContent(
+            installers = installers,
+            menuActions = menuActions,
+            startup = openState.toGateState(),
+            onRetryStartup = { appScope.launch { suspendRunCatching { databaseOpener.awaitOpen() } } },
+            dataDir = dataDir,
+        )
     }
 
     if (shouldShowTray(hidden) && SystemTray.isSupported()) {
@@ -218,34 +238,45 @@ private fun DesktopApplicationMenu(
     }
 }
 
-/** Nothing to retry, dismiss or play before M1/M4: the root's callbacks are inert (M0). */
-private val M0_ROOT_ACTIONS =
-    RootActions(
-        retryStartup = {},
-        dismissNotice = {},
-        continueHere = {},
-        dismissRemoteSession = {},
-        playbackKey = { false },
-    )
-
 /**
  * What fills the window: the shared [NeutrodyneRoot] under the desktop platform actions
  * (08 Root contract) with the OS dark mode where Compose exposes it. The same composition is
  * `:desktopApp:run`, the window-content UI test and smoke mode's first frame.
+ *
+ * [startup] carries the database open's gate state (01 Splash and start-up gate; `Ready` by
+ * default, so the UI test and smoke render straight through). [onRetryStartup] is the failed
+ * gate's "Try again"; [dataDir] arms the `DISK_FULL` variant's "Manage storage", which reveals
+ * the data folder (08 Banners and the startup gate). The remaining callbacks stay inert until
+ * playback, notices and sync wire their milestones.
  */
 @Composable
 internal fun NeutrodyneWindowContent(
     installers: Set<EntryProviderInstaller>,
     menuActions: DesktopMenuActions,
+    startup: StartupGateState = StartupGateState.Ready,
+    onRetryStartup: () -> Unit = {},
+    dataDir: Path? = null,
 ) {
     val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
+    val platformActions = rememberDesktopPlatformActions()
     CompositionLocalProvider(
-        LocalPlatformActions provides rememberDesktopPlatformActions(),
+        LocalPlatformActions provides platformActions,
         LocalScrollbars provides DesktopScrollbars.style,
     ) {
         NeutrodyneRoot(
-            state = RootUiState.READY,
-            actions = M0_ROOT_ACTIONS,
+            state = RootUiState.READY.copy(startup = startup),
+            actions =
+                RootActions(
+                    retryStartup = onRetryStartup,
+                    dismissNotice = {},
+                    continueHere = {},
+                    dismissRemoteSession = {},
+                    playbackKey = { false },
+                    manageStorage =
+                        dataDir?.let { dir ->
+                            { platformActions.reveal?.reveal(dir.toString()) }
+                        },
+                ),
             slots =
                 RootSlots(
                     // No player before M4; the slot composes inside the root, where the

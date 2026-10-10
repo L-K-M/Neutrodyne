@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>Entity&nbsp;Outside&nbsp;CDATA</title>
+    <description>Curly&nbsp;quotes&nbsp;and&nbsp;entities &#8212; kept as text.</description>
+    <item>
+      <title>Fancy&nbsp;title</title>
+      <guid>nbsp-1</guid>
+      <enclosure url="https://cdn.example.com/n1.mp3" length="10" type="audio/mpeg"/>
+      <itunes:summary>Non&#39;breaking summary &amp; text.</itunes:summary>
+    </item>
+  </channel>
+</rss>

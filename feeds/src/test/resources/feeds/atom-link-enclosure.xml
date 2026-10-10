@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Atom Link Enclosure</title>
+  <entry>
+    <id>atom-enclosure-1</id>
+    <title>Entry with an enclosure link</title>
+    <link rel="alternate" href="https://example.com/entries/1"/>
+    <link rel="enclosure" href="https://cdn.example.com/ae1.mp3" type="audio/mpeg" length="42000000"/>
+  </entry>
+</feed>

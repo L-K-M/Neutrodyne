@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>Empty Channel, New Show</title>
+    <link>https://example.com/new-show</link>
+    <description>A show without episodes yet.</description>
+    <itunes:category text="Technology"><itunes:category text="Tech News"/></itunes:category>
+    <itunes:category text="Society &amp; Culture"><itunes:category text="Documentary"/></itunes:category>
+    <language>en-us</language>
+    <ttl>60</ttl>
+  </channel>
+</rss>

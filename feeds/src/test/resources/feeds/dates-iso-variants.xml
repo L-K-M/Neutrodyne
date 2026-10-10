@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>ISO Variants</title>
+    <item><title>With offset</title><guid>i1</guid>
+      <enclosure url="https://cdn.example.com/di1.mp3" length="10" type="audio/mpeg"/>
+      <pubDate>2026-10-03T12:34:56+02:00</pubDate></item>
+    <item><title>No zone</title><guid>i2</guid>
+      <enclosure url="https://cdn.example.com/di2.mp3" length="10" type="audio/mpeg"/>
+      <pubDate>2026-10-03T12:34:56</pubDate></item>
+    <item><title>Date only</title><guid>i3</guid>
+      <enclosure url="https://cdn.example.com/di3.mp3" length="10" type="audio/mpeg"/>
+      <pubDate>2026-10-03</pubDate></item>
+    <item><title>Space separator</title><guid>i4</guid>
+      <enclosure url="https://cdn.example.com/di4.mp3" length="10" type="audio/mpeg"/>
+      <pubDate>2026-10-03 12:34:56</pubDate></item>
+    <item><title>Garbage</title><guid>i5</guid>
+      <enclosure url="https://cdn.example.com/di5.mp3" length="10" type="audio/mpeg"/>
+      <pubDate>sometime next week, probably</pubDate></item>
+    <item><title>Offset without colon</title><guid>i6</guid>
+      <enclosure url="https://cdn.example.com/di6.mp3" length="10" type="audio/mpeg"/>
+      <pubDate>2026-10-03T12:34:56+0200</pubDate></item>
+  </channel>
+</rss>
