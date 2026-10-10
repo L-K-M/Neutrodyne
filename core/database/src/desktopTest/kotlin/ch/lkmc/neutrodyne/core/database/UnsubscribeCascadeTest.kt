@@ -126,7 +126,7 @@ class UnsubscribeCascadeTest {
 
                 // p1's child tables: state, position, queue, download, description, transcript,
                 // alt enclosure, chapter, person + funding, and its recorded GUID provenance.
-                db.ingestDao().recordGuidKnowledge(p1, setOf("shared-guid"), setOf("solo-guid"))
+                db.ingestDao().recordGuidKnowledge(p1, setOf("shared-guid"), setOf("solo-guid"), setOf("hinted-guid"))
                 db.episodeStateDao().upsert(episodeStateEntity(e1, playedAt = 1))
                 db
                     .positionDao()

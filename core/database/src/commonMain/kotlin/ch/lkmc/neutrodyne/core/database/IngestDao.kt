@@ -35,24 +35,41 @@ abstract class IngestDao(
     )
     abstract suspend fun existing(podcastId: Long): List<ExistingEpisodeKey>
 
-    /** D98: the podcast's stored GUID knowledge, keyed by canonical GUID (02). */
+    /**
+     * D98: the podcast's stored GUID authority, keyed by canonical GUID (02). `OBSERVED` rows
+     * are not authority — they only remember a first sighting — so this view reports exactly
+     * the values that can decide a claim; a GUID absent here is unproven (02).
+     */
     suspend fun guidKnowledge(podcastId: Long): Map<String, GuidKnowledge> =
         guidKnowledgeRows(podcastId).associate { it.guid to it.knowledge }
 
-    @Query("SELECT guid, knowledge FROM episode_guid_provenance WHERE podcastId = :podcastId")
+    @Query(
+        "SELECT guid, knowledge FROM episode_guid_provenance" +
+            " WHERE podcastId = :podcastId AND knowledge != 'OBSERVED'",
+    )
     protected abstract suspend fun guidKnowledgeRows(podcastId: Long): List<GuidKnowledgeRow>
+
+    /**
+     * D98: every canonical GUID with a durable provenance row of any knowledge value —
+     * the first-observation record (02). A GUID in this set is never a new introduction.
+     */
+    @Query("SELECT guid FROM episode_guid_provenance WHERE podcastId = :podcastId")
+    abstract suspend fun recordedGuids(podcastId: Long): List<String>
 
     /**
      * D98 union writes (02): [ambiguous] wins over everything already stored or arriving later —
      * a `KNOWN_AMBIGUOUS` row is never demoted; [independent] is recorded only when no row exists,
-     * so a sole observation can never overwrite ambiguity. Idempotent: re-recording the same
-     * knowledge is a no-op, and a failed ingest transaction rolls the whole write back with the
-     * episodes (02 Transactions and threading).
+     * so a sole observation can never overwrite ambiguity; [observed] records a first sighting
+     * that carried no authority so the GUID can never re-qualify as a new introduction. All
+     * first-writes are idempotent: re-recording the same knowledge is a no-op, and a failed
+     * ingest transaction rolls the whole write back with the episodes (02 Transactions and
+     * threading).
      */
     suspend fun recordGuidKnowledge(
         podcastId: Long,
         ambiguous: Set<String>,
         independent: Set<String>,
+        observed: Set<String>,
     ) {
         for (guid in ambiguous) {
             insertGuidKnowledge(
@@ -70,6 +87,15 @@ abstract class IngestDao(
                     podcastId,
                     guid,
                     GuidKnowledge.KNOWN_INDEPENDENT,
+                ),
+            )
+        }
+        for (guid in observed) {
+            insertGuidKnowledge(
+                EpisodeGuidProvenanceEntity(
+                    podcastId,
+                    guid,
+                    GuidKnowledge.OBSERVED,
                 ),
             )
         }

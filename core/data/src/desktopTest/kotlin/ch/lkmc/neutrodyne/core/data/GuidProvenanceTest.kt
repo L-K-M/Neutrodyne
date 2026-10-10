@@ -20,7 +20,10 @@ import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.episodeStateEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.core.testing.database.queueEntryEntity
+import ch.lkmc.neutrodyne.feeds.model.Paging
+import ch.lkmc.neutrodyne.feeds.model.ParseWarning
 import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
+import ch.lkmc.neutrodyne.feeds.model.WarningCode
 import kotlinx.coroutines.test.runTest
 import java.nio.file.Files
 import kotlin.test.Test
@@ -419,6 +422,160 @@ class GuidProvenanceTest {
             assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(a.id)!!.playedAt)
         }
 
+    /**
+     * A GUID first seen through a paging window is a durable observation without authority:
+     * the later complete document showing it once must not promote it, and the contested item
+     * (d's identity, B's enclosure) takes insert-or-drop beside both owners instead of
+     * claiming the played A row (D98; review probe `partial-introduction`).
+     */
+    @Test
+    fun partialFirstObservationBlocksLaterSingletonPromotion() =
+        runTest {
+            val id = podcastId()
+            ingest(
+                id,
+                parsedFeed(
+                    items =
+                        listOf(
+                            parsedEpisode(1, guid = null, title = "Beta", enclosureUrl = "https://cdn/b.mp3"),
+                        ),
+                ),
+                mode = IngestMode.INITIAL,
+            )
+            ingest(
+                id,
+                parsedFeed(
+                    items =
+                        listOf(
+                            parsedEpisode(0, guid = "d", title = "Alpha", enclosureUrl = "https://cdn/a.mp3"),
+                            parsedEpisode(1, guid = null, title = "Beta", enclosureUrl = "https://cdn/b.mp3"),
+                        ),
+                ),
+                partial = true,
+            )
+            // The first sighting is durable memory, but carries no authority.
+            assertNull(db.ingestDao().guidKnowledge(id)["d"])
+            assertTrue("d" in db.ingestDao().recordedGuids(id))
+            val a = byKey(id, "g:d")!!
+            val b = byEnclosure(id, "https://cdn/b.mp3")
+            db.episodeStateDao().upsert(episodeStateEntity(a.id) { copy(playedAt = NOW - 1_000) })
+            db.episodeStateDao().upsert(episodeStateEntity(b.id) { copy(isFavorite = true) })
+
+            // The same document without the window: `d` was already observed, so the sole
+            // sighting is not an introduction and must not promote.
+            ingest(
+                id,
+                parsedFeed(
+                    items =
+                        listOf(
+                            parsedEpisode(0, guid = "d", title = "Alpha", enclosureUrl = "https://cdn/a.mp3"),
+                            parsedEpisode(1, guid = null, title = "Beta", enclosureUrl = "https://cdn/b.mp3"),
+                        ),
+                ),
+            )
+            assertNull(db.ingestDao().guidKnowledge(id)["d"])
+
+            val contested =
+                ingest(
+                    id,
+                    parsedFeed(
+                        items =
+                            listOf(
+                                parsedEpisode(9, guid = "d", title = "Beta", enclosureUrl = "https://cdn/b.mp3"),
+                            ),
+                    ),
+                )
+            assertEquals(1, contested.inserted.size)
+            assertEquals(3, db.podcastDao().episodeCount(id))
+            val aAfter = db.ingestDao().existing(id).single { it.id == a.id }
+            assertEquals("https://cdn/a.mp3", aAfter.enclosureUrl)
+            assertFalse(aAfter.inFeed)
+            assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(a.id)!!.playedAt)
+            assertTrue(db.episodeStateDao().byEpisode(b.id)!!.isFavorite)
+        }
+
+    /**
+     * A document that carries page-1 paging links is incomplete on every entry path, even when
+     * the caller's `partial` flag says otherwise (the subscribe path cannot widen it): `d` is
+     * recorded without authority and the contested item preserves both owners (D98; review
+     * probe `paged-subscribe`).
+     */
+    @Test
+    fun documentPagingLinksBlockIndependenceRegardlessOfCallerFlag() =
+        runTest {
+            val id = podcastId()
+            ingest(
+                id,
+                parsedFeed(
+                    items =
+                        listOf(
+                            parsedEpisode(0, guid = "d", title = "Alpha", enclosureUrl = "https://cdn/a.mp3"),
+                            parsedEpisode(1, guid = null, title = "Beta", enclosureUrl = "https://cdn/b.mp3"),
+                        ),
+                    paging = Paging(next = "https://example.com/older.xml"),
+                ),
+                mode = IngestMode.INITIAL,
+                partial = false,
+            )
+            assertNull(db.ingestDao().guidKnowledge(id)["d"])
+            assertTrue("d" in db.ingestDao().recordedGuids(id))
+            val a = byKey(id, "g:d")!!
+            val b = byEnclosure(id, "https://cdn/b.mp3")
+            db.episodeStateDao().upsert(episodeStateEntity(a.id) { copy(playedAt = NOW - 1_000) })
+            db.episodeStateDao().upsert(episodeStateEntity(b.id) { copy(isFavorite = true) })
+
+            val contested =
+                ingest(
+                    id,
+                    parsedFeed(
+                        items =
+                            listOf(
+                                parsedEpisode(9, guid = "d", title = "Beta", enclosureUrl = "https://cdn/b.mp3"),
+                            ),
+                    ),
+                )
+            assertEquals(1, contested.inserted.size)
+            assertEquals(3, db.podcastDao().episodeCount(id))
+            val aAfter = db.ingestDao().existing(id).single { it.id == a.id }
+            assertEquals("https://cdn/a.mp3", aAfter.enclosureUrl)
+            assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(a.id)!!.playedAt)
+            assertTrue(db.episodeStateDao().byEpisode(b.id)!!.isFavorite)
+        }
+
+    /**
+     * A parser item cap makes the document incomplete even though paging links are absent: an
+     * item whose duplicate was truncated away looks sole-observed but is not an introduction,
+     * so `d` records without KNOWN_INDEPENDENT authority (D98; review probe `default-item-cap`).
+     */
+    @Test
+    fun itemTruncatedDocumentCannotProveIndependence() =
+        runTest {
+            val id = podcastId()
+            ingest(
+                id,
+                parsedFeed(
+                    items =
+                        listOf(
+                            parsedEpisode(1, guid = null, title = "Beta", enclosureUrl = "https://cdn/b.mp3"),
+                        ),
+                ),
+                mode = IngestMode.INITIAL,
+            )
+            ingest(
+                id,
+                parsedFeed(
+                    items =
+                        listOf(
+                            parsedEpisode(0, guid = "d", title = "Alpha", enclosureUrl = "https://cdn/a.mp3"),
+                            parsedEpisode(1, guid = null, title = "Beta", enclosureUrl = "https://cdn/b.mp3"),
+                        ),
+                    warnings = listOf(ParseWarning(WarningCode.ITEMS_TRUNCATED)),
+                ),
+            )
+            assertNull(db.ingestDao().guidKnowledge(id)["d"])
+            assertTrue("d" in db.ingestDao().recordedGuids(id))
+        }
+
     /** Reversed document order hands `g:dup` to B instead; the sibling still resolves by tier. */
     @Test
     fun reversedDocumentOrderKeepsSiblingStates() =
@@ -642,7 +799,7 @@ class GuidProvenanceTest {
             val id = podcastId()
             assertFailsWith<IllegalStateException> {
                 db.withWriteTransaction {
-                    db.ingestDao().recordGuidKnowledge(id, setOf("rb"), emptySet())
+                    db.ingestDao().recordGuidKnowledge(id, setOf("rb"), emptySet(), emptySet())
                     db.ingestDao().insertEpisodes(listOf(episodeEntity(podcastId = id, identityKey = "g:rb")))
                     db
                         .podcastDao()

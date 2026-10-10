@@ -32,6 +32,22 @@ public object EpisodeKeys {
             .filter { it != primary }
     }
 
+    /**
+     * Every non-`g:` primary key of [e] in precedence order (`u:` → `t:` → `l:` → `h:`; the
+     * `h:` head key always exists). This is the insert pool for a contested item whose GUID
+     * may not claim its `g:` slot (03 deviation 17, D98): the item still lands under a
+     * content-derived key beside both owners rather than being dropped while the contested
+     * identity stays unproven. Deliberately wider than [fallbacks] — duplicate detection
+     * keeps the narrower pool.
+     */
+    public fun nonGuidKeys(e: ParsedEpisode): List<String> =
+        listOfNotNull(
+            enclosureKey(e.primaryEnclosure?.url),
+            titleDayKey(e.title, e.pubDate),
+            linkKey(e.link),
+            headKey(e.title, e.descriptionHtml),
+        )
+
     /** Current-version primary first, then the keys of every older supported version (v1: `[primary]`). */
     public fun candidates(e: ParsedEpisode): List<String> = listOf(primary(e))
 

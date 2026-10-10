@@ -34,6 +34,7 @@ import ch.lkmc.neutrodyne.feeds.model.ParseWarning
 import ch.lkmc.neutrodyne.feeds.model.ParsedEpisode
 import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
 import ch.lkmc.neutrodyne.feeds.model.WarningCode
+import ch.lkmc.neutrodyne.feeds.model.isPartialWindow
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
 import dev.zacsweers.metro.Inject
 import kotlinx.coroutines.CoroutineDispatcher
@@ -127,6 +128,12 @@ internal class FeedIngestor(
         // unknown GUIDs stay unknown on conflicting evidence.
         val guidRowCounts =
             existing.mapNotNull { EpisodeKeys.canonicalGuid(it.guid) }.groupingBy { it }.eachCount()
+        val storedGuids = guidRowCounts.keys
+        val itemGuidCounts =
+            prepared.items
+                .mapNotNull { EpisodeKeys.canonicalGuid(it.episode.guid) }
+                .groupingBy { it }
+                .eachCount()
         val ambiguousGuids =
             existing
                 .asSequence()
@@ -135,30 +142,50 @@ internal class FeedIngestor(
                         guidRowCounts[it]!! > 1 || row.identityKey != "g:$it"
                     }
                 }.toMutableSet()
-        ambiguousGuids +=
-            prepared.items
-                .mapNotNull { EpisodeKeys.canonicalGuid(it.episode.guid) }
-                .groupingBy { it }
-                .eachCount()
-                .filterValues { it > 1 }
-                .keys
+        ambiguousGuids += itemGuidCounts.filterValues { it > 1 }.keys
         val knowledge = ingestDao.guidKnowledge(stored.id)
-        // KNOWN_INDEPENDENT requires the strict introduction rule: coverage is on, the document
-        // is complete (a paging window can never prove sole carriage), the GUID appears on
-        // exactly one accepted item, and no ambiguity evidence exists. Stored-only observation
-        // never promotes — erased history stays unknown (D98).
-        val independentGuids =
-            if (stored.guidCoverageSince != null && !ctx.partial && ctx.mode != IngestMode.OLDER_PAGE) {
-                prepared.items
-                    .mapNotNull { EpisodeKeys.canonicalGuid(it.episode.guid) }
-                    .groupingBy { it }
-                    .eachCount()
-                    .filterValues { it == 1 }
-                    .keys - ambiguousGuids
+
+        // Completeness of this document as a GUID observation (02/D98): KNOWN_INDEPENDENT may
+        // only derive from a document the ingest saw in full — a paging window (the adapter's
+        // flag or the document's own links, whichever path delivered it), a parser item cap
+        // (ITEMS_TRUNCATED drops trailing items the ingest never saw) and older-page ingests
+        // are all incomplete. No caller-supplied flag can widen this.
+        val documentComplete =
+            ctx.mode != IngestMode.OLDER_PAGE &&
+                !ctx.partial &&
+                !parsed.paging.isPartialWindow &&
+                parsed.warnings.none { it.code == WarningCode.ITEMS_TRUNCATED }
+
+        // First observations are durable (02): every canonical GUID this ingest sees — on an
+        // accepted item or already carried by a stored row — that has no provenance row yet is
+        // recorded now, before matching mutates any current GUID. Only a first sighting that
+        // is a strict introduction records KNOWN_INDEPENDENT: covered podcast, complete
+        // document, exactly one accepted item carrying the GUID and not already stored. Any
+        // other first sighting records OBSERVED so a later complete singleton, an erased
+        // NULL interval, a rekey or a restart can never promote a GUID that was never safely
+        // introduced (R70 review).
+        val covered = stored.guidCoverageSince != null
+        val firstObserved =
+            if (covered) {
+                (storedGuids + itemGuidCounts.keys) -
+                    ambiguousGuids -
+                    ingestDao.recordedGuids(stored.id).toSet()
             } else {
                 emptySet()
             }
-        ingestDao.recordGuidKnowledge(stored.id, ambiguousGuids, independentGuids)
+        val independentGuids =
+            if (covered && documentComplete) {
+                firstObserved
+                    .filterTo(HashSet()) { itemGuidCounts[it] == 1 && it !in storedGuids }
+            } else {
+                emptySet()
+            }
+        ingestDao.recordGuidKnowledge(
+            stored.id,
+            ambiguousGuids,
+            independentGuids,
+            firstObserved - independentGuids,
+        )
         ambiguousGuids += knowledge.filterValues { it == GuidKnowledge.KNOWN_AMBIGUOUS }.keys
 
         // Pass 1 (03 step 4): each item claims rows in claim-key order — its assigned document
@@ -227,10 +254,15 @@ internal class FeedIngestor(
 
         // An unmatched item whose assigned key a stored row holds (lost to a better enclosure
         // match above) re-derives a free fallback; with none it is dropped as a duplicate.
+        // An unresolved contested item re-derives from every non-`g:` content key instead —
+        // its GUID authority is unproven, so it lands beside both owners under `u:`/`t:`/`l:`/`h:`
+        // rather than claiming a `g:` slot or vanishing while its identity stays unproven (D98).
         val liveDocKeys = prepared.items.mapTo(HashSet()) { it.docKey }
         for (item in prepared.items) {
             if (item.matchedTo != null || item.dropped || item.docKey !in storedKeys) continue
-            val fresh = item.fallbackKeys.firstOrNull { it !in storedKeys && it !in liveDocKeys }
+            val fresh =
+                (if (item.unresolved) EpisodeKeys.nonGuidKeys(item.episode) else item.fallbackKeys)
+                    .firstOrNull { it !in storedKeys && it !in liveDocKeys }
             if (fresh == null) {
                 item.dropped = true
                 prepared.warnings +=
