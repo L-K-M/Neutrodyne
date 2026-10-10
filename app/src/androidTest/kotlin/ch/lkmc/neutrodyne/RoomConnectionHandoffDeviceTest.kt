@@ -2,7 +2,10 @@
 package ch.lkmc.neutrodyne
 
 import android.content.Context
+import android.content.ContextWrapper
+import android.system.ErrnoException
 import android.system.Os
+import android.system.OsConstants
 import androidx.room3.useReaderConnection
 import androidx.room3.useWriterConnection
 import androidx.sqlite.SQLiteConnection
@@ -17,6 +20,7 @@ import ch.lkmc.neutrodyne.platform.DeviceClock
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -25,7 +29,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
-import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
@@ -44,24 +47,16 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * Mirrors `RoomConnectionHandoffTest` (desktop) against the real Android path:
  * `AndroidDatabaseFactory` + `NeutrodyneDatabase.build` + `BundledSQLiteDriver` on a WAL file
- * database (writer + reader pools). `SeenConnection` counts closes and `openDbFds` counts
- * process descriptors still held under the database path. Runs under the app's managed-device
- * groups (`api26DebugAndroidTest`/`api36DebugAndroidTest`, the `run-instrumented` label).
+ * database (writer + reader pools). The database file lives under a test-owned `ContextWrapper`
+ * so the app's real `getDatabasePath` target is never opened or deleted. `SeenConnection`
+ * counts closes and `openDbFds` counts process descriptors still held under the fixture path.
+ * Runs under the app's managed-device groups (`api26DebugAndroidTest`/`api36DebugAndroidTest`,
+ * the `run-instrumented` label).
  */
 @RunWith(AndroidJUnit4::class)
 class RoomConnectionHandoffDeviceTest {
     private val context: Context
         get() = InstrumentationRegistry.getInstrumentation().targetContext
-
-    private val dbFile: File
-        get() = context.getDatabasePath(NeutrodyneDatabase.FILE_NAME)
-
-    @Before
-    fun deleteLeftoverDbFiles() {
-        for (suffix in arrayOf("", "-wal", "-shm")) {
-            File(dbFile.path + suffix).delete()
-        }
-    }
 
     /**
      * First-open cancellation on the writer path: the cancelled attempt must leave no live
@@ -72,10 +67,13 @@ class RoomConnectionHandoffDeviceTest {
     fun aCancelledFirstWriterOpenLeavesNoNativeConnectionBehind() =
         runBlocking {
             val scope = CoroutineScope(Job() + Dispatchers.Default)
+            val fixtureDir = fixtureDir("writer")
+            val insideOpen = CompletableDeferred<Unit>()
+            val releaseOpen = CompletableDeferred<Unit>()
+            val seen = CopyOnWriteArrayList<SeenConnection>()
+            var db: NeutrodyneDatabase? = null
+            var attempt: Deferred<*>? = null
             try {
-                val insideOpen = CompletableDeferred<Unit>()
-                val releaseOpen = CompletableDeferred<Unit>()
-                val seen = CopyOnWriteArrayList<SeenConnection>()
                 val driver =
                     GatedDriver(
                         BundledSQLiteDriver(),
@@ -84,53 +82,44 @@ class RoomConnectionHandoffDeviceTest {
                         releaseOpen,
                         seen,
                     )
-                val db = buildDb(driver)
-
-                val attempt =
+                val database = buildDb(driver, fixtureDir)
+                db = database
+                val launched =
                     scope.async {
-                        db.useWriterConnection {
+                        database.useWriterConnection {
                             it.usePrepared("SELECT 1") { statement -> statement.step() }
                         }
                         "completed"
                     }
+                attempt = launched
                 assertTrue("driver open must be reached", waitBounded(insideOpen))
-                attempt.cancel()
+                launched.cancel()
                 releaseOpen.complete(Unit)
-                assertTrue(assertThrows { attempt.await() } is CancellationException)
+                assertTrue(assertThrows { launched.await() } is CancellationException)
 
                 assertEquals(
                     "a connection discarded at the lock boundary must be closed",
                     0,
                     seen.count { !it.closed.get() },
                 )
-                val fdsAfterCancel = openDbFds()
-                if (fdsAfterCancel >= 0) {
-                    assertEquals(
-                        "a leaked connection still holds db files open",
-                        0,
-                        fdsAfterCancel,
-                    )
-                }
+                assertDbFilesReleased(fixtureDir, "a leaked connection still holds db files open")
 
                 // Retry: an ungated open must succeed and its connection becomes pool-owned.
-                db.useWriterConnection {
+                database.useWriterConnection {
                     it.usePrepared("SELECT count(*) FROM sync_state") { statement ->
                         statement.step()
                         statement.getLong(0)
                     }
                 }
-                db.close()
+                database.close()
                 assertEquals(
                     "closing the database must release every connection it ever created",
                     0,
                     seen.count { !it.closed.get() },
                 )
-                val fdsAfterClose = openDbFds()
-                if (fdsAfterClose >= 0) {
-                    assertEquals("no db descriptor may survive db.close()", 0, fdsAfterClose)
-                }
+                assertDbFilesReleased(fixtureDir, "no db descriptor may survive db.close()")
             } finally {
-                scope.cancel()
+                cleanup(attempt, releaseOpen, seen, db, scope, fixtureDir)
             }
         }
 
@@ -143,10 +132,13 @@ class RoomConnectionHandoffDeviceTest {
     fun aCancelledReadAcquireLeavesNoNativeConnectionBehind() =
         runBlocking {
             val scope = CoroutineScope(Job() + Dispatchers.Default)
+            val fixtureDir = fixtureDir("reader")
+            val insideOpen = CompletableDeferred<Unit>()
+            val releaseOpen = CompletableDeferred<Unit>()
+            val seen = CopyOnWriteArrayList<SeenConnection>()
+            var db: NeutrodyneDatabase? = null
+            var attempt: Deferred<*>? = null
             try {
-                val insideOpen = CompletableDeferred<Unit>()
-                val releaseOpen = CompletableDeferred<Unit>()
-                val seen = CopyOnWriteArrayList<SeenConnection>()
                 val driver =
                     GatedDriver(
                         BundledSQLiteDriver(),
@@ -155,41 +147,40 @@ class RoomConnectionHandoffDeviceTest {
                         releaseOpen,
                         seen,
                     )
-                val db = buildDb(driver)
-                db.useWriterConnection {
+                val database = buildDb(driver, fixtureDir)
+                db = database
+                database.useWriterConnection {
                     it.usePrepared("SELECT 1") { statement -> statement.step() }
                 }
                 assertEquals("the writer open must be the first connection", 1, seen.size)
 
-                val attempt =
+                val launched =
                     scope.async {
-                        db.useReaderConnection {
+                        database.useReaderConnection {
                             it.usePrepared("SELECT 1") { statement -> statement.step() }
                         }
                         "completed"
                     }
+                attempt = launched
                 assertTrue("driver open must be reached", waitBounded(insideOpen))
-                attempt.cancel()
+                launched.cancel()
                 releaseOpen.complete(Unit)
-                assertTrue(assertThrows { attempt.await() } is CancellationException)
+                assertTrue(assertThrows { launched.await() } is CancellationException)
 
                 assertEquals(
                     "only the pooled writer may remain open; a discarded reader must be closed",
                     1,
                     seen.count { !it.closed.get() },
                 )
-                db.close()
+                database.close()
                 assertEquals(
                     "closing the database must release every connection it ever created",
                     0,
                     seen.count { !it.closed.get() },
                 )
-                val fdsAfterClose = openDbFds()
-                if (fdsAfterClose >= 0) {
-                    assertEquals("no db descriptor may survive db.close()", 0, fdsAfterClose)
-                }
+                assertDbFilesReleased(fixtureDir, "no db descriptor may survive db.close()")
             } finally {
-                scope.cancel()
+                cleanup(attempt, releaseOpen, seen, db, scope, fixtureDir)
             }
         }
 
@@ -197,42 +188,78 @@ class RoomConnectionHandoffDeviceTest {
     @Test
     fun anUncancelledOpenRegistersAndClosesItsConnection() =
         runBlocking {
+            val scope = CoroutineScope(Job() + Dispatchers.Default)
+            val fixtureDir = fixtureDir("control")
             val insideOpen = CompletableDeferred<Unit>()
             val releaseOpen = CompletableDeferred<Unit>()
             val seen = CopyOnWriteArrayList<SeenConnection>()
-            val driver =
-                GatedDriver(
-                    BundledSQLiteDriver(),
-                    gateOnCall = { it == 1 },
-                    insideOpen,
-                    releaseOpen,
-                    seen,
-                )
-            val db = buildDb(driver)
+            var db: NeutrodyneDatabase? = null
+            var attempt: Deferred<*>? = null
             try {
-                val attempt =
-                    async {
-                        db.useWriterConnection {
+                val driver =
+                    GatedDriver(
+                        BundledSQLiteDriver(),
+                        gateOnCall = { it == 1 },
+                        insideOpen,
+                        releaseOpen,
+                        seen,
+                    )
+                val database = buildDb(driver, fixtureDir)
+                db = database
+                val launched =
+                    scope.async {
+                        database.useWriterConnection {
                             it.usePrepared("SELECT 1") { statement -> statement.step() }
                         }
                         "completed"
                     }
+                attempt = launched
                 assertTrue("driver open must be reached", waitBounded(insideOpen))
                 releaseOpen.complete(Unit)
-                assertEquals("completed", attempt.await())
+                assertEquals("completed", launched.await())
+                database.close()
+                assertEquals(0, seen.count { !it.closed.get() })
+                assertDbFilesReleased(fixtureDir, "no db descriptor may survive db.close()")
             } finally {
-                db.close()
-            }
-            assertEquals(0, seen.count { !it.closed.get() })
-            val fdsAfterClose = openDbFds()
-            if (fdsAfterClose >= 0) {
-                assertEquals("no db descriptor may survive db.close()", 0, fdsAfterClose)
+                cleanup(attempt, releaseOpen, seen, db, scope, fixtureDir)
             }
         }
 
-    private fun buildDb(driver: SQLiteDriver): NeutrodyneDatabase =
+    /**
+     * Unblocks a possibly-latched gate, joins the attempt, then releases every unowned handle
+     * the assertions just counted — a failed assert must not leave a blocked thread or a live
+     * native connection hanging the device run. Only the test-owned fixture dir is deleted.
+     */
+    private suspend fun cleanup(
+        attempt: Deferred<*>?,
+        releaseOpen: CompletableDeferred<Unit>,
+        seen: List<SeenConnection>,
+        db: NeutrodyneDatabase?,
+        scope: CoroutineScope,
+        fixtureDir: File,
+    ) {
+        releaseOpen.complete(Unit)
+        if (attempt != null) withTimeoutOrNull(BOUND_MS) { attempt.join() }
+        db?.let { runCatching { it.close() } }
+        seen.filter { !it.closed.get() }.forEach { runCatching { it.close() } }
+        scope.cancel()
+        fixtureDir.deleteRecursively()
+    }
+
+    /** Redirects only `getDatabasePath` into [fixtureDir]; every other call delegates. */
+    private fun isolatedContext(fixtureDir: File): Context =
+        object : ContextWrapper(context) {
+            override fun getDatabasePath(name: String): File = File(fixtureDir, name).also { fixtureDir.mkdirs() }
+        }
+
+    private fun fixtureDir(name: String): File = File(context.cacheDir, "room-handoff-$name").apply { mkdirs() }
+
+    private fun buildDb(
+        driver: SQLiteDriver,
+        fixtureDir: File,
+    ): NeutrodyneDatabase =
         NeutrodyneDatabase.build(
-            factory = AndroidDatabaseFactory(context),
+            factory = AndroidDatabaseFactory(isolatedContext(fixtureDir)),
             driver = driver,
             io = Dispatchers.Default,
             cb = NeutrodyneDatabaseCallback(DeviceClock, optimizeMask = true),
@@ -254,15 +281,37 @@ class RoomConnectionHandoffDeviceTest {
         throw AssertionError("expected an exception but none was thrown")
     }
 
-    /** Open process descriptors whose target is the `neutrodyne.db*` files (-1 when /proc is absent). */
-    private fun openDbFds(): Int {
+    /**
+     * Asserts no process descriptor still targets the fixture's `neutrodyne.db*` files.
+     * `-1` means descriptor inspection is unsupported on this device, so the assertion is
+     * skipped — never silently reported as proven.
+     */
+    private fun assertDbFilesReleased(
+        fixtureDir: File,
+        message: String,
+    ) {
+        val fds = openDbFds(fixtureDir)
+        if (fds >= 0) assertEquals(message, 0, fds)
+    }
+
+    /** Open descriptors targeting `<fixtureDir>/neutrodyne.db*`, or -1 when unsupported. */
+    private fun openDbFds(fixtureDir: File): Int {
         val fdDir = File("/proc/self/fd")
         val entries = fdDir.list() ?: return -1
-        val prefix = dbFile.path
-        return entries.count { fd ->
-            runCatching { Os.readlink(File(fdDir, fd).path).startsWith(prefix) }
-                .getOrDefault(false)
+        val prefix = File(fixtureDir, NeutrodyneDatabase.FILE_NAME).path
+        var held = 0
+        for (fd in entries) {
+            val target =
+                try {
+                    Os.readlink(File(fdDir, fd).path)
+                } catch (e: ErrnoException) {
+                    // An fd vanishing between list and readlink is a normal close race; a
+                    // permission error means inspection is unsupported, not a pass.
+                    if (e.errno == OsConstants.ENOENT) continue else return -1
+                }
+            if (target.startsWith(prefix)) held++
         }
+        return held
     }
 
     private companion object {
@@ -284,21 +333,32 @@ class RoomConnectionHandoffDeviceTest {
         override fun open(fileName: String): SQLiteConnection {
             if (gateOnCall(calls.incrementAndGet())) {
                 insideOpen.complete(Unit)
-                runBlocking { releaseOpen.await() }
+                // Bounded: a test that never releases the gate must not park this thread.
+                runBlocking { withTimeoutOrNull(BOUND_MS) { releaseOpen.await() } }
             }
             return SeenConnection(delegate.open(fileName)).also { seen += it }
         }
     }
 
-    /** Records close() on the real native connection; the rest delegates unchanged. */
+    /**
+     * Records `close()` on the real native connection; the rest delegates unchanged.
+     * `closed` is set only when the delegate close completed, so a failed close is never
+     * accounted as released.
+     */
     private class SeenConnection(
         private val delegate: SQLiteConnection,
     ) : SQLiteConnection by delegate {
         val closed = AtomicBoolean(false)
 
         override fun close() {
-            closed.set(true)
-            delegate.close()
+            if (closed.compareAndSet(false, true)) {
+                try {
+                    delegate.close()
+                } catch (t: Throwable) {
+                    closed.set(false)
+                    throw t
+                }
+            }
         }
     }
 }
