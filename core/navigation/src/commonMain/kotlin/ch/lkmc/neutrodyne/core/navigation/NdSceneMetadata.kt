@@ -31,6 +31,13 @@ public object NdSceneMetadata {
     /** A composable drawn as the detail placeholder while a lone list entry fills ≥ 2 panes. */
     public const val KEY_DETAIL_PLACEHOLDER: String = "nd.detailPlaceholder"
 
+    /**
+     * The owning [TopLevelKey] of an entry, stamped by the shared host on every decorated entry.
+     * A tab switch and a back pop can produce the same rendered entry list, so the transition
+     * spec reads this marker to keep tab taps immediate while pops wipe.
+     */
+    public const val KEY_TAB: String = "nd.tab"
+
     public const val PANE_LIST: String = "list"
     public const val PANE_DETAIL: String = "detail"
     public const val PANE_EXTRA: String = "extra"

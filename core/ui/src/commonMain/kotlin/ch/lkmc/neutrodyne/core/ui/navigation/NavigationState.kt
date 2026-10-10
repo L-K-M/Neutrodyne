@@ -49,6 +49,15 @@ public class NavigationState internal constructor(
     public var panePartitions: Int = 1
         internal set
 
+    /**
+     * Whether the latest stack mutation came from a back action (`pop`). Selecting Feeds from
+     * another tab and popping back to it produce the same rendered entries — a strict prefix —
+     * which `NavDisplay` cannot tell apart, so [NeutrodyneNavHost]'s transition spec reads this
+     * marker to animate only real pops.
+     */
+    internal var lastChangeWasPop: Boolean = false
+        private set
+
     public fun stack(tab: TopLevelKey): NavBackStack<NavKey> = stacks.getValue(tab)
 
     /** The stacks [NeutrodyneNavHost] renders: Feeds, then the selected tab when different. */
@@ -56,10 +65,12 @@ public class NavigationState internal constructor(
         if (selectedTab == FeedsKey) listOf(FeedsKey) else listOf(FeedsKey, selectedTab)
 
     override fun push(key: NavKey) {
+        lastChangeWasPop = false
         stack(selectedTab).add(key)
     }
 
     override fun selectTab(key: TopLevelKey) {
+        lastChangeWasPop = false
         // 08 Re-tap behaviour: re-selecting the shown destination pops its stack back to the
         // root; the root entry itself stays, so its saved scroll position survives.
         if (key == selected.value) resetTab(key)
@@ -67,6 +78,7 @@ public class NavigationState internal constructor(
     }
 
     override fun pop(): Boolean {
+        lastChangeWasPop = true
         val stack = stack(selectedTab)
         if (stack.size > 1) {
             stack.removeAt(stack.size - 1)
@@ -80,6 +92,7 @@ public class NavigationState internal constructor(
     }
 
     override fun resetTab(key: TopLevelKey) {
+        lastChangeWasPop = false
         val stack = stack(key)
         while (stack.size > 1) stack.removeAt(stack.size - 1)
     }
@@ -88,12 +101,14 @@ public class NavigationState internal constructor(
         tab: TopLevelKey,
         stack: List<NavKey>,
     ) {
+        lastChangeWasPop = false
         resetTab(tab)
         stack(tab).addAll(stack)
         selected.value = tab
     }
 
     override fun pushDetail(key: NavKey) {
+        lastChangeWasPop = false
         val stack = stack(selectedTab)
         if (panePartitions >= 2 && stack.lastOrNull()?.let { it::class == key::class } == true) {
             stack.removeAt(stack.size - 1)
