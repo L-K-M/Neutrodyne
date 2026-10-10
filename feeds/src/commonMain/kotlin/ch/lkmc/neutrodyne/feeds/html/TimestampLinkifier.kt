@@ -17,7 +17,8 @@ import ch.lkmc.neutrodyne.feeds.html.ShowNotesStyles.NONE
 public object TimestampLinkifier {
     private val lookbehind = """(?<![\d:.])"""
     private val clock = """(?:(\d{1,2}):([0-5]\d):([0-5]\d)|(\d{1,3}):([0-5]\d))"""
-    private val lookahead = """(?![\d:])(?!\h*(?i:am|pm|a\.m\.|p\.m\.|uhr|h\b))"""
+    // Each marker must be a whole word: "10:30 ample" linkifies while "10:30 am" does not.
+    private val lookahead = """(?![\d:])(?!\h*(?i:(?:am|pm|uhr|h)\b|a\.m\.(?!\w)|p\.m\.(?!\w)))"""
     private val timestamp = Regex(lookbehind + clock + lookahead)
 
     private const val MS_PER_SECOND = 1000L

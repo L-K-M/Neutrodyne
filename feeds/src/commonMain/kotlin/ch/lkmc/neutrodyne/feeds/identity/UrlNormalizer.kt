@@ -103,7 +103,12 @@ public object UrlNormalizer {
         val decoded = percentDecode(raw)
         if (decoded.isEmpty()) return null
         val ascii = decoded.lowercase().idnaToAsciiOrNull() ?: return null
-        return ascii.removeSuffix(".")
+        // toASCII runs without UseSTD3ASCIIRules, so characters like '/' and '$' pass through
+        // and "." strips to empty: either would collide or forge identities. LDH, dots and
+        // '_' are the only characters a valid post-IDNA host can contain.
+        return ascii.removeSuffix(".").takeIf {
+            it.isNotEmpty() && it.all { c -> c in 'a'..'z' || c in '0'..'9' || c == '.' || c == '-' || c == '_' }
+        }
     }
 
     /**

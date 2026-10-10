@@ -10,9 +10,12 @@ import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
  */
 public interface FeedParser {
     /**
-     * Parses the document [open] yields. [httpCharset] is the HTTP `Content-Type` charset, consulted only
-     * by the re-parse heuristic (an `ISO-8859-1` header on a UTF-8 body must not win the first pass).
-     * [baseUrl] resolves relative URLs; `xml:base` in the document wins when present.
+     * Parses the document [open] yields. [open] is invoked exactly once per [parse] call and must
+     * return a fresh, readable source; the parser consumes and closes it, and any re-parse runs
+     * over the buffered bytes rather than calling [open] again. [httpCharset] is the HTTP
+     * `Content-Type` charset, consulted only by the re-parse heuristic (an `ISO-8859-1` header on
+     * a UTF-8 body must not win the first pass). [baseUrl] resolves relative URLs; `xml:base` in
+     * the document wins when present.
      */
     public fun parse(
         open: () -> okio.Source,

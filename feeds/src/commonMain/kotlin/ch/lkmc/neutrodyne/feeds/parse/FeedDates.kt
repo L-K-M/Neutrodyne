@@ -80,6 +80,19 @@ public object FeedDates {
             "mdt" to "-0600",
             "pst" to "-0800",
             "pdt" to "-0700",
+            // European names, common on localised feeds.
+            "wet" to "+0000",
+            "west" to "+0100",
+            "cet" to "+0100",
+            "cest" to "+0200",
+            "met" to "+0100",
+            "mest" to "+0200",
+            "mez" to "+0100",
+            "mesz" to "+0200",
+            "eet" to "+0200",
+            "eest" to "+0300",
+            // British Summer Time; the rarer Bangladesh use (+0600) loses on frequency.
+            "bst" to "+0100",
         )
 
     private val englishMonths: Map<String, Int> =

@@ -10,7 +10,7 @@ import kotlin.test.assertNull
 class FeedDatesTest {
     @Test
     fun parsesStrictRfc822() {
-        assertEquals(1792663200000L, FeedDates.parse("Sun, 22 Oct 2026 12:00:00 +0200"))
+        assertEquals(1792663200000L, FeedDates.parse("Thu, 22 Oct 2026 12:00:00 +0200"))
     }
 
     @Test
@@ -33,6 +33,18 @@ class FeedDatesTest {
         assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56"))
         // Case-insensitive month.
         assertEquals(1791030896000L, FeedDates.parse("Sat, 03 oct 2026 12:34:56 +0000"))
+    }
+
+    @Test
+    fun europeanZoneNames() {
+        // Thu, 03 Oct 2024 09:00:00 +0200 → 2024-10-03T07:00:00Z.
+        assertEquals(1727938800000L, FeedDates.parse("Thu, 3 Oct 2024 09:00:00 CEST"))
+        assertEquals(1727938800000L, FeedDates.parse("Do, 03 Okt 2024 09:00:00 MESZ"))
+        assertEquals(1727938800000L, FeedDates.parse("Thu, 03 Oct 2024 08:00:00 CET"))
+        assertEquals(1727938800000L, FeedDates.parse("Thu, 03 Oct 2024 10:00:00 EEST"))
+        assertEquals(1727938800000L, FeedDates.parse("Thu, 03 Oct 2024 08:00:00 WEST"))
+        // "bst" is British Summer Time here, not Bangladesh's +0600 (see namedZones).
+        assertEquals(1727938800000L, FeedDates.parse("Thu, 03 Oct 2024 08:00:00 BST"))
     }
 
     @Test

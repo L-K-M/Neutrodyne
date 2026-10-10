@@ -77,6 +77,35 @@ class UrlNormalizerTest {
         assertEquals("example.com/", UrlNormalizer.forIdentity("https://example.com/../.."))
     }
 
+    @Test
+    fun decodedHostIsCharsetValidated() {
+        // toASCII without STD3 rules passes '/' through: without the allowlist this would share
+        // one identity with https://ex/evil.com/feed.
+        assertNull(UrlNormalizer.forIdentity("https://ex%2Fevil.com/feed"))
+        assertNull(UrlNormalizer.forIdentity("https://exa%24mple.com/feed"))
+        // A "." host strips to empty: bogus, so no identity.
+        assertNull(UrlNormalizer.forIdentity("http://./feed"))
+        // Valid hosts still normalise: punycode, underscores that survive toASCII, mixed case.
+        assertEquals("xn--tst-qla.example/feed", UrlNormalizer.forIdentity("https://täst.example/feed"))
+        assertEquals("ex_ample.com/feed", UrlNormalizer.forIdentity("https://ex_ample.com/feed"))
+        assertEquals("ex/evil.com/feed", UrlNormalizer.forIdentity("https://ex/evil.com/feed"))
+    }
+
+    @Test
+    fun specialSchemeSkipsLeadingSlashesLikeWhatwg() {
+        // For http(s) WHATWG ignores every leading `/` or `\` before the authority, so all of
+        // these fetch from example.com (OkHttp agrees); non-special schemes keep `//`-only.
+        assertEquals("example.com/feed", UrlNormalizer.forIdentity("http:/example.com/feed"))
+        assertEquals("example.com/feed", UrlNormalizer.forIdentity("http:example.com/feed"))
+        assertEquals("example.com/feed", UrlNormalizer.forIdentity("http:\\\\example.com/feed"))
+        assertEquals("example.com/feed", UrlNormalizer.forIdentity("https:///example.com/feed"))
+        assertEquals("example.com/feed", UrlNormalizer.forIdentity("http://example.com/feed"))
+        // A single slash on a non-special scheme is path, not authority.
+        val parts = splitLenient("ftp:/example.com/feed")
+        assertNull(parts.host)
+        assertEquals("/example.com/feed", parts.path)
+    }
+
     /**
      * Dot-segment removal must be an indexed linear scan: re-slicing the remaining input once per
      * segment turns `"../" * N` quadratic. A 4× input may cost at most 8× the time (linear ≈ 4×,

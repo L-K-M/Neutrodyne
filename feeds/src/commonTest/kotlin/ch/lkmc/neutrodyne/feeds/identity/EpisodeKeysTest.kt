@@ -288,7 +288,6 @@ class EpisodeKeysTest {
         val primary = EpisodeKeys.primary(item)
         assertTrue(primary.startsWith("t:"))
         val fallbacks = EpisodeKeys.fallbacks(item)
-        assertTrue(fallbacks.none { it == primary })
-        assertTrue(fallbacks.all { it.startsWith("u:") || it.startsWith("t:") })
+        assertTrue(fallbacks.isEmpty())
     }
 }

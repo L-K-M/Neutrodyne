@@ -50,8 +50,20 @@ internal fun splitLenient(raw: String): UrlParts {
     val scheme = schemeMatch?.groupValues?.get(1)?.lowercase()
     val afterScheme = withoutFragment.substring(schemeMatch?.range?.last?.plus(1) ?: 0)
 
-    val hasAuthority = afterScheme.startsWith("//")
-    val rest = if (hasAuthority) afterScheme.substring(2) else afterScheme
+    val specialHttp = scheme == "http" || scheme == "https"
+    // WHATWG ignores every leading `/` or `\` after `scheme:` for a special scheme, so
+    // `http:/x`, `http:\\x` and `http:x` all fetch from host `x` (OkHttp agrees); other
+    // schemes keep RFC 3986's `//`-only authority.
+    val authorityText =
+        if (specialHttp) {
+            afterScheme.dropWhile { it == '/' || it == '\\' }
+        } else if (afterScheme.startsWith("//")) {
+            afterScheme.substring(2)
+        } else {
+            null
+        }
+    val hasAuthority = authorityText != null
+    val rest = authorityText ?: afterScheme
 
     val userInfo: String?
     val host: String?
@@ -62,7 +74,6 @@ internal fun splitLenient(raw: String): UrlParts {
         // For http(s), `\` ends the authority exactly like `/`: WHATWG URL and the fetch client
         // (OkHttp) both treat it as a path separator, so an `@` after it is path text, not
         // userinfo — `https://good.com\@evil.com/` is fetched from good.com.
-        val specialHttp = scheme == "http" || scheme == "https"
         val authorityEnd = rest.indexOfFirst { it == '/' || it == '?' || (specialHttp && it == '\\') }
         val authority = if (authorityEnd < 0) rest else rest.substring(0, authorityEnd)
         pathAndQuery = if (authorityEnd < 0) "" else rest.substring(authorityEnd)

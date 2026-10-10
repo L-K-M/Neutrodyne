@@ -99,4 +99,17 @@ class TimestampLinkifierTest {
         assertEquals(emptyList(), timestamps("10:30\u00A0am"))
         assertEquals(emptyList(), timestamps("20:15  Uhr"))
     }
+
+    @Test
+    fun timeOfDayMarkersRequireWholeWords() {
+        // A word merely starting with a marker is prose, not a suffix.
+        assertEquals(listOf("10:30" to 630_000L), timestamps("10:30 ample"))
+        assertEquals(listOf("10:30" to 630_000L), timestamps("10:30 American"))
+        assertEquals(listOf("10:30" to 630_000L), timestamps("10:30 Uhrwerk"))
+        assertEquals(listOf("2:45" to 165_000L), timestamps("2:45 pmm"))
+        // Whole-word markers still suppress.
+        assertEquals(emptyList(), timestamps("10:30 am"))
+        assertEquals(emptyList(), timestamps("10:30 a.m."))
+        assertEquals(emptyList(), timestamps("20:15 Uhr"))
+    }
 }
