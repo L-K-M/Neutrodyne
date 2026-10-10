@@ -152,10 +152,10 @@ jobs:
         run: |
           ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true assembleDebug assembleDebugAndroidTest :core:database:assembleAndroidDeviceTest
           ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true :app:assembleRelease :app:assembleReleaseAndroidTest
-          # The safeguard only holds if every APK the emulator scripts install exists now —
+          # The safeguard only holds if every APK the emulator scripts install exists now -
           # a task left out above compiles, dexes and packages inside the booted 4-core
           # emulator and starves system_server the same way.
-          for apk in app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk app/build/outputs/apk/androidTest/release/app-release-androidTest.apk core/database/build/outputs/apk/androidTest/database-androidTest.apk; do test -f "$apk" || { echo "::error::$apk missing — it would build inside the emulator"; exit 1; }; done
+          for apk in app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk app/build/outputs/apk/androidTest/release/app-release-androidTest.apk core/database/build/outputs/apk/androidTest/database-androidTest.apk; do test -f "$apk" || { echo "::error::$apk missing - it would build inside the emulator"; exit 1; }; done
           test -n "$(find app/build/outputs/apk/debug -name 'app-*-debug.apk' -print -quit)" || { echo "::error::debug app APKs missing"; exit 1; }
           test -n "$(find app/build/outputs/apk/release -name 'app-*-release.apk' -print -quit)" || { echo "::error::release app APKs missing"; exit 1; }
       - name: Debug suite on the API 37 16 KB image
