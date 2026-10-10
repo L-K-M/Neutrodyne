@@ -1,0 +1,1247 @@
+// SPDX-License-Identifier: Unlicense
+
+package ch.lkmc.neutrodyne.core.database
+
+import androidx.room3.RoomDatabase
+import androidx.room3.useWriterConnection
+import androidx.sqlite.SQLiteConnection
+import androidx.sqlite.SQLiteDriver
+import androidx.sqlite.SQLiteStatement
+import androidx.sqlite.driver.bundled.BundledSQLiteDriver
+import ch.lkmc.neutrodyne.core.common.AppDirs
+import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
+import ch.lkmc.neutrodyne.core.testing.database.episodeStateEntity
+import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import java.io.IOException
+import java.nio.file.AccessDeniedException
+import java.nio.file.Files
+import java.nio.file.Path
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
+import javax.swing.SwingUtilities
+import kotlin.concurrent.thread
+import kotlin.coroutines.cancellation.CancellationException
+import kotlin.io.path.Path
+import kotlin.test.Test
+import kotlin.test.assertContentEquals
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertSame
+import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
+
+/**
+ * `DatabaseOpener` (02 Error handling and recovery): a fresh directory creates; a corrupt file, a
+ * quarantine marker and a newer `user_version` each quarantine and recreate; failures are not
+ * cached so retry succeeds; quarantine keeps only the newest copy inside the 14-day window; and
+ * `onOpen` resets `sync_state.applying`.
+ */
+class DatabaseOpenerTest {
+    private val dir: Path = Files.createTempDirectory("m1a-open")
+    private val dirs = AppDirs(data = dir, config = dir, cache = dir, state = dir, logs = dir, downloadsDefault = dir)
+    private val factory = DesktopDatabaseFactory(dirs)
+
+    private fun opener(
+        clock: TestClock = TestClock(),
+        f: DatabaseFactory = factory,
+        d: SQLiteDriver = BundledSQLiteDriver(),
+        strict: Boolean = false,
+    ) = DatabaseOpener(
+        factory = f,
+        driver = d,
+        io = Dispatchers.Default,
+        clock = clock,
+        strictMigrations = strict,
+    )
+
+    /** A healthy database file on disk, closed. */
+    private suspend fun createHealthyDatabase() {
+        val o = opener()
+        o.awaitOpen()
+        o.requireDatabase().close()
+    }
+
+    @Test
+    fun freshDirectoryCreatesAndReportsOpened() =
+        runTest {
+            dirs.ensureCreated()
+            val o = opener()
+            val result = o.awaitOpen()
+            assertEquals(OpenResult(created = true, recovered = null), result)
+            assertEquals(DatabaseOpenState.Opened(result), o.openState.value)
+            assertNotNull(o.requireDatabase().playSessionDao().get())
+            o.requireDatabase().close()
+        }
+
+    @Test
+    fun corruptFileIsQuarantinedAndAFreshDatabaseCreated() =
+        runTest {
+            dirs.ensureCreated()
+            Files.write(dir.resolve(NeutrodyneDatabase.FILE_NAME), "garbage-not-sqlite".encodeToByteArray())
+
+            val o = opener()
+            val result = o.awaitOpen()
+
+            assertEquals(RecoveryCause.CORRUPT, result.recovered)
+            assertTrue(result.created)
+
+            // The file moved to quarantine, was never deleted, and the new database works.
+            val quarantine = dir.resolve("quarantine")
+            val copies = Files.list(quarantine).use { it.toList() }
+            assertEquals(1, copies.size)
+            assertTrue(Files.exists(copies.single().resolve(NeutrodyneDatabase.FILE_NAME)))
+            assertNotNull(o.requireDatabase().playSessionDao().get())
+            o.requireDatabase().close()
+        }
+
+    @Test
+    fun quarantineMarkerRecoversEvenAHealthyFileAndClears() =
+        runTest {
+            dirs.ensureCreated()
+            val first = opener()
+            first.awaitOpen()
+            first.requireDatabase().close()
+
+            factory.quarantineMarker = true
+            val second = opener()
+            val result = second.awaitOpen()
+
+            assertEquals(RecoveryCause.CORRUPT, result.recovered)
+            assertTrue(result.created)
+            assertFalse(factory.quarantineMarker, "marker must be cleared after recovery")
+
+            // A third launch sees a plain open — recovery is reported once.
+            second.requireDatabase().close()
+            val third = opener()
+            assertEquals(OpenResult(created = false, recovered = null), third.awaitOpen())
+            third.requireDatabase().close()
+        }
+
+    @Test
+    fun userVersionNewerThanOursIsADowngradeQuarantine() =
+        runTest {
+            dirs.ensureCreated()
+            val first = opener()
+            first.awaitOpen()
+            first.requireDatabase().close()
+
+            BundledSQLiteDriver().open(factory.databasePath).use { conn ->
+                conn.exec("PRAGMA user_version = ${NeutrodyneDatabase.VERSION + 1}")
+            }
+
+            val second = opener()
+            val result = second.awaitOpen()
+            assertEquals(RecoveryCause.DOWNGRADE, result.recovered)
+            assertTrue(result.created)
+            second.requireDatabase().close()
+        }
+
+    @Test
+    fun quarantineKeepsOnlyTheNewestCopyInsideTheWindow() =
+        runTest {
+            dirs.ensureCreated()
+            // First recovery at t0: a corrupt file forces a real first quarantine copy, so the
+            // 14-day pruning below actually runs against two copies instead of one.
+            Files.write(dir.resolve(NeutrodyneDatabase.FILE_NAME), "broken".encodeToByteArray())
+            val first = opener(clock = TestClock(nowMs = T0))
+            first.awaitOpen()
+            first.requireDatabase().close()
+
+            // Break the database and recover again 15 days later.
+            Files.write(dir.resolve(NeutrodyneDatabase.FILE_NAME), "broken".encodeToByteArray())
+            val second = opener(clock = TestClock(nowMs = T0 + 15L * 24 * 60 * 60 * 1000))
+            second.awaitOpen()
+            second.requireDatabase().close()
+
+            // The t0 quarantine is outside the 14-day window; only the second copy remains.
+            val copies = Files.list(dir.resolve("quarantine")).use { it.toList() }
+            assertEquals(1, copies.size)
+            assertEquals(
+                T0 + 15L * 24 * 60 * 60 * 1000,
+                copies
+                    .single()
+                    .fileName
+                    .toString()
+                    .toLong(),
+            )
+        }
+
+    @Test
+    fun failuresAreNotCachedAndRetrySucceeds() =
+        runTest {
+            dirs.ensureCreated()
+            var fail: Throwable? = IllegalStateException("open refused")
+            val flaky =
+                object : DatabaseFactory by factory {
+                    override fun builder(): RoomDatabase.Builder<NeutrodyneDatabase> {
+                        fail?.let { throw it }
+                        return factory.builder()
+                    }
+                }
+            val o = opener(f = flaky)
+
+            val error = assertThrows { o.awaitOpen() }
+            assertIs<DatabaseOpenException>(error)
+            assertEquals(DatabaseOpenException.Reason.UNKNOWN, error.reason)
+            assertIs<DatabaseOpenState.Failed>(o.openState.value)
+            assertEquals(error, (o.openState.value as DatabaseOpenState.Failed).exception)
+
+            fail = null
+            val result = o.awaitOpen()
+            assertTrue(result.created)
+            assertEquals(DatabaseOpenState.Opened(result), o.openState.value)
+            o.requireDatabase().close()
+        }
+
+    @Test
+    fun diskFullSurfacesWithoutTouchingTheFile() =
+        runTest {
+            dirs.ensureCreated()
+            val first = opener()
+            first.awaitOpen()
+            first.requireDatabase().close()
+            val sizeBefore = Files.size(dir.resolve(NeutrodyneDatabase.FILE_NAME))
+            assertTrue(sizeBefore > 0)
+
+            val full =
+                object : DatabaseFactory by factory {
+                    override fun builder(): RoomDatabase.Builder<NeutrodyneDatabase> =
+                        throw IllegalStateException("SQLiteFullException: database or disk is full")
+                }
+            val o = opener(f = full)
+            val error = assertThrows { o.awaitOpen() }
+            assertIs<DatabaseOpenException>(error)
+            assertEquals(DatabaseOpenException.Reason.DISK_FULL, error.reason)
+
+            // The file was not quarantined, truncated or deleted (02: nothing is deleted).
+            assertEquals(sizeBefore, Files.size(dir.resolve(NeutrodyneDatabase.FILE_NAME)))
+            assertFalse(Files.exists(dir.resolve("quarantine")))
+        }
+
+    @Test
+    fun onOpenResetsSyncStateApplying() =
+        runTest {
+            dirs.ensureCreated()
+            val first = opener()
+            first.awaitOpen()
+            first.requireDatabase().useWriterConnection { conn ->
+                conn.exec("UPDATE sync_state SET applying = 1 WHERE id = 0")
+            }
+            first.requireDatabase().close()
+
+            val second = opener()
+            second.awaitOpen()
+            val state = assertNotNull(second.requireDatabase().syncStateDao().get())
+            assertFalse(state.applying, "onOpen must reset sync_state.applying on every open")
+            second.requireDatabase().close()
+        }
+
+    @Test
+    fun cancellingTheOpenNeitherFailsNorQuarantines() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+
+            var calls = 0
+            val insideForceOpen = CompletableDeferred<Unit>()
+            val releaseForceOpen = CompletableDeferred<Unit>()
+            val gated =
+                object : SQLiteDriver by BundledSQLiteDriver() {
+                    private val inner = BundledSQLiteDriver()
+
+                    override fun open(fileName: String): SQLiteConnection {
+                        calls++
+                        if (calls == 2) {
+                            // Room's own open (inside forceOpen) — the point where the
+                            // coroutine is cancelled below.
+                            insideForceOpen.complete(Unit)
+                            runBlocking { releaseForceOpen.await() }
+                        }
+                        return inner.open(fileName)
+                    }
+                }
+            val o = opener(d = gated)
+            val attempt = async { o.awaitOpen() }
+            insideForceOpen.await()
+            attempt.cancel()
+            releaseForceOpen.complete(Unit)
+            val thrown = runCatching { attempt.await() }.exceptionOrNull()
+
+            assertIs<CancellationException>(thrown)
+            assertEquals(DatabaseOpenState.Pending, o.openState.value)
+            assertFalse(
+                Files.exists(dir.resolve("quarantine")),
+                "a cancelled open must not quarantine the healthy database",
+            )
+
+            // Recovery is not wedged: the retry opens the healthy file normally.
+            val result = o.awaitOpen()
+            assertEquals(OpenResult(created = false, recovered = null), result)
+            o.requireDatabase().close()
+        }
+
+    @Test
+    fun sqliteNumericResultCodesDriveClassification() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+            val dbFile = dir.resolve(NeutrodyneDatabase.FILE_NAME)
+
+            // The bundled driver writes "Error code: N, message: …"; the framework driver adds
+            // "(code N SQLITE_…)". An extended code reduces to its primary code via the low byte.
+            val cases =
+                listOf(
+                    "Error code: 10, message: disk I/O error" to DatabaseOpenException.Reason.IO,
+                    "disk I/O error (code 4618 SQLITE_IOERR_SHMOPEN)" to DatabaseOpenException.Reason.IO,
+                    "unable to open database file (code 14)" to DatabaseOpenException.Reason.IO,
+                    "Error code: 13, message: database or disk is full" to
+                        DatabaseOpenException.Reason.DISK_FULL,
+                    "database or disk is full (code 3341)" to DatabaseOpenException.Reason.DISK_FULL,
+                )
+            for ((message, reason) in cases) {
+                val throwing =
+                    object : DatabaseFactory by factory {
+                        override fun builder(): RoomDatabase.Builder<NeutrodyneDatabase> =
+                            throw IllegalStateException(message)
+                    }
+                val error = assertThrows { opener(f = throwing).awaitOpen() }
+                assertIs<DatabaseOpenException>(error)
+                assertEquals(reason, error.reason, message)
+                assertFalse(
+                    Files.exists(dir.resolve("quarantine")),
+                    "$message is an IO/full failure and must never quarantine",
+                )
+            }
+            assertTrue(Files.exists(dbFile), "the database file is untouched")
+        }
+
+    @Test
+    fun extendedCorruptionCodesStillQuarantine() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+
+            // An extended corruption code (3851 = 0xF0B, primary 11) with no text marker —
+            // only the numeric parse can classify it. The first open fails; the post-quarantine
+            // fresh build succeeds.
+            val corrupt =
+                object : DatabaseFactory by factory {
+                    var failed = false
+
+                    override fun builder(): RoomDatabase.Builder<NeutrodyneDatabase> {
+                        if (!failed) {
+                            failed = true
+                            throw IllegalStateException("write failed (code 3851)")
+                        }
+                        return factory.builder()
+                    }
+                }
+            val o = opener(f = corrupt)
+            val result = o.awaitOpen()
+            assertEquals(RecoveryCause.CORRUPT, result.recovered)
+            assertTrue(result.created)
+            o.requireDatabase().close()
+        }
+
+    @Test
+    fun failedQuarantinePropagatesAndKeepsTheRecoveryMarker() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+            factory.quarantineMarker = true
+
+            val stuck =
+                object : DatabaseFactory by factory {
+                    var fail = true
+
+                    override fun quarantine(stamp: String) {
+                        if (fail) throw IOException("quarantine destination unavailable")
+                        factory.quarantine(stamp)
+                    }
+                }
+            val o = opener(f = stuck)
+            val error = assertThrows { o.awaitOpen() }
+            assertIs<DatabaseOpenException>(error)
+            assertEquals(DatabaseOpenException.Reason.IO, error.reason)
+            assertTrue(factory.quarantineMarker, "the recovery request must survive a failed move")
+
+            // Nothing reopened or pruned over the debris: the retry completes the move.
+            stuck.fail = false
+            val result = o.awaitOpen()
+            assertEquals(RecoveryCause.CORRUPT, result.recovered)
+            assertFalse(factory.quarantineMarker)
+            o.requireDatabase().close()
+        }
+
+    @Test
+    fun aPartialQuarantineBlocksTheOpenAndCompletesOnRetry() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+            val dbFile = dir.resolve(NeutrodyneDatabase.FILE_NAME)
+            val walFile = dir.resolve("${NeutrodyneDatabase.FILE_NAME}-wal")
+            Files.write(walFile, "stale".encodeToByteArray())
+            factory.quarantineMarker = true
+
+            val partial =
+                object : DatabaseFactory by factory {
+                    var fail = true
+
+                    override fun quarantine(stamp: String) {
+                        if (!fail) {
+                            factory.quarantine(stamp)
+                            return
+                        }
+                        // The -wal sidecar lands, then the main move fails mid-sequence.
+                        val dest = dir.resolve("quarantine").resolve(stamp)
+                        Files.createDirectories(dest)
+                        Files.move(walFile, dest.resolve(walFile.fileName.toString()))
+                        throw IOException("main database move failed")
+                    }
+                }
+            val o = opener(f = partial)
+            val error = assertThrows { o.awaitOpen() }
+            assertIs<DatabaseOpenException>(error)
+            assertTrue(Files.exists(dbFile), "the database stays put after a partial move")
+            assertTrue(factory.quarantineMarker)
+
+            partial.fail = false
+            val result = o.awaitOpen()
+            assertEquals(RecoveryCause.CORRUPT, result.recovered)
+            // The retried move landed in the same stamp directory as the earlier sidecar.
+            val copies = Files.list(dir.resolve("quarantine")).use { it.toList() }
+            assertEquals(1, copies.size)
+            assertTrue(Files.exists(copies.single().resolve(NeutrodyneDatabase.FILE_NAME)))
+            assertTrue(Files.exists(copies.single().resolve("${NeutrodyneDatabase.FILE_NAME}-wal")))
+            o.requireDatabase().close()
+        }
+
+    @Test
+    fun storageAndOpenFailuresNeverQuarantine() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+            val dbFile = dir.resolve(NeutrodyneDatabase.FILE_NAME)
+            val sizeBefore = Files.size(dbFile)
+
+            // A read-only file passes SQLite's read-only open fallback and preflight, then fails
+            // Room's first write with SQLITE_READONLY (8); a database held by a live process
+            // reports SQLITE_BUSY (5) — the file is healthy, so neither may quarantine it.
+            val cases =
+                listOf(
+                    "Error code: 8, message: attempt to write a readonly database",
+                    "attempt to write a readonly database (code 8 SQLITE_READONLY)",
+                    "database is locked (code 5 SQLITE_BUSY)",
+                    "unable to open database file (code 3 SQLITE_PERM)",
+                )
+            for (message in cases) {
+                val throwing =
+                    object : DatabaseFactory by factory {
+                        override fun builder(): RoomDatabase.Builder<NeutrodyneDatabase> =
+                            throw IllegalStateException(message)
+                    }
+                val error = assertThrows { opener(f = throwing).awaitOpen() }
+                assertIs<DatabaseOpenException>(error)
+                assertEquals(DatabaseOpenException.Reason.IO, error.reason, message)
+                assertFalse(
+                    Files.exists(dir.resolve("quarantine")),
+                    "$message is a storage/open failure and must never quarantine",
+                )
+            }
+            assertEquals(sizeBefore, Files.size(dbFile), "the database file is untouched")
+        }
+
+    @Test
+    fun anUnknownFailureDuringTheOpenNeverQuarantinesTheHealthyFile() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+            val dbFile = dir.resolve(NeutrodyneDatabase.FILE_NAME)
+            val sizeBefore = Files.size(dbFile)
+
+            // A plain runtime error inside the open path — a callback bug, Room internals —
+            // is neither corruption nor a migration failure: the file may be healthy, so 02's
+            // "migration or corruption error" is the only quarantine license.
+            var fail = true
+            val flaky =
+                object : DatabaseFactory by factory {
+                    override fun builder(): RoomDatabase.Builder<NeutrodyneDatabase> {
+                        if (fail) throw RuntimeException("callback exploded")
+                        return factory.builder()
+                    }
+                }
+            val o = opener(f = flaky)
+            val error = assertThrows { o.awaitOpen() }
+
+            assertIs<DatabaseOpenException>(error)
+            assertEquals(DatabaseOpenException.Reason.UNKNOWN, error.reason)
+            assertFalse(
+                Files.exists(dir.resolve("quarantine")),
+                "an unknown open failure must never quarantine a healthy file",
+            )
+            assertEquals(sizeBefore, Files.size(dbFile))
+
+            // Recovery is not wedged: the retry opens the same untouched file.
+            fail = false
+            assertEquals(OpenResult(created = false, recovered = null), o.awaitOpen())
+            o.requireDatabase().close()
+        }
+
+    @Test
+    fun aRoomMigrationFailureStillQuarantines() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+
+            // Room reports a missing migration path or failed schema validation as a plain
+            // IllegalStateException (S2: no result-code API) — 02 quarantines it in release.
+            val messages =
+                listOf(
+                    "A migration from 1 to 3 was required but not found. " +
+                        "Please provide the necessary Migration path",
+                    "Migration didn't properly handle: podcast (expected…, found…)",
+                    "Pre-packaged database has an invalid schema: podcast",
+                    "Room cannot verify the data integrity. Looks like you've changed schema " +
+                        "but forgot to update the version number.",
+                )
+            for (message in messages) {
+                dir.resolve("quarantine").toFile().deleteRecursively()
+                var firstBuild = true
+                val throwing =
+                    object : DatabaseFactory by factory {
+                        override fun builder(): RoomDatabase.Builder<NeutrodyneDatabase> {
+                            if (firstBuild) {
+                                firstBuild = false
+                                throw IllegalStateException(message)
+                            }
+                            return factory.builder()
+                        }
+                    }
+                val o = opener(f = throwing)
+                val result = o.awaitOpen()
+
+                assertEquals(RecoveryCause.MIGRATION_FAILED, result.recovered, message)
+                assertTrue(
+                    Files.exists(dir.resolve("quarantine")),
+                    "$message is a migration failure and must quarantine",
+                )
+                o.requireDatabase().close()
+            }
+        }
+
+    @Test
+    fun aCyclicCauseChainNeverWedgesTheOpen() =
+        runBlocking {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+
+            // Two exceptions can form a cause cycle (a.initCause(b); b.initCause(a)); the
+            // classifier's chain walk must stay bounded or the opener mutex is held forever.
+            val a = RuntimeException("cycle a")
+            val b = RuntimeException("cycle b")
+            a.initCause(b)
+            b.initCause(a)
+            val throwing =
+                object : DatabaseFactory by factory {
+                    override fun builder(): RoomDatabase.Builder<NeutrodyneDatabase> = throw a
+                }
+            val error =
+                withTimeoutOrNull(10.seconds) {
+                    runCatching { opener(f = throwing).awaitOpen() }
+                }
+
+            assertNotNull(error, "a cyclic cause chain must not hang the opener")
+            val thrown = error.exceptionOrNull()
+            assertIs<DatabaseOpenException>(thrown)
+            assertEquals(DatabaseOpenException.Reason.UNKNOWN, thrown.reason)
+            assertFalse(Files.exists(dir.resolve("quarantine")))
+        }
+
+    @Test
+    fun aCallbackFailureMentioningRoomSchemaTextNeverQuarantines() =
+        runTest {
+            dirs.ensureCreated()
+
+            // A populated library through a real healthy open.
+            val seed = opener()
+            seed.awaitOpen()
+            val seeded = seed.requireDatabase()
+            val podcastId =
+                seeded.podcastDao().insertPodcast(podcastEntity(title = "Preserved podcast"))
+            val episodeId =
+                seeded.episodeDao().insertStub(
+                    episodeEntity(podcastId = podcastId, title = "Preserved episode"),
+                )
+            seeded
+                .episodeStateDao()
+                .upsert(
+                    episodeStateEntity(episodeId) {
+                        copy(playedAt = 1_700_000_500_000L, isFavorite = true)
+                    },
+                )
+            seeded.close()
+            val dbFile = dir.resolve(NeutrodyneDatabase.FILE_NAME)
+            val healthyBytes = Files.readAllBytes(dbFile)
+
+            // A real Room onOpen callback throwing a look-alike message — Room hands the
+            // callback's own throwable to the open failure, so only pinned Room
+            // IllegalStateException message families may authorize quarantine.
+            var fail = true
+            val failure = RuntimeException("invalid schema for callback configuration")
+            val throwing =
+                object : DatabaseFactory by factory {
+                    override fun builder(): RoomDatabase.Builder<NeutrodyneDatabase> =
+                        factory.builder().addCallback(
+                            object : RoomDatabase.Callback() {
+                                override suspend fun onOpen(connection: SQLiteConnection) {
+                                    if (fail) throw failure
+                                }
+                            },
+                        )
+                }
+            val o = opener(f = throwing)
+            repeat(2) { attempt ->
+                val error = assertThrows { o.awaitOpen() }
+                assertIs<DatabaseOpenException>(error)
+                assertEquals(DatabaseOpenException.Reason.UNKNOWN, error.reason)
+                assertIs<RuntimeException>(error.cause)
+                assertEquals("invalid schema for callback configuration", error.cause?.message)
+                assertSame(
+                    error,
+                    assertIs<DatabaseOpenState.Failed>(o.openState.value).exception,
+                )
+                assertFalse(
+                    Files.exists(dir.resolve("quarantine")),
+                    "attempt ${attempt + 1}: a callback failure must never quarantine the library",
+                )
+                assertContentEquals(
+                    healthyBytes,
+                    Files.readAllBytes(dbFile),
+                    "attempt ${attempt + 1}: the healthy library must not move or change",
+                )
+            }
+
+            fail = false
+            assertEquals(OpenResult(created = false, recovered = null), o.awaitOpen())
+            val db = o.requireDatabase()
+            assertEquals(podcastId, db.episodeDao().byId(episodeId)?.podcastId)
+            val state = db.episodeStateDao().byEpisode(episodeId)
+            assertEquals(1_700_000_500_000L, state?.playedAt)
+            assertEquals(true, state?.isFavorite)
+            db.close()
+        }
+
+    @Test
+    fun aDeeplyWrappedNativeNotADatabaseErrorStillRecoversAsCorruption() =
+        runTest {
+            // A real bundled NOTADB under driver wrappers must still classify as corruption at
+            // any depth — truncating the cause chain hides the root and turns recovery into
+            // UNKNOWN.
+            for (wrappers in listOf(15, 16, 19)) {
+                for (strict in listOf(false, true)) {
+                    val caseDir = dir.resolve("notadb-w$wrappers-strict-$strict")
+                    val caseDirs =
+                        AppDirs(
+                            data = caseDir,
+                            config = caseDir,
+                            cache = caseDir,
+                            state = caseDir,
+                            logs = caseDir,
+                            downloadsDefault = caseDir,
+                        )
+                    caseDirs.ensureCreated()
+                    val file = caseDir.resolve(NeutrodyneDatabase.FILE_NAME)
+                    Files.write(file, "actual-bundled-not-a-database".encodeToByteArray())
+                    val corruptBytes = Files.readAllBytes(file)
+
+                    val liveHandles = CopyOnWriteArrayList<AtomicBoolean>()
+                    val nativeCauses = CopyOnWriteArrayList<String>()
+
+                    fun wrap(t: Throwable): Throwable {
+                        nativeCauses += "${t.javaClass.name}:${t.message}"
+                        var wrapped = t
+                        repeat(wrappers) { wrapped = RuntimeException("driver wrapper $it", wrapped) }
+                        return wrapped
+                    }
+                    val wrapping =
+                        object : SQLiteDriver {
+                            private val delegate = BundledSQLiteDriver()
+
+                            override val hasConnectionPool get() = delegate.hasConnectionPool
+
+                            override fun open(fileName: String): SQLiteConnection {
+                                val connection =
+                                    try {
+                                        delegate.open(fileName)
+                                    } catch (t: Throwable) {
+                                        throw wrap(t)
+                                    }
+                                val closed = AtomicBoolean(false)
+                                liveHandles += closed
+                                return object : SQLiteConnection by connection {
+                                    override fun prepare(sql: String): SQLiteStatement {
+                                        val statement =
+                                            try {
+                                                connection.prepare(sql)
+                                            } catch (t: Throwable) {
+                                                throw wrap(t)
+                                            }
+                                        return object : SQLiteStatement by statement {
+                                            override fun step(): Boolean =
+                                                try {
+                                                    statement.step()
+                                                } catch (t: Throwable) {
+                                                    throw wrap(t)
+                                                }
+                                        }
+                                    }
+
+                                    override fun close() {
+                                        if (closed.compareAndSet(false, true)) connection.close()
+                                    }
+                                }
+                            }
+                        }
+                    val o =
+                        DatabaseOpener(
+                            factory = DesktopDatabaseFactory(caseDirs),
+                            driver = wrapping,
+                            io = Dispatchers.Default,
+                            clock = TestClock(),
+                            strictMigrations = strict,
+                        )
+                    val result = o.awaitOpen()
+
+                    assertEquals(
+                        RecoveryCause.CORRUPT,
+                        result.recovered,
+                        "entries ${wrappers + 1} strict=$strict: depth must not hide NOTADB",
+                    )
+                    assertTrue(result.created)
+                    val copies = Files.list(caseDir.resolve("quarantine")).use { it.toList() }
+                    assertEquals(1, copies.size)
+                    assertContentEquals(
+                        corruptBytes,
+                        Files.readAllBytes(copies.single().resolve(NeutrodyneDatabase.FILE_NAME)),
+                    )
+                    assertTrue(
+                        nativeCauses.any { "Error code: 26" in it },
+                        "the root cause must be a real bundled NOTADB exception",
+                    )
+                    o.requireDatabase().close()
+                    assertEquals(0, liveHandles.count { !it.get() }, "no native handle leaks")
+                }
+            }
+        }
+
+    @Test
+    fun aDeeplyWrappedIoErrorIsClassifiedLikeAShallowOne() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+            val dbFile = dir.resolve(NeutrodyneDatabase.FILE_NAME)
+            val sizeBefore = Files.size(dbFile)
+
+            var fail = true
+            val deep =
+                object : DatabaseFactory by factory {
+                    override fun builder(): RoomDatabase.Builder<NeutrodyneDatabase> {
+                        if (fail) {
+                            var root: Throwable = IOException("read failed")
+                            repeat(19) { root = RuntimeException("driver wrapper $it", root) }
+                            throw root
+                        }
+                        return factory.builder()
+                    }
+                }
+            val o = opener(f = deep)
+            val error = assertThrows { o.awaitOpen() }
+
+            assertIs<DatabaseOpenException>(error)
+            assertEquals(
+                DatabaseOpenException.Reason.IO,
+                error.reason,
+                "the IOException root must still classify at depth",
+            )
+            assertFalse(Files.exists(dir.resolve("quarantine")))
+            assertEquals(sizeBefore, Files.size(dbFile))
+
+            fail = false
+            assertEquals(OpenResult(created = false, recovered = null), o.awaitOpen())
+            o.requireDatabase().close()
+        }
+
+    @Test
+    fun aFailedMarkerRemovalPropagatesBeforeCreatingTheReplacement() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+            factory.quarantineMarker = true
+
+            var deleteFails = true
+            val stickyMarker =
+                object : DatabaseFactory by factory {
+                    override var quarantineMarker: Boolean
+                        get() = factory.quarantineMarker
+                        set(value) {
+                            // A locked marker file (Windows fails deletes other processes hold).
+                            if (!value && deleteFails) throw IOException("marker is locked")
+                            factory.quarantineMarker = value
+                        }
+                }
+            val o = opener(f = stickyMarker)
+            val error = assertThrows { o.awaitOpen() }
+            assertIs<DatabaseOpenException>(error)
+
+            // The failure propagated before the fresh build: no healthy replacement exists for
+            // the still-set marker to quarantine on the next launch, and the pending stamp still
+            // names the directory the files already moved into.
+            assertTrue(factory.quarantineMarker, "the failed removal left the request in place")
+            assertFalse(factory.exists(), "no replacement may be created while the marker persists")
+            assertNotNull(factory.pendingQuarantine)
+
+            deleteFails = false
+            val result = o.awaitOpen()
+            assertEquals(RecoveryCause.CORRUPT, result.recovered)
+            assertFalse(factory.quarantineMarker)
+            assertNull(factory.pendingQuarantine)
+            o.requireDatabase().close()
+        }
+
+    @Test
+    fun aPartialQuarantineResumesIntoTheSameDirectoryAfterARestart() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+            val walFile = dir.resolve("${NeutrodyneDatabase.FILE_NAME}-wal")
+            Files.write(walFile, "stale".encodeToByteArray())
+            factory.quarantineMarker = true
+
+            // The first process dies mid-move: the wal sidecar lands, then the move fails.
+            val dying =
+                object : DatabaseFactory by factory {
+                    override fun quarantine(stamp: String) {
+                        val dest = dir.resolve("quarantine").resolve(stamp)
+                        Files.createDirectories(dest)
+                        Files.move(walFile, dest.resolve(walFile.fileName.toString()))
+                        throw IOException("process died mid-move")
+                    }
+                }
+            val first = opener(f = dying, clock = TestClock(nowMs = T0))
+            assertThrows { first.awaitOpen() }
+            assertEquals(T0.toString(), factory.pendingQuarantine, "the stamp is persisted before the first move")
+
+            // The relaunch has no in-memory stamp and a different wall clock: the persisted
+            // pending stamp must route the remaining moves into the same directory.
+            val second = opener(clock = TestClock(nowMs = T0 + 60_000))
+            val result = second.awaitOpen()
+            assertEquals(RecoveryCause.CORRUPT, result.recovered)
+            assertNull(factory.pendingQuarantine)
+
+            val copies = Files.list(dir.resolve("quarantine")).use { it.toList() }
+            assertEquals(1, copies.size, "the resumed quarantine must reuse the first stamp")
+            assertEquals(T0.toString(), copies.single().fileName.toString())
+            assertTrue(Files.exists(copies.single().resolve(NeutrodyneDatabase.FILE_NAME)))
+            assertTrue(
+                Files.exists(copies.single().resolve("${NeutrodyneDatabase.FILE_NAME}-wal")),
+                "the moved wal must not be orphaned or pruned",
+            )
+            second.requireDatabase().close()
+        }
+
+    @Test
+    fun aResumedQuarantineNeverRewritesItsPersistedStamp() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+            factory.quarantineMarker = true
+            factory.pendingQuarantine = T0.toString()
+
+            // Rewriting truncates the record first: a kill in between would leave it empty and
+            // send the next launch to a fresh stamp, orphaning what the first attempt moved.
+            val stampWrites = mutableListOf<String?>()
+            val recording =
+                object : DatabaseFactory by factory {
+                    override var pendingQuarantine: String?
+                        get() = factory.pendingQuarantine
+                        set(value) {
+                            stampWrites += value
+                            factory.pendingQuarantine = value
+                        }
+                }
+            val subject = opener(f = recording, clock = TestClock(nowMs = T0 + 60_000))
+            val result = subject.awaitOpen()
+
+            assertEquals(RecoveryCause.CORRUPT, result.recovered)
+            assertEquals(listOf<String?>(null), stampWrites, "only the final clear may write the record")
+            subject.requireDatabase().close()
+        }
+
+    @Test
+    fun aPendingQuarantineWithoutAMarkerStillResumes() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+            val walFile = dir.resolve("${NeutrodyneDatabase.FILE_NAME}-wal")
+            Files.write(walFile, "stale".encodeToByteArray())
+
+            // A non-marker quarantine (a preflight-detected corruption, a migration failure)
+            // died mid-move: the pending stamp survives without a recovery marker.
+            val stamp = T0.toString()
+            val dest = dir.resolve("quarantine").resolve(stamp)
+            Files.createDirectories(dest)
+            Files.move(walFile, dest.resolve(walFile.fileName.toString()))
+            factory.pendingQuarantine = stamp
+            assertFalse(factory.quarantineMarker)
+
+            val o = opener(clock = TestClock(nowMs = T0 + 60_000))
+            val result = o.awaitOpen()
+            assertEquals(RecoveryCause.CORRUPT, result.recovered)
+            assertNull(factory.pendingQuarantine)
+
+            val copies = Files.list(dir.resolve("quarantine")).use { it.toList() }
+            assertEquals(listOf(stamp), copies.map { it.fileName.toString() })
+            assertTrue(Files.exists(dest.resolve(NeutrodyneDatabase.FILE_NAME)))
+            assertTrue(Files.exists(dest.resolve("${NeutrodyneDatabase.FILE_NAME}-wal")))
+            o.requireDatabase().close()
+        }
+
+    @Test
+    fun pruneQuarantineKeepsAPendingDestination() =
+        runTest {
+            dirs.ensureCreated()
+            val old = dir.resolve("quarantine").resolve(T0.toString())
+            val pendingDir = dir.resolve("quarantine").resolve((T0 + 60_000).toString())
+            Files.createDirectories(old)
+            Files.createDirectories(pendingDir)
+            factory.pendingQuarantine = (T0 + 60_000).toString()
+
+            // Both stamps are far outside the 14-day window: only the pending one survives.
+            factory.pruneQuarantine(T0 + 30L * 24 * 60 * 60 * 1000)
+            assertFalse(Files.exists(old))
+            assertTrue(Files.exists(pendingDir))
+            factory.pendingQuarantine = null
+        }
+
+    @Test
+    fun requireDatabaseReportsAFailureInsteadOfHanging() =
+        runTest {
+            dirs.ensureCreated()
+            var broken = true
+            val flaky =
+                object : DatabaseFactory by factory {
+                    override fun builder(): RoomDatabase.Builder<NeutrodyneDatabase> {
+                        check(!broken) { "still broken" }
+                        return factory.builder()
+                    }
+                }
+            val o = opener(f = flaky)
+            val error = assertThrows { o.awaitOpen() }
+            assertIs<DatabaseOpenException>(error)
+            assertIs<DatabaseOpenState.Failed>(o.openState.value)
+
+            // The Metro provider calls this on a background thread: it must report the recorded
+            // failure immediately, not wait for a retry that nobody started.
+            val outcome = CompletableDeferred<Result<NeutrodyneDatabase>>()
+            thread(isDaemon = true) {
+                outcome.complete(runCatching { o.requireDatabase() })
+            }
+            // Real time: under runTest a bare withTimeoutOrNull runs on virtual time and expires at
+            // once while the answer is still on its way from the other thread.
+            val delivered = withContext(Dispatchers.Default) { withTimeoutOrNull(5.seconds) { outcome.await() } }
+            assertNotNull(delivered, "requireDatabase must not hang after a failed open")
+            assertIs<DatabaseOpenException>(delivered.exceptionOrNull())
+
+            // A retry then succeeds and hands out the database.
+            broken = false
+            assertTrue(o.awaitOpen().created)
+            o.requireDatabase().close()
+        }
+
+    @Test
+    fun requireDatabaseOnTheUiThreadReturnsAnOpenedDatabase() =
+        runTest {
+            dirs.ensureCreated()
+            val o = opener()
+            o.awaitOpen()
+
+            // The Swing EDT is the desktop's UI thread: the guard only protects against
+            // blocking on an unopened database, so an opened one is still returned (R6).
+            val delivered = CompletableDeferred<Result<NeutrodyneDatabase>>()
+            SwingUtilities.invokeLater {
+                delivered.complete(runCatching { o.requireDatabase() })
+            }
+            val db = delivered.await().getOrThrow()
+            assertSame(o.requireDatabase(), db)
+            db.close()
+        }
+
+    @Test
+    fun requireDatabaseOnTheUiThreadStillThrowsWhileUnopened() =
+        runTest {
+            val o = opener()
+            val delivered = CompletableDeferred<Throwable?>()
+            SwingUtilities.invokeLater {
+                delivered.complete(runCatching { o.requireDatabase() }.exceptionOrNull())
+            }
+            assertIs<IllegalStateException>(delivered.await())
+        }
+
+    @Test
+    fun recoveryCauseSurvivesAFailedFreshOpen() =
+        runTest {
+            dirs.ensureCreated()
+            factory.quarantineMarker = true
+            var failBuild = true
+            val flaky =
+                object : DatabaseFactory by factory {
+                    override fun builder(): RoomDatabase.Builder<NeutrodyneDatabase> {
+                        if (failBuild) {
+                            throw IllegalStateException("Error code: 10, message: disk I/O error")
+                        }
+                        return factory.builder()
+                    }
+                }
+            val o = opener(f = flaky)
+            val first = assertThrows { o.awaitOpen() }
+            assertIs<DatabaseOpenException>(first)
+            assertEquals(DatabaseOpenException.Reason.IO, first.reason)
+
+            failBuild = false
+            val result = o.awaitOpen()
+            assertTrue(result.created)
+            assertEquals(
+                RecoveryCause.CORRUPT,
+                result.recovered,
+                "the recovery cause must survive the failed attempt (R8)",
+            )
+            o.requireDatabase().close()
+        }
+
+    @Test
+    fun aRetryPublishesPendingWhileItRuns() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+
+            val gated = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val driver =
+                object : SQLiteDriver by BundledSQLiteDriver() {
+                    private val inner = BundledSQLiteDriver()
+                    var throwError = true
+                    var gateNext = false
+
+                    override fun open(fileName: String): SQLiteConnection {
+                        if (throwError) throw RuntimeException("kaboom")
+                        if (gateNext) {
+                            gateNext = false
+                            gated.complete(Unit)
+                            runBlocking { release.await() }
+                        }
+                        return inner.open(fileName)
+                    }
+                }
+            val o = opener(d = driver)
+
+            val first = assertThrows { o.awaitOpen() }
+            assertIs<DatabaseOpenException>(first)
+            assertIs<DatabaseOpenState.Failed>(o.openState.value)
+
+            // The retry must republish Pending while it is still running (R9): gate the
+            // preflight open and observe the state before releasing it.
+            driver.throwError = false
+            driver.gateNext = true
+            val retry = async { o.awaitOpen() }
+            gated.await()
+            try {
+                assertEquals(DatabaseOpenState.Pending, o.openState.value)
+            } finally {
+                // Always release — a failing assertion must not strand the blocked driver call.
+                release.complete(Unit)
+            }
+
+            val result = retry.await()
+            assertEquals(OpenResult(created = false, recovered = null), result)
+            assertEquals(DatabaseOpenState.Opened(result), o.openState.value)
+            o.requireDatabase().close()
+        }
+
+    @Test
+    fun aMaintenanceFailureIsAnIoErrorAndNeverQuarantinesTheReplacement() =
+        runTest {
+            dirs.ensureCreated()
+            // A seeded library makes preservation observable: applying=1 survives only in the
+            // original file (onOpen resets it in every database it opens itself).
+            val original = opener()
+            original.awaitOpen()
+            original.requireDatabase().useWriterConnection { conn ->
+                conn.exec("UPDATE sync_state SET applying = 1 WHERE id = 0")
+            }
+            original.requireDatabase().close()
+            factory.quarantineMarker = true
+
+            // Files.list throws a real AccessDeniedException when the quarantine directory loses
+            // its read bit; the delegate delivers that exact failure at the factory boundary.
+            var deny = true
+            var quarantineCalls = 0
+            val pruneBroken =
+                object : DatabaseFactory by factory {
+                    override fun quarantine(stamp: String) {
+                        quarantineCalls++
+                        factory.quarantine(stamp)
+                    }
+
+                    override fun pruneQuarantine(now: Long) {
+                        if (deny) throw AccessDeniedException(dir.resolve("quarantine").toString())
+                        factory.pruneQuarantine(now)
+                    }
+                }
+            val clock = TestClock(nowMs = T0)
+            val o = opener(clock = clock, f = pruneBroken)
+
+            // The quarantine move succeeded; only the post-open prune failed. That is an
+            // environment failure, not a migration or corruption signal.
+            val first = assertThrows { o.awaitOpen() }
+            assertIs<DatabaseOpenException>(first)
+            assertEquals(DatabaseOpenException.Reason.IO, first.reason)
+            assertTrue(factory.exists(), "the replacement stays on disk after a failed prune")
+
+            // The retried open sees the healthy replacement: its own finish fails the same way
+            // and must still not quarantine it — the preserved original is the only copy.
+            clock.nowMs = T0 + 60_000
+            val second = assertThrows { o.awaitOpen() }
+            assertIs<DatabaseOpenException>(second)
+            assertEquals(DatabaseOpenException.Reason.IO, second.reason)
+            assertEquals(
+                1,
+                quarantineCalls,
+                "a failed prune must never re-quarantine the healthy replacement",
+            )
+
+            deny = false
+            clock.nowMs = T0 + 120_000
+            val result = o.awaitOpen()
+            assertEquals(RecoveryCause.CORRUPT, result.recovered, "the cause survives the failed attempts")
+            assertFalse(result.created)
+
+            // The newest-copy prune kept exactly the original library — contents intact.
+            val copies = Files.list(dir.resolve("quarantine")).use { it.toList() }
+            assertEquals(1, copies.size)
+            BundledSQLiteDriver()
+                .open(copies.single().resolve(NeutrodyneDatabase.FILE_NAME).toString())
+                .use { conn ->
+                    conn.prepare("SELECT applying FROM sync_state WHERE id = 0").use { stmt ->
+                        assertTrue(stmt.step())
+                        assertEquals(1L, stmt.getLong(0), "the preserved copy is the original library")
+                    }
+                }
+            o.requireDatabase().close()
+        }
+
+    @Test
+    fun aCancelledOpenHandsWaitersAnOpenFailure() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+
+            // Same driver gate as the no-quarantine-on-cancel test: the attempt is cancelled
+            // while Room's open is in flight, so the shared deferred resolves with the failure.
+            val insideForceOpen = CompletableDeferred<Unit>()
+            val releaseForceOpen = CompletableDeferred<Unit>()
+            var calls = 0
+            val gated =
+                object : SQLiteDriver by BundledSQLiteDriver() {
+                    private val inner = BundledSQLiteDriver()
+
+                    override fun open(fileName: String): SQLiteConnection {
+                        calls++
+                        if (calls == 2) {
+                            insideForceOpen.complete(Unit)
+                            runBlocking { releaseForceOpen.await() }
+                        }
+                        return inner.open(fileName)
+                    }
+                }
+            val o = opener(d = gated)
+            val attempt = async { o.awaitOpen() }
+            insideForceOpen.await()
+            attempt.cancel()
+            releaseForceOpen.complete(Unit)
+
+            // The cancelled caller still gets its own CancellationException.
+            assertIs<CancellationException>(runCatching { attempt.await() }.exceptionOrNull())
+            assertEquals(DatabaseOpenState.Pending, o.openState.value)
+
+            // An independent waiter asked for the database, not for cancellation: the deferred
+            // hands it an actionable open failure with the original cause preserved.
+            val failure = runCatching { o.requireDatabase() }.exceptionOrNull()
+            val error = assertIs<DatabaseOpenException>(failure)
+            assertEquals(DatabaseOpenException.Reason.UNKNOWN, error.reason)
+            assertIs<CancellationException>(error.cause)
+
+            // A failed attempt is never cached: the retry opens the healthy file normally.
+            val result = o.awaitOpen()
+            assertEquals(OpenResult(created = false, recovered = null), result)
+            o.requireDatabase().close()
+        }
+
+    @Test
+    fun aFailedOpenClosesEveryUnpublishedCandidate() =
+        runTest {
+            dirs.ensureCreated()
+            var opens = 0
+            var closes = 0
+            val counting =
+                object : SQLiteDriver by BundledSQLiteDriver() {
+                    private val inner = BundledSQLiteDriver()
+
+                    override fun open(fileName: String): SQLiteConnection {
+                        val conn = inner.open(fileName)
+                        opens++
+                        return object : SQLiteConnection by conn {
+                            override fun close() {
+                                closes++
+                                conn.close()
+                            }
+                        }
+                    }
+                }
+            var deny = true
+            val pruneBroken =
+                object : DatabaseFactory by factory {
+                    override fun pruneQuarantine(now: Long) {
+                        if (deny) throw AccessDeniedException(dir.resolve("quarantine").toString())
+                        factory.pruneQuarantine(now)
+                    }
+                }
+            val o = opener(f = pruneBroken, d = counting)
+
+            // The fresh build opens and then loses its finish: the unpublished candidate must be
+            // closed on the way out instead of leaking its connections.
+            assertThrows { o.awaitOpen() }
+            assertEquals(opens, closes, "a failed attempt must not leak its candidate's connections")
+
+            deny = false
+            o.awaitOpen()
+            val db = o.requireDatabase()
+            assertTrue(opens > closes, "the published database keeps its connections until closed")
+            db.close()
+            assertEquals(opens, closes, "every connection closes with the published database")
+        }
+
+    private companion object {
+        const val T0 = 1_700_000_000_000L
+    }
+}
