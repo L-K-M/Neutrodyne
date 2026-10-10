@@ -259,8 +259,11 @@ private fun configureNativeDistributions(
             shortcut = false
             dirChooser = false
             // Mandatory: jpackage's per-user default would be %LOCALAPPDATA%\Neutrodyne\ — the data
-            // directory its uninstaller deletes (11 Windows MSI and ZIP).
-            installationPath = "Programs\\$DESKTOP_PACKAGE_NAME"
+            // directory its uninstaller deletes (11 Windows MSI and ZIP), so the install dir must
+            // be a different name directly under LocalAppDataFolder. Nesting ("Programs/Neutrodyne")
+            // is unreachable per-user: jpackage authors the intermediate Directory but no RemoveFile
+            // component for it, and WiX's ICE64 fails the build (LGHT0204, nightly 37886973484).
+            installationPath = "$DESKTOP_PACKAGE_NAME-App"
             iconFile.set(project.file("icons/neutrodyne.ico"))
             fileAssociation(
                 mimeType = OPML_MIME_TYPE,
@@ -275,11 +278,15 @@ private fun configureNativeDistributions(
             minimumSystemVersion = "13.0"
             appCategory = "public.app-category.music"
             iconFile.set(project.file("icons/neutrodyne.icns"))
+            // No iconFile on this association: Compose copies an FA icon into
+            // Contents/Resources under its source basename while jpackage
+            // already writes the app icon to <app>.icns — a same-named FA
+            // icon collides on the case-insensitive volume (nightly
+            // 37831500506). A null FA icon falls back to the app icon.
             fileAssociation(
                 mimeType = OPML_MIME_TYPE,
                 extension = OPML_EXTENSION,
                 description = OPML_DESCRIPTION,
-                iconFile = project.file("icons/neutrodyne.icns"),
             )
             infoPlist { extraKeysRawXml = MAC_URL_TYPES + MAC_LOCAL_NETWORK_USAGE }
             // jpackage refuses a macOS version whose first number is 0 (11 macOS DMG, ad-hoc signing
