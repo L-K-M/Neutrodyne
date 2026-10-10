@@ -39,6 +39,8 @@ import ch.lkmc.neutrodyne.feeds.jvm.html.JsoupShowNotesSanitizer
 import ch.lkmc.neutrodyne.feeds.jvm.parse.XmlPullFeedParser
 import ch.lkmc.neutrodyne.feeds.model.Enclosure
 import ch.lkmc.neutrodyne.feeds.model.FeedFormat
+import ch.lkmc.neutrodyne.feeds.model.Paging
+import ch.lkmc.neutrodyne.feeds.model.ParseWarning
 import ch.lkmc.neutrodyne.feeds.model.ParsedEpisode
 import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
 import kotlinx.coroutines.CoroutineDispatcher
@@ -88,6 +90,8 @@ internal fun parsedFeed(
     complete: Boolean = false,
     ttlMinutes: Int? = null,
     medium: String? = null,
+    paging: Paging = Paging(),
+    warnings: List<ParseWarning> = emptyList(),
 ): ParsedFeed =
     ParsedFeed(
         format = FeedFormat.RSS2,
@@ -97,6 +101,8 @@ internal fun parsedFeed(
         complete = complete,
         ttlMinutes = ttlMinutes,
         medium = medium,
+        paging = paging,
+        warnings = warnings,
     )
 
 // --- Database / engine builders --------------------------------------------------------------------
@@ -176,6 +182,9 @@ internal suspend fun seedPodcast(
     needsCredentials: Boolean = false,
     podcastGuid: String? = null,
     podcastGuidDerived: Boolean = false,
+    // D98: seeded ingest-test podcasts are covered (subscribed on a provenance-aware build);
+    // pass `null` to model a V1-migrated / coverage-less row.
+    guidCoverageSince: Long? = subscribedAt,
     syncId: String =
         java.util.UUID
             .randomUUID()
@@ -215,6 +224,7 @@ internal suspend fun seedPodcast(
             needsCredentials = needsCredentials,
             podcastGuid = podcastGuid,
             podcastGuidDerived = podcastGuidDerived,
+            guidCoverageSince = guidCoverageSince,
         ).block(),
     )
 

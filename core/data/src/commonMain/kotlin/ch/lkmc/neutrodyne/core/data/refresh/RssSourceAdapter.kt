@@ -18,6 +18,7 @@ import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.TlsKind
+import ch.lkmc.neutrodyne.feeds.model.isPartialWindow
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
 import ch.lkmc.neutrodyne.feeds.parse.ParseResult
 import dev.zacsweers.metro.ContributesIntoMap
@@ -231,9 +232,7 @@ internal class RssSourceAdapter(
                         feed = result.feed,
                         // A page-1 link means the stored window is incomplete until paging ends;
                         // `fh:complete` overrides it — the document is the whole feed (03).
-                        partial =
-                            (result.feed.paging.next != null || result.feed.paging.prevArchive != null) &&
-                                !result.feed.paging.fhComplete,
+                        partial = result.feed.paging.isPartialWindow,
                         meta = meta,
                     )
                 }

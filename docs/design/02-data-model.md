@@ -46,6 +46,7 @@ Only `:core:data`, `:core:artwork`, `:download:impl` and `:sync:impl` (shared im
 | `podcast_settings`, `podcast_group_settings` | low | 05 settings screens; 05 restore; 10 `SyncApplier` (synced override columns only) | `EffectiveSettingsResolver` (05) |
 | `podcast_group`, `podcast_group_member` | low | 05 `GroupRepository`, import, restore; 10 `SyncApplier` | 05, 06, 08, 10 |
 | `episode` and children (`episode_description`, `episode_transcript`, `episode_alt_enclosure`, `person`, `funding`) | low | 03 ingestion; 04 enrichment (`IngestDao.applyYouTubeFacts`: `durationMs`, `availability`, `isShort`; facts from the engine's `YtDlpEnricher`, so only with the engine, from M9a) as part of the refresh pipeline; 04 `YouTubeAvailabilityRecorder` (`EpisodeDao.setAvailability`, called by 06/07 at resolve time); 05 restore (stub rows); 10 `SyncApplier` (stub rows); 02 retention (delete) | everyone |
+| `episode_guid_provenance` | low (one upsert batch per ingest) | 03 `FeedIngestor` only ([D98](../PLAN.md#3-key-decisions)); unsubscribe cascade deletes | 03 matcher |
 | `chapter` | low | 03 (PSC rows); 06 (other sources) | 06, 08 |
 | `episode_state` | low | 06 (started, played, measured duration); 03/08 via `EpisodeRepository` (favourite, bulk played); 07 (tombstone); 05 (import "treat as played", restore); 10 (`SyncApplier`, `SyncParkedStateApplier`) | lists, 05, 06, 07, 10 |
 | `episode_position` | **high** (every 5 s while playing) | 06 `PositionTracker` (Android and desktop through `:playback:core`'s `PositionSaver`); 05 restore; 10 `SyncApplier` | `EpisodeLiveStateSource` (08), 06, 10 |
@@ -73,6 +74,7 @@ Exceptions to [D15](../PLAN.md#3-key-decisions) "episode is written only by inge
 | `podcast.episodeOrder` | column `FeedOrder?` | Order of the podcast screen; null = `OLDEST_FIRST` when `showType = SERIAL`, else `NEWEST_FIRST` | 05, 08 |
 | `podcast.autoDownloadEligibleAfter` | column `Long?` | D67 watermark: episodes with `firstSeenAt` ≤ it are never auto-download candidates | 07 |
 | `podcast.pendingNewFeedUrl`, `podcast.lastFullFetchAt` | columns | Lazy `itunes:new-feed-url` adoption; time of the last 200 response with a parsed body (weekly unconditional fetch rule) | 03 |
+| `GuidKnowledge { KNOWN_AMBIGUOUS, KNOWN_INDEPENDENT, OBSERVED }`, `EpisodeGuidProvenanceEntity`, `podcast.guidCoverageSince`, `EpisodeKeys.canonicalGuid`/`nonGuidKeys`, `IngestDao.guidKnowledge`/`recordedGuids`/`recordGuidKnowledge` | enum, entity, column, key helpers, DAO API | Feed-scoped persistent GUID authority for the matcher's ambiguity rules ([D98](../PLAN.md#3-key-decisions), [episode_guid_provenance](#episode_guid_provenance)); `OBSERVED` is durable memory without authority | 03 |
 | `podcast.channelMetadataAt` | column `Long?` (requested by 04) | Last YouTube channel-page or engine-lookup (`YtDlpChannelLookup`) metadata fetch (avatar, banner, description); null = never. Drives 04's 30-day avatar refresh and lazy banner | 04 |
 | `ImportFormat.URL_LIST` | constant appended to the canonical `ImportFormat` (requested by 04) | Plain list of URLs, `UC…` IDs or handles; stored as `TEXT`, so no migration | 04, 05 |
 | `WaitReason.YOUTUBE_ENGINE_OFF` | constant appended to the canonical `WaitReason` (requested by 04/07, M9a) | A queued YouTube download waits because the engine is off or unusable (`ExternalReason` `DISABLED_BY_USER`, `ENGINE_FAILED`, `NOT_YET_AVAILABLE`); meaning and texts owned by [07 Wait reasons](07-downloads.md#wait-reasons). Stored as `TEXT`, so no migration; a build that predates it reads `NONE` | 04, 07, 08 |
@@ -335,6 +337,7 @@ erDiagram
   podcast ||--o{ podcast_url_alias : "known as"
   podcast ||--o| podcast_settings : overrides
   podcast ||--o{ episode : has
+  podcast ||--o{ episode_guid_provenance : "guid knowledge (CASCADE)"
   podcast ||--o{ podcast_group_member : "member of"
   podcast_group ||--o{ podcast_group_member : contains
   podcast_group ||--o| podcast_group_settings : overrides
@@ -442,6 +445,7 @@ data class PodcastEntity(
     @ColumnInfo(defaultValue = "0") val pagingComplete: Boolean = false,
     val hubUrl: String? = null, @ColumnInfo(defaultValue = "0") val usesPodping: Boolean = false,
     val credentialId: Long? = null,
+    val guidCoverageSince: Long? = null,                                          // D98 provenance coverage epoch; null on V1 rows
     val descriptionHtml: String? = null, val categoriesJson: String? = null,                             // large, last
 )
 ```
@@ -459,6 +463,7 @@ data class PodcastEntity(
 | `gone`, `needsCredentials`, `failureCount`, `lastErrorKind` | Error badges; "possibly dead" is derived (`gone = 0 AND failureCount ≥ 10 AND COALESCE(lastSuccessAt, subscribedAt) < now − 7 d`, thresholds owned by [03 Per-feed states](03-feeds-and-discovery.md#per-feed-states)) — no column |
 | `autoDownloadEligibleAfter` | Written only by 07's planner: the D67 watermark: the later of `subscribedAt` and the moment the effective auto-download policy became enabled, written by 07's watermark pass ([07 No-backfill watermark](07-downloads.md#no-backfill-watermark)), cleared when disabled ([Auto-download candidates](#auto-download-candidates)) |
 | `channelMetadataAt`; for `YOUTUBE_CHANNEL` rows also `bannerUrl`, `artworkUrl`/`artworkKey`, `descriptionHtml` | After the subscribe or import insert, written only by `PodcastDao.applyYouTubeChannelMetadata` (04); for `YOUTUBE_CHANNEL` rows Atom ingestion's `applyFeedMetadata` never touches them, nor `link`, `youtubeChannelId`, `youtubeVariants` ([04 Atom feed ingestion](04-youtube.md#atom-feed-ingestion)) |
+| `guidCoverageSince` | The epoch at which every stored observation of this feed became tracked (the subscribe's `subscribedAt` on a provenance-aware build). **Null on every V1-migrated row** and never filled afterwards: erased pre-coverage history must keep every GUID `UNKNOWN`, so coverage is set at insertion and never backfilled ([D98](../PLAN.md#3-key-decisions), [episode_guid_provenance](#episode_guid_provenance)) |
 
 ```mermaid
 stateDiagram-v2
@@ -620,6 +625,31 @@ stateDiagram-v2
   Stub --> [*]: retention after 90 days, unless protected
   InFeed --> [*]: unsubscribe cascade
 ```
+
+### episode_guid_provenance
+
+Per-feed GUID knowledge ([D98](../PLAN.md#3-key-decisions), PO-49): the durable record of what a canonical GUID means to this subscription, so a GUID once observed shared can never regain primary-key authority after its carriers rotate, are rekeyed, age out or the app restarts. Rows are written inside the ingest transaction by 03's matcher preparation and read there as claim authority; nothing else reads or writes the table.
+
+```kotlin
+enum class GuidKnowledge { KNOWN_AMBIGUOUS, KNOWN_INDEPENDENT, OBSERVED }   // absence of a row = never seen
+
+@Entity(tableName = "episode_guid_provenance", primaryKeys = ["podcastId", "guid"],
+    foreignKeys = [ForeignKey(PodcastEntity::class, ["id"], ["podcastId"], onDelete = ForeignKey.CASCADE)])
+data class EpisodeGuidProvenanceEntity(
+    val podcastId: Long, val guid: String, val knowledge: GuidKnowledge,
+)
+```
+
+| Rule | Detail |
+|---|---|
+| Scope | `(podcastId, guid)`, never `episodeId`: the fact "guid X was observed shared" must outlive the rows that evidenced it. `guid` is canonicalised exactly like the `g:` identity payload (`guid.trim()`, non-empty, verbatim case-sensitive — [Identity keys](#identity-keys)); no second normaliser |
+| First observation | Durable. On a covered podcast, every canonical GUID an ingest sees — on an accepted item or already carried by a stored row — that has no row yet is recorded inside the ingest transaction *before* matching mutates any current GUID. A first sighting is never retried as an introduction: the row is the permanent record that the GUID is not new |
+| `KNOWN_AMBIGUOUS` | Sticky. Recorded when a GUID is seen on two stored rows, on one stored row under a non-`g:` key, or on two distinct accepted items of one document. Once written it is never demoted and blocks every key-level claim by that GUID ([03 Diff algorithm](03-feeds-and-discovery.md#diff-algorithm)) |
+| `KNOWN_INDEPENDENT` | Provisional. Recorded only for a *strict introduction*: the podcast is covered (`podcast.guidCoverageSince` non-null), the ingest saw the complete document (see below), exactly one accepted item carries the GUID and no stored row already carries it. Upgrades to `KNOWN_AMBIGUOUS` on any ambiguity observation, never back |
+| Complete document | The document an ingest observed in full — no adapter `partial` flag, no page-1 `next`/`prevArchive` paging links and no `fh:archive` marker without `fh:complete` (the parser's own `paging` model, so no entry path — refresh, subscribe or backfill — can declare a window complete), and no `ITEMS_TRUNCATED` warning (the parser item cap drops trailing items, so a sole sighting in a truncated document may hide an unseen duplicate) |
+| `OBSERVED` | Inert memory, not authority. A first sighting that was not a strict introduction — through a paging window, a truncated document, an older-page ingest or mere stored carriage — records `OBSERVED` so a later complete singleton cannot promote a GUID that was never safely introduced (the erased-NULL, retention, rekey and restart cases all keep the row). The matcher's authority view filters it out: an `OBSERVED` GUID claims exactly like an unknown one |
+| `UNKNOWN` | Authority absence — no `KNOWN_*` row — including every GUID of a V1-migrated podcast (which is never covered, so no first observation or independence is ever recorded for it; the exceptions are positive ambiguity observed live and knowledge merged in at feed-merge step 7 — tracked evidence, not reconstructed history): erased history cannot be reconstructed, so stored-only carriage and sole current observation never promote an uncovered GUID to independent. Unknown is not penalising — only contested evidence (a `g:` claim whose enclosure is owned by another row) takes the conservative insert-or-drop path |
+| Lifecycle | Deleted only by the unsubscribe cascade on `podcast` (the knowledge is feed-scoped and dies with the subscription). Rekey, retention, `inFeed` flips and restarts never touch it; a failed ingest rolls the writes back with the episodes ([Transactions and threading](#transactions-and-threading)) |
 
 ### episode_description
 
@@ -1737,7 +1767,8 @@ DELETE FROM sync_clock WHERE ((coll IN ('episode', 'upnext') AND substr(rid, 1, 
                            OR (coll = 'member' AND substr(rid, 37, 36) = (SELECT syncId FROM podcast WHERE id = :pid)));
 DELETE FROM podcast WHERE id = :pid;
 -- FK cascades: episode (+ description, transcript, alt_enclosure, chapter, episode_state, episode_position,
--- queue_entry, download), podcast_url_alias, podcast_settings, podcast_group_member;
+-- queue_entry, download), podcast_url_alias, podcast_settings, podcast_group_member,
+-- episode_guid_provenance;
 -- SET NULL: play_session.currentEpisodeId, import_item.podcastId
 ```
 
@@ -1753,7 +1784,8 @@ The last-reference credential delete races with a concurrent `SecretStore.put` f
 4. Matched pairs `(l, w)`: user state merged with 05's Merge-restore rules (played = OR with the later `playedAt`, newer position wins, favourite and tombstone = OR, `INSERT OR IGNORE` + guarded `UPDATE`s of [User-state writes](#user-state-writes)); `UPDATE OR IGNORE queue_entry SET episodeId = :w WHERE episodeId = :l`; `UPDATE OR IGNORE download SET episodeId = :w WHERE episodeId = :l` (the winner keeps its own row if present; `relativePath` still finds the file); `UPDATE play_session SET currentEpisodeId = :w WHERE currentEpisodeId = :l`.
 5. Unmatched loser episodes are re-parented, so their played state and positions survive ([N1](../PLAN.md#22-non-functional-requirements)): `UPDATE episode SET podcastId = :winner, inFeed = 0 WHERE id IN (:unmatched)` (cannot violate `UNIQUE(podcastId, identityKey)`, because none of their keys exists in the winner); retention ages them out later. Their `person`/`funding` rows keep `ownerId` (episode IDs do not change).
 6. `UPDATE play_session SET contextId = :winner WHERE contextType = 'PODCAST' AND contextId = :loser`; `UPDATE import_item SET podcastId = :winner WHERE podcastId = :loser`.
-7. `deleteCascade(loser)` (now only the matched loser rows and the loser's own metadata remain). While linked (MS2), steps 1–6 are captured normally — they are real changes of the winner's records — but step 7 runs inside `SyncStateDao.withApplying` after `SyncOutboxDao.captureLiteral` has recorded the loser's move instead of an unsubscribe: `feedUrl` = the winner's URL and `feedKeys` = the loser's keys plus the winner's, under the loser's `syncId` ([10 Feed moves](10-sync.md#feed-moves)). A captured unsubscribe would make other devices drop the loser's episodes instead of merging them; the server merges the two records by feed key, marks the loser record with `mergedInto`, and every device follows that redirect ([10 Redirects on clients](10-sync.md#redirects-on-clients)).
+7. Provenance union ([episode_guid_provenance](#episode_guid_provenance)): the loser's GUID knowledge moves to the winner *before* the cascade can delete it — `INSERT INTO episode_guid_provenance(podcastId, guid, knowledge) SELECT :winner, guid, knowledge FROM episode_guid_provenance WHERE podcastId = :loser ON CONFLICT(podcastId, guid) DO UPDATE SET knowledge = 'KNOWN_AMBIGUOUS' WHERE excluded.knowledge = 'KNOWN_AMBIGUOUS'` (ambiguity on either side stays ambiguous; a coverage marker on the winner is never widened by the loser's).
+8. `deleteCascade(loser)` (now only the matched loser rows and the loser's own metadata remain). While linked (MS2), steps 1–6 are captured normally — they are real changes of the winner's records — while step 7 writes only the local, non-synced `episode_guid_provenance` table and so captures nothing; step 8 runs inside `SyncStateDao.withApplying` after `SyncOutboxDao.captureLiteral` has recorded the loser's move instead of an unsubscribe: `feedUrl` = the winner's URL and `feedKeys` = the loser's keys plus the winner's, under the loser's `syncId` ([10 Feed moves](10-sync.md#feed-moves)). A captured unsubscribe would make other devices drop the loser's episodes instead of merging them; the server merges the two records by feed key, marks the loser record with `mergedInto`, and every device follows that redirect ([10 Redirects on clients](10-sync.md#redirects-on-clients)).
 
 ### Import commit
 
@@ -2094,7 +2126,7 @@ Manual migration rules:
 | Downloads | `download(episodeId, rootId, relativePath, finalUri, totalBytes)` where `state = 'COMPLETED'` |
 | Credentials | `credential(id, origin, username, secretCipher, iv)` |
 | Sync bookkeeping | every column of `sync_state`, `sync_outbox`, `sync_clock`, `sync_parked`, `sync_held` (a lost outbox row is a lost change); after the post-migration open, the trigger set equals `SyncTriggers.sql()` |
-| Row-count and ID guards | `COUNT(*)` of every table; `sqlite_sequence.seq` of every `AUTOINCREMENT` table is unchanged or larger |
+| Row-count and ID guards | `COUNT(*)` of every table present at that version (tables added by a later migration, `episode_guid_provenance` since version 2, count only once they exist — derived provenance starts empty on migrated rows, so a truthful zero is asserted, not exempted); `sqlite_sequence.seq` of every `AUTOINCREMENT` table is unchanged or larger |
 
 ### Tests
 

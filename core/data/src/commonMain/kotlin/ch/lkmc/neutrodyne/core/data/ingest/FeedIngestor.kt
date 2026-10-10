@@ -19,6 +19,7 @@ import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.database.PodcastFeedMetadata
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
+import ch.lkmc.neutrodyne.core.model.GuidKnowledge
 import ch.lkmc.neutrodyne.core.model.OwnerType
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.ShowType
@@ -33,6 +34,7 @@ import ch.lkmc.neutrodyne.feeds.model.ParseWarning
 import ch.lkmc.neutrodyne.feeds.model.ParsedEpisode
 import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
 import ch.lkmc.neutrodyne.feeds.model.WarningCode
+import ch.lkmc.neutrodyne.feeds.model.isPartialWindow
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
 import dev.zacsweers.metro.Inject
 import kotlinx.coroutines.CoroutineDispatcher
@@ -115,56 +117,116 @@ internal class FeedIngestor(
         val taken = mutableSetOf<Long>()
         var rekeyed = 0
 
-        // A GUID the stored rows prove is reused — carried by two rows, or by one row under a
-        // non-guid key — was once decided by enclosure. A later document offering that GUID
-        // alone must not claim the `g:` row blind: the row belongs to the sibling whose
-        // enclosure it carries (r2 F1). The incoming document carries the same evidence when
-        // two distinct accepted items share one GUID: the `g:` row then holds a different
-        // episode's identity and only an enclosure-identical item may claim it (r3 F2).
+        // D98 GUID provenance (02 episode_guid_provenance): the ambiguity evidence is exactly
+        // the snapshot reuse test — a GUID carried by two stored rows, by one row under a
+        // non-`g:` key, or shared by two distinct accepted items — and it is recorded inside
+        // this transaction before any matching runs. Recorded ambiguity is sticky across GUID
+        // rotations, rekeys, retention and restarts: once shared, a GUID never regains
+        // primary-key authority even when its carriers rotate away and the snapshot evidence
+        // is gone. A covered podcast (02 podcast.guidCoverageSince) additionally records
+        // KNOWN_INDEPENDENT for GUIDs it sole-observes; row absence never promotes anything —
+        // unknown GUIDs stay unknown on conflicting evidence.
         val guidRowCounts =
-            existing.mapNotNull { it.guid?.trim()?.takeIf(String::isNotEmpty) }.groupingBy { it }.eachCount()
-        val reusedGuids =
+            existing.mapNotNull { EpisodeKeys.canonicalGuid(it.guid) }.groupingBy { it }.eachCount()
+        val storedGuids = guidRowCounts.keys
+        val itemGuidCounts =
+            prepared.items
+                .mapNotNull { EpisodeKeys.canonicalGuid(it.episode.guid) }
+                .groupingBy { it }
+                .eachCount()
+        val ambiguousGuids =
             existing
                 .asSequence()
                 .mapNotNull { row ->
-                    row.guid?.trim()?.takeIf {
-                        it.isNotEmpty() &&
-                            (guidRowCounts[it]!! > 1 || row.identityKey != "g:$it")
+                    EpisodeKeys.canonicalGuid(row.guid)?.takeIf {
+                        guidRowCounts[it]!! > 1 || row.identityKey != "g:$it"
                     }
                 }.toMutableSet()
-        reusedGuids +=
-            prepared.items
-                .mapNotNull {
-                    it.episode.guid
-                        ?.trim()
-                        ?.takeIf(String::isNotEmpty)
-                }.groupingBy { it }
-                .eachCount()
-                .filterValues { it > 1 }
-                .keys
+        ambiguousGuids += itemGuidCounts.filterValues { it > 1 }.keys
+        val knowledge = ingestDao.guidKnowledge(stored.id)
+
+        // Completeness of this document as a GUID observation (02/D98): KNOWN_INDEPENDENT may
+        // only derive from a document the ingest saw in full — a paging window (the adapter's
+        // flag or the document's own links, whichever path delivered it), a parser item cap
+        // (ITEMS_TRUNCATED drops trailing items the ingest never saw) and older-page ingests
+        // are all incomplete. No caller-supplied flag can widen this.
+        val documentComplete =
+            ctx.mode != IngestMode.OLDER_PAGE &&
+                !ctx.partial &&
+                !parsed.paging.isPartialWindow &&
+                parsed.warnings.none { it.code == WarningCode.ITEMS_TRUNCATED }
+
+        // First observations are durable (02): every canonical GUID this ingest sees — on an
+        // accepted item or already carried by a stored row — that has no provenance row yet is
+        // recorded now, before matching mutates any current GUID. Only a first sighting that
+        // is a strict introduction records KNOWN_INDEPENDENT: covered podcast, complete
+        // document, exactly one accepted item carrying the GUID and not already stored. Any
+        // other first sighting records OBSERVED so a later complete singleton, an erased
+        // NULL interval, a rekey or a restart can never promote a GUID that was never safely
+        // introduced (R70 review).
+        val covered = stored.guidCoverageSince != null
+        val firstObserved =
+            if (covered) {
+                (storedGuids + itemGuidCounts.keys) -
+                    ambiguousGuids -
+                    ingestDao.recordedGuids(stored.id).toSet()
+            } else {
+                emptySet()
+            }
+        val independentGuids =
+            if (covered && documentComplete) {
+                firstObserved
+                    .filterTo(HashSet()) { itemGuidCounts[it] == 1 && it !in storedGuids }
+            } else {
+                emptySet()
+            }
+        ingestDao.recordGuidKnowledge(
+            stored.id,
+            ambiguousGuids,
+            independentGuids,
+            firstObserved - independentGuids,
+        )
+        ambiguousGuids += knowledge.filterValues { it == GuidKnowledge.KNOWN_AMBIGUOUS }.keys
+
+        // The contested guard's enclosure-ownership check is built once: `existing` is the
+        // pre-mutation snapshot pass 1 reasons about, so an index over it answers "some other
+        // row owns this enclosure" without re-normalising every stored URL per claim.
+        val rowsByEnclosure = HashMap<String, MutableList<Long>>()
+        for (row in existing) {
+            normEnc(row)?.let { rowsByEnclosure.getOrPut(it) { mutableListOf() }.add(row.id) }
+        }
 
         // Pass 1 (03 step 4): each item claims rows in claim-key order — its assigned document
         // key first, then its (older-version) candidates. When a repeated GUID puts two items on
         // one stored row, the item whose enclosure matches the row keeps it and the loser is
         // retried on its next claim key — user state never moves between distinct episodes.
+        // D98 authority: an ambiguous GUID never claims by any key — the sibling's `g:` row, its
+        // own re-offered fallback key, or a rotated-away `g:` slot are all decided by pass 2's
+        // global evidence instead; and a GUID without KNOWN_INDEPENDENT may not take a `g:` row
+        // while its enclosure is provably owned by a different row (the unknown rule). Authority
+        // this ingest itself just recorded counts too: `independentGuids` were persisted above
+        // and are exactly the set `knowledge` still lacks (R70 follow-up).
         val claimedBy = HashMap<Long, PreparedItem>()
         val pending = ArrayDeque(prepared.items)
         while (pending.isNotEmpty()) {
             val item = pending.removeFirst()
             if (item.matchedTo != null) continue
-            val reusedGuid =
-                item.episode.guid
-                    ?.trim()
-                    ?.takeIf(reusedGuids::contains)
+            val itemGuid = EpisodeKeys.canonicalGuid(item.episode.guid)
+            if (itemGuid != null && itemGuid in ambiguousGuids) continue
+            val contested =
+                itemGuid != null && itemGuid !in independentGuids &&
+                    knowledge[itemGuid] != GuidKnowledge.KNOWN_INDEPENDENT
             for (key in item.claimKeys) {
                 val row = byKey[key] ?: continue
                 if (
-                    reusedGuid != null && key == "g:$reusedGuid" &&
-                    item.enclosureIdentity != normEnc(row)
+                    contested && item.enclosureIdentity != null &&
+                    rowsByEnclosure[item.enclosureIdentity]?.any { it != row.id } == true
                 ) {
-                    // The reused guid's row holds the sibling's enclosure; pass 2 (or an insert)
-                    // resolves this item's own identity instead of moving user state here.
-                    continue
+                    // Erased or absent history cannot arbitrate between this GUID's stored owner
+                    // and the enclosure's owner: leave both rows and their state untouched; the
+                    // item takes the insert-or-drop path (D98, 03 deviation 17).
+                    item.unresolved = true
+                    break
                 }
                 val holder = claimedBy[row.id]
                 if (holder == null) {
@@ -197,17 +259,22 @@ internal class FeedIngestor(
         // the reuse guard rejected: reserving it would strand exactly the episodes this pass
         // recovers (r3 F1).
         val fallbacks = Pass2Index(existing, taken)
-        for ((item, row) in fallbacks.matches(prepared.items)) {
+        for ((item, row) in fallbacks.matches(prepared.items.filter { !it.unresolved })) {
             if (claimRow(ingestDao, storedKeys, item, row)) rekeyed++
             taken += row.id
         }
 
         // An unmatched item whose assigned key a stored row holds (lost to a better enclosure
         // match above) re-derives a free fallback; with none it is dropped as a duplicate.
+        // An unresolved contested item re-derives from every non-`g:` content key instead —
+        // its GUID authority is unproven, so it lands beside both owners under `u:`/`t:`/`l:`/`h:`
+        // rather than claiming a `g:` slot or vanishing while its identity stays unproven (D98).
         val liveDocKeys = prepared.items.mapTo(HashSet()) { it.docKey }
         for (item in prepared.items) {
             if (item.matchedTo != null || item.dropped || item.docKey !in storedKeys) continue
-            val fresh = item.fallbackKeys.firstOrNull { it !in storedKeys && it !in liveDocKeys }
+            val fresh =
+                (if (item.unresolved) EpisodeKeys.nonGuidKeys(item.episode) else item.fallbackKeys)
+                    .firstOrNull { it !in storedKeys && it !in liveDocKeys }
             if (fresh == null) {
                 item.dropped = true
                 prepared.warnings +=
@@ -472,12 +539,20 @@ internal class FeedIngestor(
         row: ExistingEpisodeKey,
     ): Boolean {
         var rekeyed = false
+        // D98: the current parsed GUID (including null) persists on every claim, ahead of the
+        // content-hash gate — a sibling whose GUID rotated or disappeared must not keep stale
+        // carriage, and provenance evidence must reflect the row's real GUID. A guid-only write
+        // never counts as a rekey: `rekeyed` records identity-key moves only.
+        val syncGuid = row.guid != item.episode.guid
         when {
             // The stored row already carries this document's key: nothing moves.
-            row.identityKey == item.docKey -> {}
+            row.identityKey == item.docKey -> {
+                if (syncGuid) ingestDao.rekey(row.id, row.identityKey, item.episode.guid)
+            }
 
             row.identityKey == item.primaryKey -> {
                 item.docKey = item.primaryKey
+                if (syncGuid) ingestDao.rekey(row.id, row.identityKey, item.episode.guid)
             }
 
             item.docKey !in storedKeys -> {
@@ -488,6 +563,7 @@ internal class FeedIngestor(
 
             else -> {
                 item.docKey = row.identityKey
+                if (syncGuid) ingestDao.rekey(row.id, row.identityKey, item.episode.guid)
             }
         }
         item.matchedTo = row

@@ -13,10 +13,10 @@ import ch.lkmc.neutrodyne.core.database.migration.ALL_MIGRATIONS
 import kotlin.coroutines.CoroutineContext
 
 /**
- * Schema version 1 — all 27 tables including the empty `sync_*` groundwork (02 Tables). The
- * `@Database` entity list, indices and converters are exported to
- * `schemas/ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase/1.json` (frozen once a tagged
- * release contains it).
+ * Schema version 2 — the 27 V1 tables plus D98's `episode_guid_provenance` and
+ * `podcast.guidCoverageSince` (02 Tables). The `@Database` entity list, indices and converters are
+ * exported to `schemas/ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase/<version>.json`
+ * (frozen once a tagged release contains it); `1.json` stays untouched (V1 was never released).
  */
 @Database(
     entities = [
@@ -35,6 +35,7 @@ import kotlin.coroutines.CoroutineContext
         FundingEntity::class,
         ChapterEntity::class,
         EpisodeStateEntity::class,
+        EpisodeGuidProvenanceEntity::class,
         EpisodePositionEntity::class,
         QueueEntryEntity::class,
         PlaySessionEntity::class,
@@ -99,7 +100,7 @@ abstract class NeutrodyneDatabase : RoomDatabase() {
     abstract fun syncHeldDao(): SyncHeldDao
 
     companion object {
-        const val VERSION = 1
+        const val VERSION = 2
         const val FILE_NAME = "neutrodyne.db"
 
         /**

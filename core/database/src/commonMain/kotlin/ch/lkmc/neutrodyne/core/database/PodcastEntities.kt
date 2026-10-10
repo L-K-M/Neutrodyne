@@ -99,6 +99,15 @@ data class PodcastEntity(
     // Large columns last (02 Conventions): SQLite reads hot columns without walking overflow pages.
     val descriptionHtml: String? = null,
     val categoriesJson: String? = null,
+    /**
+     * D98 coverage marker: `subscribedAt` when this row was inserted by a provenance-aware build,
+     * `NULL` for V1-migrated rows. Only a covered podcast may record
+     * [ch.lkmc.neutrodyne.core.model.GuidKnowledge.KNOWN_INDEPENDENT] — its ingest sees every
+     * accepted feed item from this point, so a sole-observed GUID introduction is a genuine first
+     * introduction. An uncovered podcast keeps every GUID unknown on conflict evidence; still-
+     * observable ambiguity is recorded regardless of coverage.
+     */
+    val guidCoverageSince: Long? = null,
 )
 
 /**

@@ -32,6 +32,22 @@ public object EpisodeKeys {
             .filter { it != primary }
     }
 
+    /**
+     * Every non-`g:` primary key of [e] in precedence order (`u:` → `t:` → `l:` → `h:`; the
+     * `h:` head key always exists). This is the insert pool for a contested item whose GUID
+     * may not claim its `g:` slot (03 deviation 17, D98): the item still lands under a
+     * content-derived key beside both owners rather than being dropped while the contested
+     * identity stays unproven. Deliberately wider than [fallbacks] — duplicate detection
+     * keeps the narrower pool.
+     */
+    public fun nonGuidKeys(e: ParsedEpisode): List<String> =
+        listOfNotNull(
+            enclosureKey(e.primaryEnclosure?.url),
+            titleDayKey(e.title, e.pubDate),
+            linkKey(e.link),
+            headKey(e.title, e.descriptionHtml),
+        )
+
     /** Current-version primary first, then the keys of every older supported version (v1: `[primary]`). */
     public fun candidates(e: ParsedEpisode): List<String> = listOf(primary(e))
 
@@ -58,7 +74,14 @@ public object EpisodeKeys {
             ?.get(1)
             ?.toIntOrNull() ?: 1
 
-    private fun guidKey(guid: String?): String? = guid?.trim()?.takeIf { it.isNotEmpty() }?.let { "g:$it" }
+    /**
+     * The canonical stored form of a parsed GUID — the `g:`-key payload itself (trim, non-empty,
+     * case-sensitive). `episode_guid_provenance.guid` (D98) stores exactly this so provenance and
+     * primary keys can never disagree about identity; there is deliberately no other normaliser.
+     */
+    public fun canonicalGuid(guid: String?): String? = guid?.trim()?.takeIf { it.isNotEmpty() }
+
+    private fun guidKey(guid: String?): String? = canonicalGuid(guid)?.let { "g:$it" }
 
     private fun enclosureKey(url: String?): String? = url?.let { UrlNormalizer.forIdentity(it) }?.let { "u:$it" }
 
