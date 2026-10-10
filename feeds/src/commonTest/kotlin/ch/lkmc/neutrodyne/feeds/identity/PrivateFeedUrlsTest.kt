@@ -28,8 +28,13 @@ class PrivateFeedUrlsTest {
         assertTrue(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?user=a1b2c3d4e5f6g7h8i9j0k1l2"))
         // No digit: not a token.
         assertFalse(PrivateFeedUrls.looksPrivate("https://feeds.example.com/abcdefghijklmnopqrstuvwxyz"))
-        // Too short: not a token.
+        // Too short: not a token. The boundary is 20 chars: 19 below, 21 in the first vector above.
         assertFalse(PrivateFeedUrls.looksPrivate("https://feeds.example.com/abc123def456"))
+        assertFalse(PrivateFeedUrls.looksPrivate("https://feeds.example.com/xKd93lskSKEa1zl4dQe"))
+        // Exactly 20 chars with letters and digits is a token.
+        assertTrue(PrivateFeedUrls.looksPrivate("https://feeds.example.com/xKd93lskSKEa1zl4dQeF"))
+        // A missing host (scheme-less or malformed input) does not skip the token checks.
+        assertTrue(PrivateFeedUrls.looksPrivate("feeds.example.com/xKd93lskSKEa1zl4dQeF1"))
     }
 
     @Test

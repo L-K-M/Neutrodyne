@@ -44,6 +44,14 @@ class EnclosureTypesTest {
     }
 
     @Test
+    fun declaredTypeWinsOverExtension() {
+        // A declared playable type is authoritative; the URL extension only fills in when the
+        // declared type is absent or unusable.
+        assertEquals("video/mp4", EnclosureTypes.effective("video/mp4", "https://e.example/a.mp3"))
+        assertEquals("audio/mpeg", EnclosureTypes.effective("audio/mpeg", "https://e.example/a.mp4"))
+    }
+
+    @Test
     fun unknownTypeInfersFromExtension() {
         assertEquals("audio/mpeg", EnclosureTypes.effective("application/octet-stream", "https://e.example/a.mp3"))
         assertEquals("audio/mp4", EnclosureTypes.effective(null, "https://e.example/a.m4a"))
@@ -69,6 +77,9 @@ class EnclosureTypesTest {
         assertNull(EnclosureTypes.effective(null, "https://e.example/download"))
         // A declared but unplayable type survives (stored, never chosen as primary enclosure).
         assertEquals("text/html", EnclosureTypes.effective("text/html", "https://e.example/page"))
+        val html = Enclosure("https://e.example/page", "text/html", null, "text/html")
+        val unknown = Enclosure("https://e.example/x", null, null, null)
+        assertNull(EnclosureTypes.primary(listOf(html, unknown)))
     }
 
     @Test
@@ -88,11 +99,63 @@ class EnclosureTypesTest {
         assertSame(video, EnclosureTypes.primary(listOf(video, hls, unknown)))
         assertSame(hls, EnclosureTypes.primary(listOf(hls, unknown)))
         assertSame(audio, EnclosureTypes.primary(listOf(video, audio)))
+        // The adjacent pair this rule exists for: audio must beat the HLS playlist.
+        assertSame(audio, EnclosureTypes.primary(listOf(audio, hls)))
         assertNull(EnclosureTypes.primary(listOf(unknown)))
         assertNull(EnclosureTypes.primary(emptyList()))
         // Equal precedence: document order decides, not length or anything else.
         val audioLong = Enclosure("https://e.example/b.mp3", "audio/mpeg", 2, "audio/mpeg")
         assertSame(audio, EnclosureTypes.primary(listOf(audio, audioLong)))
         assertSame(audioLong, EnclosureTypes.primary(listOf(audioLong, audio)))
+    }
+
+    @Test
+    fun emptySubtypeFallsBackToExtension() {
+        // "audio/" carries no subtype: it must not satisfy the audio-family guard in [primary]
+        // (the KDoc promises unplayable declared types are never chosen as primary).
+        assertEquals("audio/mpeg", EnclosureTypes.effective("audio/", "https://e.example/a.mp3"))
+        assertNull(EnclosureTypes.effective("audio/", "https://e.example/download"))
+        // The stored effectiveType is effective()'s output — null here, so nothing is picked.
+        val bogusAudio =
+            Enclosure(
+                "https://e.example/download",
+                "audio/",
+                null,
+                EnclosureTypes.effective("audio/", "https://e.example/download"),
+            )
+        assertNull(EnclosureTypes.primary(listOf(bogusAudio)))
+        // Same hole on the video side.
+        val bogusVideo =
+            Enclosure(
+                "https://e.example/v",
+                "video/",
+                null,
+                EnclosureTypes.effective("video/", "https://e.example/v"),
+            )
+        assertNull(EnclosureTypes.primary(listOf(bogusVideo)))
+    }
+
+    @Test
+    fun legacyM3uTypesAreHlsNotAudio() {
+        // Common legacy m3u MIME types map onto the HLS family, so a playlist-only item lands on
+        // the HLS fallback instead of being picked as primary audio.
+        assertEquals(
+            "application/x-mpegurl",
+            EnclosureTypes.effective("audio/x-mpegurl", "https://e.example/a.m3u"),
+        )
+        assertEquals(
+            "application/x-mpegurl",
+            EnclosureTypes.effective("audio/mpegurl", "https://e.example/a"),
+        )
+        val m3u =
+            Enclosure(
+                "https://e.example/a.m3u",
+                "audio/x-mpegurl",
+                null,
+                EnclosureTypes.effective("audio/x-mpegurl", "https://e.example/a.m3u"),
+            )
+        assertSame(m3u, EnclosureTypes.primary(listOf(m3u)))
+        val audio = Enclosure("https://e.example/a.mp3", "audio/mpeg", 1, "audio/mpeg")
+        assertSame(audio, EnclosureTypes.primary(listOf(m3u, audio)))
     }
 }

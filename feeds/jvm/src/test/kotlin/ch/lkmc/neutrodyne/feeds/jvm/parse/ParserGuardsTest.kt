@@ -3,10 +3,12 @@ package ch.lkmc.neutrodyne.feeds.jvm.parse
 
 import ch.lkmc.neutrodyne.feeds.model.WarningCode
 import ch.lkmc.neutrodyne.feeds.parse.ParseFailure
+import ch.lkmc.neutrodyne.feeds.parse.ParseLimits
 import ch.lkmc.neutrodyne.feeds.parse.ParseResult
 import okio.Buffer
 import org.junit.Test
 import java.nio.charset.Charset
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
@@ -19,6 +21,11 @@ import kotlin.test.assertTrue
  */
 class ParserGuardsTest {
     private val baseUrl = "https://example.com/feed.xml"
+
+    private companion object {
+        /** Okio reads through one 8 KiB segment at a time: the bounded read may overshoot the cap by one. */
+        const val SEGMENT = 8 * 1024L
+    }
 
     private fun parse(bytes: ByteArray): ParseResult =
         XmlPullFeedParser.discovered().parse({ Buffer().write(bytes) }, null, baseUrl)
@@ -126,6 +133,53 @@ class ParserGuardsTest {
         val body = "<rss version=\"2.0\"><channel><title>Enc</title></channel></rss>"
         val bytes = declaration.toByteArray(Charsets.US_ASCII) + body.toByteArray(Charsets.UTF_16LE)
         assertEquals("Enc", assertIs<ParseResult.Ok>(parse(bytes)).feed.title)
+    }
+
+    /**
+     * `maxDocumentBytes` is enforced incrementally during the read: a source that never ends must
+     * fail `HOSTILE` after delivering only about the cap — without the bound, `readByteArray()`
+     * drains it until the heap dies.
+     */
+    @Test
+    fun endlessSourceFailsBoundedWithoutDraining() {
+        val cap = 64L
+        val parser = XmlPullFeedParser.discovered(ParseLimits(maxDocumentBytes = cap.toInt()))
+        val delivered = AtomicLong()
+        val endless =
+            object : okio.Source {
+                override fun read(
+                    sink: Buffer,
+                    byteCount: Long,
+                ): Long {
+                    delivered.addAndGet(byteCount)
+                    sink.write(ByteArray(byteCount.toInt()) { 'x'.code.toByte() })
+                    return byteCount
+                }
+
+                override fun timeout(): okio.Timeout = okio.Timeout.NONE
+
+                override fun close() {}
+            }
+        val result = parser.parse({ endless }, null, baseUrl)
+        assertEquals(ParseFailure.HOSTILE, assertIs<ParseResult.Failed>(result).reason)
+        // One segment's worth past the cap at most — never the whole stream.
+        assertTrue(delivered.get() <= cap + SEGMENT, "source delivered ${delivered.get()} bytes")
+    }
+
+    /** A finite document over the cap fails the same way; exactly the cap still reaches the parser. */
+    @Test
+    fun documentOverMaxBytesFailsHostile() {
+        val parser = XmlPullFeedParser.discovered(ParseLimits(maxDocumentBytes = 64))
+        val oversized = ByteArray(65) { 'x'.code.toByte() }
+        assertEquals(
+            ParseFailure.HOSTILE,
+            assertIs<ParseResult.Failed>(parser.parse({ Buffer().write(oversized) }, null, baseUrl)).reason,
+        )
+        // Exactly at the cap the read succeeds and the document reaches the parser — here it parses.
+        val exact = "<rss version=\"2.0\"><channel><title>abcde</title></channel></rss>"
+        assertEquals(64, exact.encodeToByteArray().size)
+        val result = parser.parse({ Buffer().write(exact.encodeToByteArray()) }, null, baseUrl)
+        assertIs<ParseResult.Ok>(result)
     }
 
     /**

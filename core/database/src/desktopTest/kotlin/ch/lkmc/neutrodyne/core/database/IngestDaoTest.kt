@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.database
 
+import androidx.room3.useWriterConnection
 import ch.lkmc.neutrodyne.core.model.EpisodeType
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
@@ -307,7 +308,8 @@ class IngestDaoTest {
                 var due = db.podcastDao().dueForRefresh(dueBefore = 0, scopeAll = true).map { it.id }
                 assertEquals(listOf(a), due, "forceDue must only touch the requested ids")
 
-                db.podcastDao().forceDue(scopeAll = true)
+                // scopeAll ignores the id list entirely — one full-table statement.
+                db.podcastDao().forceDue(scopeAll = true, ids = listOf(a))
                 due =
                     db
                         .podcastDao()
@@ -373,6 +375,65 @@ class IngestDaoTest {
                 db.ingestDao().setInFeed(listOf(ids[0], ids[2]), inFeed = false)
                 val rows = db.ingestDao().existing(podcastId).sortedBy { it.id }
                 assertEquals(listOf(false, true, false), rows.map { it.inFeed })
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun replaceChildrenDeduplicatesTranscriptUrlsInsteadOfFailingTheBatch() =
+        runTest {
+            // Real feeds repeat a transcript URL across type/language variants; the parser emits
+            // one row per element verbatim, so an ABORT insert would fail the whole episode.
+            val db = TestDb.inMemory()
+            try {
+                val podcastId = db.podcastDao().insertPodcast(podcastEntity())
+                val episodeId =
+                    db
+                        .ingestDao()
+                        .insertEpisodes(
+                            listOf(episodeEntity(podcastId = podcastId, identityKey = "g:1")),
+                        ).single()
+
+                db.ingestDao().replaceChildren(
+                    episodeId = episodeId,
+                    description = null,
+                    transcripts =
+                        listOf(
+                            EpisodeTranscriptEntity(
+                                episodeId,
+                                "https://tr",
+                                "text/vtt",
+                                language = "en",
+                            ),
+                            EpisodeTranscriptEntity(
+                                episodeId,
+                                "https://tr",
+                                "application/srt",
+                                language = "de",
+                            ),
+                        ),
+                    altEnclosures = emptyList(),
+                    persons = emptyList(),
+                    funding = emptyList(),
+                    pscChapters = emptyList(),
+                )
+
+                db.useWriterConnection { conn ->
+                    assertEquals(
+                        1,
+                        conn.longQuery(
+                            "SELECT COUNT(*) FROM episode_transcript WHERE episodeId = $episodeId",
+                        ),
+                    )
+                    // The last element in document order wins the URL.
+                    assertEquals(
+                        "application/srt",
+                        conn.stringQuery(
+                            "SELECT type FROM episode_transcript WHERE episodeId = $episodeId",
+                        ),
+                    )
+                }
             } finally {
                 db.close()
             }

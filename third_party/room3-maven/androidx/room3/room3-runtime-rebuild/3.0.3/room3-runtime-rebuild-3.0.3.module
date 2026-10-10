@@ -1,0 +1,204 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "androidx.room3",
+    "module": "room3-runtime-rebuild",
+    "version": "3.0.3",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "metadataApiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.jvm.environment": "non-jvm",
+        "org.gradle.usage": "kotlin-metadata",
+        "org.jetbrains.kotlin.platform.type": "common"
+      },
+      "dependencies": [
+        {
+          "group": "androidx.annotation",
+          "module": "annotation",
+          "version": {
+            "requires": "1.9.1"
+          }
+        },
+        {
+          "group": "androidx.collection",
+          "module": "collection",
+          "version": {
+            "requires": "1.5.0"
+          }
+        },
+        {
+          "group": "androidx.room3",
+          "module": "room3-common",
+          "version": {
+            "requires": "3.0.3"
+          }
+        },
+        {
+          "group": "androidx.sqlite",
+          "module": "sqlite",
+          "version": {
+            "requires": "2.7.1"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlinx",
+          "module": "kotlinx-coroutines-core",
+          "version": {
+            "requires": "1.9.0"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.20"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "room3-runtime-rebuild-metadata-3.0.3.jar",
+          "url": "room3-runtime-rebuild-3.0.3.jar",
+          "size": 4933,
+          "sha512": "632dc9706f36a117b395cf17fd5b58fc3acea4bf7abbb433de8db449a83cde6f5267930e3bf165c12b69a6eb4988edfec01ca5f6ade32cb808de4d2b4ed7356f",
+          "sha256": "4879b52179fb7a3dbb35ecc71af9da564d8a0444ae99c32a7d95ed64ba502979",
+          "sha1": "4196db6e3638744bb134e9e34d88c8a36e107dac",
+          "md5": "54e19bab1e746f4391914df1c195e453"
+        }
+      ]
+    },
+    {
+      "name": "metadataSourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.jvm.environment": "non-jvm",
+        "org.gradle.usage": "kotlin-runtime",
+        "org.jetbrains.kotlin.platform.type": "common"
+      },
+      "files": [
+        {
+          "name": "room3-runtime-rebuild-kotlin-3.0.3-sources.jar",
+          "url": "room3-runtime-rebuild-3.0.3-sources.jar",
+          "size": 92961,
+          "sha512": "95a6213f02623ca2183ba85ed12cc228e7d13e4706a17138c13ee5b3d8df15edf767a8b1d3401fba9f3434a8028ce71cadb5d28a25573c281187b9b96ecdfd9b",
+          "sha256": "2899ad7322ab70eaa9cb6b6e37f446325b6ce1f416acbd546ad3bfd35b1f5a07",
+          "sha1": "d55a9911443fed05eef693735485e96cff7b08a8",
+          "md5": "c70cc4e0bc7c9c4c3f8bd4069f14a6eb"
+        }
+      ]
+    },
+    {
+      "name": "androidApiElements-published",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.jvm.environment": "android",
+        "org.gradle.libraryelements": "aar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "androidJvm"
+      },
+      "available-at": {
+        "url": "../../room3-runtime-rebuild-android/3.0.3/room3-runtime-rebuild-android-3.0.3.module",
+        "group": "androidx.room3",
+        "module": "room3-runtime-rebuild-android",
+        "version": "3.0.3"
+      }
+    },
+    {
+      "name": "androidRuntimeElements-published",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.jvm.environment": "android",
+        "org.gradle.libraryelements": "aar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "androidJvm"
+      },
+      "available-at": {
+        "url": "../../room3-runtime-rebuild-android/3.0.3/room3-runtime-rebuild-android-3.0.3.module",
+        "group": "androidx.room3",
+        "module": "room3-runtime-rebuild-android",
+        "version": "3.0.3"
+      }
+    },
+    {
+      "name": "androidSourcesElements-published",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.jvm.environment": "android",
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "androidJvm"
+      },
+      "available-at": {
+        "url": "../../room3-runtime-rebuild-android/3.0.3/room3-runtime-rebuild-android-3.0.3.module",
+        "group": "androidx.room3",
+        "module": "room3-runtime-rebuild-android",
+        "version": "3.0.3"
+      }
+    },
+    {
+      "name": "jvmApiElements-published",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "available-at": {
+        "url": "../../room3-runtime-rebuild-jvm/3.0.3/room3-runtime-rebuild-jvm-3.0.3.module",
+        "group": "androidx.room3",
+        "module": "room3-runtime-rebuild-jvm",
+        "version": "3.0.3"
+      }
+    },
+    {
+      "name": "jvmRuntimeElements-published",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "available-at": {
+        "url": "../../room3-runtime-rebuild-jvm/3.0.3/room3-runtime-rebuild-jvm-3.0.3.module",
+        "group": "androidx.room3",
+        "module": "room3-runtime-rebuild-jvm",
+        "version": "3.0.3"
+      }
+    },
+    {
+      "name": "jvmSourcesElements-published",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "available-at": {
+        "url": "../../room3-runtime-rebuild-jvm/3.0.3/room3-runtime-rebuild-jvm-3.0.3.module",
+        "group": "androidx.room3",
+        "module": "room3-runtime-rebuild-jvm",
+        "version": "3.0.3"
+      }
+    }
+  ]
+}

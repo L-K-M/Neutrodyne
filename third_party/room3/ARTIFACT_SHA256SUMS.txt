@@ -1,0 +1,6 @@
+2899ad7322ab70eaa9cb6b6e37f446325b6ce1f416acbd546ad3bfd35b1f5a07  ./androidx/room3/room3-runtime-rebuild/3.0.3/room3-runtime-rebuild-3.0.3-sources.jar
+4879b52179fb7a3dbb35ecc71af9da564d8a0444ae99c32a7d95ed64ba502979  ./androidx/room3/room3-runtime-rebuild/3.0.3/room3-runtime-rebuild-3.0.3.jar
+4fd3fe011e5154b589ad81582219a492196f2b22b207680f5f5072fa0f967ff8  ./androidx/room3/room3-runtime-rebuild-android/3.0.3/room3-runtime-rebuild-android-3.0.3-sources.jar
+5d1b63c9e9d04be8b127d60cfcdfd560033c0a8017da520d6d27f2b594250080  ./androidx/room3/room3-runtime-rebuild-android/3.0.3/room3-runtime-rebuild-android-3.0.3.aar
+9a07a08861421eebad7e0305e5c161506b1f97d1f05eb7978a6cdf317bca2c81  ./androidx/room3/room3-runtime-rebuild-jvm/3.0.3/room3-runtime-rebuild-jvm-3.0.3.jar
+d777f5af0966954800661be540390fc8cc5894bf9c57632edf0e7ec2788d0e19  ./androidx/room3/room3-runtime-rebuild-jvm/3.0.3/room3-runtime-rebuild-jvm-3.0.3-sources.jar

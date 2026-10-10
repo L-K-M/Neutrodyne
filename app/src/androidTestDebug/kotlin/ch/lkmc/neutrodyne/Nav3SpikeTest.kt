@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne
 
+import android.view.KeyEvent
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.Espresso.pressBack
+import androidx.test.espresso.action.ViewActions.pressKey
+import androidx.test.espresso.matcher.RootMatchers.isDialog
+import androidx.test.espresso.matcher.ViewMatchers.isRoot
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import com.google.common.truth.Truth.assertThat
@@ -131,7 +136,12 @@ class Nav3SpikeTest {
         compose.onNodeWithText("export-dialog").assertIsDisplayed()
         compose.onNodeWithText("feeds-content").assertIsDisplayed()
 
-        pressBack()
+        // A modal dialog owns focus; Espresso's default root can retain the unfocused activity
+        // after the underlying-content assertion. Select the dialog and inject real system back.
+        compose.waitUntil(timeoutMillis = 5_000) {
+            compose.runOnIdle { !compose.activity.hasWindowFocus() }
+        }
+        onView(isRoot()).inRoot(isDialog()).perform(pressKey(KeyEvent.KEYCODE_BACK))
         compose.waitForIdle()
         compose.onNodeWithText("export-dialog").assertDoesNotExist()
         compose.onNodeWithText("feeds-content").assertIsDisplayed()

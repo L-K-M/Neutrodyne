@@ -35,7 +35,16 @@ private const val DEFAULT_HTTPS_PORT = "443"
  * throws; parts that are missing are null or empty.
  */
 internal fun splitLenient(raw: String): UrlParts {
-    val withoutFragment = raw.trim().substringBefore('#')
+    // WHATWG removes ASCII tab/CR/LF anywhere in the URL before parsing; match that so a feed
+    // URL copied out of HTML with a stray control still gets an identity. The `any` scan keeps
+    // the common case allocation-free.
+    val clean =
+        if (raw.any { it == '\t' || it == '\n' || it == '\r' }) {
+            raw.filterNot { it == '\t' || it == '\n' || it == '\r' }
+        } else {
+            raw
+        }
+    val withoutFragment = clean.trim().substringBefore('#')
 
     val schemeMatch = schemePrefix.find(withoutFragment)
     val scheme = schemeMatch?.groupValues?.get(1)?.lowercase()
@@ -71,15 +80,15 @@ internal fun splitLenient(raw: String): UrlParts {
         if (hostPort.isNotEmpty()) {
             if (hostPort.startsWith("[")) {
                 val close = hostPort.indexOf(']')
-                host =
-                    if (close > 0) {
-                        hostPort.substring(0, close + 1)
-                    } else {
-                        null
-                    }
-                if (close in 0 until hostPort.length - 1 && hostPort[close + 1] == ':') {
-                    port = hostPort.substring(close + 2).takeIf { it.isNotEmpty() }
+                if (close > 0) {
+                    // After `]` only `:port` may follow; other residue is invalid (the JDK's `URI`
+                    // rejects it) and must not silently drop into the parts.
+                    val afterBracket = hostPort.substring(close + 1)
+                    val validPortFollows = afterBracket.isEmpty() || afterBracket.startsWith(':')
+                    host = if (validPortFollows) hostPort.substring(0, close + 1) else null
+                    port = if (validPortFollows) afterBracket.substringAfter(':').takeIf { it.isNotEmpty() } else null
                 } else {
+                    host = null
                     port = null
                 }
             } else {

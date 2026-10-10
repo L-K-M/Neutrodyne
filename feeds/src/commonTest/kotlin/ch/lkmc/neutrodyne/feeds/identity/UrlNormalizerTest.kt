@@ -84,13 +84,23 @@ class UrlNormalizerTest {
      */
     @Test
     fun dotSegmentRemovalIsLinear() {
-        UrlNormalizer.forIdentity(dotDoc(1_000)) // warm-up outside the measurements
+        // Warm up at the measured size so the small run is not the first compile-candidate.
+        repeat(3) { UrlNormalizer.forIdentity(dotDoc(DOT_SMALL * 4)) }
         // Best-of-3 per size: a single noisy run (GC, shared CI CPU) must not fail the ratio.
-        val small = (1..3).minOf { measureTime { UrlNormalizer.forIdentity(dotDoc(DOT_SMALL)) } }
+        // The small run asserts too: its result must be computed, not optimised away. Build the
+        // inputs outside the timed block: allocating the 480 KB document is not normalization work.
+        val smallDoc = dotDoc(DOT_SMALL)
+        val largeDoc = dotDoc(DOT_SMALL * 4)
+        val small =
+            (1..3).minOf {
+                measureTime {
+                    assertEquals("example.com/x", UrlNormalizer.forIdentity(smallDoc))
+                }
+            }
         val large =
             (1..3).minOf {
                 measureTime {
-                    assertEquals("example.com/x", UrlNormalizer.forIdentity(dotDoc(DOT_SMALL * 4)))
+                    assertEquals("example.com/x", UrlNormalizer.forIdentity(largeDoc))
                 }
             }
         assertTrue(
@@ -164,6 +174,80 @@ class UrlNormalizerTest {
     }
 
     @Test
+    fun ipv6BracketResidueIsRejected() {
+        // Anything after `]` that is not `:port` is invalid — the JDK's `URI` throws on the same
+        // input — so the residue must not be silently dropped into an identity.
+        assertNull(UrlNormalizer.forIdentity("http://[2001:db8::1]junk/feed"))
+        assertNull(UrlNormalizer.forIdentity("http://[2001:db8::1]x:8080/feed"))
+        assertNull(UrlNormalizer.origin("http://[2001:db8::1]junk"))
+    }
+
+    @Test
+    fun ipv6LiteralHostsAreValidatedAndCanonicalised() {
+        // Equivalent spellings share one identity: lowercase, leading zeros suppressed, the longest
+        // leftmost zero run compressed to `::` (RFC 5952), an embedded IPv4 tail emitted as two hex
+        // groups like the URL spec's IPv6 serialiser.
+        assertEquals("[::1]/f", UrlNormalizer.forIdentity("http://[::1]/f"))
+        assertEquals("[::1]/f", UrlNormalizer.forIdentity("http://[0:0:0:0:0:0:0:1]/f"))
+        assertEquals("[::1]/f", UrlNormalizer.forIdentity("http://[0:0::0:1]/f"))
+        assertEquals("[2001:db8::1]/f", UrlNormalizer.forIdentity("http://[2001:0DB8:0000:0000:0:0:0:1]/f"))
+        assertEquals("[::ffff:808:808]/f", UrlNormalizer.forIdentity("http://[::ffff:8.8.8.8]/f"))
+        // Tied zero runs compress the leftmost (2001:db8:0:0:1:0:0:1 → 2001:db8::1:0:0:1).
+        assertEquals("[2001:db8::1:0:0:1]/f", UrlNormalizer.forIdentity("http://[2001:0db8:0:0:1:0:0:1]/f"))
+        // The zone id keeps its text and case (RFC 6874); the marker canonicalises to `%25`.
+        assertEquals("[fe80::1%25eth0]/f", UrlNormalizer.forIdentity("http://[fe80::1%25eth0]/f"))
+        assertEquals("[fe80::1%25Eth0]/f", UrlNormalizer.forIdentity("http://[fe80::1%25Eth0]/f"))
+        assertEquals("[fe80::1%25en1.10]/f", UrlNormalizer.forIdentity("http://[fe80::1%25en1.10]/f"))
+    }
+
+    @Test
+    fun malformedIpv6LiteralHostsAreRejected() {
+        // Full literal validation, not a character allowlist: `:::` and friends must not parse.
+        assertNull(UrlNormalizer.forIdentity("http://[]/f"))
+        assertNull(UrlNormalizer.forIdentity("http://[garbage]/f"))
+        assertNull(UrlNormalizer.forIdentity("http://[:::]/f"))
+        assertNull(UrlNormalizer.forIdentity("http://[v1.x]/f")) // IPvFuture is not supported
+        assertNull(UrlNormalizer.forIdentity("http://[1:2:3:4:5:6:7:8:9]/f")) // nine groups
+        assertNull(UrlNormalizer.forIdentity("http://[1:2:3:4:5:6:7]/f")) // seven groups, no `::`
+        assertNull(UrlNormalizer.forIdentity("http://[1::2::3]/f")) // two `::`
+        assertNull(UrlNormalizer.forIdentity("http://[12345::]/f")) // group over 4 hex digits
+        assertNull(UrlNormalizer.forIdentity("http://[::ffff:256.1.1.1]/f")) // octet > 255
+        assertNull(UrlNormalizer.forIdentity("http://[::ffff:01.2.3.4]/f")) // leading zero octet
+        assertNull(UrlNormalizer.forIdentity("http://[1.2.3.4::]/f")) // IPv4 must be the tail
+        assertNull(UrlNormalizer.forIdentity("http://[fe80::1%]/f")) // empty zone
+        assertNull(UrlNormalizer.forIdentity("http://[fe80::1%25]/f")) // `%25` marker, empty zone
+        assertNull(UrlNormalizer.forIdentity("http://[fe80::1%25e th0]/f")) // space in zone
+        assertNull(UrlNormalizer.origin("http://[garbage]"))
+    }
+
+    @Test
+    fun asciiTabCrLfAreStrippedBeforeSplitting() {
+        // WHATWG removes ASCII tab/CR/LF anywhere in the input before parsing, so URLs other
+        // clients fetch (stray tabs occur in pasted HTML) still get an identity here.
+        assertEquals("example.com/f", UrlNormalizer.forIdentity("http://ex\tample.com/f"))
+        assertEquals("example.com/f", UrlNormalizer.forIdentity("http://example.com/f\t\r\n"))
+        assertEquals("example.com/f?a=b", UrlNormalizer.forIdentity("http://example.com/f\n?a=b"))
+        assertEquals("example.com/f", UrlNormalizer.forIdentity("ht\ntp://example.com/f"))
+    }
+
+    @Test
+    fun underscoreHostLabelsAreKept() {
+        // `java.net.IDN.toASCII` (default flags) passes `_` labels through; OkHttp fetches such CDN
+        // hosts, so they must keep an identity rather than failing conversion.
+        assertEquals("ex_ample.example.com/f", UrlNormalizer.forIdentity("http://ex_ample.example.com/f"))
+    }
+
+    @Test
+    fun outOfRangePortsAreRejected() {
+        // Unfetchable URLs get no identity key: ports are 0..65535 (the JDK's `URI` accepts 65536 —
+        // the splitter must not). Digit strings beyond Long never reach the range check.
+        assertNull(UrlNormalizer.forIdentity("https://example.com:65536/x"))
+        assertNull(UrlNormalizer.forIdentity("https://example.com:99999999999999999999/x"))
+        assertNull(UrlNormalizer.origin("https://example.com:70000"))
+        assertEquals("example.com:65535/x", UrlNormalizer.forIdentity("https://example.com:65535/x"))
+    }
+
+    @Test
     fun originForm() {
         assertEquals("https://example.com", UrlNormalizer.origin("https://example.com:443/feed?a=1"))
         assertEquals("http://example.com:8080", UrlNormalizer.origin("http://example.com:8080/feed"))
@@ -176,6 +260,16 @@ class UrlNormalizerTest {
         assertEquals("https://feeds.example.com/show", url)
         assertEquals("user@x", credentials?.username)
         assertEquals("p:ss", credentials?.password)
+    }
+
+    @Test
+    fun splitUserInfoPreservesRawUnicodeNextToEscapes() {
+        // Percent escapes must not replace raw Unicode in Basic-auth credentials.
+        val (url, credentials) =
+            UrlNormalizer.splitUserInfo("https://user\uD83D\uDD12%40x:p\uD83D\uDD12%3Ass@feeds.example.com/show")
+        assertEquals("https://feeds.example.com/show", url)
+        assertEquals("user\uD83D\uDD12@x", credentials?.username)
+        assertEquals("p\uD83D\uDD12:ss", credentials?.password)
     }
 
     @Test
@@ -225,6 +319,24 @@ class UrlNormalizerTest {
     }
 
     @Test
+    fun splitUserInfoCredentialsWithoutHostAreNotReturned() {
+        // Credentials followed by no host must not surface at the add/persist boundary: the URL is
+        // returned unchanged and no `UrlUserInfo` — so no secret can be stored against an origin
+        // that does not exist.
+        assertEquals("https://user:pass@/feed" to null, UrlNormalizer.splitUserInfo("https://user:pass@/feed"))
+        assertEquals("https://user:pass@" to null, UrlNormalizer.splitUserInfo("https://user:pass@"))
+        assertEquals(
+            "https://user:pass@:8080/feed" to null,
+            UrlNormalizer.splitUserInfo("https://user:pass@:8080/feed"),
+        )
+        // A bracketed host with a port is a real host — credentials are still split.
+        val (url, credentials) = UrlNormalizer.splitUserInfo("https://user:pass@[::1]:80/feed")
+        assertEquals("https://[::1]:80/feed", url)
+        assertEquals("user", credentials?.username)
+        assertEquals("pass", credentials?.password)
+    }
+
+    @Test
     fun splitUserInfoBackslashKeepsGenuineCredentials() {
         // Credentials before the first `\` are real: OkHttp contacts evil.com with user:pass.
         val (url, credentials) =
@@ -252,13 +364,31 @@ class UrlNormalizerTest {
         // A Basic-auth token can be carried as the username with an empty password.
         val tokenUser = UrlUserInfo("xKd93lskSKEa1zl4dQeF1", "")
         assertFalse("xKd93lskSKEa1zl4dQeF1" in tokenUser.toString())
+        // The mirror case — empty username, secret password — masks too.
+        val emptyUser = UrlUserInfo("", "secret")
+        assertFalse("secret" in emptyUser.toString())
     }
 
     @Test
     fun unescapedSpacesSurvive() {
-        // java.net.URI would throw here; the splitter is lenient.
-        assertEquals("example.com/a b", UrlNormalizer.forIdentity("https://example.com/a b"))
-        assertTrue(UrlNormalizer.forIdentity("https://example.com/a b")!!.startsWith("example.com/"))
+        // java.net.URI would throw here; the splitter is lenient. The fetcher percent-encodes a
+        // raw space on the wire, so the identity encodes it too — matching `a%20b`, not a second
+        // identity for the same resource.
+        assertEquals("example.com/a%20b", UrlNormalizer.forIdentity("https://example.com/a b"))
+        assertEquals(
+            UrlNormalizer.forIdentity("https://example.com/a%20b"),
+            UrlNormalizer.forIdentity("https://example.com/a b"),
+        )
+    }
+
+    @Test
+    fun emptyPortIsDefaultAndGarbagePortIsRejected() {
+        // RFC 3986 permits an empty port (= default); the JDK and OkHttp fetch `host:` fine.
+        assertEquals("example.com/feed", UrlNormalizer.forIdentity("http://example.com:/feed"))
+        // …but a second colon or a non-numeric port is unfetchable: no identity.
+        assertNull(UrlNormalizer.forIdentity("http://a.com:1:2/x"))
+        assertNull(UrlNormalizer.forIdentity("http://:8080/x"))
+        assertNull(UrlNormalizer.forIdentity("http://::1/x"))
     }
 
     private fun dotDoc(count: Int): String = "https://example.com/" + "../".repeat(count) + "x"

@@ -28,6 +28,9 @@ class DesktopDatabaseFactory(
     override fun exists(): Boolean = Files.exists(file)
 
     override fun quarantine(stamp: String) {
+        // The stamp becomes a directory name and is read back from `quarantine-pending`;
+        // an epoch-millis shape keeps it inside the quarantine directory.
+        require(stamp.toLongOrNull() != null) { "quarantine stamp must be epoch millis: $stamp" }
         val dir = quarantineDir.resolve(stamp)
         Files.createDirectories(dir)
         // Sidecars first, the main file last: a mid-sequence failure leaves the main file in
@@ -51,11 +54,14 @@ class DesktopDatabaseFactory(
         val dirsToCheck =
             children(quarantineDir)
                 .filter { Files.isDirectory(it) && it.fileName.toString() != pending }
+        // Numeric order, not lexicographic ("abc" sorts above "1700000000000"): the stamp is
+        // the quarantine's epoch-millis name, with mtime as the fallback for other names.
         val keep =
             dirsToCheck
                 .filter { isFresh(it, now) }
-                .sortedByDescending { it.fileName.toString() }
-                .take(1)
+                .sortedByDescending {
+                    it.fileName.toString().toLongOrNull() ?: Files.getLastModifiedTime(it).toMillis()
+                }.take(1)
                 .toSet()
         dirsToCheck.filter { it !in keep }.forEach { it.toFile().deleteRecursively() }
     }
@@ -68,7 +74,9 @@ class DesktopDatabaseFactory(
         set(value) {
             if (value) {
                 Files.createDirectories(markerFile.parent)
-                Files.createFile(markerFile)
+                // Idempotent: re-setting an existing marker must not fail — the marker's whole
+                // job is surviving a crash so the next launch resumes the same quarantine.
+                Files.write(markerFile, ByteArray(0))
             } else {
                 Files.deleteIfExists(markerFile)
             }
