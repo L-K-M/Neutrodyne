@@ -143,7 +143,9 @@ class DatabaseOpenerTest {
     fun quarantineKeepsOnlyTheNewestCopyInsideTheWindow() =
         runTest {
             dirs.ensureCreated()
-            // First recovery at t0.
+            // First recovery at t0: a corrupt file forces a real first quarantine copy, so the
+            // 14-day pruning below actually runs against two copies instead of one.
+            Files.write(dir.resolve(NeutrodyneDatabase.FILE_NAME), "broken".encodeToByteArray())
             val first = opener(clock = TestClock(nowMs = T0))
             first.awaitOpen()
             first.requireDatabase().close()
@@ -817,6 +819,53 @@ class DatabaseOpenerTest {
                         assertEquals(1L, stmt.getLong(0), "the preserved copy is the original library")
                     }
                 }
+            o.requireDatabase().close()
+        }
+
+    @Test
+    fun aCancelledOpenHandsWaitersAnOpenFailure() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+
+            // Same driver gate as the no-quarantine-on-cancel test: the attempt is cancelled
+            // while Room's open is in flight, so the shared deferred resolves with the failure.
+            val insideForceOpen = CompletableDeferred<Unit>()
+            val releaseForceOpen = CompletableDeferred<Unit>()
+            var calls = 0
+            val gated =
+                object : SQLiteDriver by BundledSQLiteDriver() {
+                    private val inner = BundledSQLiteDriver()
+
+                    override fun open(fileName: String): SQLiteConnection {
+                        calls++
+                        if (calls == 2) {
+                            insideForceOpen.complete(Unit)
+                            runBlocking { releaseForceOpen.await() }
+                        }
+                        return inner.open(fileName)
+                    }
+                }
+            val o = opener(d = gated)
+            val attempt = async { o.awaitOpen() }
+            insideForceOpen.await()
+            attempt.cancel()
+            releaseForceOpen.complete(Unit)
+
+            // The cancelled caller still gets its own CancellationException.
+            assertIs<CancellationException>(runCatching { attempt.await() }.exceptionOrNull())
+            assertEquals(DatabaseOpenState.Pending, o.openState.value)
+
+            // An independent waiter asked for the database, not for cancellation: the deferred
+            // hands it an actionable open failure with the original cause preserved.
+            val failure = runCatching { o.requireDatabase() }.exceptionOrNull()
+            val error = assertIs<DatabaseOpenException>(failure)
+            assertEquals(DatabaseOpenException.Reason.UNKNOWN, error.reason)
+            assertIs<CancellationException>(error.cause)
+
+            // A failed attempt is never cached: the retry opens the healthy file normally.
+            val result = o.awaitOpen()
+            assertEquals(OpenResult(created = false, recovered = null), result)
             o.requireDatabase().close()
         }
 

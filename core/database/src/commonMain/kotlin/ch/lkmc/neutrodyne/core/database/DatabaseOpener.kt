@@ -121,7 +121,12 @@ class DatabaseOpener(
                     outcome.result
                 } catch (t: Throwable) {
                     if (t is CancellationException) {
-                        deferred.completeExceptionally(t)
+                        // The cancelled caller still receives its own cancellation; the shared
+                        // deferred carries an actionable open failure so later requireDatabase()
+                        // callers never see a foreign CancellationException.
+                        deferred.completeExceptionally(
+                            DatabaseOpenException(DatabaseOpenException.Reason.UNKNOWN, t),
+                        )
                         throw t
                     }
                     val failure = t as? DatabaseOpenException ?: DatabaseOpenException(classify(t), t)
