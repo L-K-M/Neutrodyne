@@ -89,4 +89,14 @@ class TimestampLinkifierTest {
             TimestampLinkifier.linkify("no stamps here"),
         )
     }
+
+    @Test
+    fun timeOfDayLookaheadStopsAtLineBreaks() {
+        // "Am" starting the next paragraph is prose, not a suffix: only horizontal whitespace may
+        // stand between the timestamp and the excluded word.
+        assertEquals(listOf("12:34" to 754_000L), timestamps("12:34\n\nAm Anfang sprechen wir darüber"))
+        // Same-line suffixes still suppress — a space run and NBSP are horizontal whitespace.
+        assertEquals(emptyList(), timestamps("10:30\u00A0am"))
+        assertEquals(emptyList(), timestamps("20:15  Uhr"))
+    }
 }

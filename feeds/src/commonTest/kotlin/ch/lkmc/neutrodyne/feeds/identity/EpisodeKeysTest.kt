@@ -270,4 +270,25 @@ class EpisodeKeysTest {
         val html = episode(description = "<b>Hello</b>", descriptionIsHtml = true)
         assertNotEquals(EpisodeContentHash.of(text), EpisodeContentHash.of(html))
     }
+
+    @Test
+    fun blankGuidNeverKeys() {
+        // A trimmed-blank guid (or a blank enclosure URL) must fall through, not collide every
+        // blank-GUID episode in every feed onto one `g:` key.
+        val key = EpisodeKeys.primary(episode(guid = "   ", enclosureUrl = "https://e.example/a.mp3"))
+        assertEquals("u:e.example/a.mp3", key)
+        assertTrue(EpisodeKeys.primary(episode(guid = "  ")).startsWith("h:"))
+    }
+
+    @Test
+    fun fallbacksExcludeThePrimaryItself() {
+        // For a t-primary item (title+date, no enclosure) the fallbacks must not repeat `t:` —
+        // and `l:`/`h:` never appear as fallbacks at all.
+        val item = episode(title = "Episode 42", pubDate = 1791030896000L, link = "https://e.example/p")
+        val primary = EpisodeKeys.primary(item)
+        assertTrue(primary.startsWith("t:"))
+        val fallbacks = EpisodeKeys.fallbacks(item)
+        assertTrue(fallbacks.none { it == primary })
+        assertTrue(fallbacks.all { it.startsWith("u:") || it.startsWith("t:") })
+    }
 }

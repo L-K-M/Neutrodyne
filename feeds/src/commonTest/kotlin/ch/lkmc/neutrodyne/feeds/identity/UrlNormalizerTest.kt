@@ -87,17 +87,20 @@ class UrlNormalizerTest {
         // Warm up at the measured size so the small run is not the first compile-candidate.
         repeat(3) { UrlNormalizer.forIdentity(dotDoc(DOT_SMALL * 4)) }
         // Best-of-3 per size: a single noisy run (GC, shared CI CPU) must not fail the ratio.
-        // The small run asserts too: its result must be computed, not optimised away.
+        // The small run asserts too: its result must be computed, not optimised away. Build the
+        // inputs outside the timed block: allocating the 480 KB document is not normalization work.
+        val smallDoc = dotDoc(DOT_SMALL)
+        val largeDoc = dotDoc(DOT_SMALL * 4)
         val small =
             (1..3).minOf {
                 measureTime {
-                    assertEquals("example.com/x", UrlNormalizer.forIdentity(dotDoc(DOT_SMALL)))
+                    assertEquals("example.com/x", UrlNormalizer.forIdentity(smallDoc))
                 }
             }
         val large =
             (1..3).minOf {
                 measureTime {
-                    assertEquals("example.com/x", UrlNormalizer.forIdentity(dotDoc(DOT_SMALL * 4)))
+                    assertEquals("example.com/x", UrlNormalizer.forIdentity(largeDoc))
                 }
             }
         assertTrue(
@@ -361,13 +364,31 @@ class UrlNormalizerTest {
         // A Basic-auth token can be carried as the username with an empty password.
         val tokenUser = UrlUserInfo("xKd93lskSKEa1zl4dQeF1", "")
         assertFalse("xKd93lskSKEa1zl4dQeF1" in tokenUser.toString())
+        // The mirror case — empty username, secret password — masks too.
+        val emptyUser = UrlUserInfo("", "secret")
+        assertFalse("secret" in emptyUser.toString())
     }
 
     @Test
     fun unescapedSpacesSurvive() {
-        // java.net.URI would throw here; the splitter is lenient.
-        assertEquals("example.com/a b", UrlNormalizer.forIdentity("https://example.com/a b"))
-        assertTrue(UrlNormalizer.forIdentity("https://example.com/a b")!!.startsWith("example.com/"))
+        // java.net.URI would throw here; the splitter is lenient. The fetcher percent-encodes a
+        // raw space on the wire, so the identity encodes it too — matching `a%20b`, not a second
+        // identity for the same resource.
+        assertEquals("example.com/a%20b", UrlNormalizer.forIdentity("https://example.com/a b"))
+        assertEquals(
+            UrlNormalizer.forIdentity("https://example.com/a%20b"),
+            UrlNormalizer.forIdentity("https://example.com/a b"),
+        )
+    }
+
+    @Test
+    fun emptyPortIsDefaultAndGarbagePortIsRejected() {
+        // RFC 3986 permits an empty port (= default); the JDK and OkHttp fetch `host:` fine.
+        assertEquals("example.com/feed", UrlNormalizer.forIdentity("http://example.com:/feed"))
+        // …but a second colon or a non-numeric port is unfetchable: no identity.
+        assertNull(UrlNormalizer.forIdentity("http://a.com:1:2/x"))
+        assertNull(UrlNormalizer.forIdentity("http://:8080/x"))
+        assertNull(UrlNormalizer.forIdentity("http://::1/x"))
     }
 
     private fun dotDoc(count: Int): String = "https://example.com/" + "../".repeat(count) + "x"
