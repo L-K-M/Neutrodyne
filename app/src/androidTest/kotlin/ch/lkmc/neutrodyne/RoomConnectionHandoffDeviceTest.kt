@@ -53,6 +53,12 @@ import java.util.concurrent.atomic.AtomicInteger
  * counts closes and `openDbFds` counts process descriptors still held under the fixture path.
  * Runs under the app's managed-device groups (`api26DebugAndroidTest`/`api36DebugAndroidTest`,
  * the `run-instrumented` label).
+ *
+ * The app's own startup may still create `databases/neutrodyne.db*` during a test —
+ * `NeutrodyneApplication` launches its initializers on a fresh process, and the
+ * `clearPackageData` instrumentation flag wipes app data before each test. That independent
+ * write is not fixture misrouting, so isolation is proven by recording every target the
+ * driver was asked to open, never by requiring the app's database dir to stay untouched.
  */
 @RunWith(AndroidJUnit4::class)
 class RoomConnectionHandoffDeviceTest {
@@ -69,7 +75,6 @@ class RoomConnectionHandoffDeviceTest {
         runBlocking {
             val scope = CoroutineScope(Job() + Dispatchers.Default)
             val fixtureDir = fixtureDir("writer")
-            val sentinel = AppDbSentinel(appDatabasesDir())
             val insideOpen = CompletableDeferred<Unit>()
             val releaseOpen = CompletableDeferred<Unit>()
             val seen = CopyOnWriteArrayList<SeenConnection>()
@@ -125,7 +130,7 @@ class RoomConnectionHandoffDeviceTest {
                     "the database file must actually live inside the test fixture",
                     File(fixtureDir, NeutrodyneDatabase.FILE_NAME).exists(),
                 )
-                sentinel.assertUntouched()
+                assertOpensStayedInFixture(driver, fixtureDir)
             } finally {
                 cleanup(attempt, releaseOpen, seen, db, scope, fixtureDir)
             }
@@ -141,7 +146,6 @@ class RoomConnectionHandoffDeviceTest {
         runBlocking {
             val scope = CoroutineScope(Job() + Dispatchers.Default)
             val fixtureDir = fixtureDir("reader")
-            val sentinel = AppDbSentinel(appDatabasesDir())
             val insideOpen = CompletableDeferred<Unit>()
             val releaseOpen = CompletableDeferred<Unit>()
             val seen = CopyOnWriteArrayList<SeenConnection>()
@@ -193,7 +197,7 @@ class RoomConnectionHandoffDeviceTest {
                     "the database file must actually live inside the test fixture",
                     File(fixtureDir, NeutrodyneDatabase.FILE_NAME).exists(),
                 )
-                sentinel.assertUntouched()
+                assertOpensStayedInFixture(driver, fixtureDir)
             } finally {
                 cleanup(attempt, releaseOpen, seen, db, scope, fixtureDir)
             }
@@ -205,7 +209,6 @@ class RoomConnectionHandoffDeviceTest {
         runBlocking {
             val scope = CoroutineScope(Job() + Dispatchers.Default)
             val fixtureDir = fixtureDir("control")
-            val sentinel = AppDbSentinel(appDatabasesDir())
             val insideOpen = CompletableDeferred<Unit>()
             val releaseOpen = CompletableDeferred<Unit>()
             val seen = CopyOnWriteArrayList<SeenConnection>()
@@ -241,7 +244,7 @@ class RoomConnectionHandoffDeviceTest {
                     "the database file must actually live inside the test fixture",
                     File(fixtureDir, NeutrodyneDatabase.FILE_NAME).exists(),
                 )
-                sentinel.assertUntouched()
+                assertOpensStayedInFixture(driver, fixtureDir)
             } finally {
                 cleanup(attempt, releaseOpen, seen, db, scope, fixtureDir)
             }
@@ -263,6 +266,37 @@ class RoomConnectionHandoffDeviceTest {
                 File(fixtureDir, NeutrodyneDatabase.FILE_NAME).absolutePath,
                 factory.databasePath,
             )
+        } finally {
+            fixtureDir.deleteRecursively()
+        }
+    }
+
+    /**
+     * Guard control: a path outside the fixture must fail before the delegate ever sees it —
+     * a misrouted open can never reach the app's real database file.
+     */
+    @Test
+    fun anOutOfFixtureOpenIsRejectedBeforeDelegating() {
+        val fixtureDir = fixtureDir("misroute")
+        try {
+            val spy = SpyDriver()
+            val driver =
+                GatedDriver(
+                    spy,
+                    fixtureDir.absoluteFile.toPath().normalize(),
+                    gateOnCall = { false },
+                    CompletableDeferred(),
+                    CompletableDeferred(),
+                    CopyOnWriteArrayList(),
+                )
+            val appDbPath = context.getDatabasePath(NeutrodyneDatabase.FILE_NAME).absolutePath
+            val thrown = runCatching { driver.open(appDbPath) }.exceptionOrNull()
+            assertTrue(
+                "an out-of-fixture open must be rejected, got: $thrown",
+                thrown is IllegalArgumentException,
+            )
+            assertEquals("the rejected path must never reach the delegate", 0, spy.openCalls.get())
+            assertEquals("the rejected target is still recorded", listOf(appDbPath), driver.openedPaths)
         } finally {
             fixtureDir.deleteRecursively()
         }
@@ -321,11 +355,26 @@ class RoomConnectionHandoffDeviceTest {
 
     private fun fixtureDir(name: String): File = File(context.cacheDir, "room-handoff-$name").apply { mkdirs() }
 
-    /** The app's real `databases/` dir — read-only, for the sentinel snapshot only. */
-    private fun appDatabasesDir(): File =
-        checkNotNull(context.getDatabasePath(NeutrodyneDatabase.FILE_NAME).parentFile) {
-            "cannot resolve the app databases directory"
+    /**
+     * Every target the driver was asked to open must be the fixture database — nonempty, and
+     * each normalized path equal to `<fixtureDir>/neutrodyne.db`. This replaces watching the
+     * app's `databases/` dir: under `clearPackageData` the app legitimately creates its own
+     * database there during the test, which proved nothing about routing either way.
+     */
+    private fun assertOpensStayedInFixture(
+        driver: GatedDriver,
+        fixtureDir: File,
+    ) {
+        val fixtureDb = File(fixtureDir, NeutrodyneDatabase.FILE_NAME).absoluteFile.toPath().normalize()
+        assertTrue("the driver must have received at least one open", driver.openedPaths.isNotEmpty())
+        driver.openedPaths.forEach { opened ->
+            assertEquals(
+                "every open the driver received must target the fixture database",
+                fixtureDb,
+                File(opened).toPath().normalize(),
+            )
         }
+    }
 
     private fun buildDb(
         driver: SQLiteDriver,
@@ -401,10 +450,15 @@ class RoomConnectionHandoffDeviceTest {
         private val seen: MutableList<SeenConnection>,
     ) : SQLiteDriver {
         private val calls = AtomicInteger()
+
+        /** Every `fileName` passed to [open], including rejected ones, in order of receipt. */
+        val openedPaths = CopyOnWriteArrayList<String>()
+
         override val hasConnectionPool: Boolean
             get() = delegate.hasConnectionPool
 
         override fun open(fileName: String): SQLiteConnection {
+            openedPaths += fileName
             // Gate before any native open: the only legal target is inside the test fixture —
             // anything else means fixture isolation failed and the app's real database would
             // be the one opened.
@@ -420,31 +474,17 @@ class RoomConnectionHandoffDeviceTest {
         }
     }
 
-    /**
-     * Non-destructive proof the fixture kept the test away from the app's real database:
-     * snapshots every `neutrodyne.db*` entry under the real `databases/` dir (name, length,
-     * mtime) and requires the identical snapshot afterwards — so a misrouted open would have
-     * to leave those files byte-identical in every observable dimension to pass.
-     */
-    private class AppDbSentinel(
-        private val databasesDir: File,
-    ) {
-        private val before = snapshot()
+    /** Delegate that proves the path gate rejects before any native open is attempted. */
+    private class SpyDriver : SQLiteDriver {
+        val openCalls = AtomicInteger()
 
-        fun assertUntouched() {
-            assertEquals(
-                "the app's real $databasesDir must stay untouched",
-                before,
-                snapshot(),
-            )
+        override val hasConnectionPool: Boolean
+            get() = false
+
+        override fun open(fileName: String): SQLiteConnection {
+            openCalls.incrementAndGet()
+            throw AssertionError("the spy delegate must never be invoked")
         }
-
-        private fun snapshot(): String =
-            databasesDir
-                .listFiles { file -> file.name.startsWith(NeutrodyneDatabase.FILE_NAME) }
-                ?.sortedBy { it.name }
-                ?.joinToString(";") { "${it.name}:${it.length()}:${it.lastModified()}" }
-                ?: "<absent>"
     }
 
     /**
