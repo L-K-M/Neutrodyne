@@ -65,6 +65,9 @@ class EnclosureTypesTest {
             "application/x-mpegurl",
             EnclosureTypes.effective("application/octet-stream", "https://e.example/a.m3u8?sig=1"),
         )
+        // Plain `.m3u` maps onto the same HLS family as `.m3u8` (an undecorated playlist URL
+        // with no declared type is the common shape).
+        assertEquals("application/x-mpegurl", EnclosureTypes.effective(null, "https://e.example/a.m3u"))
     }
 
     @Test

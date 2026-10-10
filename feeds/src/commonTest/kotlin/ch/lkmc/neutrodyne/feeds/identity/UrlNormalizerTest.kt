@@ -309,6 +309,19 @@ class UrlNormalizerTest {
     }
 
     @Test
+    fun splitUserInfoBareAtYieldsNoCredentials() {
+        // A bare `@` carries no credential text: it strips like real userinfo but nothing is
+        // stored, so an empty "" / "" pair never reaches the credential store.
+        val (url, credentials) = UrlNormalizer.splitUserInfo("https://@feeds.example.com/show")
+        assertEquals("https://feeds.example.com/show", url)
+        assertNull(credentials)
+        // `:` alone after the `@` is a separator without a username — still no credentials.
+        val (colonUrl, colonCredentials) = UrlNormalizer.splitUserInfo("https://:@feeds.example.com/show")
+        assertEquals("https://feeds.example.com/show", colonUrl)
+        assertNull(colonCredentials)
+    }
+
+    @Test
     fun splitUserInfoFragmentEndsTheAuthority() {
         // The `#` ends the authority: text after it is never credentials and never the host.
         val (url, credentials) = UrlNormalizer.splitUserInfo("https://feeds.example.com#contact@example.com")
@@ -408,6 +421,37 @@ class UrlNormalizerTest {
             UrlNormalizer.forIdentity("https://example.com/a%20b"),
             UrlNormalizer.forIdentity("https://example.com/a b"),
         )
+    }
+
+    @Test
+    fun unsafePathCharsEncodeLikeTheirEscapedSpellings() {
+        // Raw non-ASCII and unsafe path chars UTF-8-encode: the fetcher sends %XX, so the raw
+        // and pre-escaped spellings share one identity.
+        assertEquals(
+            "example.com/%C3%9Cbersicht/feed",
+            UrlNormalizer.forIdentity("https://example.com/Übersicht/feed"),
+        )
+        assertEquals(
+            UrlNormalizer.forIdentity("https://example.com/%C3%9Cbersicht/feed"),
+            UrlNormalizer.forIdentity("https://example.com/Übersicht/feed"),
+        )
+        assertEquals("example.com/a%22b", UrlNormalizer.forIdentity("https://example.com/a\"b"))
+        assertEquals("example.com/a%7Cb", UrlNormalizer.forIdentity("https://example.com/a|b"))
+        // pchar stays raw: ':' and '@' and sub-delims are legal in a path segment.
+        assertEquals("example.com/a:b@c", UrlNormalizer.forIdentity("https://example.com/a:b@c"))
+        // A supplementary character encodes as one UTF-8 sequence, not two '?' halves.
+        assertEquals("example.com/%F0%9F%94%92", UrlNormalizer.forIdentity("https://example.com/🔒"))
+    }
+
+    @Test
+    fun unsafeQueryCharsEncodeLikeThePath() {
+        assertEquals(
+            UrlNormalizer.forIdentity("https://example.com/p?after=2024%2006"),
+            UrlNormalizer.forIdentity("https://example.com/p?after=2024 06"),
+        )
+        assertEquals("example.com/p?q=%C3%9C", UrlNormalizer.forIdentity("https://example.com/p?q=Ü"))
+        // '/' and '?' are legal inside a query and stay raw.
+        assertEquals("example.com/p?a/b?c", UrlNormalizer.forIdentity("https://example.com/p?a/b?c"))
     }
 
     @Test

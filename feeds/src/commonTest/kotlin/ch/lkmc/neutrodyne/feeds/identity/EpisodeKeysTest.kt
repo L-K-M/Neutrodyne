@@ -80,6 +80,23 @@ class EpisodeKeysTest {
     }
 
     @Test
+    fun headKeyRecipeIsByteExact() {
+        // Golden vectors pin the v1 preimage byte-for-byte: title.fieldEsc() + U+001F +
+        // description.headUnits(), UTF-8, SHA-1 hex. A silent recipe drift must fail here,
+        // not at a migration.
+        assertEquals("h:953efe8f531a5a87f6d2d5a65b78b05e55599abc", EpisodeKeys.primary(episode()))
+        assertEquals(
+            "h:4d33bb4b4484382d274558d2a42bf16c30bf3df1",
+            EpisodeKeys.primary(episode(title = "title only")),
+        )
+        // The stored-head path must produce the identical key.
+        assertEquals(
+            EpisodeKeys.primary(episode(title = "title only", description = "d")),
+            EpisodeKeys.keyFor(KeyInput(title = "title only", descriptionHead = "d"), 1),
+        )
+    }
+
+    @Test
     fun headKeySeparatesTitleFromDescription() {
         // "AB"+"C…" and "A"+"BC…" must not hash to the same h: key.
         assertNotEquals(
@@ -132,6 +149,12 @@ class EpisodeKeysTest {
         assertNotEquals(
             EpisodeKeys.primary(episode(description = base + "\uD83Dz")),
             EpisodeKeys.primary(episode(description = base + "\uD83Dw")),
+        )
+        // An unpaired LOW surrogate at the cut strands the same way — only a complete pair
+        // ending the head is exempt.
+        assertNotEquals(
+            EpisodeKeys.primary(episode(description = base + "\uDE00a")),
+            EpisodeKeys.primary(episode(description = base + "\uDE00b")),
         )
         // The stored-head path applies the same boundary rule, so ingest/restore agree.
         assertEquals(
@@ -273,11 +296,16 @@ class EpisodeKeysTest {
 
     @Test
     fun blankGuidNeverKeys() {
-        // A trimmed-blank guid (or a blank enclosure URL) must fall through, not collide every
-        // blank-GUID episode in every feed onto one `g:` key.
+        // A trimmed-blank guid must fall through, not collide every blank-GUID episode in
+        // every feed onto one `g:` key.
         val key = EpisodeKeys.primary(episode(guid = "   ", enclosureUrl = "https://e.example/a.mp3"))
         assertEquals("u:e.example/a.mp3", key)
         assertTrue(EpisodeKeys.primary(episode(guid = "  ")).startsWith("h:"))
+        // A blank enclosure URL has no identity either — it falls through to the next tier
+        // instead of producing a `u:` key off a space.
+        assertTrue(
+            EpisodeKeys.primary(episode(enclosureUrl = "  ", title = "T", pubDate = 1791030896000L)).startsWith("t:"),
+        )
     }
 
     @Test

@@ -45,6 +45,7 @@ public object EnclosureTypes {
             "m4v" to "video/mp4",
             "mov" to "video/quicktime",
             "webm" to "video/webm",
+            "m3u" to "application/x-mpegurl",
             "m3u8" to "application/x-mpegurl",
         )
 

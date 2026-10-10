@@ -4,8 +4,8 @@ package ch.lkmc.neutrodyne.feeds.parse
 /**
  * `itunes:duration` / `media:content@duration` parsing (03 Durations). The value is a hint; 06's measured
  * duration supersedes it. 1–3 numeric parts (`H:MM:SS`, `MM:SS`, `M:SS`, plain seconds), fractional last
- * part allowed; negative values, values over 48 h, empty and garbage yield null plus a `BAD_DURATION`
- * warning at the call site.
+ * part allowed; negative values, values over 48 h, all-zero placeholders (`00:00`), empty and garbage
+ * yield null plus a `BAD_DURATION` warning at the call site.
  */
 public object Durations {
     private const val MAX_PARTS = 3
@@ -51,6 +51,9 @@ public object Durations {
         }
 
         if (totalMs > MAX_VALUE_MS) return null
+        // "00:00"-style placeholders mean the feed carries no real duration — an unknown, not a
+        // zero-length episode.
+        if (totalMs == 0L) return null
         return totalMs
     }
 }

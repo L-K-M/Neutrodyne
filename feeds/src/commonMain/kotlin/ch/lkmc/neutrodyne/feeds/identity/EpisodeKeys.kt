@@ -38,8 +38,8 @@ public object EpisodeKeys {
     /**
      * The key of a stored episode for [version] (restore and sync matching). Only v1 exists today.
      * Invariant: [KeyInput.descriptionHead] must be exactly the head of the same stored description —
-     * the first 500 UTF-16 code units, extended by one when the cut splits a surrogate pair —
-     * or `h:`-fallback matching diverges between ingest and restore.
+     * the first 500 UTF-16 code units, extended by one when the cut would strand a surrogate
+     * half — or `h:`-fallback matching diverges between ingest and restore.
      */
     public fun keyFor(
         e: KeyInput,
@@ -96,20 +96,25 @@ public object EpisodeKeys {
 }
 
 /**
- * The first [DESC_HEAD_UNITS] UTF-16 code units, extended by one when the cut would leave a lone
- * high surrogate: a surrogate half encodes as `?` in UTF-8, so descriptions differing only past
- * the cut would otherwise hash identically. `KeyInput.descriptionHead` must be stored under the
- * same rule (idempotent — applying it to an already-truncated head is a no-op).
+ * The first [DESC_HEAD_UNITS] UTF-16 code units, extended by one when the cut would leave a
+ * stranded surrogate half — a trailing high surrogate (pair cut mid-codepoint, or unpaired)
+ * or an unpaired low surrogate: a lone half encodes as `?` in UTF-8, so descriptions differing
+ * only past the cut would otherwise hash identically. `KeyInput.descriptionHead` must be
+ * stored under the same rule (idempotent — applying it to an already-truncated head is a no-op).
  */
 private const val DESC_HEAD_UNITS = 500
 
 private fun String.headUnits(): String {
     val head = take(DESC_HEAD_UNITS)
-    return if (head.lastOrNull()?.isHighSurrogate() == true && length > head.length) {
-        head + this[head.length]
-    } else {
-        head
-    }
+    val last = head.lastOrNull()
+    val stranded =
+        last?.isHighSurrogate() == true ||
+            // A low surrogate whose pair-mate is outside the head is equally stranded.
+            (
+                last?.isLowSurrogate() == true &&
+                    (head.length < 2 || !head[head.length - 2].isHighSurrogate())
+            )
+    return if (stranded && length > head.length) head + this[head.length] else head
 }
 
 /**

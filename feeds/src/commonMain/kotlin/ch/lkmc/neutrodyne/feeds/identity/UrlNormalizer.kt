@@ -20,6 +20,14 @@ public object UrlNormalizer {
     private const val IPV6_GROUPS = 8
     private const val UTF16_PAIR_UNITS = 2
 
+    /** RFC 3986 pchar + `/` — every other path char is percent-encoded (UTF-8) for identity. */
+    private const val PATH_SAFE = "!$&'()*+,;=:@/"
+
+    /** RFC 3986 query = pchar + `/` + `?`. */
+    private const val QUERY_SAFE = "!$&'()*+,;=:@/?"
+
+    private const val HEX_UPPER = "0123456789ABCDEF"
+
     /**
      * The identity form of an HTTP(S) URL, or null when the URL is not `http(s)` or has no valid host:
      * scheme dropped (so `http` and `https` compare equal), host lowercased with IDN → ASCII and the
@@ -68,8 +76,13 @@ public object UrlNormalizer {
 
         val cleaned = trimmed.substring(0, schemeMatch.range.last + 1) + afterScheme.substring(atIndex + 1)
         val userInfo = authority.substring(0, atIndex)
+        // A bare `@` carries no credential text: strip it like a real userinfo, but surface no
+        // credentials so an empty pair is never stored against the origin.
+        if (userInfo.isEmpty()) return cleaned to null
         val username = percentDecode(userInfo.substringBefore(':', userInfo))
         val password = percentDecode(if (userInfo.contains(':')) userInfo.substringAfter(':') else "")
+        // `:@` and every spelling that decodes to empty/empty is the same non-credential.
+        if (username.isEmpty() && password.isEmpty()) return cleaned to null
         return cleaned to UrlUserInfo(username, password)
     }
 
@@ -86,7 +99,9 @@ public object UrlNormalizer {
         val portSuffix = if (port == null) "" else ":$port"
         val querySuffix =
             if (keepQuery && parts.query != null) {
-                "?${parts.query}"
+                // Same unsafe-char encoding as the path, with the wider RFC query allowlist
+                // (`/` and `?` too): `?a b` and `?a%20b` fetch identically, so they key alike.
+                "?" + normalisePercentEncoding(percentEncodeUnsafe(parts.query, QUERY_SAFE))
             } else {
                 ""
             }
@@ -255,12 +270,44 @@ public object UrlNormalizer {
      */
     private fun normalisePath(rawPath: String): String {
         // A raw space is what the fetcher percent-encodes on the wire — encode it the same way so
-        // the space and `%20` spellings of one resource share an identity.
-        var path = if (rawPath.isEmpty()) "/" else rawPath.replace('\\', '/').replace(" ", "%20")
+        // the space and `%20` spellings of one resource share an identity. The same applies to
+        // every other char outside the path allowlist (non-ASCII, `"`, `<`, `>`, `|`, …).
+        var path = if (rawPath.isEmpty()) "/" else percentEncodeUnsafe(rawPath.replace('\\', '/'), PATH_SAFE)
         path = normalisePercentEncoding(path)
         path = removeDotSegments(path)
         if (path.length > 1 && path.endsWith("/")) path = path.dropLast(1)
         return path
+    }
+
+    /**
+     * UTF-8 `%XX`-encodes every char outside [allowed] — unreserved chars and `%` never encode,
+     * so an existing escape passes through for [normalisePercentEncoding] to canonicalize and a
+     * raw char and its pre-encoded spelling collapse to the same identity. UTF-16 surrogate pairs
+     * encode as one UTF-8 sequence, never as two `?` replacements.
+     */
+    private fun percentEncodeUnsafe(
+        text: String,
+        allowed: String,
+    ): String {
+        if (text.none { it !in unreservedChars && it !in allowed && it != '%' }) return text
+        val out = StringBuilder(text.length + UTF16_PAIR_UNITS)
+        var i = 0
+        while (i < text.length) {
+            val c = text[i]
+            if (c in unreservedChars || c in allowed || c == '%') {
+                out.append(c)
+                i++
+                continue
+            }
+            val pair = c.isHighSurrogate() && text.getOrNull(i + 1)?.isLowSurrogate() == true
+            val end = if (pair) i + UTF16_PAIR_UNITS else i + 1
+            for (byte in text.substring(i, end).encodeToByteArray()) {
+                val b = byte.toInt() and 0xFF
+                out.append('%').append(HEX_UPPER[b shr 4]).append(HEX_UPPER[b and 0xF])
+            }
+            i = end
+        }
+        return out.toString()
     }
 
     /**

@@ -55,6 +55,18 @@ class DurationsTest {
     }
 
     @Test
+    fun allZeroPlaceholdersAreUnknown() {
+        // Feeds emit "00:00"-style values as placeholders when no real duration exists:
+        // they mean "unknown", and must not render as a zero-length episode.
+        assertNull(Durations.parseMs("00:00"))
+        assertNull(Durations.parseMs("0:00:00"))
+        assertNull(Durations.parseMs("0"))
+        assertNull(Durations.parseMs("00:00:00.000"))
+        // A genuinely tiny duration is not a placeholder: the boundary is at zero, not below it.
+        assertEquals(1L, Durations.parseMs("0.001"))
+    }
+
+    @Test
     fun shapeRejectionsAndLeniency() {
         // Empty components, stray separators and non-`digits.fraction` shapes reject.
         assertNull(Durations.parseMs(":30"))

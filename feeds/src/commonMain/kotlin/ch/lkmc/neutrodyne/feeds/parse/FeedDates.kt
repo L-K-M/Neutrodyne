@@ -128,6 +128,11 @@ public object FeedDates {
      * rejected; such values degrade to `UNKNOWN_DATE` upstream rather than misparsing.
      * Full month names ("January") and month-first order ("Jan 5, 2024") are likewise outside
      * the grammar and degrade to `UNKNOWN_DATE`.
+     * Zone-less values — an RFC 822 date with no offset, an ISO local date-time, a date-only
+     * string — are read as UTC. That is a guess, not a reported fact: RSS serves the great
+     * majority of these and its own examples are implicitly US-local, so "UTC when unstated"
+     * is the least-wrong deterministic rule, documented here so a later policy change (e.g.
+     * mapping zone-less to `UNKNOWN_DATE`) has one documented decision point.
      */
     public fun parse(raw: String): Long? {
         var text = raw.replace(whitespaceRun, " ").trim()
@@ -230,7 +235,7 @@ public object FeedDates {
 
     private fun offsetOf(raw: String): UtcOffset? {
         val sign = if (raw.startsWith("-")) -1 else 1
-        val digits = raw.drop(1).removePrefix("+").replace(":", "")
+        val digits = raw.drop(1).replace(":", "")
         if (digits.length != 4) return null
         val hours = digits.substring(0, 2).toIntOrNull() ?: return null
         val minutes = digits.substring(2).toIntOrNull() ?: return null

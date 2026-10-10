@@ -54,8 +54,9 @@ public enum class ParseFailure {
 }
 
 /**
- * Protective limits (03 Limits and version policy). The fetch-side body cap (32 MB) is not the parser's;
- * these bound what a single document may cost to read.
+ * Protective limits (03 Limits and version policy). These bound what a single document may cost
+ * to read; `maxDocumentBytes` also bounds the buffer [FeedParser.parse] fills before decoding,
+ * so the same cap the fetch pipeline applies on the wire holds for every other caller too.
  */
 public data class ParseLimits(
     val maxDepth: Int = 64,
@@ -64,4 +65,6 @@ public data class ParseLimits(
     val maxUrlChars: Int = 4_096,
     val maxTagAttributes: Int = 1_000,
     val prologScanBytes: Int = 64 * 1024,
+    /** Whole-document bound, counted while `parse` buffers the source; matches the fetch body cap. */
+    val maxDocumentBytes: Long = 32L * 1024 * 1024,
 )
