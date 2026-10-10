@@ -216,16 +216,21 @@ class DatabaseOpener(
                         // a lock held by a live process) fails the open without touching the
                         // file (02: nothing is deleted). SQLITE_READONLY reaches Room here:
                         // the raw driver preflight reads it fine through the read-only fallback.
+                        // Room reports a missing migration path or a failed schema validation as
+                        // plain IllegalStateException text; anything else that reaches here — a
+                        // callback bug, Room internals, an OOME — is unknown, never a license
+                        // to move a file that may be healthy.
                         if (isDiskFull(t) || isStorageFailure(t)) {
                             throw DatabaseOpenException(classify(t), t)
                         }
-                        if (strictMigrations && !isCorruption(t)) {
+                        val corrupt = isCorruption(t)
+                        if (!corrupt && (strictMigrations || !isMigrationFailure(t))) {
                             throw DatabaseOpenException(DatabaseOpenException.Reason.UNKNOWN, t)
                         }
                         quarantine()
                         factory.pendingQuarantine = null
                         pendingRecovery =
-                            if (isCorruption(t)) RecoveryCause.CORRUPT else RecoveryCause.MIGRATION_FAILED
+                            if (corrupt) RecoveryCause.CORRUPT else RecoveryCause.MIGRATION_FAILED
                     }
                 }
             }
@@ -344,6 +349,11 @@ class DatabaseOpener(
             CORRUPT_MARKERS.any { text.contains(it) }
     }
 
+    private fun isMigrationFailure(t: Throwable): Boolean {
+        val text = chainText(t)
+        return MIGRATION_MARKERS.any { text.contains(it) }
+    }
+
     private fun isDiskFull(t: Throwable): Boolean {
         val text = chainText(t)
         return sqlitePrimaryCodes(text).any { it in DISK_FULL_CODES } ||
@@ -365,8 +375,11 @@ class DatabaseOpener(
     private fun sqlitePrimaryCodes(text: String): List<Int> =
         SQLITE_CODE.findAll(text).map { it.groupValues[1].toInt() and PRIMARY_CODE_MASK }.toList()
 
+    // The cause walk is bounded: a cyclic chain (a.initCause(b); b.initCause(a)) would
+    // otherwise hang the classification and hold the opener mutex forever.
     private fun chainText(t: Throwable): String =
         generateSequence(t) { it.cause }
+            .take(MAX_CAUSE_DEPTH)
             .joinToString(" ") { "${it::class.simpleName}:${it.message ?: ""}" }
 
     private companion object {
@@ -390,6 +403,9 @@ class DatabaseOpener(
         val DISK_FULL_CODES = setOf(13)
         val CORRUPT_CODES = setOf(11, 26)
 
+        /** Bounded walk of the exception cause chain for classification. */
+        const val MAX_CAUSE_DEPTH = 16
+
         /** `SQLITE_CORRUPT` (11) and `SQLITE_NOTADB` (26) spellings across both drivers (S2, 02). */
         val CORRUPT_MARKERS =
             listOf(
@@ -403,6 +419,19 @@ class DatabaseOpener(
         /** `SQLITE_FULL` (13). */
         val DISK_FULL_MARKERS =
             listOf("SQLITE_FULL", "database or disk is full", "SQLiteFullException", "ENOSPC")
+
+        /**
+         * Room's migration failures surface as plain `IllegalStateException` text (S2: no
+         * result-code API): a required path missing, a migration that left the schema invalid,
+         * or a pre-packaged file whose schema does not match (RoomConnectionManager.onMigrate /
+         * onCreate `error(...)` messages).
+         */
+        val MIGRATION_MARKERS =
+            listOf(
+                "was required but not found",
+                "Migration didn't properly handle",
+                "invalid schema",
+            )
 
         /** The [STORAGE_CODES] spellings across both drivers and Android's exception class names. */
         val STORAGE_MARKERS =

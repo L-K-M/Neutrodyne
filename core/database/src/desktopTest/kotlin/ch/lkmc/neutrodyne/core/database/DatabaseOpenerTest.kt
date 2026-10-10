@@ -455,6 +455,110 @@ class DatabaseOpenerTest {
         }
 
     @Test
+    fun anUnknownFailureDuringTheOpenNeverQuarantinesTheHealthyFile() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+            val dbFile = dir.resolve(NeutrodyneDatabase.FILE_NAME)
+            val sizeBefore = Files.size(dbFile)
+
+            // A plain runtime error inside the open path — a callback bug, Room internals —
+            // is neither corruption nor a migration failure: the file may be healthy, so 02's
+            // "migration or corruption error" is the only quarantine license.
+            var fail = true
+            val flaky =
+                object : DatabaseFactory by factory {
+                    override fun builder(): RoomDatabase.Builder<NeutrodyneDatabase> {
+                        if (fail) throw RuntimeException("callback exploded")
+                        return factory.builder()
+                    }
+                }
+            val o = opener(f = flaky)
+            val error = assertThrows { o.awaitOpen() }
+
+            assertIs<DatabaseOpenException>(error)
+            assertEquals(DatabaseOpenException.Reason.UNKNOWN, error.reason)
+            assertFalse(
+                Files.exists(dir.resolve("quarantine")),
+                "an unknown open failure must never quarantine a healthy file",
+            )
+            assertEquals(sizeBefore, Files.size(dbFile))
+
+            // Recovery is not wedged: the retry opens the same untouched file.
+            fail = false
+            assertEquals(OpenResult(created = false, recovered = null), o.awaitOpen())
+            o.requireDatabase().close()
+        }
+
+    @Test
+    fun aRoomMigrationFailureStillQuarantines() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+
+            // Room reports a missing migration path or failed schema validation as a plain
+            // IllegalStateException (S2: no result-code API) — 02 quarantines it in release.
+            val messages =
+                listOf(
+                    "A migration from 1 to 3 was required but not found. " +
+                        "Please provide the necessary Migration path",
+                    "Migration didn't properly handle: podcast (expected…, found…)",
+                    "Pre-packaged database has an invalid schema: podcast",
+                )
+            for (message in messages) {
+                dir.resolve("quarantine").toFile().deleteRecursively()
+                var firstBuild = true
+                val throwing =
+                    object : DatabaseFactory by factory {
+                        override fun builder(): RoomDatabase.Builder<NeutrodyneDatabase> {
+                            if (firstBuild) {
+                                firstBuild = false
+                                throw IllegalStateException(message)
+                            }
+                            return factory.builder()
+                        }
+                    }
+                val o = opener(f = throwing)
+                val result = o.awaitOpen()
+
+                assertEquals(RecoveryCause.MIGRATION_FAILED, result.recovered, message)
+                assertTrue(
+                    Files.exists(dir.resolve("quarantine")),
+                    "$message is a migration failure and must quarantine",
+                )
+                o.requireDatabase().close()
+            }
+        }
+
+    @Test
+    fun aCyclicCauseChainNeverWedgesTheOpen() =
+        runBlocking {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+
+            // Two exceptions can form a cause cycle (a.initCause(b); b.initCause(a)); the
+            // classifier's chain walk must stay bounded or the opener mutex is held forever.
+            val a = RuntimeException("cycle a")
+            val b = RuntimeException("cycle b")
+            a.initCause(b)
+            b.initCause(a)
+            val throwing =
+                object : DatabaseFactory by factory {
+                    override fun builder(): RoomDatabase.Builder<NeutrodyneDatabase> = throw a
+                }
+            val error =
+                withTimeoutOrNull(10.seconds) {
+                    runCatching { opener(f = throwing).awaitOpen() }
+                }
+
+            assertNotNull(error, "a cyclic cause chain must not hang the opener")
+            val thrown = error.exceptionOrNull()
+            assertIs<DatabaseOpenException>(thrown)
+            assertEquals(DatabaseOpenException.Reason.UNKNOWN, thrown.reason)
+            assertFalse(Files.exists(dir.resolve("quarantine")))
+        }
+
+    @Test
     fun aFailedMarkerRemovalPropagatesBeforeCreatingTheReplacement() =
         runTest {
             dirs.ensureCreated()
