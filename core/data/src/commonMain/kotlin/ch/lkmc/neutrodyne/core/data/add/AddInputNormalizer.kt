@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.data.add
 
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.identity.UrlUserInfo
+import okio.Buffer
 import kotlin.io.encoding.Base64
 
 /** What [AddInputNormalizer] produced (03 Input normalisation). */
@@ -140,25 +141,31 @@ internal object AddInputNormalizer {
         return runCatching { Base64.UrlSafe.decode(padded).decodeToString() }.getOrNull()
     }
 
-    /** Query-parameter percent decoding (`+` is a space, unlike path decoding). */
+    /** Decode one UTF-8 query component; `+` is a space and malformed percent escapes stay literal. */
     private fun percentDecode(text: String): String {
-        val out = StringBuilder(text.length)
+        val out = Buffer()
         var i = 0
+        var literalStart = 0
         while (i < text.length) {
             val c = text[i]
             val high = text.getOrNull(i + 1)?.digitToIntOrNull(16)
             val low = text.getOrNull(i + 2)?.digitToIntOrNull(16)
             if (c == '%' && high != null && low != null) {
-                out.append(((high shl 4) or low).toChar())
+                out.writeUtf8(text, literalStart, i)
+                out.writeByte((high shl 4) or low)
                 i += 3
+                literalStart = i
             } else if (c == '+') {
-                out.append(' ')
+                out.writeUtf8(text, literalStart, i)
+                out.writeByte(' '.code)
                 i++
+                literalStart = i
             } else {
-                out.append(c)
                 i++
             }
         }
-        return out.toString()
+        // Write literal runs together so a supplementary character is not split into surrogates.
+        out.writeUtf8(text, literalStart, text.length)
+        return out.readUtf8()
     }
 }
