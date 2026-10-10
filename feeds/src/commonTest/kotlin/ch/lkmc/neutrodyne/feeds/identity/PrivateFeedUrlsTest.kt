@@ -19,7 +19,19 @@ class PrivateFeedUrlsTest {
         assertTrue(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?AUTH=short"))
         assertTrue(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?api_key=short"))
         assertTrue(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?x=1&signature=abc"))
+        // `_`-joined forms of the credential cores count too.
+        assertTrue(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?auth_token=short"))
+        assertTrue(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?feed_token=short"))
+        assertTrue(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?token_id=1"))
         assertFalse(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?category=news"))
+        // Near-miss names must not trip a substring match on token/auth/key: the `_` boundary
+        // is required, so "author", "tokenize", "keyword", "monkey" stay public.
+        assertFalse(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?author=Jane"))
+        assertFalse(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?tokenize=1"))
+        assertFalse(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?keyword=music"))
+        assertFalse(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?monkey=1"))
+        // Generic `_`-joined names outside the credential cores stay public too.
+        assertFalse(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?user_id=42"))
     }
 
     @Test

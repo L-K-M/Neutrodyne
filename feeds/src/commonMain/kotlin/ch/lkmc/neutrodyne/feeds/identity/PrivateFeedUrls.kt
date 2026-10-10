@@ -53,16 +53,22 @@ public object PrivateFeedUrls {
         val query = parts.query ?: ""
         if (query.split('&').any { param ->
                 val name = param.substringBefore('=').lowercase()
-                name in tokenParameterNames
+                // Exact names, plus `_`-joined forms of the credential cores only
+                // ("auth_token", "feed_token", "token_id", "basic_auth"): the `_` boundary
+                // keeps "author"/"tokenize"/"monkey" clean, and widening it to the whole set
+                // would flag generic names like "user_id" or "key_id" on public feeds.
+                name in tokenParameterNames ||
+                    name.startsWith("token_") || name.endsWith("_token") ||
+                    name.startsWith("auth_") || name.endsWith("_auth")
             }
         ) {
             return true
         }
         if (looksLikeTokenQueryValue(query)) return true
 
-        // Long tokens as part of any path segment ("/feeds/xKd93lskSKEa1zl/"). The permissive
-        // class deliberately keeps '-'/'_': UUID and base64url tokens carry them, and a false
-        // positive on a hyphenated slug only costs a warning.
+        // Long tokens (≥20 chars) as part of any path segment ("/feeds/xKd93lskSKEa1zl4Tq8w/").
+        // The permissive class deliberately keeps '-'/'_': UUID and base64url tokens carry them,
+        // and a false positive on a hyphenated slug only costs a warning.
         return parts.path.split('/').any { segment -> tokenIn(segment) != null }
     }
 

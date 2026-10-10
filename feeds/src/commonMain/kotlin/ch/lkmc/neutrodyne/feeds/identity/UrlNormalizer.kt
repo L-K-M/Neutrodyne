@@ -144,6 +144,17 @@ public object UrlNormalizer {
             val after = literal.substring(pct + 1)
             zone = if (after.startsWith("25")) after.substring(2) else after
             if (zone.isEmpty() || zone.any { it !in unreservedChars && it != '%' }) return null
+            // Every `%` must head a two-hex-digit escape (RFC 6874): a dangling or short
+            // escape would emit an identity no strict URI parser accepts.
+            var zi = 0
+            while (zi < zone.length) {
+                if (zone[zi] == '%' &&
+                    (zi + 2 >= zone.length || zone[zi + 1] !in hexDigits || zone[zi + 2] !in hexDigits)
+                ) {
+                    return null
+                }
+                zi++
+            }
         }
         val groups = parseIpv6Groups(address) ?: return null
         return buildString {
@@ -248,12 +259,14 @@ public object UrlNormalizer {
         val raw = parts.port ?: return true
         if (raw.isEmpty() || raw.any { it !in '0'..'9' }) return false
         val value = raw.toLongOrNull() ?: return false
-        return value <= MAX_PORT
+        // Port 0 is a reserved, unconnectable port: same "unfetchable → no identity" rule.
+        return value in 1..MAX_PORT
     }
 
     /**
      * The port to keep: null when absent or default. Identity is scheme-free, so both well-known
-     * ports drop regardless of scheme (03 URL normalisation); [origin] keeps the scheme's own default.
+     * ports drop regardless of scheme (03 URL normalisation); [origin] keeps the scheme's own
+     * default. Only http(s) reach the scheme-free path: [identity] rejects other schemes first.
      */
     private fun normalisePort(
         parts: UrlParts,

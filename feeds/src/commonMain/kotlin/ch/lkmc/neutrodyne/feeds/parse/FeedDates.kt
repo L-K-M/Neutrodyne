@@ -117,6 +117,13 @@ public object FeedDates {
     /** A space before a trailing ISO offset ("…12:34:56 +02:00", "… +0200") is removed so the
      * space-strip and the colon insertion below compose for "YYYY-MM-DD HH:MM:SS ±HHMM". */
     private val spaceBeforeOffset = Regex("""\s+([+-]\d{2}:?\d{2}|Z)$""")
+
+    /** RFC 5322 CFWS: some feeds append a parenthetical zone comment, e.g. "…10:00:00 +0000 (UTC)". */
+    private val trailingZoneComment = Regex("""\s*\([A-Za-z]{2,5}\)$""")
+
+    /** The numeric-offset tail that makes a preceding parenthetical a zone comment. */
+    private val numericZone = Regex("""[+-]\d{2}:?\d{2}""")
+
     private val utcMidnightOffset = UtcOffset.ZERO
 
     /** Whitespace runs collapse to one ASCII space; `\s` alone misses the space separators of typeset dates. */
@@ -140,6 +147,17 @@ public object FeedDates {
         // Step 1: drop the weekday, even a wrong or localised one ("Mié,").
         text = weekdayPrefix.replaceFirst(text, "")
         if (text.isEmpty()) return null
+
+        // Step 3a: drop a trailing parenthetical zone comment (CFWS) when a real zone still
+        // precedes it ("…+0000 (UTC)", "…GMT (UTC)"), so the tokeniser below sees the zone as
+        // the last token. A parens-only tail ("… (EST)") is the zone itself wrapped wrongly,
+        // not a comment: stripping it would silently read the instant as UTC, 5 h off — it
+        // stays and degrades instead. Only letters inside; "(GMT+1)" never matches.
+        trailingZoneComment.find(text)?.let { comment ->
+            val head = text.substring(0, comment.range.first)
+            val headZone = head.substringAfterLast(' ').lowercase().removeSuffix(".")
+            if (headZone.matches(numericZone) || headZone in namedZones) text = head
+        }
 
         // Step 3: replace a trailing named zone with its numeric offset. Runs before tokenising so the
         // pattern below only ever sees ±HHMM/±HH:MM.

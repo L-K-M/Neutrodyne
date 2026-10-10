@@ -48,6 +48,24 @@ class FeedDatesTest {
     }
 
     @Test
+    fun trailingZoneCommentsAreStripped() {
+        // RFC 5322 CFWS allows a comment after the zone; real feeds emit "+0000 (UTC)".
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 +0000 (UTC)"))
+        // A named zone also counts as the preceding zone.
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 GMT (UTC)"))
+        // A comment with a numeric offset keeps the offset, not the comment's meaning.
+        assertEquals(1791023696000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 +02:00 (CET)"))
+        // A parens-only tail is a wrongly-wrapped zone, not a comment: stripping it would
+        // silently read the instant as UTC, so it degrades instead of parsing.
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 (GMT)"))
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 (EST)"))
+        // Non-comment trailing parens stay fatal: "(GMT+1)" does not match letters-only and
+        // must degrade rather than guess arithmetic out of a comment.
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 +0000 (GMT+1)"))
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 (foo bar)"))
+    }
+
+    @Test
     fun localisedMonths() {
         assertEquals(1791030896000L, FeedDates.parse("Sa., 03 Okt 2026 12:34:56 +0000"))
         assertEquals(1791030896000L, FeedDates.parse("sam., 03 oct. 2026 12:34:56 +0000"))

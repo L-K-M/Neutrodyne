@@ -120,16 +120,19 @@ class UrlNormalizerTest {
         // inputs outside the timed block: allocating the 480 KB document is not normalization work.
         val smallDoc = dotDoc(DOT_SMALL)
         val largeDoc = dotDoc(DOT_SMALL * 4)
+        // Each timed pass runs ten normalizations: a single pass can sit near the timer
+        // resolution floor once JIT-warmed, making `small * QUADRATIC_SLACK` ≈ 0 and false-failing
+        // a linear implementation. Same factor on both sides keeps the expected ~4× ratio.
         val small =
             (1..3).minOf {
                 measureTime {
-                    assertEquals("example.com/x", UrlNormalizer.forIdentity(smallDoc))
+                    repeat(10) { assertEquals("example.com/x", UrlNormalizer.forIdentity(smallDoc)) }
                 }
             }
         val large =
             (1..3).minOf {
                 measureTime {
-                    assertEquals("example.com/x", UrlNormalizer.forIdentity(largeDoc))
+                    repeat(10) { assertEquals("example.com/x", UrlNormalizer.forIdentity(largeDoc)) }
                 }
             }
         assertTrue(
@@ -246,6 +249,16 @@ class UrlNormalizerTest {
         assertNull(UrlNormalizer.forIdentity("http://[fe80::1%]/f")) // empty zone
         assertNull(UrlNormalizer.forIdentity("http://[fe80::1%25]/f")) // `%25` marker, empty zone
         assertNull(UrlNormalizer.forIdentity("http://[fe80::1%25e th0]/f")) // space in zone
+        // A `%` in the zone must head a two-hex-digit escape (RFC 6874): dangling/short escapes
+        // would emit an identity no strict URI parser accepts back.
+        assertNull(UrlNormalizer.forIdentity("http://[fe80::1%25eth%0]/f"))
+        assertNull(UrlNormalizer.forIdentity("http://[fe80::1%25eth%]/f"))
+        assertNull(UrlNormalizer.forIdentity("http://[fe80::1%25eth%zz]/f"))
+        // A valid escape in the zone is kept verbatim.
+        assertEquals(
+            "[fe80::1%25e%68th0]",
+            UrlNormalizer.forIdentity("http://[fe80::1%25e%68th0]/f")?.substringBefore('/'),
+        )
         assertNull(UrlNormalizer.origin("http://[garbage]"))
     }
 
@@ -268,10 +281,13 @@ class UrlNormalizerTest {
 
     @Test
     fun outOfRangePortsAreRejected() {
-        // Unfetchable URLs get no identity key: ports are 0..65535 (the JDK's `URI` accepts 65536 —
+        // Unfetchable URLs get no identity key: ports are 1..65535 (the JDK's `URI` accepts 65536 —
         // the splitter must not). Digit strings beyond Long never reach the range check.
         assertNull(UrlNormalizer.forIdentity("https://example.com:65536/x"))
         assertNull(UrlNormalizer.forIdentity("https://example.com:99999999999999999999/x"))
+        // Port 0 is reserved and unconnectable — same "unfetchable" rule as the upper bound.
+        assertNull(UrlNormalizer.forIdentity("http://example.com:0/feed"))
+        assertNull(UrlNormalizer.forIdentity("http://example.com:000/feed"))
         assertNull(UrlNormalizer.origin("https://example.com:70000"))
         assertEquals("example.com:65535/x", UrlNormalizer.forIdentity("https://example.com:65535/x"))
     }
@@ -289,6 +305,12 @@ class UrlNormalizerTest {
         assertEquals("https://feeds.example.com/show", url)
         assertEquals("user@x", credentials?.username)
         assertEquals("p:ss", credentials?.password)
+        // A raw `@` inside the password must not end the userinfo: the LAST `@` delimits
+        // (RFC 3986 / WHATWG) — a first-`@` splitter would read host "ss@feeds.example.com".
+        val (rawUrl, rawCredentials) = UrlNormalizer.splitUserInfo("https://user:p@ss@feeds.example.com/show")
+        assertEquals("https://feeds.example.com/show", rawUrl)
+        assertEquals("user", rawCredentials?.username)
+        assertEquals("p@ss", rawCredentials?.password)
     }
 
     @Test

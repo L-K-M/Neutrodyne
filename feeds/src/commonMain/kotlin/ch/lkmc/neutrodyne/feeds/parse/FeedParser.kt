@@ -12,7 +12,10 @@ public interface FeedParser {
     /**
      * Parses the document [open] yields. [open] is invoked exactly once per [parse] call and must
      * return a fresh, readable source; the parser consumes and closes it, and any re-parse runs
-     * over the buffered bytes rather than calling [open] again. [httpCharset] is the HTTP
+     * over the buffered bytes rather than calling [open] again. A throw from [open] or the
+     * buffering read (an I/O failure, not malformed input) propagates to the caller rather
+     * than becoming [ParseResult.Failed]; [ParseFailure] deliberately has no reason for it.
+     * [httpCharset] is the HTTP
      * `Content-Type` charset, consulted only by the re-parse heuristic (an `ISO-8859-1` header on
      * a UTF-8 body must not win the first pass). [baseUrl] resolves relative URLs; `xml:base` in
      * the document wins when present.
