@@ -26,3 +26,13 @@ enum class OwnerType { PODCAST, EPISODE }
 
 /** Where `chapter` rows came from (02 `chapter.source`). */
 enum class ChapterSource { PODCASTING20_JSON, PSC, ID3, MP4, YOUTUBE_DESC }
+
+/**
+ * What the feed-scoped `episode_guid_provenance` table knows about one canonical GUID (02, D98;
+ * authority rules: 03 Identity keys). Recorded values are append-only in authority:
+ * [KNOWN_AMBIGUOUS] is sticky and is never demoted; [KNOWN_INDEPENDENT] upgrades to ambiguous on
+ * any ambiguity observation. **Absence of a row is the third state** — unknown — and never proves
+ * independence: podcasts without a coverage marker and migrated V1 libraries bootstrap there.
+ * Constants are append-only (02 Conventions).
+ */
+enum class GuidKnowledge { KNOWN_AMBIGUOUS, KNOWN_INDEPENDENT }

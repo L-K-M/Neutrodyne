@@ -58,7 +58,14 @@ public object EpisodeKeys {
             ?.get(1)
             ?.toIntOrNull() ?: 1
 
-    private fun guidKey(guid: String?): String? = guid?.trim()?.takeIf { it.isNotEmpty() }?.let { "g:$it" }
+    /**
+     * The canonical stored form of a parsed GUID — the `g:`-key payload itself (trim, non-empty,
+     * case-sensitive). `episode_guid_provenance.guid` (D98) stores exactly this so provenance and
+     * primary keys can never disagree about identity; there is deliberately no other normaliser.
+     */
+    public fun canonicalGuid(guid: String?): String? = guid?.trim()?.takeIf { it.isNotEmpty() }
+
+    private fun guidKey(guid: String?): String? = canonicalGuid(guid)?.let { "g:$it" }
 
     private fun enclosureKey(url: String?): String? = url?.let { UrlNormalizer.forIdentity(it) }?.let { "u:$it" }
 

@@ -86,6 +86,17 @@ object MigrationInvariants {
             "sync_held",
         )
 
+    /**
+     * Tables a later schema version added — counted only where they exist, so a V1 capture still
+     * sees its own count for them (0) and the V2 capture reports the real row count. Keeping the
+     * guard truthful means the table itself is *visible* here, not exempt: a migration that
+     * unexpectedly populated or dropped it still shows up in the snapshot diff.
+     */
+    private val OPTIONAL_TABLES: List<String> =
+        listOf(
+            "episode_guid_provenance",
+        )
+
     /** The `autoGenerate` tables whose `sqlite_sequence` high-water mark must never shrink. */
     private val AUTOINCREMENT_TABLES: List<String> =
         listOf(
@@ -107,9 +118,17 @@ object MigrationInvariants {
             digests[label] = digest(connection, sql)
         }
 
-        val counts = LinkedHashMap<String, Long>(TABLES.size)
+        val counts = LinkedHashMap<String, Long>(TABLES.size + OPTIONAL_TABLES.size)
         for (table in TABLES) {
             counts[table] = scalarLong(connection, "SELECT COUNT(*) FROM $table")
+        }
+        for (table in OPTIONAL_TABLES) {
+            counts[table] =
+                if (tableExists(connection, table)) {
+                    scalarLong(connection, "SELECT COUNT(*) FROM $table")
+                } else {
+                    0L
+                }
         }
 
         val sequences = LinkedHashMap<String, Long>(AUTOINCREMENT_TABLES.size)
@@ -170,6 +189,17 @@ object MigrationInvariants {
         connection.prepare(sql).use { stmt ->
             if (stmt.step()) stmt.getLong(0) else 0L
         }
+
+    private suspend fun tableExists(
+        connection: SQLiteConnection,
+        table: String,
+    ): Boolean =
+        connection
+            .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+            .use { stmt ->
+                stmt.bindText(1, table)
+                stmt.step()
+            }
 
     /**
      * Typed canonical encoding of one column value — two representations never collide. TEXT and

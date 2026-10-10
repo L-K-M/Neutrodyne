@@ -15,6 +15,7 @@ import ch.lkmc.neutrodyne.core.model.EpisodeType
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.GroupKind
+import ch.lkmc.neutrodyne.core.model.GuidKnowledge
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportItemKind
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
@@ -175,6 +176,21 @@ class NeutrodyneConverters {
             enumOr(
                 it,
                 SyncCaptureKind.REPLAY,
+            )
+        }
+
+    /**
+     * `episode_guid_provenance.knowledge` (D98): an unknown name written by a newer build reads as
+     * `KNOWN_AMBIGUOUS` — the authority-denying misread; `KNOWN_INDEPENDENT` would wrongly grant
+     * primary-key precedence to a GUID the row never proved.
+     */
+    @ColumnTypeConverter fun fromGuidKnowledge(v: GuidKnowledge?): String? = v?.name
+
+    @ColumnTypeConverter fun toGuidKnowledge(v: String?): GuidKnowledge? =
+        v?.let {
+            enumOr(
+                it,
+                GuidKnowledge.KNOWN_AMBIGUOUS,
             )
         }
 }

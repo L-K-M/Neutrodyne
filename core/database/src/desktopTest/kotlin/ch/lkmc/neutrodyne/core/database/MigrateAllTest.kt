@@ -16,16 +16,24 @@ import org.junit.Rule
 import java.nio.file.Files
 import kotlin.io.path.Path
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
  * 02 Migration tests / MigrateAllTest: `MigrationTestHelper` creates the database at version 1
  * from the frozen `1.json`, `v1-fixture.sql` fills every table, `runMigrationsAndValidate` brings
- * the chain up to [NeutrodyneDatabase.VERSION] (the chain is empty at v1 — the test still proves
- * the harness, the fixture and the invariants), and [MigrationInvariants] verifies nothing was
- * lost. The migrated file then opens through the production builder and every DAO reads it.
+ * the chain up to [NeutrodyneDatabase.VERSION] through Room's own per-table validation, and
+ * [MigrationInvariants] verifies nothing was lost. The migrated file then opens through the
+ * production builder and every DAO reads it.
+ *
+ * Upstream `SchemaInfoUtil.readIndex` reads `PRAGMA index_xinfo` without filtering `key=0` rows,
+ * so a secondary index on a WITHOUT ROWID table (`sync_outbox`, the only such indexed table)
+ * reports its implicit primary-key suffix columns and Room's post-migration validation fails on
+ * a table no migration touched. This test cannot pass until that reader gap is closed in the
+ * runtime; both validation paths exercised here depend on it.
  */
 class MigrateAllTest {
     private val dir = Files.createTempDirectory("m1a-migrate")
@@ -63,6 +71,10 @@ class MigrateAllTest {
             // fixture rows map cleanly onto the entities.
             val db = TestDb.file(dir)
             try {
+                // V1 rows migrate with no provenance coverage or records: the marker stays null
+                // and the derived table starts empty (02 episode_guid_provenance).
+                assertNull(db.podcastDao().byId(1)!!.guidCoverageSince)
+
                 assertNotNull(db.podcastDao().byId(1))
                 assertNotNull(db.episodeDao().byId(1))
                 assertTrue(db.ingestDao().existing(1).isNotEmpty())
@@ -99,6 +111,10 @@ class MigrateAllTest {
                 assertTrue(page is androidx.paging.PagingSource.LoadResult.Page)
             } finally {
                 db.close()
+            }
+
+            BundledSQLiteDriver().open(dir.resolve(NeutrodyneDatabase.FILE_NAME).toString()).use { conn ->
+                assertEquals(0L, conn.longQuery("SELECT COUNT(*) FROM episode_guid_provenance"))
             }
         }
 

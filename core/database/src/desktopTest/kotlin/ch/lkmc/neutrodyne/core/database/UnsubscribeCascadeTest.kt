@@ -27,11 +27,11 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * 02 Unsubscribe and merge / `PodcastDao.deleteCascade`: the podcast, its episodes and every
- * child row go away; `play_session` and `import_item` lose their references via `SET NULL` /
- * targeted clears; the unshared credential goes, a shared one and `sync:`/`podcastindex` tokens
- * survive; `sync_parked`/`sync_clock` rows for the podcast go while its own clock stays as
- * tombstone.
+ * 02 Unsubscribe and merge / `PodcastDao.deleteCascade`: the podcast, its episodes, its recorded
+ * GUID provenance and every child row go away; `play_session` and `import_item` lose their
+ * references via `SET NULL` / targeted clears; the unshared credential goes, a shared one and
+ * `sync:`/`podcastindex` tokens survive; `sync_parked`/`sync_clock` rows for the podcast go while
+ * its own clock stays as tombstone.
  */
 class UnsubscribeCascadeTest {
     @Test
@@ -125,7 +125,8 @@ class UnsubscribeCascadeTest {
                         ).single()
 
                 // p1's child tables: state, position, queue, download, description, transcript,
-                // alt enclosure, chapter, person + funding.
+                // alt enclosure, chapter, person + funding, and its recorded GUID provenance.
+                db.ingestDao().recordGuidKnowledge(p1, setOf("shared-guid"), setOf("solo-guid"))
                 db.episodeStateDao().upsert(episodeStateEntity(e1, playedAt = 1))
                 db
                     .positionDao()
@@ -227,6 +228,7 @@ class UnsubscribeCascadeTest {
                     assertEquals(0, conn.longQuery("SELECT COUNT(*) FROM episode_description"))
                     assertEquals(0, conn.longQuery("SELECT COUNT(*) FROM episode_transcript"))
                     assertEquals(0, conn.longQuery("SELECT COUNT(*) FROM episode_alt_enclosure"))
+                    assertEquals(0, conn.longQuery("SELECT COUNT(*) FROM episode_guid_provenance"))
                     assertEquals(0, conn.longQuery("SELECT COUNT(*) FROM person"))
                     assertEquals(0, conn.longQuery("SELECT COUNT(*) FROM funding"))
                 }

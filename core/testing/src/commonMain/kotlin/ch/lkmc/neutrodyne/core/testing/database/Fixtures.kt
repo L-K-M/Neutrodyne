@@ -33,6 +33,9 @@ fun podcastEntity(
     artworkKey: String = "u-${Uuid.random().toString().take(8)}",
     status: PodcastStatus = PodcastStatus.ACTIVE,
     subscribedAt: Long = 1_700_000_000_000L,
+    // D98: fixture rows model pre-provenance (V1-migrated) libraries — pass `subscribedAt` to
+    // model a covered podcast.
+    guidCoverageSince: Long? = null,
     block: PodcastEntity.() -> PodcastEntity = { this },
 ): PodcastEntity =
     PodcastEntity(
@@ -46,6 +49,7 @@ fun podcastEntity(
         status = status,
         initialFetch = true,
         subscribedAt = subscribedAt,
+        guidCoverageSince = guidCoverageSince,
     ).block()
 
 fun episodeEntity(

@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.EpisodeType
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
+import ch.lkmc.neutrodyne.core.model.GuidKnowledge
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
 
@@ -74,6 +75,8 @@ data class DueFeed(
     val subscribedAt: Long,
     val lastAttemptAt: Long?,
     val lastErrorKind: FeedErrorKind?,
+    /** D98: provenance coverage marker (02 `podcast.guidCoverageSince`); `null` = uncovered. */
+    val guidCoverageSince: Long?,
 )
 
 /**
@@ -177,6 +180,12 @@ data class ExistingEpisodeKey(
     val firstSeenAt: Long,
     /** Added 2026-10-07: step 6's JSON-chapters invalidation compares the stored value. */
     val chaptersUrl: String?,
+)
+
+/** `IngestDao.guidKnowledge` row (D98): one stored provenance fact of the podcast. */
+data class GuidKnowledgeRow(
+    val guid: String,
+    val knowledge: GuidKnowledge,
 )
 
 /** `PodcastDao.observeCategoryRows` row: 03's `CategoryCount` source (suggested groups, M7). */

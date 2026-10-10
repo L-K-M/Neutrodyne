@@ -176,6 +176,9 @@ internal suspend fun seedPodcast(
     needsCredentials: Boolean = false,
     podcastGuid: String? = null,
     podcastGuidDerived: Boolean = false,
+    // D98: seeded ingest-test podcasts are covered (subscribed on a provenance-aware build);
+    // pass `null` to model a V1-migrated / coverage-less row.
+    guidCoverageSince: Long? = subscribedAt,
     syncId: String =
         java.util.UUID
             .randomUUID()
@@ -215,6 +218,7 @@ internal suspend fun seedPodcast(
             needsCredentials = needsCredentials,
             podcastGuid = podcastGuid,
             podcastGuidDerived = podcastGuidDerived,
+            guidCoverageSince = guidCoverageSince,
         ).block(),
     )
 

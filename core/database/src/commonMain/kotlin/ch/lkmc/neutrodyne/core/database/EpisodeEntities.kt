@@ -10,6 +10,7 @@ import androidx.room3.PrimaryKey
 import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.EpisodeType
+import ch.lkmc.neutrodyne.core.model.GuidKnowledge
 import ch.lkmc.neutrodyne.core.model.OwnerType
 
 /**
@@ -209,4 +210,29 @@ data class ChapterEntity(
     val linkUrl: String? = null,
     /** Podcasting 2.0 `toc:false`. */
     @ColumnInfo(defaultValue = "0") val hidden: Boolean = false,
+)
+
+/**
+ * `episode_guid_provenance` (D98, 02): what this podcast's feed history proved about one
+ * canonical GUID — `guid` is exactly the `g:`-key payload (`EpisodeKeys`: trimmed, non-empty,
+ * case-sensitive). Feed-scoped by design: the fact survives episode-row retention, rekeys and
+ * `inFeed` flips, and dies with the subscription through the podcast CASCADE. No `episodeId` —
+ * knowledge outlives the rows that evidenced it; row absence means unknown (see [GuidKnowledge]).
+ */
+@Entity(
+    tableName = "episode_guid_provenance",
+    primaryKeys = ["podcastId", "guid"],
+    foreignKeys = [
+        ForeignKey(
+            PodcastEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["podcastId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+)
+data class EpisodeGuidProvenanceEntity(
+    val podcastId: Long,
+    val guid: String,
+    val knowledge: GuidKnowledge,
 )

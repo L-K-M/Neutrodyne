@@ -144,6 +144,10 @@ internal class SubscribeUseCaseImpl(
                                 // "pending" / "not wanted" / "nothing older" (03 RFC 5005 paging).
                                 pagingNextUrl = link,
                                 pagingComplete = link == null || !backfill,
+                                // D98: a fresh subscribe observes every accepted item from here
+                                // on — complete coverage, so sole-observed GUIDs may record
+                                // KNOWN_INDEPENDENT. Migrated/restored rows stay NULL (unknown).
+                                guidCoverageSince = now,
                             ),
                         )
 
