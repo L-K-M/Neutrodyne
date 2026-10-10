@@ -32,6 +32,19 @@ inside the factory). Caller-visible semantics are unchanged: the original throwa
 permit accounting and the pool-closed error are preserved. Regression coverage:
 `core/database/.../RoomConnectionHandoffTest.kt`.
 
+`patches/0003` fixes `SchemaInfoUtil.readIndex` misreading `PRAGMA index_xinfo` on WITHOUT
+ROWID tables. SQLite stores the table's primary-key columns inside every secondary index
+and reports them as *auxiliary* rows (`key = 0`, versus `key = 1` for declared key
+columns); upstream ignored only `cid < 0` (rowid/expressions) and never read `key`, so
+`TableInfo.Index.columns` gained the PK columns — migration validation then failed a
+correct schema (`Expected [hlc, nodeId], found [hlc, nodeId, coll, rid, field]` on a
+`PRIMARY KEY (coll, rid, field)` + `INDEX (hlc, nodeId)` table). The patch reads `key`
+with the same missing-column-`null` fallback as the other columns and skips
+`key = 0` rows. Declared columns, order and uniqueness are unchanged on rowid tables,
+whose only auxiliary row is the rowid (`cid = -1`, already filtered). Regression
+coverage: `core/database/.../RoomIndexInfoTest.kt`, including a raw `index_xinfo` proof
+that the extra rows really are `key = 0` auxiliary entries.
+
 ## What is vendored
 
 This directory **builds** the runtime; `../room3-maven` carries its outputs. The root
@@ -46,6 +59,7 @@ Gradle plugin, schema and data behaviour are upstream 3.0.3, unchanged.
 | `upstream/room3-runtime-{jvm,android}-3.0.3-sources.jar` | the published sources jars from `dl.google.com/dl/android/maven2/androidx/room3/room3-runtime-{jvm,android}/3.0.3/` (`SHA256SUMS.txt`; the jvm jar is byte-identical to the copy retained from the earlier investigation). Apache-2.0, © The Android Open Source Project. |
 | `patches/0001-*.patch` | the acquisition fix described above, applied over the merged sources. |
 | `patches/0002-*.patch` | the connection-handoff ownership fix described above. |
+| `patches/0003-*.patch` | the `index_xinfo` auxiliary-column fix described above. |
 | `src/androidMain/` | upstream's `AndroidManifest.xml` service declaration (namespace/minSdk now via DSL) and the aar consumer `proguard.txt`. |
 
 `prepare-sources.sh` verifies the jars against `SHA256SUMS.txt`, extracts both, checks the
@@ -87,5 +101,6 @@ Room ships these fixes (track the `androidx.room3` release notes), then pin `roo
 catalog entry without removing the substitution would keep resolving the patched 3.0.3 —
 do not do that.
 
-Database format is untouched (the patch changes pool scheduling only), so rolling forward
-or back across this change keeps existing databases valid.
+Database format is untouched (the patches change runtime pool ownership and index
+inspection, not on-disk structures), so rolling forward or back across this change keeps
+existing databases valid.

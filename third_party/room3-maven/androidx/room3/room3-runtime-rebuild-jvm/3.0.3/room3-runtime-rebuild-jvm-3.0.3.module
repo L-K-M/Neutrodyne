@@ -72,11 +72,11 @@
         {
           "name": "room3-runtime-rebuild-jvm-3.0.3.jar",
           "url": "room3-runtime-rebuild-jvm-3.0.3.jar",
-          "size": 464762,
-          "sha512": "6f4aae48b9898ebf92c6a263881cec2262bc6add1a5e150126707e4669af2f313d587f323123d72582a9d3ecc701d17765d58c3a4b7ef99aa254c7e743dd7945",
-          "sha256": "44a7bed33b700b9efe2da113e487c2e271757c73eb3b9fe5dbf039f4074716a9",
-          "sha1": "69bca01091f198a6302d773442a7703ee3d9d1e5",
-          "md5": "4e60b78f83ee678221e5a3050cbd0c7a"
+          "size": 464854,
+          "sha512": "92c4aaf6c7b9eb56c50c647ff280e358a8d6d48e5109ad4db75d1a41bacd2eb1564d128da0b289743c8b301f34a60469ab7e73eca95e17ad1fba93163bbb0bcf",
+          "sha256": "9a07a08861421eebad7e0305e5c161506b1f97d1f05eb7978a6cdf317bca2c81",
+          "sha1": "db49f30ca8dba5115ce81d39dab14a4f2c41596a",
+          "md5": "8d760c58e9b488fee1cf7aaf617b7b05"
         }
       ]
     },
@@ -144,11 +144,11 @@
         {
           "name": "room3-runtime-rebuild-jvm-3.0.3.jar",
           "url": "room3-runtime-rebuild-jvm-3.0.3.jar",
-          "size": 464762,
-          "sha512": "6f4aae48b9898ebf92c6a263881cec2262bc6add1a5e150126707e4669af2f313d587f323123d72582a9d3ecc701d17765d58c3a4b7ef99aa254c7e743dd7945",
-          "sha256": "44a7bed33b700b9efe2da113e487c2e271757c73eb3b9fe5dbf039f4074716a9",
-          "sha1": "69bca01091f198a6302d773442a7703ee3d9d1e5",
-          "md5": "4e60b78f83ee678221e5a3050cbd0c7a"
+          "size": 464854,
+          "sha512": "92c4aaf6c7b9eb56c50c647ff280e358a8d6d48e5109ad4db75d1a41bacd2eb1564d128da0b289743c8b301f34a60469ab7e73eca95e17ad1fba93163bbb0bcf",
+          "sha256": "9a07a08861421eebad7e0305e5c161506b1f97d1f05eb7978a6cdf317bca2c81",
+          "sha1": "db49f30ca8dba5115ce81d39dab14a4f2c41596a",
+          "md5": "8d760c58e9b488fee1cf7aaf617b7b05"
         }
       ]
     },
@@ -167,11 +167,11 @@
         {
           "name": "room3-runtime-rebuild-jvm-3.0.3-sources.jar",
           "url": "room3-runtime-rebuild-jvm-3.0.3-sources.jar",
-          "size": 111055,
-          "sha512": "ae3d86e647f11ec3af8570672733faa630d4a0b78fad7571f4b19c16eb92a71df91f80c9cfc84cad817adcde34b90514c772e8e0f82563fe013063643e257d78",
-          "sha256": "106dec423cd3c48f5915b1c20b23aca6190c72af06140ecdd4e63298dbebc56b",
-          "sha1": "23b40614eafce3ec8eb4e494c1781606a0e9eeb6",
-          "md5": "d678e092dd219f4340785c65f3da73cc"
+          "size": 111242,
+          "sha512": "72bc3bf4ceaad70d52efce41413bd74835c17020d1d1db4fe585bc8f0c80e447d42696cdf7b65a34b97b09aa0b91388d77ce712864fb521ddd68e2ab3ebe107d",
+          "sha256": "d777f5af0966954800661be540390fc8cc5894bf9c57632edf0e7ec2788d0e19",
+          "sha1": "8fe981b3da463623d1455a096517ea50ccf257c8",
+          "md5": "399dcce95c3b32516930662677ec633e"
         }
       ]
     }
