@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.material3.adaptive.layout.PaneScaffoldDirective
 import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
 import androidx.compose.material3.adaptive.navigation3.rememberListDetailSceneStrategy
 import androidx.compose.runtime.Composable
@@ -16,11 +17,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PixelMap
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavKey
@@ -37,9 +40,13 @@ import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
+import ch.lkmc.neutrodyne.core.navigation.LicencesKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
+import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
+import ch.lkmc.neutrodyne.core.navigation.SettingsKey
+import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import org.junit.Rule
 import org.junit.Test
@@ -68,6 +75,7 @@ import kotlin.test.assertTrue
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Suppress("TooManyFunctions") // test suites accumulate test + fixture functions
 class NavHostTransitionHostTest {
     @get:Rule
     val rule = createAndroidComposeRule<ComponentActivity>()
@@ -179,6 +187,167 @@ class NavHostTransitionHostTest {
 
     // endregion
 
+    // region expanded two-pane (Settings Home -> About -> Licences)
+
+    /**
+     * The owner's expanded-layout case: in a two-pane scaffold a Settings Home -> About -> Licences
+     * chain keeps one `ThreePaneScaffoldScene`, so a single-entry pop swaps detail-pane content
+     * inside the same scene — the outer scene transform cannot cover it. `navigation.pop()` is
+     * the in-app back path here (a system back goes through the scaffold's
+     * `PopUntilScaffoldValueChange` handler, which pops to a scaffold boundary instead). The pane
+     * wipe must translate the outgoing detail toward the layout end and reveal the previous
+     * detail underneath, while the list pane stays anchored (a whole-master swipe would move it).
+     */
+    @Test
+    fun expandedBackPopWipesInsideTheDetailPane() {
+        setFixedHost(directive = TwoPaneDirective)
+        rule.runOnUiThread { pushSettingsChain() }
+        settle()
+        val rest = rule.onRoot().captureToImage().toPixelMap()
+        val detailRest = leftEdgeOf(rest, LICENCES_COLOR)
+        assertTrue(detailRest > 0, "expected a two-pane layout")
+
+        rule.runOnUiThread { navigation.pop() }
+
+        val wiped =
+            advanceFramesUntil(WIPE_FRAME_BOUND) {
+                val pixels = rule.onRoot().captureToImage().toPixelMap()
+                leftEdgeOf(pixels, LICENCES_COLOR) > detailRest &&
+                    leftEdgeOf(pixels, ABOUT_COLOR) == detailRest &&
+                    leftEdgeOf(pixels, SETTINGS_COLOR) == 0
+            }
+        assertTrue(wiped, "no frame showed the detail wiping right inside its pane")
+
+        settle()
+        val pixels = rule.onRoot().captureToImage().toPixelMap()
+        assertEquals(-1, leftEdgeOf(pixels, LICENCES_COLOR), "detail still painted after the pop")
+        assertEquals(detailRest, leftEdgeOf(pixels, ABOUT_COLOR))
+        assertEquals(0, leftEdgeOf(pixels, SETTINGS_COLOR))
+    }
+
+    /** The covering half of the pair: a detail push slides the new pane content in from the end. */
+    @Test
+    fun expandedDetailPushCoversThePane() {
+        setFixedHost(directive = TwoPaneDirective)
+        rule.runOnUiThread {
+            navigation.push(SettingsHomeKey)
+            navigation.push(SettingsKey(SettingsPage.ABOUT))
+        }
+        settle()
+        val rest = rule.onRoot().captureToImage().toPixelMap()
+        val detailRest = leftEdgeOf(rest, ABOUT_COLOR)
+        assertTrue(detailRest > 0, "expected a two-pane layout")
+
+        rule.runOnUiThread { navigation.push(LicencesKey) }
+
+        val covered =
+            advanceFramesUntil(WIPE_FRAME_BOUND) {
+                val pixels = rule.onRoot().captureToImage().toPixelMap()
+                val entering = leftEdgeOf(pixels, LICENCES_COLOR)
+                entering > detailRest &&
+                    leftEdgeOf(pixels, ABOUT_COLOR) == detailRest &&
+                    leftEdgeOf(pixels, SETTINGS_COLOR) == 0
+            }
+        assertTrue(covered, "no frame showed the new detail covering toward the pane start")
+
+        settle()
+        assertEquals(detailRest, leftEdgeOf(rule.onRoot().captureToImage().toPixelMap(), LICENCES_COLOR))
+    }
+
+    /**
+     * Positive control: the same back action with plain (unroled) entries still wipes through the
+     * outer scene transition — proving the fixture observes animation whenever one runs.
+     */
+    @Test
+    fun backPopWithoutPaneRolesStillWipesTheScene() {
+        setFixedHost(installers = DistinctInstallers, directive = TwoPaneDirective)
+        rule.runOnUiThread { pushSettingsChain() }
+        settle()
+
+        rule.runOnUiThread { rule.activity.onBackPressedDispatcher.onBackPressed() }
+
+        val wiped =
+            advanceFramesUntil(WIPE_FRAME_BOUND) {
+                val pixels = rule.onRoot().captureToImage().toPixelMap()
+                leftEdgeOf(pixels, LICENCES_COLOR) > 0 && leftEdgeOf(pixels, ABOUT_COLOR) == 0
+            }
+        assertTrue(wiped, "distinct-scene pop did not produce the outer wipe")
+    }
+
+    /**
+     * A predictive-back gesture on this stack is scaffold-owned, not a pane wipe: the strategy's
+     * `PopUntilScaffoldValueChange` lands on a scaffold-value boundary (here the detail pane
+     * closes and the pop skips both detail entries), so the pane-content boundary must NOT
+     * preview an in-pane wipe — About must never be revealed under the gesture — and cancelling
+     * restores the scene exactly.
+     */
+    @Test
+    fun expandedPredictiveBackIsScaffoldOwnedNotAPaneWipe() {
+        setFixedHost(directive = TwoPaneDirective)
+        rule.runOnUiThread { pushSettingsChain() }
+        settle()
+        val input = DirectNavigationEventInput()
+        val eventDispatcher =
+            assertNotNull(dispatcher, "no NavigationEventDispatcher owner in the host")
+        rule.runOnUiThread { eventDispatcher.addInput(input) }
+        rule.mainClock.autoAdvance = false
+
+        rule.runOnUiThread {
+            input.backStarted(NavigationEvent(NavigationEvent.EDGE_LEFT, 0f, 16f, 400f))
+            input.backProgressed(NavigationEvent(NavigationEvent.EDGE_LEFT, 0.45f, 300f, 400f))
+        }
+
+        // The list pane stays anchored and no wrong landing is previewed underneath.
+        var aboutSeen = false
+        var settingsMoved = false
+        repeat(GESTURE_FRAME_BOUND) {
+            rule.mainClock.advanceTimeByFrame()
+            val pixels = rule.onRoot().captureToImage().toPixelMap()
+            if (leftEdgeOf(pixels, ABOUT_COLOR) != -1) aboutSeen = true
+            if (leftEdgeOf(pixels, SETTINGS_COLOR) != 0) settingsMoved = true
+        }
+        assertTrue(!aboutSeen, "the gesture previewed a wrong in-pane landing")
+        assertTrue(!settingsMoved, "the list pane moved during the gesture")
+        assertTrue(
+            rule.onAllNodesWithTag(LICENCES_TAG).fetchSemanticsNodes().isNotEmpty(),
+            "licences left composition while the gesture was still cancellable",
+        )
+
+        rule.runOnUiThread { input.backCancelled() }
+        settle()
+        assertTrue(rule.onAllNodesWithTag(SETTINGS_TAG).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(rule.onAllNodesWithTag(LICENCES_TAG).fetchSemanticsNodes().isNotEmpty())
+    }
+
+    /** RTL resolves End to the left: the wipe recedes through the pane's start side. */
+    @Test
+    fun expandedBackPopWipesTowardTheLayoutEnd() {
+        setFixedHost(directive = TwoPaneDirective, layoutDirection = LayoutDirection.Rtl)
+        rule.runOnUiThread { pushSettingsChain() }
+        settle()
+        val rest = rule.onRoot().captureToImage().toPixelMap()
+        val restRight = rightEdgeOf(rest, LICENCES_COLOR)
+        assertTrue(restRight > 0, "expected licences painted")
+
+        rule.runOnUiThread { navigation.pop() }
+
+        val wiped =
+            advanceFramesUntil(WIPE_FRAME_BOUND) {
+                val pixels = rule.onRoot().captureToImage().toPixelMap()
+                val receding = rightEdgeOf(pixels, LICENCES_COLOR)
+                receding in 1 until restRight && leftEdgeOf(pixels, ABOUT_COLOR) != -1
+            }
+        assertTrue(wiped, "no frame showed the detail receding toward the layout end in RTL")
+    }
+
+    private fun pushSettingsChain() {
+        navigation.push(SettingsHomeKey)
+        navigation.push(SettingsKey(SettingsPage.ABOUT))
+        navigation.push(LicencesKey)
+    }
+
+    // endregion
+
     // region platform defaults (pre-fix diagnostics)
 
     /**
@@ -248,19 +417,27 @@ class NavHostTransitionHostTest {
 
     // region hosts
 
-    private fun setFixedHost() {
+    private fun setFixedHost(
+        installers: Set<EntryProviderInstaller> = HostInstallers,
+        directive: PaneScaffoldDirective? = null,
+        layoutDirection: LayoutDirection = LayoutDirection.Ltr,
+    ) {
         rule.setContent {
             val state = rememberNavigationState()
             navigation = state
             dispatcher = LocalNavigationEventDispatcherOwner.current?.navigationEventDispatcher
-            CompositionLocalProvider(LocalAppNavigator provides state) {
+            CompositionLocalProvider(
+                LocalAppNavigator provides state,
+                LocalLayoutDirection provides layoutDirection,
+            ) {
                 NeutrodyneNavHost(
                     state = state,
-                    installers = HostInstallers,
+                    installers = installers,
                     directive =
-                        calculatePaneScaffoldDirective(
-                            currentWindowAdaptiveInfo(supportLargeAndXLargeWidth = true),
-                        ),
+                        directive
+                            ?: calculatePaneScaffoldDirective(
+                                currentWindowAdaptiveInfo(supportLargeAndXLargeWidth = true),
+                            ),
                 )
             }
         }
@@ -346,6 +523,21 @@ class NavHostTransitionHostTest {
         return -1
     }
 
+    /** Rightmost column whose pixels are mostly [sentinel], or -1 when the sentinel is gone. */
+    private fun rightEdgeOf(
+        pixels: PixelMap,
+        sentinel: Color,
+    ): Int {
+        for (x in pixels.width - 1 downTo 0) {
+            var hits = 0
+            for (y in 0 until pixels.height step PIXEL_STRIDE) {
+                if (pixels[x, y].isCloseTo(sentinel)) hits++
+            }
+            if (hits * PIXEL_STRIDE > pixels.height / 2) return x
+        }
+        return -1
+    }
+
     /** Any pixel that is a blend of two sentinels — a fade signature, never a wipe's. */
     private fun hasBlendedPixels(
         pixels: PixelMap,
@@ -391,10 +583,19 @@ class NavHostTransitionHostTest {
 private const val FEEDS_TAG = "feeds-pane"
 private const val LIBRARY_TAG = "library-pane"
 private const val PODCAST_TAG = "podcast-pane"
+private const val SETTINGS_TAG = "settings-pane"
+private const val ABOUT_TAG = "about-pane"
+private const val LICENCES_TAG = "licences-pane"
 
 private val FEEDS_COLOR = Color(0xFFD32F2F)
 private val LIBRARY_COLOR = Color(0xFF2E7D32)
 private val PODCAST_COLOR = Color(0xFF1565C0)
+private val SETTINGS_COLOR = Color(0xFFF9A825)
+private val ABOUT_COLOR = Color(0xFF00695C)
+private val LICENCES_COLOR = Color(0xFF4E342E)
+
+/** Forces two partitions regardless of the test window size — the expanded scaffold case. */
+private val TwoPaneDirective = PaneScaffoldDirective.Default.copy(maxHorizontalPartitions = 2)
 
 private val HostInstallers: Set<EntryProviderInstaller> =
     buildSet {
@@ -424,6 +625,34 @@ private val HostInstallers: Set<EntryProviderInstaller> =
                 Sentinel(PODCAST_COLOR, PODCAST_TAG)
             }
         }
+        add {
+            entry<SettingsHomeKey>(metadata = NdSceneMetadata.paneList()) {
+                Sentinel(SETTINGS_COLOR, SETTINGS_TAG)
+            }
+        }
+        add {
+            entry<SettingsKey>(metadata = NdSceneMetadata.paneDetail()) {
+                Sentinel(ABOUT_COLOR, ABOUT_TAG)
+            }
+        }
+        add {
+            entry<LicencesKey>(metadata = NdSceneMetadata.paneDetail()) {
+                Sentinel(LICENCES_COLOR, LICENCES_TAG)
+            }
+        }
+    }
+
+/** The same settings keys with no pane roles — each entry lands in its own scene. */
+private val DistinctInstallers: Set<EntryProviderInstaller> =
+    buildSet {
+        add { entry<FeedsKey> { Sentinel(FEEDS_COLOR, FEEDS_TAG) } }
+        add { entry<LibraryKey> { Sentinel(LIBRARY_COLOR, LIBRARY_TAG) } }
+        add { entry<UpNextKey> { Sentinel(Color(0xFF6A1B9A), "up-next-pane") } }
+        add { entry<DownloadsKey> { Sentinel(Color(0xFF00838F), "downloads-pane") } }
+        add { entry<DiscoverKey> { Sentinel(Color(0xFFEF6C00), "discover-pane") } }
+        add { entry<SettingsHomeKey> { Sentinel(SETTINGS_COLOR, SETTINGS_TAG) } }
+        add { entry<SettingsKey> { Sentinel(ABOUT_COLOR, ABOUT_TAG) } }
+        add { entry<LicencesKey> { Sentinel(LICENCES_COLOR, LICENCES_TAG) } }
     }
 
 private val DefaultsProvider =
@@ -433,6 +662,7 @@ private val DefaultsProvider =
         entry<PodcastKey> { Sentinel(PODCAST_COLOR, PODCAST_TAG) }
     }
 
+@Suppress("FunctionNaming") // composables are PascalCase
 @Composable
 private fun Sentinel(
     color: Color,

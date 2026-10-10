@@ -21,6 +21,7 @@ kotlin {
     compilerOptions {
         // adaptive-navigation3 / navigation-suite APIs (ListDetailSceneStrategy, directives).
         optIn.add("androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi")
+        optIn.add("androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveComponentOverrideApi")
     }
 
     sourceSets {
