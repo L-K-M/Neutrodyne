@@ -6,13 +6,19 @@ import androidx.activity.ComponentActivity
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Button
+import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.layout.PaneScaffoldDirective
 import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
 import androidx.compose.material3.adaptive.navigation3.rememberListDetailSceneStrategy
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PixelMap
@@ -22,8 +28,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavKey
@@ -54,6 +65,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -317,6 +329,65 @@ class NavHostTransitionHostTest {
         settle()
         assertTrue(rule.onAllNodesWithTag(SETTINGS_TAG).fetchSemanticsNodes().isNotEmpty())
         assertTrue(rule.onAllNodesWithTag(LICENCES_TAG).fetchSemanticsNodes().isNotEmpty())
+    }
+
+    /**
+     * The outgoing pane's owners are load-bearing: while the wipe draws it, the outgoing entry
+     * must still be the same composed emission — same ViewModel, same ViewModelStoreOwner, same
+     * `rememberSaveable` value — with no disappearance/re-entry frame (the destroyed-and-
+     * recreated signature), and the popped entry's ViewModel must be cleared exactly once, after
+     * the wipe exits. The single-pane case needs no assertion here: `NavDisplay`'s own scene
+     * transition already holds the outgoing emission composed.
+     */
+    @Test
+    fun expandedBackPopKeepsTheOutgoingOwnerUntilTheWipeExits() {
+        OwnerProbe.reset()
+        setFixedHost(installers = OwnerInstallers, directive = TwoPaneDirective)
+        rule.runOnUiThread { pushSettingsChain() }
+        settle()
+        rule.onNodeWithTag(INCREMENT_TAG).performClick()
+        settle()
+        val original = assertNotNull(OwnerProbe.snapshot, "licences page never composed")
+        assertEquals(1, original.saved)
+
+        rule.mainClock.autoAdvance = false
+        rule.runOnUiThread { navigation.pop() }
+
+        var exited = false
+        var outgoingSeen = false
+        repeat(WIPE_FRAME_BOUND * 2) {
+            rule.mainClock.advanceTimeByFrame()
+            val present = rule.onAllNodesWithTag(LICENCES_TAG).fetchSemanticsNodes().isNotEmpty()
+            if (present) {
+                assertTrue(!exited, "licences re-entered composition mid-wipe")
+                outgoingSeen = true
+                val now = OwnerProbe.snapshot
+                assertEquals(original.vm, now?.vm, "outgoing ViewModel was recreated")
+                assertEquals(original.owner, now?.owner, "outgoing ViewModelStoreOwner changed")
+                assertEquals(1, now?.saved, "outgoing rememberSaveable state was reset")
+            } else {
+                exited = true
+            }
+            assertTrue(
+                exited || original.vm !in OwnerProbe.cleared,
+                "outgoing ViewModel cleared while the wipe still drew it",
+            )
+        }
+        assertTrue(outgoingSeen, "the wipe never drew the outgoing page")
+
+        settle()
+        assertTrue(rule.onAllNodesWithTag(LICENCES_TAG).fetchSemanticsNodes().isEmpty())
+        assertEquals(
+            1,
+            OwnerProbe.cleared.count { it == original.vm },
+            "original ViewModel must clear exactly once after the wipe exits",
+        )
+        assertEquals(
+            SettingsKey(SettingsPage.ABOUT),
+            navigation.stack(FeedsKey).last(),
+            "the pop must land on About in the same stack",
+        )
+        assertTrue(rule.onAllNodesWithTag(SETTINGS_TAG).fetchSemanticsNodes().isNotEmpty())
     }
 
     /** RTL resolves End to the left: the wipe recedes through the pane's start side. */
@@ -642,6 +713,45 @@ private val HostInstallers: Set<EntryProviderInstaller> =
         }
     }
 
+/** The expanded settings chain with a real `viewModel()`/`rememberSaveable` licences page. */
+private val OwnerInstallers: Set<EntryProviderInstaller> =
+    buildSet {
+        add { entry<FeedsKey>(metadata = NdSceneMetadata.paneList()) { Sentinel(FEEDS_COLOR, FEEDS_TAG) } }
+        add {
+            entry<LibraryKey>(metadata = NdSceneMetadata.paneList()) {
+                Sentinel(LIBRARY_COLOR, LIBRARY_TAG)
+            }
+        }
+        add {
+            entry<UpNextKey>(metadata = NdSceneMetadata.paneList()) {
+                Sentinel(Color(0xFF6A1B9A), "up-next-pane")
+            }
+        }
+        add {
+            entry<DownloadsKey>(metadata = NdSceneMetadata.paneList()) {
+                Sentinel(Color(0xFF00838F), "downloads-pane")
+            }
+        }
+        add {
+            entry<DiscoverKey>(metadata = NdSceneMetadata.paneList()) {
+                Sentinel(Color(0xFFEF6C00), "discover-pane")
+            }
+        }
+        add {
+            entry<SettingsHomeKey>(metadata = NdSceneMetadata.paneList()) {
+                Sentinel(SETTINGS_COLOR, SETTINGS_TAG)
+            }
+        }
+        add {
+            entry<SettingsKey>(metadata = NdSceneMetadata.paneDetail()) {
+                Sentinel(ABOUT_COLOR, ABOUT_TAG)
+            }
+        }
+        add {
+            entry<LicencesKey>(metadata = NdSceneMetadata.paneDetail()) { OwnerProbePage() }
+        }
+    }
+
 /** The same settings keys with no pane roles — each entry lands in its own scene. */
 private val DistinctInstallers: Set<EntryProviderInstaller> =
     buildSet {
@@ -661,6 +771,52 @@ private val DefaultsProvider =
         entry<LibraryKey> { Sentinel(LIBRARY_COLOR, LIBRARY_TAG) }
         entry<PodcastKey> { Sentinel(PODCAST_COLOR, PODCAST_TAG) }
     }
+
+private const val INCREMENT_TAG = "licences-increment"
+
+/** Records the live owner triple of the licences page so frames can assert continuity. */
+private object OwnerProbe {
+    val nextIdentity = AtomicInteger(1)
+    val cleared = mutableListOf<Int>()
+    var snapshot: Snapshot? = null
+
+    data class Snapshot(
+        val vm: Int,
+        val owner: Int,
+        val saved: Int,
+    )
+
+    fun reset() {
+        cleared.clear()
+        snapshot = null
+    }
+}
+
+private class OwnerProbeVm : ViewModel() {
+    val identity = OwnerProbe.nextIdentity.getAndIncrement()
+
+    override fun onCleared() {
+        OwnerProbe.cleared += identity
+    }
+}
+
+@Suppress("FunctionNaming") // composables are PascalCase
+@Composable
+private fun OwnerProbePage() {
+    val vm = viewModel { OwnerProbeVm() }
+    val owner = LocalViewModelStoreOwner.current
+    val saved = rememberSaveable { mutableIntStateOf(0) }
+    SideEffect {
+        OwnerProbe.snapshot =
+            OwnerProbe.Snapshot(vm.identity, System.identityHashCode(owner), saved.intValue)
+    }
+    Column(Modifier.fillMaxSize().testTag(LICENCES_TAG)) {
+        Text("licences|saved=${saved.intValue}")
+        Button(onClick = { saved.intValue++ }, modifier = Modifier.testTag(INCREMENT_TAG)) {
+            Text("increment")
+        }
+    }
+}
 
 @Suppress("FunctionNaming") // composables are PascalCase
 @Composable
