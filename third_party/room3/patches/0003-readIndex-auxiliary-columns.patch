@@ -1,0 +1,42 @@
+--- a/commonMain/androidx/room3/util/SchemaInfoUtil.kt
++++ b/commonMain/androidx/room3/util/SchemaInfoUtil.kt
+@@ -226,6 +226,13 @@
+     }
+ }
+ 
++/**
++ * `index_xinfo` marks a declared key column by its 1-based position in the index key;
++ * key = 0 marks an auxiliary column merely stored in the index — the primary key of a
++ * WITHOUT ROWID table, or the rowid.
++ */
++private const val XINFO_AUXILIARY_KEY = 0L
++
+ /** @return null if we cannot read the index due to older sqlite implementations. */
+ private suspend fun readIndex(
+     connection: SQLiteConnection,
+@@ -237,11 +244,13 @@
+         val cidColumnIndex = stmt.columnIndexOf("cid")
+         val nameColumnIndex = stmt.columnIndexOf("name")
+         val descColumnIndex = stmt.columnIndexOf("desc")
++        val keyColumnIndex = stmt.columnIndexOf("key")
+         if (
+             seqnoColumnIndex == -1 ||
+                 cidColumnIndex == -1 ||
+                 nameColumnIndex == -1 ||
+-                descColumnIndex == -1
++                descColumnIndex == -1 ||
++                keyColumnIndex == -1
+         ) {
+             // we cannot read them so better not validate any index.
+             return null
+@@ -254,6 +263,10 @@
+                 // Ignore SQLite row ID
+                 continue
+             }
++            if (stmt.getLong(keyColumnIndex) == XINFO_AUXILIARY_KEY) {
++                // Auxiliary columns are index payload, not declared index columns.
++                continue
++            }
+             val seq = stmt.getLong(seqnoColumnIndex).toInt()
+             val columnName = stmt.getText(nameColumnIndex)
+             val order = if (stmt.getLong(descColumnIndex) > 0) "DESC" else "ASC"
