@@ -32,6 +32,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.nio.file.Path
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -68,6 +69,7 @@ class RoomConnectionHandoffDeviceTest {
         runBlocking {
             val scope = CoroutineScope(Job() + Dispatchers.Default)
             val fixtureDir = fixtureDir("writer")
+            val sentinel = AppDbSentinel(appDatabasesDir())
             val insideOpen = CompletableDeferred<Unit>()
             val releaseOpen = CompletableDeferred<Unit>()
             val seen = CopyOnWriteArrayList<SeenConnection>()
@@ -77,6 +79,7 @@ class RoomConnectionHandoffDeviceTest {
                 val driver =
                     GatedDriver(
                         BundledSQLiteDriver(),
+                        fixtureDir.absoluteFile.toPath().normalize(),
                         gateOnCall = { it == 1 },
                         insideOpen,
                         releaseOpen,
@@ -118,6 +121,11 @@ class RoomConnectionHandoffDeviceTest {
                     seen.count { !it.closed.get() },
                 )
                 assertDbFilesReleased(fixtureDir, "no db descriptor may survive db.close()")
+                assertTrue(
+                    "the database file must actually live inside the test fixture",
+                    File(fixtureDir, NeutrodyneDatabase.FILE_NAME).exists(),
+                )
+                sentinel.assertUntouched()
             } finally {
                 cleanup(attempt, releaseOpen, seen, db, scope, fixtureDir)
             }
@@ -133,6 +141,7 @@ class RoomConnectionHandoffDeviceTest {
         runBlocking {
             val scope = CoroutineScope(Job() + Dispatchers.Default)
             val fixtureDir = fixtureDir("reader")
+            val sentinel = AppDbSentinel(appDatabasesDir())
             val insideOpen = CompletableDeferred<Unit>()
             val releaseOpen = CompletableDeferred<Unit>()
             val seen = CopyOnWriteArrayList<SeenConnection>()
@@ -142,6 +151,7 @@ class RoomConnectionHandoffDeviceTest {
                 val driver =
                     GatedDriver(
                         BundledSQLiteDriver(),
+                        fixtureDir.absoluteFile.toPath().normalize(),
                         gateOnCall = { it == 2 },
                         insideOpen,
                         releaseOpen,
@@ -179,6 +189,11 @@ class RoomConnectionHandoffDeviceTest {
                     seen.count { !it.closed.get() },
                 )
                 assertDbFilesReleased(fixtureDir, "no db descriptor may survive db.close()")
+                assertTrue(
+                    "the database file must actually live inside the test fixture",
+                    File(fixtureDir, NeutrodyneDatabase.FILE_NAME).exists(),
+                )
+                sentinel.assertUntouched()
             } finally {
                 cleanup(attempt, releaseOpen, seen, db, scope, fixtureDir)
             }
@@ -190,6 +205,7 @@ class RoomConnectionHandoffDeviceTest {
         runBlocking {
             val scope = CoroutineScope(Job() + Dispatchers.Default)
             val fixtureDir = fixtureDir("control")
+            val sentinel = AppDbSentinel(appDatabasesDir())
             val insideOpen = CompletableDeferred<Unit>()
             val releaseOpen = CompletableDeferred<Unit>()
             val seen = CopyOnWriteArrayList<SeenConnection>()
@@ -199,6 +215,7 @@ class RoomConnectionHandoffDeviceTest {
                 val driver =
                     GatedDriver(
                         BundledSQLiteDriver(),
+                        fixtureDir.absoluteFile.toPath().normalize(),
                         gateOnCall = { it == 1 },
                         insideOpen,
                         releaseOpen,
@@ -220,10 +237,36 @@ class RoomConnectionHandoffDeviceTest {
                 database.close()
                 assertEquals(0, seen.count { !it.closed.get() })
                 assertDbFilesReleased(fixtureDir, "no db descriptor may survive db.close()")
+                assertTrue(
+                    "the database file must actually live inside the test fixture",
+                    File(fixtureDir, NeutrodyneDatabase.FILE_NAME).exists(),
+                )
+                sentinel.assertUntouched()
             } finally {
                 cleanup(attempt, releaseOpen, seen, db, scope, fixtureDir)
             }
         }
+
+    /**
+     * Fixture routing proof: `AndroidDatabaseFactory` resolves through `context.applicationContext`,
+     * which `ContextWrapper` delegates to the base context — before the wrapper retained itself
+     * there, this resolved the app's real `databases/` path and every test opened and measured
+     * the wrong file. This assertion is what failed on the pre-fix wrapper.
+     */
+    @Test
+    fun theFixtureOwnsTheDatabasePath() {
+        val fixtureDir = fixtureDir("isolation")
+        try {
+            val factory = AndroidDatabaseFactory(isolatedContext(fixtureDir))
+            assertEquals(
+                "the factory must resolve the test-owned fixture, not the app database dir",
+                File(fixtureDir, NeutrodyneDatabase.FILE_NAME).absolutePath,
+                factory.databasePath,
+            )
+        } finally {
+            fixtureDir.deleteRecursively()
+        }
+    }
 
     /**
      * Unblocks a possibly-latched gate, joins the attempt, then releases every unowned handle
@@ -246,13 +289,43 @@ class RoomConnectionHandoffDeviceTest {
         fixtureDir.deleteRecursively()
     }
 
-    /** Redirects only `getDatabasePath` into [fixtureDir]; every other call delegates. */
+    /**
+     * Redirects the database path into [fixtureDir]; every other call delegates.
+     * `AndroidDatabaseFactory` resolves every path through `context.applicationContext`, so the
+     * wrapper must retain itself there or this override is bypassed and the test writes into
+     * the app's real `databases/` directory. `getDatabasePath` accepts only the bare file name
+     * (mapped into the fixture) or an absolute path already inside the fixture — Room hands the
+     * resolved absolute name back through this method (`resolveFileName`); anything else is an
+     * escape or a `File(parent, absolute)` double-map and must fail instead of relocating.
+     */
     private fun isolatedContext(fixtureDir: File): Context =
         object : ContextWrapper(context) {
-            override fun getDatabasePath(name: String): File = File(fixtureDir, name).also { fixtureDir.mkdirs() }
+            private val fixtureRoot = fixtureDir.absoluteFile.toPath().normalize()
+
+            override fun getApplicationContext(): Context = this
+
+            override fun getDatabasePath(name: String): File {
+                val candidate = File(name)
+                if (candidate.isAbsolute) {
+                    require(candidate.toPath().normalize().startsWith(fixtureRoot)) {
+                        "database path escaped the test fixture: $name"
+                    }
+                    return candidate
+                }
+                require(name == NeutrodyneDatabase.FILE_NAME) {
+                    "the test fixture only owns the Neutrodyne database name: $name"
+                }
+                return File(fixtureDir, name).also { fixtureDir.mkdirs() }
+            }
         }
 
     private fun fixtureDir(name: String): File = File(context.cacheDir, "room-handoff-$name").apply { mkdirs() }
+
+    /** The app's real `databases/` dir — read-only, for the sentinel snapshot only. */
+    private fun appDatabasesDir(): File =
+        checkNotNull(context.getDatabasePath(NeutrodyneDatabase.FILE_NAME).parentFile) {
+            "cannot resolve the app databases directory"
+        }
 
     private fun buildDb(
         driver: SQLiteDriver,
@@ -321,6 +394,7 @@ class RoomConnectionHandoffDeviceTest {
     /** Driver that blocks [open] on [gateOnCall] while recording every produced connection. */
     private class GatedDriver(
         private val delegate: SQLiteDriver,
+        private val fixtureRoot: Path,
         private val gateOnCall: (Int) -> Boolean,
         private val insideOpen: CompletableDeferred<Unit>,
         private val releaseOpen: CompletableDeferred<Unit>,
@@ -331,6 +405,12 @@ class RoomConnectionHandoffDeviceTest {
             get() = delegate.hasConnectionPool
 
         override fun open(fileName: String): SQLiteConnection {
+            // Gate before any native open: the only legal target is inside the test fixture —
+            // anything else means fixture isolation failed and the app's real database would
+            // be the one opened.
+            require(File(fileName).toPath().normalize().startsWith(fixtureRoot)) {
+                "database open escaped the test fixture: $fileName"
+            }
             if (gateOnCall(calls.incrementAndGet())) {
                 insideOpen.complete(Unit)
                 // Bounded: a test that never releases the gate must not park this thread.
@@ -338,6 +418,33 @@ class RoomConnectionHandoffDeviceTest {
             }
             return SeenConnection(delegate.open(fileName)).also { seen += it }
         }
+    }
+
+    /**
+     * Non-destructive proof the fixture kept the test away from the app's real database:
+     * snapshots every `neutrodyne.db*` entry under the real `databases/` dir (name, length,
+     * mtime) and requires the identical snapshot afterwards — so a misrouted open would have
+     * to leave those files byte-identical in every observable dimension to pass.
+     */
+    private class AppDbSentinel(
+        private val databasesDir: File,
+    ) {
+        private val before = snapshot()
+
+        fun assertUntouched() {
+            assertEquals(
+                "the app's real $databasesDir must stay untouched",
+                before,
+                snapshot(),
+            )
+        }
+
+        private fun snapshot(): String =
+            databasesDir
+                .listFiles { file -> file.name.startsWith(NeutrodyneDatabase.FILE_NAME) }
+                ?.sortedBy { it.name }
+                ?.joinToString(";") { "${it.name}:${it.length()}:${it.lastModified()}" }
+                ?: "<absent>"
     }
 
     /**
