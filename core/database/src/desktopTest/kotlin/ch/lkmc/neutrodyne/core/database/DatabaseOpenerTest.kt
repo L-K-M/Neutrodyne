@@ -6,9 +6,13 @@ import androidx.room3.RoomDatabase
 import androidx.room3.useWriterConnection
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.SQLiteDriver
+import androidx.sqlite.SQLiteStatement
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
+import ch.lkmc.neutrodyne.core.testing.database.episodeStateEntity
+import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -20,11 +24,14 @@ import java.io.IOException
 import java.nio.file.AccessDeniedException
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.SwingUtilities
 import kotlin.concurrent.thread
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.io.path.Path
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
@@ -49,12 +56,13 @@ class DatabaseOpenerTest {
         clock: TestClock = TestClock(),
         f: DatabaseFactory = factory,
         d: SQLiteDriver = BundledSQLiteDriver(),
+        strict: Boolean = false,
     ) = DatabaseOpener(
         factory = f,
         driver = d,
         io = Dispatchers.Default,
         clock = clock,
-        strictMigrations = false,
+        strictMigrations = strict,
     )
 
     /** A healthy database file on disk, closed. */
@@ -504,6 +512,8 @@ class DatabaseOpenerTest {
                         "Please provide the necessary Migration path",
                     "Migration didn't properly handle: podcast (expected…, found…)",
                     "Pre-packaged database has an invalid schema: podcast",
+                    "Room cannot verify the data integrity. Looks like you've changed schema " +
+                        "but forgot to update the version number.",
                 )
             for (message in messages) {
                 dir.resolve("quarantine").toFile().deleteRecursively()
@@ -556,6 +566,220 @@ class DatabaseOpenerTest {
             assertIs<DatabaseOpenException>(thrown)
             assertEquals(DatabaseOpenException.Reason.UNKNOWN, thrown.reason)
             assertFalse(Files.exists(dir.resolve("quarantine")))
+        }
+
+    @Test
+    fun aCallbackFailureMentioningRoomSchemaTextNeverQuarantines() =
+        runTest {
+            dirs.ensureCreated()
+
+            // A populated library through a real healthy open.
+            val seed = opener()
+            seed.awaitOpen()
+            val seeded = seed.requireDatabase()
+            val podcastId =
+                seeded.podcastDao().insertPodcast(podcastEntity(title = "Preserved podcast"))
+            val episodeId =
+                seeded.episodeDao().insertStub(
+                    episodeEntity(podcastId = podcastId, title = "Preserved episode"),
+                )
+            seeded
+                .episodeStateDao()
+                .upsert(
+                    episodeStateEntity(episodeId) {
+                        copy(playedAt = 1_700_000_500_000L, isFavorite = true)
+                    },
+                )
+            seeded.close()
+            val dbFile = dir.resolve(NeutrodyneDatabase.FILE_NAME)
+            val healthyBytes = Files.readAllBytes(dbFile)
+
+            // A real Room onOpen callback throwing a look-alike message — Room hands the
+            // callback's own throwable to the open failure, so only pinned Room
+            // IllegalStateException message families may authorize quarantine.
+            var fail = true
+            val failure = RuntimeException("invalid schema for callback configuration")
+            val throwing =
+                object : DatabaseFactory by factory {
+                    override fun builder(): RoomDatabase.Builder<NeutrodyneDatabase> =
+                        factory.builder().addCallback(
+                            object : RoomDatabase.Callback() {
+                                override suspend fun onOpen(connection: SQLiteConnection) {
+                                    if (fail) throw failure
+                                }
+                            },
+                        )
+                }
+            val o = opener(f = throwing)
+            repeat(2) { attempt ->
+                val error = assertThrows { o.awaitOpen() }
+                assertIs<DatabaseOpenException>(error)
+                assertEquals(DatabaseOpenException.Reason.UNKNOWN, error.reason)
+                assertIs<RuntimeException>(error.cause)
+                assertEquals("invalid schema for callback configuration", error.cause?.message)
+                assertSame(
+                    error,
+                    assertIs<DatabaseOpenState.Failed>(o.openState.value).exception,
+                )
+                assertFalse(
+                    Files.exists(dir.resolve("quarantine")),
+                    "attempt ${attempt + 1}: a callback failure must never quarantine the library",
+                )
+                assertContentEquals(
+                    healthyBytes,
+                    Files.readAllBytes(dbFile),
+                    "attempt ${attempt + 1}: the healthy library must not move or change",
+                )
+            }
+
+            fail = false
+            assertEquals(OpenResult(created = false, recovered = null), o.awaitOpen())
+            val db = o.requireDatabase()
+            assertEquals(podcastId, db.episodeDao().byId(episodeId)?.podcastId)
+            val state = db.episodeStateDao().byEpisode(episodeId)
+            assertEquals(1_700_000_500_000L, state?.playedAt)
+            assertEquals(true, state?.isFavorite)
+            db.close()
+        }
+
+    @Test
+    fun aDeeplyWrappedNativeNotADatabaseErrorStillRecoversAsCorruption() =
+        runTest {
+            // A real bundled NOTADB under driver wrappers must still classify as corruption at
+            // any depth — truncating the cause chain hides the root and turns recovery into
+            // UNKNOWN.
+            for (wrappers in listOf(15, 16, 19)) {
+                for (strict in listOf(false, true)) {
+                    val caseDir = dir.resolve("notadb-w$wrappers-strict-$strict")
+                    val caseDirs =
+                        AppDirs(
+                            data = caseDir,
+                            config = caseDir,
+                            cache = caseDir,
+                            state = caseDir,
+                            logs = caseDir,
+                            downloadsDefault = caseDir,
+                        )
+                    caseDirs.ensureCreated()
+                    val file = caseDir.resolve(NeutrodyneDatabase.FILE_NAME)
+                    Files.write(file, "actual-bundled-not-a-database".encodeToByteArray())
+                    val corruptBytes = Files.readAllBytes(file)
+
+                    val liveHandles = CopyOnWriteArrayList<AtomicBoolean>()
+                    val nativeCauses = CopyOnWriteArrayList<String>()
+
+                    fun wrap(t: Throwable): Throwable {
+                        nativeCauses += "${t.javaClass.name}:${t.message}"
+                        var wrapped = t
+                        repeat(wrappers) { wrapped = RuntimeException("driver wrapper $it", wrapped) }
+                        return wrapped
+                    }
+                    val wrapping =
+                        object : SQLiteDriver {
+                            private val delegate = BundledSQLiteDriver()
+
+                            override val hasConnectionPool get() = delegate.hasConnectionPool
+
+                            override fun open(fileName: String): SQLiteConnection {
+                                val connection =
+                                    try {
+                                        delegate.open(fileName)
+                                    } catch (t: Throwable) {
+                                        throw wrap(t)
+                                    }
+                                val closed = AtomicBoolean(false)
+                                liveHandles += closed
+                                return object : SQLiteConnection by connection {
+                                    override fun prepare(sql: String): SQLiteStatement {
+                                        val statement =
+                                            try {
+                                                connection.prepare(sql)
+                                            } catch (t: Throwable) {
+                                                throw wrap(t)
+                                            }
+                                        return object : SQLiteStatement by statement {
+                                            override fun step(): Boolean =
+                                                try {
+                                                    statement.step()
+                                                } catch (t: Throwable) {
+                                                    throw wrap(t)
+                                                }
+                                        }
+                                    }
+
+                                    override fun close() {
+                                        if (closed.compareAndSet(false, true)) connection.close()
+                                    }
+                                }
+                            }
+                        }
+                    val o =
+                        DatabaseOpener(
+                            factory = DesktopDatabaseFactory(caseDirs),
+                            driver = wrapping,
+                            io = Dispatchers.Default,
+                            clock = TestClock(),
+                            strictMigrations = strict,
+                        )
+                    val result = o.awaitOpen()
+
+                    assertEquals(
+                        RecoveryCause.CORRUPT,
+                        result.recovered,
+                        "entries ${wrappers + 1} strict=$strict: depth must not hide NOTADB",
+                    )
+                    assertTrue(result.created)
+                    val copies = Files.list(caseDir.resolve("quarantine")).use { it.toList() }
+                    assertEquals(1, copies.size)
+                    assertContentEquals(
+                        corruptBytes,
+                        Files.readAllBytes(copies.single().resolve(NeutrodyneDatabase.FILE_NAME)),
+                    )
+                    assertTrue(
+                        nativeCauses.any { "Error code: 26" in it },
+                        "the root cause must be a real bundled NOTADB exception",
+                    )
+                    o.requireDatabase().close()
+                    assertEquals(0, liveHandles.count { !it.get() }, "no native handle leaks")
+                }
+            }
+        }
+
+    @Test
+    fun aDeeplyWrappedIoErrorIsClassifiedLikeAShallowOne() =
+        runTest {
+            dirs.ensureCreated()
+            createHealthyDatabase()
+            val dbFile = dir.resolve(NeutrodyneDatabase.FILE_NAME)
+            val sizeBefore = Files.size(dbFile)
+
+            var fail = true
+            val deep =
+                object : DatabaseFactory by factory {
+                    override fun builder(): RoomDatabase.Builder<NeutrodyneDatabase> {
+                        if (fail) {
+                            var root: Throwable = IOException("read failed")
+                            repeat(19) { root = RuntimeException("driver wrapper $it", root) }
+                            throw root
+                        }
+                        return factory.builder()
+                    }
+                }
+            val o = opener(f = deep)
+            val error = assertThrows { o.awaitOpen() }
+
+            assertIs<DatabaseOpenException>(error)
+            assertEquals(
+                DatabaseOpenException.Reason.IO,
+                error.reason,
+                "the IOException root must still classify at depth",
+            )
+            assertFalse(Files.exists(dir.resolve("quarantine")))
+            assertEquals(sizeBefore, Files.size(dbFile))
+
+            fail = false
+            assertEquals(OpenResult(created = false, recovered = null), o.awaitOpen())
+            o.requireDatabase().close()
         }
 
     @Test

@@ -349,10 +349,13 @@ class DatabaseOpener(
             CORRUPT_MARKERS.any { text.contains(it) }
     }
 
-    private fun isMigrationFailure(t: Throwable): Boolean {
-        val text = chainText(t)
-        return MIGRATION_MARKERS.any { text.contains(it) }
-    }
+    private fun isMigrationFailure(t: Throwable): Boolean =
+        chainEntries(t).any { entry ->
+            if (entry !is IllegalStateException) return@any false
+            val message = entry.message ?: return@any false
+            MIGRATION_FAILURE_PREFIXES.any { message.startsWith(it) } ||
+                (message.startsWith(MISSING_MIGRATION_PREFIX) && MISSING_MIGRATION_MARKER in message)
+        }
 
     private fun isDiskFull(t: Throwable): Boolean {
         val text = chainText(t)
@@ -375,12 +378,24 @@ class DatabaseOpener(
     private fun sqlitePrimaryCodes(text: String): List<Int> =
         SQLITE_CODE.findAll(text).map { it.groupValues[1].toInt() and PRIMARY_CODE_MASK }.toList()
 
-    // The cause walk is bounded: a cyclic chain (a.initCause(b); b.initCause(a)) would
-    // otherwise hang the classification and hold the opener mutex forever.
+    /**
+     * The complete cause chain of [t]. The walk stops only on a repeated throwable identity: a
+     * cyclic chain (a.initCause(b); b.initCause(a)) would otherwise classify forever while
+     * holding the opener mutex. Depth is deliberately not truncated — a real driver failure can
+     * nest deeper than any fixed cap, and cutting the chain would hide the root cause.
+     */
+    private fun chainEntries(t: Throwable): List<Throwable> {
+        val seen = mutableListOf<Throwable>()
+        var current: Throwable? = t
+        while (current != null && seen.none { it === current }) {
+            seen += current
+            current = current.cause
+        }
+        return seen
+    }
+
     private fun chainText(t: Throwable): String =
-        generateSequence(t) { it.cause }
-            .take(MAX_CAUSE_DEPTH)
-            .joinToString(" ") { "${it::class.simpleName}:${it.message ?: ""}" }
+        chainEntries(t).joinToString(" ") { "${it::class.simpleName}:${it.message ?: ""}" }
 
     private companion object {
         const val TAG = "DbOpen"
@@ -403,9 +418,6 @@ class DatabaseOpener(
         val DISK_FULL_CODES = setOf(13)
         val CORRUPT_CODES = setOf(11, 26)
 
-        /** Bounded walk of the exception cause chain for classification. */
-        const val MAX_CAUSE_DEPTH = 16
-
         /** `SQLITE_CORRUPT` (11) and `SQLITE_NOTADB` (26) spellings across both drivers (S2, 02). */
         val CORRUPT_MARKERS =
             listOf(
@@ -421,17 +433,26 @@ class DatabaseOpener(
             listOf("SQLITE_FULL", "database or disk is full", "SQLiteFullException", "ENOSPC")
 
         /**
-         * Room's migration failures surface as plain `IllegalStateException` text (S2: no
-         * result-code API): a required path missing, a migration that left the schema invalid,
-         * or a pre-packaged file whose schema does not match (RoomConnectionManager.onMigrate /
-         * onCreate `error(...)` messages).
+         * The exact message families `RoomConnectionManager` throws via `error(...)` for its own
+         * migration and schema-validation failures (S2: `IllegalStateException` text, no
+         * result-code API): a migration that left the schema invalid, a pre-packaged file whose
+         * schema does not match, and an identity hash that cannot be verified. A look-alike
+         * message thrown by app or callback code is not Room's failure and must not authorize
+         * quarantine of a healthy file.
          */
-        val MIGRATION_MARKERS =
+        val MIGRATION_FAILURE_PREFIXES =
             listOf(
-                "was required but not found",
-                "Migration didn't properly handle",
-                "invalid schema",
+                "Migration didn't properly handle:",
+                "Pre-packaged database has an invalid schema:",
+                "Room cannot verify the data integrity.",
             )
+
+        /**
+         * `"A migration from $oldVersion to $newVersion was required but not found. …"` — the
+         * version numbers vary, so the family is the fixed prefix plus the marker clause.
+         */
+        const val MISSING_MIGRATION_PREFIX = "A migration from "
+        const val MISSING_MIGRATION_MARKER = " was required but not found"
 
         /** The [STORAGE_CODES] spellings across both drivers and Android's exception class names. */
         val STORAGE_MARKERS =
