@@ -121,7 +121,12 @@ class DatabaseOpener(
                     outcome.result
                 } catch (t: Throwable) {
                     if (t is CancellationException) {
-                        deferred.completeExceptionally(t)
+                        // The cancelled caller still receives its own cancellation; the shared
+                        // deferred carries an actionable open failure so later requireDatabase()
+                        // callers never see a foreign CancellationException.
+                        deferred.completeExceptionally(
+                            DatabaseOpenException(DatabaseOpenException.Reason.UNKNOWN, t),
+                        )
                         throw t
                     }
                     val failure = t as? DatabaseOpenException ?: DatabaseOpenException(classify(t), t)
@@ -203,21 +208,29 @@ class DatabaseOpener(
                         // every path. Cancellation stays cancellation — it is never classified.
                         closeQuietly(candidate?.db)
                         if (t is CancellationException) throw t
+                        // finish() reports post-open maintenance failures itself: they propagate
+                        // as open failures, never as a migration or corruption signal.
+                        if (t is DatabaseOpenException) throw t
                         // Only a migration or corruption error quarantines; a full disk, an IO
                         // error or another storage/open failure (permissions, a read-only file,
                         // a lock held by a live process) fails the open without touching the
                         // file (02: nothing is deleted). SQLITE_READONLY reaches Room here:
                         // the raw driver preflight reads it fine through the read-only fallback.
+                        // Room reports a missing migration path or a failed schema validation as
+                        // plain IllegalStateException text; anything else that reaches here — a
+                        // callback bug, Room internals, an OOME — is unknown, never a license
+                        // to move a file that may be healthy.
                         if (isDiskFull(t) || isStorageFailure(t)) {
                             throw DatabaseOpenException(classify(t), t)
                         }
-                        if (strictMigrations && !isCorruption(t)) {
+                        val corrupt = isCorruption(t)
+                        if (!corrupt && (strictMigrations || !isMigrationFailure(t))) {
                             throw DatabaseOpenException(DatabaseOpenException.Reason.UNKNOWN, t)
                         }
                         quarantine()
                         factory.pendingQuarantine = null
                         pendingRecovery =
-                            if (isCorruption(t)) RecoveryCause.CORRUPT else RecoveryCause.MIGRATION_FAILED
+                            if (corrupt) RecoveryCause.CORRUPT else RecoveryCause.MIGRATION_FAILED
                     }
                 }
             }
@@ -225,12 +238,15 @@ class DatabaseOpener(
         val fresh = build()
         try {
             forceOpen(fresh.db)
+            // finish() owns the candidate until every post-open step succeeded: a failure here
+            // still closes the unpublished database instead of leaking its connections.
+            return finish(fresh.db, created = fresh.callback.created)
         } catch (t: Throwable) {
             closeQuietly(fresh.db)
             if (t is CancellationException) throw t
+            if (t is DatabaseOpenException) throw t
             throw DatabaseOpenException(classify(t), t)
         }
-        return finish(fresh.db, created = fresh.callback.created)
     }
 
     /**
@@ -280,8 +296,24 @@ class DatabaseOpener(
         created: Boolean,
     ): OpenOutcome {
         // pruneQuarantine runs only after every move succeeded — a propagated quarantine failure
-        // never reaches here (02: quarantine keeps only the newest copy, at most 14 days).
-        if (pendingRecovery != null || created) factory.pruneQuarantine(clock.now())
+        // never reaches here (02: quarantine keeps only the newest copy, at most 14 days). It is
+        // post-open maintenance, not migration recovery: a failed prune is an environment
+        // failure that propagates as the open's failure — it must never quarantine the healthy
+        // database nor delete the preserved original through a misclassified retry.
+        try {
+            if (pendingRecovery != null || created) factory.pruneQuarantine(clock.now())
+        } catch (t: Throwable) {
+            if (t is CancellationException) throw t
+            val reason = classify(t)
+            throw DatabaseOpenException(
+                if (reason == DatabaseOpenException.Reason.UNKNOWN) {
+                    DatabaseOpenException.Reason.IO
+                } else {
+                    reason
+                },
+                t,
+            )
+        }
         return OpenOutcome(db, OpenResult(created = created, recovered = pendingRecovery))
     }
 
@@ -317,6 +349,14 @@ class DatabaseOpener(
             CORRUPT_MARKERS.any { text.contains(it) }
     }
 
+    private fun isMigrationFailure(t: Throwable): Boolean =
+        chainEntries(t).any { entry ->
+            if (entry !is IllegalStateException) return@any false
+            val message = entry.message ?: return@any false
+            MIGRATION_FAILURE_PREFIXES.any { message.startsWith(it) } ||
+                (message.startsWith(MISSING_MIGRATION_PREFIX) && MISSING_MIGRATION_MARKER in message)
+        }
+
     private fun isDiskFull(t: Throwable): Boolean {
         val text = chainText(t)
         return sqlitePrimaryCodes(text).any { it in DISK_FULL_CODES } ||
@@ -338,9 +378,24 @@ class DatabaseOpener(
     private fun sqlitePrimaryCodes(text: String): List<Int> =
         SQLITE_CODE.findAll(text).map { it.groupValues[1].toInt() and PRIMARY_CODE_MASK }.toList()
 
+    /**
+     * The complete cause chain of [t]. The walk stops only on a repeated throwable identity: a
+     * cyclic chain (a.initCause(b); b.initCause(a)) would otherwise classify forever while
+     * holding the opener mutex. Depth is deliberately not truncated — a real driver failure can
+     * nest deeper than any fixed cap, and cutting the chain would hide the root cause.
+     */
+    private fun chainEntries(t: Throwable): List<Throwable> {
+        val seen = mutableListOf<Throwable>()
+        var current: Throwable? = t
+        while (current != null && seen.none { it === current }) {
+            seen += current
+            current = current.cause
+        }
+        return seen
+    }
+
     private fun chainText(t: Throwable): String =
-        generateSequence(t) { it.cause }
-            .joinToString(" ") { "${it::class.simpleName}:${it.message ?: ""}" }
+        chainEntries(t).joinToString(" ") { "${it::class.simpleName}:${it.message ?: ""}" }
 
     private companion object {
         const val TAG = "DbOpen"
@@ -376,6 +431,28 @@ class DatabaseOpener(
         /** `SQLITE_FULL` (13). */
         val DISK_FULL_MARKERS =
             listOf("SQLITE_FULL", "database or disk is full", "SQLiteFullException", "ENOSPC")
+
+        /**
+         * The exact message families `RoomConnectionManager` throws via `error(...)` for its own
+         * migration and schema-validation failures (S2: `IllegalStateException` text, no
+         * result-code API): a migration that left the schema invalid, a pre-packaged file whose
+         * schema does not match, and an identity hash that cannot be verified. A look-alike
+         * message thrown by app or callback code is not Room's failure and must not authorize
+         * quarantine of a healthy file.
+         */
+        val MIGRATION_FAILURE_PREFIXES =
+            listOf(
+                "Migration didn't properly handle:",
+                "Pre-packaged database has an invalid schema:",
+                "Room cannot verify the data integrity.",
+            )
+
+        /**
+         * `"A migration from $oldVersion to $newVersion was required but not found. …"` — the
+         * version numbers vary, so the family is the fixed prefix plus the marker clause.
+         */
+        const val MISSING_MIGRATION_PREFIX = "A migration from "
+        const val MISSING_MIGRATION_MARKER = " was required but not found"
 
         /** The [STORAGE_CODES] spellings across both drivers and Android's exception class names. */
         val STORAGE_MARKERS =
