@@ -93,11 +93,11 @@
         {
           "name": "room3-runtime-rebuild.aar",
           "url": "room3-runtime-rebuild-android-3.0.3.aar",
-          "size": 551854,
-          "sha512": "7166b492983d7cb2e64b3b1b3b9e8d816c4a2601d85979fe8b17f32e47052f3397f9a31b838f5bf870c1baa6235bae3a5f6215576d54be694960a95b555118c6",
-          "sha256": "635d77f32ca7ed1a7f5caf1d35c1276b83dd3ba9eed03b39321888beda23b48d",
-          "sha1": "5e38eb8cddc5a9e66ed87ab47b560aff789647ce",
-          "md5": "0985aad2074099d73a087ddc7faa95c6"
+          "size": 554518,
+          "sha512": "55a16830d8efde98562d3a9fe93eeaf677993cf2cae974e667bbfdd7fc1deb89190fa33ce477e3926ffb163a754581a4cf0649d83d36e3ddf229f1df39534ec8",
+          "sha256": "a3607284b94430c8cad3c8cbc0c83ac98d03585b4025bd366729ee8df2727d0a",
+          "sha1": "4a96e19fa478bd4e3f54e54de1b7aef202797942",
+          "md5": "bc05ea6423ddac46756dbb1cbe411d7c"
         }
       ]
     },
@@ -193,11 +193,11 @@
         {
           "name": "room3-runtime-rebuild.aar",
           "url": "room3-runtime-rebuild-android-3.0.3.aar",
-          "size": 551854,
-          "sha512": "7166b492983d7cb2e64b3b1b3b9e8d816c4a2601d85979fe8b17f32e47052f3397f9a31b838f5bf870c1baa6235bae3a5f6215576d54be694960a95b555118c6",
-          "sha256": "635d77f32ca7ed1a7f5caf1d35c1276b83dd3ba9eed03b39321888beda23b48d",
-          "sha1": "5e38eb8cddc5a9e66ed87ab47b560aff789647ce",
-          "md5": "0985aad2074099d73a087ddc7faa95c6"
+          "size": 554518,
+          "sha512": "55a16830d8efde98562d3a9fe93eeaf677993cf2cae974e667bbfdd7fc1deb89190fa33ce477e3926ffb163a754581a4cf0649d83d36e3ddf229f1df39534ec8",
+          "sha256": "a3607284b94430c8cad3c8cbc0c83ac98d03585b4025bd366729ee8df2727d0a",
+          "sha1": "4a96e19fa478bd4e3f54e54de1b7aef202797942",
+          "md5": "bc05ea6423ddac46756dbb1cbe411d7c"
         }
       ]
     },
@@ -216,11 +216,11 @@
         {
           "name": "room3-runtime-rebuild-android-3.0.3-sources.jar",
           "url": "room3-runtime-rebuild-android-3.0.3-sources.jar",
-          "size": 146449,
-          "sha512": "1c8d63b9b6954cbd530f99a930dd15e7fea179689a11b3686e0037028dec180bb50538c57ad34675a5c5904deb4351395929679a0ee9c1e7833e6e76ce24d951",
-          "sha256": "c7a5d9ae6ab91d95dd2e893d92213d7f99b2353db36c241507287f45a48fed12",
-          "sha1": "4dc2baf5b4ca0ce9ca6bf966aff216770428b15e",
-          "md5": "49e63b436375cd933be8773b35451485"
+          "size": 147104,
+          "sha512": "bb275ba0a0e1998db7b4072447411702ecf65357c91ce85974eec63b6c989fab468408de97ff8a8bec0551150766e35415b7e517a6959b11e98aac7006db9448",
+          "sha256": "413dee5a52800d69ae6be2488fd5672a4e74299e4ec546ee470f928f73f18480",
+          "sha1": "eaf62d336a6865d66b0df7b8f92a8fa6a39b713c",
+          "md5": "07be9c2d27c022906791950c0dede5be"
         }
       ]
     }
