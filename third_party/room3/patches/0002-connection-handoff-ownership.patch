@@ -1,0 +1,172 @@
+--- a/commonMain/androidx/room3/RoomConnectionManager.kt
++++ b/commonMain/androidx/room3/RoomConnectionManager.kt
+@@ -67,46 +67,60 @@
+     /* Open and configure a connection. Called from the connection factory. */
+     private suspend fun openLocked(delegate: SQLiteDriver, filename: String): SQLiteConnection {
+         val resolvedFileName = resolveFileName(filename)
+-        return ExclusiveMutex(
+-                filename = resolvedFileName,
+-                useFileLock = !isConfigured && !isInitializing && resolvedFileName != ":memory:",
+-            )
+-            .withLock(
+-                onLocked = {
+-                    check(!isInitializing) {
+-                        "Recursive database initialization detected. Did you try to use the " +
+-                            "database instance during initialization? Maybe in one of the " +
+-                            "callbacks?"
+-                    }
+-                    val connection = delegate.open(resolvedFileName)
+-                    try {
+-                        if (!isConfigured) {
+-                            // Perform initial connection configuration
+-                            try {
+-                                isInitializing = true
+-                                configureDatabase(connection)
+-                            } finally {
+-                                isInitializing = false
++        // The connection created inside onLocked is handed back across withReentrantLock's
++        // cancellable withContext boundary: a cancelled coroutine still completes the block but
++        // its result is discarded, so keep an owner-visible reference and close the connection
++        // if the handoff never commits.
++        var orphan: SQLiteConnection? = null
++        try {
++            return ExclusiveMutex(
++                    filename = resolvedFileName,
++                    useFileLock = !isConfigured && !isInitializing && resolvedFileName != ":memory:",
++                )
++                .withLock(
++                    onLocked = {
++                        check(!isInitializing) {
++                            "Recursive database initialization detected. Did you try to use the " +
++                                "database instance during initialization? Maybe in one of the " +
++                                "callbacks?"
++                        }
++                        val connection = delegate.open(resolvedFileName)
++                        orphan = connection
++                        try {
++                            if (!isConfigured) {
++                                // Perform initial connection configuration
++                                try {
++                                    isInitializing = true
++                                    configureDatabase(connection)
++                                } finally {
++                                    isInitializing = false
++                                }
++                            } else {
++                                // Perform other non-initial connection configuration
++                                configurationConnection(connection)
+                             }
+-                        } else {
+-                            // Perform other non-initial connection configuration
+-                            configurationConnection(connection)
++                        } catch (th: Throwable) {
++                            // Close connection if anything goes wrong during configuration, avoids leak
++                            orphan = null
++                            connection.close()
++                            throw th
+                         }
+-                    } catch (th: Throwable) {
+-                        // Close connection if anything goes wrong during configuration, avoids leak
+-                        connection.close()
+-                        throw th
+-                    }
+-                    return@withLock connection
+-                },
+-                onLockError = { error ->
+-                    throw IllegalStateException(
+-                        "Unable to open database '$resolvedFileName'. " +
+-                            "Was a proper path / name used in Room's database builder?",
+-                        error,
+-                    )
+-                },
+-            )
++                        return@withLock connection
++                    },
++                    onLockError = { error ->
++                        throw IllegalStateException(
++                            "Unable to open database '$resolvedFileName'. " +
++                                "Was a proper path / name used in Room's database builder?",
++                            error,
++                        )
++                    },
++                )
++        } catch (th: Throwable) {
++            // The handoff never committed: nothing else owns this connection, so close it here.
++            // A cleanup failure must not replace the primary error.
++            orphan?.let { runCatching { it.close() } }
++            throw th
++        }
+     }
+ 
+     /**
+--- a/commonMain/androidx/room3/coroutines/ConnectionPoolImpl.kt
++++ b/commonMain/androidx/room3/coroutines/ConnectionPoolImpl.kt
+@@ -97,7 +97,13 @@
+                         // Enforce to be read only (might be disabled by a YOLO developer)
+                         // This is called before the connection is delivered to the pool and is not
+                         // cached
+-                        newConnection.executeSQL("PRAGMA query_only = 1")
++                        try {
++                            newConnection.executeSQL("PRAGMA query_only = 1")
++                        } catch (th: Throwable) {
++                            // The connection is still unowned; nothing else can close it.
++                            newConnection.close()
++                            throw th
++                        }
+                     }
+                 },
+                 statementCacheSize = statementCacheSize,
+@@ -270,20 +276,39 @@
+             // At this point a permit was acquired but there is no available connections therefore
+             // the pool is not at capacity and a new connection is needed to satisfy the permit.
+             check(size < capacity)
+-            val newConnection =
+-                mutex.withReentrantLock {
+-                    newConnectionWrapper(connectionFactory.invoke(), statementCacheSize)
+-                }
+-            lock.withLock {
+-                if (isClosed) {
+-                    // Pool was closed in-between opening a new connection, close it and throw.
+-                    newConnection.close()
+-                    throwSQLiteException(SQLITE_MISUSE, "Connection pool is closed")
+-                }
+-                // Add the new connection to the pool and return it, once recycled it will be
+-                // added to the available stack.
+-                connections[size++] = newConnection
+-                return newConnection
++            // The new connection crosses the cancellable withReentrantLock boundary before it is
++            // registered: a cancelled coroutine completes the block but its result is discarded,
++            // so keep owner-visible references and close the connection if registration never
++            // commits — Pool.close() only sees connections[].
++            var unregistered: SQLiteConnection? = null
++            var unownedWrapper: ConnectionWrapper? = null
++            try {
++                val newConnection =
++                    mutex.withReentrantLock {
++                        newConnectionWrapper(
++                                connectionFactory.invoke().also { unregistered = it },
++                                statementCacheSize,
++                            )
++                            .also { unownedWrapper = it }
++                    }
++                lock.withLock {
++                    if (isClosed) {
++                        // Pool was closed in-between opening a new connection; it is still
++                        // unregistered, so the catch below owns it and closes it once.
++                        throwSQLiteException(SQLITE_MISUSE, "Connection pool is closed")
++                    }
++                    // Add the new connection to the pool and return it, once recycled it will be
++                    // added to the available stack.
++                    connections[size++] = newConnection
++                    unregistered = null
++                    unownedWrapper = null
++                    return newConnection
++                }
++            } catch (th: Throwable) {
++                // Prefer the wrapper so its statement cache is released too; a connection that
++                // never got wrapped is closed through the raw reference.
++                (unownedWrapper ?: unregistered)?.let { runCatching { it.close() } }
++                throw th
+             }
+         } catch (ex: Throwable) {
+             connectionPermits.release()
