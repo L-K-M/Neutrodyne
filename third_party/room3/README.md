@@ -18,6 +18,20 @@ way out of the timed block is recycled by `finally` exactly once unless ownershi
 transfers to the caller. The internal dump-and-retry policy and transaction rollback are
 unchanged. Regression coverage: `core/database/.../RoomPoolForeignTimeoutTest.kt`.
 
+`patches/0002` closes the cancellation handoff leak in connection creation. A raw
+`SQLiteConnection` produced by `delegate.open()` is handed back across two cancellable
+`withReentrantLock` (`withContext`) completion boundaries — in `RoomConnectionManager`'s
+`openLocked` and again in `Pool.acquire` — before the pool registers it in
+`connections[]`. A coroutine cancelled while inside `open` still completes the block, but
+the boundary discards its result: the live connection lands nowhere, `Pool.close()` never
+sees it, and the native handle plus its `-wal`/`-shm` descriptors stay open across
+retries. The patch keeps an owner-visible reference across each uncommitted span and
+closes it on any throw until registration commits (the readers' `PRAGMA query_only`
+factory step gets the same treatment, since a failure there would drop the connection
+inside the factory). Caller-visible semantics are unchanged: the original throwable,
+permit accounting and the pool-closed error are preserved. Regression coverage:
+`core/database/.../RoomConnectionHandoffTest.kt`.
+
 ## What is vendored
 
 This directory **builds** the runtime; `../room3-maven` carries its outputs. The root
@@ -31,6 +45,7 @@ Gradle plugin, schema and data behaviour are upstream 3.0.3, unchanged.
 |---|---|
 | `upstream/room3-runtime-{jvm,android}-3.0.3-sources.jar` | the published sources jars from `dl.google.com/dl/android/maven2/androidx/room3/room3-runtime-{jvm,android}/3.0.3/` (`SHA256SUMS.txt`; the jvm jar is byte-identical to the copy retained from the earlier investigation). Apache-2.0, © The Android Open Source Project. |
 | `patches/0001-*.patch` | the acquisition fix described above, applied over the merged sources. |
+| `patches/0002-*.patch` | the connection-handoff ownership fix described above. |
 | `src/androidMain/` | upstream's `AndroidManifest.xml` service declaration (namespace/minSdk now via DSL) and the aar consumer `proguard.txt`. |
 
 `prepare-sources.sh` verifies the jars against `SHA256SUMS.txt`, extracts both, checks the
@@ -67,7 +82,7 @@ now cover functionally.
 
 Delete `third_party/room3`, `third_party/room3-maven`, the `exclusiveContent` block in
 `settings.gradle.kts` and the substitution in the root `build.gradle.kts` once a released
-Room ships this fix (track the `androidx.room3` release notes), then pin `room3` in
+Room ships these fixes (track the `androidx.room3` release notes), then pin `room3` in
 `libs.versions.toml` to that release. The vendored version stays `3.0.3`, so bumping the
 catalog entry without removing the substitution would keep resolving the patched 3.0.3 —
 do not do that.
