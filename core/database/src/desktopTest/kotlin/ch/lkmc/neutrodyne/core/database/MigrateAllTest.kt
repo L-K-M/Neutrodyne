@@ -29,11 +29,11 @@ import kotlin.test.assertTrue
  * [MigrationInvariants] verifies nothing was lost. The migrated file then opens through the
  * production builder and every DAO reads it.
  *
- * Upstream `SchemaInfoUtil.readIndex` reads `PRAGMA index_xinfo` without filtering `key=0` rows,
- * so a secondary index on a WITHOUT ROWID table (`sync_outbox`, the only such indexed table)
- * reports its implicit primary-key suffix columns and Room's post-migration validation fails on
- * a table no migration touched. This test cannot pass until that reader gap is closed in the
- * runtime; both validation paths exercised here depend on it.
+ * The runtime's `SchemaInfoUtil.readIndex` filters `PRAGMA index_xinfo` `key=0` rows
+ * (vendored patch 0003, `RoomIndexInfoTest`), so a secondary index on the WITHOUT ROWID
+ * `sync_outbox` validates as its declared two columns and not its physical five with the
+ * implicit primary-key suffix. Without that filter Room's post-migration validation fails on
+ * a table no migration touches; both validation paths exercised here depend on it.
  */
 class MigrateAllTest {
     private val dir = Files.createTempDirectory("m1a-migrate")

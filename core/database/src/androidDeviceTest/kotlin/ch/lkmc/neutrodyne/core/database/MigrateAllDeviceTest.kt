@@ -25,10 +25,10 @@ import kotlin.test.assertEquals
  * additionally asserts the migration's own additions: `episode_guid_provenance` starts empty and
  * every migrated `podcast.guidCoverageSince` stays NULL (02 episode_guid_provenance).
  *
- * As on the desktop, upstream `SchemaInfoUtil.readIndex` reads `PRAGMA index_xinfo` without
- * filtering `key=0` rows, so `runMigrationsAndValidate`'s per-table check currently fails on
- * `sync_outbox`'s implicit WITHOUT ROWID key suffix — a table no migration touches — until the
- * runtime reader gap is closed.
+ * As on the desktop, this needs the runtime's `SchemaInfoUtil.readIndex` `key=0` filter
+ * (vendored patch 0003, `RoomIndexInfoTest`): without it `runMigrationsAndValidate`'s
+ * per-table check sees `sync_outbox`'s implicit WITHOUT ROWID key suffix — a table no
+ * migration touches — as undeclared index columns.
  */
 @RunWith(AndroidJUnit4::class)
 class MigrateAllDeviceTest {

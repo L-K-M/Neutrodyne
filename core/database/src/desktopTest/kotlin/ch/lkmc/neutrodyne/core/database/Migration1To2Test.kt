@@ -23,13 +23,10 @@ import kotlin.test.assertTrue
  * erased V1 history must never be reconstructed as GUID coverage).
  *
  * This invokes the same `Migration.migrate(connection)` Room calls, but on the raw driver
- * connection rather than through `runMigrationsAndValidate`: upstream `SchemaInfoUtil.readIndex`
- * reads `PRAGMA index_xinfo` without filtering `key=0` rows, so Room's post-migration per-table
- * validation currently fails on `sync_outbox`'s implicit WITHOUT ROWID key suffix — a table no
- * migration touches — before the migration's own result can be observed. `MigrateAllTest` keeps
- * the Room-integrated path red until the reader is fixed; the assertions below cover everything
- * the migration itself is responsible for: data preservation, the new table's shape, the
- * coverage default, and atomic retry after a rolled-back attempt.
+ * connection rather than through `runMigrationsAndValidate`: it isolates what the migration
+ * itself is responsible for — data preservation, the new table's shape, the coverage default,
+ * and atomic retry after a rolled-back attempt — while `MigrateAllTest` covers the
+ * Room-integrated path (per-table validation, production open, DAO reads).
  */
 class Migration1To2Test {
     private val dir = Files.createTempDirectory("m1a-m1to2")
