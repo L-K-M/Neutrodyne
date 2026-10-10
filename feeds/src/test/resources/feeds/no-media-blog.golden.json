@@ -1,0 +1,18 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "descriptionHtml": "&lt;p&gt;Just a post&lt;/p&gt;",
+      "descriptionIsHtml": true,
+      "feedOrder": 0,
+      "link": "https://example.com/blog/1",
+      "title": "Post one"
+    },
+    {
+      "feedOrder": 1,
+      "link": "https://example.com/blog/2",
+      "title": "Post two"
+    }
+  ],
+  "title": "A Blog, Not A Podcast"
+}

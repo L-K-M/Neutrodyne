@@ -1,0 +1,67 @@
+{
+  "artwork": [
+    {
+      "source": "PODCAST_IMAGES",
+      "url": "https://cdn.example.com/alias-600.jpg",
+      "width": 600
+    }
+  ],
+  "format": "RSS2",
+  "items": [
+    {
+      "alternateEnclosures": [
+        {
+          "bitrate": 128,
+          "integrity": [
+            {
+              "type": "sri",
+              "value": "sha384-AbCdEf"
+            }
+          ],
+          "isDefault": true,
+          "length": 96000000,
+          "sources": [
+            {
+              "contentType": "audio/mpeg",
+              "uri": "https://cdn.example.com/a1.mp3"
+            }
+          ],
+          "type": "audio/mpeg"
+        }
+      ],
+      "chaptersType": "application/json",
+      "chaptersUrl": "https://example.com/ch1.json",
+      "enclosures": [
+        {
+          "effectiveType": "audio/mp4",
+          "length": 2,
+          "type": "audio/x-m4a",
+          "url": "https://cdn.example.com/a1.m4a"
+        },
+        {
+          "effectiveType": "application/x-mpegurl",
+          "type": "application.x-mpegURL",
+          "url": "https://cdn.example.com/a1.m3u8"
+        }
+      ],
+      "feedOrder": 0,
+      "guid": "alias-1",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mp4",
+        "length": 2,
+        "type": "audio/x-m4a",
+        "url": "https://cdn.example.com/a1.m4a"
+      },
+      "title": "Alias namespace episode",
+      "transcripts": [
+        {
+          "language": "en",
+          "type": "application/srt",
+          "url": "https://example.com/t1.srt"
+        }
+      ]
+    }
+  ],
+  "podcastGuid": "e1a2e8dc-fb0e-5b8e-a092-8f7c1c1e1234",
+  "title": "GitHub Alias Namespace (reference-feed quirks)"
+}

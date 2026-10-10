@@ -8,6 +8,8 @@ import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.CrashContext
 import ch.lkmc.neutrodyne.core.common.CrashReporter
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
+import ch.lkmc.neutrodyne.core.database.DatabaseOpener
+import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
@@ -23,11 +25,12 @@ import kotlinx.coroutines.CoroutineScope
  * The desktop shell's composition root (11 DesktopAppGraph, 01 Dependency injection). It
  * contributes the desktop implementations of the shared interfaces and nothing Android has.
  *
- * M0b shape: `AppDirs`, `BuildInfo` and the shell's [DesktopCrashReporter] come in through the
- * factory (the crash reporter is constructed by `MainKt` before the graph so 11's start-up order
- * — logging, crash handler, `session.json` before the graph — holds; 01's sketch is amended
- * accordingly, 2026-10-06). `DesktopJobRunner` (as `jobRunner`) and the media/OS bindings of
- * `:desktop:system` join with their milestones.
+ * `AppDirs`, `BuildInfo` and the shell's [DesktopCrashReporter] come in through the factory (the
+ * crash reporter is constructed by `MainKt` before the graph so 11's start-up order — logging,
+ * crash handler, `session.json` before the graph — holds; 01's sketch is amended accordingly,
+ * 2026-10-06). M1a adds the database plumbing: [databaseOpener] drives the open at initializer
+ * band 100 and the window's start-up gate. `DesktopJobRunner` (as `jobRunner`) and the media/OS
+ * bindings of `:desktop:system` join with their milestones.
  */
 @DependencyGraph(AppScope::class, bindingContainers = [DesktopYouTubeBindingsModule::class])
 interface DesktopAppGraph {
@@ -50,11 +53,21 @@ interface DesktopAppGraph {
 
     val crashReporter: CrashReporter
 
+    /** The window maps `openState` onto the start-up gate (01 Splash and start-up gate). */
+    val databaseOpener: DatabaseOpener
+
     @Binds
     val DesktopCrashReporter.asCrashReporter: CrashReporter
 
     @Binds
     val DesktopCrashReporter.asCrashContext: CrashContext
+
+    /**
+     * The one database accessor (02 Error handling and recovery): blocks a background caller until
+     * the open finishes, throws on the EDT before that — callers hold this lazily.
+     */
+    @Provides
+    fun provideDatabase(opener: DatabaseOpener): NeutrodyneDatabase = opener.requireDatabase()
 
     @DependencyGraph.Factory
     fun interface Factory {

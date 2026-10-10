@@ -12,10 +12,12 @@ import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.StoragePaths
+import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.platform.AndroidBuildInfo
 import ch.lkmc.neutrodyne.platform.AndroidPlatformInfo
 import ch.lkmc.neutrodyne.platform.DeviceClock
+import ch.lkmc.neutrodyne.sync.protocol.OrderKey
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.Provides
@@ -74,4 +76,8 @@ object CoreBindings {
     @Provides
     @SingleIn(AppScope::class)
     fun storagePaths(application: Application): StoragePaths = StoragePaths(application)
+
+    /** The subscribe transaction's fractional-index port (10 Ordered lists). */
+    @Provides
+    fun orderKeys(): OrderKeys = OrderKeys { last -> OrderKey.after(last) }
 }

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:podcast="https://podcastindex.org/namespace/1.0">
+  <channel>
+    <title>Item podcast:image</title>
+    <item>
+      <title>Episode art via url attribute</title>
+      <guid>ipi-1</guid>
+      <enclosure url="https://cdn.example.com/i1.mp3" length="10" type="audio/mpeg"/>
+      <podcast:image url="https://cdn.example.com/episode.jpg" width="1400" height="1400"/>
+    </item>
+  </channel>
+</rss>

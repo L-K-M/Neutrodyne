@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.core.database.migration.ALL_MIGRATIONS
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import kotlinx.coroutines.Dispatchers
 import java.nio.file.Path
+import kotlin.coroutines.CoroutineContext
 
 /**
  * Desktop database builders (02 Testing): [inMemory] for everything that does not need a second
@@ -27,10 +28,14 @@ object TestDb {
     fun inMemory(
         driver: SQLiteDriver = BundledSQLiteDriver(),
         clock: Clock = TestClock(),
+        // A test dispatcher here makes `advanceUntilIdle()` also wait for queries that code under
+        // test launches on its own scope (fire-and-forget writes before a callback).
+        queryContext: CoroutineContext = Dispatchers.Default,
     ): NeutrodyneDatabase =
         Room
             .inMemoryDatabaseBuilder<NeutrodyneDatabase>(NeutrodyneDatabaseConstructor::initialize)
             .applyTestSettings(driver, clock)
+            .setQueryCoroutineContext(queryContext)
             .build()
 
     /**

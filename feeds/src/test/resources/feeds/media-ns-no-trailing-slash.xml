@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss">
+  <channel>
+    <title>Media RSS No Trailing Slash</title>
+    <media:thumbnail url="https://cdn.example.com/cover-300.jpg" width="300" height="300"/>
+    <item>
+      <title>Media item</title>
+      <guid>media-1</guid>
+      <media:content url="https://cdn.example.com/m1.mp4" fileSize="4200000" type="video/mp4" duration="185" medium="video"/>
+    </item>
+  </channel>
+</rss>

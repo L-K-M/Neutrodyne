@@ -1,0 +1,27 @@
+{
+  "author": "Katherine Johnson",
+  "format": "RSS2",
+  "items": [
+    {
+      "durationMs": 750000,
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 1000,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/c1.mp3"
+        }
+      ],
+      "feedOrder": 0,
+      "guid": "custom-1",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 1000,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/c1.mp3"
+      },
+      "title": "Episode one"
+    }
+  ],
+  "title": "Custom Prefix Show"
+}

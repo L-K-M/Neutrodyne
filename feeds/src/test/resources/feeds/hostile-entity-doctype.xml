@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE rss [
+  <!ENTITY lol "lol">
+  <!ENTITY lol1 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
+  <!ENTITY lol2 "&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;">
+]>
+<rss version="2.0">
+  <channel>
+    <title>Hostile Entity Doctype</title>
+    <item><title>&lol2;</title><guid>hostile-1</guid>
+      <enclosure url="https://cdn.example.com/h1.mp3" length="10" type="audio/mpeg"/></item>
+  </channel>
+</rss>
