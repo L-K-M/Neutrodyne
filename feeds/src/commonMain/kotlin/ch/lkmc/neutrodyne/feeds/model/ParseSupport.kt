@@ -72,7 +72,9 @@ public data class Paging(
  * 5005) that never contains the feed's whole history (03 Feed moves, auth and paging).
  * Refresh adapters, subscribe and ingestion all share this single definition so no entry
  * path can treat a window as a whole feed (02 `episode_guid_provenance`: a window can never
- * prove sole GUID carriage).
+ * prove sole GUID carriage). A terminal archive page carries `fh:archive` with no continuation
+ * link, so this flag may stay `true` forever; paging and backfill terminate on link absence
+ * (`pagingNextUrl`), never by waiting for the flag to clear (03 paging).
  */
 public val Paging.isPartialWindow: Boolean
     get() = (next != null || prevArchive != null || fhArchive) && !fhComplete

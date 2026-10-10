@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.testing.database.MigrationInvariants
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import kotlinx.coroutines.test.runTest
+import org.junit.After
 import org.junit.Rule
 import java.nio.file.Files
 import kotlin.io.path.Path
@@ -37,6 +38,11 @@ import kotlin.test.assertTrue
  */
 class MigrateAllTest {
     private val dir = Files.createTempDirectory("m1a-migrate")
+
+    @After
+    fun tearDown() {
+        dir.toFile().deleteRecursively()
+    }
 
     @get:Rule
     val helper =

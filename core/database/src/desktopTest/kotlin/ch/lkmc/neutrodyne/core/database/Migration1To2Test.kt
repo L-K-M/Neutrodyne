@@ -8,6 +8,7 @@ import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import ch.lkmc.neutrodyne.core.database.migration.MIGRATION_1_TO_2
 import ch.lkmc.neutrodyne.core.testing.database.MigrationInvariants
 import kotlinx.coroutines.test.runTest
+import org.junit.After
 import org.junit.Rule
 import java.nio.file.Files
 import kotlin.io.path.Path
@@ -30,6 +31,11 @@ import kotlin.test.assertTrue
  */
 class Migration1To2Test {
     private val dir = Files.createTempDirectory("m1a-m1to2")
+
+    @After
+    fun tearDown() {
+        dir.toFile().deleteRecursively()
+    }
 
     @get:Rule
     val helper =

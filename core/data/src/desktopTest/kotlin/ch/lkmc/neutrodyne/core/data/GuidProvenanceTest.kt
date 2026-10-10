@@ -621,6 +621,57 @@ class GuidProvenanceTest {
         }
 
     /**
+     * The mirror case that must NOT claim: a covered feed where `p` already has an `OBSERVED`
+     * provenance row (a partial window saw it once, and the carrier was later rotated or retained
+     * away, leaving no current row with `guid = p`). `recordedGuids` already excludes `p` from
+     * this ingest's first observations, so it can never sit in `independentGuids` — the item
+     * stays contested, its foreign-owned enclosure forces the unresolved path, and the `g:p`
+     * shell keeps its rotated GUID (R70-R1 review refutation).
+     */
+    @Test
+    fun observedGuidNeverGainsSameIngestAuthority() =
+        runTest {
+            val id = podcastId()
+            db
+                .ingestDao()
+                .insertEpisodes(
+                    listOf(
+                        episodeEntity(podcastId = id, identityKey = "g:p") {
+                            copy(guid = "old", title = "Shell", enclosureUrl = "https://cdn/s.mp3")
+                        },
+                        episodeEntity(podcastId = id, identityKey = "g:Z") {
+                            copy(guid = "Z", title = "Owner", enclosureUrl = "https://cdn/b.mp3")
+                        },
+                    ),
+                )
+            // Durable OBSERVED for `p` with no current carrier — the state a partial sighting
+            // leaves after its carrier rotates or is retained away.
+            db.ingestDao().recordGuidKnowledge(id, emptySet(), emptySet(), setOf("p"))
+
+            val result =
+                ingest(
+                    id,
+                    parsedFeed(
+                        items =
+                            listOf(
+                                parsedEpisode(9, guid = "p", title = "Ghost", enclosureUrl = "https://cdn/b.mp3"),
+                            ),
+                    ),
+                )
+            // p was never introduced: the complete singleton must not promote it — the contested
+            // item lands beside both owners under a non-`g:` key instead of taking the shell.
+            assertEquals(1, result.inserted.size)
+            assertEquals(3, db.podcastDao().episodeCount(id))
+            val shell = byKey(id, "g:p")!!
+            assertEquals("old", shell.guid)
+            val landed = db.ingestDao().existing(id).single { it.guid == "p" }
+            assertTrue(!landed.identityKey.startsWith("g:"))
+            // OBSERVED stays inert memory; no authority was recorded for p.
+            assertNull(db.ingestDao().guidKnowledge(id)["p"])
+            assertTrue("p" in db.ingestDao().recordedGuids(id))
+        }
+
+    /**
      * A V1-migrated (uncovered) feed publishing two distinct episodes that share one enclosure
      * (the re-published/retracted pattern): the first contested refresh lands the items beside
      * both owners, and every later refresh must converge — bounded rows, no `g:`-keyed row ever
@@ -674,6 +725,16 @@ class GuidProvenanceTest {
             val countAfter4 = db.podcastDao().episodeCount(id)
             ingest(id, doc)
             assertEquals(countAfter4, db.podcastDao().episodeCount(id))
+            // Count equality alone would tolerate delete-and-reinsert churn, which would orphan
+            // the per-episode state rows; the row-id set must be identical too.
+            assertEquals(
+                rows.map { it.id }.toSet(),
+                db
+                    .ingestDao()
+                    .existing(id)
+                    .map { it.id }
+                    .toSet(),
+            )
             // No ambiguous GUID ever occupies a `g:` slot beyond the rows that legitimately
             // introduced under it: every newly landed contested row holds a non-`g:` content key.
             assertEquals(
