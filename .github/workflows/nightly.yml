@@ -83,7 +83,7 @@ jobs:
               -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
               -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest,ch.lkmc.neutrodyne.SmokeTest
           else
-            ./gradlew --max-workers=2 nightlyGroupDebugAndroidTest \
+            ./gradlew --max-workers=2 nightlyGroupDebugAndroidTest nightlyGroupAndroidDeviceTest \
               -Pneutrodyne.testScope=nightly \
               -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
               -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
@@ -150,8 +150,14 @@ jobs:
       # (nightly 2026-10-08: "Cannot access system provider: 'settings'" at install time).
       - name: Build the test APKs before the emulators boot
         run: |
-          ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true assembleDebug assembleDebugAndroidTest
+          ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true assembleDebug assembleDebugAndroidTest :core:database:assembleAndroidDeviceTest
           ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true :app:assembleRelease :app:assembleReleaseAndroidTest
+          # The safeguard only holds if every APK the emulator scripts install exists now -
+          # a task left out above compiles, dexes and packages inside the booted 4-core
+          # emulator and starves system_server the same way.
+          for apk in app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk app/build/outputs/apk/androidTest/release/app-release-androidTest.apk core/database/build/outputs/apk/androidTest/database-androidTest.apk; do test -f "$apk" || { echo "::error::$apk missing - it would build inside the emulator"; exit 1; }; done
+          test -n "$(find app/build/outputs/apk/debug -name 'app-*-debug.apk' -print -quit)" || { echo "::error::debug app APKs missing"; exit 1; }
+          test -n "$(find app/build/outputs/apk/release -name 'app-*-release.apk' -print -quit)" || { echo "::error::release app APKs missing"; exit 1; }
       - name: Debug suite on the API 37 16 KB image
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
@@ -159,6 +165,12 @@ jobs:
           target: google_apis_ps16k
           arch: x86_64
           force-avd-creation: true # never boot a retained AVD — see the target check below
+          # The action's automatic animation disable (its default) runs unguarded
+          # `settings put` right after sys.boot_completed; on this slow-booting image the
+          # settings service was not up and the third put died on "Broken pipe" before our
+          # script could wait for it (nightly 2026-10-10, run 38057314395). The script below
+          # applies the same scales after its bounded service wait.
+          disable-animations: false
           # The 16 KB-page image boots slowly on the hosted runners: with the action's 2 cores, default
           # RAM and 600 s timeout it never finished booting (nightly 2026-10-07).
           cores: 4
@@ -188,10 +200,12 @@ jobs:
             timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
             timeout 120 adb shell 'until cmd overlay enable com.android.internal.systemui.navbar.threebutton; do sleep 2; done'
             timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
+            timeout 120 adb shell 'until settings put global window_animation_scale 0.0 && settings put global transition_animation_scale 0.0 && settings put global animator_duration_scale 0.0; do sleep 2; done'
             adb shell 'getprop init.svc.surfaceflinger' | grep -q running || { echo "::error::surfaceflinger not running after boot"; exit 1; }
             test -r "$RUNNER_TEMP/logcat-api37-debug.txt" && test -s "$RUNNER_TEMP/logcat-api37-debug.txt" || { echo "::error::logcat capture missing, empty or unreadable"; exit 1; }
             ! grep -q 'hasReadColorBufferDma' "$RUNNER_TEMP/logcat-api37-debug.txt" || { echo "::error::goldfish mapper aborted on color-buffer DMA"; exit 1; }
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true connectedDebugAndroidTest
+            ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly connectedAndroidDeviceTest
       - name: Release smoke on API 37
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
@@ -199,6 +213,12 @@ jobs:
           target: google_apis_ps16k
           arch: x86_64
           force-avd-creation: true # never boot a retained AVD — see the target check below
+          # The action's automatic animation disable (its default) runs unguarded
+          # `settings put` right after sys.boot_completed; on this slow-booting image the
+          # settings service was not up and the third put died on "Broken pipe" before our
+          # script could wait for it (nightly 2026-10-10, run 38057314395). The script below
+          # applies the same scales after its bounded service wait.
+          disable-animations: false
           # The 16 KB-page image boots slowly on the hosted runners: with the action's 2 cores, default
           # RAM and 600 s timeout it never finished booting (nightly 2026-10-07).
           cores: 4
@@ -223,6 +243,7 @@ jobs:
             timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
             timeout 120 adb shell 'until cmd overlay enable com.android.internal.systemui.navbar.threebutton; do sleep 2; done'
             timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
+            timeout 120 adb shell 'until settings put global window_animation_scale 0.0 && settings put global transition_animation_scale 0.0 && settings put global animator_duration_scale 0.0; do sleep 2; done'
             adb shell 'getprop init.svc.surfaceflinger' | grep -q running || { echo "::error::surfaceflinger not running after boot"; exit 1; }
             test -r "$RUNNER_TEMP/logcat-api37-release.txt" && test -s "$RUNNER_TEMP/logcat-api37-release.txt" || { echo "::error::logcat capture missing, empty or unreadable"; exit 1; }
             ! grep -q 'hasReadColorBufferDma' "$RUNNER_TEMP/logcat-api37-release.txt" || { echo "::error::goldfish mapper aborted on color-buffer DMA"; exit 1; }
