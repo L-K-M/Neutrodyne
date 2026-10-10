@@ -60,10 +60,11 @@ abstract class IngestDao(
      * D98 union writes (02): [ambiguous] wins over everything already stored or arriving later —
      * a `KNOWN_AMBIGUOUS` row is never demoted; [independent] is recorded only when no row exists,
      * so a sole observation can never overwrite ambiguity; [observed] records a first sighting
-     * that carried no authority so the GUID can never re-qualify as a new introduction. All
-     * first-writes are idempotent: re-recording the same knowledge is a no-op, and a failed
-     * ingest transaction rolls the whole write back with the episodes (02 Transactions and
-     * threading).
+     * that carried no authority so the GUID can never re-qualify as a new introduction. `OBSERVED`
+     * is terminal: only positive later ambiguity evidence promotes it (to `KNOWN_AMBIGUOUS`),
+     * never to independent. All first-writes are idempotent: re-recording the same knowledge is a
+     * no-op, and a failed ingest transaction rolls the whole write back with the episodes
+     * (02 Transactions and threading).
      */
     suspend fun recordGuidKnowledge(
         podcastId: Long,

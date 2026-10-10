@@ -73,7 +73,7 @@ class MigrateAllTest {
             try {
                 // V1 rows migrate with no provenance coverage or records: the marker stays null
                 // and the derived table starts empty (02 episode_guid_provenance).
-                assertNull(db.podcastDao().byId(1)!!.guidCoverageSince)
+                assertNull(assertNotNull(db.podcastDao().byId(1)).guidCoverageSince)
 
                 assertNotNull(db.podcastDao().byId(1))
                 assertNotNull(db.episodeDao().byId(1))

@@ -576,6 +576,145 @@ class GuidProvenanceTest {
             assertTrue("d" in db.ingestDao().recordedGuids(id))
         }
 
+    /**
+     * A GUID that earns KNOWN_INDEPENDENT inside the contested document itself must be honoured:
+     * the authority lookup ran before this ingest recorded it, so the stale map alone still
+     * reports contested. The `g:X` row whose stored GUID rotated away (a key shell) keeps its
+     * slot and the item claims it; the unrelated enclosure owner is untouched (R70 follow-up).
+     */
+    @Test
+    fun sameIngestIndependentHonoursClaimAgainstGuidShell() =
+        runTest {
+            val id = podcastId()
+            // A `g:X`-keyed row whose current GUID is no longer X (rotation left the slot) and an
+            // unrelated row that owns the incoming item's enclosure.
+            db
+                .ingestDao()
+                .insertEpisodes(
+                    listOf(
+                        episodeEntity(podcastId = id, identityKey = "g:X") {
+                            copy(guid = "old", title = "Shell", enclosureUrl = "https://cdn/s.mp3")
+                        },
+                        episodeEntity(podcastId = id, identityKey = "g:Z") {
+                            copy(guid = "Z", title = "Owner", enclosureUrl = "https://cdn/b.mp3")
+                        },
+                    ),
+                )
+            val result =
+                ingest(
+                    id,
+                    parsedFeed(
+                        items =
+                            listOf(
+                                parsedEpisode(9, guid = "X", title = "Ghost", enclosureUrl = "https://cdn/b.mp3"),
+                            ),
+                    ),
+                )
+            // X sole-introduced under a complete document: KNOWN_INDEPENDENT is recorded and must
+            // apply to this ingest's own pass 1 — the item claims the `g:X` slot, no duplicate.
+            assertEquals(GuidKnowledge.KNOWN_INDEPENDENT, db.ingestDao().guidKnowledge(id)["X"])
+            assertEquals(0, result.inserted.size)
+            assertEquals(2, db.podcastDao().episodeCount(id))
+            val shell = byKey(id, "g:X")!!
+            assertEquals("X", shell.guid)
+            assertTrue(shell.inFeed)
+        }
+
+    /**
+     * A V1-migrated (uncovered) feed publishing two distinct episodes that share one enclosure
+     * (the re-published/retracted pattern): the first contested refresh lands the items beside
+     * both owners, and every later refresh must converge — bounded rows, no `g:`-keyed row ever
+     * acquires an ambiguous GUID, and both owners' state survives (R70 follow-up probe).
+     */
+    @Test
+    fun uncoveredSharedEnclosureConvergesWithoutChurn() =
+        runTest {
+            val id =
+                db
+                    .podcastDao()
+                    .insertPodcast(
+                        podcastEntity(
+                            feedUrl = "https://example.com/feed.xml",
+                            feedKey = "https://example.com/feed.xml",
+                            subscribedAt = NOW - 30 * DAY,
+                        ) { copy(status = PodcastStatus.ACTIVE, initialFetch = false) },
+                    )
+            val doc =
+                parsedFeed(
+                    items =
+                        listOf(
+                            parsedEpisode(
+                                0,
+                                guid = "a",
+                                title = "Alpha",
+                                enclosureUrl = "https://cdn/e.mp3",
+                                pubDate =
+                                    NOW - DAY,
+                            ),
+                            parsedEpisode(
+                                1,
+                                guid = "b",
+                                title = "Beta",
+                                enclosureUrl = "https://cdn/e.mp3",
+                                pubDate =
+                                    NOW - 2 * DAY,
+                            ),
+                        ),
+                )
+            ingest(id, doc, mode = IngestMode.INITIAL)
+            val a = byKey(id, "g:a")!!
+            val b = byKey(id, "g:b")!!
+            db.episodeStateDao().upsert(episodeStateEntity(a.id) { copy(playedAt = NOW - 1_000) })
+            db.episodeStateDao().upsert(episodeStateEntity(b.id) { copy(isFavorite = true) })
+
+            for (round in 1..4) ingest(id, doc)
+
+            val rows = db.ingestDao().existing(id)
+            // Converged: the contested inserts are bounded and the fifth refresh adds nothing.
+            val countAfter4 = db.podcastDao().episodeCount(id)
+            ingest(id, doc)
+            assertEquals(countAfter4, db.podcastDao().episodeCount(id))
+            // No ambiguous GUID ever occupies a `g:` slot beyond the rows that legitimately
+            // introduced under it: every newly landed contested row holds a non-`g:` content key.
+            assertEquals(
+                setOf(a.id, b.id),
+                rows.filter { it.identityKey.startsWith("g:") }.map { it.id }.toSet(),
+            )
+            assertTrue(rows.all { !it.identityKey.startsWith("g:") || it.guid in setOf("a", "b") })
+            // Both original owners keep their rows and state; nothing transferred.
+            assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(a.id)!!.playedAt)
+            assertTrue(db.episodeStateDao().byEpisode(b.id)!!.isFavorite)
+            assertEquals("https://cdn/e.mp3", rows.single { it.id == a.id }.enclosureUrl)
+            assertEquals("https://cdn/e.mp3", rows.single { it.id == b.id }.enclosureUrl)
+            // Persisted ambiguity stays put once both rows carry the GUIDs under non-g keys.
+            assertEquals(GuidKnowledge.KNOWN_AMBIGUOUS, db.ingestDao().guidKnowledge(id)["a"])
+            assertEquals(GuidKnowledge.KNOWN_AMBIGUOUS, db.ingestDao().guidKnowledge(id)["b"])
+        }
+
+    /**
+     * An `fh:archive` document is a stable slice of older entries (RFC 5005): never the whole
+     * feed, so a GUID sole in it cannot be a strict introduction — it records OBSERVED even on a
+     * covered feed and even when it carries no paging links (D98; review follow-up).
+     */
+    @Test
+    fun archiveDocumentCannotProveIndependence() =
+        runTest {
+            val id = podcastId()
+            ingest(
+                id,
+                parsedFeed(
+                    items =
+                        listOf(
+                            parsedEpisode(0, guid = "d", title = "Alpha", enclosureUrl = "https://cdn/a.mp3"),
+                        ),
+                    paging = Paging(fhArchive = true),
+                ),
+                mode = IngestMode.INITIAL,
+            )
+            assertNull(db.ingestDao().guidKnowledge(id)["d"])
+            assertTrue("d" in db.ingestDao().recordedGuids(id))
+        }
+
     /** Reversed document order hands `g:dup` to B instead; the sibling still resolves by tier. */
     @Test
     fun reversedDocumentOrderKeepsSiblingStates() =

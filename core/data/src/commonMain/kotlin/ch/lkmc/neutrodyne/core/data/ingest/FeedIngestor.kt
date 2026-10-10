@@ -188,6 +188,14 @@ internal class FeedIngestor(
         )
         ambiguousGuids += knowledge.filterValues { it == GuidKnowledge.KNOWN_AMBIGUOUS }.keys
 
+        // The contested guard's enclosure-ownership check is built once: `existing` is the
+        // pre-mutation snapshot pass 1 reasons about, so an index over it answers "some other
+        // row owns this enclosure" without re-normalising every stored URL per claim.
+        val rowsByEnclosure = HashMap<String, MutableList<Long>>()
+        for (row in existing) {
+            normEnc(row)?.let { rowsByEnclosure.getOrPut(it) { mutableListOf() }.add(row.id) }
+        }
+
         // Pass 1 (03 step 4): each item claims rows in claim-key order — its assigned document
         // key first, then its (older-version) candidates. When a repeated GUID puts two items on
         // one stored row, the item whose enclosure matches the row keeps it and the loser is
@@ -195,7 +203,9 @@ internal class FeedIngestor(
         // D98 authority: an ambiguous GUID never claims by any key — the sibling's `g:` row, its
         // own re-offered fallback key, or a rotated-away `g:` slot are all decided by pass 2's
         // global evidence instead; and a GUID without KNOWN_INDEPENDENT may not take a `g:` row
-        // while its enclosure is provably owned by a different row (the unknown rule).
+        // while its enclosure is provably owned by a different row (the unknown rule). Authority
+        // this ingest itself just recorded counts too: `independentGuids` were persisted above
+        // and are exactly the set `knowledge` still lacks (R70 follow-up).
         val claimedBy = HashMap<Long, PreparedItem>()
         val pending = ArrayDeque(prepared.items)
         while (pending.isNotEmpty()) {
@@ -203,12 +213,14 @@ internal class FeedIngestor(
             if (item.matchedTo != null) continue
             val itemGuid = EpisodeKeys.canonicalGuid(item.episode.guid)
             if (itemGuid != null && itemGuid in ambiguousGuids) continue
-            val contested = itemGuid != null && knowledge[itemGuid] != GuidKnowledge.KNOWN_INDEPENDENT
+            val contested =
+                itemGuid != null && itemGuid !in independentGuids &&
+                    knowledge[itemGuid] != GuidKnowledge.KNOWN_INDEPENDENT
             for (key in item.claimKeys) {
                 val row = byKey[key] ?: continue
                 if (
                     contested && item.enclosureIdentity != null &&
-                    existing.any { it.id != row.id && normEnc(it) == item.enclosureIdentity }
+                    rowsByEnclosure[item.enclosureIdentity]?.any { it != row.id } == true
                 ) {
                     // Erased or absent history cannot arbitrate between this GUID's stored owner
                     // and the enclosure's owner: leave both rows and their state untouched; the

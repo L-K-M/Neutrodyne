@@ -68,9 +68,11 @@ public data class Paging(
 
 /**
  * Whether the document is an incomplete paging window: a page-1 `next`/`prevArchive` link
- * without `fh:complete` (03 Feed moves, auth and paging). Refresh adapters, subscribe and
- * ingestion all share this single definition so no entry path can treat a window as a whole
- * feed (02 `episode_guid_provenance`: a window can never prove sole GUID carriage).
+ * without `fh:complete`, or an `fh:archive` document — a stable slice of older entries (RFC
+ * 5005) that never contains the feed's whole history (03 Feed moves, auth and paging).
+ * Refresh adapters, subscribe and ingestion all share this single definition so no entry
+ * path can treat a window as a whole feed (02 `episode_guid_provenance`: a window can never
+ * prove sole GUID carriage).
  */
 public val Paging.isPartialWindow: Boolean
-    get() = (next != null || prevArchive != null) && !fhComplete
+    get() = (next != null || prevArchive != null || fhArchive) && !fhComplete
