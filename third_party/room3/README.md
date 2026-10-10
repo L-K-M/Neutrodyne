@@ -34,8 +34,8 @@ permit accounting and the pool-closed error are preserved. Regression coverage:
 
 `patches/0003` fixes `SchemaInfoUtil.readIndex` misreading `PRAGMA index_xinfo` on WITHOUT
 ROWID tables. SQLite stores the table's primary-key columns inside every secondary index
-and reports them as *auxiliary* rows (`key = 0`, versus a key column's 1-based position);
-upstream ignored only `cid < 0` (rowid/expressions) and never read `key`, so
+and reports them as *auxiliary* rows (`key = 0`, versus `key = 1` for declared key
+columns); upstream ignored only `cid < 0` (rowid/expressions) and never read `key`, so
 `TableInfo.Index.columns` gained the PK columns — migration validation then failed a
 correct schema (`Expected [hlc, nodeId], found [hlc, nodeId, coll, rid, field]` on a
 `PRIMARY KEY (coll, rid, field)` + `INDEX (hlc, nodeId)` table). The patch reads `key`
@@ -101,5 +101,6 @@ Room ships these fixes (track the `androidx.room3` release notes), then pin `roo
 catalog entry without removing the substitution would keep resolving the patched 3.0.3 —
 do not do that.
 
-Database format is untouched (the patch changes pool scheduling only), so rolling forward
-or back across this change keeps existing databases valid.
+Database format is untouched (the patches change runtime pool ownership and index
+inspection, not on-disk structures), so rolling forward or back across this change keeps
+existing databases valid.

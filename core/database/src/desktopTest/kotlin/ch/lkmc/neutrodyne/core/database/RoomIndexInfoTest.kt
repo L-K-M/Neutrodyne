@@ -20,9 +20,9 @@ import kotlin.test.assertTrue
  * reported as declared index columns. Migration validation then fails a correct database:
  * `Expected columns [hlc, nodeId], found [hlc, nodeId, coll, rid, field]` on sync_outbox.
  *
- * Per https://www.sqlite.org/pragma.html#pragma_index_xinfo the `key` column is the 1-based
- * position of a key column in the index; `key = 0` marks auxiliary columns — the WITHOUT
- * ROWID primary key carried for lookups, or the rowid (cid = -1) on ordinary tables.
+ * Per https://www.sqlite.org/pragma.html#pragma_index_xinfo the `key` column is 1 for a
+ * declared key column and 0 for an auxiliary column — the WITHOUT ROWID primary key
+ * carried for lookups, or the rowid (cid = -1) on ordinary tables.
  */
 class RoomIndexInfoTest {
     /**

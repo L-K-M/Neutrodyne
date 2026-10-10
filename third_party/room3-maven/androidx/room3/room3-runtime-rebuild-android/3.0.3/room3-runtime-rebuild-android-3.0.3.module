@@ -216,11 +216,11 @@
         {
           "name": "room3-runtime-rebuild-android-3.0.3-sources.jar",
           "url": "room3-runtime-rebuild-android-3.0.3-sources.jar",
-          "size": 147298,
-          "sha512": "769c2f69e746162702a50cda298a95dbe8ddddc297179b03c485f92d2ed82045f78ddf58f7bed2dd5f4fc5e1feba157d3bffeba9b93ff3c5d572a8e5475edb6d",
-          "sha256": "33de6dd3c6d72e6ce22e1d98f22e8a2d9a633eadaaa169aef2f920c1a0407dfe",
-          "sha1": "2973ab1f129cfa8b0cbb6c006dcaca1271301193",
-          "md5": "ae090bad9c4e275beb85d84ee3c1dfb7"
+          "size": 147291,
+          "sha512": "bd411e997d49647c90bf127ac5772206ad63692d344e7ab85be5797bf3e17fca456b24e83cd39c2a76cd5dc789697703dc1d77d3ff689302cf92a383d2c3be4c",
+          "sha256": "4fd3fe011e5154b589ad81582219a492196f2b22b207680f5f5072fa0f967ff8",
+          "sha1": "1ede0207204f81b131da499cbd8718ee23b3a710",
+          "md5": "e6ebdd80f64ec82b2b35c263668c5ece"
         }
       ]
     }

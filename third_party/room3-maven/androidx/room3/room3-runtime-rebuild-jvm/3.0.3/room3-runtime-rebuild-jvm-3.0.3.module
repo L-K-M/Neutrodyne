@@ -167,11 +167,11 @@
         {
           "name": "room3-runtime-rebuild-jvm-3.0.3-sources.jar",
           "url": "room3-runtime-rebuild-jvm-3.0.3-sources.jar",
-          "size": 111249,
-          "sha512": "e22795131d03914d7fd211eefc8a3ad332d94f64f0cc2b08c2414c57849fdf5a47ba19d33e011ebaa8eb799c8fa51f70c762861fa6b59e038b1bfb3461eb330a",
-          "sha256": "a987da9b49d587e32c25b3258066fe121904036156a9a922aa04dbdcab0d15a2",
-          "sha1": "c19ef2d9528843ce8c2df32ab4c107a92661fea1",
-          "md5": "f669e48402d54a590f1844a1119d71cf"
+          "size": 111242,
+          "sha512": "72bc3bf4ceaad70d52efce41413bd74835c17020d1d1db4fe585bc8f0c80e447d42696cdf7b65a34b97b09aa0b91388d77ce712864fb521ddd68e2ab3ebe107d",
+          "sha256": "d777f5af0966954800661be540390fc8cc5894bf9c57632edf0e7ec2788d0e19",
+          "sha1": "8fe981b3da463623d1455a096517ea50ccf257c8",
+          "md5": "399dcce95c3b32516930662677ec633e"
         }
       ]
     }

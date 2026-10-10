@@ -5,9 +5,9 @@
  }
  
 +/**
-+ * `index_xinfo` marks a declared key column by its 1-based position in the index key;
-+ * key = 0 marks an auxiliary column merely stored in the index — the primary key of a
-+ * WITHOUT ROWID table, or the rowid.
++ * `index_xinfo` marks a declared key column with key = 1 and an auxiliary column
++ * merely stored in the index — the primary key of a WITHOUT ROWID table, or the
++ * rowid — with key = 0.
 + */
 +private const val XINFO_AUXILIARY_KEY = 0L
 +
