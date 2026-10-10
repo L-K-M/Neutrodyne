@@ -12,6 +12,8 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
+            // StringResource is part of the public UiText API the shells construct.
+            api(libs.cmp.resources)
             implementation(project(":core:designsystem"))
             implementation(project(":core:model"))
             implementation(project(":core:common"))
