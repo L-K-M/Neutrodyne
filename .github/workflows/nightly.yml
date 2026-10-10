@@ -165,6 +165,12 @@ jobs:
           target: google_apis_ps16k
           arch: x86_64
           force-avd-creation: true # never boot a retained AVD — see the target check below
+          # The action's automatic animation disable (its default) runs unguarded
+          # `settings put` right after sys.boot_completed; on this slow-booting image the
+          # settings service was not up and the third put died on "Broken pipe" before our
+          # script could wait for it (nightly 2026-10-10, run 38057314395). The script below
+          # applies the same scales after its bounded service wait.
+          disable-animations: false
           # The 16 KB-page image boots slowly on the hosted runners: with the action's 2 cores, default
           # RAM and 600 s timeout it never finished booting (nightly 2026-10-07).
           cores: 4
@@ -194,6 +200,7 @@ jobs:
             timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
             timeout 120 adb shell 'until cmd overlay enable com.android.internal.systemui.navbar.threebutton; do sleep 2; done'
             timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
+            timeout 120 adb shell 'until settings put global window_animation_scale 0.0 && settings put global transition_animation_scale 0.0 && settings put global animator_duration_scale 0.0; do sleep 2; done'
             adb shell 'getprop init.svc.surfaceflinger' | grep -q running || { echo "::error::surfaceflinger not running after boot"; exit 1; }
             test -r "$RUNNER_TEMP/logcat-api37-debug.txt" && test -s "$RUNNER_TEMP/logcat-api37-debug.txt" || { echo "::error::logcat capture missing, empty or unreadable"; exit 1; }
             ! grep -q 'hasReadColorBufferDma' "$RUNNER_TEMP/logcat-api37-debug.txt" || { echo "::error::goldfish mapper aborted on color-buffer DMA"; exit 1; }
@@ -206,6 +213,12 @@ jobs:
           target: google_apis_ps16k
           arch: x86_64
           force-avd-creation: true # never boot a retained AVD — see the target check below
+          # The action's automatic animation disable (its default) runs unguarded
+          # `settings put` right after sys.boot_completed; on this slow-booting image the
+          # settings service was not up and the third put died on "Broken pipe" before our
+          # script could wait for it (nightly 2026-10-10, run 38057314395). The script below
+          # applies the same scales after its bounded service wait.
+          disable-animations: false
           # The 16 KB-page image boots slowly on the hosted runners: with the action's 2 cores, default
           # RAM and 600 s timeout it never finished booting (nightly 2026-10-07).
           cores: 4
@@ -230,6 +243,7 @@ jobs:
             timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
             timeout 120 adb shell 'until cmd overlay enable com.android.internal.systemui.navbar.threebutton; do sleep 2; done'
             timeout 300 adb wait-for-device shell 'until cmd settings list global >/dev/null 2>&1 && pm path android >/dev/null 2>&1; do sleep 2; done'
+            timeout 120 adb shell 'until settings put global window_animation_scale 0.0 && settings put global transition_animation_scale 0.0 && settings put global animator_duration_scale 0.0; do sleep 2; done'
             adb shell 'getprop init.svc.surfaceflinger' | grep -q running || { echo "::error::surfaceflinger not running after boot"; exit 1; }
             test -r "$RUNNER_TEMP/logcat-api37-release.txt" && test -s "$RUNNER_TEMP/logcat-api37-release.txt" || { echo "::error::logcat capture missing, empty or unreadable"; exit 1; }
             ! grep -q 'hasReadColorBufferDma' "$RUNNER_TEMP/logcat-api37-release.txt" || { echo "::error::goldfish mapper aborted on color-buffer DMA"; exit 1; }
