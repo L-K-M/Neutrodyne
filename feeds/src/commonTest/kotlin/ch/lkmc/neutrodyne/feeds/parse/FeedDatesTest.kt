@@ -1,0 +1,261 @@
+// SPDX-License-Identifier: Unlicense
+package ch.lkmc.neutrodyne.feeds.parse
+
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+
+/** Every date variant of 03 Dates, table-driven with fixed vectors (locale-invariant lowercase). */
+class FeedDatesTest {
+    @Test
+    fun parsesStrictRfc822() {
+        assertEquals(1792663200000L, FeedDates.parse("Thu, 22 Oct 2026 12:00:00 +0200"))
+    }
+
+    @Test
+    fun rfc822Vectors() {
+        // Sat, 03 Oct 2026 12:34:56 GMT (+0000), with .789 fraction.
+        assertEquals(1791030896789L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56.789 GMT"))
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 3 Oct 2026 12:34:56 UT"))
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 UTC"))
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 Z"))
+        // Wrong weekday is dropped, not validated.
+        assertEquals(1791030896000L, FeedDates.parse("Mié, 03 Oct 2026 12:34:56 +0000"))
+        // Zone names map to offsets: PDT -0700, EST -0500.
+        assertEquals(1791056096000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 PDT"))
+        assertEquals(1791048896000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 EST"))
+        // Offset with colon.
+        assertEquals(1791023696000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 +02:00"))
+        // No seconds.
+        assertEquals(1791030840000L, FeedDates.parse("Sat, 03 Oct 2026 12:34 +0000"))
+        // Default offset is UTC when absent.
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56"))
+        // Case-insensitive month.
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 oct 2026 12:34:56 +0000"))
+    }
+
+    @Test
+    fun europeanZoneNames() {
+        // Thu, 03 Oct 2024 09:00:00 +0200 → 2024-10-03T07:00:00Z.
+        assertEquals(1727938800000L, FeedDates.parse("Thu, 3 Oct 2024 09:00:00 CEST"))
+        assertEquals(1727938800000L, FeedDates.parse("Do, 03 Okt 2024 09:00:00 MESZ"))
+        assertEquals(1727938800000L, FeedDates.parse("Thu, 03 Oct 2024 08:00:00 CET"))
+        assertEquals(1727938800000L, FeedDates.parse("Thu, 03 Oct 2024 10:00:00 EEST"))
+        assertEquals(1727938800000L, FeedDates.parse("Thu, 03 Oct 2024 08:00:00 WEST"))
+        // "bst" is British Summer Time here, not Bangladesh's +0600 (see namedZones).
+        assertEquals(1727938800000L, FeedDates.parse("Thu, 03 Oct 2024 08:00:00 BST"))
+    }
+
+    @Test
+    fun trailingZoneCommentsAreStripped() {
+        // RFC 5322 CFWS allows a comment after the zone; real feeds emit "+0000 (UTC)".
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 +0000 (UTC)"))
+        // A named zone also counts as the preceding zone.
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 GMT (UTC)"))
+        // A comment with a numeric offset keeps the offset, not the comment's meaning.
+        assertEquals(1791023696000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 +02:00 (CET)"))
+        // A parens-only tail naming a KNOWN zone supplies the zone itself: applying the named
+        // zone is exact, while dropping it would silently read the instant as UTC.
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 (GMT)"))
+        assertEquals(1791048896000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 (EST)")) // -0500
+        assertEquals(1791027296000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 (CET)")) // +0100
+        // A comment with a ±HH suffix after a real zone still strips: the preceding zone is
+        // authoritative. A parens-only "(GMT+1)" is not a known zone and still degrades —
+        // arithmetic is never guessed out of a comment.
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 +0000 (GMT+1)"))
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 GMT (UTC+2)"))
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 (GMT+1)"))
+        // Non-zone trailing parens still degrade.
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 (verlegt)"))
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 (foo bar)"))
+    }
+
+    @Test
+    fun ordinalDayDotAndWideZones() {
+        // German/Swiss/Austrian ordinal dot on the day — same instant as the plain form.
+        assertEquals(1791023696000L, FeedDates.parse("Di., 3. Okt. 2026 12:34:56 +0200"))
+        assertEquals(1790850896000L, FeedDates.parse("Mi, 01. Okt 2026 12:34:56 +0200"))
+        // "1.Oct" (no space after the dot) still fails: the dot is a separator, not a joiner.
+        assertNull(FeedDates.parse("1.Oct 2026 12:34:56 +0200"))
+        // Asian/African/Pacific named zones resolve through the same numeric path.
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 21:34:56 JST"))
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 22:04:56 ACST"))
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 15:34:56 MSK"))
+        assertEquals(1791030896000L, FeedDates.parse("Sun, 04 Oct 2026 01:34:56 NZDT"))
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 02:34:56 HST"))
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 03:34:56 AKST"))
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 15:34:56 EAT"))
+        // "ist" stays unmapped: India (+0530) and Israel (+0200) disagree.
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 IST"))
+    }
+
+    @Test
+    fun localisedMonths() {
+        assertEquals(1791030896000L, FeedDates.parse("Sa., 03 Okt 2026 12:34:56 +0000"))
+        assertEquals(1791030896000L, FeedDates.parse("sam., 03 oct. 2026 12:34:56 +0000"))
+        assertEquals(1767443696000L, FeedDates.parse("mer., 03 janv. 2026 12:34:56 +0000"))
+        assertEquals(1777811696000L, FeedDates.parse("03 Mai 2026 12:34:56 +0000"))
+    }
+
+    @Test
+    fun weekdayCommaWithoutSpaceStillParses() {
+        // Some generators emit "Tue,1 Oct 2024 …" — the weekday strip must not require the space.
+        assertEquals(
+            FeedDates.parse("Tue, 1 Oct 2024 10:00:00 +0000"),
+            FeedDates.parse("Tue,1 Oct 2024 10:00:00 +0000"),
+        )
+        assertNotNull(FeedDates.parse("Tue,1 Oct 2024 10:00:00 +0000"))
+    }
+
+    @Test
+    fun twoDigitYearsFollowRfc5322() {
+        // 00–49 → 20xx, 50–99 → 19xx (RFC 5322 §4.3), boundary years included.
+        assertEquals(981201600000L, FeedDates.parse("Sat, 03 Feb 01 12:00:00 +0000"))
+        assertEquals(-567864000000L, FeedDates.parse("Sat, 03 Jan 52 12:00:00 +0000"))
+        // Nullable-vs-nullable equality would pass if both sides failed to parse — pin the
+        // expected side to a parsed value first.
+        val boundary2049 = assertNotNull(FeedDates.parse("03 Feb 2049 12:00:00 +0000"))
+        val boundary1950 = assertNotNull(FeedDates.parse("03 Feb 1950 12:00:00 +0000"))
+        assertEquals(boundary2049, FeedDates.parse("Wed, 03 Feb 49 12:00:00 +0000"))
+        assertEquals(boundary1950, FeedDates.parse("Fri, 03 Feb 50 12:00:00 +0000"))
+    }
+
+    @Test
+    fun iso8601Vectors() {
+        assertEquals(1791030896789L, FeedDates.parse("2026-10-03T12:34:56.789Z"))
+        assertEquals(1791023696789L, FeedDates.parse("2026-10-03T12:34:56.789+02:00"))
+        assertEquals(1791023696000L, FeedDates.parse("2026-10-03T12:34:56+02:00"))
+        assertEquals(1791030896000L, FeedDates.parse("2026-10-03t12:34:56z"))
+    }
+
+    @Test
+    fun isoWithoutOffsetIsUtc() {
+        assertEquals(1791030896000L, FeedDates.parse("2026-10-03T12:34:56"))
+    }
+
+    @Test
+    fun isoDateOnlyIsUtcMidnight() {
+        assertEquals(1790985600000L, FeedDates.parse("2026-10-03"))
+    }
+
+    @Test
+    fun isoSpaceSeparator() {
+        assertEquals(1791030896000L, FeedDates.parse("2026-10-03 12:34:56"))
+        assertEquals(1791023696000L, FeedDates.parse("2026-10-03 12:34:56 +02:00"))
+    }
+
+    @Test
+    fun isoSpaceBeforeColonlessOffset() {
+        // "YYYY-MM-DD HH:MM:SS ±HHMM" needs the space-strip and the colon insertion to compose.
+        // assertNotNull on the expected side: assertEquals(null, null) would pass if both failed.
+        val expected = assertNotNull(FeedDates.parse("2024-06-15T12:00:00+02:00"))
+        assertEquals(expected, FeedDates.parse("2024-06-15 12:00:00 +0200"))
+        val expectedNeg = assertNotNull(FeedDates.parse("2026-10-03T12:34:56-07:00"))
+        assertEquals(expectedNeg, FeedDates.parse("2026-10-03 12:34:56 -0700"))
+        val expectedZ = assertNotNull(FeedDates.parse("2026-10-03T12:34:56Z"))
+        assertEquals(expectedZ, FeedDates.parse("2026-10-03 12:34:56 Z"))
+    }
+
+    @Test
+    fun whitespaceCollapses() {
+        assertEquals(1791030896000L, FeedDates.parse("  Sat,   03   Oct   2026  12:34:56  +0000  "))
+    }
+
+    @Test
+    fun nonBreakingSpacesNormalize() {
+        // Typeset feeds carry NBSP/narrow-NBSP between tokens; they are whitespace runs too.
+        assertEquals(
+            1791030896000L,
+            FeedDates.parse("Sat,\u00A003\u00A0Oct\u00A02026\u00A012:34:56\u00A0+0000"),
+        )
+        assertEquals(
+            1791030896000L,
+            FeedDates.parse("Sat,\u202F03\u202FOct\u202F2026\u202F12:34:56\u202F+0000"),
+        )
+        // A leading no-break space is dropped like ordinary leading whitespace.
+        assertEquals(
+            1791030896000L,
+            FeedDates.parse("\u00A0Sat, 03 Oct 2026 12:34:56 +0000"),
+        )
+    }
+
+    @Test
+    fun dayIsValidatedAgainstTheMonth() {
+        assertNull(FeedDates.parse("Mon, 31 Sep 2026 12:00:00 +0000")) // September has 30 days
+        assertNull(FeedDates.parse("Mon, 30 Feb 2026 12:00:00 +0000"))
+        assertNull(FeedDates.parse("Sun, 29 Feb 2026 12:00:00 +0000")) // non-leap year
+        assertEquals(1835438400000L, FeedDates.parse("Tue, 29 Feb 2028 12:00:00 +0000")) // leap year
+    }
+
+    @Test
+    fun hourAndMinuteBounds() {
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026 24:00:00 +0000"))
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:60:00 +0000"))
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:00:60 +0000"))
+    }
+
+    @Test
+    fun garbageYieldsNull() {
+        assertNull(FeedDates.parse(""))
+        assertNull(FeedDates.parse("next tuesday"))
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026"))
+        assertNull(FeedDates.parse("16:9"))
+    }
+
+    @Test
+    fun outOfRangeOffsetsYieldNull() {
+        // An offset past ±18 h must not throw; the date is simply unknown (UNKNOWN_DATE upstream).
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 +1900"))
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 +9900"))
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 -1900"))
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 +19:00"))
+        assertNull(FeedDates.parse("2026-10-03T12:34:56+25:00"))
+    }
+
+    @Test
+    fun dateOnlyFallbackRejectsTrailingGarbage() {
+        // The date-only fallback consumes the whole input: trailing garbage is not a date.
+        assertNull(FeedDates.parse("2026-10-03 garbage"))
+        assertNull(FeedDates.parse("2026-10-03 24:00:00"))
+        assertNull(FeedDates.parse("2026-10-03junk"))
+        assertEquals(1790985600000L, FeedDates.parse("2026-10-03"))
+    }
+
+    @Test
+    fun isoSpaceBeforeOffsetStillParses() {
+        // 'T'-separated ISO with a stray space before the offset: the only space is the offset's,
+        // so the offset strip must run before the date/time ' '→'T' substitution.
+        val expectedPos = assertNotNull(FeedDates.parse("2024-10-03T10:00:00+02:00"))
+        val expectedNeg = assertNotNull(FeedDates.parse("2024-10-03T10:00:00-05:00"))
+        val expectedZ = assertNotNull(FeedDates.parse("2024-10-03T10:00:00Z"))
+        assertEquals(expectedPos, FeedDates.parse("2024-10-03T10:00:00 +02:00"))
+        assertEquals(expectedNeg, FeedDates.parse("2024-10-03T10:00:00 -0500"))
+        assertEquals(expectedZ, FeedDates.parse("2024-10-03T10:00:00 z"))
+        // Named zones are rewritten to ±HHMM first and hit the same code path.
+        assertEquals(expectedNeg, FeedDates.parse("2024-10-03T10:00:00 EST"))
+        // The two-space form keeps working either order.
+        assertEquals(expectedPos, FeedDates.parse("2024-10-03 10:00:00 +0200"))
+    }
+
+    @Test
+    fun unicodeSpaceSeparatorsParse() {
+        // The "typeset" commitment covers the whole Unicode space-separator class, not only
+        // NBSP/narrow NBSP: thin space U+2009 and ideographic space U+3000 show up in feeds.
+        val expected = assertNotNull(FeedDates.parse("3 Oct 2024 10:00 GMT"))
+        assertEquals(expected, FeedDates.parse("3 Oct\u20092024\u200910:00 GMT"))
+        assertEquals(expected, FeedDates.parse("3\u3000Oct\u30002024 10:00 GMT"))
+    }
+
+    @Test
+    fun invisibleCharactersParse() {
+        // ZWSP/ZWNJ/ZWJ, line/paragraph separators and a BOM inside CMS-generated dates all
+        // collapse as whitespace rather than breaking the weekday strip or the anchors.
+        val expectedIso = assertNotNull(FeedDates.parse("2024-10-01T12:00:00Z"))
+        assertEquals(expectedIso, FeedDates.parse("2024-10-01T12:00:00Z\u200B"))
+        assertEquals(expectedIso, FeedDates.parse("\uFEFF2024-10-01T12:00:00Z"))
+        assertEquals(expectedIso, FeedDates.parse("2024-10-01T12:00:00\u200DZ"))
+        val expectedRfc = assertNotNull(FeedDates.parse("Tue, 1 Oct 2024 12:00:00 +0000"))
+        assertEquals(expectedRfc, FeedDates.parse("Tue,\u20281 Oct 2024 12:00:00 +0000"))
+    }
+}

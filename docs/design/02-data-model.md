@@ -1131,15 +1131,17 @@ Stored as `TEXT` in `episode.identityKey`, unique per podcast. Grammar: `key := 
 |---|---|---|
 | `g` | `guid.trim()`, verbatim, case-sensitive | `g:yt:video:3iRUwVzRDZQ`, `g:https://example.com/?p=123` |
 | `u` | `UrlNormalizer.forIdentity(primaryEnclosureUrl)` | `u:` + normalised URL |
-| `t` | lowercase hex SHA-1 of `title.trim().lowercase(Locale.ROOT)`, then `"\|"`, then `pubDate.truncatedTo(DAYS).toString()`, concatenated | `t:3f2a…` (40 hex) |
-| `l` | lowercase hex SHA-1 of `link.trim()` | `l:9c1b…` |
-| `h` | lowercase hex SHA-1 of `title.orEmpty() + description.orEmpty().take(500)` | `h:07de…` |
+| `t` | lowercase hex SHA-1 (over the input's UTF-8 bytes) of `title.trim().lowercase(Locale.ROOT) + "\|" + pubDate.truncatedTo(DAYS).toString()` | `t:3f2a…` (40 hex) |
+| `l` | lowercase hex SHA-1 (over the input's UTF-8 bytes) of `link.trim()` | `l:9c1b…` |
+| `h` | lowercase hex SHA-1 (over the input's UTF-8 bytes) of `esc(title.orEmpty()) + "\u001F"` + the description head — `description.orEmpty()` truncated to 500 UTF-16 code units, extended by one when the cut would split a surrogate pair — where `esc` doubles `\` and writes U+001F as the six ASCII characters `\u001F` (backslash, `u`, `0`, `0`, `1`, `F`), so title content cannot forge the boundary | `h:07de…` (40 hex) |
 
 YouTube episodes always take the `g` branch (`guid = yt:video:{videoId}`). A GUID repeated inside one document falls back to `u` for the second occurrence (03).
 
+The `h` and `t` concatenations are unambiguous by construction: `esc` output never contains a raw U+001F (so the first separator in the `h` input is authoritative), and an ISO-8601 date never contains `|` (so the last `|` in the `t` input is authoritative). Any change to `esc` must preserve the first property. None of the hashed inputs are surrogate-sanitised in their interior: an unpaired surrogate in the title, the description head or the link reaches the UTF-8 encoder of `String.getBytes(StandardCharsets.UTF_8)` (Kotlin's `String.toByteArray(UTF_8)` delegates to it), whose specified REPLACE behaviour substitutes `?` (U+003F) on every supported runtime — desktop and server are JVM, and Android/ART honours the same `String.getBytes` contract, so the pin holds today; a future non-JVM target must replace each unpaired surrogate with `?` (U+003F) before encoding, because any other choice — Kotlin/JS and Kotlin/Native `encodeToByteArray` substitute U+FFFD — would silently produce different v1 keys. (The head's *cut* is surrogate-aware — it never splits a pair at the 500-unit boundary — but a lone surrogate inside the head, including an unpaired one at the description's end, still encodes as `?`.)
+
 ### Key versions
 
-- `EpisodeKeys.VERSION = 1`. Backups write `kv` per episode line ([D33](../PLAN.md#3-key-decisions)); in the DB the version is self-describing through the optional numeric prefix, so no column and no metadata table is needed.
+- `EpisodeKeys.VERSION = 1`. Backups write `kv` per episode line ([D33](../PLAN.md#3-key-decisions)); in the DB the version is self-describing through the optional numeric prefix, so no column and no metadata table is needed. v1 is the table above verbatim: no earlier `h` recipe (without the separator/`esc` framing) ever shipped. A stored `h:<hex>` key cannot reveal which recipe produced it, so this was verified over shipped code, not key bytes: git history contains no release tag or commit that computed `h` keys the old way (the tag list is empty), and every `h` key in the fixture tree recomputes only under the recipe above — so no migration exists or is needed.
 - Mixed versions in one database are legal. The database is **never bulk re-keyed by a Room migration** (`:core:database` cannot call `:feeds`). Instead:
   1. 03's diff matches each parsed item against the stored keys using `EpisodeKeys.candidates(item)` — the current-version key first, then the keys of every older supported version — before falling back to enclosure and title+day matching. A match on an older-version key rewrites the row's key to the current version in place.
   2. Rows that never reappear in the feed keep their old key; that is harmless because restore matching (05) computes `EpisodeKeys.keyFor(localEpisode, kv)` for the backup line's `kv`.
