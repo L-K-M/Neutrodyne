@@ -99,5 +99,8 @@ class DurationsTest {
         // Absurd magnitudes are rejected by the per-part cap before any multiplication — never wrapped.
         assertNull(Durations.parseMs("9223372036854775807"))
         assertNull(Durations.parseMs("999999999999999999999999"))
+        // Same guarantee for colon forms, whose parts get multiplied afterwards.
+        assertNull(Durations.parseMs("9223372036854775807:00"))
+        assertNull(Durations.parseMs("9223372036854775807:00:00"))
     }
 }

@@ -140,15 +140,19 @@ public object FeedDates {
     private val spaceBeforeOffset = Regex("""\s+([+-]\d{2}:?\d{2}|Z)$""")
 
     /** RFC 5322 CFWS: some feeds append a parenthetical zone comment, e.g. "…10:00:00 +0000 (UTC)". */
-    private val trailingZoneComment = Regex("""\s*\([A-Za-z]{2,5}\)$""")
+    private val trailingZoneComment = Regex("""\s*\([A-Za-z]{2,5}(?:[+-]\d{1,2})?\)$""")
 
     /** The numeric-offset tail that makes a preceding parenthetical a zone comment. */
     private val numericZone = Regex("""[+-]\d{2}:?\d{2}""")
 
     private val utcMidnightOffset = UtcOffset.ZERO
 
-    /** Whitespace runs collapse to one ASCII space; `\s` alone misses the space separators of typeset dates. */
-    private val whitespaceRun = Regex("""[\s\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]+""")
+    /**
+     * Whitespace runs collapse to one ASCII space; \s alone misses the space separators of
+     * typeset dates and the invisible characters (ZWSP/ZWNJ/ZWJ, line separators, BOM) that
+     * CMS-generated date strings carry.
+     */
+    private val whitespaceRun = Regex("""[\s\u00A0\u1680\u2000-\u200D\u2028\u2029\u202F\u205F\u3000\uFEFF]+""")
 
     /**
      * Parses a feed date to epoch milliseconds UTC, or null when no form matches (03 Dates).
@@ -171,13 +175,22 @@ public object FeedDates {
 
         // Step 3a: drop a trailing parenthetical zone comment (CFWS) when a real zone still
         // precedes it ("…+0000 (UTC)", "…GMT (UTC)"), so the tokeniser below sees the zone as
-        // the last token. A parens-only tail ("… (EST)") is the zone itself wrapped wrongly,
-        // not a comment: stripping it would silently read the instant as UTC, 5 h off — it
-        // stays and degrades instead. Only letters inside; "(GMT+1)" never matches.
+        // the last token. A parens-only tail whose content is a KNOWN zone ("…12:00 (CET)")
+        // supplies the zone itself: apply it rather than degrade — silently reading UTC was
+        // the 5-h-off risk, and using the named zone fixes it. Any other parens-only tail
+        // ("(verlegt)", "(GMT+1)") stays and degrades.
         trailingZoneComment.find(text)?.let { comment ->
             val head = text.substring(0, comment.range.first)
             val headZone = head.substringAfterLast(' ').lowercase().removeSuffix(".")
-            if (headZone.matches(numericZone) || headZone in namedZones) text = head
+            val innerZone =
+                comment.value
+                    .substringAfter('(')
+                    .substringBefore(')')
+                    .lowercase()
+            when {
+                headZone.matches(numericZone) || headZone in namedZones -> text = head
+                innerZone in namedZones -> text = "$head ${namedZones[innerZone]}"
+            }
         }
 
         // Step 3: replace a trailing named zone with its numeric offset. Runs before tokenising so the

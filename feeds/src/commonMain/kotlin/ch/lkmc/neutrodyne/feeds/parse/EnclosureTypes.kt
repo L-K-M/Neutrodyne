@@ -75,12 +75,14 @@ public object EnclosureTypes {
             return mapped
         }
 
-        // Decode before cutting: some CDNs emit the query percent-encoded (`ep.m4a%3Ft=1`),
-        // and a literal `?`/`#` only delimits after decoding — the rare decoded `?` inside a
-        // real path segment truncates there, which is still the better guess.
-        val path = percentDecode(url).substringBefore('?').substringBefore('#')
-        val extension = path.substringAfterLast('.', "").lowercase()
-        return extensionTypes[extension] ?: mapped
+        // Sniff the raw path first: a decoded `?`/`#` can sit inside a real path segment
+        // (`ep%3Fa.m4a?token=1`), and cutting there would hide `.m4a`. Decoded fallback covers
+        // CDNs that percent-encode the whole query (`ep.m4a%3Ft=1`).
+        fun extOf(u: String): String? {
+            val path = u.substringBefore('?').substringBefore('#')
+            return extensionTypes[path.substringAfterLast('.', "").lowercase()]
+        }
+        return extOf(url) ?: extOf(percentDecode(url)) ?: mapped
     }
 
     /** Percent-decodes for extension sniffing (`%3F` → `?`, `%2E` → `.`); bad escapes pass through. */
@@ -89,9 +91,10 @@ public object EnclosureTypes {
         val sb = StringBuilder(raw.length)
         var i = 0
         while (i < raw.length) {
+            val hexChars = if (raw[i] == '%' && i + 2 < raw.length) raw.substring(i + 1, i + 3) else null
             val hex =
-                if (raw[i] == '%' && i + 2 < raw.length) {
-                    raw.substring(i + 1, i + 3).toIntOrNull(16)
+                if (hexChars != null && hexChars.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
+                    hexChars.toInt(16)
                 } else {
                     null
                 }

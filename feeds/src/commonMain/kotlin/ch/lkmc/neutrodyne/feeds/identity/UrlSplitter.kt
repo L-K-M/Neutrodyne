@@ -109,9 +109,10 @@ internal fun splitLenient(raw: String): UrlParts {
                 val colon = hostPort.indexOf(':')
                 if (colon >= 0) {
                     val candidatePort = hostPort.substring(colon + 1)
-                    if (candidatePort.contains(':')) {
-                        // Not a host:port pair (e.g. a bare IPv6 literal "2001:db8::1") —
-                        // leaving host as "2001" would mint a bogus identity for a malformed URL.
+                    if (candidatePort.contains(':') || candidatePort.any { it !in '0'..'9' }) {
+                        // Not a host:port pair: a bare IPv6 literal ("2001:db8::1") or a
+                        // non-numeric port ("example.com:80abc") — accepting either would mint
+                        // a bogus identity for a malformed URL.
                         host = null
                         port = null
                     } else {

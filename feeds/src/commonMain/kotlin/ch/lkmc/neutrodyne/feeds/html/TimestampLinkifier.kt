@@ -19,7 +19,10 @@ public object TimestampLinkifier {
     private val clock = """(?:(\d{1,2}):([0-5]\d):([0-5]\d)|(\d{1,3}):([0-5]\d))"""
 
     // Each marker must be a whole word: "10:30 ample" linkifies while "10:30 am" does not.
-    private val lookahead = """(?![\d:])(?!\h*(?i:(?:am|pm|uhr|h)\b|a\.m\.?(?!\w)|p\.m\.?(?!\w)))"""
+    // \h is spelled out because Android's regex engine does not implement the Java 8
+    // escape; the class below is exactly what OpenJDK's \h expands to.
+    private val lookahead =
+        """(?![\d:])(?![ \t\u00A0\u1680\u180E\u2000-\u200A\u202F\u205F\u3000]*(?i:(?:am|pm|uhr|h)\b|a\.m\.?(?!\w)|p\.m\.?(?!\w)))"""
     private val timestamp = Regex(lookbehind + clock + lookahead)
 
     private const val MS_PER_SECOND = 1000L

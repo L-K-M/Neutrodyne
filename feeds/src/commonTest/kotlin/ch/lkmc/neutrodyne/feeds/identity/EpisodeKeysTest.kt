@@ -126,7 +126,7 @@ class EpisodeKeysTest {
         // both of these pairs as A + 3×U+001F + B, so the escape needs its own prefix.
         assertNotEquals(
             EpisodeKeys.primary(episode(title = "A\u001F", description = "B")),
-            EpisodeKeys.primary(episode(title = "A", description = "\u001F\u001FB")),
+            EpisodeKeys.primary(episode(title = "A", description = "\u001FB")),
         )
         assertNotEquals(
             EpisodeKeys.primary(episode(title = "A\u001F\u001F", description = "B")),
@@ -141,6 +141,26 @@ class EpisodeKeysTest {
         assertEquals(
             EpisodeKeys.primary(episode(title = "A\u001FB", description = "C")),
             EpisodeKeys.keyFor(KeyInput(title = "A\u001FB", descriptionHead = "C"), 1),
+        )
+    }
+
+    @Test
+    fun unpairedSurrogateHashesAsQuestionMark() {
+        // Pins the v1 byte contract: JVM/ART UTF-8 encoders replace an unpaired surrogate with
+        // '?' (0x3F). Kotlin/JS and Kotlin/Native encodeToByteArray substitute U+FFFD instead —
+        // a future non-JVM target must normalise to '?' before hashing, or the same episode
+        // mints different keys per runtime (02-data-model's cross-target pin).
+        assertEquals(
+            EpisodeKeys.keyFor(KeyInput(title = "A?", descriptionHead = "B"), 1),
+            EpisodeKeys.keyFor(KeyInput(title = "A\uD800", descriptionHead = "B"), 1),
+        )
+        assertEquals(
+            EpisodeKeys.primary(episode(title = "A?", pubDate = 1791030896000L)),
+            EpisodeKeys.primary(episode(title = "A\uD800", pubDate = 1791030896000L)),
+        )
+        assertEquals(
+            EpisodeKeys.primary(episode(link = "https://example.com/a?b")),
+            EpisodeKeys.primary(episode(link = "https://example.com/a\uD800b")),
         )
     }
 

@@ -75,6 +75,13 @@ class EnclosureTypesTest {
         assertEquals("audio/mpeg", EnclosureTypes.effective(null, "https://e.example/A.MP3?token=x"))
         // Some CDNs emit the query percent-encoded; decode-then-cut still finds the extension.
         assertEquals("audio/mp4", EnclosureTypes.effective(null, "https://cdn.example/ep1.m4a%3Ftoken%3Dx"))
+        // A decoded `?` inside a path segment must not hide the real extension: the raw path
+        // is sniffed first, the decoded form only as fallback.
+        assertEquals("audio/mp4", EnclosureTypes.effective(null, "https://cdn.example/ep%3Fa.m4a?token=1"))
+        assertEquals("video/mp4", EnclosureTypes.effective(null, "https://cdn.example/a.mp4%23x"))
+        // Sign-prefixed escapes are not hex: %+2F and %-1 pass through instead of decoding.
+        assertNull(EnclosureTypes.effective(null, "https://cdn.example/ep%+2Fm4a"))
+        assertNull(EnclosureTypes.effective(null, "https://cdn.example/ep%-1m4a"))
         // A percent-encoded dot is still a dot for extension sniffing.
         assertEquals("audio/mpeg", EnclosureTypes.effective(null, "https://cdn.example/file%2Emp3"))
         // A bad escape passes through harmlessly.

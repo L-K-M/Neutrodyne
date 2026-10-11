@@ -53,6 +53,24 @@ class PrivateFeedUrlsTest {
     }
 
     @Test
+    fun clickTrackingParametersStayPublic() {
+        // fbclid/gclid and friends are long and random-looking, but they are appended by the
+        // sharing platform, not the publisher — never feed secrets.
+        assertFalse(
+            PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed.rss?fbclid=IwAR2AbCdEfGhIjKlMnOpQrStUvWx1234"),
+        )
+        assertFalse(
+            PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed.rss?gclid=EAIaIQobChMI1234567890abcdef"),
+        )
+        // A tracking param alongside a real token still flags.
+        assertTrue(
+            PrivateFeedUrls.looksPrivate(
+                "https://feeds.example.com/feed?fbclid=IwAR2AbCdEfGhIjKlMnOpQrStUvWx1234&auth=9f8e7d6c5b4a3210",
+            ),
+        )
+    }
+
+    @Test
     fun pathTokensIncludeUuidsAndBase64Url() {
         // Self-hosted token feeds put a UUID or base64url token in the path; both carry '-'
         // or '_' separators, so the permissive class must apply to path segments too.

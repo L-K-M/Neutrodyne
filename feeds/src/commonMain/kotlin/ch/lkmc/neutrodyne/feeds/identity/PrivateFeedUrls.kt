@@ -37,6 +37,26 @@ public object PrivateFeedUrls {
     /** A long token in a path segment or query value; must contain both a letter and a digit. */
     private val longToken = Regex("""[A-Za-z0-9_-]{20,}""")
 
+    /**
+     * Click-tracking IDs are long and random-looking, but they are public share metadata
+     * appended by the link sharer's platform — never feed secrets.
+     */
+    private val trackingParams =
+        setOf(
+            "fbclid",
+            "gclid",
+            "msclkid",
+            "dclid",
+            "ttclid",
+            "twclid",
+            "igshid",
+            "yclid",
+            "li_fat_id",
+            "mc_eid",
+            "mkt_tok",
+            "_hsenc",
+        )
+
     /** Whether [url] looks like a private (token-carrying) feed URL. */
     public fun looksPrivate(url: String): Boolean {
         val parts = splitLenient(url)
@@ -73,7 +93,10 @@ public object PrivateFeedUrls {
     }
 
     private fun looksLikeTokenQueryValue(query: String): Boolean =
-        query.split('&').map { it.substringAfter('=', "") }.any { value -> tokenIn(value) != null }
+        query.split('&').any { param ->
+            param.substringBefore('=').lowercase() !in trackingParams &&
+                tokenIn(param.substringAfter('=', "")) != null
+        }
 
     /** The long token inside [text] when it contains one with both a letter and a digit. */
     private fun tokenIn(text: String): String? =

@@ -55,13 +55,19 @@ class FeedDatesTest {
         assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 GMT (UTC)"))
         // A comment with a numeric offset keeps the offset, not the comment's meaning.
         assertEquals(1791023696000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 +02:00 (CET)"))
-        // A parens-only tail is a wrongly-wrapped zone, not a comment: stripping it would
-        // silently read the instant as UTC, so it degrades instead of parsing.
-        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 (GMT)"))
-        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 (EST)"))
-        // Non-comment trailing parens stay fatal: "(GMT+1)" does not match letters-only and
-        // must degrade rather than guess arithmetic out of a comment.
-        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 +0000 (GMT+1)"))
+        // A parens-only tail naming a KNOWN zone supplies the zone itself: applying the named
+        // zone is exact, while dropping it would silently read the instant as UTC.
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 (GMT)"))
+        assertEquals(1791048896000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 (EST)")) // -0500
+        assertEquals(1791027296000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 (CET)")) // +0100
+        // A comment with a ±HH suffix after a real zone still strips: the preceding zone is
+        // authoritative. A parens-only "(GMT+1)" is not a known zone and still degrades —
+        // arithmetic is never guessed out of a comment.
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 +0000 (GMT+1)"))
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 12:34:56 GMT (UTC+2)"))
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 (GMT+1)"))
+        // Non-zone trailing parens still degrade.
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 (verlegt)"))
         assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 (foo bar)"))
     }
 
@@ -142,18 +148,13 @@ class FeedDatesTest {
     @Test
     fun isoSpaceBeforeColonlessOffset() {
         // "YYYY-MM-DD HH:MM:SS ±HHMM" needs the space-strip and the colon insertion to compose.
-        assertEquals(
-            FeedDates.parse("2024-06-15T12:00:00+02:00"),
-            FeedDates.parse("2024-06-15 12:00:00 +0200"),
-        )
-        assertEquals(
-            FeedDates.parse("2026-10-03T12:34:56-07:00"),
-            FeedDates.parse("2026-10-03 12:34:56 -0700"),
-        )
-        assertEquals(
-            FeedDates.parse("2026-10-03T12:34:56Z"),
-            FeedDates.parse("2026-10-03 12:34:56 Z"),
-        )
+        // assertNotNull on the expected side: assertEquals(null, null) would pass if both failed.
+        val expected = assertNotNull(FeedDates.parse("2024-06-15T12:00:00+02:00"))
+        assertEquals(expected, FeedDates.parse("2024-06-15 12:00:00 +0200"))
+        val expectedNeg = assertNotNull(FeedDates.parse("2026-10-03T12:34:56-07:00"))
+        assertEquals(expectedNeg, FeedDates.parse("2026-10-03 12:34:56 -0700"))
+        val expectedZ = assertNotNull(FeedDates.parse("2026-10-03T12:34:56Z"))
+        assertEquals(expectedZ, FeedDates.parse("2026-10-03 12:34:56 Z"))
     }
 
     @Test
@@ -225,36 +226,36 @@ class FeedDatesTest {
     fun isoSpaceBeforeOffsetStillParses() {
         // 'T'-separated ISO with a stray space before the offset: the only space is the offset's,
         // so the offset strip must run before the date/time ' '→'T' substitution.
-        assertEquals(
-            FeedDates.parse("2024-10-03T10:00:00+02:00"),
-            FeedDates.parse("2024-10-03T10:00:00 +02:00"),
-        )
-        assertEquals(
-            FeedDates.parse("2024-10-03T10:00:00-05:00"),
-            FeedDates.parse("2024-10-03T10:00:00 -0500"),
-        )
-        assertEquals(
-            FeedDates.parse("2024-10-03T10:00:00Z"),
-            FeedDates.parse("2024-10-03T10:00:00 z"),
-        )
+        val expectedPos = assertNotNull(FeedDates.parse("2024-10-03T10:00:00+02:00"))
+        val expectedNeg = assertNotNull(FeedDates.parse("2024-10-03T10:00:00-05:00"))
+        val expectedZ = assertNotNull(FeedDates.parse("2024-10-03T10:00:00Z"))
+        assertEquals(expectedPos, FeedDates.parse("2024-10-03T10:00:00 +02:00"))
+        assertEquals(expectedNeg, FeedDates.parse("2024-10-03T10:00:00 -0500"))
+        assertEquals(expectedZ, FeedDates.parse("2024-10-03T10:00:00 z"))
         // Named zones are rewritten to ±HHMM first and hit the same code path.
-        assertEquals(
-            FeedDates.parse("2024-10-03T10:00:00-05:00"),
-            FeedDates.parse("2024-10-03T10:00:00 EST"),
-        )
+        assertEquals(expectedNeg, FeedDates.parse("2024-10-03T10:00:00 EST"))
         // The two-space form keeps working either order.
-        assertEquals(
-            FeedDates.parse("2024-10-03T10:00:00+02:00"),
-            FeedDates.parse("2024-10-03 10:00:00 +0200"),
-        )
+        assertEquals(expectedPos, FeedDates.parse("2024-10-03 10:00:00 +0200"))
     }
 
     @Test
     fun unicodeSpaceSeparatorsParse() {
         // The "typeset" commitment covers the whole Unicode space-separator class, not only
         // NBSP/narrow NBSP: thin space U+2009 and ideographic space U+3000 show up in feeds.
-        val expected = FeedDates.parse("3 Oct 2024 10:00 GMT")
+        val expected = assertNotNull(FeedDates.parse("3 Oct 2024 10:00 GMT"))
         assertEquals(expected, FeedDates.parse("3 Oct\u20092024\u200910:00 GMT"))
         assertEquals(expected, FeedDates.parse("3\u3000Oct\u30002024 10:00 GMT"))
+    }
+
+    @Test
+    fun invisibleCharactersParse() {
+        // ZWSP/ZWNJ/ZWJ, line/paragraph separators and a BOM inside CMS-generated dates all
+        // collapse as whitespace rather than breaking the weekday strip or the anchors.
+        val expectedIso = assertNotNull(FeedDates.parse("2024-10-01T12:00:00Z"))
+        assertEquals(expectedIso, FeedDates.parse("2024-10-01T12:00:00Z\u200B"))
+        assertEquals(expectedIso, FeedDates.parse("\uFEFF2024-10-01T12:00:00Z"))
+        assertEquals(expectedIso, FeedDates.parse("2024-10-01T12:00:00\u200DZ"))
+        val expectedRfc = assertNotNull(FeedDates.parse("Tue, 1 Oct 2024 12:00:00 +0000"))
+        assertEquals(expectedRfc, FeedDates.parse("Tue,\u20281 Oct 2024 12:00:00 +0000"))
     }
 }

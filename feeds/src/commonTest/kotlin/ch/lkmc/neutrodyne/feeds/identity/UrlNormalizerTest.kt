@@ -7,7 +7,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlin.time.Duration.Companion.seconds
 import kotlin.time.measureTime
 
 /**
@@ -123,22 +122,24 @@ class UrlNormalizerTest {
         // Each timed pass runs ten normalizations: a single pass can sit near the timer
         // resolution floor once JIT-warmed, making `small * QUADRATIC_SLACK` ≈ 0 and false-failing
         // a linear implementation. Same factor on both sides keeps the expected ~4× ratio.
-        val small =
-            (1..3).minOf {
-                measureTime {
-                    repeat(10) { assertEquals("example.com/x", UrlNormalizer.forIdentity(smallDoc)) }
-                }
+        // Interleave the rounds so machine-load drift hits both sizes equally: a load burst
+        // spanning only the large phase would otherwise inflate every large sample at once.
+        // The ratio check is self-relative, so it holds on a cold runner and a fast one alike —
+        // no absolute wall-clock budget (those flake under shared CI CPU contention).
+        val rounds =
+            List(3) {
+                val s =
+                    measureTime {
+                        repeat(10) { assertEquals("example.com/x", UrlNormalizer.forIdentity(smallDoc)) }
+                    }
+                val l =
+                    measureTime {
+                        repeat(10) { assertEquals("example.com/x", UrlNormalizer.forIdentity(largeDoc)) }
+                    }
+                s to l
             }
-        val large =
-            (1..3).minOf {
-                measureTime {
-                    repeat(10) { assertEquals("example.com/x", UrlNormalizer.forIdentity(largeDoc)) }
-                }
-            }
-        assertTrue(
-            large < BUDGET,
-            "dot segments took $large for ${DOT_SMALL * 4} segments (budget $BUDGET)",
-        )
+        val small = rounds.minOf { it.first }
+        val large = rounds.minOf { it.second }
         assertTrue(
             large < small * QUADRATIC_SLACK,
             "dot segments took $small for $DOT_SMALL, $large for 4x — quadratic would be ~16x",
@@ -244,6 +245,9 @@ class UrlNormalizerTest {
         assertNull(UrlNormalizer.forIdentity("http://[1::2::3]/f")) // two `::`
         assertNull(UrlNormalizer.forIdentity("http://[12345::]/f")) // group over 4 hex digits
         assertNull(UrlNormalizer.forIdentity("http://[::ffff:256.1.1.1]/f")) // octet > 255
+        // Deliberately stricter than the host-level grammar (which accepts octal
+        // `0177.0.0.1`): WHATWG reuses one number parser here and accepts `01.2.3.4`, but the
+        // embedded IPv4 tail stays plain decimal by design — a safe reject.
         assertNull(UrlNormalizer.forIdentity("http://[::ffff:01.2.3.4]/f")) // leading zero octet
         assertNull(UrlNormalizer.forIdentity("http://[1.2.3.4::]/f")) // IPv4 must be the tail
         assertNull(UrlNormalizer.forIdentity("http://[fe80::1%]/f")) // empty zone
@@ -310,6 +314,16 @@ class UrlNormalizerTest {
         assertNull(UrlNormalizer.forIdentity("http://a.1/x")) // "a" is not a number
         assertNull(UrlNormalizer.forIdentity("http://08.1.1.1/x")) // leading 0 → octal, 8 invalid
         assertNull(UrlNormalizer.forIdentity("http://0x/x")) // bare 0x, no digits
+        // toLongOrNull would accept a sign; WHATWG's grammar does not — signed parts must
+        // never canonicalise onto a real host's identity.
+        assertNull(UrlNormalizer.forIdentity("http://0x-1.0x1/x"))
+        assertNull(UrlNormalizer.forIdentity("http://0x+1.1/x"))
+        assertNull(UrlNormalizer.forIdentity("http://+1.2/x"))
+        // A `0x`-prefixed tail is numeric-committed even without valid hex: WHATWG's
+        // ends-in-a-number test is prefix-only, so these fail the IPv4 parse and are
+        // unfetchable (OkHttp agrees) — not valid LDH names.
+        assertNull(UrlNormalizer.forIdentity("http://api.0xtra/x"))
+        assertNull(UrlNormalizer.forIdentity("http://www.0x/x"))
         // A real DNS name keeps the IDNA path.
         assertEquals("example.com/x", UrlNormalizer.forIdentity("http://example.com/x"))
     }
@@ -324,6 +338,10 @@ class UrlNormalizerTest {
         assertNull(splitLenient("http://2001:db8::1/feed").host)
         assertNull(splitLenient("http://2001:db8::1/feed").port)
         assertNull(UrlNormalizer.forIdentity("http://2001:db8::1/feed"))
+        // A non-numeric residue after the first colon is not a port either.
+        assertNull(splitLenient("http://example.com:80abc/feed").host)
+        assertNull(splitLenient("http://example.com:80abc/feed").port)
+        assertNull(UrlNormalizer.forIdentity("http://example.com:80abc/feed"))
         // Legitimate port forms still split.
         assertEquals("example.com" to "8080", splitLenient("http://example.com:8080/feed").let { it.host to it.port })
         assertEquals("host" to null, splitLenient("http://host:/p").let { it.host to it.port })
@@ -546,6 +564,5 @@ class UrlNormalizerTest {
         // quadratic pass costs: headroom covers a linear impl slowed by the cache cliff
         // between an L2-resident small doc and the 480 KB large one on a shared runner.
         const val QUADRATIC_SLACK = 12
-        val BUDGET = 3.seconds
     }
 }

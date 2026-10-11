@@ -219,6 +219,8 @@ public object UrlNormalizer {
                 part.length > 1 && part.startsWith('0') -> 8 to part.substring(1)
                 else -> 10 to part
             }
+        // toLongOrNull accepts a leading sign; WHATWG's grammar does not.
+        if (digits.isEmpty() || digits.any { it.digitToIntOrNull(radix) == null }) return null
         return digits.toLongOrNull(radix)
     }
 
@@ -477,7 +479,11 @@ public object UrlNormalizer {
         return out.toString()
     }
 
-    /** Decodes every valid `%XX` escape; invalid escapes stay literal. `+` is NOT a space here. */
+    /**
+     * Decodes every valid `%XX` escape; invalid escapes stay literal. `+` is NOT a space here.
+     * A valid escape of invalid UTF-8 (e.g. `%FF`) also stays literal rather than silently
+     * mangling the stored credential to U+FFFD.
+     */
     private fun percentDecode(text: String): String {
         if (!text.contains('%')) return text
         val bytes = ArrayList<Byte>(text.length)
@@ -501,6 +507,7 @@ public object UrlNormalizer {
                 i = next
             }
         }
-        return bytes.toByteArray().decodeToString()
+        val decoded = bytes.toByteArray()
+        return runCatching { decoded.decodeToString(throwOnInvalidSequence = true) }.getOrDefault(text)
     }
 }
