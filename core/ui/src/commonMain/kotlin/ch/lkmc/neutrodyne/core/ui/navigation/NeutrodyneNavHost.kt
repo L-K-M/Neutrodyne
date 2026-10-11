@@ -9,6 +9,8 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
+import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveComponentOverrideApi
+import androidx.compose.material3.adaptive.layout.LocalAnimatedPaneOverride
 import androidx.compose.material3.adaptive.layout.PaneScaffoldDirective
 import androidx.compose.material3.adaptive.navigation3.ListDetailSceneStrategy
 import androidx.compose.material3.adaptive.navigation3.rememberListDetailSceneStrategy
@@ -44,7 +46,7 @@ import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
  * run in doc order: sheet and dialog overlays first, then [ListDetailSceneStrategy] (with 08's
  * `ndPaneLayout` partitions baked into [directive]), then Nav3's single-pane default.
  */
-@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+@OptIn(ExperimentalMaterial3AdaptiveApi::class, ExperimentalMaterial3AdaptiveComponentOverrideApi::class)
 @Composable
 public fun NeutrodyneNavHost(
     state: NavigationState,
@@ -77,40 +79,86 @@ public fun NeutrodyneNavHost(
 
     val entries = state.visibleTabs().flatMap { decoratedByTab.getValue(it) }
 
+    // The pane animator mirrors the decorated list: (tab, contentKey) entries for preview and
+    // boundary lookups, and (tab, role) stacks for pop/preview targets — pure projections, never
+    // membership. The transport wrapper lets a pane callsite publish the key it emits.
+    val paneSwap = remember { NdPaneSwapHost() }
+    paneSwap.enabled = directive.maxHorizontalPartitions >= 2
+    paneSwap.navigation = state
+    paneSwap.entries =
+        remember(entries) {
+            entries.mapNotNull { entry ->
+                val tab = entry.metadata[NdSceneMetadata.KEY_TAB] as? TopLevelKey
+                if (tab == null) null else ((tab to entry.contentKey) to entry)
+            }.toMap()
+        }
+    paneSwap.roleEntries =
+        remember(entries) {
+            entries.mapNotNull { entry ->
+                val tab = entry.metadata[NdSceneMetadata.KEY_TAB] as? TopLevelKey
+                val role = entry.metadata[NdSceneMetadata.KEY_PANE] as? String
+                if (tab == null || role == null) {
+                    null
+                } else {
+                    ((tab to role) to entry)
+                }
+            }.groupBy({ it.first }, { it.second })
+        }
+    paneSwap.tabTops =
+        remember(entries) {
+            entries.mapNotNull { entry ->
+                val tab = entry.metadata[NdSceneMetadata.KEY_TAB] as? TopLevelKey
+                if (tab == null) null else (tab to entry.contentKey)
+            }.toMap()
+        }
+    val displayedEntries =
+        entries.map { entry ->
+            NavEntry(navEntry = entry) { PaneSwapTransportContent(entry) }
+        }
+
     // The scene transitions share the pane-swap spec so reduced motion snaps both (see 08).
     val motionSpec = NeutrodyneMotion.effects<IntOffset>()
 
     SharedTransitionLayout {
-        NavDisplay(
-            entries = entries,
-            modifier = modifier,
-            onBack = { state.pop() },
-            sceneStrategies =
-                listOf(
-                    rememberNdBottomSheetSceneStrategy(),
-                    rememberNdDialogSceneStrategy(),
-                    rememberListDetailSceneStrategy(directive = directive),
-                ),
-            transitionSpec = {
-                transformFor(classifyTransition(initialState, targetState), motionSpec) {
-                    defaultTransitionSpec<NavKey>().invoke(this)
-                }
-            },
-            popTransitionSpec = {
-                transformFor(
-                    classifyPopTransition(initialState, targetState, state.lastChangeWasPop),
-                    motionSpec,
-                ) {
-                    defaultPopTransitionSpec<NavKey>().invoke(this)
-                }
-            },
-            predictivePopTransitionSpec = { swipeEdge ->
-                transformFor(classifyPredictivePopTransition(initialState, targetState), motionSpec) {
-                    defaultPredictivePopTransitionSpec<NavKey>().invoke(this, swipeEdge)
-                }
-            },
-            sharedTransitionScope = this,
-        )
+        CompositionLocalProvider(
+            LocalNdPaneSwap provides paneSwap,
+            LocalAnimatedPaneOverride provides NdPaneSwapOverride,
+        ) {
+            PaneSwapBackHandler(state, paneSwap)
+            NavDisplay(
+                entries = displayedEntries,
+                modifier = modifier,
+                onBack = { state.pop() },
+                sceneStrategies =
+                    listOf(
+                        rememberNdBottomSheetSceneStrategy(),
+                        rememberNdDialogSceneStrategy(),
+                        rememberListDetailSceneStrategy(directive = directive),
+                    ),
+                transitionSpec = {
+                    transformFor(classifyTransition(initialState, targetState), motionSpec) {
+                        defaultTransitionSpec<NavKey>().invoke(this)
+                    }
+                },
+                popTransitionSpec = {
+                    transformFor(
+                        classifyPopTransition(initialState, targetState, state.lastChangeWasPop),
+                        motionSpec,
+                    ) {
+                        defaultPopTransitionSpec<NavKey>().invoke(this)
+                    }
+                },
+                predictivePopTransitionSpec = { swipeEdge ->
+                    transformFor(
+                        classifyPredictivePopTransition(initialState, targetState),
+                        motionSpec,
+                    ) {
+                        defaultPredictivePopTransitionSpec<NavKey>().invoke(this, swipeEdge)
+                    }
+                },
+                sharedTransitionScope = this,
+            )
+        }
     }
 }
 
@@ -278,7 +326,9 @@ private fun withPaneRole(
         key = key,
         contentKey = entry.contentKey,
         metadata =
-            entry.metadata - NdSceneMetadata.KEY_PANE - NdSceneMetadata.KEY_DETAIL_PLACEHOLDER +
+            // KEY_PANE stays: the pane-swap transport reads the role back from the decorated
+            // entry (PaneSwapHost).
+            entry.metadata - NdSceneMetadata.KEY_DETAIL_PLACEHOLDER +
                 pane + mapOf(NdSceneMetadata.KEY_TAB to tab),
         content = { entry.Content() },
     )
