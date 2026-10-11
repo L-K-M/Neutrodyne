@@ -93,6 +93,26 @@ public object FeedDates {
             "eest" to "+0300",
             // British Summer Time; the rarer Bangladesh use (+0600) loses on frequency.
             "bst" to "+0100",
+            // Asian, African, Pacific and Alaskan names (IANA offsets; "ist" stays out: India
+            // and Israel disagree, so it degrades rather than guesses).
+            "msk" to "+0300",
+            "jst" to "+0900",
+            "kst" to "+0900",
+            "hkt" to "+0800",
+            "sgt" to "+0800",
+            "awst" to "+0800",
+            "acst" to "+0930",
+            "acdt" to "+1030",
+            "aest" to "+1000",
+            "aedt" to "+1100",
+            "nzst" to "+1200",
+            "nzdt" to "+1300",
+            "akst" to "-0900",
+            "akdt" to "-0800",
+            "hst" to "-1000",
+            "wat" to "+0100",
+            "cat" to "+0200",
+            "eat" to "+0300",
         )
 
     private val englishMonths: Map<String, Int> =
@@ -101,12 +121,13 @@ public object FeedDates {
             .toMap()
 
     /**
-     * `d MMM yyyy|yy H:mm[:ss[.fff]] [±HHMM|±HH:MM]`, case-insensitive; the leading weekday is dropped
+     * `d[.] MMM yyyy|yy H:mm[:ss[.fff]] [±HHMM|±HH:MM]`, case-insensitive; the leading weekday is dropped
      * first and localised months and named zones are normalised (03 Dates steps 1–4). A trailing dot on
-     * abbreviated months ("janv.", "oct.") is optional.
+     * abbreviated months ("janv.", "oct.") is optional, and so is the ordinal dot on the day
+     * ("3. Okt. 2024" — the German/Swiss/Austrian convention).
      */
     private val datePart =
-        """^(\d{1,2})\s+([A-Za-zÀ-ſ]+)\.?\s+(\d{2}|\d{4})\s+(\d{1,2}):(\d{1,2})""" +
+        """^(\d{1,2})\.?\s+([A-Za-zÀ-ſ]+)\.?\s+(\d{2}|\d{4})\s+(\d{1,2}):(\d{1,2})""" +
             """(?::(\d{1,2})(?:[.,](\d{1,9}))?)?"""
     private val zonePart = """(?:\s*([+-]\d{2}:?\d{2}))?$"""
     private val rfc822 = Regex(datePart + zonePart)

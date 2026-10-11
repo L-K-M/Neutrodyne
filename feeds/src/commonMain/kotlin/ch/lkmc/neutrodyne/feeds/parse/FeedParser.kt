@@ -12,7 +12,9 @@ public interface FeedParser {
     /**
      * Parses the document [open] yields. [open] is invoked exactly once per [parse] call and must
      * return a fresh, readable source; the parser consumes and closes it, and any re-parse runs
-     * over the buffered bytes rather than calling [open] again. A throw from [open] or the
+     * over the buffered bytes rather than calling [open] again. (No current consumer invokes
+     * [open] twice — re-openability is a caller-side convenience contract, kept so a caller may
+     * still hand in a re-readable source unchanged.) A throw from [open] or the
      * buffering read (an I/O failure, not malformed input) propagates to the caller rather
      * than becoming [ParseResult.Failed]; [ParseFailure] deliberately has no reason for it.
      * [httpCharset] is the HTTP
@@ -53,6 +55,10 @@ public enum class ParseFailure {
     NOT_A_FEED,
     HOSTILE,
     MALFORMED,
+
+    /** `ParseLimits.maxDocumentBytes` exceeded — an oversized but not malformed document, so
+     * callers (metrics, retries) can tell a temporary size problem from a broken feed. */
+    TOO_LARGE,
     TOO_DEEP,
 }
 

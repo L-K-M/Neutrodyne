@@ -19,7 +19,7 @@ public object TimestampLinkifier {
     private val clock = """(?:(\d{1,2}):([0-5]\d):([0-5]\d)|(\d{1,3}):([0-5]\d))"""
 
     // Each marker must be a whole word: "10:30 ample" linkifies while "10:30 am" does not.
-    private val lookahead = """(?![\d:])(?!\h*(?i:(?:am|pm|uhr|h)\b|a\.m\.(?!\w)|p\.m\.(?!\w)))"""
+    private val lookahead = """(?![\d:])(?!\h*(?i:(?:am|pm|uhr|h)\b|a\.m\.?(?!\w)|p\.m\.?(?!\w)))"""
     private val timestamp = Regex(lookbehind + clock + lookahead)
 
     private const val MS_PER_SECOND = 1000L
@@ -42,7 +42,7 @@ public object TimestampLinkifier {
             if (match.range.first > cursor) {
                 spans.add(NoteSpan.Text(text.substring(cursor, match.range.first), style))
             }
-            spans.add(NoteSpan.Timestamp(match.value, positionMs(match)))
+            spans.add(NoteSpan.Timestamp(match.value, positionMs(match), style))
             cursor = match.range.last + 1
         }
         if (cursor < text.length) {

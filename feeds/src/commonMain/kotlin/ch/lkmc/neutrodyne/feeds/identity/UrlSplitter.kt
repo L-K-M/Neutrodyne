@@ -92,12 +92,15 @@ internal fun splitLenient(raw: String): UrlParts {
             if (hostPort.startsWith("[")) {
                 val close = hostPort.indexOf(']')
                 if (close > 0) {
-                    // After `]` only `:port` may follow; other residue is invalid (the JDK's `URI`
-                    // rejects it) and must not silently drop into the parts.
+                    // After `]` only `:digits` may follow; other residue is invalid (the JDK's
+                    // `URI` rejects it) and must not silently drop into the parts.
                     val afterBracket = hostPort.substring(close + 1)
-                    val validPortFollows = afterBracket.isEmpty() || afterBracket.startsWith(':')
+                    val candidatePort = afterBracket.substringAfter(':')
+                    val validPortFollows =
+                        afterBracket.isEmpty() ||
+                            (afterBracket.startsWith(':') && candidatePort.all { it in '0'..'9' })
                     host = if (validPortFollows) hostPort.substring(0, close + 1) else null
-                    port = if (validPortFollows) afterBracket.substringAfter(':').takeIf { it.isNotEmpty() } else null
+                    port = if (validPortFollows) candidatePort.takeIf { it.isNotEmpty() } else null
                 } else {
                     host = null
                     port = null
@@ -105,8 +108,16 @@ internal fun splitLenient(raw: String): UrlParts {
             } else {
                 val colon = hostPort.indexOf(':')
                 if (colon >= 0) {
-                    host = hostPort.substring(0, colon)
-                    port = hostPort.substring(colon + 1).takeIf { it.isNotEmpty() }
+                    val candidatePort = hostPort.substring(colon + 1)
+                    if (candidatePort.contains(':')) {
+                        // Not a host:port pair (e.g. a bare IPv6 literal "2001:db8::1") —
+                        // leaving host as "2001" would mint a bogus identity for a malformed URL.
+                        host = null
+                        port = null
+                    } else {
+                        host = hostPort.substring(0, colon)
+                        port = candidatePort.takeIf { it.isNotEmpty() }
+                    }
                 } else {
                     host = hostPort
                     port = null

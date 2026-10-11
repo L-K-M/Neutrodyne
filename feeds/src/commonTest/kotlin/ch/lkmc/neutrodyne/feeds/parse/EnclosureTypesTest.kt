@@ -73,6 +73,12 @@ class EnclosureTypesTest {
     @Test
     fun extensionCaseInsensitiveAndQueryStripped() {
         assertEquals("audio/mpeg", EnclosureTypes.effective(null, "https://e.example/A.MP3?token=x"))
+        // Some CDNs emit the query percent-encoded; decode-then-cut still finds the extension.
+        assertEquals("audio/mp4", EnclosureTypes.effective(null, "https://cdn.example/ep1.m4a%3Ftoken%3Dx"))
+        // A percent-encoded dot is still a dot for extension sniffing.
+        assertEquals("audio/mpeg", EnclosureTypes.effective(null, "https://cdn.example/file%2Emp3"))
+        // A bad escape passes through harmlessly.
+        assertNull(EnclosureTypes.effective(null, "https://cdn.example/file%zzmp3"))
     }
 
     @Test

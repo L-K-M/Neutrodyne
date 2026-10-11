@@ -117,6 +117,13 @@ public object UrlNormalizer {
 
         val decoded = percentDecode(raw)
         if (decoded.isEmpty()) return null
+        if (hasNumericTail(decoded)) {
+            // A numeric last label commits the host to IPv4 (WHATWG): "127.1", "0x7f.1",
+            // "2130706433" and "0177.0.0.1" all resolve to 127.0.0.1 on the fetch client, so
+            // identity must share that canonical form — and a numeric tail that fails the
+            // IPv4 grammar is an invalid host, never a domain name.
+            return parseIpv4NumberHost(decoded)
+        }
         val ascii = decoded.lowercase().idnaToAsciiOrNull() ?: return null
         // toASCII runs without UseSTD3ASCIIRules, so characters like '/' and '$' pass through
         // and "." strips to empty: either would collide or forge identities. LDH, dots and
@@ -131,8 +138,9 @@ public object UrlNormalizer {
      * would let `:::`, empty literals and `v`-futures through unfetchable. The RFC 6874 zone id is
      * kept verbatim (case included) behind a canonical `%25` marker; the address is emitted
      * lowercase with the longest leftmost zero run of ≥2 groups as `::` and an embedded IPv4 tail
-     * as two hex groups, like the URL spec's IPv6 serialiser. Pure string work: no DNS or
-     * interface lookup, identical on every target.
+     * as two hex groups — a deliberate divergence from the dotted RFC 5952 §5 / WHATWG form, so
+     * these hosts are not byte-identical to browser/OkHttp canonical forms. Pure string work:
+     * no DNS or interface lookup, identical on every target.
      */
     private fun normaliseBracketedHost(raw: String): String? {
         if (!raw.endsWith("]")) return null
@@ -163,6 +171,55 @@ public object UrlNormalizer {
             if (zone != null) append("%25").append(zone)
             append(']')
         }
+    }
+
+    /**
+     * WHATWG's ends-in-a-number test: the last non-empty label is all digits or `0x`-prefixed.
+     * Such a host is an IPv4 address, not a DNS name — see [parseIpv4NumberHost].
+     */
+    private fun hasNumericTail(host: String): Boolean {
+        val tail = host.substringAfterLast('.')
+        if (tail.isEmpty()) {
+            // Trailing dot: the label before it decides.
+            val head = host.substringBeforeLast('.')
+            return head.isNotEmpty() && hasNumericTail(head)
+        }
+        return tail.all { it in '0'..'9' } || (tail.length >= 2 && tail.startsWith("0x", true))
+    }
+
+    /**
+     * Parses a WHATWG IPv4 number host — 1–4 dot-separated decimal, `0x` hex or leading-`0`
+     * octal parts, only the last allowed to exceed 255 — and emits canonical dotted-quad.
+     * Unlike the strict [parseIpv4Tail] used inside IPv6 literals, octal/hex spellings are
+     * legal here. Null when the grammar or a range bound fails.
+     */
+    private fun parseIpv4NumberHost(host: String): String? {
+        var labels = host.split('.')
+        if (labels.size > 1 && labels.last().isEmpty()) labels = labels.dropLast(1)
+        if (labels.isEmpty() || labels.size > 4 || labels.any { it.isEmpty() }) return null
+        val numbers = labels.map { ipv4Number(it) ?: return null }
+        for (i in 0 until numbers.size - 1) if (numbers[i] > 0xFF) return null
+        // The last part fills all remaining octets.
+        if (numbers.last() >= (1L shl (8 * (5 - numbers.size)))) return null
+        var value = numbers.last()
+        for (i in 0 until numbers.size - 1) value += numbers[i] shl (8 * (3 - i))
+        return buildString {
+            for (i in 0..3) {
+                if (i > 0) append('.')
+                append((value shr (8 * (3 - i))) and 0xFF)
+            }
+        }
+    }
+
+    /** One IPv4 part: `0x` hex, leading-`0` octal, else decimal; empty or bad digits → null. */
+    private fun ipv4Number(part: String): Long? {
+        val (radix, digits) =
+            when {
+                part.length > 2 && part.startsWith("0x", true) -> 16 to part.substring(2)
+                part.length > 1 && part.startsWith('0') -> 8 to part.substring(1)
+                else -> 10 to part
+            }
+        return digits.toLongOrNull(radix)
     }
 
     /** Parses an IPv6 address into its eight 16-bit groups, or null when the grammar is violated. */

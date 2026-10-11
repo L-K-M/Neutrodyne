@@ -66,6 +66,25 @@ class FeedDatesTest {
     }
 
     @Test
+    fun ordinalDayDotAndWideZones() {
+        // German/Swiss/Austrian ordinal dot on the day — same instant as the plain form.
+        assertEquals(1791023696000L, FeedDates.parse("Di., 3. Okt. 2026 12:34:56 +0200"))
+        assertEquals(1790850896000L, FeedDates.parse("Mi, 01. Okt 2026 12:34:56 +0200"))
+        // "1.Oct" (no space after the dot) still fails: the dot is a separator, not a joiner.
+        assertNull(FeedDates.parse("1.Oct 2026 12:34:56 +0200"))
+        // Asian/African/Pacific named zones resolve through the same numeric path.
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 21:34:56 JST"))
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 22:04:56 ACST"))
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 15:34:56 MSK"))
+        assertEquals(1791030896000L, FeedDates.parse("Sun, 04 Oct 2026 01:34:56 NZDT"))
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 02:34:56 HST"))
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 03:34:56 AKST"))
+        assertEquals(1791030896000L, FeedDates.parse("Sat, 03 Oct 2026 15:34:56 EAT"))
+        // "ist" stays unmapped: India (+0530) and Israel (+0200) disagree.
+        assertNull(FeedDates.parse("Sat, 03 Oct 2026 12:34:56 IST"))
+    }
+
+    @Test
     fun localisedMonths() {
         assertEquals(1791030896000L, FeedDates.parse("Sa., 03 Okt 2026 12:34:56 +0000"))
         assertEquals(1791030896000L, FeedDates.parse("sam., 03 oct. 2026 12:34:56 +0000"))

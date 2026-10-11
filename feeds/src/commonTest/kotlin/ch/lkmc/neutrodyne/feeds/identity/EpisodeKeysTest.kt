@@ -47,6 +47,15 @@ class EpisodeKeysTest {
         val key = EpisodeKeys.primary(episode(enclosureUrl = "HTTPS://CDN.Example.com:443/pod/a.mp3?x=1"))
         // The query is part of the enclosure identity, not stripped.
         assertEquals("u:cdn.example.com/pod/a.mp3?x=1", key)
+        // http's default port strips too; non-default ports and path/query case stay verbatim.
+        assertEquals(
+            "u:cdn.example.com/pod/b.mp3?X=1",
+            EpisodeKeys.primary(episode(enclosureUrl = "http://CDN.example.com:80/pod/b.mp3?X=1")),
+        )
+        assertEquals(
+            "u:cdn.example.com:8443/pod/a.mp3",
+            EpisodeKeys.primary(episode(enclosureUrl = "https://cdn.example.com:8443/pod/a.mp3")),
+        )
     }
 
     @Test
@@ -223,6 +232,7 @@ class EpisodeKeysTest {
     @Test
     fun keyForRejectsUnknownVersions() {
         assertFailsWith<IllegalArgumentException> { EpisodeKeys.keyFor(KeyInput(), 2) }
+        assertFailsWith<IllegalArgumentException> { EpisodeKeys.keyFor(KeyInput(), 0) }
     }
 
     @Test
@@ -231,6 +241,10 @@ class EpisodeKeysTest {
         assertEquals(1, EpisodeKeys.versionOf("u:example.com/a"))
         assertEquals(2, EpisodeKeys.versionOf("2g:x"))
         assertEquals(10, EpisodeKeys.versionOf("10u:example.com/a"))
+        // A non-numeric prefix is an absent prefix (version 1), not an error; an explicit "0"
+        // parses as version 0, which keyFor then rejects as unsupported.
+        assertEquals(1, EpisodeKeys.versionOf("xg:x"))
+        assertEquals(0, EpisodeKeys.versionOf("0g:x"))
     }
 
     @Test
@@ -264,6 +278,12 @@ class EpisodeKeysTest {
         assertNotEquals(
             EpisodeContentHash.of(episode().copy(chaptersUrl = "a|b")),
             EpisodeContentHash.of(episode().copy(chaptersUrl = "a", chaptersType = "b")),
+        )
+        // The genuine split ambiguity — both naive joins collapse to the same "a|b|c"
+        // preimage, so only an escaped/unforgeable join keeps these apart.
+        assertNotEquals(
+            EpisodeContentHash.of(episode().copy(chaptersUrl = "a|b", chaptersType = "c")),
+            EpisodeContentHash.of(episode().copy(chaptersUrl = "a", chaptersType = "b|c")),
         )
     }
 

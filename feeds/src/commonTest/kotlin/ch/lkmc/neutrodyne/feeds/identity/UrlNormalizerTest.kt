@@ -280,6 +280,57 @@ class UrlNormalizerTest {
     }
 
     @Test
+    fun numericTailHostsAreWhatwgIpv4() {
+        // WHATWG's ends-in-a-number rule: these all resolve to 127.0.0.1 on the fetch client
+        // (OkHttp parses the same shorthand), so identity must share the canonical dotted form.
+        assertEquals("127.0.0.1/feed", UrlNormalizer.forIdentity("http://127.1/feed"))
+        assertEquals("127.0.0.1/feed", UrlNormalizer.forIdentity("http://0x7f.1/feed"))
+        assertEquals("127.0.0.1/feed", UrlNormalizer.forIdentity("http://0X7F.1/feed"))
+        assertEquals("127.0.0.1/feed", UrlNormalizer.forIdentity("http://2130706433/feed"))
+        assertEquals("127.0.0.1/feed", UrlNormalizer.forIdentity("http://0177.0.0.1/feed"))
+        assertEquals("127.0.0.1/feed", UrlNormalizer.forIdentity("http://127.0.0.1/feed"))
+        // Shorthand and dotted spellings share one identity, like the fetcher.
+        assertEquals(
+            UrlNormalizer.forIdentity("http://127.0.0.1/feed"),
+            UrlNormalizer.forIdentity("http://127.1/feed"),
+        )
+        // Multi-label forms fill the missing octets from the last part.
+        assertEquals("10.0.0.1/x", UrlNormalizer.forIdentity("http://10.1/x"))
+        assertEquals("0.0.0.1/x", UrlNormalizer.forIdentity("http://1./x"))
+        assertEquals("255.255.255.255/x", UrlNormalizer.forIdentity("http://4294967295/x"))
+    }
+
+    @Test
+    fun numericTailHostsThatFailTheIpv4GrammarAreRejected() {
+        // A numeric last label commits the host to IPv4; it is never a DNS name.
+        assertNull(UrlNormalizer.forIdentity("http://256.1.1.1/x")) // non-last part > 255
+        assertNull(UrlNormalizer.forIdentity("http://1.2.3.256/x")) // last part overflows octet
+        assertNull(UrlNormalizer.forIdentity("http://1.2.3.4.5/x")) // too many parts
+        assertNull(UrlNormalizer.forIdentity("http://4294967296/x")) // > 2^32-1
+        assertNull(UrlNormalizer.forIdentity("http://a.1/x")) // "a" is not a number
+        assertNull(UrlNormalizer.forIdentity("http://08.1.1.1/x")) // leading 0 → octal, 8 invalid
+        assertNull(UrlNormalizer.forIdentity("http://0x/x")) // bare 0x, no digits
+        // A real DNS name keeps the IDNA path.
+        assertEquals("example.com/x", UrlNormalizer.forIdentity("http://example.com/x"))
+    }
+
+    @Test
+    fun malformedAuthorityResidueIsRejectedAtSplit() {
+        // `[::1]:80abc` is not a bracketed host with a port — the whole authority is invalid.
+        assertNull(splitLenient("http://[::1]:80abc/feed").host)
+        assertNull(splitLenient("http://[::1]:80abc/feed").port)
+        assertNull(UrlNormalizer.forIdentity("http://[::1]:80abc/feed"))
+        // A bare unbracketed IPv6 literal is not host "2001" + port "db8::1".
+        assertNull(splitLenient("http://2001:db8::1/feed").host)
+        assertNull(splitLenient("http://2001:db8::1/feed").port)
+        assertNull(UrlNormalizer.forIdentity("http://2001:db8::1/feed"))
+        // Legitimate port forms still split.
+        assertEquals("example.com" to "8080", splitLenient("http://example.com:8080/feed").let { it.host to it.port })
+        assertEquals("host" to null, splitLenient("http://host:/p").let { it.host to it.port })
+        assertEquals("[::1]" to "8080", splitLenient("http://[::1]:8080/f").let { it.host to it.port })
+    }
+
+    @Test
     fun outOfRangePortsAreRejected() {
         // Unfetchable URLs get no identity key: ports are 1..65535 (the JDK's `URI` accepts 65536 —
         // the splitter must not). Digit strings beyond Long never reach the range check.
@@ -490,7 +541,11 @@ class UrlNormalizerTest {
 
     private companion object {
         const val DOT_SMALL = 40_000
-        const val QUADRATIC_SLACK = 8
+
+        // Above the expected ~4x for linear work on 4x input, but far below the ~16x a
+        // quadratic pass costs: headroom covers a linear impl slowed by the cache cliff
+        // between an L2-resident small doc and the 480 KB large one on a shared runner.
+        const val QUADRATIC_SLACK = 12
         val BUDGET = 3.seconds
     }
 }

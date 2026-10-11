@@ -264,6 +264,13 @@ public object TitleMatch {
         setOf('\u2010', '\u2011', '\u2012', '\u2013', '\u2014', '\u2015', '\u2212', '\uFE58', '\uFE63', '\uFF0D')
     private val foldedDash = '-'
 
+    // Explicit Unicode White_Space class: `\s` means ASCII whitespace on the JVM but Unicode
+    // whitespace on JS/native, and fallback matching must normalise identically on every
+    // target (NFKC already folds most of these; the un-folded ones — U+0085, U+1680, U+2028,
+    // U+2029, U+205F — are exactly where `\s` would diverge).
+    private val unicodeWhitespaceRun =
+        Regex("[\\u0009-\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]+")
+
     public fun normalise(title: String): String {
         val normalised = title.nfkc()
         val folded = StringBuilder(normalised.length)
@@ -277,7 +284,7 @@ public object TitleMatch {
         return folded
             .toString()
             .lowercase()
-            .replace(Regex("\\s+"), " ")
+            .replace(unicodeWhitespaceRun, " ")
             .trim()
     }
 }

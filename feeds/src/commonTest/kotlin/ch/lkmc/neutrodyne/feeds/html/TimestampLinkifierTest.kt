@@ -32,6 +32,9 @@ class TimestampLinkifierTest {
     fun timesOfDayAreExcluded() {
         assertEquals(emptyList(), timestamps("listen at 10:30 am"))
         assertEquals(emptyList(), timestamps("opens 10:30 a.m."))
+        // The trailing period is often dropped in real show notes.
+        assertEquals(emptyList(), timestamps("opens 10:30 a.m"))
+        assertEquals(emptyList(), timestamps("closes 3:15 p.m"))
         assertEquals(emptyList(), timestamps("meeting 2:45 pm"))
         assertEquals(emptyList(), timestamps("sendezeit 20:15 Uhr"))
         assertEquals(emptyList(), timestamps("runtime 10:30h"))
@@ -111,5 +114,22 @@ class TimestampLinkifierTest {
         assertEquals(emptyList(), timestamps("10:30 am"))
         assertEquals(emptyList(), timestamps("10:30 a.m."))
         assertEquals(emptyList(), timestamps("20:15 Uhr"))
+    }
+
+    @Test
+    fun timestampCarriesTheEnclosingStyle() {
+        // A timestamp inside bold/italic keeps the emphasis (the seek affordance is a style
+        // on top, not a reason to drop the run's bits).
+        val spans = TimestampLinkifier.linkify("bold 12:34 end", style = ShowNotesStyles.BOLD)
+        val stamp = spans.filterIsInstance<NoteSpan.Timestamp>().single()
+        assertEquals(ShowNotesStyles.BOLD, stamp.style)
+        assertEquals(
+            ShowNotesStyles.NONE,
+            TimestampLinkifier
+                .linkify("plain 12:34")
+                .filterIsInstance<NoteSpan.Timestamp>()
+                .single()
+                .style,
+        )
     }
 }

@@ -32,6 +32,9 @@ class PrivateFeedUrlsTest {
         assertFalse(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?monkey=1"))
         // Generic `_`-joined names outside the credential cores stay public too.
         assertFalse(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?user_id=42"))
+        // Bare-host and path-less inputs stay public without tripping the token scan.
+        assertFalse(PrivateFeedUrls.looksPrivate("https://example.com"))
+        assertFalse(PrivateFeedUrls.looksPrivate("https://example.com/"))
     }
 
     @Test

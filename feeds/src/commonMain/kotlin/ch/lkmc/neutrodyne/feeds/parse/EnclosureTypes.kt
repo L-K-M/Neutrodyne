@@ -75,9 +75,35 @@ public object EnclosureTypes {
             return mapped
         }
 
-        val path = url.substringBefore('?').substringBefore('#')
+        // Decode before cutting: some CDNs emit the query percent-encoded (`ep.m4a%3Ft=1`),
+        // and a literal `?`/`#` only delimits after decoding — the rare decoded `?` inside a
+        // real path segment truncates there, which is still the better guess.
+        val path = percentDecode(url).substringBefore('?').substringBefore('#')
         val extension = path.substringAfterLast('.', "").lowercase()
         return extensionTypes[extension] ?: mapped
+    }
+
+    /** Percent-decodes for extension sniffing (`%3F` → `?`, `%2E` → `.`); bad escapes pass through. */
+    private fun percentDecode(raw: String): String {
+        if ('%' !in raw) return raw
+        val sb = StringBuilder(raw.length)
+        var i = 0
+        while (i < raw.length) {
+            val hex =
+                if (raw[i] == '%' && i + 2 < raw.length) {
+                    raw.substring(i + 1, i + 3).toIntOrNull(16)
+                } else {
+                    null
+                }
+            if (hex != null) {
+                sb.append(hex.toChar())
+                i += 3
+            } else {
+                sb.append(raw[i])
+                i++
+            }
+        }
+        return sb.toString()
     }
 
     /** Whether this effective type is video (03 Enclosure types and media acceptance). */
