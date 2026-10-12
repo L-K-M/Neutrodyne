@@ -339,6 +339,24 @@ class SubscribeFlowTest {
         }
 
     @Test
+    fun expiredPreviewRedirectRemovesTheReplacementCacheEntry() =
+        runTest {
+            val previewId = resolvePreview(path = "/old.xml")
+            clock.nowMs += 16 * 60_000L
+            server.enqueue(mockResponse(301, "", "Location" to "/moved.xml"))
+            server.enqueue(mockResponse(body = rssBody(items = arrayOf(rssItem("moved")))))
+
+            val outcome = subscribeBundle.useCase(previewId, emptySet())
+
+            val id = assertIs<Outcome.Success<Long>>(outcome).value
+            assertEquals(feedUrl("/moved.xml"), db.podcastDao().byId(id)!!.feedUrl)
+            assertEquals(3, server.requestCount)
+            assertNull(resolverBundle.cache.get(previewId))
+            assertNull(resolverBundle.cache.get(feedUrl("/moved.xml")))
+            assertEquals(1, db.podcastDao().episodeCount(id))
+        }
+
+    @Test
     fun failedRefetchSurfacesTheFetchError() =
         runTest {
             val previewId = resolvePreview()
