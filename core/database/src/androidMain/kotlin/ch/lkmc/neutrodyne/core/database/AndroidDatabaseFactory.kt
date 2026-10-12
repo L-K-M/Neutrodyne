@@ -55,7 +55,11 @@ class AndroidDatabaseFactory(
                 .sortedByDescending { it.name.toLongOrNull() ?: it.lastModified() }
                 .take(1)
                 .toSet()
-        dirs.filter { it !in keep }.forEach { it.deleteRecursively() }
+        // `deleteRecursively` reports a denied delete only through its Boolean result — check
+        // it: a failed prune propagates as the open's failure (02's finish() contract).
+        dirs.filter { it !in keep }.forEach {
+            if (!it.deleteRecursively()) throw IOException("cannot delete $it")
+        }
     }
 
     // File.delete() reports failure only through its return value — check it: a surviving

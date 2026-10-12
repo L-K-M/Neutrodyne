@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.database
 import androidx.room3.Room
 import androidx.room3.RoomDatabase
 import ch.lkmc.neutrodyne.core.common.AppDirs
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -63,7 +64,11 @@ class DesktopDatabaseFactory(
                     it.fileName.toString().toLongOrNull() ?: Files.getLastModifiedTime(it).toMillis()
                 }.take(1)
                 .toSet()
-        dirsToCheck.filter { it !in keep }.forEach { it.toFile().deleteRecursively() }
+        // `deleteRecursively` reports a denied delete only through its Boolean result — check
+        // it: a failed prune propagates as the open's failure (02's finish() contract).
+        dirsToCheck.filter { it !in keep }.forEach {
+            if (!it.toFile().deleteRecursively()) throw IOException("cannot delete $it")
+        }
     }
 
     // Files.delete throws on a real failure (a lock, a dead filesystem): a surviving marker or

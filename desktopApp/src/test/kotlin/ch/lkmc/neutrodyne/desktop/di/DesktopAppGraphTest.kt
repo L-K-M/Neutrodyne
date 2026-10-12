@@ -5,6 +5,7 @@ import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import ch.lkmc.neutrodyne.core.common.CrashReporter
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
+import ch.lkmc.neutrodyne.core.database.DatabaseOpenInitializer
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
@@ -29,7 +30,8 @@ import org.junit.Test
  * The desktop graph test (01 Testing, Graphs row; 11 DesktopAppGraph): Metro already fails
  * compilation on a missing or duplicate binding, so the runtime part proves the graph is
  * constructible with a temporary `AppDirs` and resolves the shell's shared bindings — including
- * the same M0 key set `AndroidAppGraphTest` checks, through the feature modules' contributions.
+ * the same M0 key set `AndroidAppGraphTest` checks, through the feature modules' contributions —
+ * and M1a's `DatabaseOpener` with its band-100 initializer.
  */
 class DesktopAppGraphTest {
     private val dirs = tempAppDirs().also { it.ensureCreated() }
@@ -55,6 +57,13 @@ class DesktopAppGraphTest {
         assertThat(graph.crashReporter).isSameInstanceAs(reporter)
         assertThat(graph.initializers).isNotNull()
         assertThat(graph.appScope).isNotNull()
+    }
+
+    /** M1a: the graph binds the opener the window's start-up gate maps (01 Splash and start-up gate). */
+    @Test
+    fun theDatabaseOpenerAndItsInitializerAreBound() {
+        assertThat(graph.databaseOpener).isNotNull()
+        assertThat(graph.initializers.filterIsInstance<DatabaseOpenInitializer>()).hasSize(1)
     }
 
     /** The same keys as `app/src/test/.../AndroidAppGraphTest` (01 Graph tests rule 11). */

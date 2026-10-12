@@ -10,7 +10,9 @@ public interface ShowNotesSanitizer {
     /**
      * Sanitises [raw] into a [ShowNotesDocument] at display time. [isHtml] is false for plain-text
      * descriptions (Atom `type=text`, YouTube); [baseUri] (episode `link`, else the feed URL) makes
-     * relative `href`/`src` absolute; unresolvable ones are dropped.
+     * relative `href`/`src` absolute; unresolvable ones are dropped. Only `http`/`https` URLs
+     * survive (plus `mailto` on links) — `javascript`, `data`, `intent`, `file` and every other
+     * scheme are dropped before they can reach the renderer's tap handler (03 Clean).
      */
     public fun toDocument(
         raw: String,

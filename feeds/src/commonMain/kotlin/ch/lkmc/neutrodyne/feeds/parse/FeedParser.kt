@@ -10,14 +10,23 @@ import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
  */
 public interface FeedParser {
     /**
-     * Parses the document [open] yields. [httpCharset] is the HTTP `Content-Type` charset, consulted only
-     * by the re-parse heuristic (an `ISO-8859-1` header on a UTF-8 body must not win the first pass).
-     * [baseUrl] resolves relative URLs; `xml:base` in the document wins when present.
+     * Parses the document [open] yields. [open] is invoked exactly once per [parse] call and must
+     * return a fresh, readable source; the parser consumes and closes it, and any re-parse runs
+     * over the buffered bytes rather than calling [open] again. (No current consumer invokes
+     * [open] twice — re-openability is a caller-side convenience contract, kept so a caller may
+     * still hand in a re-readable source unchanged.) A throw from [open] or the
+     * buffering read (an I/O failure, not malformed input) propagates to the caller rather
+     * than becoming [ParseResult.Failed]; [ParseFailure] deliberately has no reason for it.
+     * [httpCharset] is the HTTP
+     * `Content-Type` charset, consulted only by the re-parse heuristic (an `ISO-8859-1` header on
+     * a UTF-8 body must not win the first pass). [baseUrl] resolves relative URLs; `xml:base` in
+     * the document wins when present.
      */
     public fun parse(
         open: () -> okio.Source,
         httpCharset: String?,
         baseUrl: String,
+        limits: ParseLimits = ParseLimits(),
     ): ParseResult
 
     public companion object {
@@ -47,12 +56,17 @@ public enum class ParseFailure {
     NOT_A_FEED,
     HOSTILE,
     MALFORMED,
+
+    /** `ParseLimits.maxDocumentBytes` exceeded — an oversized but not malformed document, so
+     * callers (metrics, retries) can tell a temporary size problem from a broken feed. */
+    TOO_LARGE,
     TOO_DEEP,
 }
 
 /**
- * Protective limits (03 Limits and version policy). The fetch-side body cap (32 MB) is not the parser's;
- * these bound what a single document may cost to read.
+ * Protective limits (03 Limits and version policy). These bound what a single document may cost
+ * to read; `maxDocumentBytes` also bounds the buffer [FeedParser.parse] fills before decoding,
+ * so the same cap the fetch pipeline applies on the wire holds for every other caller too.
  */
 public data class ParseLimits(
     val maxDepth: Int = 64,
@@ -60,7 +74,8 @@ public data class ParseLimits(
     val maxTextChars: Int = 512 * 1024,
     val maxUrlChars: Int = 4_096,
     val maxTagAttributes: Int = 1_000,
+    /** Bounds only the declaration sniff/decode step — the `<!ENTITY` scan covers the whole prolog. */
     val prologScanBytes: Int = 64 * 1024,
-    /** Document bytes the buffered read accepts; over this the parse fails `HOSTILE` (fetch cap parity). */
-    val maxDocumentBytes: Int = 32 * 1024 * 1024,
+    /** Whole-document bound, counted while `parse` buffers the source; matches the fetch body cap. */
+    val maxDocumentBytes: Long = 32L * 1024 * 1024,
 )

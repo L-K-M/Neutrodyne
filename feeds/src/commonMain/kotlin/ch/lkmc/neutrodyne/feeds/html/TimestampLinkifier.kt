@@ -8,16 +8,25 @@ import ch.lkmc.neutrodyne.feeds.html.ShowNotesStyles.NONE
  * to text outside links while the sanitiser walks the DOM; the renderer shows spans beyond a known
  * episode duration as plain text.
  *
- * Grammar (03): a negative lookbehind for digit/colon/dot, then `H:MM:SS` or `M:SS` (minutes up to
- * 999, long episodes often write "75:12"; seconds must be two digits, so ratios such as "16:9" never
- * match), then a lookahead pair excluding a following digit/colon and times of day ("10:30 am",
+ * Grammar (03): a negative lookbehind for letter/number/colon/dot, then `H:MM:SS` or `M:SS` (minutes
+ * up to 999, long episodes often write "75:12"; seconds must be two digits, so ratios such as "16:9"
+ * never match), then a lookahead pair excluding a following letter/number/colon and times of day ("10:30 am",
  * "20:15 Uhr", "10:30h") — the time-of-day check tolerates any horizontal whitespace run, including
  * the non-breaking and narrow no-break spaces of typeset text, but never crosses a line break.
  */
 public object TimestampLinkifier {
-    private val lookbehind = """(?<![\d:.])"""
-    private val clock = """(?:(\d{1,2}):([0-5]\d):([0-5]\d)|(\d{1,3}):([0-5]\d))"""
-    private val lookahead = """(?![\d:])(?!\h*(?i:am|pm|a\.m\.|p\.m\.|uhr|h\b))"""
+    private val lookbehind = """(?<![\p{L}\p{N}_:.])"""
+
+    // ASCII [0-9], never \d: Android's ICU regex reads \d as any Unicode decimal digit, and a
+    // supplementary one ("\uD835\uDFCF", mathematical bold 1) matches yet fails toLong().
+    private val clock = """(?:([0-9]{1,2}):([0-5][0-9]):([0-5][0-9])|([0-9]{1,3}):([0-5][0-9]))"""
+
+    // Each marker must be a whole word: "10:30 ample" linkifies while "10:30 am" does not.
+    // The marker's tail check must see Unicode letters, not the ASCII \w class: "h" glued to
+    // an umlaut word ("10:30 hört") is not a time-of-day marker. The horizontal-whitespace
+    // class spells out what OpenJDK's \h expands to (Android's regex lacks the Java 8 escape).
+    private val lookahead =
+        """(?![\p{L}\p{N}_:])(?![ \t\u00A0\u1680\u180E\u2000-\u200A\u202F\u205F\u3000]*(?i:(?:am|pm|uhr|h)(?![\p{L}\p{N}_])|a\.m\.?(?![\p{L}\p{N}_])|p\.m\.?(?![\p{L}\p{N}_])))"""
     private val timestamp = Regex(lookbehind + clock + lookahead)
 
     private const val MS_PER_SECOND = 1000L
@@ -40,7 +49,7 @@ public object TimestampLinkifier {
             if (match.range.first > cursor) {
                 spans.add(NoteSpan.Text(text.substring(cursor, match.range.first), style))
             }
-            spans.add(NoteSpan.Timestamp(match.value, positionMs(match)))
+            spans.add(NoteSpan.Timestamp(match.value, positionMs(match), style))
             cursor = match.range.last + 1
         }
         if (cursor < text.length) {

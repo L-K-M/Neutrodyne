@@ -41,7 +41,7 @@ public sealed interface NoteBlock {
 }
 
 public sealed interface NoteSpan {
-    /** Style bits: [ShowNotesStyles.BOLD] 1, [ITALIC] 2, [UNDERLINE] 4, [CODE] 8. */
+    /** Style bits: [ShowNotesStyles.BOLD] 1, [ShowNotesStyles.ITALIC] 2, [ShowNotesStyles.UNDERLINE] 4, [ShowNotesStyles.CODE] 8. */
     public data class Text(
         val text: String,
         val style: Int = ShowNotesStyles.NONE,
@@ -53,10 +53,12 @@ public sealed interface NoteSpan {
         val style: Int = ShowNotesStyles.NONE,
     ) : NoteSpan
 
-    /** A show-notes timestamp; tapping seeks (03 Timestamp linkifier, 06). */
+    /** A show-notes timestamp; tapping seeks (03 Timestamp linkifier, 06). Carries the
+     * enclosing run's [style] so the seek affordance keeps its emphasis inside bold/italic text. */
     public data class Timestamp(
         val text: String,
         val positionMs: Long,
+        val style: Int = ShowNotesStyles.NONE,
     ) : NoteSpan
 
     public data object LineBreak : NoteSpan

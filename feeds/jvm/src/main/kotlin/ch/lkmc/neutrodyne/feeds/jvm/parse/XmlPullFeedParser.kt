@@ -49,19 +49,20 @@ internal class DepthLimitExceeded(
  */
 public class XmlPullFeedParser(
     private val factory: PullParserFactory,
-    private val limits: ParseLimits = ParseLimits(),
 ) : FeedParser {
     /**
      * Parses one document (03 Parser). Reads [open] once and requests the first byte beyond
-     * [ParseLimits.maxDocumentBytes] before materialization. Buffered reads can read ahead one
-     * segment; oversized input returns `Failed(HOSTILE)`. The charset re-parse (step 5) compares
-     * two passes over the same bytes. [httpCharset] is consulted only by that heuristic;
-     * [baseUrl] resolves relative URLs, and `xml:base` in the document wins when present.
+     * [limits]' [ParseLimits.maxDocumentBytes] before materialization. Buffered reads can read
+     * ahead one segment; oversized input returns `Failed(TOO_LARGE)` — an oversized but not
+     * malformed document. The charset re-parse (step 5) compares two passes over the same
+     * bytes. [httpCharset] is consulted only by that heuristic; [baseUrl] resolves relative
+     * URLs, and `xml:base` in the document wins when present.
      */
     override fun parse(
         open: () -> okio.Source,
         httpCharset: String?,
         baseUrl: String,
+        limits: ParseLimits,
     ): ParseResult {
         // Check the byte bound before materialization or decoding. Okio can read ahead one
         // segment while requesting the first byte over the bound.
@@ -70,7 +71,7 @@ public class XmlPullFeedParser(
                 open().buffer().use { source ->
                     if (source.request(limits.maxDocumentBytes + 1L)) {
                         return ParseResult.Failed(
-                            ParseFailure.HOSTILE,
+                            ParseFailure.TOO_LARGE,
                             "document over ${limits.maxDocumentBytes} bytes",
                         )
                     }
@@ -117,8 +118,7 @@ public class XmlPullFeedParser(
 
     public companion object {
         /** The desktop binding: XmlPull discovery (kxml2 at run time, 03 Parser). */
-        public fun discovered(limits: ParseLimits = ParseLimits()): FeedParser =
-            XmlPullFeedParser(PullParserFactory.Discovered, limits)
+        public fun discovered(): FeedParser = XmlPullFeedParser(PullParserFactory.Discovered)
 
         private const val REPLACEMENT_RATIO_THRESHOLD = 0.005
         private const val WINDOWS_1252 = "windows-1252"
@@ -1578,7 +1578,7 @@ private class ParseSession(
                 parser.name == "chapter"
             ) {
                 val chapterBase = baseOf(parser, chaptersBase)
-                val startMs = Durations.parseMs(attr(parser, "start").orEmpty())
+                val startMs = Durations.parsePositionMs(attr(parser, "start").orEmpty())
                 if (startMs != null) {
                     item.inlineChapters.add(
                         InlineChapter(

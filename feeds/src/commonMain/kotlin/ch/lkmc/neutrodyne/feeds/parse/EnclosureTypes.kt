@@ -45,6 +45,7 @@ public object EnclosureTypes {
             "m4v" to "video/mp4",
             "mov" to "video/quicktime",
             "webm" to "video/webm",
+            "m3u" to "application/x-mpegurl",
             "m3u8" to "application/x-mpegurl",
         )
 
@@ -74,9 +75,38 @@ public object EnclosureTypes {
             return mapped
         }
 
-        val path = url.substringBefore('?').substringBefore('#')
-        val extension = path.substringAfterLast('.', "").lowercase()
-        return extensionTypes[extension] ?: mapped
+        // Sniff the raw path first: a decoded `?`/`#` can sit inside a real path segment
+        // (`ep%3Fa.m4a?token=1`), and cutting there would hide `.m4a`. Decoded fallback covers
+        // CDNs that percent-encode the whole query (`ep.m4a%3Ft=1`).
+        fun extOf(u: String): String? {
+            val path = u.substringBefore('?').substringBefore('#')
+            return extensionTypes[path.substringAfterLast('.', "").lowercase()]
+        }
+        return extOf(url) ?: extOf(percentDecode(url)) ?: mapped
+    }
+
+    /** Percent-decodes for extension sniffing (`%3F` → `?`, `%2E` → `.`); bad escapes pass through. */
+    private fun percentDecode(raw: String): String {
+        if ('%' !in raw) return raw
+        val sb = StringBuilder(raw.length)
+        var i = 0
+        while (i < raw.length) {
+            val hexChars = if (raw[i] == '%' && i + 2 < raw.length) raw.substring(i + 1, i + 3) else null
+            val hex =
+                if (hexChars != null && hexChars.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {
+                    hexChars.toInt(16)
+                } else {
+                    null
+                }
+            if (hex != null) {
+                sb.append(hex.toChar())
+                i += 3
+            } else {
+                sb.append(raw[i])
+                i++
+            }
+        }
+        return sb.toString()
     }
 
     /** Whether this effective type is video (03 Enclosure types and media acceptance). */

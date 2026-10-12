@@ -19,7 +19,26 @@ class PrivateFeedUrlsTest {
         assertTrue(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?AUTH=short"))
         assertTrue(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?api_key=short"))
         assertTrue(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?x=1&signature=abc"))
+        // `_`-joined forms of the credential cores count too.
+        assertTrue(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?auth_token=short"))
+        assertTrue(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?feed_token=short"))
+        assertTrue(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?token_id=1"))
+        // camelCase credential names compare lowercased: one entry covers every casing.
+        assertTrue(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?accessToken=short"))
+        assertTrue(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?authToken=abc"))
+        assertTrue(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?SessionId=x"))
         assertFalse(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?category=news"))
+        // Near-miss names must not trip a substring match on token/auth/key: the `_` boundary
+        // is required, so "author", "tokenize", "keyword", "monkey" stay public.
+        assertFalse(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?author=Jane"))
+        assertFalse(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?tokenize=1"))
+        assertFalse(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?keyword=music"))
+        assertFalse(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?monkey=1"))
+        // Generic `_`-joined names outside the credential cores stay public too.
+        assertFalse(PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?user_id=42"))
+        // Bare-host and path-less inputs stay public without tripping the token scan.
+        assertFalse(PrivateFeedUrls.looksPrivate("https://example.com"))
+        assertFalse(PrivateFeedUrls.looksPrivate("https://example.com/"))
     }
 
     @Test
@@ -35,6 +54,51 @@ class PrivateFeedUrlsTest {
         assertTrue(PrivateFeedUrls.looksPrivate("https://feeds.example.com/xKd93lskSKEa1zl4dQeF"))
         // A missing host (scheme-less or malformed input) does not skip the token checks.
         assertTrue(PrivateFeedUrls.looksPrivate("feeds.example.com/xKd93lskSKEa1zl4dQeF1"))
+    }
+
+    @Test
+    fun clickTrackingParametersStayPublic() {
+        // fbclid/gclid and friends are long and random-looking, but they are appended by the
+        // sharing platform, not the publisher — never feed secrets.
+        assertFalse(
+            PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed.rss?fbclid=IwAR2AbCdEfGhIjKlMnOpQrStUvWx1234"),
+        )
+        assertFalse(
+            PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed.rss?gclid=EAIaIQobChMI1234567890abcdef"),
+        )
+        // Every whitelisted click-ID/attribution name stays public with a token-shaped value.
+        for (name in listOf(
+            "msclkid",
+            "dclid",
+            "ttclid",
+            "twclid",
+            "igshid",
+            "yclid",
+            "li_fat_id",
+            "mc_eid",
+            "mkt_tok",
+            "_hsenc",
+        )) {
+            assertFalse(
+                PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?$name=a1b2c3d4e5f6g7h8i9j0k1l2"),
+                "$name must be exempt",
+            )
+        }
+        // utm_* campaign values and Mailchimp's mc_cid are marketing attribution, not secrets.
+        assertFalse(
+            PrivateFeedUrls.looksPrivate("https://feeds.example.com/feed?utm_campaign=a1b2c3d4e5f6g7h8i9j0k1"),
+        )
+        assertFalse(
+            PrivateFeedUrls.looksPrivate(
+                "https://feeds.example.com/feed?utm_source=newsletter&mc_cid=9f8e7d6c5b4a3f2e1d0c9b8a",
+            ),
+        )
+        // A tracking param alongside a real token still flags.
+        assertTrue(
+            PrivateFeedUrls.looksPrivate(
+                "https://feeds.example.com/feed?fbclid=IwAR2AbCdEfGhIjKlMnOpQrStUvWx1234&auth=9f8e7d6c5b4a3210",
+            ),
+        )
     }
 
     @Test
@@ -63,6 +127,11 @@ class PrivateFeedUrlsTest {
         assertTrue(PrivateFeedUrls.looksPrivate("https://cdn.memberfulcontent.com/f"))
         // Host matching is case-insensitive (DNS is).
         assertTrue(PrivateFeedUrls.looksPrivate("https://PATREON.COM/rss/xyz"))
+        // A port does not hide the host — the list compares the host part only.
+        assertTrue(PrivateFeedUrls.looksPrivate("https://patreon.com:8443/rss/xyz"))
+        // A private host appearing in the path or query is not the *host* — no match.
+        assertFalse(PrivateFeedUrls.looksPrivate("https://example.com/feed?next=https://patreon.com/x"))
+        assertFalse(PrivateFeedUrls.looksPrivate("https://example.com/mirrors/patreon.com/feed"))
         // The suffix check does not match unrelated hosts.
         assertFalse(PrivateFeedUrls.looksPrivate("https://notpatreon.com/feed"))
         assertFalse(PrivateFeedUrls.looksPrivate("https://patreon.com.evil.example/feed"))
@@ -72,5 +141,20 @@ class PrivateFeedUrlsTest {
     fun publicFeedUrlsStayPublic() {
         assertFalse(PrivateFeedUrls.looksPrivate("https://feeds.example.com/show.rss"))
         assertFalse(PrivateFeedUrls.looksPrivate("https://example.com/podcasts/my-show?lang=de"))
+    }
+
+    @Test
+    fun youTubeFeedIdsArePublic() {
+        // The app stores every YouTube subscription as this endpoint (02 feedUrl); its channel,
+        // playlist and legacy user IDs are public, not secrets.
+        val feed = "www.youtube.com/feeds/videos.xml"
+        val channel = "channel_id=UC_x5XG1OV2P6uZZ5FSM9Ttw"
+        assertFalse(PrivateFeedUrls.looksPrivate("https://$feed?$channel"))
+        assertFalse(PrivateFeedUrls.looksPrivate("https://$feed?playlist_id=PLBCF2DAC6FFB574DE"))
+        assertFalse(PrivateFeedUrls.looksPrivate("https://youtube.com/feeds/videos.xml?user=GoogleDevelopers"))
+        // Credentials still win, and other YouTube paths or look-alike hosts get no exemption.
+        assertTrue(PrivateFeedUrls.looksPrivate("https://u:p@$feed?$channel"))
+        assertTrue(PrivateFeedUrls.looksPrivate("https://www.youtube.com/other?$channel"))
+        assertTrue(PrivateFeedUrls.looksPrivate("https://youtube.com.evil.example/feeds/videos.xml?$channel"))
     }
 }

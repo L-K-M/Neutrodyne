@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.designsystem.theme
 
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -13,6 +14,8 @@ import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.unit.dp
+
+private const val NAVIGATION_DURATION_MILLIS = 200
 
 /**
  * Corner radii (08 Tokens): thumbnails 8, tiles 12, mini player 16, podcast/player art 24 and
@@ -45,6 +48,12 @@ public val NeutrodyneType: Typography = Typography()
  * `MotionScheme` replaces this object in one place when adopted (PO-4).
  */
 public object NeutrodyneMotion {
+    /** Constant-speed navigation keeps predictive progress aligned with the revealed area. */
+    @Composable
+    @ReadOnlyComposable
+    public fun <T> navigation(): FiniteAnimationSpec<T> =
+        if (LocalReducedMotion.current) snap() else tween(NAVIGATION_DURATION_MILLIS, easing = LinearEasing)
+
     /** Springs for position/size changes (dampingRatio 0.8, stiffness 380). */
     @Composable
     @ReadOnlyComposable

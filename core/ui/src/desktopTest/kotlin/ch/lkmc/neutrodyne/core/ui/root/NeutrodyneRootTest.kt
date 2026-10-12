@@ -168,6 +168,71 @@ class NeutrodyneRootTest {
             onNodeWithText("feeds-content").assertIsDisplayed()
         }
 
+    /**
+     * Owner requirement: tab switches settle in zero animation frames. The outgoing tab's content
+     * is gone three frames after the tap (two frames still cover the composition swap
+     * mechanics) — the 700 ms default fade would still render it.
+     */
+    @Test
+    fun tabSwitchIsImmediate() =
+        runComposeUiTest {
+            setRootContent()
+            mainClock.autoAdvance = false
+            onNodeWithTag("nav_library").performClick()
+            repeat(3) { mainClock.advanceTimeByFrame() }
+
+            onNodeWithText("feeds-content").assertDoesNotExist()
+            onNodeWithText("count:0").assertIsDisplayed()
+            mainClock.autoAdvance = true
+        }
+
+    /**
+     * Tapping Feeds while Library is selected shrinks the rendered entries to a strict prefix —
+     * the same shape a back-to-Feeds produces — so only the recorded action can keep this tap
+     * from animating like a pop. The outgoing tab must still leave immediately.
+     */
+    @Test
+    fun tappingFeedsFromAnotherTabIsImmediate() =
+        runComposeUiTest {
+            setRootContent()
+            onNodeWithTag("nav_library").performClick()
+            waitForIdle()
+
+            mainClock.autoAdvance = false
+            onNodeWithTag("nav_feeds").performClick()
+            repeat(3) { mainClock.advanceTimeByFrame() }
+
+            onNodeWithText("count:0").assertDoesNotExist()
+            onNodeWithText("feeds-content").assertIsDisplayed()
+            mainClock.autoAdvance = true
+        }
+
+    /**
+     * Owner requirement: a back pop reveals the previous entry and does not leave the outgoing
+     * scene lingering — it is gone within the few frames any content swap needs on this harness.
+     * The horizontal wipe animation itself renders only on device; its spec mapping is pinned by
+     * `NdSceneTransitionTest.backPopWipesTheOutgoingScene`.
+     */
+    @Test
+    fun backPopRevealsThePreviousEntryImmediately() =
+        runComposeUiTest {
+            setRootContent()
+            onNodeWithText("open-podcast").performClick()
+            waitForIdle()
+            onNodeWithText("podcast-3").assertIsDisplayed()
+
+            mainClock.autoAdvance = false
+            onNodeWithTag("root-box").performKeyInput {
+                keyDown(Key.Escape)
+                keyUp(Key.Escape)
+            }
+            repeat(3) { mainClock.advanceTimeByFrame() }
+
+            onNodeWithText("podcast-3").assertDoesNotExist()
+            onNodeWithText("feeds-content").assertIsDisplayed()
+            mainClock.autoAdvance = true
+        }
+
     @Test
     fun localeSwitchRelabelsTheSuite() =
         runComposeUiTest {

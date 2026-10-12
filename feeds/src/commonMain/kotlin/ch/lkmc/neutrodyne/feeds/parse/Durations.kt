@@ -4,8 +4,8 @@ package ch.lkmc.neutrodyne.feeds.parse
 /**
  * `itunes:duration` / `media:content@duration` parsing (03 Durations). The value is a hint; 06's measured
  * duration supersedes it. 1–3 numeric parts (`H:MM:SS`, `MM:SS`, `M:SS`, plain seconds), fractional last
- * part allowed; negative values, values over 48 h, empty and garbage yield null plus a `BAD_DURATION`
- * warning at the call site.
+ * part allowed; negative values, values over 48 h, all-zero placeholders (`00:00`), empty and garbage
+ * yield null plus a `BAD_DURATION` warning at the call site.
  */
 public object Durations {
     private const val MAX_PARTS = 3
@@ -17,10 +17,21 @@ public object Durations {
     /** Durations over 48 h are treated as garbage (03 Durations). */
     public const val MAX_VALUE_MS: Long = 48L * 60 * 60 * 1000
 
-    private val numericPart = Regex("""\d+(?:\.\d+)?""")
+    private val numericPart = Regex("""[0-9]+(?:\.[0-9]+)?""")
 
     /** Parses a duration string to milliseconds, or null when it is not a valid duration. */
-    public fun parseMs(raw: String): Long? {
+    public fun parseMs(raw: String): Long? = parseMs(raw, zeroIsMissing = true)
+
+    /**
+     * Same grammar as [parseMs] for a position, not a duration: `psc:chapter@start` legitimately
+     * opens at `0:00`, so an all-zero value is a real position, not a missing-duration placeholder.
+     */
+    public fun parsePositionMs(raw: String): Long? = parseMs(raw, zeroIsMissing = false)
+
+    private fun parseMs(
+        raw: String,
+        zeroIsMissing: Boolean,
+    ): Long? {
         val parts = raw.trim().split(':')
         if (parts.size > MAX_PARTS) return null
 
@@ -51,6 +62,9 @@ public object Durations {
         }
 
         if (totalMs > MAX_VALUE_MS) return null
+        // "00:00"-style placeholders mean the feed carries no real duration — an unknown, not a
+        // zero-length episode.
+        if (zeroIsMissing && totalMs == 0L) return null
         return totalMs
     }
 }

@@ -60,17 +60,30 @@ class UrlSplitterUriCrossCheckTest {
         // them all. (A non-ASCII path like Québec.rss is legal to `URI` and sits in `urls` above.)
         val lenient =
             listOf(
-                "https://example.com/a b.mp3",
-                "https://example.com/100%",
-                "https://ex_ample.example.com/feed.xml",
+                "https://example.com/a b.mp3" to "/a b.mp3",
+                "https://example.com/100%" to "/100%",
+                "https://ex_ample.example.com/feed.xml" to "/feed.xml",
             )
-        for (url in lenient) {
+        for ((url, expectedPath) in lenient) {
             val parts = splitLenient(url)
             assertTrue(!parts.host.isNullOrEmpty(), "host of $url")
+            assertEquals(expectedPath, parts.path, "path of $url")
             assertTrue(
                 runCatching { java.net.URI(url) }.getOrNull()?.host.isNullOrEmpty(),
                 "java.net.URI should throw or find no host for $url",
             )
         }
+    }
+
+    @Test
+    fun ipv6CrossCheckCoversTheBracketSpelling() {
+        // java.net.URI keeps the brackets in getHost(); splitLenient does too, so the pair must
+        // compare equal with brackets on both sides — a regression stripping them would pass a
+        // host check on a URL without the literal.
+        val uri = java.net.URI("http://[2001:db8::1]:8080/feed")
+        val parts = splitLenient("http://[2001:db8::1]:8080/feed")
+        assertEquals("[2001:db8::1]", uri.host)
+        assertEquals(uri.host, parts.host)
+        assertEquals(uri.port, parts.port?.toIntOrNull())
     }
 }

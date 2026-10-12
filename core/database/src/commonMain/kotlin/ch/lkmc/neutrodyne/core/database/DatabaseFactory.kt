@@ -7,7 +7,7 @@ import androidx.room3.RoomDatabase
 /**
  * Platform file handling for [NeutrodyneDatabase] (02 Database builder and connections): the
  * database path, the Room builder, the quarantine directory and the quarantine marker.
- * The opener uses this boundary for platform file handling.
+ * [DatabaseOpener] stays common.
  */
 interface DatabaseFactory {
     /** Absolute path of `neutrodyne.db`. */

@@ -19,6 +19,14 @@ public object PrivateFeedUrls {
             "sig",
             "signature",
             "access_token",
+            // camelCase credential names compare lowercased, so one entry covers every casing.
+            "accesstoken",
+            "authtoken",
+            "refreshtoken",
+            "idtoken",
+            "sessionid",
+            "apisecret",
+            "clientsecret",
             "session",
             "sid",
             "uid",
@@ -37,6 +45,31 @@ public object PrivateFeedUrls {
     /** A long token in a path segment or query value; must contain both a letter and a digit. */
     private val longToken = Regex("""[A-Za-z0-9_-]{20,}""")
 
+    /**
+     * Click-tracking IDs are long and random-looking, but they are public share metadata
+     * appended by the link sharer's platform — never feed secrets.
+     */
+    private val trackingParams =
+        setOf(
+            "fbclid",
+            "gclid",
+            "msclkid",
+            "dclid",
+            "ttclid",
+            "twclid",
+            "igshid",
+            "yclid",
+            "li_fat_id",
+            "mc_eid",
+            "mc_cid",
+            "mkt_tok",
+            "_hsenc",
+        )
+
+    private val youTubeFeedHosts = setOf("youtube.com", "www.youtube.com")
+
+    private const val YOUTUBE_FEED_PATH = "/feeds/videos.xml"
+
     /** Whether [url] looks like a private (token-carrying) feed URL. */
     public fun looksPrivate(url: String): Boolean {
         val parts = splitLenient(url)
@@ -47,27 +80,44 @@ public object PrivateFeedUrls {
         // A missing host skips only the host list: query and path token checks still run on
         // scheme-less or malformed input (a stored reference may carry the token anyway).
         val host = parts.host?.lowercase()
+
+        // YouTube's feed endpoint, the stored feedUrl of every YouTube subscription (02), carries
+        // only public channel, playlist or user IDs: 24-character channel IDs would otherwise
+        // count every YouTube channel as a private link in export and sync warnings.
+        if (host in youTubeFeedHosts && parts.path == YOUTUBE_FEED_PATH) return false
+
         if (host != null && privateHosts.any { host == it || host.endsWith(".$it") }) return true
 
         // Token-bearing query parameter names, then long tokens in any query value.
         val query = parts.query ?: ""
         if (query.split('&').any { param ->
                 val name = param.substringBefore('=').lowercase()
-                name in tokenParameterNames
+                // Exact names, plus `_`-joined forms of the credential cores only
+                // ("auth_token", "feed_token", "token_id", "basic_auth"): the `_` boundary
+                // keeps "author"/"tokenize"/"monkey" clean, and widening it to the whole set
+                // would flag generic names like "user_id" or "key_id" on public feeds.
+                name in tokenParameterNames ||
+                    name.startsWith("token_") || name.endsWith("_token") ||
+                    name.startsWith("auth_") || name.endsWith("_auth")
             }
         ) {
             return true
         }
         if (looksLikeTokenQueryValue(query)) return true
 
-        // Long tokens as part of any path segment ("/feeds/xKd93lskSKEa1zl/"). The permissive
-        // class deliberately keeps '-'/'_': UUID and base64url tokens carry them, and a false
-        // positive on a hyphenated slug only costs a warning.
+        // Long tokens (≥20 chars) as part of any path segment ("/feeds/xKd93lskSKEa1zl4Tq8w/").
+        // The permissive class deliberately keeps '-'/'_': UUID and base64url tokens carry them,
+        // and a false positive on a hyphenated slug only costs a warning.
         return parts.path.split('/').any { segment -> tokenIn(segment) != null }
     }
 
     private fun looksLikeTokenQueryValue(query: String): Boolean =
-        query.split('&').map { it.substringAfter('=', "") }.any { value -> tokenIn(value) != null }
+        query.split('&').any { param ->
+            val name = param.substringBefore('=').lowercase()
+            // utm_* campaign slugs are public marketing attribution like the click IDs above.
+            name !in trackingParams && !name.startsWith("utm_") &&
+                tokenIn(param.substringAfter('=', "")) != null
+        }
 
     /** The long token inside [text] when it contains one with both a letter and a digit. */
     private fun tokenIn(text: String): String? =

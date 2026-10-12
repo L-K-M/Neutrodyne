@@ -101,12 +101,12 @@ class YtxProcessStartTest {
         assertThat(report.getBoolean("workManagerInitialized")).isFalse()
         assertThat(report.getBoolean("acraInstalled")).isFalse()
 
-        // :ytx holds no DataStore or database file open; and the M0a tree has no database
-        // yet, so databases/ is absent unless :ytx created one.
+        // :ytx holds no DataStore or database file open. The main process opens the database at
+        // start-up (M1a), so databases/ exists; :ytx can reach NeutrodyneDatabase only through
+        // AndroidAppGraph, which the events above prove it never requested.
         for (path in report.getJSONArray("openDataFiles").toStrings()) {
             assertThat(path).doesNotContainMatch(DATA_FILE_RE)
         }
-        assertThat(databasesDir().exists()).isFalse()
 
         // 04's idle stop and hang kill rely on a same-UID kill leaving the main process alone.
         // Unbind first: a still-bound BIND_AUTO_CREATE service would be restarted in a new :ytx.
@@ -192,7 +192,6 @@ class YtxProcessStartTest {
         runCatching { File("/proc/$pid/cmdline").readText().substringBefore('\u0000') }.getOrDefault("")
 
     /** The app data dir's `databases/` — Room puts `NeutrodyneDatabase` there once M1 adds it. */
-    private fun databasesDir(): File = File(context.applicationInfo.dataDir, DATABASES_DIR)
 
     @Suppress("DEPRECATION") // the int-flag getPackageInfo is the only call under API 33
     private fun providers(): Array<ProviderInfo> {
@@ -213,9 +212,6 @@ class YtxProcessStartTest {
 
     private companion object {
         const val YTX_SUFFIX = ":ytx"
-
-        /** The app data dir's `databases/` subdirectory (Room's location for `NeutrodyneDatabase`). */
-        const val DATABASES_DIR = "databases"
 
         /** Data-dir opens of `NeutrodyneDatabase` or a DataStore file (as substring match). */
         const val DATA_FILE_RE = "datastore|databases|\\.db"

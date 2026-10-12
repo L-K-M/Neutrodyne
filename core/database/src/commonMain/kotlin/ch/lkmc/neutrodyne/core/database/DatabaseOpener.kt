@@ -129,7 +129,7 @@ class DatabaseOpener(
                         )
                         throw t
                     }
-                    val failure = t as? DatabaseOpenException ?: DatabaseOpenException(classify(t), t)
+                    val failure = t as? DatabaseOpenException ?: openFailure(t)
                     deferred.completeExceptionally(failure)
                     _openState.value = DatabaseOpenState.Failed(failure)
                     throw failure
@@ -336,6 +336,18 @@ class DatabaseOpener(
 
     // --- Error classification (02: no structured result-code API — message parsing) -----------------
 
+    /**
+     * The failure a failed attempt publishes. [classify] parses untrusted message text — a bug
+     * in it must never escape the failure handler and leave the shared deferred uncompleted, so
+     * a classification throw still yields a published failure (UNKNOWN; the real throwable as
+     * the cause whenever it can be wrapped).
+     */
+    private fun openFailure(t: Throwable): DatabaseOpenException {
+        val reason = runCatching { classify(t) }.getOrDefault(DatabaseOpenException.Reason.UNKNOWN)
+        return runCatching { DatabaseOpenException(reason, t) }
+            .getOrElse { DatabaseOpenException(DatabaseOpenException.Reason.UNKNOWN, it) }
+    }
+
     private fun classify(t: Throwable): DatabaseOpenException.Reason =
         when {
             isDiskFull(t) -> DatabaseOpenException.Reason.DISK_FULL
@@ -373,10 +385,11 @@ class DatabaseOpener(
      * Every `code N` the exception chain carries, reduced to its primary SQLite result code (the
      * low byte — e.g. `SQLITE_IOERR_SHMOPEN` 4618 = 0x120A → 10). `androidx.sqlite.SQLiteException`
      * has no structured result-code API (02, S2): the bundled driver writes "Error code: N,
-     * message: …" and the framework driver "… (code N SQLITE_…)".
+     * message: …" and the framework driver "… (code N SQLITE_…)". A match that does not fit Int —
+     * a filesystem path like `code2147483648` embedded in the message — is not a SQLite code.
      */
     private fun sqlitePrimaryCodes(text: String): List<Int> =
-        SQLITE_CODE.findAll(text).map { it.groupValues[1].toInt() and PRIMARY_CODE_MASK }.toList()
+        SQLITE_CODE.findAll(text).mapNotNull { it.groupValues[1].toIntOrNull()?.and(PRIMARY_CODE_MASK) }.toList()
 
     /**
      * The complete cause chain of [t]. The walk stops only on a repeated throwable identity: a

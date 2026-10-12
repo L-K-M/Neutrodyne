@@ -1241,6 +1241,95 @@ class DatabaseOpenerTest {
             assertEquals(opens, closes, "every connection closes with the published database")
         }
 
+    @Test
+    fun anOversizedCodeInTheFailureTextStillCompletesTheGate() =
+        runTest {
+            dirs.ensureCreated()
+
+            // A filesystem error whose message carries a path segment like "code2147483648":
+            // the digits overflow Int, so classification must not throw out of the failure
+            // handler — escaping it would strand the shared deferred and every
+            // requireDatabase() caller behind it.
+            var deny = true
+            val denied =
+                object : DatabaseFactory by factory {
+                    override var pendingQuarantine: String?
+                        get() {
+                            if (deny) {
+                                // The oversized path code comes first and a real SQLITE_FULL
+                                // code after it: classification must skip the overflow and still
+                                // reach code 13, not fall back to UNKNOWN.
+                                throw AccessDeniedException(
+                                    dir.resolve("code2147483648/quarantine-pending").toString(),
+                                    null,
+                                    "write failed (code 13)",
+                                )
+                            }
+                            return factory.pendingQuarantine
+                        }
+                        set(value) {
+                            factory.pendingQuarantine = value
+                        }
+                }
+            val o = opener(f = denied)
+            val error = assertThrows { o.awaitOpen() }
+
+            assertIs<DatabaseOpenException>(error)
+            assertEquals(DatabaseOpenException.Reason.DISK_FULL, error.reason)
+            assertIs<AccessDeniedException>(error.cause)
+            assertSame(error, assertIs<DatabaseOpenState.Failed>(o.openState.value).exception)
+
+            // A background accessor is handed the same failure, not left waiting on the
+            // deferred (the Metro provider calls this on a worker thread).
+            val delivered = CompletableDeferred<Result<NeutrodyneDatabase>>()
+            thread(isDaemon = true) {
+                delivered.complete(runCatching { o.requireDatabase() })
+            }
+            val outcome =
+                withContext(Dispatchers.Default) { withTimeoutOrNull(5.seconds) { delivered.await() } }
+            assertNotNull(outcome, "requireDatabase must not hang after the failed open")
+            assertSame(error, outcome.exceptionOrNull())
+
+            // The failed attempt is not cached: the retry opens once the denial lifts.
+            deny = false
+            assertTrue(o.awaitOpen().created)
+            o.requireDatabase().close()
+        }
+
+    @Test
+    fun aClassificationFailureStillCompletesTheGate() =
+        runTest {
+            dirs.ensureCreated()
+
+            // A throwable that detonates under message parsing stands in for any future
+            // classification bug: the failure handler must still publish a failure instead of
+            // letting the exception escape past the deferred's completion.
+            val poison: Throwable =
+                object : RuntimeException() {
+                    override val message: String
+                        get() = throw IllegalStateException("unprintable failure")
+                }
+            val stuck =
+                object : DatabaseFactory by factory {
+                    override fun exists(): Boolean = throw poison
+                }
+            val o = opener(f = stuck)
+            val error = assertThrows { o.awaitOpen() }
+
+            assertIs<DatabaseOpenException>(error)
+            assertEquals(DatabaseOpenException.Reason.UNKNOWN, error.reason)
+            assertSame(error, assertIs<DatabaseOpenState.Failed>(o.openState.value).exception)
+
+            val delivered = CompletableDeferred<Result<NeutrodyneDatabase>>()
+            thread(isDaemon = true) {
+                delivered.complete(runCatching { o.requireDatabase() })
+            }
+            val outcome =
+                withContext(Dispatchers.Default) { withTimeoutOrNull(5.seconds) { delivered.await() } }
+            assertNotNull(outcome, "requireDatabase must not hang after the failed open")
+            assertSame(error, outcome.exceptionOrNull())
+        }
+
     private companion object {
         const val T0 = 1_700_000_000_000L
     }

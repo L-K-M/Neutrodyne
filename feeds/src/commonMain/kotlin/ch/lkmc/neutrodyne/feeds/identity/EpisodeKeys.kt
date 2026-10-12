@@ -17,7 +17,7 @@ public object EpisodeKeys {
     public const val VERSION: Int = 1
 
     private const val DAY_SUFFIX = "T00:00:00Z"
-    private val versionPrefix = Regex("""^(\d+)[gutlh]:""")
+    private val versionPrefix = Regex("""^([0-9]+)[gutlh]:""")
 
     /** The primary key of [e]: `g:` → `u:` → `t:` → `l:` → `h:` (the last always applies). */
     public fun primary(e: ParsedEpisode): String =
@@ -38,8 +38,8 @@ public object EpisodeKeys {
     /**
      * The key of a stored episode for [version] (restore and sync matching). Only v1 exists today.
      * Invariant: [KeyInput.descriptionHead] must be exactly the head of the same stored description —
-     * the first 500 UTF-16 code units, extended by one when the cut splits a surrogate pair —
-     * or `h:`-fallback matching diverges between ingest and restore.
+     * the first 500 UTF-16 code units, extended by one when the cut would strand a surrogate
+     * half — or `h:`-fallback matching diverges between ingest and restore.
      */
     public fun keyFor(
         e: KeyInput,
@@ -96,20 +96,25 @@ public object EpisodeKeys {
 }
 
 /**
- * The first [DESC_HEAD_UNITS] UTF-16 code units, extended by one when the cut would leave a lone
- * high surrogate: a surrogate half encodes as `?` in UTF-8, so descriptions differing only past
- * the cut would otherwise hash identically. `KeyInput.descriptionHead` must be stored under the
- * same rule (idempotent — applying it to an already-truncated head is a no-op).
+ * The first [DESC_HEAD_UNITS] UTF-16 code units, extended by one when the cut would leave a
+ * stranded surrogate half — a trailing high surrogate (pair cut mid-codepoint, or unpaired)
+ * or an unpaired low surrogate: a lone half encodes as `?` in UTF-8, so descriptions differing
+ * only past the cut would otherwise hash identically. `KeyInput.descriptionHead` must be
+ * stored under the same rule (idempotent — applying it to an already-truncated head is a no-op).
  */
 private const val DESC_HEAD_UNITS = 500
 
 private fun String.headUnits(): String {
     val head = take(DESC_HEAD_UNITS)
-    return if (head.lastOrNull()?.isHighSurrogate() == true && length > head.length) {
-        head + this[head.length]
-    } else {
-        head
-    }
+    val last = head.lastOrNull()
+    val stranded =
+        last?.isHighSurrogate() == true ||
+            // A low surrogate whose pair-mate is outside the head is equally stranded.
+            (
+                last?.isLowSurrogate() == true &&
+                    (head.length < 2 || !head[head.length - 2].isHighSurrogate())
+            )
+    return if (stranded && length > head.length) head + this[head.length] else head
 }
 
 /**
@@ -168,11 +173,16 @@ public object EpisodeContentHash {
                     ?.toString()
                     .orEmpty()
                     .fieldEsc(),
-                e.artwork
-                    .firstOrNull()
-                    ?.url
-                    .orEmpty()
-                    .fieldEsc(),
+                // Every candidate is hashed, not just the winner: a secondary-entry change is
+                // still stored content, and a reorder changes the ingest-time winner.
+                list(e.artwork) {
+                    listOf(
+                        it.url,
+                        it.source.name,
+                        it.width?.toString().orEmpty(),
+                        it.height?.toString().orEmpty(),
+                    )
+                },
                 e.link.orEmpty().fieldEsc(),
                 e.chaptersUrl.orEmpty().fieldEsc() + FIELD_SEPARATOR + e.chaptersType.orEmpty().fieldEsc(),
                 e.externalMediaId.orEmpty().fieldEsc(),
@@ -259,6 +269,13 @@ public object TitleMatch {
         setOf('\u2010', '\u2011', '\u2012', '\u2013', '\u2014', '\u2015', '\u2212', '\uFE58', '\uFE63', '\uFF0D')
     private val foldedDash = '-'
 
+    // Explicit Unicode White_Space class: `\s` means ASCII whitespace on the JVM but Unicode
+    // whitespace on JS/native, and fallback matching must normalise identically on every
+    // target (NFKC already folds most of these; the un-folded ones — U+0085, U+1680, U+2028,
+    // U+2029, U+205F — are exactly where `\s` would diverge).
+    private val unicodeWhitespaceRun =
+        Regex("[\\u0009-\\u000D\\u0020\\u0085\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000]+")
+
     public fun normalise(title: String): String {
         val normalised = title.nfkc()
         val folded = StringBuilder(normalised.length)
@@ -272,7 +289,7 @@ public object TitleMatch {
         return folded
             .toString()
             .lowercase()
-            .replace(Regex("\\s+"), " ")
+            .replace(unicodeWhitespaceRun, " ")
             .trim()
     }
 }

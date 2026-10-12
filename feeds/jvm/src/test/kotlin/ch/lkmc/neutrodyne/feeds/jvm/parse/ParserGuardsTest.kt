@@ -137,13 +137,13 @@ class ParserGuardsTest {
 
     /**
      * `maxDocumentBytes` is enforced incrementally during the read: a source that never ends must
-     * fail `HOSTILE` after delivering only about the cap — without the bound, `readByteArray()`
+     * fail `TOO_LARGE` after delivering only about the cap — without the bound, `readByteArray()`
      * drains it until the heap dies.
      */
     @Test
     fun endlessSourceFailsBoundedWithoutDraining() {
         val cap = 64L
-        val parser = XmlPullFeedParser.discovered(ParseLimits(maxDocumentBytes = cap.toInt()))
+        val parser = XmlPullFeedParser.discovered()
         val delivered = AtomicLong()
         val endless =
             object : okio.Source {
@@ -160,25 +160,26 @@ class ParserGuardsTest {
 
                 override fun close() {}
             }
-        val result = parser.parse({ endless }, null, baseUrl)
-        assertEquals(ParseFailure.HOSTILE, assertIs<ParseResult.Failed>(result).reason)
+        val result = parser.parse({ endless }, null, baseUrl, ParseLimits(maxDocumentBytes = cap))
+        assertEquals(ParseFailure.TOO_LARGE, assertIs<ParseResult.Failed>(result).reason)
         // One segment's worth past the cap at most — never the whole stream.
         assertTrue(delivered.get() <= cap + SEGMENT, "source delivered ${delivered.get()} bytes")
     }
 
-    /** A finite document over the cap fails the same way; exactly the cap still reaches the parser. */
+    /** A finite document over the cap fails `TOO_LARGE`; exactly the cap still reaches the parser. */
     @Test
-    fun documentOverMaxBytesFailsHostile() {
-        val parser = XmlPullFeedParser.discovered(ParseLimits(maxDocumentBytes = 64))
+    fun documentOverMaxBytesFailsTooLarge() {
+        val parser = XmlPullFeedParser.discovered()
+        val limits = ParseLimits(maxDocumentBytes = 64)
         val oversized = ByteArray(65) { 'x'.code.toByte() }
         assertEquals(
-            ParseFailure.HOSTILE,
-            assertIs<ParseResult.Failed>(parser.parse({ Buffer().write(oversized) }, null, baseUrl)).reason,
+            ParseFailure.TOO_LARGE,
+            assertIs<ParseResult.Failed>(parser.parse({ Buffer().write(oversized) }, null, baseUrl, limits)).reason,
         )
         // Exactly at the cap the read succeeds and the document reaches the parser — here it parses.
         val exact = "<rss version=\"2.0\"><channel><title>abcde</title></channel></rss>"
         assertEquals(64, exact.encodeToByteArray().size)
-        val result = parser.parse({ Buffer().write(exact.encodeToByteArray()) }, null, baseUrl)
+        val result = parser.parse({ Buffer().write(exact.encodeToByteArray()) }, null, baseUrl, limits)
         assertIs<ParseResult.Ok>(result)
     }
 

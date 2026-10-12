@@ -753,13 +753,15 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
         var position = 0
         for (span in TimestampLinkifier.linkify(whole)) {
             if (span is NoteSpan.Timestamp) {
-                out.add(span)
                 position += span.text.length
                 // The timestamp consumed input too: walk the piece cursor over its characters or
-                // the next piece's style read restarts at the timestamp's characters.
+                // the next piece's style read restarts at the timestamp's characters. The span
+                // keeps every covered piece's emphasis so it renders like the single-run path.
+                var coveredStyle = NONE
                 var left = span.text.length
                 while (left > 0 && pieceIndex < segment.size) {
                     val piece = segment[pieceIndex]
+                    coveredStyle = coveredStyle or piece.style
                     val take = minOf(piece.text.length - pieceOffset, left)
                     left -= take
                     pieceOffset += take
@@ -768,6 +770,7 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
                         pieceOffset = 0
                     }
                 }
+                out.add(span.copy(style = coveredStyle))
                 continue
             }
             if (span !is NoteSpan.Text) continue
@@ -797,7 +800,8 @@ public class JsoupShowNotesSanitizer : ShowNotesSanitizer {
             when (span) {
                 is NoteSpan.Text -> span.copy(style = span.style or style)
                 is NoteSpan.Link -> span.copy(style = span.style or style)
-                is NoteSpan.Timestamp, is NoteSpan.LineBreak -> span
+                is NoteSpan.Timestamp -> span.copy(style = span.style or style)
+                is NoteSpan.LineBreak -> span
             }
         }
 

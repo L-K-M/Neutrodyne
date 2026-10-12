@@ -55,6 +55,33 @@ class DurationsTest {
     }
 
     @Test
+    fun allZeroPlaceholdersAreUnknown() {
+        // Feeds emit "00:00"-style values as placeholders when no real duration exists:
+        // they mean "unknown", and must not render as a zero-length episode.
+        assertNull(Durations.parseMs("00:00"))
+        assertNull(Durations.parseMs("0:00:00"))
+        assertNull(Durations.parseMs("0"))
+        assertNull(Durations.parseMs("00:00:00.000"))
+        assertNull(Durations.parseMs("0.000"))
+        assertNull(Durations.parseMs("00:00.000"))
+        // A genuinely tiny duration is not a placeholder: the boundary is at zero, not below it.
+        assertEquals(1L, Durations.parseMs("0.001"))
+    }
+
+    @Test
+    fun positionsKeepAllZeroValues() {
+        // `psc:chapter@start` is a position, not a duration: the common opening chapter sits at
+        // "0:00", so the same all-zero shapes that reject as durations parse as position zero.
+        assertEquals(0L, Durations.parsePositionMs("0:00"))
+        assertEquals(0L, Durations.parsePositionMs("00:00:00.000"))
+        assertEquals(0L, Durations.parsePositionMs("0"))
+        assertEquals(42_000L, Durations.parsePositionMs("00:42"))
+        // The rest of the grammar is shared: garbage and over-cap shapes still reject.
+        assertNull(Durations.parsePositionMs("1.2.3"))
+        assertNull(Durations.parsePositionMs("49:00:00"))
+    }
+
+    @Test
     fun shapeRejectionsAndLeniency() {
         // Empty components, stray separators and non-`digits.fraction` shapes reject.
         assertNull(Durations.parseMs(":30"))
@@ -87,5 +114,15 @@ class DurationsTest {
         // Absurd magnitudes are rejected by the per-part cap before any multiplication — never wrapped.
         assertNull(Durations.parseMs("9223372036854775807"))
         assertNull(Durations.parseMs("999999999999999999999999"))
+        // Same guarantee for colon forms, whose parts get multiplied afterwards.
+        assertNull(Durations.parseMs("9223372036854775807:00"))
+        assertNull(Durations.parseMs("9223372036854775807:00:00"))
+    }
+
+    @Test
+    fun nonAsciiDigitsAreNotDurations() {
+        // ASCII digits only on every target (Android's ICU \d would also take Arabic-Indic).
+        assertNull(Durations.parseMs("\u0661\u0662:\u0663\u0660"))
+        assertNull(Durations.parseMs("1:\uD835\uDFCE"))
     }
 }

@@ -430,11 +430,28 @@ line two</pre>
     /** S-rev 2: a consumed timestamp still advances the cursor over the styled pieces. */
     @Test
     fun timestampKeepsFollowingStyles() {
-        val spans = spansOf(blocksOf("<p>1:00<b>x</b></p>").single())
+        val spans = spansOf(blocksOf("<p>1:00<b>.</b></p>").single())
         assertThat(spans.filterIsInstance<NoteSpan.Timestamp>().single().positionMs).isEqualTo(60_000)
         val text = spans.filterIsInstance<NoteSpan.Text>().single()
-        assertThat(text.text).isEqualTo("x")
+        assertThat(text.text).isEqualTo(".")
         assertThat(text.style).isEqualTo(BOLD)
+    }
+
+    /** A timestamp keeps its enclosing container's emphasis (03 Timestamp linkifier). */
+    @Test
+    fun timestampKeepsContainerStyle() {
+        val spans = spansOf(blocksOf("<dl><dt>10:30 term</dt></dl>").single())
+        val stamp = spans.filterIsInstance<NoteSpan.Timestamp>().single()
+        assertThat(stamp.positionMs).isEqualTo(630_000)
+        assertThat(stamp.style).isEqualTo(BOLD)
+    }
+
+    /** A timestamp glued across styled pieces keeps their combined emphasis. */
+    @Test
+    fun timestampSpanningStyledPiecesKeepsTheirEmphasis() {
+        val spans = spansOf(blocksOf("<p><b>1:0</b><i>0</i>.</p>").single())
+        val stamp = spans.filterIsInstance<NoteSpan.Timestamp>().single()
+        assertThat(stamp.style).isEqualTo(BOLD or ITALIC)
     }
 
     /** S-rev 3: the anchor's leading space collapses against the surrounding run, never inwards. */

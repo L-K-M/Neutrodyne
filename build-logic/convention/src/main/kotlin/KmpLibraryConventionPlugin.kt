@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Unlicense
+import com.android.build.api.dsl.KotlinMultiplatformAndroidDeviceTestCompilation
 import com.android.build.api.dsl.KotlinMultiplatformAndroidLibraryTarget
 import org.gradle.api.Plugin
 import org.gradle.api.Project
@@ -28,6 +29,11 @@ class KmpLibraryConventionPlugin : Plugin<Project> {
                 compileSdk = COMPILE_SDK
                 minSdk = MIN_SDK
                 compilerOptions { jvmTarget.set(JvmTarget.fromTarget(ANDROID_JVM_TARGET.toString())) }
+                // The device-test compilation exists only where the module calls `withDeviceTest { }`
+                // (09: `:core:database` only); it gets the same GMDs and runner settings as `testOptions`.
+                compilations.configureEach {
+                    (this as? KotlinMultiplatformAndroidDeviceTestCompilation)?.let(::configureKmpDeviceTest)
+                }
             }
             kotlin.jvm("desktop") {
                 compilerOptions { jvmTarget.set(JvmTarget.fromTarget(ANDROID_JVM_TARGET.toString())) }

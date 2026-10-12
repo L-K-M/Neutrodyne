@@ -56,6 +56,9 @@ class EnclosureTypesTest {
         assertEquals("audio/mpeg", EnclosureTypes.effective("application/octet-stream", "https://e.example/a.mp3"))
         assertEquals("audio/mp4", EnclosureTypes.effective(null, "https://e.example/a.m4a"))
         assertEquals("audio/aac", EnclosureTypes.effective("bogus", "https://e.example/a.aac"))
+        // A declared type with a subtype but no usable extension survives verbatim — it is
+        // stored and displayed as declared, but `primary` never selects a non-playable prefix.
+        assertEquals("bogus", EnclosureTypes.effective("bogus", "https://e.example/page"))
         assertEquals("audio/ogg", EnclosureTypes.effective(null, "https://e.example/a.oga"))
         assertEquals("audio/opus", EnclosureTypes.effective(null, "https://e.example/a.opus"))
         assertEquals("audio/flac", EnclosureTypes.effective(null, "https://e.example/a.flac"))
@@ -65,11 +68,27 @@ class EnclosureTypesTest {
             "application/x-mpegurl",
             EnclosureTypes.effective("application/octet-stream", "https://e.example/a.m3u8?sig=1"),
         )
+        // Plain `.m3u` maps onto the same HLS family as `.m3u8` (an undecorated playlist URL
+        // with no declared type is the common shape).
+        assertEquals("application/x-mpegurl", EnclosureTypes.effective(null, "https://e.example/a.m3u"))
     }
 
     @Test
     fun extensionCaseInsensitiveAndQueryStripped() {
         assertEquals("audio/mpeg", EnclosureTypes.effective(null, "https://e.example/A.MP3?token=x"))
+        // Some CDNs emit the query percent-encoded; decode-then-cut still finds the extension.
+        assertEquals("audio/mp4", EnclosureTypes.effective(null, "https://cdn.example/ep1.m4a%3Ftoken%3Dx"))
+        // A decoded `?` inside a path segment must not hide the real extension: the raw path
+        // is sniffed first, the decoded form only as fallback.
+        assertEquals("audio/mp4", EnclosureTypes.effective(null, "https://cdn.example/ep%3Fa.m4a?token=1"))
+        assertEquals("video/mp4", EnclosureTypes.effective(null, "https://cdn.example/a.mp4%23x"))
+        // Sign-prefixed escapes are not hex: %+2F and %-1 pass through instead of decoding.
+        assertNull(EnclosureTypes.effective(null, "https://cdn.example/ep%+2Fm4a"))
+        assertNull(EnclosureTypes.effective(null, "https://cdn.example/ep%-1m4a"))
+        // A percent-encoded dot is still a dot for extension sniffing.
+        assertEquals("audio/mpeg", EnclosureTypes.effective(null, "https://cdn.example/file%2Emp3"))
+        // A bad escape passes through harmlessly.
+        assertNull(EnclosureTypes.effective(null, "https://cdn.example/file%zzmp3"))
     }
 
     @Test

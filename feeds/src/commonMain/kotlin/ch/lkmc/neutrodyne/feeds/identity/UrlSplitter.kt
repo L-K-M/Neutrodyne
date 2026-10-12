@@ -50,8 +50,20 @@ internal fun splitLenient(raw: String): UrlParts {
     val scheme = schemeMatch?.groupValues?.get(1)?.lowercase()
     val afterScheme = withoutFragment.substring(schemeMatch?.range?.last?.plus(1) ?: 0)
 
-    val hasAuthority = afterScheme.startsWith("//")
-    val rest = if (hasAuthority) afterScheme.substring(2) else afterScheme
+    val specialHttp = scheme == "http" || scheme == "https"
+    // WHATWG ignores every leading `/` or `\` after `scheme:` for a special scheme, so
+    // `http:/x`, `http:\\x` and `http:x` all fetch from host `x` (OkHttp agrees); other
+    // schemes keep RFC 3986's `//`-only authority.
+    val authorityText =
+        if (specialHttp) {
+            afterScheme.dropWhile { it == '/' || it == '\\' }
+        } else if (afterScheme.startsWith("//")) {
+            afterScheme.substring(2)
+        } else {
+            null
+        }
+    val hasAuthority = authorityText != null
+    val rest = authorityText ?: afterScheme
 
     val userInfo: String?
     val host: String?
@@ -62,7 +74,6 @@ internal fun splitLenient(raw: String): UrlParts {
         // For http(s), `\` ends the authority exactly like `/`: WHATWG URL and the fetch client
         // (OkHttp) both treat it as a path separator, so an `@` after it is path text, not
         // userinfo — `https://good.com\@evil.com/` is fetched from good.com.
-        val specialHttp = scheme == "http" || scheme == "https"
         val authorityEnd = rest.indexOfFirst { it == '/' || it == '?' || (specialHttp && it == '\\') }
         val authority = if (authorityEnd < 0) rest else rest.substring(0, authorityEnd)
         pathAndQuery = if (authorityEnd < 0) "" else rest.substring(authorityEnd)
@@ -80,13 +91,17 @@ internal fun splitLenient(raw: String): UrlParts {
         if (hostPort.isNotEmpty()) {
             if (hostPort.startsWith("[")) {
                 val close = hostPort.indexOf(']')
-                if (close > 0) {
-                    // After `]` only `:port` may follow; other residue is invalid (the JDK's `URI`
-                    // rejects it) and must not silently drop into the parts.
+                // `close > 1`: an empty literal ("[]") is malformed, not an empty host.
+                if (close > 1) {
+                    // After `]` only `:digits` may follow; other residue is invalid (the JDK's
+                    // `URI` rejects it) and must not silently drop into the parts.
                     val afterBracket = hostPort.substring(close + 1)
-                    val validPortFollows = afterBracket.isEmpty() || afterBracket.startsWith(':')
+                    val candidatePort = afterBracket.substringAfter(':')
+                    val validPortFollows =
+                        afterBracket.isEmpty() ||
+                            (afterBracket.startsWith(':') && candidatePort.all { it in '0'..'9' })
                     host = if (validPortFollows) hostPort.substring(0, close + 1) else null
-                    port = if (validPortFollows) afterBracket.substringAfter(':').takeIf { it.isNotEmpty() } else null
+                    port = if (validPortFollows) candidatePort.takeIf { it.isNotEmpty() } else null
                 } else {
                     host = null
                     port = null
@@ -94,8 +109,17 @@ internal fun splitLenient(raw: String): UrlParts {
             } else {
                 val colon = hostPort.indexOf(':')
                 if (colon >= 0) {
-                    host = hostPort.substring(0, colon)
-                    port = hostPort.substring(colon + 1).takeIf { it.isNotEmpty() }
+                    val candidatePort = hostPort.substring(colon + 1)
+                    if (candidatePort.contains(':') || candidatePort.any { it !in '0'..'9' }) {
+                        // Not a host:port pair: a bare IPv6 literal ("2001:db8::1") or a
+                        // non-numeric port ("example.com:80abc") — accepting either would mint
+                        // a bogus identity for a malformed URL.
+                        host = null
+                        port = null
+                    } else {
+                        host = hostPort.substring(0, colon)
+                        port = candidatePort.takeIf { it.isNotEmpty() }
+                    }
                 } else {
                     host = hostPort
                     port = null

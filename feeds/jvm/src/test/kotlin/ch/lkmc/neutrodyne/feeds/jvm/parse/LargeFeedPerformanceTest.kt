@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.feeds.jvm.parse
 
 import ch.lkmc.neutrodyne.feeds.jvm.Goldens
+import ch.lkmc.neutrodyne.feeds.parse.ParseLimits
 import ch.lkmc.neutrodyne.feeds.parse.ParseResult
 import okio.Buffer
 import org.junit.Test
@@ -102,7 +103,7 @@ class LargeFeedPerformanceTest {
         parser: XmlPullFeedParser,
         bytes: ByteArray,
     ): ParseResult.Ok =
-        parser.parse({ Buffer().write(bytes) }, null, "https://example.com/feed.xml")
+        parser.parse({ Buffer().write(bytes) }, null, "https://example.com/feed.xml", ParseLimits())
             as ParseResult.Ok
 
     private companion object {

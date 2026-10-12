@@ -47,6 +47,15 @@ class EpisodeKeysTest {
         val key = EpisodeKeys.primary(episode(enclosureUrl = "HTTPS://CDN.Example.com:443/pod/a.mp3?x=1"))
         // The query is part of the enclosure identity, not stripped.
         assertEquals("u:cdn.example.com/pod/a.mp3?x=1", key)
+        // http's default port strips too; non-default ports and path/query case stay verbatim.
+        assertEquals(
+            "u:cdn.example.com/pod/b.mp3?X=1",
+            EpisodeKeys.primary(episode(enclosureUrl = "http://CDN.example.com:80/pod/b.mp3?X=1")),
+        )
+        assertEquals(
+            "u:cdn.example.com:8443/pod/a.mp3",
+            EpisodeKeys.primary(episode(enclosureUrl = "https://cdn.example.com:8443/pod/a.mp3")),
+        )
     }
 
     @Test
@@ -55,6 +64,8 @@ class EpisodeKeysTest {
         val key = EpisodeKeys.titleDayKey(" Episode 42 ", 1791030896000L)
         assertEquals("t:1f46eba7092e57135e3aef7b6570849f3712b5c1", key)
         assertEquals(key, EpisodeKeys.primary(episode(title = "Episode 42", pubDate = 1791030896000L)))
+        // Case folds into the hash input: shouty and lowercase titles share one key.
+        assertEquals(key, EpisodeKeys.titleDayKey("EPISODE 42", 1791030896000L))
         // 23:59:59Z is still the same UTC day; a non-UTC default timezone would bucket it to Oct 4.
         assertEquals(key, EpisodeKeys.titleDayKey("Episode 42", 1791071999000L))
     }
@@ -64,12 +75,17 @@ class EpisodeKeysTest {
         assertNull(EpisodeKeys.titleDayKey("Episode 42", null))
         assertNull(EpisodeKeys.titleDayKey("", 1791030896000L))
         assertNull(EpisodeKeys.titleDayKey(null, 1791030896000L))
+        // Whitespace-only titles are keyless too — trim precedes the emptiness check.
+        assertNull(EpisodeKeys.titleDayKey("   ", 1791030896000L))
     }
 
     @Test
     fun linkKey() {
         val key = EpisodeKeys.primary(episode(link = "https://example.com/ep-1"))
         assertEquals("l:cdbce1b074f7cf4b346ffdb683fc78363bd903e6", key)
+        // Surrounding whitespace is trimmed before hashing — both spellings share a key.
+        val spaced = episode(link = "  https://example.com/ep-1  ")
+        assertEquals(key, EpisodeKeys.primary(spaced))
     }
 
     @Test
@@ -77,6 +93,23 @@ class EpisodeKeysTest {
         val key = EpisodeKeys.primary(episode())
         assertTrue(key.startsWith("h:"))
         assertEquals(42, key.length)
+    }
+
+    @Test
+    fun headKeyRecipeIsByteExact() {
+        // Golden vectors pin the v1 preimage byte-for-byte: title.fieldEsc() + U+001F +
+        // description.headUnits(), UTF-8, SHA-1 hex. A silent recipe drift must fail here,
+        // not at a migration.
+        assertEquals("h:953efe8f531a5a87f6d2d5a65b78b05e55599abc", EpisodeKeys.primary(episode()))
+        assertEquals(
+            "h:4d33bb4b4484382d274558d2a42bf16c30bf3df1",
+            EpisodeKeys.primary(episode(title = "title only")),
+        )
+        // The stored-head path must produce the identical key.
+        assertEquals(
+            EpisodeKeys.primary(episode(title = "title only", description = "d")),
+            EpisodeKeys.keyFor(KeyInput(title = "title only", descriptionHead = "d"), 1),
+        )
     }
 
     @Test
@@ -100,7 +133,7 @@ class EpisodeKeysTest {
         // both of these pairs as A + 3×U+001F + B, so the escape needs its own prefix.
         assertNotEquals(
             EpisodeKeys.primary(episode(title = "A\u001F", description = "B")),
-            EpisodeKeys.primary(episode(title = "A", description = "\u001F\u001FB")),
+            EpisodeKeys.primary(episode(title = "A", description = "\u001FB")),
         )
         assertNotEquals(
             EpisodeKeys.primary(episode(title = "A\u001F\u001F", description = "B")),
@@ -119,6 +152,26 @@ class EpisodeKeysTest {
     }
 
     @Test
+    fun unpairedSurrogateHashesAsQuestionMark() {
+        // Pins the v1 byte contract: JVM/ART UTF-8 encoders replace an unpaired surrogate with
+        // '?' (0x3F). Kotlin/JS and Kotlin/Native encodeToByteArray substitute U+FFFD instead —
+        // a future non-JVM target must normalise to '?' before hashing, or the same episode
+        // mints different keys per runtime (02-data-model's cross-target pin).
+        assertEquals(
+            EpisodeKeys.keyFor(KeyInput(title = "A?", descriptionHead = "B"), 1),
+            EpisodeKeys.keyFor(KeyInput(title = "A\uD800", descriptionHead = "B"), 1),
+        )
+        assertEquals(
+            EpisodeKeys.primary(episode(title = "A?", pubDate = 1791030896000L)),
+            EpisodeKeys.primary(episode(title = "A\uD800", pubDate = 1791030896000L)),
+        )
+        assertEquals(
+            EpisodeKeys.primary(episode(link = "https://example.com/a?b")),
+            EpisodeKeys.primary(episode(link = "https://example.com/a\uD800b")),
+        )
+    }
+
+    @Test
     fun headKeyTruncationNeverEndsOnALoneSurrogate() {
         // take(500) can cut inside a surrogate pair: the lone high surrogate encodes as '?' in
         // UTF-8, so two descriptions differing only past the cut would hash identically. The cut
@@ -132,6 +185,12 @@ class EpisodeKeysTest {
         assertNotEquals(
             EpisodeKeys.primary(episode(description = base + "\uD83Dz")),
             EpisodeKeys.primary(episode(description = base + "\uD83Dw")),
+        )
+        // An unpaired LOW surrogate at the cut strands the same way — only a complete pair
+        // ending the head is exempt.
+        assertNotEquals(
+            EpisodeKeys.primary(episode(description = base + "\uDE00a")),
+            EpisodeKeys.primary(episode(description = base + "\uDE00b")),
         )
         // The stored-head path applies the same boundary rule, so ingest/restore agree.
         assertEquals(
@@ -200,6 +259,7 @@ class EpisodeKeysTest {
     @Test
     fun keyForRejectsUnknownVersions() {
         assertFailsWith<IllegalArgumentException> { EpisodeKeys.keyFor(KeyInput(), 2) }
+        assertFailsWith<IllegalArgumentException> { EpisodeKeys.keyFor(KeyInput(), 0) }
     }
 
     @Test
@@ -208,6 +268,12 @@ class EpisodeKeysTest {
         assertEquals(1, EpisodeKeys.versionOf("u:example.com/a"))
         assertEquals(2, EpisodeKeys.versionOf("2g:x"))
         assertEquals(10, EpisodeKeys.versionOf("10u:example.com/a"))
+        // A non-numeric prefix is an absent prefix (version 1), not an error; an explicit "0"
+        // parses as version 0, which keyFor then rejects as unsupported.
+        assertEquals(1, EpisodeKeys.versionOf("xg:x"))
+        assertEquals(0, EpisodeKeys.versionOf("0g:x"))
+        // A prefix too large for Int parses as absent (version 1), never throws.
+        assertEquals(1, EpisodeKeys.versionOf("99999999999g:x"))
     }
 
     @Test
@@ -242,6 +308,12 @@ class EpisodeKeysTest {
             EpisodeContentHash.of(episode().copy(chaptersUrl = "a|b")),
             EpisodeContentHash.of(episode().copy(chaptersUrl = "a", chaptersType = "b")),
         )
+        // The genuine split ambiguity — both naive joins collapse to the same "a|b|c"
+        // preimage, so only an escaped/unforgeable join keeps these apart.
+        assertNotEquals(
+            EpisodeContentHash.of(episode().copy(chaptersUrl = "a|b", chaptersType = "c")),
+            EpisodeContentHash.of(episode().copy(chaptersUrl = "a", chaptersType = "b|c")),
+        )
     }
 
     @Test
@@ -273,11 +345,16 @@ class EpisodeKeysTest {
 
     @Test
     fun blankGuidNeverKeys() {
-        // A trimmed-blank guid (or a blank enclosure URL) must fall through, not collide every
-        // blank-GUID episode in every feed onto one `g:` key.
+        // A trimmed-blank guid must fall through, not collide every blank-GUID episode in
+        // every feed onto one `g:` key.
         val key = EpisodeKeys.primary(episode(guid = "   ", enclosureUrl = "https://e.example/a.mp3"))
         assertEquals("u:e.example/a.mp3", key)
         assertTrue(EpisodeKeys.primary(episode(guid = "  ")).startsWith("h:"))
+        // A blank enclosure URL has no identity either — it falls through to the next tier
+        // instead of producing a `u:` key off a space.
+        assertTrue(
+            EpisodeKeys.primary(episode(enclosureUrl = "  ", title = "T", pubDate = 1791030896000L)).startsWith("t:"),
+        )
     }
 
     @Test
@@ -288,7 +365,6 @@ class EpisodeKeysTest {
         val primary = EpisodeKeys.primary(item)
         assertTrue(primary.startsWith("t:"))
         val fallbacks = EpisodeKeys.fallbacks(item)
-        assertTrue(fallbacks.none { it == primary })
-        assertTrue(fallbacks.all { it.startsWith("u:") || it.startsWith("t:") })
+        assertTrue(fallbacks.isEmpty())
     }
 }

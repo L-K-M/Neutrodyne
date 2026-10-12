@@ -43,6 +43,9 @@ public object PodcastGuid {
      * UUIDv5 over the URL with the scheme and trailing slashes removed, namespace
      * `ead4c236-bf58-58c6-a2c6-a6b28d128cb6` (03 podcast:guid; reproduces both spec examples:
      * `mp3s.nashownotes.com/pc20rss.xml` → `917393e3-…`, `podnews.net/rss` → `9b024349-…`).
+     * Blank input contract: [feedUrl] is always a stored feed URL (non-blank by ingestion
+     * contract); a blank input still derives a deterministic but meaningless UUID. Callers
+     * must not pass blank — the parse layer's nil-UUID rejection exists for the same reason.
      */
     public fun derive(feedUrl: String): String {
         val name =

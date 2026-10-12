@@ -3,8 +3,13 @@
 package ch.lkmc.neutrodyne.core.database
 
 import ch.lkmc.neutrodyne.core.common.AppDirs
+import org.junit.Assume.assumeTrue
+import java.io.IOException
 import java.nio.file.Files
+import java.nio.file.attribute.PosixFileAttributeView
+import java.nio.file.attribute.PosixFilePermissions
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -55,5 +60,37 @@ class DesktopDatabaseFactoryTest {
 
         assertTrue(Files.exists(newer), "the numerically newest fresh copy must be kept")
         assertFalse(Files.exists(older), "the older copy must be pruned")
+    }
+
+    @Test
+    fun pruneThrowsWhenACopyCannotBeDeleted() {
+        assumeTrue(
+            "POSIX permissions require a POSIX file store",
+            Files.getFileStore(dir).supportsFileAttributeView(PosixFileAttributeView::class.java),
+        )
+        val now = 1_700_000_000_000L
+        val old = dir.resolve("quarantine/${now - 60_000}")
+        val newest = dir.resolve("quarantine/$now")
+        Files.createDirectories(old)
+        Files.createDirectories(newest)
+        Files.writeString(old.resolve(NeutrodyneDatabase.FILE_NAME), "old preserved copy")
+        Files.writeString(newest.resolve(NeutrodyneDatabase.FILE_NAME), "newest preserved copy")
+
+        // `deleteRecursively` reports a denied delete only through its Boolean result: the
+        // contract is that a failed prune propagates as the open's failure, so a false
+        // result must throw instead of reporting a still-present copy as pruned.
+        val permissions = Files.getPosixFilePermissions(old)
+        try {
+            Files.setPosixFilePermissions(old, PosixFilePermissions.fromString("r-x------"))
+            assumeTrue("the denial must be real — run unprivileged", !Files.isWritable(old))
+
+            val error = assertFailsWith<IOException> { factory.pruneQuarantine(now) }
+
+            assertEquals("cannot delete $old", error.message)
+            assertTrue(Files.exists(old.resolve(NeutrodyneDatabase.FILE_NAME)))
+            assertTrue(Files.exists(newest.resolve(NeutrodyneDatabase.FILE_NAME)))
+        } finally {
+            Files.setPosixFilePermissions(old, permissions)
+        }
     }
 }

@@ -213,13 +213,17 @@ internal object DesktopShell {
 
         // Step 6: the window on the AWT event thread. `application` returns when the window
         // closes — the M0b close rule: nothing is busy, so a close request quits — and the
-        // clean shutdown runs before main returns.
+        // clean shutdown runs before main returns. The content is gated on the database open
+        // (band 100 above) exactly like Android's StartupGate.
         application {
             NeutrodyneWindow(
                 installers = graph.entryInstallers,
                 menuActions = DesktopMenuActions(),
                 activator = activator,
                 background = background,
+                databaseOpener = graph.databaseOpener,
+                appScope = graph.appScope,
+                dataDir = dirs.data,
                 onQuitRequest = ::exitApplication,
             )
         }
