@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Minimal RSS 2.0</title>
+    <link>https://example.com/minimal</link>
+    <description>The smallest valid synthetic feed.</description>
+    <item>
+      <title>Only episode</title>
+      <enclosure url="https://cdn.example.com/min1.mp3" length="1000" type="audio/mpeg"/>
+    </item>
+  </channel>
+</rss>

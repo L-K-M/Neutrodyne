@@ -1,0 +1,18 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "feedOrder": 0,
+      "guid": "ul-1",
+      "title": "Overlong enclosure"
+    }
+  ],
+  "title": "Overlong URL",
+  "warnings": [
+    {
+      "code": "BAD_URL",
+      "detail": "4118 chars",
+      "itemIndex": 0
+    }
+  ]
+}

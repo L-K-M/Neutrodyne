@@ -26,6 +26,6 @@ private fun NoteSpan.toModel(): ShowNoteSpan =
     when (this) {
         is NoteSpan.Text -> ShowNoteSpan.Text(text, style)
         is NoteSpan.Link -> ShowNoteSpan.Link(text, url, style)
-        is NoteSpan.Timestamp -> ShowNoteSpan.Timestamp(text, positionMs)
+        is NoteSpan.Timestamp -> ShowNoteSpan.Timestamp(text, positionMs, style)
         NoteSpan.LineBreak -> ShowNoteSpan.LineBreak
     }

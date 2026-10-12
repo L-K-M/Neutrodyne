@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+  <channel>
+    <title>Media Group Content</title>
+    <item><title>Grouped media with default</title><guid>grp-1</guid>
+      <media:group>
+        <media:content url="https://cdn.example.com/g1-low.mp3" fileSize="22000000" type="audio/mpeg" bitrate="64"/>
+        <media:content url="https://cdn.example.com/g1-high.mp3" fileSize="42000000" type="audio/mpeg" bitrate="128" isDefault="true"/>
+        <media:thumbnail url="https://cdn.example.com/g1-art.jpg" width="1400" height="1400"/>
+        <media:description>Grouped media description</media:description>
+      </media:group></item>
+  </channel>
+</rss>
