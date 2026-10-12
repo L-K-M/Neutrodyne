@@ -44,7 +44,9 @@ class AndroidAppGraphTest {
     @Test
     fun initializerOrdersLieInStartupBands() {
         for (initializer in graph.initializers) {
-            assertThat(initializer.order).isAtLeast(FIRST_BAND)
+            val band = STARTUP_BANDS.getValue(checkNotNull(initializer::class.simpleName))
+            assertThat(initializer.order).isAtLeast(band.first)
+            assertThat(initializer.order).isAtMost(band.last)
         }
     }
 
@@ -65,7 +67,13 @@ class AndroidAppGraphTest {
     }
 
     private companion object {
-        const val FIRST_BAND = 0
+        val STARTUP_BANDS =
+            mapOf(
+                "DebugToolsInitializer" to 0..99,
+                "DatabaseOpenInitializer" to 100..199,
+                "PeriodicRefreshInitializer" to 200..299,
+                "RefreshForegroundObserverInitializer" to 200..299,
+            )
 
         /** The five destinations and the Settings screens M0a renders (01 M0 checklist step 16). */
         val M0A_KEYS: List<NavKey> =

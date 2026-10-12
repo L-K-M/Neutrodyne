@@ -7,10 +7,11 @@ import ch.lkmc.neutrodyne.desktop.log.RollingFileSink
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * The clean shutdown (11 Shutdown, the M0b subset): stop the hand-off server and the
- * application scope, write `session.json` with `cleanExit = true`, release the
- * single-instance lock and flush the log. Playback, lanes and the sync push join with their
- * milestones.
+ * The clean shutdown (11 Shutdown): [stopServices] stops the job runner (its grace lets an
+ * in-flight lane's `NonCancellable` finalizer commit — step 2), the hand-off server and the
+ * application scope, then this writes `session.json` with `cleanExit = true`, releases the
+ * single-instance lock and flushes the log. Playback, the sync push, the transport shutdown and
+ * the media session of steps 1–5 join with their milestones.
  *
  * [startedAtMs] is the session's real start instant, passed in by the caller that wrote the
  * session file at start-up — `session.json` keeps one meaning for the field whether the exit

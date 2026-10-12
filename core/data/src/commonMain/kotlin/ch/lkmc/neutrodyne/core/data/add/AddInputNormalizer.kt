@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.data.add
 
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.identity.UrlUserInfo
+import okio.Buffer
 import kotlin.io.encoding.Base64
 
 /** What [AddInputNormalizer] produced (03 Input normalisation). */
@@ -36,11 +37,18 @@ internal object AddInputNormalizer {
 
     private val urlToken = Regex("""^(?:(?:https?|feed|pcast|podcast|itpc|neutrodyne):|[^\s/@]+\.[^\s@]+)""")
 
-    fun normalize(raw: String): NormalizedInput {
-        var text = raw.trim().take(MAX_INPUT_CHARS)
+    fun normalize(raw: String): NormalizedInput = normalize(raw, NeutrodynePass.INITIAL)
 
-        // Step 1: share intents ("Listen to X https://…") — take the first URL-looking token.
-        if (text.any { it.isWhitespace() }) {
+    private enum class NeutrodynePass { INITIAL, RECURSIVE }
+
+    private fun normalize(
+        raw: String,
+        pass: NeutrodynePass,
+    ): NormalizedInput {
+        var text = if (pass == NeutrodynePass.INITIAL) raw.trim().take(MAX_INPUT_CHARS) else raw
+
+        // Step 1 applies only to shared text; decoded query values may legitimately contain spaces.
+        if (pass == NeutrodynePass.INITIAL && text.any { it.isWhitespace() }) {
             val token =
                 text.split(Regex("""\s+""")).firstOrNull { candidate ->
                     !candidate.startsWith("@") && urlToken.containsMatchIn(candidate)
@@ -48,10 +56,15 @@ internal object AddInputNormalizer {
             text = token
         }
 
-        // Steps 2–5 unwrap wrappers and scheme variants; each returns the fetch URL it produced.
+        // Step 2 permits one recursive normalisation, not an unbounded wrapper chain.
+        if (text.startsWith("neutrodyne://subscribe", ignoreCase = true)) {
+            text = queryUrl(text) ?: return NormalizedInput.Invalid
+            if (pass == NeutrodynePass.INITIAL) return normalize(text, NeutrodynePass.RECURSIVE)
+        }
+
+        // Steps 3–5 consume the preceding step's result without re-decoding query values.
         var schemeGuessed = false
-        var url = unwrap(text)
-        if (url == null) return invalidOrNotAUrl(text)
+        var url = unwrapSubscribePage(unwrapScheme(text)) ?: return NormalizedInput.Invalid
         if (!url.startsWith("http://", ignoreCase = true) &&
             !url.startsWith("https://", ignoreCase = true)
         ) {
@@ -69,56 +82,59 @@ internal object AddInputNormalizer {
         return NormalizedInput.Url(clean, schemeGuessed, credentials)
     }
 
-    /** The wrapper/scheme chain of 03 steps 2–4; null when no rule applies. */
-    private fun unwrap(input: String): String? {
-        val lower = input.lowercase()
-        when {
-            lower.startsWith("neutrodyne://subscribe") -> {
-                val enc = input.substringAfter("url=", "")
-                if (enc.isEmpty()) return null
-                return percentDecode(enc.substringBefore('&'))
-            }
-
-            lower.startsWith("feed:") -> {
-                // `feed://host/…` unwraps like `feed:http(s)://…` (03 step 3): an optional `//`.
-                return input.substring("feed:".length).removePrefix("//")
-            }
-
-            lower.startsWith("pcast://") -> {
-                return input.substring("pcast://".length)
-            }
-
-            lower.startsWith("podcast://") -> {
-                return input.substring("podcast://".length)
-            }
-
-            lower.startsWith("itpc://") -> {
-                return input.substring("itpc://".length)
-            }
-        }
-
-        // Subscribe-page wrappers (03 step 4).
-        val hostPath = lower.removePrefix("https://").removePrefix("http://")
-        when {
-            hostPath.startsWith("antennapod.org/deeplink/subscribe") -> {
-                val enc = input.substringAfter("url=", "")
-                if (enc.isEmpty()) return null
-                return percentDecode(enc.substringBefore('&'))
-            }
-
-            hostPath.startsWith("subscribeonandroid.com/") -> {
-                return input.substringAfter("subscribeonandroid.com/")
-            }
-
-            hostPath.startsWith("www.subscribeonandroid.com/") -> {
-                return input.substringAfter("www.subscribeonandroid.com/")
-            }
-
-            hostPath.startsWith("podcasts.google.com/feed/") -> {
-                return decodeGoogleFeed(input.substringAfter("/feed/"))
+    /** Step 3 precedes subscribe-page extraction, so `feed:` may wrap an AntennaPod page. */
+    private fun unwrapScheme(input: String): String {
+        for (prefix in listOf("feed:", "pcast://", "podcast://", "itpc://")) {
+            if (input.startsWith(prefix, ignoreCase = true)) {
+                val suffix = input.substring(prefix.length)
+                return if (prefix == "feed:") suffix.removePrefix("//") else suffix
             }
         }
         return input
+    }
+
+    /** Step 4 matches hostnames without changing the case-sensitive path or embedded URL. */
+    private fun unwrapSubscribePage(input: String): String? {
+        val schemeLength =
+            when {
+                input.startsWith("https://", ignoreCase = true) -> "https://".length
+                input.startsWith("http://", ignoreCase = true) -> "http://".length
+                else -> 0
+            }
+        val hostPath = input.substring(schemeLength)
+        val host = hostPath.substringBefore('/')
+        val path = hostPath.substring(host.length)
+        return when {
+            host.equals("antennapod.org", ignoreCase = true) && path.startsWith("/deeplink/subscribe") -> {
+                queryUrl(input)
+            }
+
+            (
+                host.equals("subscribeonandroid.com", ignoreCase = true) ||
+                    host.equals("www.subscribeonandroid.com", ignoreCase = true)
+            ) && path.startsWith('/') -> {
+                input.substring(schemeLength + host.length + 1)
+            }
+
+            host.equals("podcasts.google.com", ignoreCase = true) && path.startsWith("/feed/") -> {
+                decodeGoogleFeed(input.substring(schemeLength + host.length + "/feed/".length))
+            }
+
+            else -> {
+                input
+            }
+        }
+    }
+
+    /** Only the first exact `url` query parameter counts; fragments never supply parameters. */
+    private fun queryUrl(input: String): String? {
+        val query = input.substringBefore('#').substringAfter('?', "")
+        val encoded =
+            query
+                .split('&')
+                .firstOrNull { it.substringBefore('=') == "url" }
+                ?.substringAfter('=', "") ?: return null
+        return encoded.takeUnless { it.isEmpty() }?.let(::percentDecode)
     }
 
     /** `host.tld` or `host.tld/…` (with optional port/userinfo); rejects scheme-less garbage. */
@@ -140,25 +156,31 @@ internal object AddInputNormalizer {
         return runCatching { Base64.UrlSafe.decode(padded).decodeToString() }.getOrNull()
     }
 
-    /** Query-parameter percent decoding (`+` is a space, unlike path decoding). */
+    /** Decode one UTF-8 query component; `+` is a space and malformed percent escapes stay literal. */
     private fun percentDecode(text: String): String {
-        val out = StringBuilder(text.length)
+        val out = Buffer()
         var i = 0
+        var literalStart = 0
         while (i < text.length) {
             val c = text[i]
             val high = text.getOrNull(i + 1)?.digitToIntOrNull(16)
             val low = text.getOrNull(i + 2)?.digitToIntOrNull(16)
             if (c == '%' && high != null && low != null) {
-                out.append(((high shl 4) or low).toChar())
+                out.writeUtf8(text, literalStart, i)
+                out.writeByte((high shl 4) or low)
                 i += 3
+                literalStart = i
             } else if (c == '+') {
-                out.append(' ')
+                out.writeUtf8(text, literalStart, i)
+                out.writeByte(' '.code)
                 i++
+                literalStart = i
             } else {
-                out.append(c)
                 i++
             }
         }
-        return out.toString()
+        // Write literal runs together so a supplementary character is not split into surrogates.
+        out.writeUtf8(text, literalStart, text.length)
+        return out.readUtf8()
     }
 }

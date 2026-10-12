@@ -50,6 +50,8 @@ internal object RefreshWorkData {
     ): RefreshRequest {
         val scopeValue = data.getString(KEY_SCOPE)
         val ids = data.getLongArray(KEY_IDS)
+        val groupId = scopeValue?.removePrefix(SCOPE_GROUP)?.toLongOrNull()
+        val malformedGroup = ids == null && scopeValue?.startsWith(SCOPE_GROUP) == true && groupId == null
         val scope =
             when {
                 ids != null -> {
@@ -57,7 +59,7 @@ internal object RefreshWorkData {
                 }
 
                 scopeValue?.startsWith(SCOPE_GROUP) == true -> {
-                    RefreshScope.Group(scopeValue.removePrefix(SCOPE_GROUP).toLong())
+                    groupId?.let(RefreshScope::Group) ?: RefreshScope.All
                 }
 
                 else -> {
@@ -66,7 +68,9 @@ internal object RefreshWorkData {
             }
         return RefreshRequest(
             scope = scope,
-            force = data.getBoolean(KEY_FORCE, false),
+            // A corrupt group falls back to due selection, so unrelated feeds are never forced
+            // and decoding cannot fail every request appended behind this one.
+            force = data.getBoolean(KEY_FORCE, false) && !malformedGroup,
             pagesOnly = data.getBoolean(KEY_PAGES_ONLY, false),
             origin =
                 data.getString(KEY_ORIGIN)?.let { runCatching { RefreshOrigin.valueOf(it) }.getOrNull() }

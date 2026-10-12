@@ -139,8 +139,8 @@ internal class AddPodcastResolverImpl(
                 FeedRequest(url, etag = null, lastModified = null, conditional = false, credentials = credentials),
             )
 
-        // Scheme-guessed input retries once on `http://` (03 step 5).
-        if (schemeGuessed && outcome is FetchOutcome.Network && outcome.error.isTransport) {
+        // A guessed scheme may retry cleartext only without credentials (03 step 5).
+        if (schemeGuessed && credentials == null && outcome is FetchOutcome.Network && outcome.error.isTransport) {
             outcome =
                 fetcher.fetch(
                     FeedRequest(
@@ -271,8 +271,8 @@ internal class AddPodcastResolverImpl(
         if (UrlNormalizer.forIdentity(meta.permanentUrl ?: meta.requestedUrl) == null) {
             return PreviewOutcome.Failed(AddPodcastError.InvalidUrl)
         }
-        val id = cache.put(meta.permanentUrl ?: meta.requestedUrl, inputUrl, feed, meta, body.hops, credentials)
-        return PreviewOutcome.Done(cache.get(id) ?: error("fresh preview entry vanished"))
+        val entry = cache.put(meta.permanentUrl ?: meta.requestedUrl, inputUrl, feed, meta, body.hops, credentials)
+        return PreviewOutcome.Done(entry)
     }
 
     /**

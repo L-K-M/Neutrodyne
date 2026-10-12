@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.data.refresh
 
 import androidx.work.BackoffPolicy
+import androidx.work.Configuration
 import androidx.work.NetworkType
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkInfo
@@ -13,6 +14,8 @@ import androidx.work.testing.WorkManagerTestInitHelper
 import ch.lkmc.neutrodyne.core.data.newDb
 import ch.lkmc.neutrodyne.core.data.seedPodcast
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
+import ch.lkmc.neutrodyne.core.database.PodcastGroupMemberEntity
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
@@ -20,6 +23,8 @@ import ch.lkmc.neutrodyne.core.testing.TestClock
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -31,6 +36,10 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * `WorkManagerRefreshScheduler` against the WorkManager test backend (03 Work requests /
@@ -59,6 +68,35 @@ class RefreshSchedulerTest {
     fun tearDown() {
         db.close()
     }
+
+    @Test
+    fun `a pending periodic query suspends the caller thread`() =
+        runTest {
+            val query = PausingExecutor()
+            WorkManagerTestInitHelper.initializeTestWorkManager(
+                app,
+                Configuration.Builder().setTaskExecutor(query).build(),
+            )
+            val scheduler = scheduler()
+            Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { caller ->
+                query.pause()
+                val reconcile = async(caller) { scheduler.reschedulePeriodic() }
+                try {
+                    assertThat(query.queued.await(5, TimeUnit.SECONDS)).isTrue()
+                    val responsive = CountDownLatch(1)
+                    caller.executor.execute { responsive.countDown() }
+                    assertThat(responsive.await(1, TimeUnit.SECONDS)).isTrue()
+                    assertThat(reconcile.isCompleted).isFalse()
+                    val cancelled = CountDownLatch(1)
+                    reconcile.invokeOnCompletion { cancelled.countDown() }
+                    reconcile.cancel()
+                    assertThat(cancelled.await(1, TimeUnit.SECONDS)).isTrue()
+                } finally {
+                    query.resume()
+                    reconcile.join()
+                }
+            }
+        }
 
     @Test
     fun `the periodic tick enqueues refresh-periodic with the interval`() =
@@ -143,7 +181,7 @@ class RefreshSchedulerTest {
                 origin = RefreshOrigin.MANUAL,
             )
 
-            val info = uniqueWork(WorkManagerRefreshScheduler.WORK_NOW)
+            val info = awaitWork(WorkManagerRefreshScheduler.WORK_NOW)
             val spec = specOf(info.id.toString())
             val request = RefreshWorkData.request(spec.input, 0, 0, 0)
             assertThat(request.scope).isEqualTo(RefreshScope.Podcasts(listOf(3L, 7L)))
@@ -169,12 +207,82 @@ class RefreshSchedulerTest {
 
             // The re-enqueued mutex-timeout request carries the full intent in its input
             // data (r4 F3): RETRY stays user-driven and lands on `refresh-now`.
-            val spec = specOf(uniqueWork(WorkManagerRefreshScheduler.WORK_NOW).id.toString())
+            val spec = specOf(awaitWork(WorkManagerRefreshScheduler.WORK_NOW).id.toString())
             val request = RefreshWorkData.request(spec.input, 0, 0, 0)
             assertThat(request.scope).isEqualTo(RefreshScope.Podcasts(listOf(5L)))
             assertThat(request.force).isTrue()
             assertThat(request.origin).isEqualTo(RefreshOrigin.RETRY)
             assertThat(spec.constraints.requiresBatteryNotLow()).isFalse()
+        }
+
+    @Test
+    fun `a forced queued scope is persisted before its worker starts`() =
+        runTest {
+            val scheduler = scheduler()
+            val target = seedPodcast(db, "https://target.test/feed.xml", nextRefreshAt = FAR_FUTURE)
+            val other = seedPodcast(db, "https://other.test/feed.xml", nextRefreshAt = FAR_FUTURE)
+            scheduler.enqueueNow(RefreshScope.All, force = false, pagesOnly = false, origin = RefreshOrigin.MANUAL)
+
+            scheduler.enqueueNow(
+                RefreshScope.Podcasts(listOf(target)),
+                force = true,
+                pagesOnly = false,
+                origin = RefreshOrigin.MANUAL,
+            )
+            awaitWorkCount(WorkManagerRefreshScheduler.WORK_NOW, 2)
+
+            val infos = workManager.getWorkInfosForUniqueWork(WorkManagerRefreshScheduler.WORK_NOW).get()
+            assertThat(infos.map { it.state }).containsExactly(WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED)
+            assertThat(db.podcastDao().byId(target)?.nextRefreshAt).isEqualTo(0L)
+            assertThat(db.podcastDao().byId(other)?.nextRefreshAt).isEqualTo(FAR_FUTURE)
+        }
+
+    @Test
+    fun `a forced group persists only eligible member due marks`() =
+        runTest {
+            val target = seedPodcast(db, "https://target.test/feed.xml", nextRefreshAt = FAR_FUTURE)
+            val other = seedPodcast(db, "https://other.test/feed.xml", nextRefreshAt = FAR_FUTURE)
+            val gone = seedPodcast(db, "https://gone.test/feed.xml", nextRefreshAt = FAR_FUTURE, gone = true)
+            val groupId =
+                db.groupDao().insert(
+                    PodcastGroupEntity(
+                        uuid = "forced-group",
+                        name = "Group",
+                        nameKey = "group",
+                        orderKey = "a0",
+                        createdAt = clock.now(),
+                        updatedAt = clock.now(),
+                    ),
+                )
+            for (id in listOf(target, gone)) {
+                db.groupDao().insertMember(PodcastGroupMemberEntity(groupId, id, "a0", clock.now()))
+            }
+
+            scheduler().enqueueNow(
+                RefreshScope.Group(groupId),
+                force = true,
+                pagesOnly = false,
+                origin = RefreshOrigin.MANUAL,
+            )
+            awaitWork(WorkManagerRefreshScheduler.WORK_NOW)
+
+            assertThat(db.podcastDao().byId(target)?.nextRefreshAt).isEqualTo(0L)
+            assertThat(db.podcastDao().byId(other)?.nextRefreshAt).isEqualTo(FAR_FUTURE)
+            assertThat(db.podcastDao().byId(gone)?.nextRefreshAt).isEqualTo(FAR_FUTURE)
+        }
+
+    @Test
+    fun `a forced all scope persists due marks without unblocking credentials`() =
+        runTest {
+            val target = seedPodcast(db, "https://target.test/feed.xml", nextRefreshAt = FAR_FUTURE)
+            val blocked =
+                seedPodcast(db, "https://blocked.test/feed.xml", nextRefreshAt = FAR_FUTURE, needsCredentials = true)
+
+            scheduler().enqueueNow(RefreshScope.All, force = true, pagesOnly = false, origin = RefreshOrigin.MANUAL)
+            awaitWork(WorkManagerRefreshScheduler.WORK_NOW)
+
+            assertThat(db.podcastDao().byId(target)?.nextRefreshAt).isEqualTo(0L)
+            assertThat(db.podcastDao().byId(blocked)?.nextRefreshAt).isEqualTo(FAR_FUTURE)
         }
 
     @Test
@@ -186,7 +294,7 @@ class RefreshSchedulerTest {
 
             val request =
                 RefreshWorkData.request(
-                    specOf(uniqueWork(WorkManagerRefreshScheduler.WORK_NOW).id.toString()).input,
+                    specOf(awaitWork(WorkManagerRefreshScheduler.WORK_NOW).id.toString()).input,
                     0,
                     0,
                     0,
@@ -243,6 +351,8 @@ class RefreshSchedulerTest {
                 pagesOnly = false,
                 origin = RefreshOrigin.MANUAL,
             )
+
+            awaitWorkCount(WorkManagerRefreshScheduler.WORK_NOW, 2)
 
             // APPEND_OR_REPLACE treats an unstarted predecessor as finished-enough to keep: the
             // earlier user request stays ENQUEUED and the newest waits BLOCKED behind it.
@@ -423,7 +533,7 @@ class RefreshSchedulerTest {
 
             scheduler.enqueueNow(RefreshScope.All, force = false, pagesOnly = false, origin = RefreshOrigin.MANUAL)
 
-            val spec = specOf(uniqueWork(WorkManagerRefreshScheduler.WORK_NOW).id.toString())
+            val spec = specOf(awaitWork(WorkManagerRefreshScheduler.WORK_NOW).id.toString())
             assertThat(spec.expedited).isTrue()
             assertThat(spec.outOfQuotaPolicy).isEqualTo(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
         }
@@ -436,7 +546,7 @@ class RefreshSchedulerTest {
 
             scheduler.enqueueNow(RefreshScope.All, force = false, pagesOnly = false, origin = RefreshOrigin.MANUAL)
 
-            val spec = specOf(uniqueWork(WorkManagerRefreshScheduler.WORK_NOW).id.toString())
+            val spec = specOf(awaitWork(WorkManagerRefreshScheduler.WORK_NOW).id.toString())
             assertThat(spec.expedited).isFalse()
         }
 
@@ -471,11 +581,53 @@ class RefreshSchedulerTest {
         error("no work enqueued for $name within ${AWAIT_MS}ms")
     }
 
+    private suspend fun TestScope.awaitWorkCount(
+        name: String,
+        count: Int,
+    ) {
+        val deadlineMs = System.currentTimeMillis() + AWAIT_MS
+        while (System.currentTimeMillis() < deadlineMs) {
+            advanceUntilIdle()
+            if (workManager.getWorkInfosForUniqueWork(name).get().size == count) return
+            Thread.sleep(POLL_MS)
+        }
+        error("expected $count work requests for $name within ${AWAIT_MS}ms")
+    }
+
     /** The persisted spec: `WorkInfo` hides the input data, backoff and expedited flag. */
     private suspend fun specOf(id: String): WorkSpec =
         withContext(Dispatchers.IO) {
             checkNotNull((workManager as WorkManagerImpl).workDatabase.workSpecDao().getWorkSpec(id))
         }
+
+    /** Holds WorkManager's query while a second dispatch probes the caller's responsiveness. */
+    private class PausingExecutor : Executor {
+        val queued = CountDownLatch(1)
+        private val pending = mutableListOf<Runnable>()
+        private var paused = false
+
+        fun pause() = synchronized(pending) { paused = true }
+
+        override fun execute(command: Runnable) {
+            synchronized(pending) {
+                if (paused) {
+                    pending += command
+                    queued.countDown()
+                    return
+                }
+            }
+            command.run()
+        }
+
+        fun resume() {
+            val tasks =
+                synchronized(pending) {
+                    paused = false
+                    pending.toList().also { pending.clear() }
+                }
+            tasks.forEach { it.run() }
+        }
+    }
 
     private companion object {
         const val MINUTE_MS = 60_000L
