@@ -1,0 +1,32 @@
+{
+  "descriptionHtml": "Smart ’apostrophe’ and naïve text …",
+  "format": "RSS2",
+  "items": [
+    {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/w1.mp3"
+        }
+      ],
+      "feedOrder": 0,
+      "guid": "win-1",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/w1.mp3"
+      },
+      "title": "Épisode très bien"
+    }
+  ],
+  "title": "Café Rösti “quotes” — dash",
+  "warnings": [
+    {
+      "code": "CHARSET_REPARSED",
+      "detail": "re-parsed as windows-1252"
+    }
+  ]
+}

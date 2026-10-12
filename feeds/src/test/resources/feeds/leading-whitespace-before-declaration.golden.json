@@ -1,0 +1,25 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/lw1.mp3"
+        }
+      ],
+      "feedOrder": 0,
+      "guid": "lead-1",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/lw1.mp3"
+      },
+      "title": "Still parses"
+    }
+  ],
+  "title": "Whitespace Before Declaration"
+}

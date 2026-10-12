@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:psc="http://podlove.org/simple-chapters" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>Podlove Simple Chapters</title>
+    <item>
+      <title>Chaptered episode</title>
+      <guid>psc-1</guid>
+      <enclosure url="https://cdn.example.com/pc1.mp3" length="10" type="audio/mpeg"/>
+      <itunes:duration>1:02:03.5</itunes:duration>
+      <psc:chapters version="1.2">
+        <psc:chapter start="00:00:00.000" title="Intro"/>
+        <psc:chapter start="00:42" title="Topic one" href="https://example.com/topic/1"/>
+        <psc:chapter start="31:15.250" title="Topic two" href="https://example.com/topic/2" image="https://cdn.example.com/ch2.jpg"/>
+        <psc:chapter start="3700.0" title="Outro"/>
+      </psc:chapters>
+    </item>
+  </channel>
+</rss>

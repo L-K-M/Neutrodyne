@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+  <channel>
+    <title>Relative media:content</title>
+    <item>
+      <title>Relative media URL</title>
+      <guid>mr-1</guid>
+      <media:content url="ep.mp3" medium="audio" type="audio/mpeg" fileSize="42"/>
+    </item>
+  </channel>
+</rss>

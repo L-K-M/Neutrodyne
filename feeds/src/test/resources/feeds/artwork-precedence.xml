@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
+     xmlns:podcast="https://podcastindex.org/namespace/1.0"
+     xmlns:media="http://search.yahoo.com/mrss/"
+     xmlns:googleplay="http://www.google.com/schemas/play-podcasts/1.0">
+  <channel>
+    <title>Artwork Precedence</title>
+    <itunes:image href="https://cdn.example.com/cover-1400.jpg"/>
+    <podcast:image purpose="artwork" aspect="1/1" width="3000" height="3000" url="https://cdn.example.com/cover-3000.jpg"/>
+    <podcast:image purpose="banner" aspect="16/9" width="3200" height="1800" url="https://cdn.example.com/banner-3200.jpg"/>
+    <podcast:images srcset="https://cdn.example.com/legacy-600.jpg 600w, https://cdn.example.com/legacy-1400.jpg 1400w"/>
+    <media:thumbnail url="https://cdn.example.com/thumb-300.jpg" width="300" height="300"/>
+    <image><url>https://cdn.example.com/rss-image-144.png</url><title>Artwork Precedence</title><link>https://example.com</link></image>
+    <googleplay:image href="https://cdn.example.com/gp-500.jpg"/>
+    <item>
+      <title>Episode art</title><guid>art-1</guid>
+      <enclosure url="https://cdn.example.com/ar1.mp3" length="10" type="audio/mpeg"/>
+      <itunes:image href="https://cdn.example.com/ep-art.jpg"/>
+      <media:thumbnail url="https://cdn.example.com/ep-thumb.jpg" width="300"/>
+    </item>
+    <item>
+      <title>Text-only itunes:image quirk</title><guid>art-2</guid>
+      <enclosure url="https://cdn.example.com/ar2.mp3" length="10" type="audio/mpeg"/>
+      <itunes:image>https://cdn.example.com/ep-art-as-text.jpg</itunes:image>
+    </item>
+  </channel>
+</rss>

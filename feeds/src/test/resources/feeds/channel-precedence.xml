@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>RSS title wins regardless of order</title>
+    <atom:title>Atom title must lose to RSS</atom:title>
+    <itunes:owner><itunes:name>Owner Name</itunes:name></itunes:owner>
+    <atom:author><atom:name>Atom Author</atom:name></atom:author>
+    <item>
+      <title>Episode</title>
+      <guid>cp-1</guid>
+      <enclosure url="https://cdn.example.com/c1.mp3" length="10" type="audio/mpeg"/>
+    </item>
+  </channel>
+</rss>

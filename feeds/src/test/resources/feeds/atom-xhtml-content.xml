@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Atom XHTML Content</title>
+  <subtitle>An Atom feed with xhtml content</subtitle>
+  <logo>https://cdn.example.com/atom-logo.png</logo>
+  <icon>https://cdn.example.com/atom-icon.png</icon>
+  <entry>
+    <id>atom-xhtml-1</id>
+    <title type="html">An &lt;i&gt;html&lt;/i&gt; title</title>
+    <content type="xhtml">
+      <div xmlns="http://www.w3.org/1999/xhtml">
+        <p>Paragraph with <strong>markup</strong> and <a href="https://example.com/target">a link</a>.</p>
+      </div>
+    </content>
+    <published>2026-10-05T09:30:00Z</published>
+    <updated>2026-10-05T10:00:00Z</updated>
+  </entry>
+</feed>

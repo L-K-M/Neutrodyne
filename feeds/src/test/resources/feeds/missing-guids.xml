@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Missing GUIDs</title>
+    <item><title>Only an enclosure</title>
+      <enclosure url="https://cdn.example.com/mg1.mp3" length="10" type="audio/mpeg"/></item>
+    <item><title>Enclosure and link</title>
+      <link>https://example.com/ep2</link>
+      <enclosure url="https://cdn.example.com/mg2.mp3" length="10" type="audio/mpeg"/></item>
+  </channel>
+</rss>

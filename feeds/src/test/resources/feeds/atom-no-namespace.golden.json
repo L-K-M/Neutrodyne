@@ -1,0 +1,29 @@
+{
+  "format": "ATOM",
+  "items": [
+    {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/a1.mp3"
+        }
+      ],
+      "feedOrder": 0,
+      "guid": "urn:entry:1",
+      "link": "https://example.com/blog/1",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/a1.mp3"
+      },
+      "pubDate": 1790856000000,
+      "rawPubDate": "2026-10-01T12:00:00Z",
+      "title": "First post"
+    }
+  ],
+  "link": "https://example.com/blog",
+  "title": "Namespace-free Atom"
+}
