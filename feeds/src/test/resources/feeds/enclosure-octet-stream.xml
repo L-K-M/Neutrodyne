@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Enclosure Octet Stream</title>
+    <item><title>Generic type, known extension</title><guid>oct-1</guid>
+      <enclosure url="https://cdn.example.com/o1.m4a?sig=abc" length="1000" type="application/octet-stream"/></item>
+    <item><title>Generic type, unknown extension</title><guid>oct-2</guid>
+      <enclosure url="https://cdn.example.com/o2.bin" length="1000" type="application/octet-stream"/></item>
+  </channel>
+</rss>

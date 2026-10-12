@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:podcast="https://podcastindex.org/namespace/1.0">
+  <channel>
+    <title>A List Of Other Feeds</title>
+    <podcast:medium>podcastL</podcast:medium>
+    <podcast:remoteItem medium="podcast" feedGuid="917393e3-1b1e-5cef-ace4-edaa54e1f810"/>
+  </channel>
+</rss>

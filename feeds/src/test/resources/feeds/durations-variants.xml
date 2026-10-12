@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>Duration Variants</title>
+    <item><title>Hours minutes seconds</title><guid>du1</guid>
+      <enclosure url="https://cdn.example.com/du1.mp3" length="10" type="audio/mpeg"/>
+      <itunes:duration>00:52:57</itunes:duration></item>
+    <item><title>Minutes seconds</title><guid>du2</guid>
+      <enclosure url="https://cdn.example.com/du2.mp3" length="10" type="audio/mpeg"/>
+      <itunes:duration>75:12</itunes:duration></item>
+    <item><title>Seconds</title><guid>du3</guid>
+      <enclosure url="https://cdn.example.com/du3.mp3" length="10" type="audio/mpeg"/>
+      <itunes:duration>960</itunes:duration></item>
+    <item><title>Fraction</title><guid>du4</guid>
+      <enclosure url="https://cdn.example.com/du4.mp3" length="10" type="audio/mpeg"/>
+      <itunes:duration>1:02:03.5</itunes:duration></item>
+    <item><title>Empty</title><guid>du5</guid>
+      <enclosure url="https://cdn.example.com/du5.mp3" length="10" type="audio/mpeg"/>
+      <itunes:duration></itunes:duration></item>
+    <item><title>Over 48 hours</title><guid>du6</guid>
+      <enclosure url="https://cdn.example.com/du6.mp3" length="10" type="audio/mpeg"/>
+      <itunes:duration>52:00:00</itunes:duration></item>
+    <item><title>Garbage</title><guid>du7</guid>
+      <enclosure url="https://cdn.example.com/du7.mp3" length="10" type="audio/mpeg"/>
+      <itunes:duration>about an hour</itunes:duration></item>
+  </channel>
+</rss>
