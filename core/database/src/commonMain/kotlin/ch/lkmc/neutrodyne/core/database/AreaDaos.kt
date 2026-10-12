@@ -98,6 +98,7 @@ interface EpisodeStateDao {
         now: Long,
     ): Int
 
+    /** Caller must [ensure] a state row first (like the mark-played chain) — else this updates nothing. */
     @Query(
         "UPDATE episode_state SET isFavorite = :favorite, updatedAt = :now" +
             " WHERE episodeId = :id AND isFavorite <> :favorite",

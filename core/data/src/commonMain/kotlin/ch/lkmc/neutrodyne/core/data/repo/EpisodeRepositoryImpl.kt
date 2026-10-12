@@ -39,9 +39,17 @@ internal class EpisodeRepositoryImpl(
     private val sanitizer: ShowNotesSanitizer,
     private val clock: Clock,
 ) : EpisodeRepository {
-    /** "decoded and sanitised lazily (LRU 16)" (03): keyed by episode id. */
+    /**
+     * "decoded and sanitised lazily (LRU 16)" (03): keyed by episode id *and the blob it was
+     * decoded from* — a description rewrite must never be served the previous note.
+     */
     private val notesMutex = Mutex()
-    private val notesCache = LinkedHashMap<Long, ShowNotes>(SHOW_NOTES_CACHE_SIZE + 1)
+    private val notesCache = LinkedHashMap<Long, CachedNotes>(SHOW_NOTES_CACHE_SIZE + 1)
+
+    private class CachedNotes(
+        val bytes: ByteArray,
+        val notes: ShowNotes,
+    )
 
     override fun observeEpisode(episodeId: Long): Flow<EpisodeDetail?> =
         db.episodeDao().observeDetail(episodeId).map { it?.toDetail() }
@@ -52,9 +60,13 @@ internal class EpisodeRepositoryImpl(
             db.episodeDao().observeDescription(episodeId),
         ) { detail, bytes ->
             bytes ?: return@combine null
-            notesMutex.withLock {
-                notesCache.remove(episodeId)?.also { notesCache[episodeId] = it }
-            } ?: decode(episodeId, bytes, detail?.link ?: detail?.feedUrl ?: "")
+            notesMutex
+                .withLock {
+                    notesCache
+                        .remove(episodeId)
+                        ?.takeIf { it.bytes.contentEquals(bytes) }
+                        ?.also { notesCache[episodeId] = it }
+                }?.notes ?: decode(episodeId, bytes, detail?.link ?: detail?.feedUrl ?: "")
         }
 
     override suspend fun setPlayed(
@@ -120,7 +132,7 @@ internal class EpisodeRepositoryImpl(
                 .toModel()
         notesMutex.withLock {
             notesCache.remove(episodeId)
-            notesCache[episodeId] = notes
+            notesCache[episodeId] = CachedNotes(bytes, notes)
             while (notesCache.size > SHOW_NOTES_CACHE_SIZE) {
                 notesCache.remove(notesCache.keys.first())
             }

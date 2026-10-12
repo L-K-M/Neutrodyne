@@ -94,6 +94,8 @@ abstract class PodcastDao(
      * 2026-10-07): a candidate snapshot can go stale while a refresh or user action commits
      * fresher fetch state — the write then skips rather than roll `nextRefreshAt` (or any other
      * column) back to the stale target. Returns the number of rows written.
+     * Invariant: every other `nextRefreshAt` writer must stamp `lastAttemptAt` in the same
+     * statement/transaction, or this conditional write can clobber it.
      */
     @Query(
         "UPDATE podcast SET nextRefreshAt = :nextRefreshAt WHERE id = :id" +
@@ -121,7 +123,12 @@ abstract class PodcastDao(
         scopeAll: Boolean,
         ids: List<Long> = emptyList(),
     ) {
-        ids.ifEmpty { listOf(NO_ID) }.chunked(BIND_CHUNK).forEach { clearRefreshBlocksChunk(scopeAll, it) }
+        // scopeAll wins: a per-chunk loop would repeat the same full-table update per chunk.
+        if (scopeAll) {
+            clearRefreshBlocksChunk(true, listOf(NO_ID))
+        } else {
+            ids.ifEmpty { listOf(NO_ID) }.chunked(BIND_CHUNK).forEach { clearRefreshBlocksChunk(false, it) }
+        }
     }
 
     /** The Group variant: the same statement with the membership subquery for `id IN (:ids)`. */
@@ -308,7 +315,7 @@ abstract class PodcastDao(
      * "background paging pending" (`pagingComplete = 0`); a feed without one stays put.
      */
     @Query("UPDATE podcast SET pagingComplete = 0 WHERE id = :id AND pagingNextUrl IS NOT NULL")
-    abstract suspend fun reopenPaging(id: Long)
+    abstract suspend fun reopenPaging(id: Long): Int
 
     /**
      * Batched refresh outcomes (02): scheduling, error and validator columns only — the partial
