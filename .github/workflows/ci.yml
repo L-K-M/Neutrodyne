@@ -98,8 +98,13 @@ jobs:
       # and stubs only, no build outputs — bash, coreutils and python3's stdlib.
       - name: CI script fixture tests
         run: |
+          scripts/ci/tests/check-desktop-image.test.sh
+          scripts/ci/tests/check-runtime-sources.test.sh
+          scripts/ci/tests/desktop-packaging.test.sh
           scripts/ci/tests/install-android-sdk.test.sh
+          scripts/ci/tests/nightly-smoke.test.sh
           python3 scripts/ci/tests/report-nightly.test.py
+          scripts/ci/tests/smoke-start.test.sh
 
   unit:
     runs-on: ubuntu-24.04
@@ -158,12 +163,11 @@ jobs:
         with:
           cache-provider: basic
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
-      # :sync:server:fatJar keeps the server's packaging task green from M0a.
-      # TODO(M0b): add :desktopApp:createDistributable — the desktop image needs
-      # the runtime.lock/jlink setup that lands with the desktop package (it
-      # fails at createRuntimeImage today).
-      - name: Build the APKs and the server JAR
-        run: ./gradlew assembleRelease assembleDebug :sync:server:fatJar -Pneutrodyne.abiSplits=true
+      # jlink's --strip-debug runs objcopy on the image's native files.
+      - name: binutils for the jlink step
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq binutils
+      - name: Build the APKs, the desktop image and the server JAR
+        run: ./gradlew assembleRelease assembleDebug :desktopApp:createDistributable :sync:server:fatJar -Pneutrodyne.abiSplits=true
       # PR builds are signed with the committed public key, so a PR build is
       # signed exactly like a release and needs no secret (09 Hardening).
       - name: Build-output checks on the release APKs
@@ -179,6 +183,20 @@ jobs:
           name: debug-apks
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 5
+      # Archive the image and check inputs together: download-artifact otherwise
+      # strips executable modes, and the packaged launcher cannot start.
+      - name: Archive the desktop image and its check inputs
+        run: |
+          mkdir -p build/ci-artifacts
+          tar -czf build/ci-artifacts/desktop-image-linux-x64.tar.gz \
+            desktopApp/build/compose/binaries/main/app/Neutrodyne \
+            desktopApp/build/desktop-packaging/runtime-classpath*.txt \
+            desktopApp/build/bundled-runtime/linux-x64/jdk
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-image-linux-x64
+          path: build/ci-artifacts/desktop-image-linux-x64.tar.gz
+          retention-days: 1
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: server-jar
@@ -236,9 +254,38 @@ jobs:
             **/build/outputs/androidTest-results/
             **/build/reports/androidTests/
 
-  # TODO (M0b): `desktop-smoke` (xvfb-run smoke start of the Linux x64 image +
-  # check-desktop-image.sh + check-runtime-sources.sh --image) — `needs: assemble`
-  # per 09; it lands with the desktop packaging.
+  desktop-smoke:
+    needs: assemble
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: desktop-image-linux-x64
+          path: build/ci-artifacts
+      - name: Restore the desktop image and its executable modes
+        run: |
+          tar -xzf build/ci-artifacts/desktop-image-linux-x64.tar.gz
+          test -x desktopApp/build/compose/binaries/main/app/Neutrodyne/bin/Neutrodyne
+          test -x desktopApp/build/bundled-runtime/linux-x64/jdk/bin/java
+      # xvfb-run and dbus-run-session wrap the packaged smoke start (11 Smoke
+      # mode); objdump/ar serve the image scan's glibc and package rules.
+      - name: Smoke and scan tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb dbus-x11 binutils
+      - name: Smoke start the packaged image
+        run: |
+          img=desktopApp/build/compose/binaries/main/app/Neutrodyne
+          xvfb-run -a dbus-run-session scripts/desktop/smoke-start.sh "$img" | tee smoke.txt
+          grep -q '^SMOKE {' smoke.txt
+      - name: Image scan rules
+        run: |
+          img=desktopApp/build/compose/binaries/main/app/Neutrodyne
+          scripts/ci/check-desktop-image.sh "$img"
+      - name: Runtime exception checks
+        run: |
+          img=desktopApp/build/compose/binaries/main/app/Neutrodyne
+          scripts/ci/check-runtime-sources.sh --image "$img" --smoke smoke.txt
 
   server:
     needs: assemble

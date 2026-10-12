@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: Unlicense
+#
+# The Android command-line tools archive install-android-sdk.sh installs per
+# host (09 CI scripts, 01 Toolchain and versions). cmdline-tools;latest is
+# 23.0, upstream build 16111833; the archives live under
+# https://dl.google.com/android/repository/.
+#
+# cmdline-tools.revision is the Pkg.Revision install-android-sdk.sh requires
+# from an existing install's source.properties — anything else is replaced.
+# Each sha256 is the SHA-256 of the downloaded archive. The same manifest
+# sdkmanager reads, https://dl.google.com/android/repository/repository2-1.xml,
+# cross-checks them with SHA-1 (read 2026-10-08):
+#   commandlinetools-linux-16111833_latest.zip      sha1 e025545c62a8e64c7559119566a569fb1dec5f60
+#   commandlinetools-mac_x86_64-16111833_latest.zip sha1 112cf9618794a997ff273537d55bee02c22abffe
+#   commandlinetools-win-16111833_latest.zip        sha1 57d04f2d75eb8e8fffc5000a987e5de4b5a63e9d
+#
+# Google ships no linux/arm64 archive, and at this build the macOS archive's
+# native bin/android launcher is x86_64-only (mac_x86_64 in the name). The
+# archives' tool payload is platform-independent Java: linux-arm64 takes the
+# linux archive and macos-arm64 the macOS one, and the packages are installed
+# through the pure-Java SdkManagerCli that still ships in lib/ instead of the
+# native launcher. Keys read by scripts/ci/install-android-sdk.sh:
+#   cmdline-tools.revision, cmdline-tools.<host>.archiveUrl,
+#   cmdline-tools.<host>.sha256
+cmdline-tools.revision=23.0
+
+cmdline-tools.linux-x64.archiveUrl=https://dl.google.com/android/repository/commandlinetools-linux-16111833_latest.zip
+cmdline-tools.linux-x64.sha256=0877a1d048fe4a24efe2eff536ca4223f7adeb58648bb81909d33c446918cfa8
+
+cmdline-tools.linux-arm64.archiveUrl=https://dl.google.com/android/repository/commandlinetools-linux-16111833_latest.zip
+cmdline-tools.linux-arm64.sha256=0877a1d048fe4a24efe2eff536ca4223f7adeb58648bb81909d33c446918cfa8
+
+cmdline-tools.macos-arm64.archiveUrl=https://dl.google.com/android/repository/commandlinetools-mac_x86_64-16111833_latest.zip
+cmdline-tools.macos-arm64.sha256=7e601c04e7173754b3d051a87bb4c3a8243c65a9d7bfa9356ed6499fb8953fa3
+
+cmdline-tools.windows-x64.archiveUrl=https://dl.google.com/android/repository/commandlinetools-win-16111833_latest.zip
+cmdline-tools.windows-x64.sha256=e5885e2e59038c0778a85fc19f01de7ce7c567c105553f7617b936b1e0e87b2b

@@ -9,9 +9,10 @@
 # wix-{version}-src.tar.gz (sources job, 09 release.yml step 4).
 #
 # binaryTable lists the MSI Binary-table entries a Neutrodyne MSI may carry (11 Image
-# scan rules): jpackage's wixhelper.dll, WiX Util's custom action behind RemoveFolderEx
-# and the WixUI resources of the licence dialog. Exact ids are confirmed by the first
-# Windows build (S13); patterns match by fnmatch.
+# scan rules), confirmed 2026-10-09 against the first built MSI (nightly 37935771413):
+# JpCaDll is jpackage's own custom action (its compiled wixhelper), WixCA is WiX Util's
+# custom action behind RemoveFolderEx, and WixUIWixca plus the WixUI_Bmp_/WixUI_Ico_
+# resources are the licence dialog of WixUIExtension. Patterns match by fnmatch.
 version=3.11.2
 tag=wix3112rtm
 
@@ -22,7 +23,12 @@ source.name=wix-3.11.2-src.tar.gz
 source.url=https://codeload.github.com/wixtoolset/wix3/tar.gz/refs/tags/wix3112rtm
 source.sha256=cfc434f1ecd65d7274da35593aab792117821a22037af2a8ef42ba24673297aa
 
-binaryTable=wixhelper.dll
-binaryTable=WixHelper*
-binaryTable=bannrbmp
-binaryTable=dlgbmp
+binaryTable=JpCaDll
+binaryTable=WixCA
+binaryTable=WixUIWixca
+binaryTable=WixUI_Bmp_Banner
+binaryTable=WixUI_Bmp_Dialog
+binaryTable=WixUI_Bmp_New
+binaryTable=WixUI_Bmp_Up
+binaryTable=WixUI_Ico_Exclam
+binaryTable=WixUI_Ico_Info
