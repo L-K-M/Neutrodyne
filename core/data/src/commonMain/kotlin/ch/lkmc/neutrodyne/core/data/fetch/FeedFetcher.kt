@@ -126,6 +126,8 @@ internal class FeedFetcher(
                                     ),
                                 serverDateMs =
                                     FeedHttpHeaders.serverDateMs(response.headers[FeedHttpHeaders.DATE]),
+                                finalUrl = url,
+                                permanentUrl = permanentUrl,
                             )
                     }
 
@@ -204,11 +206,12 @@ internal class FeedFetcher(
         var probeBytes = 0L
         var total = 0L
         val sniffTarget = req.sniffOnlyBytes?.toLong() ?: FeedSniffer.PROBE_BYTES.toLong()
-        val channel = response.bodyAsChannel()
         val chunk = ByteArray(CHUNK_BYTES)
         var tooLarge = false
 
         try {
+            // Inside the try: a throw here must still close the sink and delete the temp file.
+            val channel = response.bodyAsChannel()
             while (true) {
                 val read =
                     try {
@@ -287,14 +290,25 @@ internal class FeedFetcher(
         )
     }
 
-    /** Releases a response body we do not stream (3xx, 304, errors). */
+    /**
+     * Releases a response body we do not stream (3xx, 304, errors). A server can legally send an
+     * unbounded error body; the drain stops at [DISCARD_MAX_BYTES] and cancels the channel —
+     * the bytes are never used, so draining them is waste, not correctness.
+     */
     private suspend fun HttpResponse.discardBody() {
         val channel = bodyAsChannel()
         val chunk = ByteArray(CHUNK_BYTES)
-        while (!channel.isClosedForRead) {
-            if (channel.readAvailable(chunk, 0, chunk.size) == -1) break
-            channel.awaitContent()
+        var remaining = DISCARD_MAX_BYTES
+        while (remaining > 0 && !channel.isClosedForRead) {
+            val read = channel.readAvailable(chunk, 0, minOf(chunk.size.toLong(), remaining).toInt())
+            if (read == -1) break
+            if (read == 0) {
+                channel.awaitContent()
+                continue
+            }
+            remaining -= read
         }
+        if (remaining <= 0) channel.cancel(null)
     }
 
     /** Best-effort sink close plus temp-file delete for the failure/cancellation exits. */
@@ -325,6 +339,9 @@ internal class FeedFetcher(
 
     private companion object {
         const val CHUNK_BYTES = 64 * 1024
+
+        /** Error/redirect bodies are discarded after this many bytes (03 Response handling). */
+        const val DISCARD_MAX_BYTES = 256L * 1024
 
         /** The only 3xx codes the manual chain follows (03 Request rules). */
         val FOLLOWABLE_STATUSES = setOf(301, 302, 303, 307, 308)

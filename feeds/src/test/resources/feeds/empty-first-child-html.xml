@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Empty first child</title>
+    <item>
+      <title>Leading void element</title>
+      <guid>efc-1</guid>
+      <enclosure url="https://cdn.example.com/e1.mp3" length="10" type="audio/mpeg"/>
+      <description><br/>After the line break <b>bold text</b> remains.</description>
+    </item>
+  </channel>
+</rss>

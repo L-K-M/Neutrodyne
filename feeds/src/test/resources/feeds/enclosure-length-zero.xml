@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Enclosure Length Zero</title>
+    <item><title>Zero length</title><guid>len0-1</guid>
+      <enclosure url="https://cdn.example.com/z1.mp3" length="0" type="audio/mpeg"/></item>
+    <item><title>Negative length</title><guid>len0-2</guid>
+      <enclosure url="https://cdn.example.com/z2.mp3" length="-5" type="audio/mpeg"/></item>
+    <item><title>Garbage length</title><guid>len0-3</guid>
+      <enclosure url="https://cdn.example.com/z3.mp3" length="about an hour" type="audio/mpeg"/></item>
+  </channel>
+</rss>

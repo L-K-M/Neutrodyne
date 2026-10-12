@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:podcast="https://github.com/Podcastindex-org/podcast-namespace/blob/main/docs/1.0.md">
+  <channel>
+    <title>GitHub Alias Namespace (reference-feed quirks)</title>
+    <podcast:guid>e1a2e8dc-fb0e-5b8e-a092-8f7c1c1e1234</podcast:guid>
+    <podcast:images srcset="https://cdn.example.com/alias-300.jpg 300w, https://cdn.example.com/alias-600.jpg 600w"/>
+    <item>
+      <title>Alias namespace episode</title>
+      <guid>alias-1</guid>
+      <enclosure url="https://cdn.example.com/a1.m4a" length="2" type="audio/x-m4a"/>
+      <enclosure url="https://cdn.example.com/a1.m3u8" length="0" type="application.x-mpegURL"/>
+      <podcast:transcript url="https://example.com/t1.srt" type="application/srt" language="en"/>
+      <podcast:chapters url="https://example.com/ch1.json" type="application/json"/>
+      <podcast:alternateEnclosure type="audio/mpeg" length="96000000" bitrate="128" default="true">
+        <podcast:source uri="https://cdn.example.com/a1.mp3" contentType="audio/mpeg"/>
+        <podcast:integrity type="sri" value="sha384-AbCdEf"/>
+      </podcast:alternateEnclosure>
+    </item>
+  </channel>
+</rss>

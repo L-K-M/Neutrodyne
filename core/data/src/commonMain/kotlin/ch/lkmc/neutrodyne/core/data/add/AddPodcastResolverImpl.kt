@@ -265,6 +265,12 @@ internal class AddPodcastResolverImpl(
                 maxAgeSec = body.maxAgeSec,
                 unconditional = true,
             )
+        // Reject a null subscribe identity before offering the preview (03 Host recognition):
+        // the normalizer rejects some parser-accepted hosts, and a feed without an identity can
+        // never be subscribed — better to fail here than at the subscribe write path.
+        if (UrlNormalizer.forIdentity(meta.permanentUrl ?: meta.requestedUrl) == null) {
+            return PreviewOutcome.Failed(AddPodcastError.InvalidUrl)
+        }
         val id = cache.put(meta.permanentUrl ?: meta.requestedUrl, inputUrl, feed, meta, body.hops, credentials)
         return PreviewOutcome.Done(cache.get(id) ?: error("fresh preview entry vanished"))
     }

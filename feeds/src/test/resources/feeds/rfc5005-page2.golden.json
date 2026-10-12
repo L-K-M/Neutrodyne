@@ -1,0 +1,30 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/r2.mp3"
+        }
+      ],
+      "feedOrder": 0,
+      "guid": "rfc-2-1",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/r2.mp3"
+      },
+      "title": "Page two episode"
+    }
+  ],
+  "paging": {
+    "fhArchive": true,
+    "next": "https://example.com/archived/1.xml",
+    "prevArchive": "https://example.com/archived/3.xml"
+  },
+  "title": "Archived Show, page 2"
+}

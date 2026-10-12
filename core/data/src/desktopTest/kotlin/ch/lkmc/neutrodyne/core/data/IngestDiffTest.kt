@@ -403,6 +403,83 @@ class IngestDiffTest {
         }
 
     /**
+     * Integration-review regression (data2-refresh): the normalizer rejects some
+     * parser-accepted hosts — leading-zero and trailing-dot numeric forms — so both
+     * siblings' enclosures can yield a null identity. A null identity is absence of
+     * evidence, not equality: the reused-guid claim may only reuse the `g:` row when
+     * non-null enclosure identities match on both sides, otherwise the item falls
+     * through to the fallback relations and claims its own row.
+     */
+    private suspend fun preservesPlayedEpisode(host: String) {
+        val id = podcastId()
+        ingest(
+            id,
+            parsedFeed(
+                items =
+                    listOf(
+                        parsedEpisode(
+                            0,
+                            guid = "reused",
+                            title = "Episode A",
+                            pubDate = NOW - DAY,
+                            enclosureUrl = "http://$host/a.mp3",
+                        ),
+                        parsedEpisode(
+                            1,
+                            guid = "reused",
+                            title = "Episode B",
+                            pubDate = NOW - DAY,
+                            enclosureUrl = "http://$host/b.mp3",
+                        ),
+                    ),
+            ),
+            mode = IngestMode.INITIAL,
+        )
+        val aBefore = db.episodeDao().byIdentityKey(id, "g:reused")!!
+        db.episodeStateDao().upsert(episodeStateEntity(aBefore.id, playedAt = NOW - 1_000))
+
+        ingest(
+            id,
+            parsedFeed(
+                items =
+                    listOf(
+                        parsedEpisode(
+                            0,
+                            guid = "reused",
+                            title = "Episode B",
+                            pubDate = NOW - DAY,
+                            enclosureUrl = "http://$host/b.mp3",
+                        ),
+                    ),
+            ),
+        )
+
+        val aAfter = db.episodeDao().byId(aBefore.id)!!
+        assertEquals("g:reused", aAfter.identityKey)
+        assertEquals("http://$host/a.mp3", aAfter.enclosureUrl)
+        assertEquals("Episode A", aAfter.title)
+        assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(aBefore.id)!!.playedAt)
+    }
+
+    @Test
+    fun reusedGuidWithLeadingZeroNullIdentityKeepsThePlayedRowsState() =
+        runTest {
+            preservesPlayedEpisode("127.000.000.001")
+        }
+
+    @Test
+    fun reusedGuidWithTrailingDotNullIdentityKeepsThePlayedRowsState() =
+        runTest {
+            preservesPlayedEpisode("127.0.0.1.")
+        }
+
+    @Test
+    fun reusedGuidWithDecimalIdentityKeepsThePlayedRowsState() =
+        runTest {
+            preservesPlayedEpisode("127.0.0.1")
+        }
+
+    /**
      * The document's first "dup" item is a different episode; the true continuation
      * arrives second under a fallback document key and a rotated enclosure query. Pass
      * 2's query-less match must give the row — its `g:` key, its id and its state — to

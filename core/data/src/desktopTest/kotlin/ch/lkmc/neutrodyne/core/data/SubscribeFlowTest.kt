@@ -249,6 +249,29 @@ class SubscribeFlowTest {
         }
 
     @Test
+    fun aNullIdentityPreviewFailsSubscribeAsInvalidUrl() =
+        runTest {
+            // The normalizer rejects some parser-accepted hosts (leading-zero numerics), so a
+            // preview can hold no subscribe identity. That is an InvalidUrl classification —
+            // mislabeling it Storage reports a storage fault that never happened.
+            resolverBundle.cache.put(
+                previewId = "http://127.000.000.001/f",
+                inputUrl = "http://127.000.000.001/f",
+                feed = parsedFeed(items = listOf(parsedEpisode(0))),
+                meta = fetchMeta(finalUrl = "http://127.000.000.001/f"),
+                hops = emptyList(),
+                credentials = null,
+            )
+
+            val outcome = subscribeBundle.useCase("http://127.000.000.001/f", emptySet())
+
+            assertEquals(
+                SubscribeError.InvalidUrl,
+                assertIs<Outcome.Failure<SubscribeError>>(outcome).error,
+            )
+        }
+
+    @Test
     fun aTemporaryRedirectKeepsTheRequestedUrlAsIdentity() =
         runTest {
             server.enqueue(mockResponse(302, "", "Location" to "/temp.xml"))

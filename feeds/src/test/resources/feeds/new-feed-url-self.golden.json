@@ -1,0 +1,27 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/nf1.mp3"
+        }
+      ],
+      "feedOrder": 0,
+      "guid": "nfs-1",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/nf1.mp3"
+      },
+      "title": "Episode"
+    }
+  ],
+  "link": "https://example.com/show",
+  "newFeedUrl": "https://example.com/feed.xml",
+  "title": "Self Referential New Feed URL"
+}

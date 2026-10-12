@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>RFC 822 Variants</title>
+    <item><title>Wrong weekday</title><guid>d1</guid>
+      <enclosure url="https://cdn.example.com/dd1.mp3" length="10" type="audio/mpeg"/>
+      <pubDate>Wed, 03 Oct 2026 12:34:56 +0000</pubDate></item>
+    <item><title>PDT zone</title><guid>d2</guid>
+      <enclosure url="https://cdn.example.com/dd2.mp3" length="10" type="audio/mpeg"/>
+      <pubDate>Sat, 03 Oct 2026 12:34:56 PDT</pubDate></item>
+    <item><title>UT zone</title><guid>d3</guid>
+      <enclosure url="https://cdn.example.com/dd3.mp3" length="10" type="audio/mpeg"/>
+      <pubDate>Sat, 03 Oct 2026 12:34:56 UT</pubDate></item>
+    <item><title>Z zone</title><guid>d4</guid>
+      <enclosure url="https://cdn.example.com/dd4.mp3" length="10" type="audio/mpeg"/>
+      <pubDate>Sat, 03 Oct 2026 12:34:56 Z</pubDate></item>
+    <item><title>Two digit year</title><guid>d5</guid>
+      <enclosure url="https://cdn.example.com/dd5.mp3" length="10" type="audio/mpeg"/>
+      <pubDate>Sat, 03 Oct 26 12:34:56 +0100</pubDate></item>
+    <item><title>German month</title><guid>d6</guid>
+      <enclosure url="https://cdn.example.com/dd6.mp3" length="10" type="audio/mpeg"/>
+      <pubDate>Sam., 03 Okt 2026 12:34:56 +0200</pubDate></item>
+    <item><title>French month</title><guid>d7</guid>
+      <enclosure url="https://cdn.example.com/dd7.mp3" length="10" type="audio/mpeg"/>
+      <pubDate>sam., 03 oct. 2026 12:34:56 GMT</pubDate></item>
+    <item><title>No seconds</title><guid>d8</guid>
+      <enclosure url="https://cdn.example.com/dd8.mp3" length="10" type="audio/mpeg"/>
+      <pubDate>Sat, 03 Oct 2026 12:34 +0000</pubDate></item>
+    <item><title>Out of range offset</title><guid>d9</guid>
+      <enclosure url="https://cdn.example.com/dd9.mp3" length="10" type="audio/mpeg"/>
+      <pubDate>Sat, 03 Oct 2026 12:34:56 +1900</pubDate></item>
+  </channel>
+</rss>

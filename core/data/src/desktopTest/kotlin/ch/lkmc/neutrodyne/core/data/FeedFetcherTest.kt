@@ -32,6 +32,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.util.Base64
+import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPOutputStream
 
 /**
@@ -135,6 +136,27 @@ class FeedFetcherTest {
             assertThat(hopTwo.headers["If-Modified-Since"]).isEqualTo("lm")
         }
 
+    @Test
+    fun `a permanent redirect into a 304 still surfaces the moved URL`() =
+        runBlocking {
+            server.enqueue(mockResponse(301, "", "Location" to "/new"))
+            server.enqueue(mockResponse(code = 304, body = ""))
+            val outcome =
+                fetcher().use { bundle ->
+                    bundle.fetcher.fetch(
+                        FeedRequest(
+                            url = server.url("/feed.xml").toString(),
+                            etag = "\"e\"",
+                            lastModified = null,
+                            conditional = true,
+                        ),
+                    )
+                }
+            outcome as FetchOutcome.NotModified
+            assertThat(outcome.permanentUrl).isEqualTo(server.url("/new").toString())
+            assertThat(outcome.finalUrl).isEqualTo(server.url("/new").toString())
+        }
+
     // --- Status handling ----------------------------------------------------------------------------
 
     @Test
@@ -181,23 +203,24 @@ class FeedFetcherTest {
                     "Content-Type" to "application/rss+xml; charset=utf-8",
                 ),
             )
-            val outcome =
-                fetcher().use { bundle ->
+            fetcher().use { bundle ->
+                val outcome =
                     bundle.fetcher.fetch(request(server.url("/feed.xml").toString()))
+                outcome as FetchOutcome.Body
+                assertThat(outcome.sniff).isEqualTo(Sniff.RSS)
+                assertThat(outcome.etag).isEqualTo("\"v9\"")
+                assertThat(outcome.charset).isEqualTo("utf-8")
+                assertThat(outcome.hops).isEmpty()
+                assertThat(outcome.permanentUrl).isNull()
+                // SHA-256 over the raw bytes, lowercase hex (03 Body, hashing and sniffing).
+                val expected = body.encodeUtf8().sha256().hex()
+                assertThat(outcome.sha256Hex).isEqualTo(expected)
+                // The temp file's lifetime is the bundle's — read it while both are alive.
+                FileSystem.SYSTEM.read(outcome.file) {
+                    assertThat(readUtf8()).isEqualTo(body)
                 }
-            outcome as FetchOutcome.Body
-            assertThat(outcome.sniff).isEqualTo(Sniff.RSS)
-            assertThat(outcome.etag).isEqualTo("\"v9\"")
-            assertThat(outcome.charset).isEqualTo("utf-8")
-            assertThat(outcome.hops).isEmpty()
-            assertThat(outcome.permanentUrl).isNull()
-            // SHA-256 over the raw bytes, lowercase hex (03 Body, hashing and sniffing).
-            val expected = body.encodeUtf8().sha256().hex()
-            assertThat(outcome.sha256Hex).isEqualTo(expected)
-            FileSystem.SYSTEM.read(outcome.file) {
-                assertThat(readUtf8()).isEqualTo(body)
+                FileSystem.SYSTEM.delete(outcome.file)
             }
-            FileSystem.SYSTEM.delete(outcome.file)
         }
 
     @Test
@@ -242,6 +265,31 @@ class FeedFetcherTest {
                 assertThat((gone as FetchOutcome.Http).code).isEqualTo(410)
                 assertThat((unavailable as FetchOutcome.Http).code).isEqualTo(503)
             }
+        }
+
+    @Test
+    fun `an error response drains only a bounded slice of its body`() =
+        runBlocking {
+            // 16 MiB trickled at 4 KiB/ms: an unbounded drain blocks ~4 s; a bounded one
+            // returns as soon as the cap is hit and cancels the read.
+            val payload = Buffer().write(ByteArray(16 * 1024 * 1024))
+            server.enqueue(
+                MockResponse
+                    .Builder()
+                    .code(500)
+                    .body(payload)
+                    .throttleBody(4 * 1024, 1, TimeUnit.MILLISECONDS)
+                    .build(),
+            )
+            val start = System.nanoTime()
+            val outcome =
+                fetcher().use { bundle ->
+                    bundle.fetcher.fetch(request(server.url("/feed.xml").toString()))
+                }
+            val elapsedMs = (System.nanoTime() - start) / 1_000_000
+            outcome as FetchOutcome.Http
+            assertThat(outcome.code).isEqualTo(500)
+            assertThat(elapsedMs).isLessThan(3_000)
         }
 
     @Test

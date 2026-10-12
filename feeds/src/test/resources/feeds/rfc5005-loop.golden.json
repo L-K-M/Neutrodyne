@@ -1,0 +1,29 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/lp1.mp3"
+        }
+      ],
+      "feedOrder": 0,
+      "guid": "loop-1",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/lp1.mp3"
+      },
+      "title": "Loop episode"
+    }
+  ],
+  "paging": {
+    "next": "https://example.com/loop/1.xml",
+    "prevArchive": "https://example.com/loop/1.xml"
+  },
+  "title": "Looping paging links"
+}
