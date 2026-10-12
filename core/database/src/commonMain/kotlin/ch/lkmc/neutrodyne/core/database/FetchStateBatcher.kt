@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.database
 
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -11,6 +12,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Batches batched fetch-state writes (02 Refresh selection and fetch-state writes): up to
@@ -25,9 +27,10 @@ import kotlinx.coroutines.withContext
  * (a process kill still can — harmless: those feeds stay due and refetch with conditional GET).
  *
  * [scope] owns the deadline job: the refresh run's scope in production, `backgroundScope` in
- * tests so the virtual scheduler drives the deadline. A write failure inside the deadline job
- * propagates into [scope] on purpose — it fails the run through structured concurrency rather
- * than completing a job whose write silently committed nothing.
+ * tests so the virtual scheduler drives the deadline. A write failure keeps the batch buffered
+ * ([flushLocked] throws before clearing), so the next `add` or the run's finalizer flush retries
+ * it — the deadline job must not propagate its own failure into [scope], or one faulting flush
+ * would cancel every sibling feed's in-flight work; surfacing the failure is the finalizer's job.
  *
  * Deviation (02, recorded 2026-10-06): the spec places this class in `:core:data`; it lives in
  * `:core:database` because the M1a package may not edit `core/data`.
@@ -66,7 +69,16 @@ class FetchStateBatcher internal constructor(
                                 pending.isNotEmpty() &&
                                 clock.elapsedRealtime() - firstPendingElapsed >= MAX_DELAY_MS
                             ) {
-                                flushLocked()
+                                // A failed flush keeps the batch for the next retry (finalizer
+                                // or a later add): it must not propagate into [scope] and cancel
+                                // the run's sibling feeds.
+                                try {
+                                    flushLocked()
+                                } catch (c: CancellationException) {
+                                    throw c
+                                } catch (t: Throwable) {
+                                    Log.w(TAG, t) { "deadline flush failed; batch retained" }
+                                }
                             }
                         }
                     }
@@ -98,6 +110,8 @@ class FetchStateBatcher internal constructor(
     }
 
     internal companion object {
+        private const val TAG = "FetchStateBatcher"
+
         /** 02: batches of up to 20 outcomes. */
         const val MAX_BATCH = 20
 

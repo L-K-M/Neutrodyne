@@ -167,6 +167,17 @@ abstract class PodcastDao(
         title: String?,
     )
 
+    /**
+     * Records a `pendingNewFeedUrl` outside an ingest — a permanent redirect that ends in a 304
+     * announces a move but produces no body for the ingest transaction (03 Permanent redirects).
+     * The probe machinery adopts or drops it once a fetched body proves the move.
+     */
+    @Query("UPDATE podcast SET pendingNewFeedUrl = :url WHERE id = :id")
+    abstract suspend fun setPendingNewFeedUrl(
+        id: Long,
+        url: String?,
+    )
+
     // --- Refresh selection and fetch-state writes (02; 03 Refresh scheduling) --------------------
 
     /**

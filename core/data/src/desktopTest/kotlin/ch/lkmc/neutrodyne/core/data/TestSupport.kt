@@ -2,26 +2,46 @@
 
 package ch.lkmc.neutrodyne.core.data
 
+import ch.lkmc.neutrodyne.core.common.CredentialLookup
+import ch.lkmc.neutrodyne.core.data.fetch.FeedTempFiles
 import ch.lkmc.neutrodyne.core.data.ingest.FeedIngestor
 import ch.lkmc.neutrodyne.core.data.ingest.FetchMeta
+import ch.lkmc.neutrodyne.core.data.ingest.IngestionEventBus
+import ch.lkmc.neutrodyne.core.data.refresh.AdapterResult
+import ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher
+import ch.lkmc.neutrodyne.core.data.refresh.FetchMode
+import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
+import ch.lkmc.neutrodyne.core.data.refresh.RefreshScheduler
+import ch.lkmc.neutrodyne.core.data.refresh.RssSourceAdapter
+import ch.lkmc.neutrodyne.core.data.refresh.SourceAdapter
 import ch.lkmc.neutrodyne.core.database.DueFeed
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
+import ch.lkmc.neutrodyne.core.database.PodcastFetchState
+import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
+import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.feeds.html.ShowNotesSanitizer
 import ch.lkmc.neutrodyne.feeds.jvm.html.JsoupShowNotesSanitizer
+import ch.lkmc.neutrodyne.feeds.jvm.parse.XmlPullFeedParser
 import ch.lkmc.neutrodyne.feeds.model.Enclosure
 import ch.lkmc.neutrodyne.feeds.model.FeedFormat
 import ch.lkmc.neutrodyne.feeds.model.ParsedEpisode
 import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
+import ch.lkmc.neutrodyne.feeds.parse.FeedParser
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import okio.FileSystem
+import java.io.File
 import kotlin.coroutines.CoroutineContext
+import kotlin.random.Random
 
 // --- Feed documents -------------------------------------------------------------------------------
 
@@ -88,6 +108,30 @@ internal fun newIngestor(
     sanitizer: ShowNotesSanitizer = JsoupShowNotesSanitizer(),
     defaultDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ): FeedIngestor = FeedIngestor(db, sanitizer, settings, clock, defaultDispatcher)
+
+internal fun newRefresher(
+    db: NeutrodyneDatabase,
+    adapters: Map<SourceType, SourceAdapter>,
+    clock: TestClock,
+    settings: SettingsRepository = FakeSettingsRepository(),
+    eventBus: IngestionEventBus = IngestionEventBus(),
+    syncHook: SyncIngestHook = SyncIngestHook.None,
+    // A unique root per refresher instance — a shared default would leak temp bodies across
+    // tests that run in the same JVM.
+    tempFiles: FeedTempFiles =
+        FeedTempFiles(
+            storagePathsFor(
+                File("build/tmp/m1a-refresh").resolve(
+                    java.util.UUID
+                        .randomUUID()
+                        .toString(),
+                ),
+            ),
+            FileSystem.SYSTEM,
+        ),
+    random: Random = Random(1),
+    ingestor: FeedIngestor = newIngestor(db, clock, settings),
+): FeedRefresher = FeedRefresher(db, adapters, ingestor, eventBus, syncHook, tempFiles, settings, clock, random)
 
 internal fun fetchMeta(
     finalUrl: String = "https://example.com/feed.xml",
@@ -186,3 +230,177 @@ internal suspend fun dueFeedOf(
     db: NeutrodyneDatabase,
     id: Long,
 ): DueFeed = checkNotNull(db.podcastDao().dueFeedById(id)) { "podcast $id missing" }
+
+/** A scheduler fake: records every call; `reschedulePeriodic` still bumps a counter. */
+internal class FakeRefreshScheduler : RefreshScheduler {
+    data class NowRequest(
+        val scope: RefreshScope,
+        val force: Boolean,
+        val pagesOnly: Boolean,
+        val origin: RefreshOrigin,
+    )
+
+    val nowRequests = mutableListOf<NowRequest>()
+    var rescheduleCount = 0
+    var continuationCount = 0
+    var firstFetchCount = 0
+
+    /** Returned by the next [enqueueContinuation]; lets a test simulate a rejected enqueue. */
+    var continuationEnqueued = true
+
+    override fun enqueueNow(
+        scope: RefreshScope,
+        force: Boolean,
+        pagesOnly: Boolean,
+        origin: RefreshOrigin,
+    ) {
+        nowRequests += NowRequest(scope, force, pagesOnly, origin)
+    }
+
+    override suspend fun reschedulePeriodic() {
+        rescheduleCount++
+    }
+
+    override suspend fun enqueueContinuation(): Boolean {
+        continuationCount++
+        return continuationEnqueued
+    }
+
+    override fun requestFirstFetch() {
+        firstFetchCount++
+    }
+}
+
+/** Executes one statement inside a `useWriterConnection`/`useReaderConnection` block. */
+internal suspend fun androidx.room3.PooledConnection.execSql(sql: String) {
+    usePrepared(sql) { it.step() }
+}
+
+internal fun fetchState(
+    id: Long,
+    nextRefreshAt: Long?,
+): PodcastFetchState =
+    PodcastFetchState(
+        id = id,
+        lastAttemptAt = null,
+        lastSuccessAt = null,
+        nextRefreshAt = nextRefreshAt,
+        failureCount = 0,
+        lastErrorKind = null,
+        lastErrorDetail = null,
+        gone = false,
+        needsCredentials = false,
+        etag = null,
+        lastModified = null,
+        lastFullFetchAt = null,
+        lastParseOk = true,
+    )
+
+// --- Refresh-engine doubles -----------------------------------------------------------------------
+
+/**
+ * A scripted `SourceAdapter` (03 Source adapters): [result] answers `fetchAndParse` per feed —
+ * `OLDER_PAGE` requests key on `feed.pagingNextUrl`, the rest on `feed.feedUrl`. `afterIngest`
+ * defaults to the RSS behaviour (newIds unchanged) and every call is recorded.
+ */
+internal class StubSourceAdapter(
+    val results: MutableMap<String, AdapterResult> = mutableMapOf(),
+    private val onFetch: suspend (DueFeed, FetchMode) -> AdapterResult? = { _, _ -> null },
+    private val announce: suspend (Long, List<Long>, List<Long>) -> List<Long> = { _, _, newIds -> newIds },
+) : SourceAdapter {
+    override val sourceType: SourceType = SourceType.RSS
+
+    /** `(podcastId, mode)` of every `fetchAndParse`, in call order. */
+    val calls = mutableListOf<Pair<Long, FetchMode>>()
+
+    /** `(podcastId, inserted, newIds)` of every `afterIngest`, in call order. */
+    val afterIngestCalls = mutableListOf<Triple<Long, List<Long>, List<Long>>>()
+
+    /** Keys `fetchAndParse` looked up with no scripted result — assert this stays empty. */
+    val unscriptedKeys = mutableListOf<String?>()
+
+    override fun hostKey(
+        feed: DueFeed,
+        requestUrl: String,
+    ): String =
+        requestUrl
+            .substringAfter("://", requestUrl)
+            .substringBefore("/")
+            .substringBefore("?")
+            .substringAfterLast("@")
+            .lowercase()
+
+    override suspend fun fetchAndParse(
+        feed: DueFeed,
+        mode: FetchMode,
+    ): AdapterResult {
+        calls += feed.id to mode
+        onFetch(feed, mode)?.let { return it }
+        val key = if (mode == FetchMode.OLDER_PAGE) feed.pagingNextUrl else feed.feedUrl
+        val scripted = results[key]
+        if (scripted == null) unscriptedKeys += key
+        return scripted ?: AdapterResult.Failed(
+            FeedErrorKind.UNKNOWN,
+            http = null,
+            retryAfterMs = null,
+            transient = true,
+        )
+    }
+
+    override fun nextRefreshAt(
+        feed: DueFeed,
+        result: AdapterResult,
+        base: Long,
+    ): Long = base
+
+    override suspend fun afterIngest(
+        podcastId: Long,
+        inserted: List<Long>,
+        newIds: List<Long>,
+    ): List<Long> {
+        afterIngestCalls += Triple(podcastId, inserted, newIds)
+        return announce(podcastId, inserted, newIds)
+    }
+}
+
+internal fun stubAdapter(
+    results: MutableMap<String, AdapterResult> = mutableMapOf(),
+    onFetch: suspend (DueFeed, FetchMode) -> AdapterResult? = { _, _ -> null },
+    announce: suspend (Long, List<Long>, List<Long>) -> List<Long> = { _, _, newIds -> newIds },
+) = StubSourceAdapter(results, onFetch, announce)
+
+/** A parsed-document adapter result (03 `AdapterResult.Parsed`). */
+internal fun adapterParsed(
+    feed: ParsedFeed,
+    partial: Boolean = false,
+    meta: FetchMeta = fetchMeta(),
+) = AdapterResult.Parsed(feed = feed, partial = partial, meta = meta)
+
+/** A real `RssSourceAdapter` over the production fetcher stack for the engine end-to-end tests. */
+internal class RssAdapterBundle(
+    val adapter: RssSourceAdapter,
+    val tempFiles: FeedTempFiles,
+    private val fetcher: FetcherBundle,
+) : AutoCloseable by fetcher
+
+internal fun newRssAdapter(
+    root: File,
+    clock: TestClock,
+    network: FakeNetworkMonitor = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE),
+    credentials: CredentialLookup = CredentialLookup.None,
+    io: CoroutineDispatcher = Dispatchers.IO,
+    parser: FeedParser = XmlPullFeedParser.discovered(),
+): RssAdapterBundle {
+    val bundle = newFetcher(root, credentials, clock)
+    val adapter =
+        RssSourceAdapter(
+            fetcher = bundle.fetcher,
+            parser = parser,
+            tempFiles = bundle.tempFiles,
+            fileSystem = FileSystem.SYSTEM,
+            network = network,
+            clock = clock,
+            io = io,
+        )
+    return RssAdapterBundle(adapter, bundle.tempFiles, bundle)
+}
