@@ -168,6 +168,13 @@ abstract class PodcastDao(
         title: String?,
     )
 
+    /** The podcast screen's order chip (05 `FeedRepository.setFeedOrder`, `FeedSource.Podcast`). */
+    @Query("UPDATE podcast SET episodeOrder = :order WHERE id = :podcastId")
+    abstract suspend fun setEpisodeOrder(
+        podcastId: Long,
+        order: FeedOrder,
+    )
+
     /**
      * Records a `pendingNewFeedUrl` outside an ingest — a permanent redirect that ends in a 304
      * announces a move but produces no body for the ingest transaction (03 Permanent redirects).
@@ -177,13 +184,6 @@ abstract class PodcastDao(
     abstract suspend fun setPendingNewFeedUrl(
         id: Long,
         url: String?,
-    )
-
-    /** The podcast screen's order chip (05 `FeedRepository.setFeedOrder`, `FeedSource.Podcast`). */
-    @Query("UPDATE podcast SET episodeOrder = :order WHERE id = :podcastId")
-    abstract suspend fun setEpisodeOrder(
-        podcastId: Long,
-        order: FeedOrder,
     )
 
     // --- Refresh selection and fetch-state writes (02; 03 Refresh scheduling) --------------------
