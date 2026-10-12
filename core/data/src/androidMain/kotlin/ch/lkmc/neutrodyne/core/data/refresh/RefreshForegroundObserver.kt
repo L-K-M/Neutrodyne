@@ -71,7 +71,7 @@ internal class RefreshForegroundObserver
             if (!settings.get(FeedsSettingKeys.REFRESH_ON_APP_OPEN)) return false
             val tickMs =
                 settings.get(FeedsSettingKeys.SCHEDULED_TICK_MINUTES).coerceAtLeast(MIN_TICK_MINUTES) * 60_000L
-            if (clock.now() - settings.get(FeedsSettingKeys.LAST_ALL_RUN_FINISHED_AT) < tickMs) return false
+            if (clock.now() - settings.get(FeedsSettingKeys.LAST_ALL_RUN_FINISHED_AT) in 0 until tickMs) return false
             if (settings.get(FeedsSettingKeys.REFRESH_WIFI_ONLY) && network.status.value.isMetered) return false
             return true
         }

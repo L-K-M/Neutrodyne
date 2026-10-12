@@ -224,6 +224,26 @@ class FeedFetcherTest {
         }
 
     @Test
+    fun `namespace-prefixed atom roots sniff as atom`() =
+        runBlocking {
+            fun prefixedAtom(prefix: String) =
+                "<$prefix:feed xmlns:$prefix=\"http://www.w3.org/2005/Atom\">" +
+                    "<$prefix:title>t</$prefix:title></$prefix:feed>"
+            server.enqueue(mockResponse(body = prefixedAtom("atom")))
+            server.enqueue(mockResponse(body = prefixedAtom("a")))
+            fetcher().use { bundle ->
+                for (path in listOf("/atom", "/a")) {
+                    val outcome = bundle.fetcher.fetch(request(server.url(path).toString()))
+                    // The parser accepts prefixed roots by local name; the sniff must agree.
+                    assertWithMessage(path)
+                        .that((outcome as FetchOutcome.Body).sniff)
+                        .isEqualTo(Sniff.ATOM)
+                    FileSystem.SYSTEM.delete(outcome.file)
+                }
+            }
+        }
+
+    @Test
     fun `html 200 is a Body with HTML sniff — the adapter decides NOT_A_FEED`() =
         runBlocking {
             server.enqueue(mockResponse(body = "<html><body>oops</body></html>"))
@@ -381,6 +401,25 @@ class FeedFetcherTest {
             outcome as FetchOutcome.Http
             assertThat(outcome.basicChallenge).isTrue()
             assertThat(outcome.realm).isEqualTo("packed")
+        }
+
+    @Test
+    fun `a 401 with a very long basic challenge keeps its http outcome`() =
+        runBlocking {
+            // Thousands of auth params overflowed the recursive challenge regex and
+            // surfaced as Network(Other(StackOverflowError)) instead of the 401.
+            val header =
+                (0 until 4_096).joinToString(",", prefix = "Basic ") { "p$it=x" } +
+                    ",realm=\"probe\""
+            server.enqueue(mockResponse(401, "", "WWW-Authenticate" to header))
+            val outcome =
+                fetcher().use { bundle ->
+                    bundle.fetcher.fetch(request(server.url("/feed.xml").toString()))
+                }
+            outcome as FetchOutcome.Http
+            assertThat(outcome.code).isEqualTo(401)
+            assertThat(outcome.basicChallenge).isTrue()
+            assertThat(outcome.realm).isEqualTo("probe")
         }
 
     @Test

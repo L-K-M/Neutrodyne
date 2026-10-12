@@ -29,4 +29,33 @@ class FeedSnifferTest {
                 "<feed xmlns=\"http://www.w3.org/2005/Atom\"/>"
         assertThat(FeedSniffer.sniff(doc.encodeToByteArray())).isEqualTo(Sniff.ATOM)
     }
+
+    @Test
+    fun `namespace-prefixed roots classify on the local name`() {
+        // The parser matches the root's local name, so a prefixed Atom document
+        // must not read as OTHER.
+        assertThat(
+            FeedSniffer.sniff(
+                "<atom:feed xmlns:atom=\"http://www.w3.org/2005/Atom\"/>".encodeToByteArray(),
+            ),
+        ).isEqualTo(Sniff.ATOM)
+        assertThat(
+            FeedSniffer.sniff(
+                "<a:feed xmlns:a=\"http://www.w3.org/2005/Atom\"/>".encodeToByteArray(),
+            ),
+        ).isEqualTo(Sniff.ATOM)
+        assertThat(
+            FeedSniffer.sniff(
+                "<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"/>"
+                    .encodeToByteArray(),
+            ),
+        ).isEqualTo(Sniff.RDF)
+    }
+
+    @Test
+    fun `root names longer than the keyword are not feeds`() {
+        assertThat(FeedSniffer.sniff("<rssfoo><channel/></rssfoo>".encodeToByteArray()))
+            .isEqualTo(Sniff.OTHER)
+        assertThat(FeedSniffer.sniff("<feeder/>".encodeToByteArray())).isEqualTo(Sniff.OTHER)
+    }
 }

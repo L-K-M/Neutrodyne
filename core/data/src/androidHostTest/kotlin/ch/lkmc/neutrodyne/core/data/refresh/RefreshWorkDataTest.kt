@@ -54,10 +54,13 @@ class RefreshWorkDataTest {
         val data =
             Data
                 .Builder()
-                .putString("scope", "all")
+                .putString("scope", "group:abc")
                 .putLongArray("ids", longArrayOf(9L))
+                .putBoolean("force", true)
                 .build()
-        assertThat(decode(data).scope).isEqualTo(RefreshScope.Podcasts(listOf(9L)))
+        val request = decode(data)
+        assertThat(request.scope).isEqualTo(RefreshScope.Podcasts(listOf(9L)))
+        assertThat(request.force).isTrue()
     }
 
     @Test
@@ -73,6 +76,21 @@ class RefreshWorkDataTest {
     fun `an unknown origin falls back to periodic`() {
         val data = Data.Builder().putString("origin", "NOT_A_THING").build()
         assertThat(decode(data).origin).isEqualTo(RefreshOrigin.PERIODIC)
+    }
+
+    @Test
+    fun `malformed group scopes fall back without failing the chain`() {
+        for (scope in listOf("group:abc", "group:", "group:9223372036854775808")) {
+            val data =
+                Data
+                    .Builder()
+                    .putString("scope", scope)
+                    .putBoolean("force", true)
+                    .build()
+            val request = decode(data)
+            assertThat(request.scope).isEqualTo(RefreshScope.All)
+            assertThat(request.force).isFalse()
+        }
     }
 
     @Test
@@ -99,7 +117,16 @@ class RefreshWorkDataTest {
 
     @Test
     fun `scope id cap matches the data size budget`() {
-        assertThat(RefreshWorkData.MAX_SCOPE_IDS).isEqualTo(500)
+        val ids = List(RefreshWorkData.MAX_SCOPE_IDS) { Long.MAX_VALUE - it }
+        val data =
+            RefreshWorkData.of(
+                RefreshScope.Podcasts(ids),
+                force = true,
+                pagesOnly = true,
+                RefreshOrigin.CONTINUATION,
+            )
+        assertThat(data.toByteArray().size).isAtMost(Data.MAX_DATA_BYTES)
+        assertThat(decode(data).scope).isEqualTo(RefreshScope.Podcasts(ids))
     }
 
     private fun decode(data: Data) =
