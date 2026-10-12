@@ -218,16 +218,29 @@ internal class FeedIngestor(
                     knowledge[itemGuid] != GuidKnowledge.KNOWN_INDEPENDENT
             for (key in item.claimKeys) {
                 val row = byKey[key] ?: continue
+                // A `g:` row whose stored current GUID has rotated away from the claimed GUID
+                // is another episode's slot, not this item's own — pass 1 alone cannot
+                // distinguish the slot's owner from a foreign claimant once the enclosure
+                // identity is unusable (the normalizer rejects some parser-accepted hosts),
+                // so the claim takes the same conservative path as proven foreign ownership.
+                // A row still carrying the item's own current GUID is its own slot and claims
+                // normally — that is the path V1 feeds of text-only episodes rely on.
+                val rotatedSlot =
+                    key == "g:$itemGuid" && EpisodeKeys.canonicalGuid(row.guid) != itemGuid
                 if (
-                    contested && item.enclosureIdentity != null &&
-                    rowsByEnclosure[item.enclosureIdentity]?.any { it != row.id } == true
+                    contested &&
+                    (
+                        (
+                            item.enclosureIdentity != null &&
+                                rowsByEnclosure[item.enclosureIdentity]?.any { it != row.id } ==
+                                true
+                        ) ||
+                            (rotatedSlot && item.enclosureIdentity == null)
+                    )
                 ) {
                     // Erased or absent history cannot arbitrate between this GUID's stored owner
-                    // and the enclosure's owner: leave both rows and their state untouched; the
-                    // item takes the insert-or-drop path (D98, 03 deviation 17). A null
-                    // enclosure identity cannot prove foreign ownership, so it falls through to
-                    // the ordinary key claim — the reused-GUID case it must never claim is
-                    // already settled by the ambiguity skip above.
+                    // and the claimant: leave both rows and their state untouched; the item
+                    // takes the insert-or-drop path (D98, 03 deviation 17).
                     item.unresolved = true
                     break
                 }
