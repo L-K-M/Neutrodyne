@@ -129,6 +129,7 @@ internal fun newRefresher(
 
 internal fun fetchMeta(
     finalUrl: String = "https://example.com/feed.xml",
+    requestedUrl: String = finalUrl,
     sha256Hex: String = "a".repeat(64),
     etag: String? = null,
     lastModified: String? = null,
@@ -139,7 +140,7 @@ internal fun fetchMeta(
 ): FetchMeta =
     FetchMeta(
         finalUrl = finalUrl,
-        requestedUrl = finalUrl,
+        requestedUrl = requestedUrl,
         permanentUrl = permanentUrl,
         etag = etag,
         lastModified = lastModified,

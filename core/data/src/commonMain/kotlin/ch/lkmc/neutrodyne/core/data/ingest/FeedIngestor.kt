@@ -67,19 +67,32 @@ internal class FeedIngestor(
         parsed: ParsedFeed,
         ctx: IngestContext,
     ): IngestResult {
+        // The settings read can suspend on DataStore — it resolves before the write lock.
+        val intervalMinutes =
+            RefreshPolicy.effectiveIntervalMinutes(settings.get(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES))
         val prepared = withContext(defaultDispatcher) { prepare(parsed, ctx) }
-        return db.withWriteTransaction { ingestPrepared(podcast, parsed, ctx, prepared) }
+        return db.withWriteTransaction { ingestPrepared(podcast, parsed, ctx, prepared, intervalMinutes) }
     }
 
     /**
      * The same ingest, meant to be called inside the caller's `withWriteTransaction` (the
-     * subscribe commit — 03 Subscribe). Preparation still runs before the write work.
+     * subscribe commit — 03 Subscribe). Preparation and the settings read run on the caller's
+     * lock: that caller owns the transaction boundary and keeps the section short.
      */
     suspend fun ingestInTransaction(
         podcast: DueFeed,
         parsed: ParsedFeed,
         ctx: IngestContext,
-    ): IngestResult = ingestPrepared(podcast, parsed, ctx, prepare(parsed, ctx))
+    ): IngestResult =
+        ingestPrepared(
+            podcast,
+            parsed,
+            ctx,
+            prepare(parsed, ctx),
+            RefreshPolicy.effectiveIntervalMinutes(
+                settings.get(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES),
+            ),
+        )
 
     /**
      * The diff's write phase. [prepared] carries everything the transaction needs so nothing
@@ -90,6 +103,7 @@ internal class FeedIngestor(
         parsed: ParsedFeed,
         ctx: IngestContext,
         prepared: PreparedFeed,
+        intervalMinutes: Int?,
     ): IngestResult {
         val ingestDao = db.ingestDao()
         val podcastDao = db.podcastDao()
@@ -110,7 +124,10 @@ internal class FeedIngestor(
         }
 
         val existing = ingestDao.existing(stored.id)
-        val byKey = existing.associateBy { it.identityKey }
+        // Mutable and updated on every rekey so claims and the fallback-key check never act
+        // on an identity the row no longer carries (a stale key view re-keys later items onto
+        // fallback keys, or lets a second item claim a row through its old key).
+        val byKey = existing.associateByTo(LinkedHashMap()) { it.identityKey }
         val storedKeys = byKey.keys
         val taken = mutableSetOf<Long>()
         var rekeyed = 0
@@ -170,7 +187,7 @@ internal class FeedIngestor(
                 }
                 val holder = claimedBy[row.id]
                 if (holder == null) {
-                    if (claimRow(ingestDao, storedKeys, item, row)) rekeyed++
+                    if (claimRow(ingestDao, byKey, item, row)) rekeyed++
                     claimedBy[row.id] = item
                     taken += row.id
                     break
@@ -181,7 +198,7 @@ internal class FeedIngestor(
                 if (itemWins) {
                     holder.matchedTo = null
                     pending.addLast(holder)
-                    if (claimRow(ingestDao, storedKeys, item, row)) rekeyed++
+                    if (claimRow(ingestDao, byKey, item, row)) rekeyed++
                     claimedBy[row.id] = item
                     taken += row.id
                     break
@@ -200,7 +217,7 @@ internal class FeedIngestor(
         // recovers (r3 F1).
         val fallbacks = Pass2Index(existing, taken)
         for ((item, row) in fallbacks.matches(prepared.items)) {
-            if (claimRow(ingestDao, storedKeys, item, row)) rekeyed++
+            if (claimRow(ingestDao, byKey, item, row)) rekeyed++
             taken += row.id
         }
 
@@ -248,9 +265,9 @@ internal class FeedIngestor(
                         funding = item.funding(row.id),
                         pscChapters = item.pscChapters(row.id),
                     )
-                    // A changed non-null chapters URL drops the fetched JSON chapter blob.
+                    // A changed or removed chapters URL drops the fetched JSON chapter blob.
                     val chaptersUrl = item.episode.chaptersUrl
-                    if (chaptersUrl != null && row.chaptersUrl != chaptersUrl) {
+                    if (row.chaptersUrl != chaptersUrl) {
                         ingestDao.deleteJsonChapters(row.id)
                     }
                     updated++
@@ -316,7 +333,7 @@ internal class FeedIngestor(
                     } else {
                         Long.MIN_VALUE
                     }
-                val absent = existing.filter { it.id !in taken && it.sortDate >= floor }
+                val absent = existing.filter { it.inFeed && it.id !in taken && it.sortDate >= floor }
                 if (absent.isNotEmpty()) {
                     ingestDao.setInFeed(absent.map { it.id }, false)
                     flippedOut = absent.size
@@ -353,8 +370,6 @@ internal class FeedIngestor(
         val pendingNewFeedUrl = pendingNewFeedUrl(parsed, stored, podcastDao.aliases(stored.id))
         val firstIngest = stored.initialFetch
         val latestEpisodeAt = ingestDao.maxSortDate(stored.id)
-        val intervalMinutes =
-            RefreshPolicy.effectiveIntervalMinutes(settings.get(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES))
         val (guidValue, guidDerived) =
             when {
                 realGuid != null -> {
@@ -469,7 +484,7 @@ internal class FeedIngestor(
      */
     private suspend fun claimRow(
         ingestDao: IngestDao,
-        storedKeys: Set<String>,
+        byKey: MutableMap<String, ExistingEpisodeKey>,
         item: PreparedItem,
         row: ExistingEpisodeKey,
     ): Boolean {
@@ -482,9 +497,12 @@ internal class FeedIngestor(
                 item.docKey = item.primaryKey
             }
 
-            item.docKey !in storedKeys -> {
-                // An older key version matched: the row's identity is rewritten in place.
+            item.docKey !in byKey.keys -> {
+                // An older key version matched: the row's identity is rewritten in place —
+                // and in the live index, so the released key is free and the new one claims.
                 ingestDao.rekey(row.id, item.docKey, item.episode.guid)
+                byKey.remove(row.identityKey)
+                byKey[item.docKey] = row.copy(identityKey = item.docKey)
                 rekeyed = true
             }
 
@@ -531,7 +549,9 @@ internal class FeedIngestor(
             val docKey = chooseKey(e, primaryKey, usedKeys, warnings, index) ?: continue
             val imageUrl =
                 e.artwork.firstOrNull()?.url?.takeUnless {
-                    UrlNormalizer.forIdentity(it) == artworkIdentity
+                    // A null identity is absence of evidence, not equality (03): a feed with
+                    // no resolvable cover must not swallow an unresolvable item image.
+                    artworkIdentity != null && UrlNormalizer.forIdentity(it) == artworkIdentity
                 }
             val titleNorm = e.title?.let(TitleMatch::normalise)?.takeIf(String::isNotEmpty)
             val pubDayUtc = e.pubDate?.div(PreparedItem.DAY_MS)

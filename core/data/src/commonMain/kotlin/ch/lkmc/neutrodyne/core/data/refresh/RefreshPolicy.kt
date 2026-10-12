@@ -29,7 +29,7 @@ internal object RefreshPolicy {
         ttlMinutes: Int?,
         maxAgeSec: Long?,
     ): Long {
-        val intervalMs = intervalMinutes?.toLong()?.times(60_000L) ?: return NEVER
+        val intervalMs = intervalMinutes?.takeIf { it > 0 }?.toLong()?.times(60_000L) ?: return NEVER
         var i = intervalMs
         if (complete || (latestEpisodeAt != null && latestEpisodeAt < now - 180L * DAY_MS)) {
             i = maxOf(i, DAY_MS)
