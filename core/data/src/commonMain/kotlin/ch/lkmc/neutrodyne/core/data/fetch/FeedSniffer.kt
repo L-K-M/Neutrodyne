@@ -44,12 +44,27 @@ internal object FeedSniffer {
                 }
 
                 else -> {
+                    if (i < text.length && text[i] == '<') {
+                        // The root element's QName ends at whitespace, '/' or '>' (or the
+                        // window edge). The parser matches its local name — namespace-prefixed
+                        // roots like `<a:feed>` classify like `<feed>` — so the sniffer does
+                        // the same, which also keeps `<rssfoo>` from passing as RSS.
+                        var end = i + 1
+                        while (end < text.length && !text[end].isXmlSpace() &&
+                            text[end] != '/' && text[end] != '>'
+                        ) {
+                            end++
+                        }
+                        return when {
+                            text.endsWithAt("rss", i + 1, end) -> Sniff.RSS
+                            text.endsWithAt("rdf", i + 1, end) -> Sniff.RDF
+                            text.endsWithAt("feed", i + 1, end) -> Sniff.ATOM
+                            text.endsWithAt("opml", i + 1, end) -> Sniff.OPML
+                            text.endsWithAt("html", i + 1, end) -> Sniff.HTML
+                            else -> Sniff.OTHER
+                        }
+                    }
                     return when {
-                        text.startsWith("<rss", i, ignoreCase = true) -> Sniff.RSS
-                        text.startsWith("<rdf", i, ignoreCase = true) -> Sniff.RDF
-                        text.startsWith("<feed", i, ignoreCase = true) -> Sniff.ATOM
-                        text.startsWith("<opml", i, ignoreCase = true) -> Sniff.OPML
-                        text.startsWith("<html", i, ignoreCase = true) -> Sniff.HTML
                         text.startsWith("{", i) || text.startsWith("[", i) -> Sniff.JSON
                         else -> Sniff.OTHER
                     }
@@ -182,6 +197,23 @@ internal object FeedSniffer {
             i += 4
         }
         return out.toString()
+    }
+
+    /**
+     * Whether the QName `this[start, end)` has local name [name] — the part after the last
+     * `:` — compared case-insensitively, without copying.
+     */
+    private fun String.endsWithAt(
+        name: String,
+        start: Int,
+        end: Int,
+    ): Boolean {
+        var local = start
+        for (j in start until end) {
+            if (this[j] == ':') local = j + 1
+        }
+        return local + name.length == end &&
+            regionMatches(local, name, 0, name.length, ignoreCase = true)
     }
 
     private fun Char.isXmlSpace(): Boolean = this == ' ' || this == '\t' || this == '\n' || this == '\r'
