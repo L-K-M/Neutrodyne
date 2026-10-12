@@ -346,7 +346,11 @@ internal class FeedRefresher(
                 .getOrElse { e ->
                     if (e is CancellationException) throw e
                     Log.w(TAG, e) { "fetchAndParse threw for podcast ${feed.id}" }
-                    writeFailure(feed, FeedErrorKind.UNKNOWN, retryAfterMs = null, detail = e.message)
+                    // An eager batch flush can fault here too; isolate it just like an
+                    // outcome-handling failure so siblings finish before finalisation retries.
+                    suspendRunCatching {
+                        writeFailure(feed, FeedErrorKind.UNKNOWN, retryAfterMs = null, detail = e.message)
+                    }.onFailure { Log.w(TAG, it) { "failure-state write failed for podcast ${feed.id}" } }
                     return FeedOutcome.Failed(FeedErrorKind.UNKNOWN, null)
                 }
         // Outcome handling (ingest, fetch-state rows, pending moves, hooks) is guarded per feed:

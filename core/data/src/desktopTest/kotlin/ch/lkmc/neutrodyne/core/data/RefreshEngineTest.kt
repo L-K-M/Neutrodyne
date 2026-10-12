@@ -1656,6 +1656,82 @@ class RefreshEngineTest {
         }
 
     @Test
+    fun aFaultingFetchFailureWriteKeepsTheThirdFeedOutcome() =
+        runTest {
+            val dispatcher = StandardTestDispatcher(testScheduler)
+            val db = newDb(clock, queryContext = dispatcher)
+            try {
+                val a = seedPodcast(db, "https://a.example.com/f")
+                val b = seedPodcast(db, "https://b.example.com/f")
+                val c = seedPodcast(db, "https://c.example.com/f")
+                val releaseFailure = CompletableDeferred<Unit>()
+                val releaseSibling = CompletableDeferred<Unit>()
+                val adapter =
+                    stubAdapter(onFetch = { feed, _ ->
+                        when (feed.id) {
+                            a -> {
+                                AdapterResult.NotModified(fetchMeta(etag = "a-buffered"))
+                            }
+
+                            b -> {
+                                releaseFailure.await()
+                                // Age the buffered 304 without advancing the batcher's timer: the
+                                // failure write itself must attempt the eager flush.
+                                clock.elapsedMs += 6_000L
+                                error("unexpected adapter fault")
+                            }
+
+                            else -> {
+                                releaseSibling.await()
+                                adapterParsed(parsedFeed(items = listOf(parsedEpisode(0, guid = "c"))))
+                            }
+                        }
+                    })
+                db.exec(
+                    "CREATE TRIGGER fail_fetch_guard BEFORE UPDATE OF failureCount ON podcast" +
+                        " WHEN old.id = $b BEGIN SELECT RAISE(ABORT, 'fetch failure write'); END",
+                )
+                val engine =
+                    newRefresher(
+                        db,
+                        mapOf(SourceType.RSS to adapter),
+                        clock,
+                        settings,
+                        ingestor = newIngestor(db, clock, settings, defaultDispatcher = dispatcher),
+                    )
+                val events = mutableListOf<FeedRunEvent>()
+                backgroundScope.launch { engine.events.collect { events += it } }
+                val run = backgroundScope.async { suspendRunCatching { engine.run(request()) } }
+                runCurrent()
+                assertEquals(3, adapter.calls.size)
+                releaseFailure.complete(Unit)
+                runCurrent()
+                releaseSibling.complete(Unit)
+                val thrown = assertIs<SQLiteException>(run.await().exceptionOrNull())
+                runCurrent()
+
+                // The persistent batch fault still fails finalisation, after every feed finishes.
+                assertTrue(thrown.message.orEmpty().contains("fetch failure write"))
+                assertEquals(setOf(a, b, c), events.map { it.podcastId }.toSet())
+                assertEquals(FeedOutcome.NotModified, events.single { it.podcastId == a }.outcome)
+                assertEquals(
+                    FeedOutcome.Failed(FeedErrorKind.UNKNOWN, null),
+                    events.single { it.podcastId == b }.outcome,
+                )
+                assertIs<FeedOutcome.Ingested>(events.single { it.podcastId == c }.outcome)
+                assertEquals(1, db.podcastDao().episodeCount(c))
+                assertEquals(NOW, db.podcastDao().byId(c)!!.lastAttemptAt)
+                assertEquals(3, engine.status.value.done)
+                assertFalse(engine.status.value.running)
+                assertNull(db.podcastDao().byId(a)!!.etag)
+                assertEquals(0, db.podcastDao().byId(b)!!.failureCount)
+                assertEquals(0L, settings.get(FeedsSettingKeys.LAST_ALL_RUN_FINISHED_AT))
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
     fun aDeferredOutcomeKeepsTheFreshlyWrittenRow() =
         runTest {
             // A user action landing between due-selection and the outcome write must not be
