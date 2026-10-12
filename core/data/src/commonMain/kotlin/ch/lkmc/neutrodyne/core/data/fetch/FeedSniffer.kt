@@ -23,34 +23,34 @@ internal object FeedSniffer {
         var i = 0
 
         // Whitespace, then any number of `<?xml …?>`, `<!-- -->` or `<!DOCTYPE …>` preambles.
+        // Indexed checks only — `substring(i)` per loop would copy O(n²) on preamble-heavy input.
         while (true) {
             while (i < text.length && text[i].isXmlSpace()) i++
-            val rest = text.substring(i)
             when {
-                rest.startsWith("<?xml") -> {
+                text.startsWith("<?xml", i) -> {
                     i = text.indexOf("?>", i + 2).takeIf { it >= 0 }?.plus(2) ?: return Sniff.OTHER
                 }
 
-                rest.startsWith("<!--") -> {
+                text.startsWith("<!--", i) -> {
                     i = text.indexOf("-->", i + 4).takeIf { it >= 0 }?.plus(3) ?: return Sniff.OTHER
                 }
 
-                rest.startsWith("<!doctype html", ignoreCase = true) -> {
+                text.startsWith("<!doctype html", i, ignoreCase = true) -> {
                     return Sniff.HTML
                 }
 
-                rest.startsWith("<!doctype", ignoreCase = true) -> {
+                text.startsWith("<!doctype", i, ignoreCase = true) -> {
                     i = text.indexOf('>', i + 2).takeIf { it >= 0 }?.plus(1) ?: return Sniff.OTHER
                 }
 
                 else -> {
                     return when {
-                        rest.startsWith("<rss", ignoreCase = true) -> Sniff.RSS
-                        rest.startsWith("<rdf", ignoreCase = true) -> Sniff.RDF
-                        rest.startsWith("<feed", ignoreCase = true) -> Sniff.ATOM
-                        rest.startsWith("<opml", ignoreCase = true) -> Sniff.OPML
-                        rest.startsWith("<html", ignoreCase = true) -> Sniff.HTML
-                        rest.startsWith("{") || rest.startsWith("[") -> Sniff.JSON
+                        text.startsWith("<rss", i, ignoreCase = true) -> Sniff.RSS
+                        text.startsWith("<rdf", i, ignoreCase = true) -> Sniff.RDF
+                        text.startsWith("<feed", i, ignoreCase = true) -> Sniff.ATOM
+                        text.startsWith("<opml", i, ignoreCase = true) -> Sniff.OPML
+                        text.startsWith("<html", i, ignoreCase = true) -> Sniff.HTML
+                        text.startsWith("{", i) || text.startsWith("[", i) -> Sniff.JSON
                         else -> Sniff.OTHER
                     }
                 }

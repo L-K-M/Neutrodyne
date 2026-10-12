@@ -14,7 +14,8 @@ internal object FeedHttpHeaders {
         if (cacheControl == null) return null
         for (part in cacheControl.split(',')) {
             val directive = part.trim()
-            if (!directive.startsWith("max-age", ignoreCase = true)) continue
+            // The directive name must be `max-age` itself — extensions like `max-age-x` are not it.
+            if (!directive.substringBefore('=').trim().equals("max-age", ignoreCase = true)) continue
             return directive.substringAfter('=', "").trim().toLongOrNull()
         }
         return null
@@ -40,14 +41,17 @@ internal object FeedHttpHeaders {
 
     /**
      * `Retry-After`: delta-seconds, or an IMF-fixdate relative to [nowMs] (03 Response handling);
-     * negative dates (already past) clamp to 0.
+     * non-positive or past values clamp to 0, absurdly large deltas saturate instead of wrapping.
      */
     fun retryAfterMs(
         value: String?,
         nowMs: Long,
     ): Long? {
         val trimmed = value?.trim() ?: return null
-        trimmed.toLongOrNull()?.let { return it * 1000L }
+        trimmed.toLongOrNull()?.let { sec ->
+            if (sec <= 0) return 0L
+            return if (sec >= Long.MAX_VALUE / 1000) Long.MAX_VALUE else sec * 1000
+        }
         return serverDateMs(trimmed)?.let { (it - nowMs).coerceAtLeast(0L) }
     }
 
@@ -112,7 +116,7 @@ internal object FeedHttpHeaders {
             y -= 1
             m += 12
         }
-        val era = Math.floorDiv(y, 400)
+        val era = y.floorDiv(400)
         val yoe = y - era * 400
         val mp = m - 3
         val doy = (153 * mp + 2) / 5 + day - 1

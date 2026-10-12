@@ -58,4 +58,7 @@ data class AlreadySubscribed(
 data class BasicCredentials(
     val username: String,
     val password: String,
-)
+) {
+    // Feed passwords are secrets (N3): the generated toString would print the password.
+    override fun toString(): String = "BasicCredentials(username=$username, password=…)"
+}
