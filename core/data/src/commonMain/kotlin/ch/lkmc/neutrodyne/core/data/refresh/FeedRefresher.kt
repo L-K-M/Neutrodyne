@@ -216,10 +216,25 @@ internal class FeedRefresher(
             coroutineScope {
                 batcherLock.withLock { batcher = FetchStateBatcher(db.podcastDao(), clock, this) }
                 val global = Semaphore(GLOBAL_CONCURRENCY)
+                // The key is the host the request will actually hit — `feedUrl` for refreshes,
+                // the page URL for older-page requests (a rel=next link may point at another
+                // host), so a shared CDN still gets the 2-per-host limit.
                 val hostSems =
-                    (due + pendingPages)
-                        .map { feed -> adapters.getValue(feed.sourceType).hostKey(feed) }
-                        .toSet()
+                    (
+                        due.map { feed ->
+                            adapters
+                                .getValue(feed.sourceType)
+                                .hostKey(
+                                    feed,
+                                    if (request.pagesOnly) feed.pagingNextUrl ?: feed.feedUrl else feed.feedUrl,
+                                )
+                        } +
+                            pendingPages.map { feed ->
+                                adapters
+                                    .getValue(feed.sourceType)
+                                    .hostKey(feed, feed.pagingNextUrl ?: feed.feedUrl)
+                            }
+                    ).toSet()
                         .associateWith { Semaphore(HOST_CONCURRENCY) }
                 val deadline = request.deadlineElapsedMs
 
@@ -236,9 +251,19 @@ internal class FeedRefresher(
                                 launched++
                                 launch {
                                     global.withPermit {
-                                        hostSems.getValue(adapter.hostKey(feed)).withPermit {
-                                            slots[index] = refreshOne(feed, adapter, request)
-                                        }
+                                        hostSems
+                                            .getValue(
+                                                adapter.hostKey(
+                                                    feed,
+                                                    if (request.pagesOnly) {
+                                                        feed.pagingNextUrl ?: feed.feedUrl
+                                                    } else {
+                                                        feed.feedUrl
+                                                    },
+                                                ),
+                                            ).withPermit {
+                                                slots[index] = refreshOne(feed, adapter, request)
+                                            }
                                     }
                                 }
                             }
@@ -291,9 +316,10 @@ internal class FeedRefresher(
                 // A failed flush means the outcome rows never committed: no completion
                 // diagnostics (`lastAllRunFinishedAt` would suppress the foreground trigger's
                 // next refresh for a whole tick) and no report — the failure propagates once
-                // the status reset below has run.
+                // the status reset below has run. The diagnostics write itself is also guarded:
+                // a throw here must not wedge `running` or mask the flush outcome.
                 if (flushFailure == null) {
-                    writeDiagnostics(request, finalReport, finishedAt)
+                    suspendRunCatching { writeDiagnostics(request, finalReport, finishedAt) }
                 }
                 _status.value =
                     RefreshStatus(
@@ -337,7 +363,16 @@ internal class FeedRefresher(
                     writeFailure(feed, FeedErrorKind.UNKNOWN, retryAfterMs = null, detail = e.message)
                     return FeedOutcome.Failed(FeedErrorKind.UNKNOWN, null)
                 }
-        return applyAdapterResult(feed, adapter, result)
+        // Outcome handling (ingest, fetch-state rows, pending moves, hooks) is guarded per feed:
+        // one feed's unexpected DAO fault records a STORAGE failure instead of cancelling the
+        // run and every sibling feed with it (03's per-feed isolation).
+        return suspendRunCatching { applyAdapterResult(feed, adapter, result) }
+            .getOrElse { e ->
+                if (e is CancellationException) throw e
+                Log.w(TAG, e) { "outcome handling failed for podcast ${feed.id}" }
+                writeFailure(feed, FeedErrorKind.STORAGE, retryAfterMs = null, detail = e.message)
+                FeedOutcome.Failed(FeedErrorKind.STORAGE, null)
+            }
     }
 
     /** The outcome table of 03 Engine run: each adapter result becomes one `FeedOutcome`. */
@@ -403,15 +438,17 @@ internal class FeedRefresher(
 
             is AdapterResult.Deferred -> {
                 // 04 only: "not attempted; only nextRefreshAt moves" — every other column keeps
-                // the stored value.
+                // the stored value. The row is re-read because a user action (Retry, Edit URL)
+                // landing between due-selection and this write must not be clobbered by the
+                // stale DueFeed snapshot.
                 val stored = db.podcastDao().byId(feed.id)
                 addFetchState(
                     fetchStateOf(
                         feed,
                         lastAttemptAt = stored?.lastAttemptAt ?: feed.lastAttemptAt,
-                        lastSuccessAt = feed.lastSuccessAt,
+                        lastSuccessAt = stored?.lastSuccessAt ?: feed.lastSuccessAt,
                         nextRefreshAt = adapter.nextRefreshAt(feed, result, result.untilMs),
-                        failureCount = feed.failureCount,
+                        failureCount = stored?.failureCount ?: feed.failureCount,
                         lastErrorKind = stored?.lastErrorKind ?: feed.lastErrorKind,
                         lastErrorDetail = stored?.lastErrorDetail,
                         gone = stored?.gone ?: false,
@@ -463,6 +500,8 @@ internal class FeedRefresher(
                 }
 
         rememberWarnings(feed.id, ingest.warnings)
+        // `vanished` means the podcast row was deleted mid-run — there is no row left to write a
+        // fetch state onto, and the row being gone is itself the terminal state.
         if (ingest.vanished) return FeedOutcome.Failed(FeedErrorKind.UNKNOWN, null)
 
         val emptyKind = ingest.emptyKind
@@ -629,7 +668,7 @@ internal class FeedRefresher(
         val stopAt = pagingStopAt(request)
         val pages: suspend () -> Unit = {
             while (session.active && clock.elapsedRealtime() < stopAt) {
-                session.active = onePage(session, manual)
+                session.active = onePageGuarded(session, manual)
             }
         }
         if (stopAt == Long.MAX_VALUE) {
@@ -639,6 +678,28 @@ internal class FeedRefresher(
         }
         return session.lastOutcome
     }
+
+    /**
+     * [onePage] with per-session fault isolation: its own guards cover the fetch and the ingest,
+     * but the surrounding DAO calls (markPagingComplete, the cursor reload, the episode cap) can
+     * still throw. One session's fault ends that session — it must not escape the launch and
+     * cancel every sibling's in-flight page (03's per-feed isolation).
+     */
+    private suspend fun onePageGuarded(
+        session: PagingSession,
+        manual: Boolean,
+    ): Boolean =
+        suspendRunCatching { onePage(session, manual) }
+            .getOrElse { e ->
+                if (e is CancellationException) throw e
+                Log.w(TAG, e) { "page handling failed for podcast ${session.feed.id}" }
+                session.lastOutcome =
+                    FeedOutcome.Failed(
+                        if (isUniqueViolation(e)) FeedErrorKind.IDENTITY_CONFLICT else FeedErrorKind.STORAGE,
+                        null,
+                    )
+                false
+            }
 
     /** The shared stop of the paging session loop and the background-paging round. */
     private suspend fun onePage(
@@ -735,15 +796,17 @@ internal class FeedRefresher(
             }
 
             is AdapterResult.Deferred -> {
+                // As in the refresh arm: only `nextRefreshAt` moves; the row is re-read so a
+                // user action between page selection and this write isn't clobbered.
                 val stored = db.podcastDao().byId(session.feed.id)
                 addFetchState(
                     fetchStateOf(
                         session.feed,
                         lastAttemptAt = stored?.lastAttemptAt ?: session.feed.lastAttemptAt,
-                        lastSuccessAt = session.feed.lastSuccessAt,
+                        lastSuccessAt = stored?.lastSuccessAt ?: session.feed.lastSuccessAt,
                         nextRefreshAt =
                             session.adapter.nextRefreshAt(session.feed, result, result.untilMs),
-                        failureCount = session.feed.failureCount,
+                        failureCount = stored?.failureCount ?: session.feed.failureCount,
                         lastErrorKind = stored?.lastErrorKind ?: session.feed.lastErrorKind,
                         lastErrorDetail = stored?.lastErrorDetail,
                         gone = stored?.gone ?: false,
@@ -790,13 +853,20 @@ internal class FeedRefresher(
                     for (session in active) {
                         launch {
                             global.withPermit {
-                                hostSems.getValue(session.adapter.hostKey(session.feed)).withPermit {
-                                    // The bound is re-checked after the permit waits: a session that
-                                    // spent the paging budget queued must not start a page anyway.
-                                    if (clock.elapsedRealtime() < stopAt) {
-                                        session.active = onePage(session, manual = false)
+                                hostSems
+                                    .getValue(
+                                        session.adapter.hostKey(
+                                            session.feed,
+                                            session.feed.pagingNextUrl ?: session.feed.feedUrl,
+                                        ),
+                                    ).withPermit {
+                                        // The bound is re-checked after the permit waits: a session
+                                        // that spent the paging budget queued must not start a page
+                                        // anyway.
+                                        if (clock.elapsedRealtime() < stopAt) {
+                                            session.active = onePageGuarded(session, manual = false)
+                                        }
                                     }
-                                }
                             }
                         }
                     }
@@ -847,8 +917,12 @@ internal class FeedRefresher(
             }
         val emitIds = if (initialFetch) ingest.inserted else announceIds
         if (emitIds.isEmpty()) return
-        withContext(NonCancellable) { eventBus.emit(feed.id, emitIds, initialFetch) }
-        announcementsLock.withLock { announcements += NewEpisodes(feed.id, emitIds, initialFetch) }
+        // Emit and its bookkeeping share one non-cancellable section: a deadline landing between
+        // them would fire the event while dropping the announcements record.
+        withContext(NonCancellable) {
+            eventBus.emit(feed.id, emitIds, initialFetch)
+            announcementsLock.withLock { announcements += NewEpisodes(feed.id, emitIds, initialFetch) }
+        }
     }
 
     /**
@@ -1092,7 +1166,9 @@ internal class FeedRefresher(
     private fun isUniqueViolation(t: Throwable): Boolean {
         var cause: Throwable? = t
         while (cause != null) {
-            if (cause.message?.contains("UNIQUE") == true) return true
+            // "UNIQUE constraint failed: …" — the tighter phrase keeps a generic "UNIQUE"
+            // substring in an unrelated message from misclassifying a storage fault.
+            if (cause.message?.contains("UNIQUE constraint", ignoreCase = true) == true) return true
             cause = cause.cause
         }
         return false
