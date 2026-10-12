@@ -16,6 +16,7 @@ import kotlinx.coroutines.test.runTest
 import mockwebserver3.junit4.MockWebServerRule
 import org.junit.Rule
 import java.io.File
+import java.net.URLEncoder
 import kotlin.io.encoding.Base64
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -126,6 +127,44 @@ class AddPodcastResolverTest {
             "https://a.example.com/f",
         )
     }
+
+    @Test
+    fun subscribePageWrappersDecodeUtf8UrlParameters() {
+        val encoded = "https%3A%2F%2Fa.example.com%2Fcaf%C3%A9%2F%E6%9D%B1%E4%BA%AC%2F%F0%9F%90%88.xml"
+        for (wrapper in listOf("neutrodyne://subscribe", "https://antennapod.org/deeplink/subscribe")) {
+            assertUrl("$wrapper?url=$encoded", "https://a.example.com/café/東京/🐈.xml")
+        }
+    }
+
+    @Test
+    fun subscribePageWrappersPreserveLiteralUnicodeBesideEncodedBytes() {
+        assertUrl(
+            "neutrodyne://subscribe?url=https%3A%2F%2Fa.example.com%2F🐈%2Fcaf%C3%A9.xml",
+            "https://a.example.com/🐈/café.xml",
+        )
+    }
+
+    @Test
+    fun subscribePageWrappersDecodeQueryFormSemanticsOnce() {
+        assertUrl(
+            "neutrodyne://subscribe?url=https%3A%2F%2Fa.example.com%2F%252F%3Fq%3Da%2Bb+c%26bad%3D%zz%26tail%3D%",
+            "https://a.example.com/%2F?q=a+b c&bad=%zz&tail=%",
+        )
+    }
+
+    @Test
+    fun subscribePageWrappersFetchTheDecodedUtf8Path() =
+        runTest {
+            val path = "/café/東京/🐈.xml"
+            val rawUrl = "http://${server.hostName}:${server.port}$path"
+            val wrapped = "neutrodyne://subscribe?url=${URLEncoder.encode(rawUrl, Charsets.UTF_8)}"
+            server.enqueue(mockResponse(body = rssBody(title = "Wrapped feed")))
+
+            val feed = assertIs<AddResolution.Feed>(bundle.resolver.resolve(wrapped))
+
+            assertEquals(rawUrl, feed.preview.feedUrl)
+            assertEquals(server.url(path).encodedPath, server.takeRequest().target)
+        }
 
     private fun assertUrl(
         input: String,
