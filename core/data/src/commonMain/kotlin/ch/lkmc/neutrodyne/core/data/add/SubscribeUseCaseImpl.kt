@@ -33,10 +33,11 @@ import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
-import ch.lkmc.neutrodyne.feeds.parse.FeedParser
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlin.uuid.Uuid
 
 /**
@@ -99,6 +100,13 @@ internal class SubscribeUseCaseImpl(
         // this subscription's identity, but a feed already subscribed there is the same feed.
         val terminalKey = UrlNormalizer.forIdentity(entry.meta.finalUrl)
         val hopKeys = entry.hops.mapNotNull { UrlNormalizer.forIdentity(it.url) }
+        val candidateKeys =
+            buildList {
+                add(feedKey)
+                if (inputKey != null) add(inputKey)
+                if (terminalKey != null) add(terminalKey)
+                addAll(hopKeys)
+            }
         val backfill = settings.get(FeedsSettingKeys.BACKFILL_PAGED_FEEDS)
         val link = feed.paging.next ?: feed.paging.prevArchive
         val artworkUrl = feed.artwork.firstOrNull()?.url
@@ -112,13 +120,6 @@ internal class SubscribeUseCaseImpl(
                     // Step 3.1: dedupe again inside the transaction (03 Subscribe) — every URL
                     // the entry knows is checked against both primary feedKeys and aliases, so
                     // a hop URL that is another feed's current URL also dedupes.
-                    val candidateKeys =
-                        buildList {
-                            add(feedKey)
-                            if (inputKey != null) add(inputKey)
-                            if (terminalKey != null) add(terminalKey)
-                            addAll(hopKeys)
-                        }
                     var existing: Long? = null
                     for (key in candidateKeys) {
                         existing = dao.byFeedKey(key)?.id ?: dao.aliasOwner(key)
@@ -216,16 +217,9 @@ internal class SubscribeUseCaseImpl(
                 // the unique violation raced step 3.1's dedupe on one of them.
                 var owner: Long? = null
                 var idx = 0
-                val racedKeys =
-                    buildList {
-                        add(feedKey)
-                        if (inputKey != null) add(inputKey)
-                        if (terminalKey != null) add(terminalKey)
-                        addAll(hopKeys)
-                    }
-                while (owner == null && idx < racedKeys.size) {
-                    owner = db.podcastDao().byFeedKey(racedKeys[idx])?.id
-                        ?: db.podcastDao().aliasOwner(racedKeys[idx])
+                while (owner == null && idx < candidateKeys.size) {
+                    owner = db.podcastDao().byFeedKey(candidateKeys[idx])?.id
+                        ?: db.podcastDao().aliasOwner(candidateKeys[idx])
                     idx++
                 }
                 if (owner != null) return Outcome.Failure(SubscribeError.AlreadySubscribed(owner))
@@ -248,17 +242,25 @@ internal class SubscribeUseCaseImpl(
             }
 
         // Step 4: the initial-fetch event, the pending paging run, the rebase, the cache drop.
-        eventBus.emit(podcastId, ingest.inserted, initialFetch = true)
-        if (pendingPaging) {
-            scheduler.enqueueNow(
-                scope = RefreshScope.Podcasts(listOf(podcastId)),
-                force = false,
-                pagesOnly = true,
-                origin = RefreshOrigin.SUBSCRIBE,
-            )
+        try {
+            eventBus.emit(podcastId, ingest.inserted, initialFetch = true)
+            // Scheduling cannot undo the committed subscription; attempt each step independently.
+            if (pendingPaging) {
+                suspendRunCatching {
+                    scheduler.enqueueNow(
+                        scope = RefreshScope.Podcasts(listOf(podcastId)),
+                        force = false,
+                        pagesOnly = true,
+                        origin = RefreshOrigin.SUBSCRIBE,
+                    )
+                }.onFailure { e -> Log.w(TAG, e) { "Paging enqueue failed for podcast $podcastId" } }
+            }
+            suspendRunCatching { scheduler.reschedulePeriodic() }
+                .onFailure { e -> Log.w(TAG, e) { "Periodic reschedule failed for podcast $podcastId" } }
+        } finally {
+            // Credentials must leave the cache even when post-commit scheduling is cancelled.
+            withContext(NonCancellable) { cache.remove(previewId) }
         }
-        scheduler.reschedulePeriodic()
-        cache.remove(previewId)
         return Outcome.Success(podcastId)
     }
 

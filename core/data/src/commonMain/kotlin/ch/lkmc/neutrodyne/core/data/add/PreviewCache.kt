@@ -61,11 +61,12 @@ internal class PreviewCache(
         meta: FetchMeta,
         hops: List<RedirectHop>,
         credentials: BasicCredentials?,
-    ): String =
+    ): PreviewEntry =
         mutex.withLock {
-            entries[previewId] = PreviewEntry(previewId, inputUrl, feed, meta, hops, credentials, clock.now())
+            val entry = PreviewEntry(previewId, inputUrl, feed, meta, hops, credentials, clock.now())
+            entries[previewId] = entry
             while (entries.size > MAX_ENTRIES) entries.remove(entries.keys.first())
-            previewId
+            entry
         }
 
     /** The entry's `previewId`, or null when missing/expired (an expired entry is dropped). */

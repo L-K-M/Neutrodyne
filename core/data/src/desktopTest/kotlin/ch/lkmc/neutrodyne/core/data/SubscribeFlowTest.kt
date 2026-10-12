@@ -3,8 +3,10 @@
 package ch.lkmc.neutrodyne.core.data
 
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.data.add.PreviewEntry
 import ch.lkmc.neutrodyne.core.data.fetch.RedirectHop
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
+import ch.lkmc.neutrodyne.core.data.refresh.RefreshScheduler
 import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
 import ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
@@ -20,8 +22,10 @@ import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.model.Paging
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.junit4.MockWebServerRule
 import org.junit.Rule
@@ -30,9 +34,11 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
@@ -130,6 +136,109 @@ class SubscribeFlowTest {
             assertEquals(id, event.podcastId)
             assertTrue(event.initialFetch)
             assertEquals(2, event.episodeIds.size)
+        }
+
+    @Test
+    fun enqueueFailureAfterCommitStillCompletesSubscribe() =
+        runTest { assertSchedulingFailureCompletesSubscribe(SchedulingStep.ENQUEUE) }
+
+    @Test
+    fun rescheduleFailureAfterCommitStillCompletesSubscribe() =
+        runTest { assertSchedulingFailureCompletesSubscribe(SchedulingStep.RESCHEDULE) }
+
+    private suspend fun TestScope.assertSchedulingFailureCompletesSubscribe(step: SchedulingStep) {
+        val throwing = ThrowingScheduler(scheduler, step)
+        val bundle = newSubscribe(db, resolverBundle.cache, resolverBundle.resolver, throwing, settings, clock)
+        val previewId = cachePagedPreview()
+        val emitted = backgroundScope.async { bundle.eventBus.newEpisodes.first() }
+
+        val id = assertIs<Outcome.Success<Long>>(bundle.useCase(previewId, emptySet())).value
+
+        assertNotNull(db.podcastDao().byId(id))
+        assertEquals(1, db.podcastDao().episodeCount(id))
+        assertNull(resolverBundle.cache.get(previewId))
+        val event = emitted.await()
+        assertEquals(id, event.podcastId)
+        assertTrue(event.initialFetch)
+        assertEquals(1, event.episodeIds.size)
+        assertEquals(1, scheduler.nowRequests.size)
+        assertEquals(1, scheduler.rescheduleCount)
+    }
+
+    @Test
+    fun schedulingCancellationAfterCommitPropagatesAndRemovesPreview() =
+        runTest {
+            for (step in SchedulingStep.entries) {
+                val previewId = cachePagedPreview("https://a.example.com/${step.name}")
+                val throwing = ThrowingScheduler(scheduler, step, CancellationException("cancel scheduling"))
+                val bundle = newSubscribe(db, resolverBundle.cache, resolverBundle.resolver, throwing, settings, clock)
+
+                assertFailsWith<CancellationException> { bundle.useCase(previewId, emptySet()) }
+
+                val row = assertNotNull(db.podcastDao().byFeedKey(assertNotNull(UrlNormalizer.forIdentity(previewId))))
+                assertEquals(1, db.podcastDao().episodeCount(row.id))
+                assertNull(resolverBundle.cache.get(previewId), "Committed preview must be removed on cancellation")
+            }
+        }
+
+    private suspend fun cachePagedPreview(url: String = "https://a.example.com/f"): String {
+        settings.set(FeedsSettingKeys.BACKFILL_PAGED_FEEDS, true)
+        resolverBundle.cache.put(
+            previewId = url,
+            inputUrl = url,
+            feed = parsedFeed(items = listOf(parsedEpisode(0))).copy(paging = Paging(next = "$url?page=2")),
+            meta = fetchMeta(finalUrl = url),
+            hops = emptyList(),
+            credentials = null,
+        )
+        return url
+    }
+
+    private enum class SchedulingStep { ENQUEUE, RESCHEDULE }
+
+    private class ThrowingScheduler(
+        private val delegate: FakeRefreshScheduler,
+        private val step: SchedulingStep,
+        private val failure: Exception = IllegalStateException("scheduler $step failed"),
+    ) : RefreshScheduler by delegate {
+        override fun enqueueNow(
+            scope: RefreshScope,
+            force: Boolean,
+            pagesOnly: Boolean,
+            origin: RefreshOrigin,
+        ) {
+            delegate.enqueueNow(scope, force, pagesOnly, origin)
+            if (step == SchedulingStep.ENQUEUE) throw failure
+        }
+
+        override suspend fun reschedulePeriodic() {
+            delegate.reschedulePeriodic()
+            if (step == SchedulingStep.RESCHEDULE) throw failure
+        }
+    }
+
+    @Test
+    fun previewCachePutReturnsTheCreatedEntryEvenAfterEviction() =
+        runTest {
+            val url = "https://a.example.com/f"
+            val created: Any =
+                resolverBundle.cache.put(
+                    url,
+                    url,
+                    parsedFeed(),
+                    fetchMeta(finalUrl = url),
+                    emptyList(),
+                    null,
+                )
+            val entry = assertIs<PreviewEntry>(created)
+            assertSame(entry, resolverBundle.cache.get(url))
+            for (suffix in listOf("g", "h")) {
+                val later = "https://a.example.com/$suffix"
+                resolverBundle.cache.put(later, later, parsedFeed(), fetchMeta(finalUrl = later), emptyList(), null)
+            }
+            assertNull(resolverBundle.cache.get(url))
+            assertEquals(url, entry.previewId)
+            assertEquals(url, entry.meta.finalUrl)
         }
 
     @Test

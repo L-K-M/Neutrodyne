@@ -16,6 +16,8 @@ import kotlinx.coroutines.test.runTest
 import mockwebserver3.junit4.MockWebServerRule
 import org.junit.Rule
 import java.io.File
+import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
 import kotlin.io.encoding.Base64
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -126,6 +128,130 @@ class AddPodcastResolverTest {
             "https://a.example.com/f",
         )
     }
+
+    @Test
+    fun feedWrapperThenAntennaPodUnwrapsSequentially() {
+        assertUrl(
+            "feed:https://antennapod.org/deeplink/subscribe?url=https%3A%2F%2Fa.example.com%2F%252F.xml",
+            "https://a.example.com/%2F.xml",
+        )
+    }
+
+    @Test
+    fun neutrodyneWrapperRecursivelyNormalisesFeedScheme() {
+        assertUrl(
+            "neutrodyne://subscribe?url=feed%3Ahttps%3A%2F%2Fa.example.com%2F%252F.xml",
+            "https://a.example.com/%2F.xml",
+        )
+    }
+
+    @Test
+    fun nestedQueryWrappersDecodeEachComponentOnce() {
+        val inner = "https://antennapod.org/deeplink/subscribe?url=https%3A%2F%2Fa.example.com%2F%252F.xml"
+        assertUrl(
+            "neutrodyne://subscribe?url=${URLEncoder.encode(inner, Charsets.UTF_8)}",
+            "https://a.example.com/%2F.xml",
+        )
+    }
+
+    @Test
+    fun neutrodyneRecursionIsBounded() {
+        var input = "https://a.example.com/f"
+        repeat(3) { input = "neutrodyne://subscribe?url=${URLEncoder.encode(input, Charsets.UTF_8)}" }
+        assertIs<NormalizedInput.Invalid>(AddInputNormalizer.normalize(input))
+    }
+
+    @Test
+    fun malformedInnerWrapperIsInvalid() {
+        assertIs<NormalizedInput.Invalid>(
+            AddInputNormalizer.normalize("feed:https://antennapod.org/deeplink/subscribe?missing=1"),
+        )
+        assertIs<NormalizedInput.Invalid>(
+            AddInputNormalizer.normalize("neutrodyne://subscribe?url=neutrodyne%3A%2F%2Fsubscribe%3Fmissing%3D1"),
+        )
+    }
+
+    @Test
+    fun queryWrappersSelectTheFirstExactUrlParameter() {
+        for (wrapper in listOf("neutrodyne://subscribe", "https://antennapod.org/deeplink/subscribe")) {
+            assertUrl(
+                "$wrapper?noturl=https://wrong.example/f&feedurl=https://wrong.example/g&url=https%3A%2F%2Fa.example.com%2F%252F.xml&url=https://wrong.example/h",
+                "https://a.example.com/%2F.xml",
+            )
+        }
+    }
+
+    @Test
+    fun queryWrappersRequireAnExactUrlParameter() {
+        for (wrapper in listOf("neutrodyne://subscribe", "https://antennapod.org/deeplink/subscribe")) {
+            assertIs<NormalizedInput.Invalid>(AddInputNormalizer.normalize("$wrapper?feedurl=https://wrong.example/f"))
+        }
+    }
+
+    @Test
+    fun queryWrappersIgnoreUrlInsideTheFragment() {
+        for (wrapper in listOf("neutrodyne://subscribe", "https://antennapod.org/deeplink/subscribe")) {
+            assertIs<NormalizedInput.Invalid>(AddInputNormalizer.normalize("$wrapper?x=1#url=https://wrong.example/f"))
+        }
+    }
+
+    @Test
+    fun subscribeOnAndroidHostCasePreservesEmbeddedUrlCase() {
+        assertUrl("https://SubscribeOnAndroid.com/Example.com/Feed.xml", "https://Example.com/Feed.xml", guessed = true)
+    }
+
+    @Test
+    fun wwwSubscribeOnAndroidHostCasePreservesEmbeddedUrlCase() {
+        assertUrl(
+            "https://WWW.SubscribeOnAndroid.com/Example.com/Feed.xml",
+            "https://Example.com/Feed.xml",
+            guessed = true,
+        )
+    }
+
+    @Test
+    fun googleHostCasePreservesEmbeddedUrlCase() {
+        val enc = Base64.UrlSafe.encode("https://Example.com/Feed.xml".encodeToByteArray()).trimEnd('=')
+        assertUrl("https://Podcasts.Google.com/feed/$enc", "https://Example.com/Feed.xml")
+    }
+
+    @Test
+    fun subscribePageWrappersDecodeUtf8UrlParameters() {
+        val encoded = "https%3A%2F%2Fa.example.com%2Fcaf%C3%A9%2F%E6%9D%B1%E4%BA%AC%2F%F0%9F%90%88.xml"
+        for (wrapper in listOf("neutrodyne://subscribe", "https://antennapod.org/deeplink/subscribe")) {
+            assertUrl("$wrapper?url=$encoded", "https://a.example.com/café/東京/🐈.xml")
+        }
+    }
+
+    @Test
+    fun subscribePageWrappersPreserveLiteralUnicodeBesideEncodedBytes() {
+        assertUrl(
+            "neutrodyne://subscribe?url=https%3A%2F%2Fa.example.com%2F🐈%2Fcaf%C3%A9.xml",
+            "https://a.example.com/🐈/café.xml",
+        )
+    }
+
+    @Test
+    fun subscribePageWrappersDecodeQueryFormSemanticsOnce() {
+        assertUrl(
+            "neutrodyne://subscribe?url=https%3A%2F%2Fa.example.com%2F%252F%3Fq%3Da%2Bb+c%26bad%3D%zz%26tail%3D%",
+            "https://a.example.com/%2F?q=a+b c&bad=%zz&tail=%",
+        )
+    }
+
+    @Test
+    fun subscribePageWrappersFetchTheDecodedUtf8Path() =
+        runTest {
+            val path = "/café/東京/🐈.xml"
+            val rawUrl = "http://${server.hostName}:${server.port}$path"
+            val wrapped = "neutrodyne://subscribe?url=${URLEncoder.encode(rawUrl, Charsets.UTF_8)}"
+            server.enqueue(mockResponse(body = rssBody(title = "Wrapped feed")))
+
+            val feed = assertIs<AddResolution.Feed>(bundle.resolver.resolve(wrapped))
+
+            assertEquals(rawUrl, feed.preview.feedUrl)
+            assertEquals(server.url(path).encodedPath, server.takeRequest().target)
+        }
 
     private fun assertUrl(
         input: String,
@@ -293,7 +419,7 @@ class AddPodcastResolverTest {
         }
 
     @Test
-    fun typedCredentialsAreSentOnTheRetry() =
+    fun typedCredentialsAreSentOnTheRequest() =
         runTest {
             server.enqueue(mockResponse(body = rssBody()))
 
@@ -331,6 +457,44 @@ class AddPodcastResolverTest {
             // (an https attempt answered over cleartext fallback would keep `https://`).
             assertEquals("http://127.0.0.1:${server.port}/feed.xml", feed.preview.feedUrl)
         }
+
+    @Test
+    fun schemeGuessedUserinfoCredentialsNeverFallBackToCleartext() =
+        runTest {
+            assertCredentialedGuessDoesNotDowngrade("u:p@127.0.0.1:${server.port}/feed.xml", null)
+        }
+
+    @Test
+    fun schemeGuessedTypedCredentialsNeverFallBackToCleartext() =
+        runTest {
+            assertCredentialedGuessDoesNotDowngrade("127.0.0.1:${server.port}/feed.xml", BasicCredentials("u", "p"))
+        }
+
+    private suspend fun assertCredentialedGuessDoesNotDowngrade(
+        input: String,
+        credentials: BasicCredentials?,
+    ) {
+        server.enqueue(mockResponse(body = rssBody()))
+
+        val result =
+            if (credentials ==
+                null
+            ) {
+                bundle.resolver.resolve(input)
+            } else {
+                bundle.resolver.resolve(input, credentials)
+            }
+
+        // Handshake records can arrive just after resolution returns; wait for the queue, not a count snapshot.
+        val requests =
+            listOfNotNull(
+                server.takeRequest(5, TimeUnit.SECONDS),
+                server.takeRequest(200, TimeUnit.MILLISECONDS),
+            )
+        assertTrue(requests.none { it.headers["Authorization"] != null }, "Cleartext request carried Authorization")
+        assertEquals(1, requests.size, "Only the failed TLS attempt may reach the plaintext port")
+        assertIs<AddPodcastError.Network>(assertIs<AddResolution.Failure>(result).error)
+    }
 
     @Test
     fun previewReusesALiveCacheEntry() =
