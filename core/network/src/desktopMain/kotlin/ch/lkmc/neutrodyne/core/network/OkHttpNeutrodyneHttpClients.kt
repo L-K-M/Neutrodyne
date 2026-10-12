@@ -23,10 +23,15 @@ import io.ktor.serialization.kotlinx.json.json
  * derives `newBuilder()` from it, so the island's pool, dispatcher, DNS and interceptors apply.
  * S12 validated this arrangement; `expectSuccess` stays off so status codes reach the caller,
  * and redirects stay in the caller's hands for FEED.
+ *
+ * `public` (not `internal`) so other modules' `desktopTest` suites construct the real client
+ * stack — KMP test classes are not shareable across modules and `checkBannedApis` keeps
+ * `HttpClient` construction inside `:core:network` (`:core:data`'s fetch tests). `close()` lets
+ * them release the engines; the graph never calls it.
  */
 @SingleIn(AppScope::class)
 @ContributesBinding(AppScope::class)
-internal class OkHttpNeutrodyneHttpClients
+public class OkHttpNeutrodyneHttpClients
     @Inject
     constructor(
         networkClients: NetworkClients,
@@ -47,10 +52,19 @@ internal class OkHttpNeutrodyneHttpClients
                     }
                     // 10's long-lived sync stream.
                     if (kind == HttpClientKind.SYNC) install(SSE)
-                    install(ContentNegotiation) { json(NeutrodyneJson) }
+                    // Not for FEED: ContentNegotiation appends application/json to Accept, but 03's
+                    // Request rules pin the feed Accept header verbatim (and feeds are never JSON).
+                    if (kind != HttpClientKind.FEED) {
+                        install(ContentNegotiation) { json(NeutrodyneJson) }
+                    }
                     install(UserAgent) { agent = userAgent.value }
                 }
             }
 
         override fun client(kind: HttpClientKind): HttpClient = clients.getValue(kind)
+
+        /** Releases the engines — for tests that construct the class directly; the graph never calls it. */
+        fun close() {
+            clients.values.forEach { it.close() }
+        }
     }

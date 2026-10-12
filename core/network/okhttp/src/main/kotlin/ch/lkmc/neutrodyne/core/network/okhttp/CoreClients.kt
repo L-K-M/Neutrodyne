@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.network.okhttp
 
+import ch.lkmc.neutrodyne.core.common.ConnectionPoolEvictor
 import dev.zacsweers.metro.Inject
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
@@ -29,7 +30,7 @@ class CoreClients(
     private val lanGuard: LocalNetworkGuard,
     private val hints: DnsFamilyHints,
     @param:DebugInterceptors private val debugInterceptors: Set<Interceptor>,
-) {
+) : ConnectionPoolEvictor {
     // Declared before the clients: property initializers run in order, and `coreBuilder` reads them.
     private val dispatcher =
         Dispatcher().apply {
@@ -67,6 +68,11 @@ class CoreClients(
         coreBuilder(LocalNetworkGuard.Mode.SYNC)
             .callTimeout(SYNC_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .build()
+
+    /** 11's wake path: pooled sockets do not survive a system sleep. */
+    override fun evict() {
+        pool.evictAll()
+    }
 
     private companion object {
         const val CONNECT_TIMEOUT_SECONDS = 15L
