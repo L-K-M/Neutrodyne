@@ -2783,6 +2783,16 @@ Serves N1, N4, N6. Expected failures arrive as values (01 [Errors](01-foundation
 6. `LocalUiClock` and `LocalPlatformKind` (`:core:ui`) are CompositionLocals this doc did not name: the clock backs every relative-date label so tests inject `TestClock`, and the platform kind picks 07's per-platform copy. Both are on 09's `.editorconfig` allowlist together with `LocalDrawnReporter`.
 7. The Library tile menu's "Mark all as played…" confirmation is a plain confirm/cancel `NdDialog`: the dialog table's "All" / "Older than 1 week / 1 month / 3 months" options and `countUnplayed` arrive with M2's group data (`FeedRepository.countUnplayed` does not exist yet; `markFeedPlayed(source, sortDateBefore)` already takes the cutoff). Confirming marks the whole feed via `markFeedPlayed(source, null)` (UI review round 2, P2).
 
+### Implementation deviations (2026-10-12, M1a Episode and Add-podcast slice)
+
+1. Discover at M1a is the empty state plus "Add by URL". The search field, charts, import card and YouTube channel entry remain M7/M3/M8 work; this port preserves the verified UI package's entry point.
+2. The sheet's "Add to groups" chips remain M2 work. `SubscribeUseCase` receives `groupIds = emptySet()`; its reviewed transaction and the paged `FeedRepository` are unchanged.
+3. `NoMedia` from the resolver renders as the input field's error line with Retry, rather than a preview with a disabled Subscribe button: `AddResolution.Failure` carries no preview. The reviewed `SubscribeError.InvalidUrl`, absent from the verified UI package's contract, now renders the existing "That doesn't look like a feed address" text inline on the preview and clears the subscribing indicator. The other resolution and subscribe outcomes keep their verified handling.
+4. The sheet renders credentials and candidate selection when the resolver returns those outcomes; HTML autodiscovery and directory lookup remain M7. Credentials typed into the sheet remain in the transient preview cache until M1b's credential persistence, and subscribing does not pin artwork until M4, as recorded in [03's M1a data-half deviations](03-feeds-and-discovery.md#implementation-deviations-2026-10-07-m1a-data-half). The preview cover uses `ArtworkRef(key = url, url, version = 0)`, fetching the URL with a monogram placeholder and error fallback.
+5. Episode detail keeps the verified show-notes renderer, image policy, played/favourite writes, navigation and platform link/share actions. Play and queue actions await M4, timestamp seeks and chapters await M5, downloads await M6, and YouTube availability actions await M8; their controller dispatch remains inert at M1a.
+6. Both screens reuse the Library slice's shell factories and image loader. `EpisodeViewModel` uses `ManualViewModelAssistedFactory` through `assistedMetroViewModel`; no shell or shared navigation change is needed. The reviewed subscribe implementation already binds the internal `PreviewEntryResolver` interface for expired-preview re-fetching, so the verified package's concrete-resolver downcast is not ported.
+7. The screens' desktop-JVM tests (`runComposeUiTest`) stand in for their desktop-window variants, as in the Library slice. Desktop scrollbars and the remaining desktop interaction work follow the owning milestones.
+
 ---
 
 ## New names introduced here
