@@ -28,8 +28,11 @@ import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.TimeUnit
 
 /**
@@ -54,6 +57,7 @@ internal class WorkManagerRefreshScheduler
         private val rebaser: NextRefreshRebaser,
         @param:ApplicationScope private val appScope: CoroutineScope,
     ) : RefreshScheduler {
+        private val enqueueMutex = Mutex()
         private val workManager get() = WorkManager.getInstance(application)
 
         override fun enqueueNow(
@@ -67,31 +71,30 @@ internal class WorkManagerRefreshScheduler
             // pull-to-refresh, and a queued manual request is not replaced by automatic work.
             val manual = userDriven(origin)
             val uniqueName = if (manual) WORK_NOW else WORK_AUTO
-            if (scope is RefreshScope.Podcasts && scope.ids.size > RefreshWorkData.MAX_SCOPE_IDS) {
-                // `Data` caps at 10 KB: persist the due marks, then send a plain All run
-                // (03 Work requests). The enqueue rides this coroutine to keep the order.
-                appScope.launch {
-                    db.podcastDao().forceDue(scopeAll = false, ids = scope.ids)
+            // Claim the enqueue order before suspending on Room: a later request must not
+            // overtake a forced scope while its durable due marks are being written.
+            appScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                enqueueMutex.withLock {
+                    val oversized = scope is RefreshScope.Podcasts && scope.ids.size > RefreshWorkData.MAX_SCOPE_IDS
+                    if (force || oversized) {
+                        // Persist before APPEND: a failed predecessor can drop the work, but the
+                        // next due selection still recovers its forced intent. Run-start reapply
+                        // is idempotent (03 Work requests / Engine run).
+                        when (scope) {
+                            RefreshScope.All -> db.podcastDao().forceDue(scopeAll = true)
+                            is RefreshScope.Group -> db.podcastDao().forceDueGroup(scope.groupId)
+                            is RefreshScope.Podcasts -> db.podcastDao().forceDue(scopeAll = false, ids = scope.ids)
+                        }
+                    }
                     enqueueUnique(
                         uniqueName,
                         ExistingWorkPolicy.APPEND_OR_REPLACE,
-                        requestFor(RefreshScope.All, force = false, pagesOnly, origin),
-                    )
-                }
-                return
-            }
-            if (manual) {
-                enqueueUnique(
-                    WORK_NOW,
-                    ExistingWorkPolicy.APPEND_OR_REPLACE,
-                    nowRequest(scope, force, pagesOnly, origin),
-                )
-            } else {
-                appScope.launch {
-                    enqueueUnique(
-                        WORK_AUTO,
-                        ExistingWorkPolicy.APPEND_OR_REPLACE,
-                        automaticRequest(scope, force, pagesOnly, origin),
+                        requestFor(
+                            if (oversized) RefreshScope.All else scope,
+                            force = force && !oversized,
+                            pagesOnly,
+                            origin,
+                        ),
                     )
                 }
             }
