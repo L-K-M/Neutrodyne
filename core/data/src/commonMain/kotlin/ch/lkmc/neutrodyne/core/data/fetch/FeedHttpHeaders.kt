@@ -310,9 +310,9 @@ internal object FeedHttpHeaders {
     private const val REALM_PARAM = "realm"
 
     /**
-     * Defensive bound on one header value's scan — past OkHttp's 256 KiB per-line cap no
-     * intact value arrives anyway; the tokenizer itself is linear, this only fences off
-     * pathological in-memory strings.
+     * Defensive bound on one header value's scan — OkHttp's HTTP/1.1 reader caps the whole
+     * response-header block at 256 KiB, so no longer value arrives anyway; the tokenizer
+     * itself is linear, this only fences off pathological in-memory strings.
      */
     private const val MAX_CHALLENGE_CHARS = 256 * 1024
 
