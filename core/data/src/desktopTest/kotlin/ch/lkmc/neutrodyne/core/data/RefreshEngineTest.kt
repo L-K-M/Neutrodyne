@@ -1329,6 +1329,85 @@ class RefreshEngineTest {
         }
 
     @Test
+    fun aPermanentRedirectInto304RecordsTheMoveAsPending() =
+        runTest {
+            // A 304 carries no body, so the design's ≥1-item adoption gate cannot run — but the
+            // announced move must still be recorded for the probe path (03 Permanent redirects).
+            setUpRoot()
+            val feedUrl = server.url("/feed.xml").toString()
+            val id =
+                due(feedUrl, nextRefreshAt = NOW - 1) {
+                    copy(
+                        etag = "e-old",
+                        parserVersion = FeedParser.VERSION,
+                        lastParseOk = true,
+                        lastFullFetchAt = NOW,
+                    )
+                }
+            server.enqueue(mockResponse(301, "", "Location" to "/new.xml"))
+            server.enqueue(mockResponse(code = 304, body = ""))
+            val bundle = newRssAdapter(root, clock)
+            try {
+                val engine =
+                    newRefresher(
+                        db,
+                        mapOf(SourceType.RSS to bundle.adapter),
+                        clock,
+                        settings,
+                        tempFiles = bundle.tempFiles,
+                    )
+
+                val report = engine.run(request())
+
+                assertEquals(FeedOutcome.NotModified, report.outcomes[id])
+                assertEquals(
+                    server.url("/new.xml").toString(),
+                    db.podcastDao().byId(id)!!.pendingNewFeedUrl,
+                )
+            } finally {
+                bundle.close()
+            }
+        }
+
+    @Test
+    fun aTemporaryRedirectInto304RecordsNothing() =
+        runTest {
+            // 302/307 hops never produce a permanentUrl (03 Request rules), so nothing is
+            // recorded as pending either.
+            setUpRoot()
+            val feedUrl = server.url("/feed.xml").toString()
+            val id =
+                due(feedUrl, nextRefreshAt = NOW - 1) {
+                    copy(
+                        etag = "e-old",
+                        parserVersion = FeedParser.VERSION,
+                        lastParseOk = true,
+                        lastFullFetchAt = NOW,
+                    )
+                }
+            server.enqueue(mockResponse(302, "", "Location" to "/temp.xml"))
+            server.enqueue(mockResponse(code = 304, body = ""))
+            val bundle = newRssAdapter(root, clock)
+            try {
+                val engine =
+                    newRefresher(
+                        db,
+                        mapOf(SourceType.RSS to bundle.adapter),
+                        clock,
+                        settings,
+                        tempFiles = bundle.tempFiles,
+                    )
+
+                val report = engine.run(request())
+
+                assertEquals(FeedOutcome.NotModified, report.outcomes[id])
+                assertNull(db.podcastDao().byId(id)!!.pendingNewFeedUrl)
+            } finally {
+                bundle.close()
+            }
+        }
+
+    @Test
     fun failedParseAndStaleFullFetchAlsoFetchUnconditionally() =
         runTest {
             setUpRoot()

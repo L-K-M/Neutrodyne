@@ -37,8 +37,11 @@ object ArtworkKeys {
         val scheme = if (schemeEnd >= 0) s.substring(0, schemeEnd).lowercase() else ""
         var rest = if (schemeEnd >= 0) s.substring(schemeEnd + 3) else s
 
-        // Authority ends at the first '/', '?' is part of the path+query tail here.
-        val authorityEnd = rest.indexOf('/').let { if (it < 0) rest.length else it }
+        // Authority ends at the first '/', '?' or '#' — a query-only URL has no '/' to stop at.
+        val authorityEnd =
+            rest
+                .indexOfFirst { it == '/' || it == '?' || it == '#' }
+                .let { if (it < 0) rest.length else it }
         var authority = rest.substring(0, authorityEnd)
         val tail = rest.substring(authorityEnd)
 

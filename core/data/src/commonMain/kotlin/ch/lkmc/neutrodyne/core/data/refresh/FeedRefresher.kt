@@ -26,6 +26,7 @@ import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.feeds.identity.PodcastGuid
+import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.model.ParseWarning
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
@@ -344,6 +345,11 @@ internal class FeedRefresher(
                         lastParseOk = feed.lastParseOk,
                     ),
                 )
+                // A permanent redirect that ends in a 304 announces a move but yields no body to
+                // prove it, so the ≥1-item adoption gate (03 Permanent redirects) cannot run on
+                // this outcome. Record the announced target as pending instead — the probe path
+                // fetches it, checks plausibility, and only then moves the feed.
+                meta?.permanentUrl?.let { recordPendingMove(feed, it) }
                 FeedOutcome.NotModified
             }
 
@@ -916,6 +922,22 @@ internal class FeedRefresher(
 
     private suspend fun addFetchState(row: PodcastFetchState) {
         batcher?.add(row) ?: db.podcastDao().updateFetchStates(listOf(row))
+    }
+
+    /**
+     * A 304-after-301 move announcement recorded as `pendingNewFeedUrl` (03 Permanent redirects):
+     * the same pending column the `itunes:new-feed-url` path fills on ingest — a target already
+     * pending is left alone, non-http(s) targets are skipped, and a URL this podcast once moved
+     * away from (an alias) is a loop and never recorded.
+     */
+    private suspend fun recordPendingMove(
+        feed: DueFeed,
+        target: String,
+    ) {
+        if (feed.pendingNewFeedUrl == target) return
+        val identity = UrlNormalizer.forIdentity(target) ?: return
+        if (db.podcastDao().aliases(feed.id).any { it.url == identity }) return
+        db.podcastDao().setPendingNewFeedUrl(feed.id, target)
     }
 
     private fun successNextAt(
