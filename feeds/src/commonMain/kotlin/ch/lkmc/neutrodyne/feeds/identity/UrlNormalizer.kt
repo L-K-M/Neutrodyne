@@ -117,14 +117,16 @@ public object UrlNormalizer {
 
         val decoded = percentDecode(raw)
         if (decoded.isEmpty()) return null
-        if (hasNumericTail(decoded)) {
+        val ascii = decoded.lowercase().idnaToAsciiOrNull() ?: return null
+        if (hasNumericTail(ascii)) {
             // A numeric last label commits the host to IPv4 ("127.1", "2130706433" resolve to
             // 127.0.0.1 through the fetch stack — OkHttp passes the spelling verbatim to
             // InetAddress, which accepts decimal shorthand). A numeric tail that fails the
-            // grammar is an invalid or ambiguous host, never a domain name.
-            return parseIpv4NumberHost(decoded)
+            // grammar is an invalid or ambiguous host, never a domain name. The one check runs
+            // on the IDNA result: fullwidth digits and ideographic full stops only become ASCII
+            // there ("\uFF11\uFF12\uFF17.\uFF11" -> "127.1"), and IDNA leaves ASCII numbers as they are.
+            return parseIpv4NumberHost(ascii)
         }
-        val ascii = decoded.lowercase().idnaToAsciiOrNull() ?: return null
         // toASCII runs without UseSTD3ASCIIRules, so characters like '/' and '$' pass through
         // and "." strips to empty: either would collide or forge identities. LDH, dots and
         // '_' are the only characters a valid post-IDNA host can contain.
