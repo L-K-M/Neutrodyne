@@ -77,6 +77,27 @@ data class DueFeed(
 )
 
 /**
+ * `PodcastDao.rebaseCandidates` row (added 2026-10-07): a `PodcastFetchState` plus `subscribedAt`,
+ * which the rebase formula needs (`target = COALESCE(lastSuccessAt, subscribedAt) + I`).
+ */
+data class RebaseCandidate(
+    val id: Long,
+    val lastAttemptAt: Long?,
+    val lastSuccessAt: Long?,
+    val nextRefreshAt: Long?,
+    val failureCount: Int,
+    val lastErrorKind: FeedErrorKind?,
+    val lastErrorDetail: String?,
+    val gone: Boolean,
+    val needsCredentials: Boolean,
+    val etag: String?,
+    val lastModified: String?,
+    val lastFullFetchAt: Long?,
+    val lastParseOk: Boolean,
+    val subscribedAt: Long,
+)
+
+/**
  * The partial `podcast` write of batched refresh outcomes (02 Refresh selection and fetch-state
  * writes): only scheduling, error and validator columns — never feed data or user columns.
  * Invariant for callers: one row is one *committed* fetch outcome — never construct an instance
@@ -120,14 +141,56 @@ data class LibraryTileRow(
 
 /** The `IngestDao.existing` row 03 builds its in-memory identity maps from (02 Ingestion support). */
 data class ExistingEpisodeKey(
+    // Compared field-by-field by the ingest diff (pass-2 guards). Do not compare whole
+    // instances: equals/hashCode include drift-prone fields (durationMs, chaptersUrl).
     val id: Long,
     val identityKey: String,
     val guid: String?,
     val enclosureUrl: String?,
+    /** Added 2026-10-07 for the diff's pass-2 MIME-major-type guard (03 step 5). */
+    val enclosureType: String?,
     val title: String,
     val pubDate: Long?,
+    /** Added 2026-10-07: pass-2's matched-window floor and `isNew`'s date basis. */
+    val sortDate: Long,
+    /** Added 2026-10-07 for the diff's pass-2 duration guard (03 step 5). */
+    val durationMs: Long?,
     val contentHash: Long,
     val inFeed: Boolean,
+    /** Added 2026-10-07: `sortDate` is recomputed against the stored `firstSeenAt` (03 sortDate). */
+    val firstSeenAt: Long,
+    /** Added 2026-10-07: step 6's JSON-chapters invalidation compares the stored value. */
+    val chaptersUrl: String?,
+)
+
+/** `PodcastDao.observeCategoryRows` row: 03's `CategoryCount` source (suggested groups, M7). */
+data class PodcastCategories(
+    val id: Long,
+    val categoriesJson: String?,
+)
+
+/** `EpisodeDao.observeDetail` row, mapped to `EpisodeDetail` in `:core:data` (02 DAO rule 6). */
+data class EpisodeDetailRow(
+    val id: Long,
+    val podcastId: Long,
+    val podcastTitle: String,
+    val title: String,
+    val pubDate: Long?,
+    val durationMs: Long?,
+    val artworkKey: String,
+    val artworkUrl: String?,
+    val artworkVersion: Int,
+    val isVideo: Boolean,
+    val sourceType: SourceType,
+    val externalMediaId: String?,
+    val availability: Availability,
+    val episodeDisplay: String?,
+    val link: String?,
+    val playedAt: Long?,
+    val isFavorite: Boolean,
+    val downloadState: DownloadState?,
+    /** The show-notes `baseUri` fallback (03 Sanitiser): episode `link` first, then this. */
+    val feedUrl: String,
 )
 
 /**

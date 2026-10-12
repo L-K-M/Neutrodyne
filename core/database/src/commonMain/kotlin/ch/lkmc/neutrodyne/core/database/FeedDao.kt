@@ -129,4 +129,52 @@ object FeedQueryBuilder {
                 "ORDER BY e.sortDate $dir, e.id $dir"
         return RoomRawQuery(sql) { st -> args.forEachIndexed { i, v -> st.bindLong(i + 1, v) } }
     }
+
+    /**
+     * `markFeedPlayed`'s id selection (02 Bulk "Mark all as played"): the `countUnplayed`
+     * predicate selecting `e.id`, so the confirmation count and the marked rows share it.
+     */
+    fun unplayedIds(
+        source: FeedSource,
+        sortDateBefore: Long?,
+    ): RoomRawQuery {
+        val where = mutableListOf(VISIBLE)
+        val args = mutableListOf<Long>()
+        val from =
+            if (source == FeedSource.All) {
+                where += "p.id = e.podcastId"
+                where += "p.includeInAll = 1"
+                "episode e CROSS JOIN podcast p"
+            } else {
+                "episode e JOIN podcast p ON p.id = e.podcastId"
+            }
+
+        when (source) {
+            FeedSource.All -> {}
+
+            FeedSource.Ungrouped -> {
+                where += "NOT EXISTS (SELECT 1 FROM podcast_group_member m WHERE m.podcastId = e.podcastId)"
+            }
+
+            is FeedSource.Group -> {
+                where += "e.podcastId IN (SELECT m.podcastId FROM podcast_group_member m WHERE m.groupId = ?)"
+                args += source.groupId
+            }
+
+            is FeedSource.Podcast -> {
+                where += "e.podcastId = ?"
+                args += source.podcastId
+            }
+        }
+
+        where += "s.playedAt IS NULL"
+        sortDateBefore?.let {
+            where += "e.sortDate < ?"
+            args += it
+        }
+
+        val sql =
+            "SELECT e.id FROM $from $ROW_JOINS WHERE ${where.joinToString(" AND ")}"
+        return RoomRawQuery(sql) { st -> args.forEachIndexed { i, v -> st.bindLong(i + 1, v) } }
+    }
 }
