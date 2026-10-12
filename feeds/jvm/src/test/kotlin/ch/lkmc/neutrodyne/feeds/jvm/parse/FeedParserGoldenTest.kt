@@ -12,6 +12,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.encodeToJsonElement
 import okio.Buffer
+import org.junit.Assume.assumeFalse
 import org.junit.Test
 import java.io.File
 import java.util.concurrent.Executors
@@ -46,9 +47,7 @@ class FeedParserGoldenTest {
 
     @Test
     fun everyFixtureMatchesItsGolden() {
-        val fixtures = fixtures()
-        check(fixtures.isNotEmpty()) { "golden corpus not found under ${Goldens.fixturesDir}" }
-        for (fixture in fixtures) {
+        for (fixture in fixtures()) {
             parseAndCompare(fixture)
         }
     }
@@ -60,8 +59,10 @@ class FeedParserGoldenTest {
      */
     @Test(timeout = 120_000)
     fun corpusParsesConcurrentlyOnOneInstance() {
+        // Golden rewrites may only come from the deterministic sequential pass above; an
+        // interleaved run must never pin nondeterministic output as the baseline.
+        assumeFalse(Goldens.updateRequested())
         val fixtures = fixtures()
-        check(fixtures.isNotEmpty()) { "golden corpus not found under ${Goldens.fixturesDir}" }
 
         val shared: FeedParser = XmlPullFeedParser.discovered()
         val pool = Executors.newFixedThreadPool(STRESS_THREADS)
@@ -84,11 +85,7 @@ class FeedParserGoldenTest {
         }
     }
 
-    private fun fixtures(): List<File> =
-        Goldens.fixturesDir
-            .listFiles { file -> file.name.endsWith(".xml") }
-            .orEmpty()
-            .sortedBy { it.name }
+    private fun fixtures(): List<File> = Goldens.fixtures()
 
     private fun parseAndCompare(fixture: File) {
         val result = parser.parse({ Buffer().write(fixture.readBytes()) }, null, baseUrl)

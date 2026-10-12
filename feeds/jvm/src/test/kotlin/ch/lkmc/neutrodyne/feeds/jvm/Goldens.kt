@@ -25,9 +25,23 @@ object Goldens {
 
     /** The corpus tree: a plain data directory of `:feeds`, consumed through a test-resources srcDir. */
     val fixturesDir: File
-        get() = File(System.getProperty("neutrodyne.rootDir")!!, "feeds/src/test/resources/feeds")
+        get() =
+            File(
+                checkNotNull(System.getProperty("neutrodyne.rootDir")) {
+                    "neutrodyne.rootDir is unset; run tests through Gradle (TestConventions sets it)"
+                },
+                "feeds/src/test/resources/feeds",
+            )
 
     fun fixture(name: String): File = File(fixturesDir, name)
+
+    /** Every corpus fixture, sorted by name; fails when the corpus tree is missing or empty. */
+    fun fixtures(): List<File> {
+        val files = fixturesDir.listFiles { file -> file.name.endsWith(".xml") }
+        checkNotNull(files) { "golden corpus directory not found: ${fixturesDir.path}" }
+        check(files.isNotEmpty()) { "golden corpus is empty under ${fixturesDir.path}" }
+        return files.sortedBy { it.name }
+    }
 
     fun updateRequested(): Boolean =
         System.getProperty("neutrodyne.updateGoldens") == "true" &&
@@ -49,7 +63,9 @@ object Goldens {
             return
         }
         check(goldenFile.isFile) { "missing golden file ${goldenFile.path}; run with -PupdateGoldens" }
-        val expected = goldenFile.readText()
+        // `actual` is generated LF-only; read back LF too (.gitattributes pins eol=lf, but a
+        // checkout that overrode attributes locally must still compare equal).
+        val expected = goldenFile.readText().replace("\r\n", "\n")
         check(actual == expected) {
             "golden mismatch for $name\n--- expected ---\n$expected\n--- actual ---\n$actual"
         }

@@ -26,10 +26,7 @@ class MutationRobustnessTest {
     @Test
     fun everyFixtureSurvivesMutations() {
         val iterations = System.getProperty("neutrodyne.mutationIterations")?.toIntOrNull() ?: 20
-        for (fixture in Goldens.fixturesDir
-            .listFiles { f -> f.name.endsWith(".xml") }
-            .orEmpty()
-            .sortedBy { it.name }) {
+        for (fixture in Goldens.fixtures()) {
             mutate(fixture, iterations)
         }
     }
@@ -125,17 +122,23 @@ class MutationRobustnessTest {
             mutants += original
         }
 
-        // Insert NUL and a lone surrogate.
+        // Insert NUL and an invalid UTF-8 surrogate half (CESU-8 U+D800): a lone \uD800 in a
+        // String would be substituted by encodeToByteArray() and never reach the parser.
         val asText = original.decodeToString()
         val withNul = asText.replaceFirst("<", "<\u0000", ignoreCase = false)
-        val withSurrogate = asText.replaceFirst("<", "<\uD800", ignoreCase = false)
         if (withNul != asText) mutants += withNul.encodeToByteArray()
-        if (withSurrogate != asText) mutants += withSurrogate.encodeToByteArray()
+        val lt = original.indexOf('<'.code.toByte())
+        if (lt >= 0) {
+            mutants += original.copyOfRange(0, lt + 1) + CESU8_SURROGATE + original.copyOfRange(lt + 1, original.size)
+        }
 
         return mutants.distinctBy { it.contentHashCode() }
     }
 
     private companion object {
         const val MUTANT_TIMEOUT_MS = 5_000L
+
+        /** CESU-8 encoding of U+D800 — an invalid sequence under strict UTF-8 decoding. */
+        val CESU8_SURROGATE = byteArrayOf(0xED.toByte(), 0xA0.toByte(), 0x80.toByte())
     }
 }
