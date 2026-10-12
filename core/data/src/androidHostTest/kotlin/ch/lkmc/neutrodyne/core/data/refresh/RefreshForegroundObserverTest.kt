@@ -80,6 +80,23 @@ class RefreshForegroundObserverTest {
         }
 
     @Test
+    fun `a wall clock rollback does not suppress the trigger`() =
+        runTest {
+            val deps = deps()
+            deps.settings.set(FeedsSettingKeys.LAST_ALL_RUN_FINISHED_AT, deps.clock.nowMs)
+            val observer = deps.observer()
+            observer.onStart(owner)
+            advanceUntilIdle()
+            assertThat(deps.scheduler.nowRequests).isEmpty()
+
+            deps.clock.nowMs -= 120 * MINUTE_MS
+            observer.onStart(owner)
+            advanceUntilIdle()
+
+            assertThat(deps.scheduler.nowRequests).hasSize(1)
+        }
+
+    @Test
     fun `honours the stored scheduled tick`() =
         runTest {
             val deps = deps()
