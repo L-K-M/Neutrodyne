@@ -451,7 +451,7 @@ enum class Sniff { RSS, ATOM, RDF, OPML, HTML, JSON, OTHER }
 
 1. Stream the response body (`bodyAsChannel()`) into `<cache>/feeds/{uuid}.tmp` — Android `cacheDir`, the desktop's cache directory of [11 AppDirs](11-desktop.md#appdirs), both through 01's `StoragePaths` — via Okio `HashingSink.sha256` on the injected Okio `FileSystem`, counting decompressed bytes in the copy loop; above `maxBytes` stop reading (which cancels the call), delete the file and return `TooLarge` (also bounds gzip bombs).
 2. `sniffOnlyBytes` (probes in [Autodiscovery](#fetch-sniff-and-autodiscovery)) stops after N bytes.
-3. `FeedSniffer` (common, byte-level) reads at most the first 64 KiB (the prolog-guard window; long comments or DOCTYPEs before the root exist): skip BOM (UTF-8/16/32), whitespace, `<?xml…?>`, comments and `<!DOCTYPE …>` (except `<!DOCTYPE html`), then classify the first element: `rss` → RSS, `feed` → ATOM, `RDF`/`rdf:RDF` → RDF, `opml` → OPML, `html` or `<!DOCTYPE html` → HTML; a first non-space byte `{` or `[` → JSON; otherwise OTHER.
+3. `FeedSniffer` (common, byte-level) reads at most the first 64 KiB (the prolog-guard window; long comments or DOCTYPEs before the root exist): skip BOM (UTF-8/16/32), whitespace, `<?xml…?>`, comments and `<!DOCTYPE …>` (except `<!DOCTYPE html`), then classify the first element's local name — the QName part after the last `:`, matched case-insensitively like the parser's root dispatch, so a namespace-prefixed `a:feed` or `atom:feed` reads as Atom: `rss` → RSS, `feed` → ATOM, `RDF`/`rdf:RDF` → RDF, `opml` → OPML, `html` or `<!DOCTYPE html` → HTML; a first non-space byte `{` or `[` → JSON; otherwise OTHER.
 4. `FeedTempFiles` deletes each file in a `finally` after parsing; `sweep()` at every engine start deletes files older than 1 h.
 
 ### Response handling
@@ -891,6 +891,25 @@ Android (WorkManager); the desktop has no tick of its own ([Desktop refresh](#de
 
 All four run `RefreshWorker` (Metro assisted injection through 01's multibound worker map, `@WorkerKey(RefreshWorker::class)`; tag `refresh`); `import-sync` is enqueued by `RefreshController.requestFirstFetch()`, which 10's `WorkManagerSyncScheduler` calls after a pulled page added podcasts ([10 Client sync engine](10-sync.md#client-sync-engine)). A sync-added library of hundreds of podcasts follows the same continuation path as a large import. `refresh-now` ignores `feeds.refresh_wifi_only` and the battery constraint because the user asked for it; automatic triggers honour both. Below Android 12, WorkManager runs expedited work as a foreground service and requires `getForegroundInfo()`, and expedited requests reject every constraint except network and storage and any initial delay (`WorkRequest.Builder.build()` throws, [define work](https://developer.android.com/develop/background-work/background-tasks/persistent/getting-started/define-work), [WorkRequest source](https://github.com/androidx/androidx/blob/androidx-main/work/work-runtime/src/main/java/androidx/work/WorkRequest.kt)); refresh deliberately avoids the FGS path (no notification channel, no `dataSync` use for refresh), accepting slightly later starts on API 26–30, where non-expedited one-time work still starts promptly while the app is in the foreground. Scope serialisation in `Data`: `"all"`, `"group:<id>"`, or a `LongArray` of ≤ 500 ids (`Data` is capped at 10 KB, `Data.MAX_DATA_BYTES`; larger sets are marked due with 02's `forceDue` first and sent as `"all"` with `force = false`).
 
+**M1a review adjustments (2026-10-12).** Android persists every forced scope with
+02's `forceDue` before handing its request to WorkManager, including All, Group
+and podcast lists within the 500-id cap. The engine reapplies the marks
+idempotently at run start. A failed predecessor on an appended chain can drop
+the request but cannot erase its due marks; the next due-selection run can
+recover that intent. Enqueues are serialized so the persistence step cannot
+let a later request overtake an earlier one.
+
+A mutex-timeout report (`reenqueued`) makes `RefreshWorker` return `Result.retry()`
+for the existing work, preserving its persisted scope, force, pages-only flag
+and origin. This replaces the separate app-scope re-enqueue with WorkManager's
+durable retry and its normal backoff; a worker never reports success while a
+replacement exists only in memory. This is an implementation deviation from
+the mutex-timeout continuation described in [Engine run](#engine-run), because
+a continuation would lose the scoped or pages-only intent. Deadline leftovers
+still use the awaited continuation below. A malformed persisted group id
+falls back to All with force cleared: ordinary due selection recovers without
+forcing unrelated feeds or failing the rest of the appended chain.
+
 **Continuations and `KEEP`.** `KEEP` ignores a new request while unique work of that name is *uncompleted*, which includes `RUNNING` ([ExistingWorkPolicy source](https://github.com/androidx/androidx/blob/androidx-main/work/work-runtime/src/main/java/androidx/work/ExistingWorkPolicy.kt)). A running continuation therefore cannot enqueue its successor; it returns `Result.retry()` instead (linear backoff 60 s × attempt), at most 10 *executions* of the continuation work in total, after which the periodic tick takes over. Other origins enqueue the continuation — the enqueue's `Operation` is awaited before the worker reports success, because an unconfirmed enqueue could strand the leftovers; `KEEP` then collapses concurrent requests into one.
 
 ```kotlin
@@ -907,6 +926,7 @@ All four run `RefreshWorker` (Metro assisted injection through 01's multibound w
         val report = refresher.run(request)
         val more = report.remaining > 0 || report.stoppedByDeadline
         return when {
+            report.reenqueued -> Result.retry() // retain the existing persisted request after a mutex timeout
             !more -> Result.success()          // per-feed failures live on the podcast rows, not in WorkManager retries
             // the enqueue is awaited; a failed enqueue retries this worker rather than stranding leftovers
             request.origin != RefreshOrigin.CONTINUATION ->
@@ -1287,9 +1307,11 @@ data class BasicCredentials(val username: String, val password: String)
 2. `neutrodyne://subscribe?url=<enc>` → the decoded `url` (recursively, once).
 3. `feed:https://x` / `feed:http://x` → `https://x` / `http://x`; `feed://x`, `pcast://x`, `podcast://x`, `itpc://x` → `https://x` with `schemeGuessed = true`.
 4. Subscribe wrappers: `subscribeonandroid.com/<rest>` and `www.subscribeonandroid.com/<rest>` → `<rest>` (adding `https://` when scheme-less); `antennapod.org/deeplink/subscribe?url=<enc>` → the `url` parameter; `podcasts.google.com/feed/<base64url>` → decoded feed URL (**Unverified:** the encoding; the shut-down service's links still circulate).
-5. Scheme-less `host.tld/…` → `https://…` with `schemeGuessed = true`. When `schemeGuessed` and the `https` attempt fails with `CONNECTION`, `TLS_*` or `TIMEOUT`, the resolver retries once with `http://`.
+5. Scheme-less `host.tld/…` → `https://…` with `schemeGuessed = true`. When `schemeGuessed` and the `https` attempt fails with `CONNECTION`, `TLS_*` or `TIMEOUT`, the resolver retries once with `http://`. **Credential exception (2026-10-12):** when credentials are present (from userinfo or explicitly supplied), do not retry over `http://`; surface the transport error. The user can explicitly enter `http://` to opt into cleartext.
 6. Reject anything that is not `http(s)` after unwrapping (`file:`, `content:`, `javascript:`, …) as `InvalidUrl`; text with no URL-like token and no dot → `NotAUrl(query = text)`.
 7. `UrlNormalizer.splitUserInfo` moves `user:pass@` into credentials.
+
+The `url` query parameter in Neutrodyne and AntennaPod wrappers is percent-decoded once as UTF-8, with `+` meaning space and `%2B` meaning a literal plus. Literal Unicode is preserved alongside escaped bytes. Malformed percent triplets stay literal; invalid UTF-8 byte sequences use replacement decoding.
 
 ### Host recognition
 

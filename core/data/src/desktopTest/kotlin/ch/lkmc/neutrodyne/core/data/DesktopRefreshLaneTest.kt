@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.common.JobLanePoker
 import ch.lkmc.neutrodyne.core.data.refresh.AdapterResult
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopRefreshLane
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopRefreshScheduler
+import ch.lkmc.neutrodyne.core.data.refresh.FetchMode
 import ch.lkmc.neutrodyne.core.data.refresh.NextRefreshRebaser
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
@@ -18,6 +19,9 @@ import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -31,8 +35,9 @@ import kotlin.time.Instant
 /**
  * 03 Desktop refresh — the `refresh` lane: an offline run is free, queued requests drain in order
  * (forced scopes persisted first), and the automatic selection picks up feeds due inside the
- * 15-minute slack. Runs are driven by the fake scheduler's queue plus the real engine over the
- * scripted adapter.
+ * 15-minute slack or holding a stranded paging cursor. Runs are driven by the fake scheduler's
+ * queue plus the real engine over the scripted adapter. The MS2-tagged rows of 03's Testing
+ * table stay out here.
  */
 class DesktopRefreshLaneTest {
     private val clock = TestClock()
@@ -209,6 +214,149 @@ class DesktopRefreshLaneTest {
             assertEquals(0, db.podcastDao().byId(id)!!.failureCount)
         }
 
+    @Test
+    fun pendingPagingResumesEvenWhenNoHeadIsDue() =
+        laneTest {
+            // "Manual only" (interval 0): the head never falls due, but a stranded "Load older
+            // episodes"/subscribe-backfill cursor must still resume (03 Desktop refresh step 2 —
+            // `pagingPending` does not consult `nextRefreshAt`).
+            val id =
+                seedPodcast(
+                    db,
+                    "https://a.example.com/f",
+                    nextRefreshAt = NOW + 365 * DAY,
+                    pagingNextUrl = "https://a.example.com/page2",
+                    pagingComplete = false,
+                )
+            val adapter =
+                stubAdapter(
+                    mutableMapOf(
+                        "https://a.example.com/page2" to
+                            adapterParsed(parsedFeed(items = listOf(parsedEpisode(1)))),
+                    ),
+                )
+            val lane = lane(adapter, queue(this))
+
+            lane.run(Instant.fromEpochMilliseconds(NOW))
+
+            assertEquals(listOf(id to FetchMode.OLDER_PAGE), adapter.calls)
+        }
+
+    @Test
+    fun aPagesOnlyRequestDrainsInOrderWithANormalOne() =
+        laneTest {
+            // 03 Testing: a pages-only request drains in order beside a normal one and the
+            // pages-only run never touches the feed's head.
+            val a = seedPodcast(db, "https://a.example.com/f", nextRefreshAt = NOW)
+            val b =
+                seedPodcast(
+                    db,
+                    "https://b.example.com/f",
+                    nextRefreshAt = NOW + 365 * DAY,
+                    pagingNextUrl = "https://b.example.com/page2",
+                    pagingComplete = false,
+                )
+            val adapter =
+                stubAdapter(
+                    mutableMapOf(
+                        "https://a.example.com/f" to AdapterResult.NotModified(meta = null),
+                        "https://b.example.com/page2" to
+                            adapterParsed(parsedFeed(items = listOf(parsedEpisode(1)))),
+                    ),
+                )
+            val q = queue(this)
+            val lane = lane(adapter, q)
+
+            q.enqueueNow(
+                scope = RefreshScope.Podcasts(listOf(a)),
+                force = false,
+                pagesOnly = false,
+                origin = RefreshOrigin.MANUAL,
+            )
+            q.enqueueNow(
+                scope = RefreshScope.Podcasts(listOf(b)),
+                force = false,
+                pagesOnly = true,
+                origin = RefreshOrigin.MANUAL,
+            )
+            testScheduler.advanceUntilIdle()
+
+            lane.run(Instant.fromEpochMilliseconds(NOW))
+
+            assertEquals(
+                listOf(a to FetchMode.REFRESH, b to FetchMode.OLDER_PAGE),
+                adapter.calls,
+            )
+        }
+
+    @Test
+    fun aForcedScopeSurvivesASimulatedQuit() =
+        laneTest {
+            // 03 Testing: `force` is persisted before the request queues, so a quit mid-drain
+            // loses the in-memory request but not the mark — the next start's automatic
+            // selection picks the feed up.
+            val id =
+                seedPodcast(
+                    db,
+                    "https://a.example.com/f",
+                    nextRefreshAt = NOW + 365 * DAY,
+                )
+            val gate = Channel<Unit>()
+            val adapter =
+                stubAdapter(
+                    onFetch = { _, _ ->
+                        gate.receive()
+                        AdapterResult.NotModified(meta = null)
+                    },
+                )
+            val q = queue(this)
+            val lane = lane(adapter, q)
+
+            q.enqueueNow(
+                scope = RefreshScope.Podcasts(listOf(id)),
+                force = true,
+                pagesOnly = false,
+                origin = RefreshOrigin.MANUAL,
+            )
+            testScheduler.advanceUntilIdle()
+
+            // The drain reaches the fetch and sticks on it — the "quit".
+            val runJob = launch { lane.run(Instant.fromEpochMilliseconds(NOW)) }
+            testScheduler.advanceUntilIdle()
+            assertEquals(listOf(id to FetchMode.REFRESH), adapter.calls)
+
+            runJob.cancel()
+            testScheduler.advanceUntilIdle()
+
+            // The persisted mark survived the dropped request.
+            assertEquals(0L, db.podcastDao().byId(id)!!.nextRefreshAt)
+
+            // A fresh lane (empty queue, like a restart) finds the feed in the automatic
+            // selection without any enqueue.
+            val restartAdapter =
+                stubAdapter(
+                    mutableMapOf(
+                        "https://a.example.com/f" to AdapterResult.NotModified(meta = null),
+                    ),
+                )
+            val restartLane = lane(restartAdapter, queue(this))
+            restartLane.run(Instant.fromEpochMilliseconds(NOW))
+
+            assertEquals(listOf(id to FetchMode.REFRESH), restartAdapter.calls)
+        }
+
+    @Test
+    fun requestFirstFetchPokesTheLane() =
+        laneTest {
+            // 03 Testing: a sync-added podcast's first fetch asks the runner for the lane.
+            val q = queue(this)
+
+            q.requestFirstFetch()
+            testScheduler.advanceUntilIdle()
+
+            assertEquals(listOf(DesktopRefreshLane.NAME), pokes)
+        }
+
     private suspend fun summaryCount(): Int = if (settings.get(FeedsSettingKeys.LAST_RUN_SUMMARY).isEmpty()) 0 else 1
 
     /**
@@ -234,12 +382,28 @@ class DesktopRefreshLaneTest {
             appScope = scope,
         )
 
-    private fun lane(
+    private fun TestScope.lane(
         adapter: StubSourceAdapter,
         queue: DesktopRefreshScheduler,
     ): DesktopRefreshLane =
         DesktopRefreshLane(
-            refresher = newRefresher(db, mapOf(SourceType.RSS to adapter), clock, settings),
+            refresher =
+                newRefresher(
+                    db,
+                    mapOf(SourceType.RSS to adapter),
+                    clock,
+                    settings,
+                    ingestor =
+                        newIngestor(
+                            db,
+                            clock,
+                            settings,
+                            // Ingest prep joins the virtual clock: the paging phase's
+                            // cancellation bound would otherwise fire while a commit is parked
+                            // on a real worker thread, rolling the page back (engine test's note).
+                            defaultDispatcher = StandardTestDispatcher(testScheduler),
+                        ),
+                ),
             db = db,
             network = network,
             queue = queue,

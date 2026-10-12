@@ -24,6 +24,7 @@ import ch.lkmc.neutrodyne.core.testing.TestClock
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Test
@@ -198,62 +199,54 @@ class RefreshWorkerTest {
         }
 
     @Test
-    fun `a scoped retry that times out on the mutex re-enqueues instead of continuing`() =
-        runTest {
-            val db = openDb()
-            val id = seedPodcast(db, "https://a.test/feed.xml")
-            val gate = CompletableDeferred<Unit>()
-            val deps =
-                deps(
-                    db = db,
-                    adapter =
-                        stubAdapter(onFetch = { _, _ ->
-                            gate.await()
-                            adapterFailed()
-                        }),
-                    clock = DeadlineClock(),
+    fun `a scoped retry that times out on the mutex retries instead of continuing`() =
+        runTest { assertMutexTimeoutRetries(RefreshOrigin.RETRY) }
+
+    @Test
+    fun `a non-manual mutex timeout retries the persisted request`() =
+        runTest { assertMutexTimeoutRetries(RefreshOrigin.SUBSCRIBE) }
+
+    private suspend fun TestScope.assertMutexTimeoutRetries(origin: RefreshOrigin) {
+        val db = openDb()
+        val id = seedPodcast(db, "https://a.test/feed.xml")
+        val gate = CompletableDeferred<Unit>()
+        val deps =
+            deps(
+                db = db,
+                adapter =
+                    stubAdapter(onFetch = { _, _ ->
+                        gate.await()
+                        adapterFailed()
+                    }),
+                clock = DeadlineClock(),
+            )
+        // Another run owns the mutex; this worker's clock jumps past its wait deadline.
+        val holder =
+            backgroundScope.async {
+                deps.refresher.run(
+                    RefreshRequest(RefreshScope.All, force = false, pagesOnly = false, origin = RefreshOrigin.PERIODIC),
                 )
-            // An unrelated run owns the engine mutex behind its parked fetch; the retry work's
-            // deadline lands inside the mutex margin (the clock jumps past it), so the wait
-            // degrades to a tryLock that fails.
-            val holder =
-                backgroundScope.async {
-                    deps.refresher.run(
-                        RefreshRequest(
-                            scope = RefreshScope.All,
-                            force = false,
-                            pagesOnly = false,
-                            origin = RefreshOrigin.PERIODIC,
-                        ),
-                    )
-                }
-            testScheduler.runCurrent()
+            }
+        testScheduler.runCurrent()
+        try {
+            val worker =
+                worker(deps, RefreshScope.Podcasts(listOf(id)), force = true, pagesOnly = true, origin = origin)
+            val result = worker.doWork()
 
-            val result =
-                worker(
-                    deps,
-                    scope = RefreshScope.Podcasts(listOf(id)),
-                    force = true,
-                    origin = RefreshOrigin.RETRY,
-                ).doWork()
-
-            // r4 F3: the original request is re-enqueued — scope, force and RETRY origin
-            // intact in the work data — rather than degraded to a non-forced continuation.
-            assertThat(result).isInstanceOf(ListenableWorker.Result.Success::class.java)
+            // Retrying retains WorkManager's input, with no app-scope enqueue gap.
+            assertThat(result).isInstanceOf(ListenableWorker.Result.Retry::class.java)
             assertThat(deps.scheduler.continuationCount).isEqualTo(0)
-            assertThat(deps.scheduler.nowRequests)
-                .containsExactly(
-                    FakeRefreshScheduler.NowRequest(
-                        RefreshScope.Podcasts(listOf(id)),
-                        force = true,
-                        pagesOnly = false,
-                        origin = RefreshOrigin.RETRY,
-                    ),
-                )
-
+            assertThat(deps.scheduler.nowRequests).isEmpty()
+            val retained = RefreshWorkData.request(worker.inputData, 0, 0, 0)
+            assertThat(retained.scope).isEqualTo(RefreshScope.Podcasts(listOf(id)))
+            assertThat(retained.force).isTrue()
+            assertThat(retained.pagesOnly).isTrue()
+            assertThat(retained.origin).isEqualTo(origin)
+        } finally {
             gate.complete(Unit)
             holder.await()
         }
+    }
 
     // --- plumbing ---------------------------------------------------------------------------------
 

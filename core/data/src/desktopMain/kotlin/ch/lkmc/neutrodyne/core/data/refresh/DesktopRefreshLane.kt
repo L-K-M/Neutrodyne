@@ -14,9 +14,10 @@ import kotlin.time.Instant
 
 /**
  * The `refresh` lane (03 Desktop refresh): drains the queued requests, then runs the automatic
- * due selection when `dueForRefresh(now + 15 min)` finds anything. No deadline, no continuation —
- * a run ends when the selection is done and its 2-min paging phase is over. The 15-min slack makes
- * feeds come due in batches, so a run posts at most one new-episode notification.
+ * due selection when `dueForRefresh(now + 15 min)` finds heads or `pagingPending` finds stranded
+ * cursors. No deadline, no continuation — a run ends when the selection is done and its 2-min
+ * paging phase is over. The 15-min slack makes feeds come due in batches, so a run posts at most
+ * one new-episode notification.
  */
 @ContributesIntoSet(AppScope::class)
 internal class DesktopRefreshLane
@@ -42,9 +43,14 @@ internal class DesktopRefreshLane
                 }
             }
 
-            // One indexed query over at most a few hundred rows — cheap enough for the minute tick.
+            // Two indexed queries over at most a few hundred rows — cheap enough for the minute
+            // tick. `pagingPending` ignores `nextRefreshAt` (03 step 2): a "Manual only" feed's
+            // stranded cursor resumes here although its head never falls due.
             val dueBefore = now.toEpochMilliseconds() + DUE_SLACK_MS
-            if (db.podcastDao().dueForRefresh(dueBefore, scopeAll = true).isEmpty()) return
+            val idle =
+                db.podcastDao().dueForRefresh(dueBefore, scopeAll = true).isEmpty() &&
+                    db.podcastDao().pagingPending(scopeAll = true).isEmpty()
+            if (idle) return
             refresher.run(
                 RefreshRequest(
                     scope = RefreshScope.All,
