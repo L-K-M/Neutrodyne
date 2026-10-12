@@ -96,9 +96,12 @@ internal class RssSourceAdapter(
                 AdapterResult.NotModified(
                     meta =
                         FetchMeta(
-                            finalUrl = feed.feedUrl,
+                            // The 304 came back from the end of the redirect chain, and a
+                            // leading 301/308 run still announces a move the engine must see
+                            // (03 Permanent redirects) — the stored URL is only `requestedUrl`.
+                            finalUrl = outcome.finalUrl,
                             requestedUrl = feed.feedUrl,
-                            permanentUrl = null,
+                            permanentUrl = outcome.permanentUrl,
                             etag = outcome.etag ?: feed.etag,
                             lastModified = outcome.lastModified ?: feed.lastModified,
                             sha256Hex = feed.contentSha256.orEmpty(),
