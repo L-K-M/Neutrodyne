@@ -2783,6 +2783,13 @@ Serves N1, N4, N6. Expected failures arrive as values (01 [Errors](01-foundation
 6. `LocalUiClock` and `LocalPlatformKind` (`:core:ui`) are CompositionLocals this doc did not name: the clock backs every relative-date label so tests inject `TestClock`, and the platform kind picks 07's per-platform copy. Both are on 09's `.editorconfig` allowlist together with `LocalDrawnReporter`.
 7. The Library tile menu's "Mark all as played…" confirmation is a plain confirm/cancel `NdDialog`: the dialog table's "All" / "Older than 1 week / 1 month / 3 months" options and `countUnplayed` arrive with M2's group data (`FeedRepository.countUnplayed` does not exist yet; `markFeedPlayed(source, sortDateBefore)` already takes the cutoff). Confirming marks the whole feed via `markFeedPlayed(source, null)` (UI review round 2, P2).
 
+### Implementation deviations (2026-10-12, M1a Feeds slice)
+
+1. The Feeds destination is the single All page: the group tab row and pager, tab/selection persistence, visit tracking and the overflow's "Hide older than…" and group entries arrive with M2's groups. The page header's Play button waits for M4's `PlaybackController`, and the row's Play/Download actions dispatch but are inert until M4/M6 bind their controllers.
+2. "Paged lists show `LoadState.Error` as a footer row" applies only to the append path. A refresh failure over already-visible content and any prepend failure pin an `NdBanner` under the app bar instead — the append footer can sit thousands of placeholder rows away and a prepend failure has no footer; Retry replays every failed load. The empty first-page failure keeps the standalone `EmptyState` with Retry.
+3. The Feeds overflow's "Mark all as played…" is the plain confirm/cancel `NdDialog` of the Library note above (same reason: no `countUnplayed` or cutoff options until M2), covering the whole feed via `markFeedPlayed(FeedSource.All, null)`.
+4. Settings › Feeds is reachable through the Settings home row only, its summary the live refresh interval; the row order's remaining M1 entries arrive with their milestones. On the desktop the Wi-Fi-only row stays visible with the "Not used on computers" line ([Shared pages](#settings-screens), 11's Android-only-row rule for rows users may look for) while refresh-on-open — an Android foreground trigger with no desktop meaning — is hidden.
+
 ---
 
 ## New names introduced here
