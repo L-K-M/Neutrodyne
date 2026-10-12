@@ -26,12 +26,20 @@ internal data class FeedRequest(
 )
 
 internal sealed interface FetchOutcome {
-    /** 304 to a conditional request; validators the response still sent are kept (03 Validators). */
+    /**
+     * 304 to a conditional request; validators the response still sent are kept (03 Validators).
+     * The URL fields mirror [Body]'s: a permanently moved feed that now answers 304 still needs
+     * its redirect result applied so the stored URL migrates off the dead domain.
+     */
     data class NotModified(
         val etag: String?,
         val lastModified: String?,
         val maxAgeSec: Long?,
         val serverDateMs: Long?,
+        /** The URL the 304 came back from — the end of the followed chain. */
+        val finalUrl: String,
+        /** URL reached by the leading run of 301/308 hops, else null (03 Request rules). */
+        val permanentUrl: String?,
     ) : FetchOutcome
 
     /** A 200 body in a temp file; the caller owns and deletes [file]. */
