@@ -215,7 +215,6 @@ class DesktopJobRunner
                                     state.backoffUntil = null
                                     updateStatus(lane.name) {
                                         it.copy(
-                                            running = false,
                                             lastEndAt = Instant.fromEpochMilliseconds(clock.now()),
                                             lastError = null,
                                             runs = it.runs + 1,
@@ -237,7 +236,6 @@ class DesktopJobRunner
                                     Log.e(TAG, throwable) { "lane ${lane.name} failed" }
                                     updateStatus(lane.name) {
                                         it.copy(
-                                            running = false,
                                             lastEndAt = Instant.fromEpochMilliseconds(clock.now()),
                                             lastError =
                                                 Redactor.text(
@@ -271,7 +269,14 @@ class DesktopJobRunner
                                     false
                                 }
                             }
-                        if (relaunch) launchLane(lane, state)
+                        // `running = false` is published only after ownership is released: a
+                        // status reading idle while the tick would still skip the lane misleads
+                        // diagnostics and any caller waiting on it.
+                        if (relaunch) {
+                            launchLane(lane, state)
+                        } else {
+                            updateStatus(lane.name) { it.copy(running = false) }
+                        }
                     }
                 }
         }

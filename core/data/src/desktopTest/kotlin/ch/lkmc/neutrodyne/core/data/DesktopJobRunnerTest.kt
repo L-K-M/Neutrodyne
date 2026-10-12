@@ -184,6 +184,7 @@ class DesktopJobRunnerTest {
                 }
                 advanceTick(probe, ++probeRuns, clock)
                 awaitRuns(lane, ++laneRuns)
+                awaitStatus(runner, lane.name) { it.failures == laneRuns.toLong() }
             }
             awaitStatus(runner, lane.name) { it.failures == 6L }
 
@@ -548,17 +549,18 @@ class DesktopJobRunnerTest {
     ) = awaitCondition("${lane.name} run #$n") { lane.runCount.get() >= n }
 
     /**
-     * Waits for a `LaneStatus` shape, then one real beat: the fold's status write precedes the
-     * runner's `running`-clearing `finally` by a few instructions on the same coroutine, and a
-     * tick observing the stale flag would skip the lane — the sleep covers thread preemption.
+     * Waits for a settled `LaneStatus` shape: [predicate] and the lane released. The runner
+     * publishes `running = false` only after it gives up ownership, so the next tick is
+     * guaranteed to see the lane idle — no real-time beat needed under load.
      */
     private suspend fun TestScope.awaitStatus(
         runner: DesktopJobRunner,
         lane: String,
         predicate: (ch.lkmc.neutrodyne.core.data.refresh.LaneStatus) -> Boolean,
     ) {
-        awaitCondition("$lane's status") { runner.status.value[lane]?.let(predicate) == true }
-        Thread.sleep(HANDOFF_MS)
+        awaitCondition("$lane's status") {
+            runner.status.value[lane]?.let { !it.running && predicate(it) } == true
+        }
         runCurrent()
     }
 
@@ -623,7 +625,6 @@ class DesktopJobRunnerTest {
 
         const val FINALIZE_MS = 150L
         const val POKE_SETTLE_MS = 200L
-        const val HANDOFF_MS = 100L
         const val AWAIT_NS = 10_000_000_000L
         const val QUIET_NS = 150_000_000L
     }
