@@ -63,11 +63,7 @@ internal object FeedHttpHeaders {
     fun basicChallenge(headers: List<String>?): Pair<Boolean, String?> {
         if (headers == null) return false to null
         for (header in headers) {
-            val challenge = BASIC_CHALLENGE_RE.find(header)
-            if (challenge != null) {
-                return true to REALM_RE.find(challenge.groupValues[1])?.groupValues?.get(1)
-            }
-            if (BASIC_BARE_RE.containsMatchIn(header)) return true to null
+            basicChallengeIn(header)?.let { return it }
         }
         return false to null
     }
@@ -87,16 +83,238 @@ internal object FeedHttpHeaders {
     private val DATE_RE =
         Regex("""[A-Za-z]{3},\s*(\d{1,2})\s*([A-Za-z]{3})\s*(\d{4})\s*(\d{2}):(\d{2}):(\d{2})\s*GMT""")
 
-    private val REALM_RE = Regex("""realm\s*=\s*"([^"]*)"""", RegexOption.IGNORE_CASE)
+    /**
+     * The Basic verdict of one `WWW-Authenticate` value, or null when it carries no `Basic`
+     * challenge. An iterative walk of the RFC 9110 §11.6.1 challenge list —
+     * `auth-scheme [ 1*SP ( token68 / auth-param *( OWS "," OWS auth-param ) ) ]` — so a
+     * server-controlled param count stays linear; the recursive regex it replaces overflowed
+     * the JVM stack around a thousand params and cost the response its HTTP outcome. At each
+     * top-level comma the lookahead decides: `, token =` continues the current challenge's
+     * auth-params, anything else opens a new challenge. The first `Basic` challenge carrying
+     * a blob decides the realm; a bare `Basic` counts only when the value has no parametrized
+     * `Basic` at all.
+     */
+    private fun basicChallengeIn(header: String): Pair<Boolean, String?>? {
+        val n = minOf(header.length, MAX_CHALLENGE_CHARS)
+        var i = 0
+        var bare = false
+        while (true) {
+            while (i < n && (header[i] == ',' || header[i].isOws())) i++
+            if (i >= n) break
+            val start = i
+            while (i < n && header[i].isTokenChar()) i++
+            if (i == start) {
+                // Not a token start — malformed input; step over the byte and keep scanning.
+                i++
+                continue
+            }
+            val scheme = header.substring(start, i)
+            val owsEnd = i
+            while (i < n && header[i].isOws()) i++
+            val hasBlob = i > owsEnd
+            when {
+                i < n && header[i] == '=' -> {
+                    // `name=value` in scheme position — an auth-param the challenge
+                    // boundary swallowed; skip its value and keep looking for a scheme.
+                    i = skipAuthParamValue(header, i + 1, n)
+                }
 
-    /** A `Basic` challenge carrying auth-params anywhere in a challenge list. */
-    private val BASIC_CHALLENGE_RE =
-        Regex(
-            """(?i)(?:^|,)\s*Basic\s+((?:[A-Za-z0-9_-]+\s*=\s*(?:"[^"]*"|[^,\s"]*)\s*,?\s*)+)""",
-        )
+                !scheme.equals(BASIC_SCHEME, ignoreCase = true) -> {
+                    // Another scheme's params may contain `Basic` as a param name or inside a
+                    // quoted value — skip the blob so only real schemes are inspected.
+                    if (hasBlob) i = skipChallengeBlob(header, i, n)
+                }
 
-    /** A bare `Basic` challenge (no params — permitted though useless), anywhere in the list. */
-    private val BASIC_BARE_RE = Regex("""(?i)(?:^|,)\s*Basic\s*(?:,|$)""")
+                hasBlob && (i >= n || header[i] == ',') -> {
+                    bare = true
+                }
+
+                !hasBlob -> {
+                    // `Basic` before a comma or the end is the bare form; glued to any other
+                    // byte it is junk to step over, not a challenge.
+                    if (i < n && header[i] != ',') {
+                        i = skipChallengeBlob(header, i, n)
+                    } else {
+                        bare = true
+                    }
+                }
+
+                else -> {
+                    return true to basicRealm(header, i, n)
+                }
+            }
+        }
+        return if (bare) true to null else null
+    }
+
+    /**
+     * Skips one challenge's blob — a token68 or an auth-param list — from [start]; returns the
+     * index of the comma that starts the next challenge, or [n]. Commas inside quoted strings
+     * never delimit.
+     */
+    private fun skipChallengeBlob(
+        header: String,
+        start: Int,
+        n: Int,
+    ): Int {
+        var i = start
+        while (i < n) {
+            while (i < n && header[i].isOws()) i++
+            if (i >= n) break
+            if (header[i] == ',') {
+                // `, token =` continues the auth-param list; anything else is a new challenge.
+                var j = i + 1
+                while (j < n && header[j].isOws()) j++
+                val token = j
+                while (j < n && header[j].isTokenChar()) j++
+                while (j < n && header[j].isOws()) j++
+                if (j > token && j < n && header[j] == '=') {
+                    i++
+                    continue
+                }
+                return i
+            }
+            val element = i
+            if (header[i] == '"') {
+                i = skipQuoted(header, i, n)
+            } else {
+                while (i < n && header[i].isTokenChar()) i++
+                var k = i
+                while (k < n && header[k].isOws()) k++
+                if (k < n && header[k] == '=') {
+                    i = skipAuthParamValue(header, k + 1, n)
+                }
+            }
+            if (i == element) i++
+        }
+        return i
+    }
+
+    /** Skips an auth-param's value; [start] sits just past its `=`. */
+    private fun skipAuthParamValue(
+        header: String,
+        start: Int,
+        n: Int,
+    ): Int {
+        var i = start
+        while (i < n && header[i].isOws()) i++
+        if (i < n && header[i] == '"') return skipQuoted(header, i, n)
+        while (i < n && header[i].isTokenChar()) i++
+        return i
+    }
+
+    /** Skips a `"`-quoted string, honouring backslash escapes; unterminated consumes to [n]. */
+    private fun skipQuoted(
+        header: String,
+        start: Int,
+        n: Int,
+    ): Int {
+        var i = start + 1
+        while (i < n) {
+            when (header[i]) {
+                '\\' -> i += 2
+                '"' -> return i + 1
+                else -> i++
+            }
+        }
+        return n
+    }
+
+    /**
+     * The quoted `realm=` value of this `Basic` challenge's auth-param list (RFC 7617), or
+     * null when the blob is a token68, has no realm or quotes one without a closing quote.
+     * Params after the realm still parse, but the first quoted realm wins.
+     */
+    private fun basicRealm(
+        header: String,
+        start: Int,
+        n: Int,
+    ): String? {
+        var i = start
+        var realm: String? = null
+        while (i < n) {
+            while (i < n && header[i].isOws()) i++
+            if (i >= n || header[i] == ',') break
+            val nameStart = i
+            while (i < n && header[i].isTokenChar()) i++
+            if (i == nameStart) break
+            val name = header.substring(nameStart, i)
+            while (i < n && header[i].isOws()) i++
+            // No `=`: the blob is a token68 or the next challenge — the param list is over.
+            if (i >= n || header[i] != '=') break
+            i++
+            while (i < n && header[i].isOws()) i++
+            val value: String?
+            val quoted = i < n && header[i] == '"'
+            if (quoted) {
+                val (text, end) = readQuoted(header, i, n)
+                value = text
+                i = end
+            } else {
+                val valueStart = i
+                while (i < n && header[i].isTokenChar()) i++
+                value = header.substring(valueStart, i)
+            }
+            if (realm == null && quoted && name.equals(REALM_PARAM, ignoreCase = true)) {
+                realm = value
+            }
+            while (i < n && header[i].isOws()) i++
+            if (i >= n || header[i] != ',') break
+            i++
+        }
+        return realm
+    }
+
+    /**
+     * A `"`-quoted string with backslash escapes (the escaped byte itself is kept); null when
+     * the closing quote is missing. The int is the index just past the string.
+     */
+    private fun readQuoted(
+        header: String,
+        start: Int,
+        n: Int,
+    ): Pair<String?, Int> {
+        val out = StringBuilder()
+        var i = start + 1
+        while (i < n) {
+            when (header[i]) {
+                '\\' -> {
+                    if (i + 1 < n) out.append(header[i + 1])
+                    i += 2
+                }
+
+                '"' -> {
+                    return out.toString() to i + 1
+                }
+
+                else -> {
+                    out.append(header[i])
+                    i++
+                }
+            }
+        }
+        return null to n
+    }
+
+    /** SP or HTAB — the OWS/BWS of the challenge grammar. */
+    private fun Char.isOws(): Boolean = this == ' ' || this == '\t'
+
+    /** RFC 9110 `tchar`. */
+    private fun Char.isTokenChar(): Boolean =
+        this in 'A'..'Z' || this in 'a'..'z' || this in '0'..'9' ||
+            this == '!' || this == '#' || this == '$' || this == '%' || this == '&' ||
+            this == '\'' || this == '*' || this == '+' || this == '-' || this == '.' ||
+            this == '^' || this == '_' || this == '`' || this == '|' || this == '~'
+
+    private const val BASIC_SCHEME = "Basic"
+    private const val REALM_PARAM = "realm"
+
+    /**
+     * Defensive bound on one header value's scan — past OkHttp's 256 KiB per-line cap no
+     * intact value arrives anyway; the tokenizer itself is linear, this only fences off
+     * pathological in-memory strings.
+     */
+    private const val MAX_CHALLENGE_CHARS = 256 * 1024
 
     private val MONTHS =
         listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
