@@ -22,5 +22,23 @@ public object AppearanceSettingKeys {
     public val DYNAMIC_COLOR: SettingKey.Bool =
         SettingKey.Bool(name = "appearance.dynamic_color", default = true)
 
-    public val ALL: List<SettingKey<*>> = listOf(THEME, DYNAMIC_COLOR)
+    /** Library overflow › Show titles: title text under each grid tile (08 Library). */
+    public val LIBRARY_TITLES: SettingKey.Bool =
+        SettingKey.Bool(name = "appearance.library_titles", default = false)
+
+    /** Library › Sort (08; M1 fixed 100 dp cells, density arrives with M10). */
+    public val LIBRARY_SORT: SettingKey.Choice<LibrarySort> =
+        SettingKey.Choice(
+            name = "appearance.library_sort",
+            default = LibrarySort.TITLE,
+            values =
+                persistentListOf(
+                    LibrarySort.TITLE,
+                    LibrarySort.RECENTLY_UPDATED,
+                    LibrarySort.MOST_UNPLAYED,
+                    LibrarySort.RECENTLY_ADDED,
+                ),
+        )
+
+    public val ALL: List<SettingKey<*>> = listOf(THEME, DYNAMIC_COLOR, LIBRARY_TITLES, LIBRARY_SORT)
 }

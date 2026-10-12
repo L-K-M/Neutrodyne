@@ -51,6 +51,7 @@ internal fun Project.configureModuleGraphAssert() {
                 ":feature:[a-z]+ -> :(playback|download|youtube|sync):api",
                 ":core:domain -> :core:(model|common)",
                 ":core:domain -> :(playback|download|youtube):api",
+                ":core:common -> :core:model", // 08: Monogram returns MonogramSpec (moved 2026-10-05)
                 ":core:data -> :core:(domain|model|common|database|datastore|network|artwork)",
                 ":core:data -> :feeds(:jvm)?",
                 ":core:data -> :youtube:api",
