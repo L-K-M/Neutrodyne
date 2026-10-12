@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns="http://purl.org/rss/1.0/"
+         xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>RDF RSS 1.0 Show</title>
+    <link>https://example.com/rdf</link>
+    <description>Synthetic RSS 1.0 / RDF feed.</description>
+    <dc:creator>RDF Creator</dc:creator>
+    <items><rdf:li resource="https://example.com/rdf/1"/></items>
+  </channel>
+  <item>
+    <title>RDF item one</title>
+    <link>https://example.com/rdf/1</link>
+    <dc:date>2026-10-01T18:45:00+02:00</dc:date>
+    <enclosure url="https://cdn.example.com/rdf1.mp3" length="1000" type="audio/mpeg"/>
+  </item>
+</rdf:RDF>

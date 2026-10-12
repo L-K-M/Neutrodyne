@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Synthetic Undeclared Show</title>
+    <link>https://example.com/show</link>
+    <description>Synthetic feed: itunes prefix used without its xmlns declaration.</description>
+    <itunes:author>Ada Lovelace</itunes:author>
+    <itunes:explicit>false</itunes:explicit>
+    <item>
+      <title>Episode with undeclared itunes tags</title>
+      <guid isPermaLink="false">undeclared-1</guid>
+      <pubDate>Tue, 06 Oct 2026 08:00:00 +0000</pubDate>
+      <enclosure url="https://cdn.example.com/e1.mp3" length="48000000" type="audio/mpeg"/>
+      <itunes:duration>37:25</itunes:duration>
+    </item>
+  </channel>
+</rss>

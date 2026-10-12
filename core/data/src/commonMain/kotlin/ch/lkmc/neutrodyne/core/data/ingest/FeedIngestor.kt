@@ -160,10 +160,12 @@ internal class FeedIngestor(
                 val row = byKey[key] ?: continue
                 if (
                     reusedGuid != null && key == "g:$reusedGuid" &&
-                    item.enclosureIdentity != normEnc(row)
+                    (item.enclosureIdentity == null || item.enclosureIdentity != normEnc(row))
                 ) {
-                    // The reused guid's row holds the sibling's enclosure; pass 2 (or an insert)
-                    // resolves this item's own identity instead of moving user state here.
+                    // The reused guid's row holds the sibling's enclosure — or the item offers
+                    // none (null identity is absence of evidence, not equality: the normalizer
+                    // rejects some parser-accepted hosts). Pass 2 (or an insert) resolves this
+                    // item's own identity instead of moving user state here.
                     continue
                 }
                 val holder = claimedBy[row.id]

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:fh="http://purl.org/syndication/history/1.0">
+  <channel>
+    <title>Complete Feed, no archive</title>
+    <fh:complete/>
+    <item><title>The one and only</title><guid>fhc-1</guid>
+      <enclosure url="https://cdn.example.com/fc1.mp3" length="10" type="audio/mpeg"/></item>
+  </channel>
+</rss>

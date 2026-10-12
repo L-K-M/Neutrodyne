@@ -1,0 +1,43 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/mg1.mp3"
+        }
+      ],
+      "feedOrder": 0,
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/mg1.mp3"
+      },
+      "title": "Only an enclosure"
+    },
+    {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/mg2.mp3"
+        }
+      ],
+      "feedOrder": 1,
+      "link": "https://example.com/ep2",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/mg2.mp3"
+      },
+      "title": "Enclosure and link"
+    }
+  ],
+  "title": "Missing GUIDs"
+}

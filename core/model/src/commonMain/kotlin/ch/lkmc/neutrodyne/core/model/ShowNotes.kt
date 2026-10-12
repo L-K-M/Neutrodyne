@@ -57,6 +57,7 @@ sealed interface ShowNoteSpan {
     data class Timestamp(
         val text: String,
         val positionMs: Long,
+        val style: Int = 0,
     ) : ShowNoteSpan
 
     data object LineBreak : ShowNoteSpan

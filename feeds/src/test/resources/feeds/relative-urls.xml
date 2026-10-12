@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Relative URLs</title>
+    <item>
+      <title>Same-directory reference</title>
+      <guid>rel-1</guid>
+      <enclosure url="ep.mp3" length="10" type="audio/mpeg"/>
+    </item>
+    <item xml:base="podcasts/">
+      <title>xml:base directory</title>
+      <guid>rel-2</guid>
+      <enclosure url="ep.mp3" length="10" type="audio/mpeg"/>
+    </item>
+    <item>
+      <title>Dot segments and root</title>
+      <guid>rel-3</guid>
+      <enclosure url="a/b/../c.mp3" length="10" type="audio/mpeg"/>
+      <enclosure url="/abs/path.mp3" length="11" type="audio/mpeg"/>
+      <enclosure url="//cdn.other.example/x.mp3" length="12" type="audio/mpeg"/>
+    </item>
+  </channel>
+</rss>

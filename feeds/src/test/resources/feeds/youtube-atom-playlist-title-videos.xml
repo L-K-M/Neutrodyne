@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns="http://www.w3.org/2005/Atom"
+      xmlns:media="http://search.yahoo.com/mrss/">
+  <link rel="self" href="https://www.youtube.com/feeds/videos.xml?playlist_id=PLsynthetic777"/>
+  <id>yt:playlist:PLsynthetic777</id>
+  <yt:channelId>UCsynthetic0001122334</yt:channelId>
+  <yt:playlistId>PLsynthetic777</yt:playlistId>
+  <title>Some Playlist Name - Videos</title>
+  <link rel="alternate" href="https://www.youtube.com/playlist?list=PLsynthetic777"/>
+  <entry>
+    <id>yt:video:syntheticC3</id>
+    <yt:videoId>syntheticC3</yt:videoId>
+    <yt:channelId>UCsynthetic0001122334</yt:channelId>
+    <title>Playlist entry title</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=syntheticC3"/>
+    <published>2026-10-04T11:00:00+00:00</published>
+    <updated>2026-10-04T11:00:00+00:00</updated>
+    <media:group>
+      <media:title>Playlist entry title</media:title>
+      <media:description>Playlist entry description.</media:description>
+    </media:group>
+  </entry>
+</feed>

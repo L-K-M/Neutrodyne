@@ -1,0 +1,44 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/gp1.mp3"
+        }
+      ],
+      "feedOrder": 0,
+      "guid": "tag:blogger.com,1999:post-123456",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/gp1.mp3"
+      },
+      "title": "Tag guid"
+    },
+    {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/gp2.mp3"
+        }
+      ],
+      "feedOrder": 1,
+      "guid": "https://example.com/episodes/2",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/gp2.mp3"
+      },
+      "title": "URL guid"
+    }
+  ],
+  "title": "GUID isPermaLink False"
+}
