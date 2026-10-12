@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.testing.database.episodeStateEntity
 import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
 import ch.lkmc.neutrodyne.feeds.model.WarningCode
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -84,8 +85,7 @@ class IngestDiffTest {
             assertEquals(2, result.inserted.size)
             assertEquals(2, result.accepted)
             assertEquals(emptyList(), result.newIds)
-            val a = db.episodeDao().byId(result.inserted[0])!!
-            assertEquals("g:a", a.identityKey)
+            val a = db.episodeDao().byIdentityKey(id, "g:a")!!
             assertTrue(a.inFeed)
             assertFalse(a.isNew)
 
@@ -96,7 +96,7 @@ class IngestDiffTest {
             assertEquals(FeedParser.VERSION, stored.parserVersion)
             assertTrue(stored.lastParseOk)
             assertEquals(NOW, stored.lastSuccessAt)
-            assertTrue((stored.nextRefreshAt ?: 0) > NOW)
+            assertTrue(assertNotNull(stored.nextRefreshAt) > NOW)
             assertEquals(NOW - DAY, stored.latestEpisodeAt)
         }
 
@@ -438,27 +438,32 @@ class IngestDiffTest {
         val aBefore = db.episodeDao().byIdentityKey(id, "g:reused")!!
         db.episodeStateDao().upsert(episodeStateEntity(aBefore.id, playedAt = NOW - 1_000))
 
-        ingest(
-            id,
-            parsedFeed(
-                items =
-                    listOf(
-                        parsedEpisode(
-                            0,
-                            guid = "reused",
-                            title = "Episode B",
-                            pubDate = NOW - DAY,
-                            enclosureUrl = "http://$host/b.mp3",
+        val result =
+            ingest(
+                id,
+                parsedFeed(
+                    items =
+                        listOf(
+                            parsedEpisode(
+                                0,
+                                guid = "reused",
+                                title = "Episode B",
+                                pubDate = NOW - DAY,
+                                enclosureUrl = "http://$host/b.mp3",
+                            ),
                         ),
-                    ),
-            ),
-        )
+                ),
+            )
 
         val aAfter = db.episodeDao().byId(aBefore.id)!!
         assertEquals("g:reused", aAfter.identityKey)
         assertEquals("http://$host/a.mp3", aAfter.enclosureUrl)
         assertEquals("Episode A", aAfter.title)
         assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(aBefore.id)!!.playedAt)
+        // The sibling claims its own stored row: no duplicate insert, and A flips out.
+        assertEquals(emptyList(), result.inserted)
+        assertFalse(aAfter.inFeed)
+        assertEquals(2, db.podcastDao().episodeCount(id))
     }
 
     @Test
@@ -541,6 +546,16 @@ class IngestDiffTest {
             assertEquals(
                 "https://cdn.example.com/x.mp3",
                 db.episodeDao().byId(result.inserted.single())!!.enclosureUrl,
+            )
+            // X carries a distinct fallback key — not a second copy of g:dup.
+            assertEquals(
+                2,
+                db
+                    .ingestDao()
+                    .existing(id)
+                    .map { it.identityKey }
+                    .distinct()
+                    .size,
             )
         }
 
@@ -954,6 +969,7 @@ class IngestDiffTest {
             assertEquals(emptyList(), result.inserted)
             assertEquals(1, result.rekeyed)
             val after = db.episodeDao().byId(before.id)!!
+            assertNotEquals(before.identityKey, after.identityKey)
             assertEquals("https://cdn.example.com/a.mp3?token=new", after.enclosureUrl)
             assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(before.id)!!.playedAt)
         }
@@ -994,7 +1010,12 @@ class IngestDiffTest {
                 ),
                 mode = IngestMode.INITIAL,
             )
-            val aBefore = db.episodeDao().byIdentityKey(id, "g:g")!!
+            // A and C share the reused GUID "g"; select A by enclosure so the row identity
+            // doesn't depend on how duplicate identity keys are stored.
+            val aBefore =
+                db.ingestDao().existing(id).single {
+                    it.enclosureUrl == "https://cdn.example.com/a.mp3?token=old"
+                }
             db.episodeStateDao().upsert(episodeStateEntity(aBefore.id, playedAt = NOW - 1_000))
             val cBefore =
                 db.ingestDao().existing(id).single {
@@ -1165,6 +1186,7 @@ class IngestDiffTest {
                 )
 
             assertEquals(1, result.inserted.size)
+            assertEquals(listOf(result.inserted.single()), result.newIds)
             val aAfter = db.episodeDao().byId(aBefore.id)!!
             assertEquals("https://cdn.example.com/download?id=101", aAfter.enclosureUrl)
             assertEquals("News", aAfter.title)
@@ -1414,7 +1436,7 @@ class IngestDiffTest {
     // --- Column rules on update ------------------------------------------------------------------
 
     @Test
-    fun titleEditRewritesFeedColumnsAndChildren() =
+    fun titleEditRewritesFeedColumnsAndContentHash() =
         runTest {
             val id = podcastId()
             ingest(
@@ -1589,7 +1611,11 @@ class IngestDiffTest {
 
             assertFalse(db.episodeDao().byIdentityKey(id, "g:d5")!!.inFeed)
             assertFalse(db.episodeDao().byIdentityKey(id, "g:d8")!!.inFeed)
+            // d6 is absent and newer than the oldest documented day — inside the window, flips.
+            assertFalse(db.episodeDao().byIdentityKey(id, "g:d6")!!.inFeed)
             assertTrue(db.episodeDao().byIdentityKey(id, "g:d11")!!.inFeed)
+            // d10 is absent but older than the window floor — outside coverage, stays.
+            assertTrue(db.episodeDao().byIdentityKey(id, "g:d10")!!.inFeed)
             assertTrue(db.episodeDao().byIdentityKey(id, "g:d7")!!.inFeed)
         }
 
@@ -1696,6 +1722,8 @@ class IngestDiffTest {
 
             assertEquals(0, result.inserted.size)
             assertEquals(2, result.updated)
+            // The first v2 item claimed row B by its reserved u: identity key.
+            assertEquals("B2", db.episodeDao().byIdentityKey(id, "u:cdn.example.com/x.mp3")!!.title)
             val d = db.episodeDao().byId(dBefore.id)!!
             assertEquals("https://cdn.example.com/x.mp3", d.enclosureUrl)
             assertEquals("T", d.title)
@@ -1733,6 +1761,221 @@ class IngestDiffTest {
             assertEquals(1, db.podcastDao().aliases(id).size)
             assertNotNull(db.episodeDao().byIdentityKey(id, "g:a"))
         }
+
+    // --- GLM r1 regressions ---------------------------------------------------------------------
+
+    @Test
+    fun rekeyFreesTheOldIdentityKeyForLaterItems() =
+        runTest {
+            val id = podcastId()
+            // R carries the enclosure the next document's "new" item will claim it by.
+            ingest(
+                id,
+                parsedFeed(
+                    items =
+                        listOf(
+                            parsedEpisode(
+                                0,
+                                guid = "old",
+                                title = "R",
+                                pubDate = NOW - 5 * DAY,
+                                enclosureUrl = "https://cdn.example.com/r.mp3",
+                            ),
+                        ),
+                ),
+                mode = IngestMode.INITIAL,
+            )
+            val r = db.episodeDao().byIdentityKey(id, "g:old")!!
+
+            // A carries R's enclosure under a new guid, claims R in pass 2 and rekeys it to
+            // g:new. That frees g:old — the document's guid-"old" items must be able to take
+            // the released canonical key instead of being pushed onto fallback keys by a view
+            // of the stored keys that still shows g:old as occupied.
+            val result =
+                ingest(
+                    id,
+                    parsedFeed(
+                        items =
+                            listOf(
+                                parsedEpisode(
+                                    0,
+                                    guid = "new",
+                                    title = "A",
+                                    pubDate = NOW - DAY,
+                                    enclosureUrl = "https://cdn.example.com/r.mp3",
+                                ),
+                                parsedEpisode(
+                                    1,
+                                    guid = "old",
+                                    title = "B",
+                                    pubDate = NOW - 2 * DAY,
+                                    enclosureUrl = "https://cdn.example.com/b.mp3",
+                                ),
+                                parsedEpisode(
+                                    2,
+                                    guid = "old",
+                                    title = "C",
+                                    pubDate = NOW - 3 * DAY,
+                                    enclosureUrl = "https://cdn.example.com/c.mp3",
+                                ),
+                            ),
+                    ),
+                )
+
+            assertEquals(r.id, db.episodeDao().byIdentityKey(id, "g:new")!!.id)
+            assertEquals("A", db.episodeDao().byIdentityKey(id, "g:new")!!.title)
+            val b = assertNotNull(db.episodeDao().byIdentityKey(id, "g:old"))
+            assertEquals("https://cdn.example.com/b.mp3", b.enclosureUrl)
+            assertEquals("B", b.title)
+            assertEquals(2, result.inserted.size)
+            assertEquals(1, result.rekeyed)
+            assertEquals(3, db.podcastDao().episodeCount(id))
+        }
+
+    @Test
+    fun relativeItemArtworkIsNotMistakenForTheFeedCover() =
+        runTest {
+            val id = podcastId()
+            ingest(
+                id,
+                parsedFeed(
+                    items =
+                        listOf(
+                            parsedEpisode(0, guid = "a")
+                                .copy(artwork = listOf(artwork("/covers/ep.png"))),
+                        ),
+                ),
+                mode = IngestMode.INITIAL,
+            )
+            // A feed without a cover has no artwork identity, and a relative URL has none
+            // either — null == null is absence of evidence, not a match (03 null-identity rule).
+            assertEquals("/covers/ep.png", db.episodeDao().byIdentityKey(id, "g:a")!!.imageUrl)
+        }
+
+    @Test
+    fun removedChaptersUrlDeletesFetchedJsonChapters() =
+        runTest {
+            val id = podcastId()
+            ingest(
+                id,
+                parsedFeed(items = listOf(parsedEpisode(0, guid = "a", chaptersUrl = "https://x.example.com/c1.json"))),
+                mode = IngestMode.INITIAL,
+            )
+            val episodeId = db.episodeDao().byIdentityKey(id, "g:a")!!.id
+            db
+                .chapterDao()
+                .replace(
+                    episodeId,
+                    ChapterSource.PODCASTING20_JSON,
+                    listOf(
+                        ChapterEntity(
+                            episodeId = episodeId,
+                            source = ChapterSource.PODCASTING20_JSON,
+                            ordinal = 0,
+                            startMs = 0,
+                        ),
+                    ),
+                )
+            assertEquals(1, db.chapterDao().ofSource(episodeId, ChapterSource.PODCASTING20_JSON).size)
+
+            // The feed drops the chapters link entirely; the fetched blob must not survive a
+            // URL the feed no longer endorses.
+            ingest(id, parsedFeed(items = listOf(parsedEpisode(0, guid = "a"))))
+
+            assertEquals(emptyList(), db.chapterDao().ofSource(episodeId, ChapterSource.PODCASTING20_JSON))
+        }
+
+    @Test
+    fun alreadyAbsentRowsAreNotFlippedOrCountedAgain() =
+        runTest {
+            val id = podcastId()
+            ingest(
+                id,
+                parsedFeed(
+                    items =
+                        listOf(
+                            parsedEpisode(0, guid = "a", pubDate = NOW - DAY),
+                            parsedEpisode(1, guid = "b", pubDate = NOW - 2 * DAY),
+                            parsedEpisode(2, guid = "c", pubDate = NOW - 3 * DAY),
+                        ),
+                ),
+                mode = IngestMode.INITIAL,
+            )
+            val first =
+                ingest(id, parsedFeed(items = listOf(parsedEpisode(0, guid = "a", pubDate = NOW - DAY))))
+            assertEquals(2, first.flippedOut)
+
+            // Same document again: b and c are already out of feed — nothing flips.
+            val second =
+                ingest(id, parsedFeed(items = listOf(parsedEpisode(0, guid = "a", pubDate = NOW - DAY))))
+            assertEquals(0, second.flippedOut)
+        }
+
+    @Test
+    fun percentDecodedEnclosureTitleKeepsRawNonAscii() =
+        runTest {
+            // A raw (unescaped) UTF-8 name must not be byte-truncated into U+FFFD.
+            val title =
+                ch.lkmc.neutrodyne.core.data.ingest.resolvedTitle(
+                    parsedEpisode(0, title = null, pubDate = null, enclosureUrl = "https://cdn.example.com/café.mp3"),
+                )
+            assertEquals("café.mp3", title)
+        }
+
+    @Test
+    fun ingestInTransactionWritesRollBackWhenTheCallerAborts() =
+        runTest {
+            val id = podcastId()
+            kotlin.test.assertFailsWith<IllegalStateException> {
+                db.withWriteTransaction {
+                    ingestor.ingestInTransaction(
+                        dueFeedOf(db, id),
+                        parsedFeed(items = listOf(parsedEpisode(0, guid = "a"))),
+                        IngestContext(mode = IngestMode.INITIAL, partial = false, fetch = fetchMeta()),
+                    )
+                    error("abort")
+                }
+            }
+            kotlin.test.assertNull(db.episodeDao().byIdentityKey(id, "g:a"))
+        }
+
+    @Test
+    fun rewrittenDescriptionReemitsFreshShowNotes() =
+        runTest {
+            val id = podcastId()
+            ingest(
+                id,
+                parsedFeed(items = listOf(parsedEpisode(0, guid = "a", descriptionHtml = "<p>first note</p>"))),
+                mode = IngestMode.INITIAL,
+            )
+            val episodeId = db.episodeDao().byIdentityKey(id, "g:a")!!.id
+            val repo =
+                ch.lkmc.neutrodyne.core.data.repo.EpisodeRepositoryImpl(
+                    db,
+                    ch.lkmc.neutrodyne.feeds.jvm.html
+                        .JsoupShowNotesSanitizer(),
+                    clock,
+                )
+
+            val first = repo.observeShowNotes(episodeId).first()!!
+            assertEquals("first note", first.notesText())
+
+            ingest(
+                id,
+                parsedFeed(items = listOf(parsedEpisode(0, guid = "a", descriptionHtml = "<p>second note</p>"))),
+            )
+
+            // The id-keyed note cache must not outlive the description rewrite.
+            val second = repo.observeShowNotes(episodeId).first()!!
+            assertEquals("second note", second.notesText())
+        }
+
+    private fun ch.lkmc.neutrodyne.core.model.ShowNotes.notesText(): String =
+        blocks
+            .filterIsInstance<ch.lkmc.neutrodyne.core.model.ShowNoteBlock.Paragraph>()
+            .flatMap { it.spans }
+            .filterIsInstance<ch.lkmc.neutrodyne.core.model.ShowNoteSpan.Text>()
+            .joinToString("") { it.text }
 
     private fun artwork(url: String) =
         ch.lkmc.neutrodyne.feeds.model.ArtworkCandidate(
