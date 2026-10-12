@@ -236,18 +236,13 @@ internal class FeedRefresher(
                                 launched++
                                 launch {
                                     global.withPermit {
-                                        hostPermits
-                                            .semaphore(
-                                                adapter.hostKey(
-                                                    feed,
-                                                    if (request.pagesOnly) {
-                                                        feed.pagingNextUrl ?: feed.feedUrl
-                                                    } else {
-                                                        feed.feedUrl
-                                                    },
-                                                ),
-                                            ).withPermit {
-                                                slots[index] = refreshOne(feed, adapter, request)
+                                        slots[index] =
+                                            if (request.pagesOnly) {
+                                                runPagingSession(feed, adapter, request, hostPermits)
+                                            } else {
+                                                hostPermits
+                                                    .semaphore(adapter.hostKey(feed, feed.feedUrl))
+                                                    .withPermit { refreshOne(feed, adapter) }
                                             }
                                     }
                                 }
@@ -332,15 +327,13 @@ internal class FeedRefresher(
     }
 
     /**
-     * One feed of the fan-out: a paging session for `pagesOnly` runs, else fetch → policy →
-     * ingest/write → outcome. Returns `null` when the run was cancelled before the feed finished.
+     * One refresh feed of the fan-out: fetch → policy → ingest/write → outcome.
+     * Cancellation propagates so an unfinished feed never publishes an outcome.
      */
     private suspend fun refreshOne(
         feed: DueFeed,
         adapter: SourceAdapter,
-        request: RefreshRequest,
-    ): FeedOutcome? {
-        if (request.pagesOnly) return runPagingSession(feed, adapter, request)
+    ): FeedOutcome {
         val result =
             suspendRunCatching { adapter.fetchAndParse(feed, FetchMode.REFRESH) }
                 .getOrElse { e ->
@@ -657,13 +650,21 @@ internal class FeedRefresher(
         feed: DueFeed,
         adapter: SourceAdapter,
         request: RefreshRequest,
+        hostPermits: HostPermits,
     ): FeedOutcome? {
         val session = PagingSession(feed, adapter)
         val manual = request.origin == RefreshOrigin.MANUAL
         val stopAt = pagingStopAt(request)
         val pages: suspend () -> Unit = {
             while (session.active && clock.elapsedRealtime() < stopAt) {
-                session.active = onePageGuarded(session, manual)
+                // A cursor can move hosts after ingest, so each page takes its current lane.
+                hostPermits
+                    .semaphore(adapter.hostKey(session.feed, session.feed.pagingNextUrl ?: session.feed.feedUrl))
+                    .withPermit {
+                        if (clock.elapsedRealtime() < stopAt) {
+                            session.active = onePageGuarded(session, manual)
+                        }
+                    }
             }
         }
         if (stopAt == Long.MAX_VALUE) {

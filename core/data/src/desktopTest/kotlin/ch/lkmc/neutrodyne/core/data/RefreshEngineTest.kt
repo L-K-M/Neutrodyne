@@ -32,6 +32,7 @@ import ch.lkmc.neutrodyne.feeds.parse.ParseResult
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -1097,6 +1098,80 @@ class RefreshEngineTest {
             val stored = db.podcastDao().byId(id)!!
             assertTrue(stored.pagingComplete)
             assertEquals(2, db.podcastDao().episodeCount(id))
+        }
+
+    @Test
+    fun pagesOnlyReacquiresTheHostPermitWhenTheCursorMoves() =
+        runTest {
+            val dispatcher = StandardTestDispatcher(testScheduler)
+            val db = newDb(clock, queryContext = dispatcher)
+            try {
+                val ids =
+                    (1..6).map { n ->
+                        seedPodcast(
+                            db,
+                            "https://feed$n.example/f",
+                            nextRefreshAt = NOW + DAY,
+                            pagingNextUrl = "https://start$n.example/0",
+                            pagingComplete = false,
+                        )
+                    }
+                var active = 0
+                var maximum = 0
+                val adapter =
+                    stubAdapter(onFetch = { feed, mode ->
+                        assertEquals(FetchMode.OLDER_PAGE, mode)
+                        val url = assertNotNull(feed.pagingNextUrl)
+                        val page = url.substringAfterLast('/').toInt()
+                        if (page == 1) {
+                            active++
+                            maximum = maxOf(maximum, active)
+                            try {
+                                delay(100)
+                            } finally {
+                                active--
+                            }
+                        }
+                        adapterParsed(
+                            parsedFeed(items = listOf(parsedEpisode(page, guid = "${feed.id}-$page")))
+                                .copy(
+                                    paging =
+                                        Paging(
+                                            next =
+                                                if (page ==
+                                                    0
+                                                ) {
+                                                    "https://shared.example/${feed.id}/1"
+                                                } else {
+                                                    null
+                                                },
+                                        ),
+                                ),
+                            meta = fetchMeta(finalUrl = url, requestedUrl = url),
+                        )
+                    })
+                val engine =
+                    newRefresher(
+                        db,
+                        mapOf(SourceType.RSS to adapter),
+                        clock,
+                        settings,
+                        ingestor = newIngestor(db, clock, settings, defaultDispatcher = dispatcher),
+                    )
+
+                val report = engine.run(request(pagesOnly = true, origin = RefreshOrigin.MANUAL))
+
+                assertEquals(2, maximum, "every cursor uses the current host's two permits")
+                assertEquals(ids.toSet(), report.outcomes.keys)
+                assertEquals(12, adapter.calls.size)
+                for (id in ids) {
+                    assertIs<FeedOutcome.Ingested>(report.outcomes[id])
+                    assertTrue(db.podcastDao().byId(id)!!.pagingComplete)
+                    assertEquals(2, db.podcastDao().episodeCount(id))
+                }
+            } finally {
+                db.close()
+            }
         }
 
     @Test
