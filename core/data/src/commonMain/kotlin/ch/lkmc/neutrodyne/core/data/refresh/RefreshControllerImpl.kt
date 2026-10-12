@@ -52,13 +52,8 @@ internal class RefreshControllerImpl(
      */
     override fun refreshFeed(source: FeedSource) {
         appScope.launch {
-            val scope =
-                when (source) {
-                    FeedSource.All -> RefreshScope.All
-                    is FeedSource.Group -> RefreshScope.Group(source.groupId)
-                    is FeedSource.Podcast -> RefreshScope.Podcasts(listOf(source.podcastId))
-                    FeedSource.Ungrouped -> RefreshScope.Podcasts(db.podcastDao().ungroupedIds())
-                }
+            // The cooldown check runs before scope resolution so a suppressed pull doesn't pay
+            // for the `ungroupedIds` query.
             refreshFeedLock.withLock {
                 val now = clock.elapsedRealtime()
                 val last = lastRefreshFeedAt[source]
@@ -66,6 +61,13 @@ internal class RefreshControllerImpl(
                 if (last != null && now - last in 0 until REFRESH_FEED_COOLDOWN_MS) return@launch
                 lastRefreshFeedAt[source] = now
             }
+            val scope =
+                when (source) {
+                    FeedSource.All -> RefreshScope.All
+                    is FeedSource.Group -> RefreshScope.Group(source.groupId)
+                    is FeedSource.Podcast -> RefreshScope.Podcasts(listOf(source.podcastId))
+                    FeedSource.Ungrouped -> RefreshScope.Podcasts(db.podcastDao().ungroupedIds())
+                }
             scheduler.enqueueNow(scope, force = true, pagesOnly = false, origin = RefreshOrigin.MANUAL)
         }
     }

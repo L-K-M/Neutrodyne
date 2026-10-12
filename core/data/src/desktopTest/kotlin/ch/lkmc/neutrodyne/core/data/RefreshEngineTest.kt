@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.data
 
+import androidx.room3.useWriterConnection
 import ch.lkmc.neutrodyne.core.data.ingest.IngestContext
 import ch.lkmc.neutrodyne.core.data.ingest.IngestMode
 import ch.lkmc.neutrodyne.core.data.refresh.AdapterResult
@@ -11,6 +12,7 @@ import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshRequest
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
+import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
@@ -18,8 +20,11 @@ import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.feeds.jvm.parse.XmlPullFeedParser
 import ch.lkmc.neutrodyne.feeds.model.Paging
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
+import ch.lkmc.neutrodyne.feeds.parse.ParseLimits
+import ch.lkmc.neutrodyne.feeds.parse.ParseResult
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -31,6 +36,7 @@ import kotlinx.coroutines.yield
 import mockwebserver3.junit4.MockWebServerRule
 import org.junit.Rule
 import java.io.File
+import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -113,7 +119,7 @@ class RefreshEngineTest {
         runTest {
             val adapter = stubAdapter()
             val stale = due("https://a.example.com/f", nextRefreshAt = NOW - 1)
-            val future = due("https://b.example.com/f", nextRefreshAt = NOW + 60 * DAY)
+            due("https://b.example.com/f", nextRefreshAt = NOW + 60 * DAY)
             val noSchedule = due("https://c.example.com/f", nextRefreshAt = null)
             due("https://d.example.com/f", nextRefreshAt = 0) { copy(gone = true) }
             due("https://e.example.com/f", nextRefreshAt = 0) { copy(needsCredentials = true) }
@@ -121,10 +127,10 @@ class RefreshEngineTest {
             val report = refresher(adapter).run(request())
 
             assertEquals(setOf(stale, noSchedule), adapter.calls.map { it.first }.toSet())
+            assertEquals(2, adapter.calls.size)
             assertEquals(setOf(stale, noSchedule), report.outcomes.keys)
             assertEquals(0, report.remaining)
             assertFalse(report.stoppedByDeadline)
-            assertTrue(future > 0)
         }
 
     @Test
@@ -138,6 +144,7 @@ class RefreshEngineTest {
             val report = refresher(adapter).run(request(force = true))
 
             assertEquals(setOf(a, b), adapter.calls.map { it.first }.toSet())
+            assertEquals(2, adapter.calls.size)
             assertEquals(2, report.outcomes.size)
         }
 
@@ -352,13 +359,15 @@ class RefreshEngineTest {
                 AdapterResult.Failed(
                     FeedErrorKind.HTTP_RATE_LIMITED,
                     http = 429,
-                    retryAfterMs = 2 * 60 * 60_000L,
+                    // 3 h is strictly above the n=3 jittered backoff ceiling (120 min × 1.2),
+                    // so the assertion below can only pass through the Retry-After branch.
+                    retryAfterMs = 3 * 60 * 60_000L,
                     transient = true,
                 )
             refresher(adapter).run(request())
             stored = db.podcastDao().byId(id)!!
             assertEquals(3, stored.failureCount)
-            assertTrue(stored.nextRefreshAt!! - clock.now() >= 2 * 60 * 60_000L)
+            assertTrue(stored.nextRefreshAt!! - clock.now() >= 3 * 60 * 60_000L)
         }
 
     @Test
@@ -428,6 +437,8 @@ class RefreshEngineTest {
             // Feed A's stored rows plus the colliding document of IngestDiffTest's construction:
             // the second item's assigned t: key exactly matches row D's — the diff claims it in
             // pass 1 rather than aborting on UNIQUE (S3).
+            // TODO(fixture): TODO in IngestDiffTest asks for this missing-guid construction —
+            //   deduplicate the two fixtures when one of the files is next touched.
             val a = due("https://a.example.com/f")
             val day = NOW - DAY
             newIngestor(db, clock)
@@ -571,6 +582,8 @@ class RefreshEngineTest {
             val first = backgroundScope.async { engine.run(request()) }
             testScheduler.runCurrent()
 
+            // Relies on run() reporting "queued behind an active run" without suspending on the
+            // busy run mutex — acquiring the lock here would deadlock this test until timeout.
             val report = engine.run(request(deadlineElapsedMs = clock.elapsedRealtime() + 35_000L))
 
             assertTrue(report.stoppedByDeadline)
@@ -948,7 +961,14 @@ class RefreshEngineTest {
 
             assertEquals(6, adapter.calls.size)
             assertTrue(adapter.calls.all { it.second == FetchMode.OLDER_PAGE })
-            assertTrue(feeds.size == 8)
+            // The two sessions that stopped queued keep their paging cursors for a later run.
+            val called = adapter.calls.map { it.first }.toSet()
+            assertEquals(2, feeds.size - called.size)
+            assertTrue(
+                feeds.filterNot { it in called }.all { id ->
+                    db.podcastDao().byId(id)!!.let { it.pagingNextUrl != null && !it.pagingComplete }
+                },
+            )
         }
 
     // --- Announcements and diagnostics -------------------------------------------------------------
@@ -1281,7 +1301,7 @@ class RefreshEngineTest {
                 val report = engine.run(request())
 
                 assertIs<FeedOutcome.Ingested>(report.outcomes[id])
-                val recorded = server.takeRequest()
+                val recorded = assertNotNull(server.takeRequest(5, TimeUnit.SECONDS))
                 assertNull(recorded.headers["If-None-Match"])
                 assertNull(recorded.headers["If-Modified-Since"])
                 assertEquals(FeedParser.VERSION, db.podcastDao().byId(id)!!.parserVersion)
@@ -1320,7 +1340,7 @@ class RefreshEngineTest {
                 val report = engine.run(request())
 
                 assertEquals(FeedOutcome.NotModified, report.outcomes[id])
-                val recorded = server.takeRequest()
+                val recorded = assertNotNull(server.takeRequest(5, TimeUnit.SECONDS))
                 assertEquals("e-now", recorded.headers["If-None-Match"])
                 assertEquals("Wed, 21 Oct 2015 07:28:00 GMT", recorded.headers["If-Modified-Since"])
             } finally {
@@ -1408,6 +1428,227 @@ class RefreshEngineTest {
         }
 
     @Test
+    fun anOutcomeHandlingFaultIsIsolatedToTheFeed() =
+        runTest {
+            // The outcome table's own writes (recordPendingMove here) run outside the ingest
+            // transaction; a fault there must degrade this feed to Failed, not abort the run
+            // and its siblings.
+            val a = due("https://a.example.com/f")
+            val b = due("https://b.example.com/f")
+            val adapter =
+                stubAdapter(
+                    mutableMapOf(
+                        "https://a.example.com/f" to
+                            AdapterResult.NotModified(
+                                meta = fetchMeta(permanentUrl = "https://new.example.com/f"),
+                            ),
+                        "https://b.example.com/f" to AdapterResult.NotModified(meta = fetchMeta()),
+                    ),
+                )
+            db.useWriterConnection {
+                it.execSql(
+                    "CREATE TRIGGER fail_pending BEFORE UPDATE OF pendingNewFeedUrl ON podcast" +
+                        " WHEN old.id = $a BEGIN SELECT RAISE(ABORT, 'pending write'); END",
+                )
+            }
+
+            val report = refresher(adapter).run(request())
+
+            assertEquals(
+                FeedErrorKind.STORAGE,
+                assertIs<FeedOutcome.Failed>(report.outcomes[a]).kind,
+            )
+            assertEquals(FeedOutcome.NotModified, report.outcomes[b])
+            assertEquals(0, report.remaining)
+        }
+
+    @Test
+    fun aPagingSessionFaultStopsThatSessionOnly() =
+        runTest {
+            // One background-paging session's DAO fault (the visited-loop stop's
+            // markPagingComplete here) ends that session; the sibling still finishes. The
+            // StandardTestDispatcher dispatchers keep the cancellation-bounded paging phase on
+            // the virtual clock, as in dueRunsPagePendingFeedsInTheBackground.
+            val db = newDb(clock, queryContext = StandardTestDispatcher(testScheduler))
+            val a =
+                seedPodcast(
+                    db,
+                    "https://a.example.com/f",
+                    nextRefreshAt = NOW + 60 * DAY,
+                    subscribedAt = NOW - 30 * DAY,
+                    pagingNextUrl = "https://a.example.com/f?page=2",
+                    pagingComplete = false,
+                )
+            val b =
+                seedPodcast(
+                    db,
+                    "https://b.example.com/f",
+                    nextRefreshAt = NOW + 60 * DAY,
+                    subscribedAt = NOW - 30 * DAY,
+                    pagingNextUrl = "https://b.example.com/f?page=2",
+                    pagingComplete = false,
+                )
+            val adapter =
+                stubAdapter(
+                    mutableMapOf(
+                        // A's page links back to itself: round 2 hits the visited stop and
+                        // marks complete — a DAO call outside per-session isolation.
+                        "https://a.example.com/f?page=2" to
+                            adapterParsed(
+                                parsedFeed(
+                                    items = listOf(parsedEpisode(1, guid = "pa", pubDate = NOW - DAY)),
+                                ).copy(paging = Paging(next = "https://a.example.com/f?page=2")),
+                                meta = fetchMeta("https://a.example.com/f?page=2"),
+                            ),
+                        "https://b.example.com/f?page=2" to
+                            adapterParsed(
+                                parsedFeed(
+                                    items = listOf(parsedEpisode(1, guid = "pb", pubDate = NOW - DAY)),
+                                ),
+                                meta = fetchMeta("https://b.example.com/f?page=2"),
+                            ),
+                    ),
+                )
+            db.useWriterConnection {
+                it.execSql(
+                    "CREATE TRIGGER fail_pc BEFORE UPDATE OF pagingComplete ON podcast" +
+                        " WHEN old.id = $a AND new.pagingComplete = 1" +
+                        " BEGIN SELECT RAISE(ABORT, 'pc write'); END",
+                )
+            }
+
+            val thrown =
+                runCatching {
+                    newRefresher(
+                        db,
+                        mapOf(SourceType.RSS to adapter),
+                        clock,
+                        settings,
+                        ingestor =
+                            newIngestor(
+                                db,
+                                clock,
+                                settings,
+                                defaultDispatcher = StandardTestDispatcher(testScheduler),
+                            ),
+                    ).run(request(pagingBudgetMs = 120_000L))
+                }.exceptionOrNull()
+
+            // B finished its page; A's failed mark leaves it paging-pending at the same cursor.
+            assertNull(thrown)
+            assertTrue(db.podcastDao().byId(b)!!.pagingComplete)
+            db.podcastDao().byId(a)!!.let { stored ->
+                assertFalse(stored.pagingComplete)
+                assertEquals("https://a.example.com/f?page=2", stored.pagingNextUrl)
+            }
+        }
+
+    @Test
+    fun aDeferredOutcomeKeepsTheFreshlyWrittenRow() =
+        runTest {
+            // A user action landing between due-selection and the outcome write must not be
+            // clobbered by the Deferred arm's stale DueFeed snapshot.
+            val id =
+                due("https://a.example.com/f") {
+                    copy(failureCount = 5, lastSuccessAt = NOW - DAY, lastErrorDetail = "old")
+                }
+            val until = NOW + 2 * DAY
+            val adapter =
+                stubAdapter(
+                    onFetch = { _, _ ->
+                        // The Retry path rewrote the row while this feed waited on a permit.
+                        db.podcastDao().updateFetchStates(
+                            listOf(
+                                fetchState(id, NOW + DAY).copy(
+                                    lastAttemptAt = NOW,
+                                    lastSuccessAt = NOW,
+                                    failureCount = 0,
+                                    lastErrorDetail = "reset",
+                                ),
+                            ),
+                        )
+                        AdapterResult.Deferred(untilMs = until)
+                    },
+                )
+
+            val report = refresher(adapter).run(request())
+
+            assertEquals(FeedOutcome.Deferred(until), report.outcomes[id])
+            val stored = db.podcastDao().byId(id)!!
+            assertEquals(0, stored.failureCount)
+            assertEquals(NOW, stored.lastSuccessAt)
+            assertEquals("reset", stored.lastErrorDetail)
+            // The one column the arm owns: "only nextRefreshAt moves".
+            assertEquals(until, stored.nextRefreshAt)
+        }
+
+    @Test
+    fun aDiagnosticsWriteFailureStillCompletesTheRun() =
+        runTest {
+            // Pin: every settings write in the finalizer is already failure-safe — a rejected
+            // LAST_RUN_SUMMARY write can neither wedge `running` nor drop the report.
+            val id = due("https://a.example.com/f")
+            val adapter =
+                stubAdapter(
+                    mutableMapOf("https://a.example.com/f" to AdapterResult.NotModified(fetchMeta())),
+                )
+            settings.failNextSet = SettingsError.WriteFailed
+
+            val report = refresher(adapter).run(request())
+
+            assertEquals(FeedOutcome.NotModified, report.outcomes[id])
+            assertFalse(refresher(adapter).status.value.running)
+        }
+
+    @Test
+    fun aParserThrowIsIsolatedToTheFeed() =
+        runTest {
+            // Pin: `parseOutcome` deliberately propagates non-IO parser throws (a bug, not a
+            // malformed document — 03 Parser); the fetch guard degrades that feed to
+            // Failed(UNKNOWN) and the run continues.
+            setUpRoot()
+            val feedUrl = server.url("/a.xml").toString()
+            val a = due(feedUrl, nextRefreshAt = NOW - 1)
+            val b = due(server.url("/b.xml").toString(), nextRefreshAt = NOW - 1)
+            server.enqueue(mockResponse(body = rssBody(items = arrayOf(rssItem("x")))))
+            server.enqueue(mockResponse(body = rssBody(items = arrayOf(rssItem("y")))))
+            val real = XmlPullFeedParser.discovered()
+            val throwing =
+                object : FeedParser {
+                    override fun parse(
+                        open: () -> okio.Source,
+                        httpCharset: String?,
+                        baseUrl: String,
+                        limits: ParseLimits,
+                    ): ParseResult =
+                        if (baseUrl == feedUrl) {
+                            throw RuntimeException("parser boom")
+                        } else {
+                            real.parse(open, httpCharset, baseUrl, limits)
+                        }
+                }
+            val bundle = newRssAdapter(root, clock, parser = throwing)
+            try {
+                val report =
+                    newRefresher(
+                        db,
+                        mapOf(SourceType.RSS to bundle.adapter),
+                        clock,
+                        settings,
+                        tempFiles = bundle.tempFiles,
+                    ).run(request())
+
+                assertEquals(
+                    FeedErrorKind.UNKNOWN,
+                    assertIs<FeedOutcome.Failed>(report.outcomes[a]).kind,
+                )
+                assertIs<FeedOutcome.Ingested>(report.outcomes[b])
+            } finally {
+                bundle.close()
+            }
+        }
+
+    @Test
     fun failedParseAndStaleFullFetchAlsoFetchUnconditionally() =
         runTest {
             setUpRoot()
@@ -1443,8 +1684,9 @@ class RefreshEngineTest {
                 engine.run(request())
 
                 repeat(2) {
-                    val recorded = server.takeRequest()
+                    val recorded = assertNotNull(server.takeRequest(5, TimeUnit.SECONDS))
                     assertNull(recorded.headers["If-None-Match"])
+                    assertNull(recorded.headers["If-Modified-Since"])
                 }
             } finally {
                 bundle.close()
@@ -1487,7 +1729,7 @@ class RefreshEngineTest {
 
                 engine.run(request())
 
-                assertEquals("e-m", server.takeRequest().headers["If-None-Match"])
+                assertEquals("e-m", assertNotNull(server.takeRequest(5, TimeUnit.SECONDS)).headers["If-None-Match"])
             } finally {
                 bundle.close()
             }
