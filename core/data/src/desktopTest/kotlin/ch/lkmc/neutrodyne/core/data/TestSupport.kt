@@ -61,6 +61,9 @@ internal fun parsedEpisode(
     externalMediaId: String? = null,
     chaptersUrl: String? = null,
     descriptionHtml: String? = null,
+    // The parser marks RSS descriptions and Atom `type="html"` bodies as markup; the helpers
+    // hand it HTML, so the stored default matches what a real parse would emit.
+    descriptionIsHtml: Boolean = true,
     episodeType: String? = null,
 ): ParsedEpisode =
     ParsedEpisode(
@@ -69,6 +72,7 @@ internal fun parsedEpisode(
         title = title,
         pubDate = pubDate,
         descriptionHtml = descriptionHtml,
+        descriptionIsHtml = descriptionIsHtml,
         primaryEnclosure = enclosureUrl?.let { enclosure(it) },
         durationMs = durationMs,
         externalMediaId = externalMediaId,
