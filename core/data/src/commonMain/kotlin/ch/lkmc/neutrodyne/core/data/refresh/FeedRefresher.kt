@@ -361,7 +361,7 @@ internal class FeedRefresher(
                 // refreshOne and cancel the run. suspendRunCatching keeps cancellation fatal.
                 suspendRunCatching {
                     writeFailure(feed, FeedErrorKind.STORAGE, retryAfterMs = null, detail = e.message)
-                }
+                }.onFailure { Log.w(TAG, it) { "failure-state write failed for podcast ${feed.id}" } }
                 FeedOutcome.Failed(FeedErrorKind.STORAGE, null)
             }
     }
