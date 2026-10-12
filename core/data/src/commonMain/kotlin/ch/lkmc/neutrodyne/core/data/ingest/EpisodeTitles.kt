@@ -28,7 +28,7 @@ private fun utcDayText(ms: Long): String =
 private fun enclosureFileName(url: String): String? {
     val path = url.substringBefore('?').substringBefore('#')
     val segment = path.substringAfterLast('/').takeIf { it.isNotEmpty() } ?: return null
-    val decoded = runCatching { percentDecode(segment) }.getOrNull() ?: return null
+    val decoded = percentDecode(segment)
     return decoded.takeIf { it.isNotBlank() }
 }
 
@@ -38,12 +38,18 @@ private fun percentDecode(s: String): String {
     var i = 0
     while (i < s.length) {
         val c = s[i]
-        if (c == '%' && i + 2 <= s.length - 1) {
-            val hi = s[i + 1].hexDigit() ?: return s
-            val lo = s[i + 2].hexDigit() ?: return s
-            bytes[out++] = (hi * 16 + lo).toByte()
-            i += 3
+        if (c == '%' && i + 2 < s.length) {
+            val hi = s[i + 1].hexDigit()
+            val lo = s[i + 2].hexDigit()
+            if (hi != null && lo != null) {
+                bytes[out++] = (hi * 16 + lo).toByte()
+                i += 3
+            } else {
+                bytes[out++] = c.code.toByte() // stray '%': keep it literal
+                i++
+            }
         } else {
+            if (c.code > 0x7F) return s // literal non-ASCII: keep the segment untouched
             bytes[out++] = c.code.toByte()
             i++
         }
