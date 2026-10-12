@@ -129,6 +129,92 @@ class AddPodcastResolverTest {
     }
 
     @Test
+    fun feedWrapperThenAntennaPodUnwrapsSequentially() {
+        assertUrl(
+            "feed:https://antennapod.org/deeplink/subscribe?url=https%3A%2F%2Fa.example.com%2F%252F.xml",
+            "https://a.example.com/%2F.xml",
+        )
+    }
+
+    @Test
+    fun neutrodyneWrapperRecursivelyNormalisesFeedScheme() {
+        assertUrl(
+            "neutrodyne://subscribe?url=feed%3Ahttps%3A%2F%2Fa.example.com%2F%252F.xml",
+            "https://a.example.com/%2F.xml",
+        )
+    }
+
+    @Test
+    fun nestedQueryWrappersDecodeEachComponentOnce() {
+        val inner = "https://antennapod.org/deeplink/subscribe?url=https%3A%2F%2Fa.example.com%2F%252F.xml"
+        assertUrl(
+            "neutrodyne://subscribe?url=${URLEncoder.encode(inner, Charsets.UTF_8)}",
+            "https://a.example.com/%2F.xml",
+        )
+    }
+
+    @Test
+    fun neutrodyneRecursionIsBounded() {
+        var input = "https://a.example.com/f"
+        repeat(3) { input = "neutrodyne://subscribe?url=${URLEncoder.encode(input, Charsets.UTF_8)}" }
+        assertIs<NormalizedInput.Invalid>(AddInputNormalizer.normalize(input))
+    }
+
+    @Test
+    fun malformedInnerWrapperIsInvalid() {
+        assertIs<NormalizedInput.Invalid>(
+            AddInputNormalizer.normalize("feed:https://antennapod.org/deeplink/subscribe?missing=1"),
+        )
+        assertIs<NormalizedInput.Invalid>(
+            AddInputNormalizer.normalize("neutrodyne://subscribe?url=neutrodyne%3A%2F%2Fsubscribe%3Fmissing%3D1"),
+        )
+    }
+
+    @Test
+    fun queryWrappersSelectTheFirstExactUrlParameter() {
+        for (wrapper in listOf("neutrodyne://subscribe", "https://antennapod.org/deeplink/subscribe")) {
+            assertUrl(
+                "$wrapper?noturl=https://wrong.example/f&feedurl=https://wrong.example/g&url=https%3A%2F%2Fa.example.com%2F%252F.xml&url=https://wrong.example/h",
+                "https://a.example.com/%2F.xml",
+            )
+        }
+    }
+
+    @Test
+    fun queryWrappersRequireAnExactUrlParameter() {
+        for (wrapper in listOf("neutrodyne://subscribe", "https://antennapod.org/deeplink/subscribe")) {
+            assertIs<NormalizedInput.Invalid>(AddInputNormalizer.normalize("$wrapper?feedurl=https://wrong.example/f"))
+        }
+    }
+
+    @Test
+    fun queryWrappersIgnoreUrlInsideTheFragment() {
+        for (wrapper in listOf("neutrodyne://subscribe", "https://antennapod.org/deeplink/subscribe")) {
+            assertIs<NormalizedInput.Invalid>(AddInputNormalizer.normalize("$wrapper?x=1#url=https://wrong.example/f"))
+        }
+    }
+
+    @Test
+    fun subscribeOnAndroidHostCasePreservesEmbeddedUrlCase() {
+        assertUrl("https://SubscribeOnAndroid.com/Example.com/Feed.xml", "https://Example.com/Feed.xml", guessed = true)
+    }
+
+    @Test
+    fun wwwSubscribeOnAndroidHostCasePreservesEmbeddedUrlCase() {
+        assertUrl(
+            "https://WWW.SubscribeOnAndroid.com/Example.com/Feed.xml",
+            "https://Example.com/Feed.xml",
+            guessed = true,
+        )
+    }
+
+    @Test
+    fun googleHostCasePreservesEmbeddedUrlCase() {
+        val enc = Base64.UrlSafe.encode("https://Example.com/Feed.xml".encodeToByteArray()).trimEnd('=')
+        assertUrl("https://Podcasts.Google.com/feed/$enc", "https://Example.com/Feed.xml")
+    }
+
+    @Test
     fun subscribePageWrappersDecodeUtf8UrlParameters() {
         val encoded = "https%3A%2F%2Fa.example.com%2Fcaf%C3%A9%2F%E6%9D%B1%E4%BA%AC%2F%F0%9F%90%88.xml"
         for (wrapper in listOf("neutrodyne://subscribe", "https://antennapod.org/deeplink/subscribe")) {
