@@ -217,24 +217,9 @@ internal class FeedRefresher(
                 val global = Semaphore(GLOBAL_CONCURRENCY)
                 // The key is the host the request will actually hit — `feedUrl` for refreshes,
                 // the page URL for older-page requests (a rel=next link may point at another
-                // host), so a shared CDN still gets the 2-per-host limit.
-                val hostSems =
-                    (
-                        due.map { feed ->
-                            adapters
-                                .getValue(feed.sourceType)
-                                .hostKey(
-                                    feed,
-                                    if (request.pagesOnly) feed.pagingNextUrl ?: feed.feedUrl else feed.feedUrl,
-                                )
-                        } +
-                            pendingPages.map { feed ->
-                                adapters
-                                    .getValue(feed.sourceType)
-                                    .hostKey(feed, feed.pagingNextUrl ?: feed.feedUrl)
-                            }
-                    ).toSet()
-                        .associateWith { Semaphore(HOST_CONCURRENCY) }
+                // host), so a shared CDN still gets the 2-per-host limit. Semaphores are created
+                // lazily: a cursor that advances to a host unseen at run start must resolve too.
+                val hostPermits = HostPermits()
                 val deadline = request.deadlineElapsedMs
 
                 val fanOut =
@@ -250,8 +235,8 @@ internal class FeedRefresher(
                                 launched++
                                 launch {
                                     global.withPermit {
-                                        hostSems
-                                            .getValue(
+                                        hostPermits
+                                            .semaphore(
                                                 adapter.hostKey(
                                                     feed,
                                                     if (request.pagesOnly) {
@@ -278,7 +263,7 @@ internal class FeedRefresher(
                 }
 
                 if (pendingPages.isNotEmpty()) {
-                    runBackgroundPaging(request, pendingPages, global, hostSems)
+                    runBackgroundPaging(request, pendingPages, global, hostPermits)
                 }
             }
             completed = true
@@ -305,6 +290,7 @@ internal class FeedRefresher(
                         stoppedByDeadline = timedOut || launched < due.size || !completed,
                     )
                 suspendRunCatching { writeDiagnostics(request, finalReport, finishedAt) }
+                    .onFailure { Log.w(TAG, it) { "diagnostics write failed" } }
                 _status.value =
                     RefreshStatus(
                         running = false,
@@ -344,7 +330,12 @@ internal class FeedRefresher(
             .getOrElse { e ->
                 if (e is CancellationException) throw e
                 Log.w(TAG, e) { "outcome handling failed for podcast ${feed.id}" }
-                writeFailure(feed, FeedErrorKind.STORAGE, retryAfterMs = null, detail = e.message)
+                // The isolation guard holds here too: writeFailure hits the DAO (a full or
+                // aged-out batch flushes inside `add`), and a second fault must not escape
+                // refreshOne and cancel the run. suspendRunCatching keeps cancellation fatal.
+                suspendRunCatching {
+                    writeFailure(feed, FeedErrorKind.STORAGE, retryAfterMs = null, detail = e.message)
+                }
                 FeedOutcome.Failed(FeedErrorKind.STORAGE, null)
             }
     }
@@ -812,7 +803,7 @@ internal class FeedRefresher(
         request: RefreshRequest,
         pendingPages: List<DueFeed>,
         global: Semaphore,
-        hostSems: Map<String, Semaphore>,
+        hostPermits: HostPermits,
     ) {
         val stopAt = pagingStopAt(request)
         val sessions = pendingPages.map { PagingSession(it, adapters.getValue(it.sourceType)) }
@@ -827,8 +818,8 @@ internal class FeedRefresher(
                     for (session in active) {
                         launch {
                             global.withPermit {
-                                hostSems
-                                    .getValue(
+                                hostPermits
+                                    .semaphore(
                                         session.adapter.hostKey(
                                             session.feed,
                                             session.feed.pagingNextUrl ?: session.feed.feedUrl,
@@ -852,6 +843,19 @@ internal class FeedRefresher(
         } else {
             withTimeoutOrNull((stopAt - clock.elapsedRealtime()).coerceAtLeast(0)) { rounds() }
         }
+    }
+
+    /**
+     * Per-host fetch limiter for a run (03's 2-per-host politeness cap). Semaphores are created
+     * lazily under [lock]: an RFC 5005 `rel=next` link can point at a host that was not in the
+     * run's initial key set, and the first lookup of that host must resolve rather than throw.
+     */
+    private class HostPermits {
+        private val lock = Mutex()
+        private val sems = HashMap<String, Semaphore>()
+
+        suspend fun semaphore(key: String): Semaphore =
+            lock.withLock { sems.getOrPut(key) { Semaphore(HOST_CONCURRENCY) } }
     }
 
     /** The paging phase's hard stop: `pagingBudgetMs` or, on Android, 2 min before the deadline. */
