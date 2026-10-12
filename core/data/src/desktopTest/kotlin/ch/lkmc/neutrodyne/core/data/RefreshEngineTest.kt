@@ -3,11 +3,13 @@
 package ch.lkmc.neutrodyne.core.data
 
 import androidx.room3.useWriterConnection
+import androidx.sqlite.SQLiteException
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.data.ingest.IngestContext
 import ch.lkmc.neutrodyne.core.data.ingest.IngestMode
 import ch.lkmc.neutrodyne.core.data.refresh.AdapterResult
 import ch.lkmc.neutrodyne.core.data.refresh.FeedOutcome
+import ch.lkmc.neutrodyne.core.data.refresh.FeedRunEvent
 import ch.lkmc.neutrodyne.core.data.refresh.FetchMode
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshRequest
@@ -30,9 +32,11 @@ import ch.lkmc.neutrodyne.feeds.parse.ParseResult
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
 import mockwebserver3.junit4.MockWebServerRule
@@ -43,6 +47,7 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
@@ -1463,6 +1468,7 @@ class RefreshEngineTest {
             )
             assertEquals(FeedOutcome.NotModified, report.outcomes[b])
             assertEquals(0, report.remaining)
+            assertTrue(adapter.unscriptedKeys.isEmpty())
         }
 
     @Test
@@ -1520,30 +1526,133 @@ class RefreshEngineTest {
                 )
             }
 
-            val thrown =
-                runCatching {
-                    newRefresher(
+            // B finished its page; A's failed mark leaves it paging-pending at the same cursor.
+            newRefresher(
+                db,
+                mapOf(SourceType.RSS to adapter),
+                clock,
+                settings,
+                ingestor =
+                    newIngestor(
                         db,
-                        mapOf(SourceType.RSS to adapter),
                         clock,
                         settings,
-                        ingestor =
-                            newIngestor(
-                                db,
-                                clock,
-                                settings,
-                                defaultDispatcher = StandardTestDispatcher(testScheduler),
-                            ),
-                    ).run(request(pagingBudgetMs = 120_000L))
-                }.exceptionOrNull()
+                        defaultDispatcher = StandardTestDispatcher(testScheduler),
+                    ),
+            ).run(request(pagingBudgetMs = 120_000L))
 
-            // B finished its page; A's failed mark leaves it paging-pending at the same cursor.
-            assertNull(thrown)
             assertTrue(db.podcastDao().byId(b)!!.pagingComplete)
             db.podcastDao().byId(a)!!.let { stored ->
                 assertFalse(stored.pagingComplete)
                 assertEquals("https://a.example.com/f?page=2", stored.pagingNextUrl)
             }
+            assertTrue(adapter.unscriptedKeys.isEmpty())
+        }
+
+    @Test
+    fun aPagingCursorToANewHostStillCompletes() =
+        runTest {
+            // A rel=next link may point at a host absent from the run's initial key set: the
+            // per-host limiter must resolve it lazily instead of throwing NoSuchElementException
+            // and failing the whole paging round.
+            val db = newDb(clock, queryContext = StandardTestDispatcher(testScheduler))
+            val a =
+                seedPodcast(
+                    db,
+                    "https://a.example.com/f",
+                    nextRefreshAt = NOW + 60 * DAY,
+                    subscribedAt = NOW - 30 * DAY,
+                    pagingNextUrl = "https://a.example.com/f?page=2",
+                    pagingComplete = false,
+                )
+            val adapter =
+                stubAdapter(
+                    mutableMapOf(
+                        "https://a.example.com/f?page=2" to
+                            adapterParsed(
+                                parsedFeed(
+                                    items = listOf(parsedEpisode(1, guid = "pa", pubDate = NOW - DAY)),
+                                ).copy(paging = Paging(next = "https://b.example.com/f?page=3")),
+                                meta = fetchMeta("https://a.example.com/f?page=2"),
+                            ),
+                        "https://b.example.com/f?page=3" to
+                            adapterParsed(
+                                parsedFeed(
+                                    items =
+                                        listOf(parsedEpisode(2, guid = "pa2", pubDate = NOW - 2 * DAY)),
+                                ),
+                                meta = fetchMeta("https://b.example.com/f?page=3"),
+                            ),
+                    ),
+                )
+
+            newRefresher(
+                db,
+                mapOf(SourceType.RSS to adapter),
+                clock,
+                settings,
+                ingestor =
+                    newIngestor(
+                        db,
+                        clock,
+                        settings,
+                        defaultDispatcher = StandardTestDispatcher(testScheduler),
+                    ),
+            ).run(request(pagingBudgetMs = 120_000L))
+
+            assertEquals(2, db.podcastDao().episodeCount(a))
+            assertTrue(db.podcastDao().byId(a)!!.pagingComplete)
+        }
+
+    @Test
+    fun aFaultingFailureWriteStillIsolatesTheFeed() =
+        runTest {
+            // The guard's own writeFailure is a DAO write too — the batcher flushes eagerly once
+            // the buffered batch ages out — so a second fault inside getOrElse must not escape
+            // refreshOne and cancel the run (r2 regression pin).
+            val a = due("https://a.example.com/f")
+            val b = due("https://b.example.com/f")
+            val adapter =
+                stubAdapter(
+                    mutableMapOf(
+                        "https://a.example.com/f" to AdapterResult.NotModified(meta = fetchMeta()),
+                        "https://b.example.com/f" to
+                            AdapterResult.NotModified(
+                                meta = fetchMeta(permanentUrl = "https://new.example.com/f"),
+                            ),
+                    ),
+                    onFetch = { feed, _ ->
+                        // Age A's buffered row past the batcher's 5 s deadline so B's
+                        // writeFailure flushes — and faults — inside the guard's getOrElse.
+                        if (feed.id == b) clock.elapsedMs += 6_000L
+                        null
+                    },
+                )
+            db.useWriterConnection {
+                it.execSql(
+                    "CREATE TRIGGER fail_pending BEFORE UPDATE OF pendingNewFeedUrl ON podcast" +
+                        " WHEN old.id = $b BEGIN SELECT RAISE(ABORT, 'pending write'); END",
+                )
+                it.execSql(
+                    "CREATE TRIGGER fail_fs BEFORE UPDATE OF failureCount ON podcast" +
+                        " WHEN old.id = $a BEGIN SELECT RAISE(ABORT, 'fs write'); END",
+                )
+            }
+
+            val r = refresher(adapter)
+            val events = mutableListOf<FeedRunEvent>()
+            backgroundScope.launch { r.events.collect { events += it } }
+            // The retained batch is retried by the finalizer flush, which surfaces the fault as
+            // the run's failure — the isolation fix means it gets that far instead of dying in
+            // the fan-out.
+            val thrown = assertFailsWith<SQLiteException> { r.run(request()) }
+            runCurrent()
+
+            assertEquals("fs write", thrown.message?.substringAfter("message: "))
+            // Both feeds produced an outcome before the flush surfaced: the sibling is isolated.
+            assertEquals(FeedOutcome.NotModified, events.single { it.podcastId == a }.outcome)
+            val bOutcome = assertIs<FeedOutcome.Failed>(events.single { it.podcastId == b }.outcome)
+            assertEquals(FeedErrorKind.STORAGE, bOutcome.kind)
         }
 
     @Test
@@ -1597,10 +1706,11 @@ class RefreshEngineTest {
                 )
             settings.failNextSet = SettingsError.WriteFailed
 
-            val report = refresher(adapter).run(request())
+            val engine = refresher(adapter)
+            val report = engine.run(request())
 
             assertEquals(FeedOutcome.NotModified, report.outcomes[id])
-            assertFalse(refresher(adapter).status.value.running)
+            assertFalse(engine.status.value.running)
         }
 
     @Test
