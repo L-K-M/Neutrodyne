@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.data.repo
 
+import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Outcome
@@ -57,6 +58,8 @@ internal class PodcastRepositoryImpl(
     override fun observeLibraryTiles(groupId: Long?): Flow<List<LibraryTile>> =
         db
             .podcastDao()
+            // The window is fixed at subscription time — a long-lived collector doesn't re-anchor
+            // it (self-corrects on resubscribe).
             .observeLibraryTiles(clock.now() - TILE_COUNTS_WINDOW_MS, groupId)
             .map { rows ->
                 rows
@@ -128,10 +131,14 @@ internal class PodcastRepositoryImpl(
         refresher.flushFetchStates()
         val removed = mutableListOf<Long>()
         val dao = db.podcastDao()
-        for (id in podcastIds) {
-            if (dao.byId(id) == null) continue
-            dao.deleteCascade(id, clock.now())
-            removed += id
+        // One transaction for the whole list: a crash mid-loop must not leave a half-unsubscribed
+        // library with stale periodic scheduling (03 Unsubscribe).
+        db.withWriteTransaction {
+            for (id in podcastIds) {
+                if (dao.byId(id) == null) continue
+                dao.deleteCascade(id, clock.now())
+                removed += id
+            }
         }
         if (removed.isNotEmpty()) scheduler.reschedulePeriodic()
         return removed
@@ -207,7 +214,7 @@ internal class PodcastRepositoryImpl(
             byCategory.map { (category, ids) -> CategoryCount(category, ids) }
         }
 
-    private fun detailOf(
+    private suspend fun detailOf(
         p: PodcastEntity,
         episodeCount: Int,
     ): PodcastDetail =
@@ -219,7 +226,9 @@ internal class PodcastRepositoryImpl(
                 p.descriptionHtml?.let {
                     sanitizer.toDocument(it, isHtml = true, baseUri = p.feedUrl).toModel()
                 },
-            artwork = ArtworkRef(p.artworkKey, p.artworkUrl, 0),
+            // The version lives on the artwork row, not the podcast row — the tile projection
+            // joins it, the detail flow reads it here. 0 when the row is absent.
+            artwork = ArtworkRef(p.artworkKey, p.artworkUrl, db.artworkDao().byKey(p.artworkKey)?.version ?: 0),
             bannerUrl = p.bannerUrl,
             sourceType = p.sourceType,
             link = p.link,

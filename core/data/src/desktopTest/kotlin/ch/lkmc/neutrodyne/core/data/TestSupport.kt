@@ -116,7 +116,19 @@ internal fun newRefresher(
     settings: SettingsRepository = FakeSettingsRepository(),
     eventBus: IngestionEventBus = IngestionEventBus(),
     syncHook: SyncIngestHook = SyncIngestHook.None,
-    tempFiles: FeedTempFiles = FeedTempFiles(storagePathsFor(File("build/tmp/m1a-refresh")), FileSystem.SYSTEM),
+    // A unique root per refresher instance — a shared default would leak temp bodies across
+    // tests that run in the same JVM.
+    tempFiles: FeedTempFiles =
+        FeedTempFiles(
+            storagePathsFor(
+                File("build/tmp/m1a-refresh").resolve(
+                    java.util.UUID
+                        .randomUUID()
+                        .toString(),
+                ),
+            ),
+            FileSystem.SYSTEM,
+        ),
     random: Random = Random(1),
     ingestor: FeedIngestor = newIngestor(db, clock, settings),
 ): FeedRefresher = FeedRefresher(db, adapters, ingestor, eventBus, syncHook, tempFiles, settings, clock, random)
@@ -233,6 +245,9 @@ internal class FakeRefreshScheduler : RefreshScheduler {
     var continuationCount = 0
     var firstFetchCount = 0
 
+    /** Returned by the next [enqueueContinuation]; lets a test simulate a rejected enqueue. */
+    var continuationEnqueued = true
+
     override fun enqueueNow(
         scope: RefreshScope,
         force: Boolean,
@@ -248,12 +263,17 @@ internal class FakeRefreshScheduler : RefreshScheduler {
 
     override suspend fun enqueueContinuation(): Boolean {
         continuationCount++
-        return true
+        return continuationEnqueued
     }
 
     override fun requestFirstFetch() {
         firstFetchCount++
     }
+}
+
+/** Executes one statement inside a `useWriterConnection`/`useReaderConnection` block. */
+internal suspend fun androidx.room3.PooledConnection.execSql(sql: String) {
+    usePrepared(sql) { it.step() }
 }
 
 internal fun fetchState(
@@ -296,10 +316,18 @@ internal class StubSourceAdapter(
     /** `(podcastId, inserted, newIds)` of every `afterIngest`, in call order. */
     val afterIngestCalls = mutableListOf<Triple<Long, List<Long>, List<Long>>>()
 
-    override fun hostKey(feed: DueFeed): String =
-        feed.feedUrl
-            .substringAfter("://", feed.feedUrl)
+    /** Keys `fetchAndParse` looked up with no scripted result — assert this stays empty. */
+    val unscriptedKeys = mutableListOf<String?>()
+
+    override fun hostKey(
+        feed: DueFeed,
+        requestUrl: String,
+    ): String =
+        requestUrl
+            .substringAfter("://", requestUrl)
             .substringBefore("/")
+            .substringBefore("?")
+            .substringAfterLast("@")
             .lowercase()
 
     override suspend fun fetchAndParse(
@@ -309,7 +337,9 @@ internal class StubSourceAdapter(
         calls += feed.id to mode
         onFetch(feed, mode)?.let { return it }
         val key = if (mode == FetchMode.OLDER_PAGE) feed.pagingNextUrl else feed.feedUrl
-        return results[key] ?: AdapterResult.Failed(
+        val scripted = results[key]
+        if (scripted == null) unscriptedKeys += key
+        return scripted ?: AdapterResult.Failed(
             FeedErrorKind.UNKNOWN,
             http = null,
             retryAfterMs = null,
