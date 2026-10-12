@@ -891,6 +891,25 @@ Android (WorkManager); the desktop has no tick of its own ([Desktop refresh](#de
 
 All four run `RefreshWorker` (Metro assisted injection through 01's multibound worker map, `@WorkerKey(RefreshWorker::class)`; tag `refresh`); `import-sync` is enqueued by `RefreshController.requestFirstFetch()`, which 10's `WorkManagerSyncScheduler` calls after a pulled page added podcasts ([10 Client sync engine](10-sync.md#client-sync-engine)). A sync-added library of hundreds of podcasts follows the same continuation path as a large import. `refresh-now` ignores `feeds.refresh_wifi_only` and the battery constraint because the user asked for it; automatic triggers honour both. Below Android 12, WorkManager runs expedited work as a foreground service and requires `getForegroundInfo()`, and expedited requests reject every constraint except network and storage and any initial delay (`WorkRequest.Builder.build()` throws, [define work](https://developer.android.com/develop/background-work/background-tasks/persistent/getting-started/define-work), [WorkRequest source](https://github.com/androidx/androidx/blob/androidx-main/work/work-runtime/src/main/java/androidx/work/WorkRequest.kt)); refresh deliberately avoids the FGS path (no notification channel, no `dataSync` use for refresh), accepting slightly later starts on API 26–30, where non-expedited one-time work still starts promptly while the app is in the foreground. Scope serialisation in `Data`: `"all"`, `"group:<id>"`, or a `LongArray` of ≤ 500 ids (`Data` is capped at 10 KB, `Data.MAX_DATA_BYTES`; larger sets are marked due with 02's `forceDue` first and sent as `"all"` with `force = false`).
 
+**M1a review adjustments (2026-10-12).** Android persists every forced scope with
+02's `forceDue` before handing its request to WorkManager, including All, Group
+and podcast lists within the 500-id cap. The engine reapplies the marks
+idempotently at run start. A failed predecessor on an appended chain can drop
+the request but cannot erase its due marks; the next due-selection run can
+recover that intent. Enqueues are serialized so the persistence step cannot
+let a later request overtake an earlier one.
+
+A mutex-timeout report (`reenqueued`) makes `RefreshWorker` return `Result.retry()`
+for the existing work, preserving its persisted scope, force, pages-only flag
+and origin. This replaces the separate app-scope re-enqueue with WorkManager's
+durable retry and its normal backoff; a worker never reports success while a
+replacement exists only in memory. This is an implementation deviation from
+the mutex-timeout continuation described in [Engine run](#engine-run), because
+a continuation would lose the scoped or pages-only intent. Deadline leftovers
+still use the awaited continuation below. A malformed persisted group id
+falls back to All with force cleared: ordinary due selection recovers without
+forcing unrelated feeds or failing the rest of the appended chain.
+
 **Continuations and `KEEP`.** `KEEP` ignores a new request while unique work of that name is *uncompleted*, which includes `RUNNING` ([ExistingWorkPolicy source](https://github.com/androidx/androidx/blob/androidx-main/work/work-runtime/src/main/java/androidx/work/ExistingWorkPolicy.kt)). A running continuation therefore cannot enqueue its successor; it returns `Result.retry()` instead (linear backoff 60 s × attempt), at most 10 *executions* of the continuation work in total, after which the periodic tick takes over. Other origins enqueue the continuation — the enqueue's `Operation` is awaited before the worker reports success, because an unconfirmed enqueue could strand the leftovers; `KEEP` then collapses concurrent requests into one.
 
 ```kotlin
@@ -907,6 +926,7 @@ All four run `RefreshWorker` (Metro assisted injection through 01's multibound w
         val report = refresher.run(request)
         val more = report.remaining > 0 || report.stoppedByDeadline
         return when {
+            report.reenqueued -> Result.retry() // retain the existing persisted request after a mutex timeout
             !more -> Result.success()          // per-feed failures live on the podcast rows, not in WorkManager retries
             // the enqueue is awaited; a failed enqueue retries this worker rather than stranding leftovers
             request.origin != RefreshOrigin.CONTINUATION ->
