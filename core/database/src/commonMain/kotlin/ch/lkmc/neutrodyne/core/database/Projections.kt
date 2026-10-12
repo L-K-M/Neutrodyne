@@ -98,25 +98,7 @@ data class RebaseCandidate(
     val lastFullFetchAt: Long?,
     val lastParseOk: Boolean,
     val subscribedAt: Long,
-) {
-    /** The batched-write form (the rebase changes `nextRefreshAt` only). */
-    fun fetchState(nextRefreshAt: Long?) =
-        PodcastFetchState(
-            id = id,
-            lastAttemptAt = lastAttemptAt,
-            lastSuccessAt = lastSuccessAt,
-            nextRefreshAt = nextRefreshAt,
-            failureCount = failureCount,
-            lastErrorKind = lastErrorKind,
-            lastErrorDetail = lastErrorDetail,
-            gone = gone,
-            needsCredentials = needsCredentials,
-            etag = etag,
-            lastModified = lastModified,
-            lastFullFetchAt = lastFullFetchAt,
-            lastParseOk = lastParseOk,
-        )
-}
+)
 
 /**
  * The partial `podcast` write of batched refresh outcomes (02 Refresh selection and fetch-state
@@ -162,6 +144,8 @@ data class LibraryTileRow(
 
 /** The `IngestDao.existing` row 03 builds its in-memory identity maps from (02 Ingestion support). */
 data class ExistingEpisodeKey(
+    // Compared field-by-field by the ingest diff (pass-2 guards). Do not compare whole
+    // instances: equals/hashCode include drift-prone fields (durationMs, chaptersUrl).
     val id: Long,
     val identityKey: String,
     val guid: String?,
