@@ -118,6 +118,41 @@ class DesktopShellTest {
             assertThat(appScope.coroutineContext.job.isCancelled).isTrue()
         }
 
+    @Test
+    fun `stopServices still stops every service when the runner cannot be resolved`() {
+        val events = CopyOnWriteArrayList<String>()
+        val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        appScope.coroutineContext.job.invokeOnCompletion { events += "appscope" }
+
+        // A quit while the database open failed or is still pending (the window-close path runs
+        // on the UI thread): resolving the runner throws, and the hand-off server, its files and
+        // the application scope must still go down.
+        DesktopShell.stopServices(
+            jobRunner = { error("database not open") },
+            appScope = appScope,
+            serveJob = Job().also { it.invokeOnCompletion { events += "serve" } },
+            handshakeScope = CoroutineScope(SupervisorJob()),
+            closeHandshakeDispatcher = { events += "dispatcher" },
+        )
+
+        assertThat(events).containsExactly("serve", "dispatcher", "appscope").inOrder()
+    }
+
+    @Test
+    fun `stopServices skips a runner that never existed`() {
+        val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+        DesktopShell.stopServices(
+            jobRunner = { null },
+            appScope = appScope,
+            serveJob = Job(),
+            handshakeScope = CoroutineScope(SupervisorJob()),
+            closeHandshakeDispatcher = {},
+        )
+
+        assertThat(appScope.coroutineContext.job.isCancelled).isTrue()
+    }
+
     private object NoPower : PowerMonitor {
         override val events: Flow<PowerEvent> = emptyFlow()
     }

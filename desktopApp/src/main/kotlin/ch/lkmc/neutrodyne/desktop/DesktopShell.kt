@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.LogLevel
 import ch.lkmc.neutrodyne.core.common.runInitializers
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
+import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.DesktopOs
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
@@ -204,7 +205,12 @@ internal object DesktopShell {
                 fileSink = fileSink,
                 stopServices = {
                     stopServices(
-                        jobRunner = { graph.jobRunner },
+                        // Only an opened database means band 200 can have started the runner;
+                        // resolving it otherwise would wait on, or rethrow, the open.
+                        jobRunner = {
+                            val opened = graph.databaseOpener.openState.value is DatabaseOpenState.Opened
+                            if (opened) graph.jobRunner else null
+                        },
                         appScope = graph.appScope,
                         serveJob = serveJob,
                         handshakeScope = handshakeScope,
@@ -248,18 +254,19 @@ internal object DesktopShell {
      * would cut it off. `serve`'s `cancelAndJoin` removes the port/token files; the dispatcher
      * close frees its virtual-thread executor.
      *
-     * [jobRunner] is a lambda: resolving it pulls the lane chain through `requireDatabase()`,
-     * which waits out an in-flight open — the call site pays that only inside the stop, where a
-     * running open is exactly what a lane would be using.
+     * [jobRunner] is null when the runner never started (the database is not open). A failure
+     * to resolve or stop it is logged and never skips the remaining steps: the port/token files
+     * and the scopes must go down on every exit path.
      */
     internal fun stopServices(
-        jobRunner: () -> DesktopJobRunner,
+        jobRunner: () -> DesktopJobRunner?,
         appScope: CoroutineScope,
         serveJob: Job,
         handshakeScope: CoroutineScope,
         closeHandshakeDispatcher: () -> Unit,
     ) {
-        runBlocking { jobRunner().stop(RUNNER_SHUTDOWN_GRACE) }
+        runCatching { runBlocking { jobRunner()?.stop(RUNNER_SHUTDOWN_GRACE) } }
+            .onFailure { Log.w(TAG, it) { "job runner stop failed" } }
         runBlocking { serveJob.cancelAndJoin() }
         handshakeScope.cancel()
         closeHandshakeDispatcher()
