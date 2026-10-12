@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.data
 
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.data.add.PreviewEntry
 import ch.lkmc.neutrodyne.core.data.fetch.RedirectHop
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
 import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
@@ -33,6 +34,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
@@ -130,6 +132,30 @@ class SubscribeFlowTest {
             assertEquals(id, event.podcastId)
             assertTrue(event.initialFetch)
             assertEquals(2, event.episodeIds.size)
+        }
+
+    @Test
+    fun previewCachePutReturnsTheCreatedEntryEvenAfterEviction() =
+        runTest {
+            val url = "https://a.example.com/f"
+            val created: Any =
+                resolverBundle.cache.put(
+                    url,
+                    url,
+                    parsedFeed(),
+                    fetchMeta(finalUrl = url),
+                    emptyList(),
+                    null,
+                )
+            val entry = assertIs<PreviewEntry>(created)
+            assertSame(entry, resolverBundle.cache.get(url))
+            for (suffix in listOf("g", "h")) {
+                val later = "https://a.example.com/$suffix"
+                resolverBundle.cache.put(later, later, parsedFeed(), fetchMeta(finalUrl = later), emptyList(), null)
+            }
+            assertNull(resolverBundle.cache.get(url))
+            assertEquals(url, entry.previewId)
+            assertEquals(url, entry.meta.finalUrl)
         }
 
     @Test

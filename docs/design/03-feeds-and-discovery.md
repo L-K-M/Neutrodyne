@@ -1265,7 +1265,7 @@ data class BasicCredentials(val username: String, val password: String)
 2. `neutrodyne://subscribe?url=<enc>` → the decoded `url` (recursively, once).
 3. `feed:https://x` / `feed:http://x` → `https://x` / `http://x`; `feed://x`, `pcast://x`, `podcast://x`, `itpc://x` → `https://x` with `schemeGuessed = true`.
 4. Subscribe wrappers: `subscribeonandroid.com/<rest>` and `www.subscribeonandroid.com/<rest>` → `<rest>` (adding `https://` when scheme-less); `antennapod.org/deeplink/subscribe?url=<enc>` → the `url` parameter; `podcasts.google.com/feed/<base64url>` → decoded feed URL (**Unverified:** the encoding; the shut-down service's links still circulate).
-5. Scheme-less `host.tld/…` → `https://…` with `schemeGuessed = true`. When `schemeGuessed` and the `https` attempt fails with `CONNECTION`, `TLS_*` or `TIMEOUT`, the resolver retries once with `http://`.
+5. Scheme-less `host.tld/…` → `https://…` with `schemeGuessed = true`. When `schemeGuessed` and the `https` attempt fails with `CONNECTION`, `TLS_*` or `TIMEOUT`, the resolver retries once with `http://`. **Credential exception (2026-10-12):** when credentials are present (from userinfo or explicitly supplied), do not retry over `http://`; surface the transport error. The user can explicitly enter `http://` to opt into cleartext.
 6. Reject anything that is not `http(s)` after unwrapping (`file:`, `content:`, `javascript:`, …) as `InvalidUrl`; text with no URL-like token and no dot → `NotAUrl(query = text)`.
 7. `UrlNormalizer.splitUserInfo` moves `user:pass@` into credentials.
 

@@ -17,6 +17,7 @@ import mockwebserver3.junit4.MockWebServerRule
 import org.junit.Rule
 import java.io.File
 import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
 import kotlin.io.encoding.Base64
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -418,7 +419,7 @@ class AddPodcastResolverTest {
         }
 
     @Test
-    fun typedCredentialsAreSentOnTheRetry() =
+    fun typedCredentialsAreSentOnTheRequest() =
         runTest {
             server.enqueue(mockResponse(body = rssBody()))
 
@@ -456,6 +457,44 @@ class AddPodcastResolverTest {
             // (an https attempt answered over cleartext fallback would keep `https://`).
             assertEquals("http://127.0.0.1:${server.port}/feed.xml", feed.preview.feedUrl)
         }
+
+    @Test
+    fun schemeGuessedUserinfoCredentialsNeverFallBackToCleartext() =
+        runTest {
+            assertCredentialedGuessDoesNotDowngrade("u:p@127.0.0.1:${server.port}/feed.xml", null)
+        }
+
+    @Test
+    fun schemeGuessedTypedCredentialsNeverFallBackToCleartext() =
+        runTest {
+            assertCredentialedGuessDoesNotDowngrade("127.0.0.1:${server.port}/feed.xml", BasicCredentials("u", "p"))
+        }
+
+    private suspend fun assertCredentialedGuessDoesNotDowngrade(
+        input: String,
+        credentials: BasicCredentials?,
+    ) {
+        server.enqueue(mockResponse(body = rssBody()))
+
+        val result =
+            if (credentials ==
+                null
+            ) {
+                bundle.resolver.resolve(input)
+            } else {
+                bundle.resolver.resolve(input, credentials)
+            }
+
+        // Handshake records can arrive just after resolution returns; wait for the queue, not a count snapshot.
+        val requests =
+            listOfNotNull(
+                server.takeRequest(5, TimeUnit.SECONDS),
+                server.takeRequest(200, TimeUnit.MILLISECONDS),
+            )
+        assertTrue(requests.none { it.headers["Authorization"] != null }, "Cleartext request carried Authorization")
+        assertEquals(1, requests.size, "Only the failed TLS attempt may reach the plaintext port")
+        assertIs<AddPodcastError.Network>(assertIs<AddResolution.Failure>(result).error)
+    }
 
     @Test
     fun previewReusesALiveCacheEntry() =
