@@ -166,20 +166,24 @@ class SubscribeFlowTest {
     }
 
     @Test
-    fun schedulingCancellationAfterCommitPropagatesAndRemovesPreview() =
-        runTest {
-            for (step in SchedulingStep.entries) {
-                val previewId = cachePagedPreview("https://a.example.com/${step.name}")
-                val throwing = ThrowingScheduler(scheduler, step, CancellationException("cancel scheduling"))
-                val bundle = newSubscribe(db, resolverBundle.cache, resolverBundle.resolver, throwing, settings, clock)
+    fun enqueueCancellationAfterCommitPropagatesAndRemovesPreview() =
+        runTest { assertSchedulingCancellationRemovesPreview(SchedulingStep.ENQUEUE) }
 
-                assertFailsWith<CancellationException> { bundle.useCase(previewId, emptySet()) }
+    @Test
+    fun rescheduleCancellationAfterCommitPropagatesAndRemovesPreview() =
+        runTest { assertSchedulingCancellationRemovesPreview(SchedulingStep.RESCHEDULE) }
 
-                val row = assertNotNull(db.podcastDao().byFeedKey(assertNotNull(UrlNormalizer.forIdentity(previewId))))
-                assertEquals(1, db.podcastDao().episodeCount(row.id))
-                assertNull(resolverBundle.cache.get(previewId), "Committed preview must be removed on cancellation")
-            }
-        }
+    private suspend fun assertSchedulingCancellationRemovesPreview(step: SchedulingStep) {
+        val previewId = cachePagedPreview("https://a.example.com/${step.name}")
+        val throwing = ThrowingScheduler(scheduler, step, CancellationException("cancel scheduling"))
+        val bundle = newSubscribe(db, resolverBundle.cache, resolverBundle.resolver, throwing, settings, clock)
+
+        assertFailsWith<CancellationException> { bundle.useCase(previewId, emptySet()) }
+
+        val row = assertNotNull(db.podcastDao().byFeedKey(assertNotNull(UrlNormalizer.forIdentity(previewId))))
+        assertEquals(1, db.podcastDao().episodeCount(row.id))
+        assertNull(resolverBundle.cache.get(previewId), "Committed preview must be removed on cancellation")
+    }
 
     private suspend fun cachePagedPreview(url: String = "https://a.example.com/f"): String {
         settings.set(FeedsSettingKeys.BACKFILL_PAGED_FEEDS, true)

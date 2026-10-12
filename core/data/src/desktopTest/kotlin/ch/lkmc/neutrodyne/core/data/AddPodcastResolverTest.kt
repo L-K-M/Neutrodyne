@@ -492,7 +492,9 @@ class AddPodcastResolverTest {
                 server.takeRequest(200, TimeUnit.MILLISECONDS),
             )
         assertTrue(requests.none { it.headers["Authorization"] != null }, "Cleartext request carried Authorization")
-        assertEquals(1, requests.size, "Only the failed TLS attempt may reach the plaintext port")
+        // Whether the aborted TLS handshake is recorded at all depends on timing; what must never
+        // arrive is a well-formed plaintext request, the http fallback.
+        assertTrue(requests.all { it.failure != null }, "A plaintext request reached the server")
         assertIs<AddPodcastError.Network>(assertIs<AddResolution.Failure>(result).error)
     }
 
