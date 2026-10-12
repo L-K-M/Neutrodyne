@@ -90,7 +90,10 @@ internal class SubscribeUseCaseImpl(
         // `permanentUrl ?: requestedUrl` is the subscribe identity (03 redirects/dedupe): a
         // temporary redirect's target never becomes the subscription's feedUrl/feedKey.
         val feedUrl = entry.meta.permanentUrl ?: entry.meta.requestedUrl
-        val feedKey = UrlNormalizer.forIdentity(feedUrl) ?: return Outcome.Failure(SubscribeError.Storage)
+        // The resolver already rejects a null identity before offering the preview; this guard
+        // keeps the invariant at the write path — a null identity is an InvalidUrl, not a
+        // storage fault.
+        val feedKey = UrlNormalizer.forIdentity(feedUrl) ?: return Outcome.Failure(SubscribeError.InvalidUrl)
         val inputKey = UrlNormalizer.forIdentity(entry.inputUrl)
         // The terminal fetch URL is a dedupe candidate too: a temporary redirect's target is not
         // this subscription's identity, but a feed already subscribed there is the same feed.
