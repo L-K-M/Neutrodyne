@@ -60,17 +60,29 @@ internal class RssSourceAdapter(
      */
     private val parseDispatcher = io.limitedParallelism(PARSE_PARALLELISM)
 
-    /** The per-host semaphore key of the fan-out limit (lowercase request host). */
+    /**
+     * The per-host semaphore key of the fan-out limit (lowercase request host, without the port,
+     * as OkHttp's per-host limit): `https://u@Feeds.example.com:8443/f` → `feeds.example.com`,
+     * `https://[2001:db8::1]:8080/f` → `[2001:db8::1]`.
+     */
     override fun hostKey(
         feed: DueFeed,
         requestUrl: String,
-    ): String =
-        requestUrl
-            .substringAfter("://", requestUrl)
-            .substringBefore("/")
-            .substringBefore("?")
-            .substringAfterLast("@")
-            .lowercase()
+    ): String {
+        val authority =
+            requestUrl
+                .substringAfter("://", requestUrl)
+                .substringBefore("/")
+                .substringBefore("?")
+                .substringAfterLast("@")
+        val host =
+            if (authority.startsWith("[")) {
+                authority.substringBefore("]") + "]"
+            } else {
+                authority.substringBefore(":")
+            }
+        return host.lowercase()
+    }
 
     override suspend fun fetchAndParse(
         feed: DueFeed,
