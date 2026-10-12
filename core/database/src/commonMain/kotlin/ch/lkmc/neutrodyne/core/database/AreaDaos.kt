@@ -6,6 +6,7 @@ import androidx.room3.Dao
 import androidx.room3.Insert
 import androidx.room3.Query
 import androidx.room3.Upsert
+import ch.lkmc.neutrodyne.core.model.FeedOrder
 
 // The remaining one-DAO-per-area surface (02 "New names introduced here"). M1a adds only the row
 // writers and lookups its own paths and fixtures need; each later milestone extends its DAO.
@@ -35,6 +36,13 @@ interface GroupDao {
             " ORDER BY orderKey DESC, podcastId DESC LIMIT 1",
     )
     suspend fun lastMemberOrderKey(groupId: Long): String?
+
+    /** The group's feed order (05 `FeedRepository.setFeedOrder`, `FeedSource.Group`). */
+    @Query("UPDATE podcast_group SET feedOrder = :order WHERE id = :groupId")
+    suspend fun setFeedOrder(
+        groupId: Long,
+        order: FeedOrder,
+    )
 }
 
 /** `podcast_settings` + `podcast_group_settings` (M2: resolution reads; deletes on all-null). */
