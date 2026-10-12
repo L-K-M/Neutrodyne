@@ -15,7 +15,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.encodeToJsonElement
 import okio.Buffer
-import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -60,9 +59,6 @@ class AndroidParserGoldenTest {
                 .orEmpty()
                 .sortedBy { it.name }
 
-        // The corpus lands with its own PR (#78); until then this leg has nothing to compare.
-        // A present-but-empty directory still fails so a clobbered corpus stays loud.
-        assumeTrue("feed corpus is not merged into feeds/ yet", FIXTURES_DIR.isDirectory)
         assertThat(fixtures).isNotEmpty()
         for (fixture in fixtures) {
             val name = fixture.name.removeSuffix(".xml")
