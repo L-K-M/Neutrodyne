@@ -58,13 +58,19 @@ class RssSourceAdapterTest {
         }
 
     @Test
-    fun hostKeyStripsQueryButKeepsPort() =
+    fun hostKeyStripsQueryAndPort() =
         runTest {
             setUpRoot()
             val feed = dueFeedOf(db, seedPodcast(db, "https://feeds.example.com:8443?raw=1"))
             val bundle = newRssAdapter(root, clock)
             try {
-                assertEquals("feeds.example.com:8443", bundle.adapter.hostKey(feed, feed.feedUrl))
+                // 03 keys the limit on the host alone, as OkHttp's per-host limit does: feeds on
+                // two ports of one server share one politeness semaphore.
+                assertEquals("feeds.example.com", bundle.adapter.hostKey(feed, feed.feedUrl))
+                assertEquals(
+                    "[2001:db8::1]",
+                    bundle.adapter.hostKey(feed, "https://[2001:DB8::1]:8080/f.xml"),
+                )
             } finally {
                 bundle.close()
             }
