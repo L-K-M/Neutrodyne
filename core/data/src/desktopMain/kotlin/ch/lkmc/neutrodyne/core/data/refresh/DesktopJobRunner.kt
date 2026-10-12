@@ -22,6 +22,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -101,8 +102,9 @@ class DesktopJobRunner
         private var runnerJob: Job? = null
 
         /**
-         * The scope lane jobs launch under — a child of [runnerJob], so `stop` cancels every lane
-         * with the runner itself rather than only waiting for them (11 Quitting).
+         * The scope lane jobs launch under — a supervised child of [runnerJob] (11 Tick step 3):
+         * a lane's failure ends only that lane's coroutine instead of the tick loop and every
+         * sibling lane, while `stop` still cancels them all through the parent link.
          */
         private var laneScope: CoroutineScope = scope
 
@@ -121,6 +123,19 @@ class DesktopJobRunner
                             if (event == PowerEvent.Resumed) wake("power-event")
                         }
                     }
+                    launch {
+                        // 11 Tick step 6: a return to "online" pokes the lanes that need the
+                        // network. Names absent from this milestone's graph are skipped.
+                        var wasConnected = network.status.value.isConnected
+                        network.status.collect { status ->
+                            val connected = status.isConnected
+                            if (connected && !wasConnected) {
+                                pendingPokes.addAll(NETWORK_LANES intersect lanesByName.keys)
+                                tickSignal.trySend(Unit)
+                            }
+                            wasConnected = connected
+                        }
+                    }
                     delay(START_SETTLE_MS)
                     while (isActive) {
                         tick()
@@ -128,7 +143,7 @@ class DesktopJobRunner
                     }
                 }
             runnerJob = job
-            laneScope = CoroutineScope(job)
+            laneScope = CoroutineScope(SupervisorJob(job))
         }
 
         /**
@@ -160,19 +175,33 @@ class DesktopJobRunner
             for (lane in orderedLanes) {
                 val state = states.getValue(lane.name)
                 val poked = lane.name in pokes
-                when {
-                    state.running -> if (poked) state.rerun = true
-                    !poked && state.backoffUntil?.let { it > now } == true -> Unit
-                    else -> launchLane(lane, state)
-                }
+                val launch =
+                    synchronized(state.lock) {
+                        when {
+                            state.running -> {
+                                if (poked) state.rerun = true
+                                false
+                            }
+
+                            !poked && state.backoffUntil?.let { it > now } == true -> {
+                                false
+                            }
+
+                            else -> {
+                                state.running = true
+                                true
+                            }
+                        }
+                    }
+                if (launch) launchLane(lane, state)
             }
         }
 
+        /** Callers claim `state.running` under `state.lock` first; this only launches. */
         private fun launchLane(
             lane: JobLane,
             state: LaneState,
         ) {
-            state.running = true
             state.job =
                 laneScope.launch(laneDispatcher(lane.name)) {
                     try {
@@ -221,15 +250,28 @@ class DesktopJobRunner
                                     }
                                 },
                             )
+                    } catch (throwable: Throwable) {
+                        // A throw outside `lane.run`'s own guard — fold bookkeeping, a status
+                        // write — lands here. The lane coroutine still ends, and ending it is
+                        // enough: logging like a lane failure keeps it off the uncaught handler.
+                        if (throwable is CancellationException) throw throwable
+                        Log.e(TAG, throwable) { "lane ${lane.name} failed outside its run guard" }
                     } finally {
-                        // `running` stays true through the rerun handoff: the tick must never
-                        // see the lane unowned between the finished job and its replacement.
-                        if (state.rerun && !stopping) {
-                            state.rerun = false
-                            launchLane(lane, state)
-                        } else {
-                            state.running = false
-                        }
+                        // The handoff is atomic with the tick's `running` check under the same
+                        // lock, so a poke landing while the lane unwinds is always seen by
+                        // exactly one side — never checked here before `running` is released
+                        // there, orphaned on the flag.
+                        val relaunch =
+                            synchronized(state.lock) {
+                                if (state.rerun && !stopping) {
+                                    state.rerun = false
+                                    true
+                                } else {
+                                    state.running = false
+                                    false
+                                }
+                            }
+                        if (relaunch) launchLane(lane, state)
                     }
                 }
         }
@@ -269,13 +311,18 @@ class DesktopJobRunner
             _status.update { current -> current + (name to block(current.getValue(name))) }
         }
 
-        /** Read across the tick and lane coroutines, so every shared field is volatile. */
+        /**
+         * Per-lane bookkeeping shared by the tick and the lane's own coroutine. [lock] serializes
+         * the `running`/`rerun` handoff — the tick's check-and-arm and the completion's
+         * release-or-relaunch are each single critical sections, a few field writes wide and
+         * never suspending. [failures] and [backoffUntil] each have one writer (the lane's fold)
+         * and stay volatile.
+         */
         private class LaneState {
-            @Volatile var job: Job? = null
-
-            @Volatile var running: Boolean = false
-
-            @Volatile var rerun: Boolean = false
+            val lock = Any()
+            var job: Job? = null
+            var running: Boolean = false
+            var rerun: Boolean = false
 
             @Volatile var failures: Int = 0
 
@@ -291,6 +338,9 @@ class DesktopJobRunner
             const val BACKOFF_BASE_MINUTES = 1
             const val BACKOFF_CAP_MINUTES = 30
             const val ARTWORK_PARALLELISM = 2
+
+            /** 11 Tick step 6's network-regained set. */
+            private val NETWORK_LANES = setOf("refresh", "downloads-manual", "downloads-auto", "sync")
 
             /** 11's fixed per-tick lane order; unknown lanes append by name for determinism. */
             val LANE_ORDER =
