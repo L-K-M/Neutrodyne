@@ -15,10 +15,12 @@ import ch.lkmc.neutrodyne.core.common.StoragePaths
 import ch.lkmc.neutrodyne.core.database.DatabaseFactory
 import ch.lkmc.neutrodyne.core.database.DesktopDatabaseFactory
 import ch.lkmc.neutrodyne.core.database.StrictMigrations
+import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.platform.DesktopPlatformInfo
+import ch.lkmc.neutrodyne.sync.protocol.OrderKey
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.Provides
@@ -113,6 +115,10 @@ object DesktopCoreBindings {
     @Provides
     @SingleIn(AppScope::class)
     fun powerMonitor(): PowerMonitor = NoEventsPowerMonitor
+
+    /** The subscribe transaction's fractional-index port (10 Ordered lists). */
+    @Provides
+    fun orderKeys(): OrderKeys = OrderKeys { last -> OrderKey.after(last) }
 }
 
 private object NoEventsPowerMonitor : PowerMonitor {
