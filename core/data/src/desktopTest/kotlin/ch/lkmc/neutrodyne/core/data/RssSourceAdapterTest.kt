@@ -100,6 +100,7 @@ class RssSourceAdapterTest {
                 assertFailsWith<IllegalArgumentException> {
                     bundle.adapter.fetchAndParse(dueFeedOf(db, id), FetchMode.OLDER_PAGE)
                 }
+                assertEquals(0, server.requestCount)
             } finally {
                 bundle.close()
             }
