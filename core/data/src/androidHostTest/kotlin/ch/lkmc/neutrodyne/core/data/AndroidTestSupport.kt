@@ -138,10 +138,15 @@ internal class StubSourceAdapter(
     /** `(podcastId, mode)` of every `fetchAndParse`, in call order. */
     val calls = mutableListOf<Pair<Long, FetchMode>>()
 
-    override fun hostKey(feed: DueFeed): String =
-        feed.feedUrl
-            .substringAfter("://", feed.feedUrl)
+    override fun hostKey(
+        feed: DueFeed,
+        requestUrl: String,
+    ): String =
+        requestUrl
+            .substringAfter("://", requestUrl)
             .substringBefore("/")
+            .substringBefore("?")
+            .substringAfterLast("@")
             .lowercase()
 
     override suspend fun fetchAndParse(

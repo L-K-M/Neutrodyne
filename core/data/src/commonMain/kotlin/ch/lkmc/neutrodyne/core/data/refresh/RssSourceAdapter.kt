@@ -61,12 +61,29 @@ internal class RssSourceAdapter(
      */
     private val parseDispatcher = io.limitedParallelism(PARSE_PARALLELISM)
 
-    /** The per-host semaphore key of the fan-out limit (lowercase request host). */
-    override fun hostKey(feed: DueFeed): String =
-        feed.feedUrl
-            .substringAfter("://", feed.feedUrl)
-            .substringBefore("/")
-            .lowercase()
+    /**
+     * The per-host semaphore key of the fan-out limit (lowercase request host, without the port,
+     * as OkHttp's per-host limit): `https://u@Feeds.example.com:8443/f` → `feeds.example.com`,
+     * `https://[2001:db8::1]:8080/f` → `[2001:db8::1]`.
+     */
+    override fun hostKey(
+        feed: DueFeed,
+        requestUrl: String,
+    ): String {
+        val authority =
+            requestUrl
+                .substringAfter("://", requestUrl)
+                .substringBefore("/")
+                .substringBefore("?")
+                .substringAfterLast("@")
+        val host =
+            if (authority.startsWith("[")) {
+                authority.substringBefore("]") + "]"
+            } else {
+                authority.substringBefore(":")
+            }
+        return host.lowercase()
+    }
 
     override suspend fun fetchAndParse(
         feed: DueFeed,
@@ -80,8 +97,17 @@ internal class RssSourceAdapter(
             }
         val url =
             when (mode) {
-                FetchMode.OLDER_PAGE -> feed.pagingNextUrl ?: feed.feedUrl
-                else -> feed.feedUrl
+                FetchMode.OLDER_PAGE -> {
+                    // The engine only sends OLDER_PAGE when a cursor exists — a null cursor is an
+                    // invariant violation and must not silently re-fetch page 1.
+                    requireNotNull(feed.pagingNextUrl) {
+                        "OLDER_PAGE requested without pagingNextUrl for ${feed.feedUrl}"
+                    }
+                }
+
+                else -> {
+                    feed.feedUrl
+                }
             }
         val outcome =
             fetcher.fetch(
@@ -306,9 +332,8 @@ internal class RssSourceAdapter(
 
             code >= 500 -> FeedErrorKind.HTTP_SERVER
 
-            // A 3xx the chain could not follow (no usable Location) is the final response (03).
-            code >= 300 -> FeedErrorKind.HTTP_CLIENT
-
+            // A 3xx the chain could not follow (no usable Location) is the final response (03),
+            // and every remaining status maps to the same client-error kind.
             else -> FeedErrorKind.HTTP_CLIENT
         }
 

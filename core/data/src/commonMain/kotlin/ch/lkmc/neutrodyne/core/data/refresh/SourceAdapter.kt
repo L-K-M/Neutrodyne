@@ -20,8 +20,15 @@ import okio.Path
 internal interface SourceAdapter {
     val sourceType: SourceType
 
-    /** Per-host concurrency key (03 Engine run step 5: 2 per host): the lowercase request host. */
-    fun hostKey(feed: DueFeed): String
+    /**
+     * Per-host concurrency key (03 Engine run step 5: 2 per host): the lowercase host of
+     * [requestUrl] — the feed URL for refreshes, the page URL for `OLDER_PAGE`, which may point
+     * at a different host than the feed (e.g. a rel=next CDN).
+     */
+    fun hostKey(
+        feed: DueFeed,
+        requestUrl: String,
+    ): String
 
     /** Fetches and parses one feed; [mode] `OLDER_PAGE` fetches `pagingNextUrl` unconditionally. */
     suspend fun fetchAndParse(

@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * The `RefreshController` of 03 API (`:core:data` internal): user- and system-facing refresh
@@ -52,13 +53,8 @@ internal class RefreshControllerImpl(
      */
     override fun refreshFeed(source: FeedSource) {
         appScope.launch {
-            val scope =
-                when (source) {
-                    FeedSource.All -> RefreshScope.All
-                    is FeedSource.Group -> RefreshScope.Group(source.groupId)
-                    is FeedSource.Podcast -> RefreshScope.Podcasts(listOf(source.podcastId))
-                    FeedSource.Ungrouped -> RefreshScope.Podcasts(db.podcastDao().ungroupedIds())
-                }
+            // The cooldown check runs before scope resolution so a suppressed pull doesn't pay
+            // for the `ungroupedIds` query.
             refreshFeedLock.withLock {
                 val now = clock.elapsedRealtime()
                 val last = lastRefreshFeedAt[source]
@@ -66,7 +62,21 @@ internal class RefreshControllerImpl(
                 if (last != null && now - last in 0 until REFRESH_FEED_COOLDOWN_MS) return@launch
                 lastRefreshFeedAt[source] = now
             }
-            scheduler.enqueueNow(scope, force = true, pagesOnly = false, origin = RefreshOrigin.MANUAL)
+            try {
+                val scope =
+                    when (source) {
+                        FeedSource.All -> RefreshScope.All
+                        is FeedSource.Group -> RefreshScope.Group(source.groupId)
+                        is FeedSource.Podcast -> RefreshScope.Podcasts(listOf(source.podcastId))
+                        FeedSource.Ungrouped -> RefreshScope.Podcasts(db.podcastDao().ungroupedIds())
+                    }
+                scheduler.enqueueNow(scope, force = true, pagesOnly = false, origin = RefreshOrigin.MANUAL)
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                // Nothing was enqueued — a failed pull must not burn the cooldown.
+                refreshFeedLock.withLock { lastRefreshFeedAt.remove(source) }
+                throw t
+            }
         }
     }
 

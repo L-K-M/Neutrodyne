@@ -41,7 +41,10 @@ internal data class RefreshRequest(
     val pagingBudgetMs: Long = 0,
 ) {
     internal companion object {
-        /** The desktop's (and tests') no-deadline marker (03 API). */
+        /**
+         * The desktop's (and tests') no-deadline marker (03 API). Never use it in arithmetic —
+         * `NO_DEADLINE - now` overflows; compare with `==` first.
+         */
         const val NO_DEADLINE = Long.MAX_VALUE
     }
 }
