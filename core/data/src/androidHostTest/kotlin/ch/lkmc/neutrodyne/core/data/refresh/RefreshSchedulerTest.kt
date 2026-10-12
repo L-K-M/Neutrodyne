@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.data.refresh
 
 import androidx.work.BackoffPolicy
+import androidx.work.Configuration
 import androidx.work.NetworkType
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkInfo
@@ -20,6 +21,8 @@ import ch.lkmc.neutrodyne.core.testing.TestClock
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -31,6 +34,10 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * `WorkManagerRefreshScheduler` against the WorkManager test backend (03 Work requests /
@@ -59,6 +66,35 @@ class RefreshSchedulerTest {
     fun tearDown() {
         db.close()
     }
+
+    @Test
+    fun `a pending periodic query suspends the caller thread`() =
+        runTest {
+            val query = PausingExecutor()
+            WorkManagerTestInitHelper.initializeTestWorkManager(
+                app,
+                Configuration.Builder().setTaskExecutor(query).build(),
+            )
+            val scheduler = scheduler()
+            Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { caller ->
+                query.pause()
+                val reconcile = async(caller) { scheduler.reschedulePeriodic() }
+                try {
+                    assertThat(query.queued.await(5, TimeUnit.SECONDS)).isTrue()
+                    val responsive = CountDownLatch(1)
+                    caller.executor.execute { responsive.countDown() }
+                    assertThat(responsive.await(1, TimeUnit.SECONDS)).isTrue()
+                    assertThat(reconcile.isCompleted).isFalse()
+                    val cancelled = CountDownLatch(1)
+                    reconcile.invokeOnCompletion { cancelled.countDown() }
+                    reconcile.cancel()
+                    assertThat(cancelled.await(1, TimeUnit.SECONDS)).isTrue()
+                } finally {
+                    query.resume()
+                    reconcile.join()
+                }
+            }
+        }
 
     @Test
     fun `the periodic tick enqueues refresh-periodic with the interval`() =
@@ -476,6 +512,35 @@ class RefreshSchedulerTest {
         withContext(Dispatchers.IO) {
             checkNotNull((workManager as WorkManagerImpl).workDatabase.workSpecDao().getWorkSpec(id))
         }
+
+    /** Holds WorkManager's query while a second dispatch probes the caller's responsiveness. */
+    private class PausingExecutor : Executor {
+        val queued = CountDownLatch(1)
+        private val pending = mutableListOf<Runnable>()
+        private var paused = false
+
+        fun pause() = synchronized(pending) { paused = true }
+
+        override fun execute(command: Runnable) {
+            synchronized(pending) {
+                if (paused) {
+                    pending += command
+                    queued.countDown()
+                    return
+                }
+            }
+            command.run()
+        }
+
+        fun resume() {
+            val tasks =
+                synchronized(pending) {
+                    paused = false
+                    pending.toList().also { pending.clear() }
+                }
+            tasks.forEach { it.run() }
+        }
+    }
 
     private companion object {
         const val MINUTE_MS = 60_000L

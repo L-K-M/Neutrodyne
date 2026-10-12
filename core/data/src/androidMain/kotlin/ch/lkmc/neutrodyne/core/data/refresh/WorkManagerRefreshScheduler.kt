@@ -23,11 +23,13 @@ import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
+import com.google.common.util.concurrent.ListenableFuture
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.concurrent.TimeUnit
 
 /**
@@ -264,9 +266,16 @@ internal class WorkManagerRefreshScheduler
             suspendRunCatching {
                 workManager
                     .getWorkInfosForUniqueWork(WORK_PERIODIC)
-                    .get()
+                    .awaitResult()
                     .any { !it.state.isFinished }
             }.getOrDefault(false)
+
+        private suspend fun <T> ListenableFuture<T>.awaitResult(): T =
+            suspendCancellableCoroutine { continuation ->
+                // The listener runs only after completion, so get() cannot block the caller.
+                addListener({ continuation.resumeWith(runCatching { get() }) }, { it.run() })
+                continuation.invokeOnCancellation { cancel(true) }
+            }
 
         /** The `Operation` awaited; `await()` returns `SUCCESS` or throws — a failed op must not set markers. */
         private suspend fun Operation.awaitSuccess(): Boolean = suspendRunCatching { await() }.isSuccess
