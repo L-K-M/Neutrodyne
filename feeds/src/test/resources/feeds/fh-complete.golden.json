@@ -1,0 +1,28 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/fc1.mp3"
+        }
+      ],
+      "feedOrder": 0,
+      "guid": "fhc-1",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/fc1.mp3"
+      },
+      "title": "The one and only"
+    }
+  ],
+  "paging": {
+    "fhComplete": true
+  },
+  "title": "Complete Feed, no archive"
+}

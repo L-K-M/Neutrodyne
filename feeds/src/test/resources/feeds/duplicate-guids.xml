@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Duplicate GUIDs</title>
+    <item><title>First with the guid</title><guid>same-guid</guid>
+      <enclosure url="https://cdn.example.com/dg1.mp3" length="10" type="audio/mpeg"/></item>
+    <item><title>Second with the same guid</title><guid>same-guid</guid>
+      <enclosure url="https://cdn.example.com/dg2.mp3" length="10" type="audio/mpeg"/></item>
+    <item><title>Third, guid free</title>
+      <enclosure url="https://cdn.example.com/dg3.mp3" length="10" type="audio/mpeg"/></item>
+  </channel>
+</rss>

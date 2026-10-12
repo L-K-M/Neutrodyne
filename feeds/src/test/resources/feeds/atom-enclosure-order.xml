@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Atom enclosure order</title>
+  <entry>
+    <id>urn:entry:enc</id>
+    <title>Audio then video</title>
+    <published>2026-10-01T12:00:00Z</published>
+    <link rel="enclosure" href="https://cdn.example.com/a.mp3" type="audio/mpeg" length="10"/>
+    <link rel="enclosure" href="https://cdn.example.com/v.mp4" type="video/mp4" length="20"/>
+    <link rel="enclosure"/>
+  </entry>
+</feed>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Multiple Enclosures Audio Video</title>
+    <item><title>Video first, audio second</title><guid>multi-1</guid>
+      <enclosure url="https://cdn.example.com/m1.mp4" length="99000000" type="video/mp4"/>
+      <enclosure url="https://cdn.example.com/m1.mp3" length="48000000" type="audio/mpeg"/></item>
+    <item><title>Audio and pdf</title><guid>multi-2</guid>
+      <enclosure url="https://cdn.example.com/m2.mp3" length="48000000" type="audio/mpeg"/>
+      <enclosure url="https://cdn.example.com/m2.pdf" length="120000" type="application/pdf"/></item>
+  </channel>
+</rss>

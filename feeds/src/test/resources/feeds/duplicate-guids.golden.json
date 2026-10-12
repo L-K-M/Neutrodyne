@@ -1,0 +1,62 @@
+{
+  "format": "RSS2",
+  "items": [
+    {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/dg1.mp3"
+        }
+      ],
+      "feedOrder": 0,
+      "guid": "same-guid",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/dg1.mp3"
+      },
+      "title": "First with the guid"
+    },
+    {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/dg2.mp3"
+        }
+      ],
+      "feedOrder": 1,
+      "guid": "same-guid",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/dg2.mp3"
+      },
+      "title": "Second with the same guid"
+    },
+    {
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 10,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/dg3.mp3"
+        }
+      ],
+      "feedOrder": 2,
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 10,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/dg3.mp3"
+      },
+      "title": "Third, guid free"
+    }
+  ],
+  "title": "Duplicate GUIDs"
+}

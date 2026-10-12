@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>A Blog, Not A Podcast</title>
+    <item><title>Post one</title>
+      <link>https://example.com/blog/1</link>
+      <description>&lt;p&gt;Just a post&lt;/p&gt;</description></item>
+    <item><title>Post two</title>
+      <link>https://example.com/blog/2</link></item>
+  </channel>
+</rss>
