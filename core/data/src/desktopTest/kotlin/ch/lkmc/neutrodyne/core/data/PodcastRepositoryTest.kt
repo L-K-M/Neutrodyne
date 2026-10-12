@@ -84,8 +84,9 @@ class PodcastRepositoryTest {
                 )
             }
 
-            runCatching { repo().unsubscribe(listOf(a, b), ChangeOrigin.LOCAL) }
+            val result = runCatching { repo().unsubscribe(listOf(a, b), ChangeOrigin.LOCAL) }
 
+            assertTrue(result.isFailure, "unsubscribe must propagate the DAO fault")
             assertNotNull(db.podcastDao().byId(a))
             assertNotNull(db.podcastDao().byId(b))
         }
