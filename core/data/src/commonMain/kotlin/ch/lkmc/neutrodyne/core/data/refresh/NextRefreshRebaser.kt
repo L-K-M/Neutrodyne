@@ -9,9 +9,11 @@ import dev.zacsweers.metro.Inject
 
 /**
  * The `nextRefreshAt` rebase of 03 Periodic tick step 2 (`:core:data` internal): after an interval
- * or membership change every healthy row moves to `target = COALESCE(lastSuccessAt, subscribedAt)
- * + I` (`NEVER` when the interval is "Manual only"). Only rows that actually change are written —
- * forced (`nextRefreshAt = 0`), failing, `gone` and `needsCredentials` rows are left alone.
+ * or membership change a healthy row moves *earlier* to `target = COALESCE(lastSuccessAt,
+ * subscribedAt) + I` (`NEVER` when the interval is "Manual only"). A row already scheduled earlier
+ * than target — a Retry-After or a shorter manual mark — keeps its earlier time; the spec writes
+ * only rows that are unscheduled (`null`), `NEVER`, or later than target. Forced
+ * (`nextRefreshAt = 0`), failing, `gone` and `needsCredentials` rows are left alone.
  *
  * Each write is conditional on the snapshot's `lastAttemptAt` (03's rule, sharpened 2026-10-07): a
  * fetch commit between the read and the write moves `lastAttemptAt`, the UPDATE then matches no
