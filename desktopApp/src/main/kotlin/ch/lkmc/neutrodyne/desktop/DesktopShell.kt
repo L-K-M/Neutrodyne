@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.LogLevel
 import ch.lkmc.neutrodyne.core.common.runInitializers
+import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.DesktopOs
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
@@ -27,6 +28,7 @@ import ch.lkmc.neutrodyne.desktop.window.DesktopMenuActions
 import ch.lkmc.neutrodyne.desktop.window.NeutrodyneWindow
 import ch.lkmc.neutrodyne.desktop.window.WindowActivator
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
@@ -38,6 +40,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.security.SecureRandom
 import java.util.concurrent.Executors
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * The shell start-up in 11's order: `AppDirs` → `SingleInstanceLock` → directories, log, crash
@@ -59,6 +62,9 @@ internal object DesktopShell {
     private const val FLAG_PREFIX = "--"
     private const val HS_ERR_GLOB = "hs_err_pid*.log"
     private const val SHUTDOWN_THREAD = "nd-shutdown"
+
+    /** 11 Shutdown step 2's lane budget: in-flight `NonCancellable` finalizers get this long. */
+    private val RUNNER_SHUTDOWN_GRACE = 3.seconds
 
     /** The two [ShutdownCoordinator] callers; both mean a normal exit. */
     private const val REASON_SIGNAL = "signal"
@@ -197,10 +203,13 @@ internal object DesktopShell {
                 lock = lock,
                 fileSink = fileSink,
                 stopServices = {
-                    runBlocking { serveJob.cancelAndJoin() } // serve's finally removes port/token files
-                    handshakeScope.cancel()
-                    handshakeDispatcher.close()
-                    graph.appScope.cancel()
+                    stopServices(
+                        jobRunner = { graph.jobRunner },
+                        appScope = graph.appScope,
+                        serveJob = serveJob,
+                        handshakeScope = handshakeScope,
+                        closeHandshakeDispatcher = { handshakeDispatcher.close() },
+                    )
                 },
                 startedAtMs = sessionStartedAtMs,
             )
@@ -229,6 +238,32 @@ internal object DesktopShell {
         }
         coordinator.shutdown(REASON_WINDOW_CLOSED)
         return EXIT_OK
+    }
+
+    /**
+     * The service-stop half of the clean shutdown (11 Shutdown steps 2–6's M1a subset): the job
+     * runner gets [RUNNER_SHUTDOWN_GRACE] *before* the scopes die — an in-flight lane's
+     * `NonCancellable` finalizer (the engine's buffered flush, 03 Engine run) commits inside the
+     * window, where `appScope.cancel()` alone would return while it still runs and process exit
+     * would cut it off. `serve`'s `cancelAndJoin` removes the port/token files; the dispatcher
+     * close frees its virtual-thread executor.
+     *
+     * [jobRunner] is a lambda: resolving it pulls the lane chain through `requireDatabase()`,
+     * which waits out an in-flight open — the call site pays that only inside the stop, where a
+     * running open is exactly what a lane would be using.
+     */
+    internal fun stopServices(
+        jobRunner: () -> DesktopJobRunner,
+        appScope: CoroutineScope,
+        serveJob: Job,
+        handshakeScope: CoroutineScope,
+        closeHandshakeDispatcher: () -> Unit,
+    ) {
+        runBlocking { jobRunner().stop(RUNNER_SHUTDOWN_GRACE) }
+        runBlocking { serveJob.cancelAndJoin() }
+        handshakeScope.cancel()
+        closeHandshakeDispatcher()
+        appScope.cancel()
     }
 
     /** macOS-only AWT properties, all of which must be set before AWT initialises. */

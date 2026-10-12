@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.CrashContext
 import ch.lkmc.neutrodyne.core.common.CrashReporter
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
+import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
@@ -29,8 +30,9 @@ import kotlinx.coroutines.CoroutineScope
  * crash reporter is constructed by `MainKt` before the graph so 11's start-up order — logging,
  * crash handler, `session.json` before the graph — holds; 01's sketch is amended accordingly,
  * 2026-10-06). M1a adds the database plumbing: [databaseOpener] drives the open at initializer
- * band 100 and the window's start-up gate. `DesktopJobRunner` (as `jobRunner`) and the media/OS
- * bindings of `:desktop:system` join with their milestones.
+ * band 100 and the window's start-up gate, and [jobRunner] serves the shutdown's
+ * `stop(grace = 3 s)` (11 Shutdown step 2). The media/OS bindings of `:desktop:system` join with
+ * their milestones.
  */
 @DependencyGraph(AppScope::class, bindingContainers = [DesktopYouTubeBindingsModule::class])
 interface DesktopAppGraph {
@@ -55,6 +57,14 @@ interface DesktopAppGraph {
 
     /** The window maps `openState` onto the start-up gate (01 Splash and start-up gate). */
     val databaseOpener: DatabaseOpener
+
+    /**
+     * The runner the shutdown stops (11 Shutdown step 2). Resolving pulls the lane chain through
+     * [provideDatabase], which blocks until the band-100 open finishes — held behind a lambda at
+     * the call site so an early quit never pays it, and by then the runner is the started
+     * singleton anyway.
+     */
+    val jobRunner: DesktopJobRunner
 
     @Binds
     val DesktopCrashReporter.asCrashReporter: CrashReporter
