@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<resources>
+    <string name="discover_arrives_later">Dieser Bildschirm kommt mit einem späteren Update.</string>
+</resources>

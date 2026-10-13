@@ -4,9 +4,11 @@ package ch.lkmc.neutrodyne.core.designsystem.components
 
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Text
@@ -17,6 +19,12 @@ import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+
+/**
+ * The colour role of a text action (08 Dialogs: destructive confirms draw in the error colour;
+ * an enum keeps call sites self-describing where a Boolean `destructive` would not be).
+ */
+public enum class NdActionRole { NORMAL, DESTRUCTIVE }
 
 /** Filled button; [label] is a resolved Compose resource, never a literal at the call site. */
 @Composable
@@ -65,8 +73,19 @@ public fun NdTextButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    role: NdActionRole = NdActionRole.NORMAL,
 ) {
-    TextButton(onClick = onClick, modifier = modifier, enabled = enabled) { Text(label) }
+    val contentColor =
+        when (role) {
+            NdActionRole.DESTRUCTIVE -> MaterialTheme.colorScheme.error
+            NdActionRole.NORMAL -> MaterialTheme.colorScheme.primary
+        }
+    TextButton(
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        colors = ButtonDefaults.textButtonColors(contentColor = contentColor),
+    ) { Text(label) }
 }
 
 /**
