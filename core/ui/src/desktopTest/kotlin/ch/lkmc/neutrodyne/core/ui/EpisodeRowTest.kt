@@ -7,8 +7,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
@@ -24,6 +27,7 @@ import java.util.Locale
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -97,6 +101,24 @@ class EpisodeRowTest {
             )
         }
 
+    @Test
+    fun offlineNotDownloadedRowPlayAffordanceStillDispatches() =
+        runDesktopComposeUiTest(width = 400, height = 200) {
+            // 08's row table: offline and not downloaded -> the play affordance stays enabled as
+            // cloud_off at 60 % alpha; the tap still dispatches PlayToggle so the screen can
+            // answer with the offline snackbar. The button clears its semantics for the merged
+            // row, so the tap goes through real touch input on the icon's centre.
+            val actions = mutableListOf<EpisodeAction>()
+            setRow(
+                testEpisodeRow(1),
+                caps = RowCaps.FULL.copy(offline = true),
+                onAction = { actions += it },
+            )
+            onNodeWithContentDescription("Open", useUnmergedTree = true)
+                .performTouchInput { click(center) }
+            assertEquals(listOf<EpisodeAction>(EpisodeAction.PlayToggle(1)), actions)
+        }
+
     private fun ComposeUiTest.textLayoutOf(text: String): TextLayoutResult {
         val node = onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode()
         val action =
@@ -110,6 +132,8 @@ class EpisodeRowTest {
     private fun ComposeUiTest.setRow(
         row: ch.lkmc.neutrodyne.core.model.EpisodeRow,
         fontScale: Float = 1f,
+        caps: RowCaps = RowCaps.FULL,
+        onAction: (EpisodeAction) -> Unit = {},
     ) {
         setContent {
             CompositionLocalProvider(
@@ -125,10 +149,10 @@ class EpisodeRowTest {
                             row = row,
                             live = null,
                             style = EpisodeRowStyle.PODCAST,
-                            caps = RowCaps.FULL,
+                            caps = caps,
                             highlightNew = false,
                             selected = null,
-                            onAction = {},
+                            onAction = onAction,
                         )
                     }
                 }

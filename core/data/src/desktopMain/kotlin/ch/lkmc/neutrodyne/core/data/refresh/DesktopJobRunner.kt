@@ -99,7 +99,7 @@ class DesktopJobRunner
         /** The last detected wake (11 Runner diagnostics). */
         val lastWakeAt: StateFlow<Instant?> = _lastWakeAt.asStateFlow()
 
-        private var runnerJob: Job? = null
+        @Volatile private var runnerJob: Job? = null
 
         /**
          * The scope lane jobs launch under — a supervised child of [runnerJob] (11 Tick step 3):
@@ -266,17 +266,12 @@ class DesktopJobRunner
                                     true
                                 } else {
                                     state.running = false
+                                    // Publish idle before a new owner can publish running=true.
+                                    updateStatus(lane.name) { it.copy(running = false) }
                                     false
                                 }
                             }
-                        // `running = false` is published only after ownership is released: a
-                        // status reading idle while the tick would still skip the lane misleads
-                        // diagnostics and any caller waiting on it.
-                        if (relaunch) {
-                            launchLane(lane, state)
-                        } else {
-                            updateStatus(lane.name) { it.copy(running = false) }
-                        }
+                        if (relaunch) launchLane(lane, state)
                     }
                 }
         }

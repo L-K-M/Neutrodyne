@@ -80,7 +80,10 @@ internal class RefreshForegroundObserver
             const val TRIGGER_COOLDOWN_MS = 10 * 60_000L
             const val MIN_TICK_MINUTES = 60L
 
-            /** Sentinel: `nowElapsed - Long.MIN_VALUE` overflows into the cooldown window. */
+            /**
+             * Sentinel: excluded by the explicit `!= NEVER_TRIGGERED` guard; subtracting
+             * `Long.MIN_VALUE` also wraps negative, outside the cooldown window.
+             */
             const val NEVER_TRIGGERED = Long.MIN_VALUE
         }
     }

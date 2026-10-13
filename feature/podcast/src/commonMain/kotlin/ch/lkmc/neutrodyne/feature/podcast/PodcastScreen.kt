@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.itemKey
+import ch.lkmc.neutrodyne.core.designsystem.components.NdActionRole
 import ch.lkmc.neutrodyne.core.designsystem.components.NdBanner
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
@@ -338,7 +339,7 @@ internal fun PodcastScreen(
                                 primary =
                                     NdDialogAction(
                                         stringResource(Res.string.action_retry),
-                                        items::retry,
+                                        onClick = items::retry,
                                     ),
                             )
                         }
@@ -360,8 +361,13 @@ internal fun PodcastScreen(
                     pending.downloads,
                 ),
             confirm =
-                NdDialogAction(stringResource(Res.string.podcast_unsubscribe), onConfirmUnsubscribe),
-            dismiss = NdDialogAction(stringResource(Res.string.action_cancel), onDismissUnsubscribe),
+                NdDialogAction(
+                    stringResource(Res.string.podcast_unsubscribe),
+                    role = NdActionRole.DESTRUCTIVE,
+                    onClick = onConfirmUnsubscribe,
+                ),
+            dismiss =
+                NdDialogAction(stringResource(Res.string.action_cancel), onClick = onDismissUnsubscribe),
         )
     }
 }
@@ -383,6 +389,7 @@ private fun PodcastOverflow(
     var confirmMarkAll by remember { mutableStateOf(false) }
     var confirmPrivateCopy by remember { mutableStateOf(false) }
     val actions = LocalPlatformActions.current
+    val openUrl = rememberUrlOpener()
     val clipboard = LocalClipboardManager.current
     val snackbar = LocalSnackbarHost.current
     val scope = rememberCoroutineScope()
@@ -439,7 +446,7 @@ private fun PodcastOverflow(
                     },
                     onClick = {
                         open = false
-                        actions.urls.open(link)
+                        openUrl(link)
                     },
                 )
             }
@@ -549,9 +556,9 @@ private fun FeedStateBanner(
                 message = stringResource(Res.string.podcast_gone),
                 icon = NdIcons.Error,
                 primary =
-                    NdDialogAction(stringResource(Res.string.ps_edit_url), onOpenSettings),
+                    NdDialogAction(stringResource(Res.string.ps_edit_url), onClick = onOpenSettings),
                 secondary =
-                    NdDialogAction(stringResource(Res.string.podcast_unsubscribe), onUnsubscribe),
+                    NdDialogAction(stringResource(Res.string.podcast_unsubscribe), onClick = onUnsubscribe),
             )
         }
 
@@ -566,9 +573,9 @@ private fun FeedStateBanner(
                     ),
                 icon = NdIcons.Error,
                 primary =
-                    NdDialogAction(stringResource(Res.string.action_retry), onRetryFeed),
+                    NdDialogAction(stringResource(Res.string.action_retry), onClick = onRetryFeed),
                 secondary =
-                    NdDialogAction(stringResource(Res.string.ps_edit_url), onOpenSettings),
+                    NdDialogAction(stringResource(Res.string.ps_edit_url), onClick = onOpenSettings),
             )
         }
 
@@ -584,7 +591,7 @@ private fun FeedStateBanner(
                 message = FeedErrorText.describe(health.lastErrorKind!!).asString(),
                 icon = NdIcons.Error,
                 primary =
-                    NdDialogAction(stringResource(Res.string.action_retry), onRetryFeed),
+                    NdDialogAction(stringResource(Res.string.action_retry), onClick = onRetryFeed),
             )
         }
     }
@@ -673,7 +680,7 @@ private fun CredentialsDialog(
         title = stringResource(Res.string.add_auth_title),
         confirm =
             NdDialogAction(stringResource(Res.string.action_save)) { onSubmit(BasicCredentials(username, password)) },
-        dismiss = NdDialogAction(stringResource(Res.string.action_cancel), onDismiss),
+        dismiss = NdDialogAction(stringResource(Res.string.action_cancel), onClick = onDismiss),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(FIELD_GAP)) {
             OutlinedTextField(
@@ -746,7 +753,7 @@ private fun LoadErrorBanner(items: LazyPagingItems<*>) {
     NdBanner(
         message = stringResource(Res.string.feeds_load_error),
         icon = NdIcons.Error,
-        primary = NdDialogAction(stringResource(Res.string.action_retry), items::retry),
+        primary = NdDialogAction(stringResource(Res.string.action_retry), onClick = items::retry),
     )
 }
 

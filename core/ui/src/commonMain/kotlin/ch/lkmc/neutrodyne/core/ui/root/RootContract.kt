@@ -130,6 +130,12 @@ public class RootActions(
      * the card's "OK" uses [dismissNotice].
      */
     public val disableUpdateChecks: () -> Unit = {},
+    /**
+     * A [RootSlots.userMessages] snackbar's action was tapped, reported by `UserMessage.id` —
+     * the shell maps it back to the posting controller (01's `onMessageAction`, 08's Undo
+     * catalogue).
+     */
+    public val userMessageAction: (Long) -> Unit = {},
 )
 
 /**

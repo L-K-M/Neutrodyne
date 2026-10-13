@@ -441,7 +441,7 @@ private fun CustomTitleDialog(
             NdDialogAction(stringResource(Res.string.action_save)) {
                 onSubmit(text.trim().ifEmpty { null })
             },
-        dismiss = NdDialogAction(stringResource(Res.string.action_cancel), onDismiss),
+        dismiss = NdDialogAction(stringResource(Res.string.action_cancel), onClick = onDismiss),
     ) {
         OutlinedTextField(
             value = text,
@@ -505,7 +505,7 @@ private fun EditUrlDialog(
                 val url = text.trim()
                 if (url.isNotEmpty()) onSubmit(url)
             },
-        dismiss = NdDialogAction(stringResource(Res.string.action_cancel), onDismiss),
+        dismiss = NdDialogAction(stringResource(Res.string.action_cancel), onClick = onDismiss),
     ) {
         OutlinedTextField(
             value = text,
@@ -531,7 +531,7 @@ private fun SettingsCredentialsDialog(
             NdDialogAction(stringResource(Res.string.action_save)) {
                 onSubmit(BasicCredentials(username, password))
             },
-        dismiss = NdDialogAction(stringResource(Res.string.action_cancel), onDismiss),
+        dismiss = NdDialogAction(stringResource(Res.string.action_cancel), onClick = onDismiss),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(FIELD_GAP)) {
             OutlinedTextField(
