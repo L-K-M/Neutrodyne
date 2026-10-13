@@ -66,7 +66,7 @@ public fun CoverArt(
     val placeholder =
         avgArgb?.let(::Color) ?: Color(painter.backgroundArgb)
     val request =
-        remember(ref, tier, aspect, crossfade, density) {
+        remember(ref, tier, aspect, crossfade, density, context) {
             Covers.request(context, ref, tier, density, aspect, crossfade)
         }
     Box(
