@@ -21,6 +21,8 @@ import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.UserMessages
 import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.action_copy_link
+import ch.lkmc.neutrodyne.core.ui.resources.no_handler
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import dev.zacsweers.metro.Assisted
 import dev.zacsweers.metro.AssistedFactory
@@ -70,6 +72,7 @@ public class EpisodeViewModel
         network: NetworkMonitor,
     ) : ViewModel() {
         private val userMessages = UserMessages()
+        private val failedLinks = mutableMapOf<Long, String>()
 
         public val uiState: StateFlow<EpisodeUiState> =
             combine(
@@ -106,8 +109,24 @@ public class EpisodeViewModel
 
         /** The screen acks a shown snackbar so its [UserMessage] leaves the state. */
         public fun onMessageShown(id: Long) {
+            failedLinks.remove(id)
             userMessages.shown(id)
         }
+
+        public fun onLinkOpenFailed(url: String) {
+            userMessages.post(
+                UiText.Res(Res.string.no_handler),
+                action = UiText.Res(Res.string.action_copy_link),
+            )
+            failedLinks[
+                userMessages.flow.value
+                    .last()
+                    .id,
+            ] = url
+        }
+
+        /** Only the failed link attached to this message may be copied by the route. */
+        public fun onMessageAction(id: Long): String? = failedLinks[id]
 
         public fun setFavorite(favorite: Boolean) {
             write { episodes.setFavorite(episodeId, favorite) }

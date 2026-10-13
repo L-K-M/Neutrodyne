@@ -63,7 +63,6 @@ import ch.lkmc.neutrodyne.core.ui.YouTubeLinks
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.offlineBannerItem
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
-import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
 import ch.lkmc.neutrodyne.core.ui.rememberMonogram
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_copy_link
@@ -88,7 +87,6 @@ import ch.lkmc.neutrodyne.core.ui.resources.episode_not_found
 import ch.lkmc.neutrodyne.core.ui.resources.episode_offline_row
 import ch.lkmc.neutrodyne.core.ui.resources.episode_offline_toast
 import ch.lkmc.neutrodyne.core.ui.resources.episode_opens_youtube
-import ch.lkmc.neutrodyne.core.ui.resources.no_handler
 import ch.lkmc.neutrodyne.core.ui.resources.summary_downloaded
 import ch.lkmc.neutrodyne.core.ui.resources.summary_video
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
@@ -107,13 +105,12 @@ internal fun EpisodeScreen(
     state: EpisodeUiState,
     onAction: (EpisodeAction) -> Unit,
     onFavorite: (Boolean) -> Unit,
+    onOpenLink: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val episode = state.episode
-    val urls = LocalPlatformActions.current.urls
     val snackbar = LocalSnackbarHost.current
     val scope = rememberCoroutineScope()
-    val noHandler = stringResource(Res.string.no_handler)
     var imagesRevealed by rememberSaveable { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -121,7 +118,7 @@ internal fun EpisodeScreen(
             title = "",
             navigation = { NavBackButton() },
             actions = {
-                episode?.let { EpisodeChrome(it, onAction, onFavorite) }
+                episode?.let { EpisodeChrome(it, onAction, onFavorite, onOpenLink) }
             },
         )
         when {
@@ -167,11 +164,7 @@ internal fun EpisodeScreen(
                                     state.imageMode
                                 },
                             durationMs = episode.durationMs,
-                            onLink = { url ->
-                                if (urls.open(url) == OpenResult.NO_HANDLER) {
-                                    scope.launch { snackbar.showSnackbar(noHandler) }
-                                }
-                            },
+                            onLink = onOpenLink,
                             // M5 seeks; M1a timestamps render but do nothing (deviation in 08).
                             onTimestamp = {},
                             onLoadImages = { imagesRevealed = true },
@@ -189,12 +182,10 @@ private fun EpisodeChrome(
     episode: EpisodeDetail,
     onAction: (EpisodeAction) -> Unit,
     onFavorite: (Boolean) -> Unit,
+    onOpenLink: (String) -> Unit,
 ) {
     val actions = LocalPlatformActions.current
     val clipboard = LocalClipboardManager.current
-    val snackbar = LocalSnackbarHost.current
-    val scope = rememberCoroutineScope()
-    val noHandler = stringResource(Res.string.no_handler)
     var menuOpen by remember { mutableStateOf(false) }
 
     val externalMediaId = episode.externalMediaId
@@ -243,9 +234,7 @@ private fun EpisodeChrome(
                     text = { Text(stringResource(Res.string.action_open_website)) },
                     onClick = {
                         menuOpen = false
-                        if (actions.urls.open(episodeLink) == OpenResult.NO_HANDLER) {
-                            scope.launch { snackbar.showSnackbar(noHandler) }
-                        }
+                        onOpenLink(episodeLink)
                     },
                 )
             }
@@ -448,7 +437,10 @@ private fun ActionRow(
                 Text(stringResource(Res.string.action_watch_on_youtube))
             }
         } else if (!playableOffline) {
-            NdButton(onClick = { toast(offlineToast) }) {
+            NdButton(onClick = {
+                onAction(EpisodeAction.PlayToggle(episode.id))
+                toast(offlineToast)
+            }) {
                 Icon(
                     NdIcons.CloudOff,
                     contentDescription = null,

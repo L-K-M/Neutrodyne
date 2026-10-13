@@ -13,6 +13,8 @@ import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.ShowNotesImageMode
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.action_copy_link
+import ch.lkmc.neutrodyne.core.ui.resources.no_handler
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -21,6 +23,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -187,6 +190,37 @@ class EpisodeViewModelTest : MainDispatcherTest() {
             assertTrue(
                 viewModel.uiState.value.messages
                     .isNotEmpty(),
+            )
+        }
+
+    @Test
+    fun failedLinksStayBoundToTheirMessageIdsUntilAcknowledged() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            viewModel.onLinkOpenFailed("https://example.com/first")
+            viewModel.onLinkOpenFailed("https://example.com/second")
+            advanceUntilIdle()
+
+            val (first, second) = viewModel.uiState.value.messages
+            assertEquals(UiText.Res(Res.string.no_handler), first.text)
+            assertEquals(UiText.Res(Res.string.action_copy_link), first.action)
+            assertEquals("https://example.com/first", viewModel.onMessageAction(first.id))
+            assertEquals("https://example.com/second", viewModel.onMessageAction(second.id))
+            assertNull(viewModel.onMessageAction(Long.MAX_VALUE))
+
+            viewModel.onMessageShown(first.id)
+            advanceUntilIdle()
+            assertNull(viewModel.onMessageAction(first.id))
+            assertEquals(listOf(second), viewModel.uiState.value.messages)
+            assertEquals("https://example.com/second", viewModel.onMessageAction(second.id))
+
+            viewModel.onMessageShown(second.id)
+            advanceUntilIdle()
+            assertNull(viewModel.onMessageAction(second.id))
+            assertTrue(
+                viewModel.uiState.value.messages
+                    .isEmpty(),
             )
         }
 }

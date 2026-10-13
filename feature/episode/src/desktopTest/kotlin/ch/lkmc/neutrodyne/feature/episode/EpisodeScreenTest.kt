@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.feature.episode
 
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.ClipboardManager
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -24,6 +25,10 @@ import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.Density
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
@@ -34,7 +39,11 @@ import ch.lkmc.neutrodyne.core.model.ShowNoteBlock
 import ch.lkmc.neutrodyne.core.model.ShowNoteSpan
 import ch.lkmc.neutrodyne.core.model.ShowNotes
 import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
+import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
+import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
 import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
@@ -49,12 +58,12 @@ import ch.lkmc.neutrodyne.core.ui.platform.FileSaver
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
 import ch.lkmc.neutrodyne.core.ui.platform.PlatformActions
+import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import java.util.Locale
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 /**
  * The episode detail screen through `runComposeUiTest` (08 Episode detail): the loading skeleton,
@@ -69,6 +78,7 @@ class EpisodeScreenTest {
     private val navigator = RecordingAppNavigator()
     private val openedUrls = mutableListOf<String>()
     private val clipboard = RecordingClipboard()
+    private var openResult = OpenResult.OPENED
 
     @BeforeTest
     fun setUp() {
@@ -195,9 +205,9 @@ class EpisodeScreenTest {
             val actions = mutableListOf<EpisodeAction>()
             setEpisode(loadedState(offline = true), onAction = { actions += it })
             onNodeWithText("You're offline — downloaded episodes still play").assertIsDisplayed()
-            // The primary button becomes the inert "Offline" affordance (08's offline state).
+            // The enabled offline affordance still dispatches play, as in U2's episode rows.
             onNodeWithText("Offline").performClick()
-            assertTrue(actions.isEmpty())
+            assertEquals(listOf<EpisodeAction>(EpisodeAction.PlayToggle(9)), actions)
         }
 
     @Test
@@ -346,6 +356,105 @@ class EpisodeScreenTest {
             assertEquals(listOf<EpisodeAction>(EpisodeAction.SetPlayed(9, played = true)), actions)
         }
 
+    @Test
+    fun failedYouTubeOpenOffersCopyLink() =
+        runComposeUiTest {
+            openResult = OpenResult.NO_HANDLER
+            val host = SnackbarHostState()
+            setEpisodeRoute(
+                host,
+                episode =
+                    testEpisodeDetail(
+                        9,
+                        podcastId = 7,
+                        sourceType = SourceType.YOUTUBE_CHANNEL,
+                        externalMediaId = "abc123",
+                    ),
+            )
+            onNodeWithText("Watch on YouTube").performClick()
+            copyFailedLink(host, "https://www.youtube.com/watch?v=abc123")
+        }
+
+    @Test
+    fun failedWebsiteOpenOffersCopyLink() =
+        runComposeUiTest {
+            openResult = OpenResult.NO_HANDLER
+            val host = SnackbarHostState()
+            setEpisodeRoute(host)
+            onNodeWithContentDescription("More actions").performClick()
+            onNodeWithText("Open website").performClick()
+            copyFailedLink(host, "https://example.com/ep-9")
+        }
+
+    @Test
+    fun failedNotesOpenOffersCopyLink() =
+        runComposeUiTest {
+            openResult = OpenResult.NO_HANDLER
+            val host = SnackbarHostState()
+            setEpisodeRoute(
+                host,
+                notes =
+                    ShowNotes(
+                        listOf(
+                            ShowNoteBlock.Paragraph(
+                                listOf(ShowNoteSpan.Link("the site", "https://example.com/site")),
+                            ),
+                        ),
+                    ),
+            )
+            scrollTo(hasText("the site")).performClick()
+            copyFailedLink(host, "https://example.com/site")
+        }
+
+    private fun ComposeUiTest.copyFailedLink(
+        host: SnackbarHostState,
+        url: String,
+    ) {
+        waitUntil(timeoutMillis = 5_000) { host.currentSnackbarData != null }
+        val data = checkNotNull(host.currentSnackbarData)
+        assertEquals("No app can open this link", data.visuals.message)
+        assertEquals("Copy link", data.visuals.actionLabel)
+        runOnIdle { data.performAction() }
+        waitUntil(timeoutMillis = 5_000) { clipboard.copied?.text == url }
+        assertEquals(listOf(url), openedUrls)
+        waitUntil(timeoutMillis = 5_000) { host.currentSnackbarData == null }
+    }
+
+    private fun ComposeUiTest.setEpisodeRoute(
+        host: SnackbarHostState,
+        episode: EpisodeDetail = testEpisodeDetail(9, podcastId = 7),
+        notes: ShowNotes? = null,
+    ) {
+        val episodes = FakeEpisodeRepository()
+        episodes.episodes.value = mapOf(9L to episode)
+        episodes.notes.value = if (notes != null) mapOf(9L to notes) else emptyMap()
+        val viewModel =
+            EpisodeViewModel(9, episodes, FakeSettingsRepository(), FakeNetworkMonitor(FakeNetworkMonitor.ONLINE))
+        val owner =
+            object : LifecycleOwner {
+                override val lifecycle =
+                    LifecycleRegistry.createUnsafe(this).apply {
+                        handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+                    }
+            }
+        setContent {
+            CompositionLocalProvider(
+                LocalLifecycleOwner provides owner,
+                LocalPlatformKind provides PlatformKind.DESKTOP,
+                LocalUiClock provides TestClock(),
+                LocalAppNavigator provides navigator,
+                LocalPlatformActions provides platformActions,
+                LocalClipboardManager provides clipboard,
+                LocalSnackbarHost provides host,
+            ) {
+                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    EpisodeRoute(EpisodeKey(9), viewModel)
+                }
+            }
+        }
+        waitForIdle()
+    }
+
     private fun loadedState(
         episode: EpisodeDetail =
             testEpisodeDetail(9, podcastId = 7, title = "The Interview", podcastTitle = "The Show"),
@@ -383,6 +492,7 @@ class EpisodeScreenTest {
                             state = state,
                             onAction = onAction,
                             onFavorite = onFavorite,
+                            onOpenLink = { platformActions.urls.open(it) },
                         )
                     }
                 }
@@ -403,7 +513,7 @@ class EpisodeScreenTest {
             override val urls: ExternalUrlOpener =
                 ExternalUrlOpener { url ->
                     openedUrls += url
-                    OpenResult.OPENED
+                    openResult
                 }
             override val share = null
             override val files: FilePicker =
