@@ -1026,6 +1026,17 @@ Registrations known today (each owning document defines its initializer; this ta
 | 300 | `PlaybackPrefs` warm-up and `PlayerConnection` registration (06), `ExportFilesCleaner` (05), one `artwork-sync` request per process (08); in the emergency no-engine builds only, `AbsentYouTubeEngine`'s one-time removal of leftover engine files (04, [Emergency build without the engine](#emergency-build-without-the-engine)) | owning modules; `app/src/noYouTubeEngine/`, `desktopApp/src/noYouTubeEngine/` | 06, 05, 08, 04 | M3, M4, M9a |
 | 310 | `:download:impl` collectors on `@ApplicationScope` and, on Android, its `ProcessLifecycleOwner` observer ([07 Start-up hooks](07-downloads.md#start-up-hooks)) | `:download:impl` | 07 | M6a |
 
+**M1a database recovery (2026-10-13).** Band 100 is a success barrier on both
+platforms. `DatabaseOpenInitializer` logs a failed `awaitOpen()` and suspends on
+`DatabaseOpener.openState` until the first `Opened`, keeping higher bands from
+resolving their database-backed providers while the gate shows `Failed`.
+"Try again" still calls only `awaitOpen()`; when that retry succeeds, the
+original initializer coroutine resumes the remaining bands once, in their
+existing order. Another failed retry leaves them suspended; repeated successful
+opens do not reinstall them. A successful initial open follows the same sequence
+as before. The wait suspends the application-scope coroutine without blocking
+the UI thread or first frame, and application-scope cancellation stops it.
+
 ```mermaid
 sequenceDiagram
   participant Z as System

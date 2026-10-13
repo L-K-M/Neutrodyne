@@ -57,6 +57,7 @@ kotlin {
         // (implementation deps of :core:datastore are otherwise invisible here).
         desktopTest.dependencies {
             implementation(libs.androidx.datastore.preferences.core)
+            implementation(libs.androidx.paging.testing)
             implementation(libs.okhttp.mockwebserver3)
             implementation(libs.okhttp.mockwebserver3.junit4)
             implementation(libs.okio)
