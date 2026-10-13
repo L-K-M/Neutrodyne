@@ -2194,7 +2194,7 @@ class NeutrodyneImageLoaderFactory @Inject constructor(
 
 - `ArtworkRefMapper` uses `store.pinnedPath(key)` (in-memory, no `exists()`), so mapping on the main thread does no disk I/O; a vanished file fails the request and the monogram shows until the next sync repairs the index.
 - `TinyImageInterceptor`: only for requests whose data is an `ArtworkRef` (covers and episode art; never show-notes or chapter images, which are plain URLs): a successful result whose decoded size is below the requested size on both axes **and** below 128 px on the longer side becomes an error result (monogram).
-- Crossfade (150 ms, off with reduced motion) is set per request by `Covers.request`, not on the loader, so a change of the system animator scale applies without rebuilding the singleton.
+- Crossfade (150 ms, off with reduced motion) is set per request by `Covers.request`, not on the loader, so a change of the system animator scale applies without rebuilding the singleton. **M1a deviation (2026-10-07):** Coil 3.6.3's public `crossfade(Boolean)` uses its fixed 200 ms default; reduced motion still disables it per request.
 - Coil ignores `Cache-Control` by default ([coil-network-core README](https://github.com/coil-kt/coil/blob/main/coil-network-core/README.md)); freshness of covers is handled by the store's monthly refresh, not by HTTP caching. Cleartext `http://` covers load because cleartext is allowed app-wide ([D28](../PLAN.md#3-key-decisions)).
 - Tests use `coil-test`'s `FakeImageLoaderEngine` via `:core:testing`'s `fakeImageLoader`.
 
@@ -2643,7 +2643,7 @@ All in `commonTest` unless the module column names a platform source set.
 | `DayHeaderTest` | `:feature:feeds` | Today/Yesterday/weekday/date boundaries across a DST change and in `America/St_Johns` (09's test zone) | M2 |
 | `ScrubberClockTest` | `:feature:player` | interpolation uses `Clock.elapsedRealtime()` (`TestClock` with a deep-sleep offset between uptime and elapsed realtime yields the right position); stops when `advancing` is false | M4 |
 | `DownloadRequestHandlerTest` | `:core:ui` | every `RequestResult` shape → metered dialog, notification prompt, snackbar text per `RejectReason`, nothing for `alreadyPresent` only | M6 |
-| `CoversRequestTest` | `:core:designsystem` | THUMB/HERO memory keys and `placeholderMemoryCacheKey`; `WIDE_16_9` THUMB requests 320 × 180; crossfade 0 with reduced motion | M1, M8 |
+| `CoversRequestTest` | `:core:designsystem` `desktopTest` (Coil 3.6.3 exposes `crossfadeMillis` only on desktop) | THUMB/HERO memory keys and `placeholderMemoryCacheKey`; `WIDE_16_9` THUMB requests 320 × 180; crossfade 0 with reduced motion | M1, M8 |
 
 ### Robolectric and Compose UI tests
 
