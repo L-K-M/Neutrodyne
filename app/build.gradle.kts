@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Unlicense
 import org.gradle.api.attributes.Usage
+import org.gradle.api.file.ArchiveOperations
 import org.gradle.api.tasks.testing.Test
 import org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType
 
@@ -173,14 +174,32 @@ val hostArch =
         else -> "x64"
     }
 val startupHostNativeDir = layout.buildDirectory.dir("startup-host-sqlite/$hostOs/$hostArch")
+
+/** Gradle injects the archive service; a script lambda calling `zipTree` would capture the script. */
+interface ArchiveAccess {
+    @get:javax.inject.Inject
+    val archives: ArchiveOperations
+}
 val extractStartupHostSqlite =
     tasks.register<Sync>("extractStartupHostSqlite") {
-        from(startupHostSqlite.map { zipTree(it) }) {
+        // Lazy: the configuration resolves only when this task runs, not on every build. The
+        // injected ArchiveOperations (not Project.zipTree) keeps the action cacheable.
+        val archives = objects.newInstance<ArchiveAccess>().archives
+        from(startupHostSqlite.elements.map { files -> files.map { archives.zipTree(it.asFile) } }) {
             include("natives/${hostOs}_$hostArch/*")
             eachFile { path = name }
             includeEmptyDirs = false
         }
         into(startupHostNativeDir)
+        // An unknown host layout must fail here, not as an UnsatisfiedLinkError inside a test.
+        // Locals only: the action must not capture the script object (configuration cache).
+        val platform = "${hostOs}_$hostArch"
+        val outputDir = startupHostNativeDir.get().asFile
+        doLast {
+            check(outputDir.listFiles().orEmpty().isNotEmpty()) {
+                "no sqlite-bundled native for $platform in the sqlite-bundled artifact"
+            }
+        }
     }
 tasks.withType<Test>().configureEach {
     dependsOn(extractStartupHostSqlite)

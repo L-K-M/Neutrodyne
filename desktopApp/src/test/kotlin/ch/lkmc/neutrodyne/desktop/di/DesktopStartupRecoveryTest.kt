@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Test
 import java.net.InetSocketAddress
 import java.nio.file.Files
@@ -115,7 +116,9 @@ class DesktopStartupRecoveryTest {
                     graph.jobRunner.stop(3.seconds)
                 }
                 graph.appScope.coroutineContext[Job]?.cancel()
-                graph.appScope.coroutineContext[Job]?.join()
+                // Bounded and best-effort: a stuck child must neither hang the suite nor mask the
+                // test's own failure.
+                withTimeoutOrNull(CLEANUP_TIMEOUT) { graph.appScope.coroutineContext[Job]?.join() }
                 if (graph.databaseOpener.openState.value is DatabaseOpenState.Opened) {
                     graph.databaseOpener.requireDatabase().close()
                 }
@@ -127,4 +130,8 @@ class DesktopStartupRecoveryTest {
         }
 
     private enum class Startup { HEALTHY, RETRY }
+
+    private companion object {
+        val CLEANUP_TIMEOUT = 10.seconds
+    }
 }

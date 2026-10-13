@@ -99,7 +99,8 @@ class AndroidStartupRecoveryTest {
             )
         } finally {
             graph.appScope.cancel()
-            pumpUntil { graph.appScope.coroutineContext[Job]?.isCompleted != false }
+            // Best-effort teardown: a cleanup timeout must not replace the test's own failure.
+            runCatching { pumpUntil { graph.appScope.coroutineContext[Job]?.isCompleted != false } }
             if (graph.databaseOpener.openState.value is DatabaseOpenState.Opened) {
                 graph.databaseOpener.requireDatabase().close()
             }

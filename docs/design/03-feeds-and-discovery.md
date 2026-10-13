@@ -887,7 +887,10 @@ an initial failure. Android reconciles `refresh-periodic` at order 200, then
 registers the foreground observer at 220, exactly once per process startup.
 Desktop starts its runner and rebases the schedule at order 200. Neither
 platform resolves these database-backed dependencies during a failed open;
-repeated successful `awaitOpen()` calls do not repeat their installation.
+repeated successful `awaitOpen()` calls do not repeat their installation. A held initializer that itself fails after the open is logged by
+`runInitializers` and not retried in that process; Android reinstalls
+`refresh-periodic` at the next rebase trigger (a settings change, subscribe or
+unsubscribe) or the next start, the desktop runner at the next start.
 
 ### Work requests
 
