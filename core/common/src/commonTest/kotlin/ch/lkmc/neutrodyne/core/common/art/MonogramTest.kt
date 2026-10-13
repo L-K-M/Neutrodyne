@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.common.art
 
+import ch.lkmc.neutrodyne.core.common.Nfc
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -51,14 +52,73 @@ class MonogramTest {
 
     @Test
     fun `hue is the Java string hash of the lowercase NFC title mod 360`() {
-        val title = "The Daily"
-        val expected =
-            title
-                .lowercase()
-                .hashCode()
-                .mod(360)
-                .toDouble()
-        assertEquals(expected, Monogram.spec(title).hue)
+        val titles =
+            listOf(
+                "The Daily",
+                "the daily",
+                "THE DAILY",
+                "99% Invisible",
+                "🎧 Commute",
+                "日本語ポッドキャスト",
+                "Ärzte Talk",
+                "A\u0308rzte Talk",
+                "ärzte talk",
+                "ÄRZTE TALK",
+                "בוקר טוב",
+                "",
+                "   ",
+                "— · —",
+                "!!!",
+                "Solo",
+                "reply-all",
+                "Hacker/News",
+                "68' Comeback",
+                "Café",
+                "Cafe\u0301",
+                "CAFÉ",
+                "mañana",
+                "man\u0303ana",
+                "Ångström",
+                "A\u030angstro\u0308m",
+                "İstanbul",
+                "istanbul",
+                "Straße",
+                "STRASSE",
+                "Ελληνικά",
+                "Καλημέρα",
+                "Привет мир",
+                "한국어",
+                "中文播客",
+                "العربية",
+                "हिन्दी",
+                "ไทย",
+                "👨‍👩‍👧‍👦 Family",
+                "🇨🇭 News",
+                "👍🏽 Talk",
+                "🎙️ Radio",
+                "Music 𝄞",
+                "Science 🚀",
+                "a".repeat(1000),
+                "Aa",
+                "BB",
+                "0",
+                "Podcast #50",
+                "\u0000 edge",
+            )
+        assertEquals(50, titles.size)
+        for (title in titles) {
+            // On the desktop JVM, String.hashCode() is Java's UTF-16 hash, including overflow.
+            val expected =
+                Nfc
+                    .normalize(title)
+                    .lowercase()
+                    .hashCode()
+                    .mod(360)
+                    .toDouble()
+            assertEquals(expected, Monogram.spec(title).hue, "title '$title'")
+        }
+        assertEquals(Monogram.spec("Ärzte Talk").hue, Monogram.spec("A\u0308rzte Talk").hue)
+        assertEquals(Monogram.spec("Ärzte Talk").hue, Monogram.spec("ÄRZTE TALK").hue)
     }
 
     @Test
