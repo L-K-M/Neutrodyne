@@ -2,14 +2,13 @@
 
 package ch.lkmc.neutrodyne.core.data
 
-import androidx.room3.withWriteTransaction
+import androidx.room3.useWriterConnection
+import androidx.sqlite.SQLiteException
 import ch.lkmc.neutrodyne.core.data.ingest.FetchMeta
 import ch.lkmc.neutrodyne.core.data.ingest.IngestContext
 import ch.lkmc.neutrodyne.core.data.ingest.IngestMode
 import ch.lkmc.neutrodyne.core.data.ingest.IngestResult
 import ch.lkmc.neutrodyne.core.database.EpisodePositionEntity
-import ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity
-import ch.lkmc.neutrodyne.core.model.AliasReason
 import ch.lkmc.neutrodyne.core.model.GuidKnowledge
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.PositionSource
@@ -120,6 +119,8 @@ class GuidProvenanceTest {
                 )
             assertEquals(2, second.accepted)
             assertEquals(0, second.inserted.size)
+            assertEquals(1, second.rekeyed)
+            assertEquals(0, second.updated)
 
             // The fallback-keyed sibling's current GUID must persist too.
             assertEquals("dup2", byKey(id, "g:dup2")!!.guid)
@@ -277,6 +278,7 @@ class GuidProvenanceTest {
             assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(a.id)!!.playedAt)
             val bAfter = db.ingestDao().existing(id).single { it.id == b.id }
             assertFalse(bAfter.inFeed)
+            assertEquals("https://cdn/b.mp3", bAfter.enclosureUrl)
             assertTrue(db.episodeStateDao().byEpisode(b.id)!!.isFavorite)
 
             // A repeated contested document still cannot resolve: no transfer, and the item is
@@ -361,6 +363,7 @@ class GuidProvenanceTest {
             assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(a.id)!!.playedAt)
             val bAfter = db.ingestDao().existing(id).single { it.id == b.id }
             assertFalse(bAfter.inFeed)
+            assertEquals("https://cdn/b.mp3", bAfter.enclosureUrl)
             assertTrue(db.episodeStateDao().byEpisode(b.id)!!.isFavorite)
         }
 
@@ -618,6 +621,10 @@ class GuidProvenanceTest {
             val shell = byKey(id, "g:X")!!
             assertEquals("X", shell.guid)
             assertTrue(shell.inFeed)
+            val owner = byKey(id, "g:Z")!!
+            assertEquals("Z", owner.guid)
+            assertEquals("https://cdn/b.mp3", owner.enclosureUrl)
+            assertFalse(owner.inFeed)
         }
 
     /**
@@ -989,27 +996,28 @@ class GuidProvenanceTest {
             }
         }
 
-    /**
-     * Provenance writes ride the ingest transaction: an abort after the record leaves no
-     * provenance row, no episode and no alias; nothing commits in pieces (02 Transactions).
-     */
+    /** A late episode-insert fault must roll back provenance recorded by the real pipeline. */
     @Test
     fun provenanceWritesRollbackWithTheIngestTransaction() =
         runTest {
             val id = podcastId()
-            assertFailsWith<IllegalStateException> {
-                db.withWriteTransaction {
-                    db.ingestDao().recordGuidKnowledge(id, setOf("rb"), emptySet(), emptySet())
-                    db.ingestDao().insertEpisodes(listOf(episodeEntity(podcastId = id, identityKey = "g:rb")))
-                    db
-                        .podcastDao()
-                        .insertAlias(
-                            PodcastUrlAliasEntity("https://alias.example.com/x", id, AliasReason.REDIRECT, NOW),
-                        )
-                    throw IllegalStateException("aborting after provenance")
-                }
+            db.useWriterConnection {
+                it.execSql(
+                    "CREATE TRIGGER fail_episode BEFORE INSERT ON episode" +
+                        " BEGIN SELECT RAISE(ABORT, 'episode insert'); END",
+                )
             }
+            val thrown =
+                assertFailsWith<SQLiteException> {
+                    ingest(
+                        id,
+                        parsedFeed(items = listOf(parsedEpisode(0, guid = "rb"))),
+                        meta = fetchMeta(permanentUrl = "https://alias.example.com/x"),
+                    )
+                }
+            assertTrue(thrown.message.orEmpty().contains("episode insert"))
             assertTrue(db.ingestDao().guidKnowledge(id).isEmpty())
+            assertTrue(db.ingestDao().recordedGuids(id).isEmpty())
             assertTrue(db.ingestDao().existing(id).isEmpty())
             assertTrue(db.podcastDao().aliases(id).isEmpty())
             assertNotNull(db.podcastDao().byId(id))

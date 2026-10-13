@@ -122,6 +122,7 @@ internal class RotatedSlotNullIdentityTest {
             assertNotEquals("g:x", assertNotNull(db.episodeDao().byId(bBefore.id)).identityKey)
             assertEquals(GuidKnowledge.KNOWN_AMBIGUOUS, db.ingestDao().guidKnowledge(id)["y"])
             assertNull(db.ingestDao().guidKnowledge(id)["x"])
+            if (covered) assertTrue("x" in db.ingestDao().recordedGuids(id))
 
             if (reopen) {
                 db.close()
