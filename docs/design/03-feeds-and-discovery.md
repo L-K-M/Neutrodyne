@@ -1191,12 +1191,12 @@ Serves R4.8 (timestamps), N3, N6. Delivered in M1 (storage, sanitiser, block mod
 
 ### At ingest
 
-- Raw description (HTML, or plain text for Atom/YouTube) goes to `episode_description` through 02's `EpisodeDescriptionCodec`; nothing is sanitised at ingest ([02 episode_description](02-data-model.md#episode_description)).
+- Raw description (HTML, or plain text for Atom/YouTube) goes to `episode_description` through 02's `EpisodeDescriptionCodec`, which also stores the parser's `descriptionIsHtml` flag as a format bit in its header (2026-10-12, M1a); nothing is sanitised at ingest ([02 episode_description](02-data-model.md#episode_description)).
 - `snippet` = `ShowNotesSanitizer.snippet(text, isHtml)`: jsoup `text()` (or the plain text), whitespace collapsed, cut at the last word boundary ≤ 199 chars plus `…`; used by list rows (02 keeps it out of descriptions).
 
 ### Sanitiser and block model
 
-`ShowNotesSanitizer.toDocument(raw, isHtml, baseUri): ShowNotesDocument` (implemented by `JsoupShowNotesSanitizer`) runs at display time on `@Dispatcher(Default)`; `EpisodeRepository.observeShowNotes` caches the last 16 documents in memory.
+`ShowNotesSanitizer.toDocument(raw, isHtml, baseUri): ShowNotesDocument` (implemented by `JsoupShowNotesSanitizer`) runs at display time on `@Dispatcher(Default)`; `isHtml` is the format the codec returns with the text (2026-10-12, M1a — it was always `true`, so literal `<b>`/`&copy;` in a `type="text"` body rendered as markup). `EpisodeRepository.observeShowNotes` caches the last 16 documents in memory; an entry hits only when the stored blob (whose header carries the format) and the effective base URI both match, so a link-only change cannot serve notes resolved against the old base (2026-10-12, M1a).
 
 1. **Normalise input:** no tags but escaped markup (`&lt;p&gt;`, `&lt;br`) → unescape once (double-escaped feeds); no tags at all (YouTube, many Atom feeds) → plain text: blank lines split paragraphs, `\n` → line break, URLs linkified.
 2. **Clean:** `Cleaner(safelist).clean(Jsoup.parseBodyFragment(html, baseUri))` and walk the returned `Document` directly (no re-serialisation and re-parse). `safelist` = `Safelist.basicWithImages()` + `addTags("h1".."h6", "div", "hr", "figure", "figcaption")`; `img` attributes `alt`, `width`, `height`, `src`; `a` protocols `http`, `https`, `mailto` (`removeProtocols("a", "href", "ftp")`); `img` protocols `http`, `https`; `removeEnforcedAttribute("a", "rel")`. Relative `href`/`src` are made absolute against `baseUri` (jsoup's default `preserveRelativeLinks(false)`; unresolvable ones are dropped) ([jsoup Safelist](https://jsoup.org/apidocs/org/jsoup/safety/Safelist.html)). `baseUri` = episode `link`, else the feed URL. `script`, `style`, `iframe`, event attributes and `javascript:`/`data:` URLs never survive the safelist.

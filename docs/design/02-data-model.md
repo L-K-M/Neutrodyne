@@ -662,12 +662,14 @@ Show notes, kept out of the hot `episode` table. Read only by episode detail, ch
 data class EpisodeDescriptionEntity(@PrimaryKey val episodeId: Long, val html: ByteArray)
 
 object EpisodeDescriptionCodec {             // the only way to read or write `html`
-    fun encode(text: String): ByteArray      // UTF-8 ≥ 512 bytes → [0x01] + raw DEFLATE (nowrap, level 6); else [0x00] + UTF-8
-    fun decode(bytes: ByteArray): String
+    fun encode(text: String, format: DescriptionFormat): ByteArray
+    fun decode(bytes: ByteArray): DecodedDescription     // the text plus its stored format
 }
 ```
 
-`decode` never throws only on the unknown-header UTF-8 fallback (corrupt or pre-codec blobs decode as themselves). The codec-owned `0x00`/`0x01` forms fail with `IllegalStateException` on a corrupt or truncated deflate body or on decoded output past the producer bound — every supported producer is capped at 03's `ParseLimits.maxTextChars` (512 Ki chars per element), so legitimate decoded output is at most 2 MiB of UTF-8; anything past it is a corruption signal, not show notes. `encode` enforces the same bound on its input (`IllegalArgumentException`), so a custom `ParseLimits` raised past the codec bound fails before persistence instead of writing an unreadable blob — a successful encode always round-trips.
+`decode` never throws only on the unknown-header UTF-8 fallback (corrupt or pre-codec blobs decode as themselves, as HTML). The codec-owned `0x00`–`0x03` forms fail with `IllegalStateException` on a corrupt or truncated deflate body or on decoded output past the producer bound — every supported producer is capped at 03's `ParseLimits.maxTextChars` (512 Ki chars per element), so legitimate decoded output is at most 2 MiB of UTF-8; anything past it is a corruption signal, not show notes. `encode` enforces the same bound on its input (`IllegalArgumentException`), so a custom `ParseLimits` raised past the codec bound fails before persistence instead of writing an unreadable blob — a successful encode always round-trips.
+
+**Format headers (2026-10-12, M1a):** the header now also carries the description format, with no schema change. `encode(text, format)` writes `[0x00]` raw / `[0x01]` DEFLATE for `DescriptionFormat.HTML` and `[0x02]`/`[0x03]` for `DescriptionFormat.PLAIN_TEXT` under the same 512-byte threshold; `decode` returns a `DecodedDescription(text, format)`. Legacy and unknown-header payloads still decode as HTML, matching what every pre-format blob meant. `FeedIngestor` passes the parser's `descriptionIsHtml`; `observeShowNotes` feeds the decoded format to the sanitiser's `isHtml`, so Atom `type="text"` (and YouTube / `media:description`) literals such as `<b>` and `&copy;` no longer render as markup.
 
 The column holds raw HTML from the feed (or plain text for YouTube and Atom); sanitising happens at display time ([D27](../PLAN.md#3-key-decisions), [03 Show notes](03-feeds-and-discovery.md#show-notes)). Compression shrinks the largest table to roughly a third (see [Expected size](#expected-size)). Encoding runs in the ingest's prepare step — off the write transaction for a refresh ingest, inside it for subscribe's single-transaction path, where an encode rejection aborts the whole subscribe: no podcast, alias, membership or episode row survives it (03 Subscribe transaction; covered by `SubscribeFlowTest`'s over-bound rollback and exact-bound commit cases).
 

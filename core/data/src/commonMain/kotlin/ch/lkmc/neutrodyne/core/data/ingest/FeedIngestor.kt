@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Dispatcher
 import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshPolicy
+import ch.lkmc.neutrodyne.core.database.DescriptionFormat
 import ch.lkmc.neutrodyne.core.database.DueFeed
 import ch.lkmc.neutrodyne.core.database.EpisodeDescriptionCodec
 import ch.lkmc.neutrodyne.core.database.ExistingEpisodeKey
@@ -698,7 +699,15 @@ internal class FeedIngestor(
                     title = resolvedTitle(e),
                     imageUrl = imageUrl,
                     artworkKey = imageUrl?.let(ArtworkKeys::forUrl),
-                    descriptionBytes = e.descriptionHtml?.let(EpisodeDescriptionCodec::encode),
+                    descriptionBytes =
+                        e.descriptionHtml?.let {
+                            // The format rides in the blob's header so show notes render as
+                            // stored — the parser's text/markup distinction must not be lost.
+                            EpisodeDescriptionCodec.encode(
+                                it,
+                                if (e.descriptionIsHtml) DescriptionFormat.HTML else DescriptionFormat.PLAIN_TEXT,
+                            )
+                        },
                     snippet = e.descriptionHtml?.let { sanitizer.snippet(it, e.descriptionIsHtml) },
                     hint = e.externalMediaId?.let { ctx.rowHints[it] },
                     pubDateValid =
