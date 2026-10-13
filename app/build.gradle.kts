@@ -52,6 +52,9 @@ android {
             buildConfigField("String", "ACRA_MAILTO", "\"\"") // ACRA off in debug builds (D62)
         }
     }
+    // Corpus leg c (03 Testing): the shared fixture/golden tree reaches the device through the
+    // test APK's assets under `feeds/`; the production APK's source sets stay untouched.
+    sourceSets["androidTest"].assets.srcDir(rootProject.layout.projectDirectory.dir("feeds/src/test/resources"))
 }
 
 dependencies {
@@ -134,6 +137,12 @@ dependencies {
     // RoomRuntimeServiceDeviceTest drives the rebuilt pool directly; sqlite-bundled is an
     // `implementation` edge of :core:database and never reaches this classpath.
     androidTestImplementation(libs.androidx.sqlite.bundled)
+    // Corpus leg c (03 Testing): `XmlPullFeedParser`/`PullParserFactory` live in :feeds:jvm, which
+    // reaches the app only through :core:data's androidMain `implementation` edge; :feeds' `api`
+    // already supplies okio (`FeedParser.parse` takes `okio.Source`), but the golden JSON encode
+    // needs the serialization runtime on this classpath directly.
+    androidTestImplementation(project(":feeds:jvm"))
+    androidTestImplementation(libs.kotlinx.serialization.json)
 
     // S11's worker-side getString test resolves Res strings on the JVM.
     testImplementation(libs.cmp.resources)
