@@ -83,7 +83,9 @@ import org.jetbrains.compose.resources.stringResource
  * The "Add a podcast" sheet's content (08 Add podcast sheet), rendered inside the nav host's
  * `NdModalBottomSheet`. The field's text is `rememberSaveable`; a restored sheet re-resolves its
  * input through [onResolve] and the ViewModel dedupes a resolution that still stands (previews are
- * memory-only, D24).
+ * memory-only, D24). The credential fields stay plain `remember`: 08's saveable set is only the
+ * input, the preview id and the chosen groups, so a typed password never lands in the
+ * saved-state bundle — a restore re-prompts for it instead (M1b owns persistence, N3).
  *
  * The "Add to groups" chips arrive with M2's group feed; the YouTube + suggest_rss card with M8
  * (deviations recorded in 08, 2026-10-07).
@@ -103,9 +105,9 @@ internal fun AddPodcastSheet(
     modifier: Modifier = Modifier,
 ) {
     var input by rememberSaveable { mutableStateOf(initialInput.orEmpty()) }
-    var username by rememberSaveable { mutableStateOf("") }
-    var password by rememberSaveable { mutableStateOf("") }
-    var showPassword by rememberSaveable { mutableStateOf(false) }
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var showPassword by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     val focusRequester = remember { FocusRequester() }
 

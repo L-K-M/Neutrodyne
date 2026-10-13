@@ -4,6 +4,8 @@ package ch.lkmc.neutrodyne.feature.discover.add
 
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
+import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -280,6 +282,41 @@ class AddPodcastSheetTest {
             )
         }
 
+    /**
+     * 95-1: a save/restore round trip (process death) brings the address field back and
+     * re-resolves to the auth prompt, but the typed credentials do not return with it — 08's
+     * saveable set is only the input, the preview id and the chosen groups, so the password
+     * must never land in the saved-state bundle.
+     */
+    @Test
+    fun credentialsDoNotSurviveRecreation() =
+        runComposeUiTest {
+            resolver.nextResolution =
+                AddResolution.Failure(AddPodcastError.AuthRequired(realm = null))
+            var restored: Map<String, List<Any?>> = emptyMap()
+            var registry = SaveableStateRegistry(restored) { true }
+            setSheet(registry = registry)
+
+            feedField().performTextInput("https://example.com/feed")
+            onNodeWithText("Subscribe").performClick()
+            waitForIdle()
+            onNodeWithText("This feed needs a password").assertIsDisplayed()
+            // Field order: the address field, then username, then password.
+            onAllNodes(hasSetTextAction())[1].performTextInput("alice")
+            onAllNodes(hasSetTextAction())[2].performTextInput("s3cret")
+
+            runOnIdle { restored = registry.performSave() }
+            registry = SaveableStateRegistry(restored) { true }
+            setSheet(registry = registry)
+
+            // The restored field re-resolves to the same auth step (the fake still answers
+            // AuthRequired); the re-shown credential fields start empty.
+            onNodeWithText("This feed needs a password").assertIsDisplayed()
+            assertEquals("https://example.com/feed", editableText(0))
+            assertEquals("", editableText(1))
+            assertEquals("", editableText(2))
+        }
+
     @Test
     fun cancelDismissesTheSheet() =
         runComposeUiTest {
@@ -288,7 +325,10 @@ class AddPodcastSheetTest {
             assertTrue(dismissed)
         }
 
-    private fun ComposeUiTest.setSheet(initialInput: String? = null) {
+    private fun ComposeUiTest.setSheet(
+        initialInput: String? = null,
+        registry: SaveableStateRegistry = SaveableStateRegistry(null) { true },
+    ) {
         setContent {
             // collectAsStateWithLifecycle (rule 10) needs a started owner; a bare
             // compose scene provides none, so the test installs a RESUMED one.
@@ -297,6 +337,7 @@ class AddPodcastSheetTest {
                 CompositionLocalProvider(
                     LocalPlatformKind provides PlatformKind.DESKTOP,
                     LocalUiClock provides TestClock(),
+                    LocalSaveableStateRegistry provides registry,
                 ) {
                     NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
                         AddPodcastSheet(
@@ -329,4 +370,11 @@ class AddPodcastSheetTest {
 
     /** The sheet's single address field — the first editable node. */
     private fun ComposeUiTest.feedField() = onAllNodes(hasSetTextAction()).onFirst()
+
+    /** The [index]-th editable node's current text (0 is the address field). */
+    private fun ComposeUiTest.editableText(index: Int): String =
+        onAllNodes(hasSetTextAction())[index]
+            .fetchSemanticsNode()
+            .config[SemanticsProperties.EditableText]
+            .text
 }
