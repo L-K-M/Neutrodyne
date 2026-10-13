@@ -170,12 +170,26 @@ interface DownloadDao {
 /** `artwork` (M4: references and garbage collection; `@Upsert`-able single-writer table). */
 @Dao
 interface ArtworkDao {
+    /** Pin requests must not overwrite metadata or the descriptor of existing stored bytes. */
+    @Insert(onConflict = androidx.room3.OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(row: ArtworkEntity)
+
     @Upsert
     suspend fun upsert(row: ArtworkEntity)
 
     @Query("SELECT * FROM artwork WHERE `key` = :key")
     suspend fun byKey(key: String): ArtworkEntity?
+
+    /** The index load of 08's `ArtworkStore` (key → localPath for every pinned file). */
+    @Query("SELECT `key`, localPath FROM artwork WHERE localPath IS NOT NULL")
+    suspend fun pinnedRows(): List<ArtworkPinRow>
 }
+
+/** `key` → `localPath` projection for [ArtworkDao.pinnedRows]. */
+data class ArtworkPinRow(
+    val key: String,
+    val localPath: String,
+)
 
 /** `import_session`/`import_item` (M3: the OPML import pipeline). */
 @Dao
