@@ -94,6 +94,47 @@ class RssSourceAdapterTest {
         }
 
     @Test
+    fun hostKeyCanonicalisesNumericAndIdnHosts() =
+        runTest {
+            setUpRoot()
+            val feed = dueFeedOf(db, seedPodcast(db, "https://a.example.com/f"))
+            val bundle = newRssAdapter(root, clock)
+            try {
+                // OkHttp hands the verbatim host to InetAddress, which resolves "127.1" and
+                // "2130706433" to 127.0.0.1; all three spellings must share the semaphore.
+                assertEquals("127.0.0.1", bundle.adapter.hostKey(feed, "http://127.0.0.1/f"))
+                assertEquals("127.0.0.1", bundle.adapter.hostKey(feed, "http://127.1/f"))
+                assertEquals("127.0.0.1", bundle.adapter.hostKey(feed, "http://2130706433/f"))
+                // An IDN and its punycode spelling are one host too.
+                assertEquals("xn--mnchen-3ya.de", bundle.adapter.hostKey(feed, "https://MÜNCHEN.de/f"))
+                assertEquals(
+                    "xn--mnchen-3ya.de",
+                    bundle.adapter.hostKey(feed, "https://xn--mnchen-3ya.de/f"),
+                )
+            } finally {
+                bundle.close()
+            }
+        }
+
+    @Test
+    fun hostKeyFallsBackToRawAuthorityWhenUncanonicalisable() =
+        runTest {
+            setUpRoot()
+            val feed = dueFeedOf(db, seedPodcast(db, "https://a.example.com/f"))
+            val bundle = newRssAdapter(root, clock)
+            try {
+                // Port 0 is unfetchable, so the URL has no canonical identity; the semaphore
+                // still needs a stable key, taken from the raw authority as before.
+                assertEquals(
+                    "feeds.example.com",
+                    bundle.adapter.hostKey(feed, "https://FEEDS.EXAMPLE.COM:0/f"),
+                )
+            } finally {
+                bundle.close()
+            }
+        }
+
+    @Test
     fun olderPageWithoutACursorFailsFast() =
         runTest {
             // The engine only sends OLDER_PAGE when `pagingNextUrl` is set; a null cursor must
