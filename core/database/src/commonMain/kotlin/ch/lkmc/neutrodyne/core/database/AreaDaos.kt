@@ -170,6 +170,10 @@ interface DownloadDao {
 /** `artwork` (M4: references and garbage collection; `@Upsert`-able single-writer table). */
 @Dao
 interface ArtworkDao {
+    /** Pin requests must not overwrite metadata or the descriptor of existing stored bytes. */
+    @Insert(onConflict = androidx.room3.OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(row: ArtworkEntity)
+
     @Upsert
     suspend fun upsert(row: ArtworkEntity)
 

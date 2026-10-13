@@ -41,34 +41,41 @@ public fun EmptyState(
     onTertiary: (() -> Unit)? = null,
 ) {
     Column(
-        modifier = modifier.fillMaxSize().padding(horizontal = 32.dp).widthIn(max = 400.dp),
+        modifier = modifier.fillMaxSize().padding(horizontal = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            modifier = Modifier.size(EMPTY_ICON_SIZE),
-            tint = MaterialTheme.colorScheme.primary,
-        )
-        Spacer(Modifier.height(ICON_TITLE_GAP))
-        Text(title, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(TITLE_BODY_GAP))
-        Text(
-            body,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
-        if (actionLabel != null && onAction != null) {
-            Spacer(Modifier.height(BODY_ACTION_GAP))
-            NdButton(label = actionLabel, onClick = onAction)
-        }
-        if (secondaryLabel != null && onSecondary != null) {
-            NdTextButton(label = secondaryLabel, onClick = onSecondary)
-        }
-        if (tertiaryLabel != null && onTertiary != null) {
-            NdTextButton(label = tertiaryLabel, onClick = onTertiary)
+        // The 400 dp cap lives on the inner content column: `widthIn` after `fillMaxSize` on the
+        // same node is coerced into the incoming (already fixed) constraints and does nothing.
+        Column(
+            modifier = Modifier.widthIn(max = 400.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                modifier = Modifier.size(EMPTY_ICON_SIZE),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.height(ICON_TITLE_GAP))
+            Text(title, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(TITLE_BODY_GAP))
+            Text(
+                body,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            if (actionLabel != null && onAction != null) {
+                Spacer(Modifier.height(BODY_ACTION_GAP))
+                NdButton(label = actionLabel, onClick = onAction)
+            }
+            if (secondaryLabel != null && onSecondary != null) {
+                NdTextButton(label = secondaryLabel, onClick = onSecondary)
+            }
+            if (tertiaryLabel != null && onTertiary != null) {
+                NdTextButton(label = tertiaryLabel, onClick = onTertiary)
+            }
         }
     }
 }
