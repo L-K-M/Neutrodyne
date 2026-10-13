@@ -13,12 +13,17 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.navigation3.runtime.NavKey
+import ch.lkmc.neutrodyne.core.common.PlatformKind
+import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
+import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.di.createDesktopGraph
 import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
+import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Before
@@ -104,6 +109,33 @@ class NeutrodyneWindowContentTest {
             onNodeWithText("Debug build").assertExists()
         }
 
+    /**
+     * The window must provide `LocalPlatformKind` as DESKTOP (93-4): shared rows pick
+     * per-platform copy from it (07's "download folder" wording), and nothing else provides
+     * the local above the entries, so a missing provision silently falls back to ANDROID.
+     * The probe entry reads the local inside the shell's locals — the menu bridge's push is
+     * the navigator captured in the root's player slot.
+     */
+    @Test
+    fun theWindowProvidesTheDesktopPlatformKind() =
+        runComposeUiTest {
+            var provided: PlatformKind? = null
+            val menuActions = DesktopMenuActions()
+            setContent {
+                NeutrodyneWindowContent(
+                    installers = graph.entryInstallers + platformProbeInstaller { provided = it },
+                    menuActions = menuActions,
+                    viewModelFactory = graph.metroViewModelFactory,
+                )
+            }
+
+            waitUntil("the root navigator attaches", TIMEOUT_MS) {
+                menuActions.pushKey(PlatformProbeKey)
+            }
+            waitUntil("the probe entry composes", TIMEOUT_MS) { provided != null }
+            assertThat(provided).isEqualTo(PlatformKind.DESKTOP)
+        }
+
     @Test
     fun licencesListTheOpenJdkRuntime() =
         runComposeUiTest {
@@ -139,3 +171,12 @@ class NeutrodyneWindowContentTest {
         const val TIMEOUT_MS = 5_000L
     }
 }
+
+/** The key the platform-kind probe installs under — never a production route. */
+private object PlatformProbeKey : NavKey
+
+/** Captures `LocalPlatformKind` once the probe entry composes inside the window's locals. */
+private fun platformProbeInstaller(sink: (PlatformKind) -> Unit): EntryProviderInstaller =
+    {
+        entry<PlatformProbeKey> { sink(LocalPlatformKind.current) }
+    }

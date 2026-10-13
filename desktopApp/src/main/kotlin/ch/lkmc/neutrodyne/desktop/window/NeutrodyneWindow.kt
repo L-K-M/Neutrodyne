@@ -25,6 +25,7 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.rememberWindowState
 import ch.lkmc.neutrodyne.core.common.AppDirs
+import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.designsystem.components.DesktopScrollbars
@@ -35,6 +36,7 @@ import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
+import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.rememberDesktopPlatformActions
 import ch.lkmc.neutrodyne.core.ui.root.NeutrodyneRoot
@@ -268,6 +270,8 @@ internal fun NeutrodyneWindowContent(
     val platformActions = rememberDesktopPlatformActions()
     CompositionLocalProvider(
         LocalPlatformActions provides platformActions,
+        // 07 Storage rows: without a provider the local falls back to ANDROID wording.
+        LocalPlatformKind provides PlatformKind.DESKTOP,
         LocalScrollbars provides DesktopScrollbars.style,
         // 01 Feature entry installers: metroViewModel()/assistedMetroViewModel() resolve here.
         LocalMetroViewModelFactory provides viewModelFactory,
