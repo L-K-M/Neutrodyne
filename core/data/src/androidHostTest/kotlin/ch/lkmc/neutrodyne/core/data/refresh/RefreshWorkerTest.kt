@@ -17,11 +17,14 @@ import ch.lkmc.neutrodyne.core.data.seedPodcast
 import ch.lkmc.neutrodyne.core.data.stubAdapter
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
+import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.TestScope
@@ -191,11 +194,75 @@ class RefreshWorkerTest {
     fun `the work manager stop reason is persisted`() =
         runTest {
             val db = openDb()
-            val deps = deps(db = db)
+            val settings = FakeSettingsRepository()
+            val deps = deps(db = db, settings = settings)
 
             worker(deps).doWork()
 
-            assertThat(deps.settings.calls).contains("set(${FeedsSettingKeys.LAST_RUN_STOP_REASON.name})")
+            assertThat(settings.calls).contains("set(${FeedsSettingKeys.LAST_RUN_STOP_REASON.name})")
+        }
+
+    @Test
+    fun `a thrown engine error retries within the continuation budget then succeeds`() =
+        runTest { assertThrownReadIsBounded(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES) }
+
+    @Test
+    fun `a thrown worker settings read retries within the continuation budget then succeeds`() =
+        runTest { assertThrownReadIsBounded(FeedsSettingKeys.SCHEDULED_TICK_MINUTES) }
+
+    private suspend fun assertThrownReadIsBounded(failingKey: SettingKey<*>) {
+        val settings = FakeSettingsRepository()
+        val deps =
+            deps(
+                db = openDb(),
+                settings = throwingRead(settings, failingKey, IllegalStateException("disk read failed")),
+            )
+        for (attempt in 0..9) {
+            val result = worker(deps, runAttemptCount = attempt).doWork()
+            val expected =
+                if (attempt <
+                    9
+                ) {
+                    ListenableWorker.Result.Retry::class.java
+                } else {
+                    ListenableWorker.Result.Success::class.java
+                }
+            assertThat(result).isInstanceOf(expected)
+            assertThat(settings.calls.count { it == "set(${FeedsSettingKeys.LAST_RUN_STOP_REASON.name})" })
+                .isEqualTo(attempt + 1)
+        }
+        assertThat(deps.scheduler.continuationCount).isEqualTo(0)
+    }
+
+    @Test
+    fun `cancellation from worker settings or the engine propagates and writes the stop reason`() =
+        runTest {
+            val db = openDb()
+            for (key in listOf(FeedsSettingKeys.SCHEDULED_TICK_MINUTES, FeedsSettingKeys.REFRESH_INTERVAL_MINUTES)) {
+                val settings = FakeSettingsRepository()
+                val cancellation = CancellationException("worker stopped")
+                val deps = deps(db = db, settings = throwingRead(settings, key, cancellation))
+                var caught: CancellationException? = null
+                try {
+                    worker(deps).doWork()
+                } catch (exception: CancellationException) {
+                    caught = exception
+                }
+                assertThat(caught).isSameInstanceAs(cancellation)
+                assertThat(settings.calls).contains("set(${FeedsSettingKeys.LAST_RUN_STOP_REASON.name})")
+            }
+        }
+
+    private fun throwingRead(
+        settings: SettingsRepository,
+        failingKey: SettingKey<*>,
+        failure: Exception,
+    ): SettingsRepository =
+        object : SettingsRepository by settings {
+            override suspend fun <T : Any> get(key: SettingKey<T>): T {
+                if (key == failingKey) throw failure
+                return settings.get(key)
+            }
         }
 
     @Test
@@ -244,7 +311,7 @@ class RefreshWorkerTest {
             assertThat(retained.origin).isEqualTo(origin)
         } finally {
             gate.complete(Unit)
-            holder.await()
+            holder.join()
         }
     }
 
@@ -255,7 +322,7 @@ class RefreshWorkerTest {
     private class Deps(
         val adapter: StubSourceAdapter,
         val scheduler: FakeRefreshScheduler,
-        val settings: FakeSettingsRepository,
+        val settings: SettingsRepository,
         val clock: Clock,
         val refresher: FeedRefresher,
     )
@@ -264,8 +331,8 @@ class RefreshWorkerTest {
         db: NeutrodyneDatabase,
         adapter: StubSourceAdapter = stubAdapter(),
         clock: Clock = TestClock(),
+        settings: SettingsRepository = FakeSettingsRepository(),
     ): Deps {
-        val settings = FakeSettingsRepository()
         val scheduler = FakeRefreshScheduler()
         val refresher =
             newRefresher(
