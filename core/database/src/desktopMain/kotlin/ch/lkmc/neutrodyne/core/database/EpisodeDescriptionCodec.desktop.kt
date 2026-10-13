@@ -8,14 +8,17 @@ import java.util.zip.Deflater
 import java.util.zip.Inflater
 
 actual object EpisodeDescriptionCodec {
-    actual fun encode(text: String): ByteArray {
+    actual fun encode(
+        text: String,
+        format: DescriptionFormat,
+    ): ByteArray {
         val utf8 = text.encodeToByteArray()
         // Aligned bound: a caller exceeding the producer cap (a custom ParseLimits) must be
         // rejected here, not after persistence — encode output must always round-trip.
         require(utf8.size <= MAX_DECODED_BYTES) {
             "episode_description input exceeds the 2 MiB codec bound"
         }
-        if (utf8.size < COMPRESS_ABOVE_BYTES) return byteArrayOf(RAW_TAG) + utf8
+        if (utf8.size < COMPRESS_ABOVE_BYTES) return byteArrayOf(rawTag(format)) + utf8
 
         val deflater = Deflater(Deflater.DEFAULT_COMPRESSION, true)
         try {
@@ -28,7 +31,7 @@ actual object EpisodeDescriptionCodec {
                 val n = deflater.deflate(chunk)
                 buffer.write(chunk, 0, n)
             }
-            out.write(DEFLATED_TAG.toInt())
+            out.write(deflatedTag(format).toInt())
             buffer.writeTo(out)
             return out.toByteArray()
         } finally {
@@ -36,24 +39,48 @@ actual object EpisodeDescriptionCodec {
         }
     }
 
-    actual fun decode(bytes: ByteArray): String {
-        if (bytes.isEmpty()) return ""
+    actual fun decode(bytes: ByteArray): DecodedDescription {
+        if (bytes.isEmpty()) return DecodedDescription("", DescriptionFormat.HTML)
         return when (bytes[0]) {
             RAW_TAG -> {
-                // The codec only writes a raw body below COMPRESS_ABOVE_BYTES; the producer
-                // bound caps what any blob may materialise.
-                check(bytes.size - 1 <= MAX_DECODED_BYTES) { TOO_BIG }
-                bytes.copyOfRange(1, bytes.size).decodeToString()
+                DecodedDescription(rawBody(bytes), DescriptionFormat.HTML)
             }
 
             DEFLATED_TAG -> {
-                inflate(bytes.copyOfRange(1, bytes.size))
+                DecodedDescription(inflate(bytes.copyOfRange(1, bytes.size)), DescriptionFormat.HTML)
+            }
+
+            RAW_TEXT_TAG -> {
+                DecodedDescription(rawBody(bytes), DescriptionFormat.PLAIN_TEXT)
+            }
+
+            DEFLATED_TEXT_TAG -> {
+                DecodedDescription(inflate(bytes.copyOfRange(1, bytes.size)), DescriptionFormat.PLAIN_TEXT)
             }
 
             else -> {
-                bytes.decodeToString()
+                DecodedDescription(bytes.decodeToString(), DescriptionFormat.HTML)
             }
         }
+    }
+
+    private fun rawTag(format: DescriptionFormat): Byte =
+        when (format) {
+            DescriptionFormat.HTML -> RAW_TAG
+            DescriptionFormat.PLAIN_TEXT -> RAW_TEXT_TAG
+        }
+
+    private fun deflatedTag(format: DescriptionFormat): Byte =
+        when (format) {
+            DescriptionFormat.HTML -> DEFLATED_TAG
+            DescriptionFormat.PLAIN_TEXT -> DEFLATED_TEXT_TAG
+        }
+
+    private fun rawBody(bytes: ByteArray): String {
+        // The codec only writes a raw body below COMPRESS_ABOVE_BYTES; the producer bound caps
+        // what any blob may materialise.
+        check(bytes.size - 1 <= MAX_DECODED_BYTES) { TOO_BIG }
+        return bytes.copyOfRange(1, bytes.size).decodeToString()
     }
 
     private fun inflate(deflated: ByteArray): String {
@@ -88,6 +115,8 @@ actual object EpisodeDescriptionCodec {
 private const val COMPRESS_ABOVE_BYTES = 512
 private const val RAW_TAG: Byte = 0x00
 private const val DEFLATED_TAG: Byte = 0x01
+private const val RAW_TEXT_TAG: Byte = 0x02
+private const val DEFLATED_TEXT_TAG: Byte = 0x03
 
 /**
  * 03 `ParseLimits.maxTextChars` (512 Ki chars per text element) bounds every producer of a
