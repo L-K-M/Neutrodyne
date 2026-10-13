@@ -46,7 +46,7 @@ Only `:core:data`, `:core:artwork`, `:download:impl` and `:sync:impl` (shared im
 | `podcast_settings`, `podcast_group_settings` | low | 05 settings screens; 05 restore; 10 `SyncApplier` (synced override columns only) | `EffectiveSettingsResolver` (05) |
 | `podcast_group`, `podcast_group_member` | low | 05 `GroupRepository`, import, restore; 10 `SyncApplier` | 05, 06, 08, 10 |
 | `episode` and children (`episode_description`, `episode_transcript`, `episode_alt_enclosure`, `person`, `funding`) | low | 03 ingestion; 04 enrichment (`IngestDao.applyYouTubeFacts`: `durationMs`, `availability`, `isShort`; facts from the engine's `YtDlpEnricher`, so only with the engine, from M9a) as part of the refresh pipeline; 04 `YouTubeAvailabilityRecorder` (`EpisodeDao.setAvailability`, called by 06/07 at resolve time); 05 restore (stub rows); 10 `SyncApplier` (stub rows); 02 retention (delete) | everyone |
-| `episode_guid_provenance` | low (one upsert batch per ingest) | 03 `FeedIngestor` only ([D98](../PLAN.md#3-key-decisions)); unsubscribe cascade deletes | 03 matcher |
+| `episode_guid_provenance` | low (one upsert batch per ingest) | 03 `FeedIngestor` records observations; 02 feed merge and 05 restore union provenance transactionally ([D98](../PLAN.md#3-key-decisions)); unsubscribe cascade deletes; local-only, never synced | 03 matcher reads claim authority; 05 backup export reads ambiguity only |
 | `chapter` | low | 03 (PSC rows); 06 (other sources) | 06, 08 |
 | `episode_state` | low | 06 (started, played, measured duration); 03/08 via `EpisodeRepository` (favourite, bulk played); 07 (tombstone); 05 (import "treat as played", restore); 10 (`SyncApplier`, `SyncParkedStateApplier`) | lists, 05, 06, 07, 10 |
 | `episode_position` | **high** (every 5 s while playing) | 06 `PositionTracker` (Android and desktop through `:playback:core`'s `PositionSaver`); 05 restore; 10 `SyncApplier` | `EpisodeLiveStateSource` (08), 06, 10 |
@@ -628,7 +628,7 @@ stateDiagram-v2
 
 ### episode_guid_provenance
 
-Per-feed GUID knowledge ([D98](../PLAN.md#3-key-decisions), PO-49): the durable record of what a canonical GUID means to this subscription, so a GUID once observed shared can never regain primary-key authority after its carriers rotate, are rekeyed, age out or the app restarts. Rows are written inside the ingest transaction by 03's matcher preparation and read there as claim authority; nothing else reads or writes the table.
+Per-feed GUID knowledge ([D98](../PLAN.md#3-key-decisions), PO-49): the durable record of what a canonical GUID means to this subscription, so a GUID once observed shared can never regain primary-key authority after its carriers rotate, are rekeyed, age out or the app restarts. Ingest records observations and reads claim authority inside its transaction; feed merge and restore union provenance transactionally before any losing subscription cascades it ([Unsubscribe and merge](#unsubscribe-and-merge), [05 Restore](05-groups-opml-backup.md#stubs-and-matching)). Backup export reads ambiguity only, never independence evidence. The table stays local-only and non-synced.
 
 ```kotlin
 enum class GuidKnowledge { KNOWN_AMBIGUOUS, KNOWN_INDEPENDENT, OBSERVED }   // absence of a row = never seen
