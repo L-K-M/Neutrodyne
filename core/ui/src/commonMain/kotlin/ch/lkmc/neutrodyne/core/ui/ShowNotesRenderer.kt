@@ -326,12 +326,19 @@ private fun List<ShowNoteSpan>.toAnnotatedString(
     onLink: (String) -> Unit,
     onTimestamp: (Long) -> Unit,
 ): AnnotatedString {
-    val linkStyle = TextLinkStyles(SpanStyle(color = MaterialTheme.colorScheme.primary))
+    // 08 styles links primary and underlined — colour alone must not carry the link cue.
+    val linkStyle =
+        TextLinkStyles(
+            SpanStyle(
+                color = MaterialTheme.colorScheme.primary,
+                textDecoration = TextDecoration.Underline,
+            ),
+        )
     // The builder scope is not composable, so the listeners are hoisted and read the tag back.
     val linkListener =
         remember(onLink) {
             LinkInteractionListener { annotation ->
-                (annotation as? LinkAnnotation.Clickable)?.tag?.let(onLink)
+                (annotation as? LinkAnnotation.Url)?.url?.let(onLink)
             }
         }
     val seekListener =
@@ -355,8 +362,8 @@ private fun List<ShowNoteSpan>.toAnnotatedString(
 
                 is ShowNoteSpan.Link -> {
                     withLink(
-                        LinkAnnotation.Clickable(
-                            tag = span.url,
+                        LinkAnnotation.Url(
+                            url = span.url,
                             styles = linkStyle,
                             linkInteractionListener = linkListener,
                         ),

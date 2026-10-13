@@ -315,8 +315,10 @@ class ShowNotesRendererTest {
                 onLink = { opened += it },
             )
             val text = semanticsText("the episode page")
-            val link = assertIs<LinkAnnotation.Clickable>(text.getLinkAnnotations(0, text.length).single().item)
-            assertEquals("https://example.com/ep", link.tag)
+            val link = assertIs<LinkAnnotation.Url>(text.getLinkAnnotations(0, text.length).single().item)
+            assertEquals("https://example.com/ep", link.url)
+            // 08 styles links primary and underlined — colour alone must not carry the link cue.
+            assertEquals(TextDecoration.Underline, link.styles?.style?.textDecoration)
 
             onNodeWithText("the episode page").performClick()
             assertEquals(listOf("https://example.com/ep"), opened)
