@@ -107,7 +107,10 @@ public class FeedsSettingsViewModel(
                 reportWriteFailed(null)
                 return@launch
             }
-            suspendRunCatching { refreshController.reschedulePeriodic() }.onFailure(::reportWriteFailed)
+            suspendRunCatching { refreshController.reschedulePeriodic() }.onFailure { failure ->
+                // The setting is already persisted; a scheduling failure is not a save failure.
+                Log.w(TAG, failure) { "refresh scheduling failed after settings write" }
+            }
         }
     }
 

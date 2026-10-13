@@ -2,6 +2,9 @@
 
 package ch.lkmc.neutrodyne.feature.settings
 
+import ch.lkmc.neutrodyne.core.common.Log
+import ch.lkmc.neutrodyne.core.common.LogSink
+import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.ShowNotesImages
@@ -91,6 +94,38 @@ class FeedsSettingsViewModelTest : MainDispatcherTest() {
                 viewModel.uiState.value.messages
                     .isEmpty(),
             )
+        }
+
+    @Test
+    fun rescheduleFailureKeepsSavedSettingWithoutSaveFailedMessage() =
+        runTest {
+            val logs = mutableListOf<String>()
+            Log.install(LogSink { _, _, message -> logs += message })
+            try {
+                val failingScheduler =
+                    object : RefreshController by refreshController {
+                        override suspend fun reschedulePeriodic() {
+                            // Persistence must complete before the scheduler re-reads settings.
+                            assertEquals(MINUTES_PER_HOUR, settings.get(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES))
+                            throw IllegalStateException("scheduler unavailable")
+                        }
+                    }
+                val viewModel = FeedsSettingsViewModel(settings, failingScheduler)
+                collect(viewModel)
+                viewModel.setRefreshIntervalMinutes(MINUTES_PER_HOUR)
+                advanceUntilIdle()
+
+                assertEquals(MINUTES_PER_HOUR, settings.get(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES))
+                assertEquals(MINUTES_PER_HOUR, viewModel.uiState.value.intervalMinutes)
+                assertTrue(
+                    viewModel.uiState.value.messages
+                        .isEmpty(),
+                    "A saved setting must not report save failure",
+                )
+                assertTrue(logs.any { "scheduler unavailable" in it })
+            } finally {
+                Log.install()
+            }
         }
 
     @Test
