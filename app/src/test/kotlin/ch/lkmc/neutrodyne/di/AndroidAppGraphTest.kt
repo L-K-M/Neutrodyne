@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.di
 import android.app.Application
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
+import ch.lkmc.neutrodyne.core.database.DatabaseOpenInitializer
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
@@ -43,12 +44,36 @@ class AndroidAppGraphTest {
     @Test
     fun initializerOrdersLieInStartupBands() {
         for (initializer in graph.initializers) {
-            assertThat(initializer.order).isAtLeast(FIRST_BAND)
+            val band = STARTUP_BANDS.getValue(checkNotNull(initializer::class.simpleName))
+            assertThat(initializer.order).isAtLeast(band.first)
+            assertThat(initializer.order).isAtMost(band.last)
         }
     }
 
+    @Test
+    fun refreshInitializersFollowTheDatabaseBand() {
+        val orders = graph.initializers.associate { (it::class.simpleName ?: it::class.toString()) to it.order }
+
+        // 01 Application start-up: band 100 opens the database; the M1a refresh initializers run
+        // in band 200 (periodic tick) and 220 (foreground observer) — after it and in that order.
+        val dbOrder =
+            graph.initializers
+                .filterIsInstance<DatabaseOpenInitializer>()
+                .single()
+                .order
+        assertThat(dbOrder).isLessThan(orders.getValue("PeriodicRefreshInitializer"))
+        assertThat(orders.getValue("PeriodicRefreshInitializer"))
+            .isLessThan(orders.getValue("RefreshForegroundObserverInitializer"))
+    }
+
     private companion object {
-        const val FIRST_BAND = 0
+        val STARTUP_BANDS =
+            mapOf(
+                "DebugToolsInitializer" to 0..99,
+                "DatabaseOpenInitializer" to 100..199,
+                "PeriodicRefreshInitializer" to 200..299,
+                "RefreshForegroundObserverInitializer" to 200..299,
+            )
 
         /** The five destinations and the Settings screens M0a renders (01 M0 checklist step 16). */
         val M0A_KEYS: List<NavKey> =
