@@ -25,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import ch.lkmc.neutrodyne.core.designsystem.components.NdActionRole
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
@@ -43,11 +44,12 @@ import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_more
-import ch.lkmc.neutrodyne.core.ui.resources.add_title
+import ch.lkmc.neutrodyne.core.ui.resources.feeds_add_url
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_mark_all_played
+import ch.lkmc.neutrodyne.core.ui.resources.feeds_onboarding_title
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_refresh
+import ch.lkmc.neutrodyne.core.ui.resources.feeds_search
 import ch.lkmc.neutrodyne.core.ui.resources.library_empty_body
-import ch.lkmc.neutrodyne.core.ui.resources.library_empty_title
 import ch.lkmc.neutrodyne.core.ui.resources.library_show_titles
 import ch.lkmc.neutrodyne.core.ui.resources.library_sort
 import ch.lkmc.neutrodyne.core.ui.resources.library_sort_added
@@ -91,6 +93,7 @@ internal fun LibraryScreen(
     onConfirmMarkAll: (Long) -> Unit,
     onDismissMarkAll: () -> Unit,
     onAddPodcast: () -> Unit,
+    onSearchPodcasts: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -109,12 +112,16 @@ internal fun LibraryScreen(
             }
 
             state.tiles.isEmpty() -> {
+                // 08's no-subscriptions state; the Import subscriptions secondary is deferred
+                // with the Import flow, so Add by URL fills the tertiary slot (recorded in 08).
                 EmptyState(
                     icon = NdIcons.GridView,
-                    title = stringResource(Res.string.library_empty_title),
+                    title = stringResource(Res.string.feeds_onboarding_title),
                     body = stringResource(Res.string.library_empty_body),
-                    actionLabel = stringResource(Res.string.add_title),
-                    onAction = onAddPodcast,
+                    actionLabel = stringResource(Res.string.feeds_search),
+                    onAction = onSearchPodcasts,
+                    tertiaryLabel = stringResource(Res.string.feeds_add_url),
+                    onTertiary = onAddPodcast,
                 )
             }
 
@@ -136,10 +143,17 @@ internal fun LibraryScreen(
                     pending.downloads,
                 ),
             confirm =
-                NdDialogAction(stringResource(Res.string.podcast_unsubscribe)) {
+                NdDialogAction(
+                    stringResource(Res.string.podcast_unsubscribe),
+                    role = NdActionRole.DESTRUCTIVE,
+                ) {
                     onConfirmUnsubscribe(pending.tile)
                 },
-            dismiss = NdDialogAction(stringResource(Res.string.action_cancel), onDismissUnsubscribe),
+            dismiss =
+                NdDialogAction(
+                    stringResource(Res.string.action_cancel),
+                    onClick = onDismissUnsubscribe,
+                ),
         )
     }
 
@@ -154,7 +168,11 @@ internal fun LibraryScreen(
                 NdDialogAction(stringResource(Res.string.podcast_mark_played)) {
                     onConfirmMarkAll(pendingMarkAll)
                 },
-            dismiss = NdDialogAction(stringResource(Res.string.action_cancel), onDismissMarkAll),
+            dismiss =
+                NdDialogAction(
+                    stringResource(Res.string.action_cancel),
+                    onClick = onDismissMarkAll,
+                ),
         )
     }
 }
@@ -162,11 +180,14 @@ internal fun LibraryScreen(
 /** 08's tile actions at M1a: settings, refresh, mark-played, unsubscribe (with the dialog). */
 internal enum class TileAction { SETTINGS, REFRESH, MARK_PLAYED, UNSUBSCRIBE }
 
+// 08's context-menu catalogue order with the destructive item last. A separator between
+// "Mark all as played…" and "Unsubscribe" needs a menu-model marker `TileMenuAction` does
+// not carry; recorded in 08's M1a deviations until `core:ui` grows one.
 @Composable
 private fun tileActions(): List<Pair<TileAction, String>> =
     listOf(
-        TileAction.SETTINGS to stringResource(Res.string.podcast_settings),
         TileAction.REFRESH to stringResource(Res.string.feeds_refresh),
+        TileAction.SETTINGS to stringResource(Res.string.podcast_settings),
         TileAction.MARK_PLAYED to stringResource(Res.string.feeds_mark_all_played),
         TileAction.UNSUBSCRIBE to stringResource(Res.string.podcast_unsubscribe),
     )

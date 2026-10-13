@@ -85,9 +85,9 @@ class NeutrodyneWindowContentTest {
 
             onNodeWithTag("nav_library").performClick()
             waitUntil("the Library ViewModel loads", TIMEOUT_MS) {
-                onAllNodesWithText("Your library is empty").fetchSemanticsNodes().isNotEmpty()
+                onAllNodesWithText("Your feeds live here").fetchSemanticsNodes().isNotEmpty()
             }
-            onNodeWithText("Add a podcast").assertIsDisplayed()
+            onNodeWithText("Search podcasts").assertIsDisplayed()
         }
 
     @Test
