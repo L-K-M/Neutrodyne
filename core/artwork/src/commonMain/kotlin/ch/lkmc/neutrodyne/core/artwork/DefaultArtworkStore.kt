@@ -23,7 +23,7 @@ import okio.Path.Companion.toPath
  * loaded it reads empty, and Coil falls back to the URL.
  *
  * M1a slice: the index and lookup members are live; `pin`/`unpin`/`collectGarbage` record only
- * what is deterministic without the M4 pipeline — `pin` upserts the descriptor row so M4's first
+ * what is deterministic without the M4 pipeline — `pin` inserts a missing descriptor row so M4's first
  * `syncCandidates` pass picks it up, `unpin` and `collectGarbage` are no-ops until the runner and
  * 02's garbage query exist (deviation 2026-10-07, 08 ArtworkStore).
  */
@@ -48,8 +48,8 @@ internal class DefaultArtworkStore(
         reason: PinReason,
         ownerId: Long,
     ) {
-        // No fetch pipeline before M4; recording the descriptor row is all that is deterministic.
-        scope.launch { db.artworkDao().upsert(ArtworkEntity(key = ref.key, url = ref.url)) }
+        // Existing descriptors belong to stored bytes; only M4's runner may change them.
+        scope.launch { db.artworkDao().insertIfAbsent(ArtworkEntity(key = ref.key, url = ref.url)) }
     }
 
     override fun unpin(
