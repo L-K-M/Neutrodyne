@@ -17,8 +17,9 @@ import kotlinx.coroutines.flow.Flow
  */
 interface FeedRepository {
     /**
-     * One page flow of [source]'s episodes, built only through `FeedQueryBuilder` (05; paging
-     * config and LRU hand-off are the ViewModel's, 08 Paging hand-off).
+     * One page flow of [source]'s episodes, built only through `FeedQueryBuilder` (05). The
+     * implementation owns the `Pager` and 08's fixed `PagingConfig`; `cachedIn`, collection
+     * lifecycle and the per-source LRU stay with the ViewModel (08 Paging hand-off).
      */
     fun pagedFeed(
         source: FeedSource,

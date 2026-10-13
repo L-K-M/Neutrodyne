@@ -148,6 +148,10 @@ internal class SubscribeUseCaseImpl(
                                 // "pending" / "not wanted" / "nothing older" (03 RFC 5005 paging).
                                 pagingNextUrl = link,
                                 pagingComplete = link == null || !backfill,
+                                // D98: a fresh subscribe observes every accepted item from here
+                                // on — complete coverage, so sole-observed GUIDs may record
+                                // KNOWN_INDEPENDENT. Migrated/restored rows stay NULL (unknown).
+                                guidCoverageSince = now,
                             ),
                         )
 
@@ -259,7 +263,11 @@ internal class SubscribeUseCaseImpl(
                 .onFailure { e -> Log.w(TAG, e) { "Periodic reschedule failed for podcast $podcastId" } }
         } finally {
             // Credentials must leave the cache even when post-commit scheduling is cancelled.
-            withContext(NonCancellable) { cache.remove(previewId) }
+            withContext(NonCancellable) {
+                cache.remove(previewId)
+                // Re-resolution can follow a new permanent redirect and cache a different key.
+                cache.remove(entry.previewId)
+            }
         }
         return Outcome.Success(podcastId)
     }

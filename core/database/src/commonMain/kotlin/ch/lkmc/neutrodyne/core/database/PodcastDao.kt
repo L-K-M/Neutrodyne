@@ -168,6 +168,13 @@ abstract class PodcastDao(
         title: String?,
     )
 
+    /** The podcast screen's order chip (05 `FeedRepository.setFeedOrder`, `FeedSource.Podcast`). */
+    @Query("UPDATE podcast SET episodeOrder = :order WHERE id = :podcastId")
+    abstract suspend fun setEpisodeOrder(
+        podcastId: Long,
+        order: FeedOrder,
+    )
+
     /**
      * Records a `pendingNewFeedUrl` outside an ingest — a permanent redirect that ends in a 304
      * announces a move but produces no body for the ingest transaction (03 Permanent redirects).
@@ -177,13 +184,6 @@ abstract class PodcastDao(
     abstract suspend fun setPendingNewFeedUrl(
         id: Long,
         url: String?,
-    )
-
-    /** The podcast screen's order chip (05 `FeedRepository.setFeedOrder`, `FeedSource.Podcast`). */
-    @Query("UPDATE podcast SET episodeOrder = :order WHERE id = :podcastId")
-    abstract suspend fun setEpisodeOrder(
-        podcastId: Long,
-        order: FeedOrder,
     )
 
     // --- Refresh selection and fetch-state writes (02; 03 Refresh scheduling) --------------------
@@ -352,9 +352,10 @@ abstract class PodcastDao(
      * `PodcastDao.deleteCascade(podcastId)`: person/funding rows, the cleared `PODCAST` context,
      * the unshared credential, the parked records and clock rows, then the podcast itself — the
      * FK cascades delete `episode` (+ its children, state, position, Up next, download),
-     * `podcast_url_alias`, `podcast_settings` and `podcast_group_member`; `SET NULL` clears
-     * `play_session.currentEpisodeId` and `import_item.podcastId`. While linked (MS0+) the caller
-     * wraps this in `SyncStateDao.withApplying` for a sync-origin unsubscribe.
+     * `podcast_url_alias`, `podcast_settings`, `podcast_group_member` and
+     * `episode_guid_provenance` (D98: feed-scoped knowledge dies with the subscription);
+     * `SET NULL` clears `play_session.currentEpisodeId` and `import_item.podcastId`. While linked
+     * (MS0+) the caller wraps this in `SyncStateDao.withApplying` for a sync-origin unsubscribe.
      */
     suspend fun deleteCascade(
         podcastId: Long,
@@ -436,6 +437,6 @@ abstract class PodcastDao(
                 " etag, lastModified, contentSha256, parserVersion, lastParseOk, credentialId," +
                 " failureCount, initialFetch, status, lastSuccessAt, lastFullFetchAt, pendingNewFeedUrl," +
                 " pagingNextUrl, pagingComplete, complete, ttlMinutes, latestEpisodeAt, subscribedAt," +
-                " lastAttemptAt, lastErrorKind"
+                " lastAttemptAt, lastErrorKind, guidCoverageSince"
     }
 }
