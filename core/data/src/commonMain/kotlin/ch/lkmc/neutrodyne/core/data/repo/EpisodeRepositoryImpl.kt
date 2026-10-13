@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.data.repo
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.database.DescriptionFormat
 import ch.lkmc.neutrodyne.core.database.EpisodeDescriptionCodec
 import ch.lkmc.neutrodyne.core.database.EpisodeDetailRow
 import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
@@ -40,14 +41,17 @@ internal class EpisodeRepositoryImpl(
     private val clock: Clock,
 ) : EpisodeRepository {
     /**
-     * "decoded and sanitised lazily (LRU 16)" (03): keyed by episode id *and the blob it was
-     * decoded from* — a description rewrite must never be served the previous note.
+     * "decoded and sanitised lazily (LRU 16)" (03): keyed by episode id, and a hit requires every
+     * input the sanitised document depends on — the blob it was decoded from (its header carries
+     * the format) and the link base relative URLs resolve against. A description rewrite, a format
+     * flip or an episode-link move must never be served the previous note.
      */
     private val notesMutex = Mutex()
     private val notesCache = LinkedHashMap<Long, CachedNotes>(SHOW_NOTES_CACHE_SIZE + 1)
 
     private class CachedNotes(
         val bytes: ByteArray,
+        val baseUri: String,
         val notes: ShowNotes,
     )
 
@@ -60,13 +64,15 @@ internal class EpisodeRepositoryImpl(
             db.episodeDao().observeDescription(episodeId),
         ) { detail, bytes ->
             bytes ?: return@combine null
+            val baseUri = detail?.link ?: detail?.feedUrl ?: ""
             notesMutex
                 .withLock {
                     notesCache
                         .remove(episodeId)
-                        ?.takeIf { it.bytes.contentEquals(bytes) }
-                        ?.also { notesCache[episodeId] = it }
-                }?.notes ?: decode(episodeId, bytes, detail?.link ?: detail?.feedUrl ?: "")
+                        ?.takeIf {
+                            it.bytes.contentEquals(bytes) && it.baseUri == baseUri
+                        }?.also { notesCache[episodeId] = it }
+                }?.notes ?: decode(episodeId, bytes, baseUri)
         }
 
     override suspend fun setPlayed(
@@ -126,13 +132,14 @@ internal class EpisodeRepositoryImpl(
         bytes: ByteArray,
         baseUri: String,
     ): ShowNotes {
+        val decoded = EpisodeDescriptionCodec.decode(bytes)
         val notes =
             sanitizer
-                .toDocument(EpisodeDescriptionCodec.decode(bytes), isHtml = true, baseUri = baseUri)
+                .toDocument(decoded.text, isHtml = decoded.format == DescriptionFormat.HTML, baseUri = baseUri)
                 .toModel()
         notesMutex.withLock {
             notesCache.remove(episodeId)
-            notesCache[episodeId] = CachedNotes(bytes, notes)
+            notesCache[episodeId] = CachedNotes(bytes, baseUri, notes)
             while (notesCache.size > SHOW_NOTES_CACHE_SIZE) {
                 notesCache.remove(notesCache.keys.first())
             }
