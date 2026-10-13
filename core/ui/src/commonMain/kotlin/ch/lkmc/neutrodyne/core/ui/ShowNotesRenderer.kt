@@ -241,40 +241,30 @@ private fun NoteImage(
     onLoadImages: () -> Unit,
 ) {
     if (imageMode != ShowNotesImageMode.SHOWN) {
-        val tapToLoad = imageMode == ShowNotesImageMode.TAP_TO_LOAD
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = TOUCH_TARGET)
-                    .let { m -> if (tapToLoad) m.clickable(onClick = onLoadImages) else m }
-                    .padding(bottom = PARAGRAPH_GAP),
-        ) {
-            Icon(NdIcons.Image, contentDescription = null, modifier = Modifier.size(ICON_SIZE))
-            Text(
-                stringResource(Res.string.shownotes_image, block.alt ?: block.url),
-                style = MaterialTheme.typography.bodyMedium,
-                color =
-                    if (tapToLoad) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                modifier = Modifier.padding(start = TEXT_GAP),
-            )
-        }
+        ImagePlaceholderRow(
+            block = block,
+            emphasised = imageMode == ShowNotesImageMode.TAP_TO_LOAD,
+            onClick = if (imageMode == ShowNotesImageMode.TAP_TO_LOAD) onLoadImages else null,
+        )
         return
     }
 
     val context = LocalPlatformContext.current
     val request = remember(block.url) { ImageRequest.Builder(context).data(block.url).build() }
     var loadedAspect by remember(block.url) { mutableStateOf<Float?>(null) }
+    var failed by remember(block.url) { mutableStateOf(false) }
+    if (failed) {
+        // 08: "not loaded or failed → the 48 dp row" — a failed SHOWN image keeps the same
+        // placeholder, without the tap (there is nothing to load on tap).
+        ImagePlaceholderRow(block = block, emphasised = false, onClick = null)
+        return
+    }
     val aspect = declaredAspect(block.width, block.height) ?: loadedAspect
     AsyncImage(
         model = request,
         contentDescription = block.alt,
         contentScale = ContentScale.Fit,
+        onError = { failed = true },
         onSuccess = { state ->
             val image = state.result.image
             if (image.width > 0 && image.height > 0) {
@@ -289,6 +279,40 @@ private fun NoteImage(
                 .heightIn(max = IMAGE_MAX_HEIGHT)
                 .let { m -> if (aspect != null) m.aspectRatio(aspect) else m },
     )
+}
+
+/**
+ * The 48 dp "Image: {alt}" row 08 specifies for every not-loaded state (TAP_TO_LOAD, BLOCKED and
+ * load failure); [emphasised] colours the text `primary` for the tappable TAP_TO_LOAD variant.
+ */
+@Composable
+private fun ImagePlaceholderRow(
+    block: ShowNoteBlock.Image,
+    emphasised: Boolean,
+    onClick: (() -> Unit)?,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = TOUCH_TARGET)
+                .let { m -> if (onClick != null) m.clickable(onClick = onClick) else m }
+                .padding(bottom = PARAGRAPH_GAP),
+    ) {
+        Icon(NdIcons.Image, contentDescription = null, modifier = Modifier.size(ICON_SIZE))
+        Text(
+            stringResource(Res.string.shownotes_image, block.alt ?: block.url),
+            style = MaterialTheme.typography.bodyMedium,
+            color =
+                if (emphasised) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            modifier = Modifier.padding(start = TEXT_GAP),
+        )
+    }
 }
 
 /** The `width`/`height` attribute pair as an aspect ratio, or null when absent or absurd. */
