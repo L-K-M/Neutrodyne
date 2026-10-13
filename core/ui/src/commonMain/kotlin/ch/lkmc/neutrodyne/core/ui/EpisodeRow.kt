@@ -103,9 +103,9 @@ public fun EpisodeRow(
 ) {
     val nowMs = LocalUiClock.current.now()
     val downloadState = live?.downloadState ?: row.downloadState
-    val dimmed =
-        (caps.offline && downloadState != DownloadState.COMPLETED) ||
-            row.availability != Availability.AVAILABLE
+    // 08 dims the whole row only for availability; offline-and-not-downloaded dims just the
+    // play affordance (TrailingSlot's cloud_off at 60 %), the status line carries the reason.
+    val dimmed = row.availability != Availability.AVAILABLE
     val summary =
         EpisodeRowSummary.describe(row, live, nowMs, LocalPlatformKind.current, caps).asString()
     val stateDesc = rowStateDescription(row, live)
@@ -572,12 +572,18 @@ private fun TrailingSlot(
                     NdIcons.PlayArrow to stringResource(Res.string.action_open)
                 }
             }
+        // Offline and not downloaded: the affordance stays enabled as `cloud_off` at 60 % alpha
+        // (08's row table) — the tap still dispatches PlayToggle so the screen answers with the
+        // offline snackbar instead of a dead button.
+        val offlineBlocked = caps.offline && downloadState != DownloadState.COMPLETED
         NdIconButton(
             onClick = { onAction(EpisodeAction.PlayToggle(row.id)) },
-            icon = icon,
+            icon = if (offlineBlocked) NdIcons.CloudOff else icon,
             contentDescription = label,
-            modifier = Modifier.clearAndSetSemantics {},
-            enabled = !caps.offline || downloadState == DownloadState.COMPLETED,
+            modifier =
+                Modifier
+                    .clearAndSetSemantics {}
+                    .alpha(if (offlineBlocked) DIMMED_ALPHA else 1f),
         )
     }
 }
