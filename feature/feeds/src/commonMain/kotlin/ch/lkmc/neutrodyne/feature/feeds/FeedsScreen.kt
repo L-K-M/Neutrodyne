@@ -296,7 +296,7 @@ private fun FeedList(
                             primary =
                                 NdDialogAction(
                                     stringResource(Res.string.action_retry),
-                                    items::retry,
+                                    onClick = items::retry,
                                 ),
                         )
                     }
@@ -327,7 +327,7 @@ private fun LoadErrorBanner(items: LazyPagingItems<*>) {
     NdBanner(
         message = stringResource(Res.string.feeds_load_error),
         icon = NdIcons.Error,
-        primary = NdDialogAction(stringResource(Res.string.action_retry), items::retry),
+        primary = NdDialogAction(stringResource(Res.string.action_retry), onClick = items::retry),
     )
 }
 

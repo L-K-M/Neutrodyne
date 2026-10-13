@@ -15,6 +15,7 @@ import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
 import ch.lkmc.neutrodyne.core.domain.FeedRepository
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.RefreshController
+import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
@@ -23,6 +24,9 @@ import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.UserMessages
 import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.action_copy_link
+import ch.lkmc.neutrodyne.core.ui.resources.episode_offline_toast
+import ch.lkmc.neutrodyne.core.ui.resources.no_handler
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.Inject
@@ -35,6 +39,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -47,7 +52,8 @@ import kotlin.time.Duration.Companion.seconds
  * page): [feed] is the paged feed with day headers `cachedIn` the VM scope — the three-entry
  * source LRU arrives with M2's pager, when more than one source exists. [uiState] carries the
  * transient chips, the offline flag and the pull-to-refresh indicator (capped at 30 s per 08).
- * Play and download row actions are silent until M4/M6 bind their controllers.
+ * Play and download row actions are silent until M4/M6 bind their controllers — except an
+ * offline undownloaded row's play tap, which answers with the offline toast (08's row table).
  */
 @ViewModelKey(FeedsViewModel::class)
 @ContributesIntoMap(AppScope::class)
@@ -62,6 +68,9 @@ public class FeedsViewModel(
 ) : ViewModel() {
     private val filters = MutableStateFlow(FeedFilters())
     private val userMessages = UserMessages()
+
+    /** Message id → URL behind a no-handler snackbar's "Copy link" action (08). */
+    private val copyLinks = mutableMapOf<Long, String>()
 
     @OptIn(ExperimentalCoroutinesApi::class)
     public val feed: Flow<PagingData<FeedItem>> =
@@ -96,8 +105,25 @@ public class FeedsViewModel(
                 write { episodes.setPlayed(listOf(action.episodeId), action.played) }
             }
 
-            // PlayToggle/PlayNext/PlayLast need the player (M4), DownloadToggle the download
-            // engine (M6), CheckAvailability the YouTube engine (M8), Select selection mode (M2).
+            // The offline row's cloud_off affordance stays enabled (08's row table): while the
+            // player is M4 the tap answers with the offline toast — only when the episode has
+            // no download, since a downloaded row would play.
+            is EpisodeAction.PlayToggle -> {
+                if (uiState.value.offline) {
+                    viewModelScope.launch {
+                        val downloaded =
+                            suspendRunCatching {
+                                episodes.observeEpisode(action.episodeId).first()
+                            }.getOrNull()?.downloadState == DownloadState.COMPLETED
+                        if (!downloaded) {
+                            userMessages.post(UiText.Res(Res.string.episode_offline_toast))
+                        }
+                    }
+                }
+            }
+
+            // PlayNext/PlayLast need the player (M4), DownloadToggle the download engine (M6),
+            // CheckAvailability the YouTube engine (M8), Select selection mode (M2).
             else -> {
                 Unit
             }
@@ -120,8 +146,23 @@ public class FeedsViewModel(
 
     /** The screen acks a shown snackbar so its [UserMessage] leaves the state. */
     public fun onMessageShown(id: Long) {
+        copyLinks.remove(id)
         userMessages.shown(id)
     }
+
+    /** A `NO_HANDLER` external open: "No app can open this link" with a "Copy link" action (08). */
+    public fun onNoHandler(url: String) {
+        userMessages.post(
+            UiText.Res(Res.string.no_handler),
+            UiText.Res(Res.string.action_copy_link),
+        )
+        // `post` appends synchronously: the flow's tail is the message just posted.
+        val message = userMessages.flow.value.last()
+        copyLinks[message.id] = url
+    }
+
+    /** The route resolves a snackbar action by id; a copy-link message hands its URL back once. */
+    public fun consumeCopyLink(id: Long): String? = copyLinks.remove(id)
 
     /** A failed write is logged and surfaces as a snackbar — it never escapes the scope. */
     private fun write(block: suspend () -> Unit) {

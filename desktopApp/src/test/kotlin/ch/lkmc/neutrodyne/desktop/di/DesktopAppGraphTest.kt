@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
+import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
@@ -104,6 +105,19 @@ class DesktopAppGraphTest {
     }
 
     /**
+     * Every key `FeedsRoute` pushes must resolve too — the row tap's `EpisodeKey`, the row
+     * menu's `PodcastKey` and the empty state's `AddPodcastKey` hit the same 94-1 crash.
+     */
+    @Test
+    fun everyKeyTheFeedsRoutePushesHasAnEntry() {
+        val provider = entryProvider<NavKey> { graph.entryInstallers.forEach { install -> install() } }
+
+        for (key in FEEDS_PUSHED_KEYS) {
+            assertThat(provider(key).contentKey).isNotNull()
+        }
+    }
+
+    /**
      * 01 Feature entry installers: the window root hands this to `LocalMetroViewModelFactory`, so
      * `metroViewModel()` inside the Library route can only work if the factory resolves the VM.
      * Graph compilation alone does not prove that — the VM is created through the public factory.
@@ -175,6 +189,14 @@ class DesktopAppGraphTest {
             listOf(
                 PodcastKey(7),
                 PodcastSettingsKey(7),
+                AddPodcastKey(null),
+            )
+
+        /** The keys `FeedsRoute` pushes: row tap, the row menu's podcast jump and the empty state. */
+        val FEEDS_PUSHED_KEYS: List<NavKey> =
+            listOf(
+                EpisodeKey(7),
+                PodcastKey(7),
                 AddPodcastKey(null),
             )
     }

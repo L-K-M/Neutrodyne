@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.feature.feeds
 import androidx.paging.testing.asSnapshot
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.RefreshStatus
+import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
@@ -15,13 +16,17 @@ import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.testing.testEpisodeDetail
 import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
 import ch.lkmc.neutrodyne.core.testing.testLibraryTile
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.action_copy_link
 import ch.lkmc.neutrodyne.core.ui.resources.date_today
 import ch.lkmc.neutrodyne.core.ui.resources.date_yesterday
+import ch.lkmc.neutrodyne.core.ui.resources.episode_offline_toast
+import ch.lkmc.neutrodyne.core.ui.resources.no_handler
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.take
@@ -209,10 +214,77 @@ class FeedsViewModelTest : MainDispatcherTest() {
     fun playerAndDownloadActionsAreInertAtM1a() =
         runTest {
             val viewModel = viewModel()
+            collect(viewModel)
             viewModel.onRowAction(EpisodeAction.PlayToggle(42))
             viewModel.onRowAction(EpisodeAction.DownloadToggle(42))
             advanceUntilIdle()
             assertTrue(episodes.calls.isEmpty())
+            // Online, play taps are plain M4 silence — no offline toast.
+            assertTrue(
+                viewModel.uiState.value.messages
+                    .isEmpty(),
+            )
+        }
+
+    /** 08's row table: an offline, undownloaded row's play tap answers with the offline toast. */
+    @Test
+    fun offlinePlayTogglePostsTheOfflineToast() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            network.setStatus(FakeNetworkMonitor.OFFLINE)
+            advanceUntilIdle()
+
+            viewModel.onRowAction(EpisodeAction.PlayToggle(42))
+            advanceUntilIdle()
+
+            val message =
+                viewModel.uiState.value.messages
+                    .single()
+            assertEquals(Res.string.episode_offline_toast, (message.text as UiText.Res).id)
+        }
+
+    /** A downloaded episode's offline tap would play under M4 — silent like every pre-M4 play. */
+    @Test
+    fun downloadedEpisodeStaysSilentOnOfflinePlayToggle() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            episodes.episodes.value =
+                mapOf(42L to testEpisodeDetail(42, downloadState = DownloadState.COMPLETED))
+            network.setStatus(FakeNetworkMonitor.OFFLINE)
+            advanceUntilIdle()
+
+            viewModel.onRowAction(EpisodeAction.PlayToggle(42))
+            advanceUntilIdle()
+
+            assertTrue(
+                viewModel.uiState.value.messages
+                    .isEmpty(),
+            )
+        }
+
+    /** A NO_HANDLER open posts the copy-link snackbar; the action tap resolves by id (08). */
+    @Test
+    fun noHandlerPostsACopyLinkMessage() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+
+            viewModel.onNoHandler("https://www.youtube.com/watch?v=abc")
+            advanceUntilIdle()
+
+            val message =
+                viewModel.uiState.value.messages
+                    .single()
+            assertEquals(Res.string.no_handler, (message.text as UiText.Res).id)
+            assertEquals(Res.string.action_copy_link, (message.action as UiText.Res).id)
+            assertEquals(
+                "https://www.youtube.com/watch?v=abc",
+                viewModel.consumeCopyLink(message.id),
+            )
+            // One-shot, like 01's acknowledgement contract: the id resolves exactly once.
+            assertEquals(null, viewModel.consumeCopyLink(message.id))
         }
 
     /** A throwing repository write becomes a snackbar message — not an uncaught exception (01). */
