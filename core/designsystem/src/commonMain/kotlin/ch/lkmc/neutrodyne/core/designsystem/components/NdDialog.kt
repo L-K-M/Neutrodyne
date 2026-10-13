@@ -15,10 +15,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.window.DialogProperties
 
 /**
- * One dialog action button: resolved [label] plus the callback.
+ * One dialog action button: resolved [label] plus the callback. [role] marks destructive
+ * confirms (08 Dialogs: they draw in the error colour); every other action stays NORMAL.
  */
 public data class NdDialogAction(
     val label: String,
+    val role: NdActionRole = NdActionRole.NORMAL,
     val onClick: () -> Unit,
 )
 
@@ -76,10 +78,14 @@ public fun NdDialog(
         onDismissRequest = onDismissRequest,
         modifier = modifier,
         confirmButton = {
-            if (confirm != null) NdTextButton(label = confirm.label, onClick = confirm.onClick)
+            if (confirm != null) {
+                NdTextButton(label = confirm.label, role = confirm.role, onClick = confirm.onClick)
+            }
         },
         dismissButton = {
-            if (dismiss != null) NdTextButton(label = dismiss.label, onClick = dismiss.onClick)
+            if (dismiss != null) {
+                NdTextButton(label = dismiss.label, role = dismiss.role, onClick = dismiss.onClick)
+            }
         },
         icon = { if (icon != null) Icon(icon, contentDescription = null) },
         title = {

@@ -41,17 +41,25 @@ class RefreshWorker
         }
 
         override suspend fun doWork(): Result {
-            // −1 (none enqueued) behaves as the 60-min floor for slack purposes.
-            val tickMs = settings.get(FeedsSettingKeys.SCHEDULED_TICK_MINUTES).coerceAtLeast(MIN_TICK_MINUTES) * 60_000L
-            val request =
-                RefreshWorkData.request(
-                    inputData,
-                    deadlineElapsedMs = clock.elapsedRealtime() + SOFT_DEADLINE_MS,
-                    dueSlackMs = tickMs / 4,
-                    pagingBudgetMs = PAGING_BUDGET_MS,
-                )
             try {
-                val report = refresher.run(request)
+                val (request, report) =
+                    suspendRunCatching {
+                        // −1 (none enqueued) behaves as the 60-min floor for slack purposes.
+                        val tickMs =
+                            settings.get(FeedsSettingKeys.SCHEDULED_TICK_MINUTES).coerceAtLeast(MIN_TICK_MINUTES) *
+                                60_000L
+                        val request =
+                            RefreshWorkData.request(
+                                inputData,
+                                deadlineElapsedMs = clock.elapsedRealtime() + SOFT_DEADLINE_MS,
+                                dueSlackMs = tickMs / 4,
+                                pagingBudgetMs = PAGING_BUDGET_MS,
+                            )
+                        request to refresher.run(request)
+                    }.getOrElse {
+                        // A transient read or engine error must not permanently fail the chain.
+                        return if (runAttemptCount < MAX_CONTINUATION_ATTEMPTS - 1) Result.retry() else Result.success()
+                    }
                 val more = report.remaining > 0 || report.stoppedByDeadline
                 return when {
                     // WorkManager retries the persisted input itself: a replacement launched
