@@ -9,6 +9,7 @@ import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
@@ -48,6 +49,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -315,6 +317,30 @@ class AddPodcastSheetTest {
             assertEquals("https://example.com/feed", editableText(0))
             assertEquals("", editableText(1))
             assertEquals("", editableText(2))
+        }
+
+    /**
+     * 95-2: while the lookup runs only its own Cancel renders — the row's dismiss Cancel would
+     * carry the same label for a different effect (the wireframe shows one). Cancelling returns
+     * to the editable field; it does not dismiss the sheet.
+     */
+    @Test
+    fun resolvingShowsOnlyTheLookupCancel() =
+        runComposeUiTest {
+            resolver.gate = CompletableDeferred()
+            setSheet()
+
+            feedField().performTextInput("https://example.com/feed")
+            onNodeWithText("Subscribe").performClick()
+            waitForIdle()
+
+            onNodeWithText("Looking up…").assertIsDisplayed()
+            onAllNodes(hasText("Cancel")).assertCountEquals(1)
+
+            onNodeWithText("Cancel").performClick()
+            waitForIdle()
+            onNodeWithText("Looking up…").assertDoesNotExist()
+            assertFalse(dismissed)
         }
 
     @Test

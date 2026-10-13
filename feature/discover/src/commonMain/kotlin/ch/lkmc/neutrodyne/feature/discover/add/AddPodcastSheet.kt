@@ -250,10 +250,14 @@ internal fun AddPodcastSheet(
             horizontalArrangement = Arrangement.spacedBy(ROW_GAP, Alignment.End),
             modifier = Modifier.fillMaxWidth().padding(vertical = BUTTON_GAP),
         ) {
-            NdTextButton(
-                label = stringResource(Res.string.action_cancel),
-                onClick = onDismiss,
-            )
+            // While the lookup runs its own inline Cancel is the only one: a second
+            // identically-labelled button would dismiss instead (scrim/back still can).
+            if (step !is AddSheetStep.Resolving) {
+                NdTextButton(
+                    label = stringResource(Res.string.action_cancel),
+                    onClick = onDismiss,
+                )
+            }
             if (alreadyId != null) {
                 NdButton(
                     label = stringResource(Res.string.add_open),
