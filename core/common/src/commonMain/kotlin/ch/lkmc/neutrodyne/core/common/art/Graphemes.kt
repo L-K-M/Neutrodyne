@@ -5,8 +5,8 @@ package ch.lkmc.neutrodyne.core.common.art
 /**
  * 08: a pure-Kotlin subset of UAX #29 grapheme segmentation — enough for a *leading* cluster
  * (combining marks, variation selectors, emoji modifiers, ZWJ sequences, tag sequences and
- * regional-indicator pairs stay with their base). `BreakIterator` is JVM-only and banned
- * in `commonMain`.
+ * regional-indicator pairs stay with their base).
+ * `BreakIterator` is JVM-only and banned in `commonMain`.
  */
 public object Graphemes {
     /**
@@ -17,8 +17,9 @@ public object Graphemes {
     public fun first(text: String): String {
         if (text.isEmpty()) return ""
 
-        var i = charCount(codePointAt(text, 0))
-        var regionalIndicators = if (isRegionalIndicator(codePointAt(text, 0))) 1 else 0
+        val baseCp = codePointAt(text, 0)
+        var i = charCount(baseCp)
+        var regionalIndicators = if (isRegionalIndicator(baseCp)) 1 else 0
 
         while (i < text.length) {
             val cp = codePointAt(text, i)
@@ -29,10 +30,14 @@ public object Graphemes {
                     i = next
                 }
 
-                // GB9+GB11: ZWJ stays with its base; a following pictograph joins the cluster.
+                // GB9 keeps the ZWJ itself; GB11 joins a following pictograph only to a
+                // pictographic cluster base (ExtPict Extend* ZWJ × ExtPict).
                 cp == ZWJ -> {
                     i = next
-                    if (i < text.length && isExtendedPictographic(codePointAt(text, i))) {
+                    if (i < text.length &&
+                        isExtendedPictographic(baseCp) &&
+                        isExtendedPictographic(codePointAt(text, i))
+                    ) {
                         i += charCount(codePointAt(text, i))
                         continue
                     }
