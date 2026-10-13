@@ -662,7 +662,7 @@ Show notes, kept out of the hot `episode` table. Read only by episode detail, ch
 data class EpisodeDescriptionEntity(@PrimaryKey val episodeId: Long, val html: ByteArray)
 
 object EpisodeDescriptionCodec {             // the only way to read or write `html`
-    fun encode(text: String, format: DescriptionFormat): ByteArray   // UTF-8 ≥ 512 B: raw DEFLATE (nowrap, level 6)
+    fun encode(text: String, format: DescriptionFormat): ByteArray   // header byte + UTF-8 (< 512 B) or raw DEFLATE (nowrap, level 6)
     fun decode(bytes: ByteArray): DecodedDescription     // the text plus its stored format
 }
 ```
