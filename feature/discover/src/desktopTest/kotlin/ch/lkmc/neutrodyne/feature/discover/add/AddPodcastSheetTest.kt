@@ -11,11 +11,13 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.v2.runComposeUiTest
@@ -171,6 +173,38 @@ class AddPodcastSheetTest {
             waitForIdle()
             assertEquals(listOf("https://example.com", "https://a/feed.xml"), resolver.inputs)
             onNodeWithText("Picked Show").assertIsDisplayed()
+        }
+
+    /**
+     * 95-3: while `Choose` lists candidates the primary action is inert — only a candidate row
+     * advances (08). The button reads disabled and Enter fires no resolve; the spy counts
+     * submissions the ViewModel's dedupe would otherwise hide.
+     */
+    @Test
+    fun choosingDisablesSubscribeAndEnter() =
+        runComposeUiTest {
+            resolver.nextResolution =
+                AddResolution.Choose(
+                    listOf(
+                        FeedCandidate("https://a/feed.xml", "Feed A", 10, "html"),
+                        FeedCandidate("https://b/feed.xml", "Feed B", 5, "html"),
+                    ),
+                )
+            val resolves = mutableListOf<String>()
+            setSheet(onResolve = {
+                resolves += it
+                viewModel.resolve(it)
+            })
+
+            feedField().performTextInput("https://example.com")
+            onNodeWithText("Subscribe").performClick()
+            waitForIdle()
+            onNodeWithText("This page has several feeds").assertIsDisplayed()
+
+            onNodeWithText("Subscribe").assertIsNotEnabled()
+            feedField().performImeAction()
+            waitForIdle()
+            assertEquals(listOf("https://example.com"), resolves)
         }
 
     @Test
@@ -354,6 +388,7 @@ class AddPodcastSheetTest {
     private fun ComposeUiTest.setSheet(
         initialInput: String? = null,
         registry: SaveableStateRegistry = SaveableStateRegistry(null) { true },
+        onResolve: (String) -> Unit = viewModel::resolve,
     ) {
         setContent {
             // collectAsStateWithLifecycle (rule 10) needs a started owner; a bare
@@ -369,7 +404,7 @@ class AddPodcastSheetTest {
                         AddPodcastSheet(
                             initialInput = initialInput,
                             state = state,
-                            onResolve = viewModel::resolve,
+                            onResolve = onResolve,
                             onCredentials = viewModel::resolveWithCredentials,
                             onCancelResolve = viewModel::cancelResolve,
                             onInputChange = viewModel::onInputChanged,

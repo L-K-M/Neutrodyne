@@ -129,6 +129,14 @@ internal fun AddPodcastSheet(
             alreadyId == null &&
             (step.preview.emptyFeed || step.preview.episodeCount > 0)
 
+    // Enter and the bottom button share this rule (08: "Enter runs Subscribe when it is
+    // enabled"): a running lookup may not be re-submitted, and while `Choose` lists
+    // candidates only a candidate row advances — the field's value no longer leads.
+    val submitEnabled =
+        input.isNotBlank() &&
+            step !is AddSheetStep.Resolving &&
+            step !is AddSheetStep.Choosing
+
     // Subscribe's single submit: preview → subscribe, auth fields → credentialed resolve,
     // otherwise resolve the field's input. Enter, the button and a failed state's Retry share it.
     fun submit() {
@@ -180,7 +188,7 @@ internal fun AddPodcastSheet(
             },
             keyboardOptions =
                 KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
-            keyboardActions = KeyboardActions(onGo = { submit() }),
+            keyboardActions = KeyboardActions(onGo = { if (submitEnabled) submit() }),
             singleLine = true,
             modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
         )
@@ -266,7 +274,7 @@ internal fun AddPodcastSheet(
             } else {
                 NdButton(
                     label = stringResource(Res.string.add_subscribe),
-                    enabled = input.isNotBlank() && step !is AddSheetStep.Resolving,
+                    enabled = submitEnabled,
                     onClick = ::submit,
                 )
             }
