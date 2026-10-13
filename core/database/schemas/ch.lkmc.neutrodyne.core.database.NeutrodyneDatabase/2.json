@@ -1,0 +1,2719 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "64db5260314641a1873ea867d0630abe",
+    "entities": [
+      {
+        "tableName": "podcast",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `syncId` TEXT NOT NULL, `sourceType` TEXT NOT NULL, `feedUrl` TEXT NOT NULL, `feedKey` TEXT NOT NULL, `youtubeChannelId` TEXT, `youtubeVariants` INTEGER NOT NULL DEFAULT 1, `channelMetadataAt` INTEGER, `podcastGuid` TEXT, `podcastGuidDerived` INTEGER NOT NULL DEFAULT 0, `title` TEXT NOT NULL, `author` TEXT, `link` TEXT, `language` TEXT, `explicit` INTEGER, `showType` TEXT, `medium` TEXT, `locked` INTEGER, `complete` INTEGER NOT NULL DEFAULT 0, `artworkUrl` TEXT, `artworkKey` TEXT NOT NULL, `bannerUrl` TEXT, `customTitle` TEXT, `includeInAll` INTEGER NOT NULL DEFAULT 1, `episodeOrder` TEXT, `autoDownloadEligibleAfter` INTEGER, `status` TEXT NOT NULL, `initialFetch` INTEGER NOT NULL, `subscribedAt` INTEGER NOT NULL, `latestEpisodeAt` INTEGER, `etag` TEXT, `lastModified` TEXT, `contentSha256` TEXT, `parserVersion` INTEGER NOT NULL DEFAULT 0, `lastParseOk` INTEGER NOT NULL DEFAULT 0, `lastAttemptAt` INTEGER, `lastSuccessAt` INTEGER, `lastFullFetchAt` INTEGER, `nextRefreshAt` INTEGER, `failureCount` INTEGER NOT NULL DEFAULT 0, `lastErrorKind` TEXT, `lastErrorDetail` TEXT, `gone` INTEGER NOT NULL DEFAULT 0, `needsCredentials` INTEGER NOT NULL DEFAULT 0, `ttlMinutes` INTEGER, `updateFrequencyRrule` TEXT, `pendingNewFeedUrl` TEXT, `pagingNextUrl` TEXT, `pagingComplete` INTEGER NOT NULL DEFAULT 0, `hubUrl` TEXT, `usesPodping` INTEGER NOT NULL DEFAULT 0, `credentialId` INTEGER, `descriptionHtml` TEXT, `categoriesJson` TEXT, `guidCoverageSince` INTEGER, FOREIGN KEY(`credentialId`) REFERENCES `credential`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncId",
+            "columnName": "syncId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceType",
+            "columnName": "sourceType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "feedUrl",
+            "columnName": "feedUrl",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "feedKey",
+            "columnName": "feedKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "youtubeChannelId",
+            "columnName": "youtubeChannelId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "youtubeVariants",
+            "columnName": "youtubeVariants",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "channelMetadataAt",
+            "columnName": "channelMetadataAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "podcastGuid",
+            "columnName": "podcastGuid",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "podcastGuidDerived",
+            "columnName": "podcastGuidDerived",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "author",
+            "columnName": "author",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "link",
+            "columnName": "link",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "language",
+            "columnName": "language",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "explicit",
+            "columnName": "explicit",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "showType",
+            "columnName": "showType",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "medium",
+            "columnName": "medium",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "locked",
+            "columnName": "locked",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "complete",
+            "columnName": "complete",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "artworkUrl",
+            "columnName": "artworkUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "artworkKey",
+            "columnName": "artworkKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bannerUrl",
+            "columnName": "bannerUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "customTitle",
+            "columnName": "customTitle",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "includeInAll",
+            "columnName": "includeInAll",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "episodeOrder",
+            "columnName": "episodeOrder",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "autoDownloadEligibleAfter",
+            "columnName": "autoDownloadEligibleAfter",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "initialFetch",
+            "columnName": "initialFetch",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "subscribedAt",
+            "columnName": "subscribedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "latestEpisodeAt",
+            "columnName": "latestEpisodeAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "etag",
+            "columnName": "etag",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastModified",
+            "columnName": "lastModified",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "contentSha256",
+            "columnName": "contentSha256",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "parserVersion",
+            "columnName": "parserVersion",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "lastParseOk",
+            "columnName": "lastParseOk",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "lastAttemptAt",
+            "columnName": "lastAttemptAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastSuccessAt",
+            "columnName": "lastSuccessAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastFullFetchAt",
+            "columnName": "lastFullFetchAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "nextRefreshAt",
+            "columnName": "nextRefreshAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "failureCount",
+            "columnName": "failureCount",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "lastErrorKind",
+            "columnName": "lastErrorKind",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastErrorDetail",
+            "columnName": "lastErrorDetail",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "gone",
+            "columnName": "gone",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "needsCredentials",
+            "columnName": "needsCredentials",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "ttlMinutes",
+            "columnName": "ttlMinutes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "updateFrequencyRrule",
+            "columnName": "updateFrequencyRrule",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "pendingNewFeedUrl",
+            "columnName": "pendingNewFeedUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "pagingNextUrl",
+            "columnName": "pagingNextUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "pagingComplete",
+            "columnName": "pagingComplete",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "hubUrl",
+            "columnName": "hubUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "usesPodping",
+            "columnName": "usesPodping",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "credentialId",
+            "columnName": "credentialId",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "descriptionHtml",
+            "columnName": "descriptionHtml",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "categoriesJson",
+            "columnName": "categoriesJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "guidCoverageSince",
+            "columnName": "guidCoverageSince",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_podcast_feedKey",
+            "unique": true,
+            "columnNames": [
+              "feedKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_podcast_feedKey` ON `${TABLE_NAME}` (`feedKey`)"
+          },
+          {
+            "name": "index_podcast_syncId",
+            "unique": true,
+            "columnNames": [
+              "syncId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_podcast_syncId` ON `${TABLE_NAME}` (`syncId`)"
+          },
+          {
+            "name": "index_podcast_nextRefreshAt",
+            "unique": false,
+            "columnNames": [
+              "nextRefreshAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_podcast_nextRefreshAt` ON `${TABLE_NAME}` (`nextRefreshAt`)"
+          },
+          {
+            "name": "index_podcast_podcastGuid",
+            "unique": false,
+            "columnNames": [
+              "podcastGuid"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_podcast_podcastGuid` ON `${TABLE_NAME}` (`podcastGuid`)"
+          },
+          {
+            "name": "index_podcast_credentialId",
+            "unique": false,
+            "columnNames": [
+              "credentialId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_podcast_credentialId` ON `${TABLE_NAME}` (`credentialId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "credential",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "credentialId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "podcast_url_alias",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`url` TEXT NOT NULL, `podcastId` INTEGER NOT NULL, `reason` TEXT NOT NULL, `addedAt` INTEGER NOT NULL, PRIMARY KEY(`url`), FOREIGN KEY(`podcastId`) REFERENCES `podcast`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "url",
+            "columnName": "url",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "podcastId",
+            "columnName": "podcastId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reason",
+            "columnName": "reason",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "addedAt",
+            "columnName": "addedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "url"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_podcast_url_alias_podcastId",
+            "unique": false,
+            "columnNames": [
+              "podcastId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_podcast_url_alias_podcastId` ON `${TABLE_NAME}` (`podcastId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "podcast",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "podcastId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "credential",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `origin` TEXT NOT NULL, `username` TEXT NOT NULL, `secretCipher` BLOB, `iv` BLOB, `createdAt` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "origin",
+            "columnName": "origin",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "username",
+            "columnName": "username",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "secretCipher",
+            "columnName": "secretCipher",
+            "affinity": "BLOB"
+          },
+          {
+            "fieldPath": "iv",
+            "columnName": "iv",
+            "affinity": "BLOB"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_credential_origin",
+            "unique": false,
+            "columnNames": [
+              "origin"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_credential_origin` ON `${TABLE_NAME}` (`origin`)"
+          }
+        ]
+      },
+      {
+        "tableName": "podcast_settings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`podcastId` INTEGER NOT NULL, `playbackSpeed` REAL, `skipSilence` INTEGER, `boostDb` REAL, `introSkipMs` INTEGER, `outroSkipMs` INTEGER, `autoDownload` INTEGER, `autoDownloadKeepLatest` INTEGER, `autoDownloadNetwork` TEXT, `autoDownloadRequireCharging` INTEGER, `deleteAfterPlayed` TEXT, `includeVideoInAutoDownload` INTEGER, `notifyNewEpisodes` INTEGER, `refreshIntervalMinutes` INTEGER, PRIMARY KEY(`podcastId`), FOREIGN KEY(`podcastId`) REFERENCES `podcast`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "podcastId",
+            "columnName": "podcastId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "o.playbackSpeed",
+            "columnName": "playbackSpeed",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "o.skipSilence",
+            "columnName": "skipSilence",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "o.boostDb",
+            "columnName": "boostDb",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "o.introSkipMs",
+            "columnName": "introSkipMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "o.outroSkipMs",
+            "columnName": "outroSkipMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "o.autoDownload",
+            "columnName": "autoDownload",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "o.autoDownloadKeepLatest",
+            "columnName": "autoDownloadKeepLatest",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "o.autoDownloadNetwork",
+            "columnName": "autoDownloadNetwork",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "o.autoDownloadRequireCharging",
+            "columnName": "autoDownloadRequireCharging",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "o.deleteAfterPlayed",
+            "columnName": "deleteAfterPlayed",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "o.includeVideoInAutoDownload",
+            "columnName": "includeVideoInAutoDownload",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "o.notifyNewEpisodes",
+            "columnName": "notifyNewEpisodes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "o.refreshIntervalMinutes",
+            "columnName": "refreshIntervalMinutes",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "podcastId"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "podcast",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "podcastId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "podcast_group",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `uuid` TEXT NOT NULL, `name` TEXT NOT NULL, `nameKey` TEXT NOT NULL, `orderKey` TEXT NOT NULL, `colorArgb` INTEGER, `iconKey` TEXT, `kind` TEXT NOT NULL DEFAULT 'MANUAL', `feedOrder` TEXT NOT NULL DEFAULT 'NEWEST_FIRST', `playOrder` TEXT NOT NULL DEFAULT 'NEWEST_FIRST', `filterFlags` INTEGER NOT NULL DEFAULT 0, `mediaFilter` TEXT NOT NULL DEFAULT 'ALL', `hideOlderThanDays` INTEGER, `showAsTab` INTEGER NOT NULL DEFAULT 1, `lastViewedAt` INTEGER, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `ruleJson` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uuid",
+            "columnName": "uuid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nameKey",
+            "columnName": "nameKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "orderKey",
+            "columnName": "orderKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "colorArgb",
+            "columnName": "colorArgb",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "iconKey",
+            "columnName": "iconKey",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'MANUAL'"
+          },
+          {
+            "fieldPath": "feedOrder",
+            "columnName": "feedOrder",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'NEWEST_FIRST'"
+          },
+          {
+            "fieldPath": "playOrder",
+            "columnName": "playOrder",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'NEWEST_FIRST'"
+          },
+          {
+            "fieldPath": "filterFlags",
+            "columnName": "filterFlags",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "mediaFilter",
+            "columnName": "mediaFilter",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'ALL'"
+          },
+          {
+            "fieldPath": "hideOlderThanDays",
+            "columnName": "hideOlderThanDays",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "showAsTab",
+            "columnName": "showAsTab",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "lastViewedAt",
+            "columnName": "lastViewedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ruleJson",
+            "columnName": "ruleJson",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_podcast_group_uuid",
+            "unique": true,
+            "columnNames": [
+              "uuid"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_podcast_group_uuid` ON `${TABLE_NAME}` (`uuid`)"
+          },
+          {
+            "name": "index_podcast_group_nameKey",
+            "unique": true,
+            "columnNames": [
+              "nameKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_podcast_group_nameKey` ON `${TABLE_NAME}` (`nameKey`)"
+          },
+          {
+            "name": "index_podcast_group_orderKey",
+            "unique": false,
+            "columnNames": [
+              "orderKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_podcast_group_orderKey` ON `${TABLE_NAME}` (`orderKey`)"
+          }
+        ]
+      },
+      {
+        "tableName": "podcast_group_member",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`groupId` INTEGER NOT NULL, `podcastId` INTEGER NOT NULL, `orderKey` TEXT NOT NULL, `addedAt` INTEGER NOT NULL, `source` TEXT NOT NULL DEFAULT 'MANUAL', PRIMARY KEY(`groupId`, `podcastId`), FOREIGN KEY(`groupId`) REFERENCES `podcast_group`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`podcastId`) REFERENCES `podcast`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE ) WITHOUT ROWID",
+        "fields": [
+          {
+            "fieldPath": "groupId",
+            "columnName": "groupId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "podcastId",
+            "columnName": "podcastId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "orderKey",
+            "columnName": "orderKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "addedAt",
+            "columnName": "addedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'MANUAL'"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "groupId",
+            "podcastId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_podcast_group_member_podcastId_groupId",
+            "unique": false,
+            "columnNames": [
+              "podcastId",
+              "groupId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_podcast_group_member_podcastId_groupId` ON `${TABLE_NAME}` (`podcastId`, `groupId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "podcast_group",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "groupId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "podcast",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "podcastId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ],
+        "withoutRowId": true
+      },
+      {
+        "tableName": "podcast_group_settings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`groupId` INTEGER NOT NULL, `playbackSpeed` REAL, `skipSilence` INTEGER, `boostDb` REAL, `introSkipMs` INTEGER, `outroSkipMs` INTEGER, `autoDownload` INTEGER, `autoDownloadKeepLatest` INTEGER, `autoDownloadNetwork` TEXT, `autoDownloadRequireCharging` INTEGER, `deleteAfterPlayed` TEXT, `includeVideoInAutoDownload` INTEGER, `notifyNewEpisodes` INTEGER, `refreshIntervalMinutes` INTEGER, PRIMARY KEY(`groupId`), FOREIGN KEY(`groupId`) REFERENCES `podcast_group`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "groupId",
+            "columnName": "groupId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "o.playbackSpeed",
+            "columnName": "playbackSpeed",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "o.skipSilence",
+            "columnName": "skipSilence",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "o.boostDb",
+            "columnName": "boostDb",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "o.introSkipMs",
+            "columnName": "introSkipMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "o.outroSkipMs",
+            "columnName": "outroSkipMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "o.autoDownload",
+            "columnName": "autoDownload",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "o.autoDownloadKeepLatest",
+            "columnName": "autoDownloadKeepLatest",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "o.autoDownloadNetwork",
+            "columnName": "autoDownloadNetwork",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "o.autoDownloadRequireCharging",
+            "columnName": "autoDownloadRequireCharging",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "o.deleteAfterPlayed",
+            "columnName": "deleteAfterPlayed",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "o.includeVideoInAutoDownload",
+            "columnName": "includeVideoInAutoDownload",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "o.notifyNewEpisodes",
+            "columnName": "notifyNewEpisodes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "o.refreshIntervalMinutes",
+            "columnName": "refreshIntervalMinutes",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "groupId"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "podcast_group",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "groupId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "episode",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `podcastId` INTEGER NOT NULL, `identityKey` TEXT NOT NULL, `guid` TEXT, `title` TEXT NOT NULL, `pubDate` INTEGER, `rawPubDate` TEXT, `sortDate` INTEGER NOT NULL, `feedOrder` INTEGER NOT NULL, `firstSeenAt` INTEGER NOT NULL, `lastSeenAt` INTEGER NOT NULL, `inFeed` INTEGER NOT NULL DEFAULT 1, `isNew` INTEGER NOT NULL DEFAULT 0, `enclosureUrl` TEXT, `enclosureType` TEXT, `enclosureLength` INTEGER, `externalMediaId` TEXT, `isVideo` INTEGER NOT NULL DEFAULT 0, `durationMs` INTEGER, `season` INTEGER, `seasonName` TEXT, `episodeNumber` TEXT, `episodeDisplay` TEXT, `episodeType` TEXT, `explicit` INTEGER, `imageUrl` TEXT, `artworkKey` TEXT, `link` TEXT, `chaptersUrl` TEXT, `chaptersType` TEXT, `contentHash` INTEGER NOT NULL, `availability` TEXT NOT NULL DEFAULT 'AVAILABLE', `isShort` INTEGER NOT NULL DEFAULT 0, `snippet` TEXT, FOREIGN KEY(`podcastId`) REFERENCES `podcast`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "podcastId",
+            "columnName": "podcastId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "identityKey",
+            "columnName": "identityKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "guid",
+            "columnName": "guid",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pubDate",
+            "columnName": "pubDate",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "rawPubDate",
+            "columnName": "rawPubDate",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sortDate",
+            "columnName": "sortDate",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "feedOrder",
+            "columnName": "feedOrder",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "firstSeenAt",
+            "columnName": "firstSeenAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSeenAt",
+            "columnName": "lastSeenAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "inFeed",
+            "columnName": "inFeed",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "isNew",
+            "columnName": "isNew",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "enclosureUrl",
+            "columnName": "enclosureUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "enclosureType",
+            "columnName": "enclosureType",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "enclosureLength",
+            "columnName": "enclosureLength",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "externalMediaId",
+            "columnName": "externalMediaId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isVideo",
+            "columnName": "isVideo",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "durationMs",
+            "columnName": "durationMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "season",
+            "columnName": "season",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "seasonName",
+            "columnName": "seasonName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "episodeNumber",
+            "columnName": "episodeNumber",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "episodeDisplay",
+            "columnName": "episodeDisplay",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "episodeType",
+            "columnName": "episodeType",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "explicit",
+            "columnName": "explicit",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "imageUrl",
+            "columnName": "imageUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "artworkKey",
+            "columnName": "artworkKey",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "link",
+            "columnName": "link",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "chaptersUrl",
+            "columnName": "chaptersUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "chaptersType",
+            "columnName": "chaptersType",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "contentHash",
+            "columnName": "contentHash",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "availability",
+            "columnName": "availability",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'AVAILABLE'"
+          },
+          {
+            "fieldPath": "isShort",
+            "columnName": "isShort",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "snippet",
+            "columnName": "snippet",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_episode_podcastId_identityKey",
+            "unique": true,
+            "columnNames": [
+              "podcastId",
+              "identityKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_episode_podcastId_identityKey` ON `${TABLE_NAME}` (`podcastId`, `identityKey`)"
+          },
+          {
+            "name": "index_episode_podcastId_sortDate",
+            "unique": false,
+            "columnNames": [
+              "podcastId",
+              "sortDate"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_episode_podcastId_sortDate` ON `${TABLE_NAME}` (`podcastId`, `sortDate`)"
+          },
+          {
+            "name": "index_episode_sortDate",
+            "unique": false,
+            "columnNames": [
+              "sortDate"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_episode_sortDate` ON `${TABLE_NAME}` (`sortDate`)"
+          },
+          {
+            "name": "index_episode_firstSeenAt",
+            "unique": false,
+            "columnNames": [
+              "firstSeenAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_episode_firstSeenAt` ON `${TABLE_NAME}` (`firstSeenAt`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "podcast",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "podcastId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "episode_description",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`episodeId` INTEGER NOT NULL, `html` BLOB NOT NULL, PRIMARY KEY(`episodeId`), FOREIGN KEY(`episodeId`) REFERENCES `episode`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "episodeId",
+            "columnName": "episodeId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "html",
+            "columnName": "html",
+            "affinity": "BLOB",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "episodeId"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "episode",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "episodeId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "episode_transcript",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`episodeId` INTEGER NOT NULL, `url` TEXT NOT NULL, `type` TEXT NOT NULL, `language` TEXT, `rel` TEXT, PRIMARY KEY(`episodeId`, `url`), FOREIGN KEY(`episodeId`) REFERENCES `episode`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "episodeId",
+            "columnName": "episodeId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "url",
+            "columnName": "url",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "language",
+            "columnName": "language",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "rel",
+            "columnName": "rel",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "episodeId",
+            "url"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "episode",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "episodeId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "episode_alt_enclosure",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`episodeId` INTEGER NOT NULL, `ordinal` INTEGER NOT NULL, `type` TEXT NOT NULL, `length` INTEGER, `bitrate` INTEGER, `height` INTEGER, `lang` TEXT, `title` TEXT, `rel` TEXT, `codecs` TEXT, `isDefault` INTEGER NOT NULL DEFAULT 0, `integrityType` TEXT, `integrityValue` TEXT, `sourcesJson` TEXT NOT NULL, PRIMARY KEY(`episodeId`, `ordinal`), FOREIGN KEY(`episodeId`) REFERENCES `episode`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "episodeId",
+            "columnName": "episodeId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ordinal",
+            "columnName": "ordinal",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "length",
+            "columnName": "length",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "bitrate",
+            "columnName": "bitrate",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "height",
+            "columnName": "height",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lang",
+            "columnName": "lang",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "rel",
+            "columnName": "rel",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "codecs",
+            "columnName": "codecs",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isDefault",
+            "columnName": "isDefault",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "integrityType",
+            "columnName": "integrityType",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "integrityValue",
+            "columnName": "integrityValue",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sourcesJson",
+            "columnName": "sourcesJson",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "episodeId",
+            "ordinal"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "episode",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "episodeId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "person",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `ownerType` TEXT NOT NULL, `ownerId` INTEGER NOT NULL, `name` TEXT NOT NULL, `role` TEXT NOT NULL DEFAULT 'host', `grp` TEXT NOT NULL DEFAULT 'cast', `imageUrl` TEXT, `href` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerType",
+            "columnName": "ownerType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerId",
+            "columnName": "ownerId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "role",
+            "columnName": "role",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'host'"
+          },
+          {
+            "fieldPath": "grp",
+            "columnName": "grp",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'cast'"
+          },
+          {
+            "fieldPath": "imageUrl",
+            "columnName": "imageUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "href",
+            "columnName": "href",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_person_ownerType_ownerId",
+            "unique": false,
+            "columnNames": [
+              "ownerType",
+              "ownerId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_person_ownerType_ownerId` ON `${TABLE_NAME}` (`ownerType`, `ownerId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "funding",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `ownerType` TEXT NOT NULL, `ownerId` INTEGER NOT NULL, `url` TEXT NOT NULL, `label` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerType",
+            "columnName": "ownerType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerId",
+            "columnName": "ownerId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "url",
+            "columnName": "url",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "label",
+            "columnName": "label",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_funding_ownerType_ownerId",
+            "unique": false,
+            "columnNames": [
+              "ownerType",
+              "ownerId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_funding_ownerType_ownerId` ON `${TABLE_NAME}` (`ownerType`, `ownerId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "chapter",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`episodeId` INTEGER NOT NULL, `source` TEXT NOT NULL, `ordinal` INTEGER NOT NULL, `startMs` INTEGER NOT NULL, `endMs` INTEGER, `title` TEXT, `imageUrl` TEXT, `linkUrl` TEXT, `hidden` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`episodeId`, `source`, `ordinal`), FOREIGN KEY(`episodeId`) REFERENCES `episode`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "episodeId",
+            "columnName": "episodeId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ordinal",
+            "columnName": "ordinal",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startMs",
+            "columnName": "startMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endMs",
+            "columnName": "endMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "imageUrl",
+            "columnName": "imageUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "linkUrl",
+            "columnName": "linkUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "hidden",
+            "columnName": "hidden",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "episodeId",
+            "source",
+            "ordinal"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "episode",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "episodeId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "episode_state",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`episodeId` INTEGER NOT NULL, `startedAt` INTEGER, `playedAt` INTEGER, `playCount` INTEGER NOT NULL DEFAULT 0, `lastPlayedAt` INTEGER, `isFavorite` INTEGER NOT NULL DEFAULT 0, `downloadDismissedAt` INTEGER, `measuredDurationMs` INTEGER, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`episodeId`), FOREIGN KEY(`episodeId`) REFERENCES `episode`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "episodeId",
+            "columnName": "episodeId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAt",
+            "columnName": "startedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "playedAt",
+            "columnName": "playedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "playCount",
+            "columnName": "playCount",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "lastPlayedAt",
+            "columnName": "lastPlayedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "isFavorite",
+            "columnName": "isFavorite",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "downloadDismissedAt",
+            "columnName": "downloadDismissedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "measuredDurationMs",
+            "columnName": "measuredDurationMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "episodeId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_episode_state_playedAt",
+            "unique": false,
+            "columnNames": [
+              "playedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_episode_state_playedAt` ON `${TABLE_NAME}` (`playedAt`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "episode",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "episodeId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "episode_guid_provenance",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`podcastId` INTEGER NOT NULL, `guid` TEXT NOT NULL, `knowledge` TEXT NOT NULL, PRIMARY KEY(`podcastId`, `guid`), FOREIGN KEY(`podcastId`) REFERENCES `podcast`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "podcastId",
+            "columnName": "podcastId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "guid",
+            "columnName": "guid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "knowledge",
+            "columnName": "knowledge",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "podcastId",
+            "guid"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "podcast",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "podcastId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "episode_position",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`episodeId` INTEGER NOT NULL, `positionMs` INTEGER NOT NULL, `durationMs` INTEGER, `positionSource` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`episodeId`), FOREIGN KEY(`episodeId`) REFERENCES `episode`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "episodeId",
+            "columnName": "episodeId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "positionMs",
+            "columnName": "positionMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "durationMs",
+            "columnName": "durationMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "positionSource",
+            "columnName": "positionSource",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "episodeId"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "episode",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "episodeId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "queue_entry",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `episodeId` INTEGER NOT NULL, `orderKey` TEXT NOT NULL, `addedAt` INTEGER NOT NULL, FOREIGN KEY(`episodeId`) REFERENCES `episode`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "episodeId",
+            "columnName": "episodeId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "orderKey",
+            "columnName": "orderKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "addedAt",
+            "columnName": "addedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_queue_entry_episodeId",
+            "unique": true,
+            "columnNames": [
+              "episodeId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_queue_entry_episodeId` ON `${TABLE_NAME}` (`episodeId`)"
+          },
+          {
+            "name": "index_queue_entry_orderKey",
+            "unique": false,
+            "columnNames": [
+              "orderKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_queue_entry_orderKey` ON `${TABLE_NAME}` (`orderKey`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "episode",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "episodeId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "play_session",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `currentEpisodeId` INTEGER, `contextType` TEXT, `contextId` INTEGER, `contextOrder` TEXT NOT NULL DEFAULT 'NEWEST_FIRST', `contextFilterFlags` INTEGER NOT NULL DEFAULT 0, `contextMediaFilter` TEXT NOT NULL DEFAULT 'ALL', `contextMinSortDate` INTEGER, `contextAnchorEpisodeId` INTEGER, `contextAnchorSortDate` INTEGER, `generation` INTEGER NOT NULL DEFAULT 0, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`currentEpisodeId`) REFERENCES `episode`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "currentEpisodeId",
+            "columnName": "currentEpisodeId",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "contextType",
+            "columnName": "contextType",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "contextId",
+            "columnName": "contextId",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "contextOrder",
+            "columnName": "contextOrder",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'NEWEST_FIRST'"
+          },
+          {
+            "fieldPath": "contextFilterFlags",
+            "columnName": "contextFilterFlags",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "contextMediaFilter",
+            "columnName": "contextMediaFilter",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'ALL'"
+          },
+          {
+            "fieldPath": "contextMinSortDate",
+            "columnName": "contextMinSortDate",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "contextAnchorEpisodeId",
+            "columnName": "contextAnchorEpisodeId",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "contextAnchorSortDate",
+            "columnName": "contextAnchorSortDate",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "generation",
+            "columnName": "generation",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_play_session_currentEpisodeId",
+            "unique": false,
+            "columnNames": [
+              "currentEpisodeId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_play_session_currentEpisodeId` ON `${TABLE_NAME}` (`currentEpisodeId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "episode",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "currentEpisodeId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "download",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`episodeId` INTEGER NOT NULL, `lane` TEXT NOT NULL, `state` TEXT NOT NULL, `waitReason` TEXT NOT NULL DEFAULT 'NONE', `priority` INTEGER NOT NULL, `requestedAt` INTEGER NOT NULL, `sourceKind` TEXT NOT NULL, `sourceRef` TEXT NOT NULL, `formatPref` TEXT, `resolvedItag` INTEGER, `rootId` TEXT NOT NULL, `tempPath` TEXT, `relativePath` TEXT, `finalUri` TEXT, `totalBytes` INTEGER, `downloadedBytes` INTEGER NOT NULL DEFAULT 0, `estimatedBytes` INTEGER, `etag` TEXT, `lastModified` TEXT, `mimeType` TEXT, `allowMetered` INTEGER NOT NULL, `requireCharging` INTEGER NOT NULL DEFAULT 0, `attempt` INTEGER NOT NULL DEFAULT 0, `integrityFailures` INTEGER NOT NULL DEFAULT 0, `nextAttemptAt` INTEGER, `lastError` TEXT, `lastHttpStatus` INTEGER, `lastStopReason` INTEGER, `completedAt` INTEGER, `runnerToken` TEXT, PRIMARY KEY(`episodeId`), FOREIGN KEY(`episodeId`) REFERENCES `episode`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "episodeId",
+            "columnName": "episodeId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lane",
+            "columnName": "lane",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "waitReason",
+            "columnName": "waitReason",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'NONE'"
+          },
+          {
+            "fieldPath": "priority",
+            "columnName": "priority",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "requestedAt",
+            "columnName": "requestedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceKind",
+            "columnName": "sourceKind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceRef",
+            "columnName": "sourceRef",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "formatPref",
+            "columnName": "formatPref",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "resolvedItag",
+            "columnName": "resolvedItag",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "rootId",
+            "columnName": "rootId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tempPath",
+            "columnName": "tempPath",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "relativePath",
+            "columnName": "relativePath",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "finalUri",
+            "columnName": "finalUri",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "totalBytes",
+            "columnName": "totalBytes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "downloadedBytes",
+            "columnName": "downloadedBytes",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "estimatedBytes",
+            "columnName": "estimatedBytes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "etag",
+            "columnName": "etag",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastModified",
+            "columnName": "lastModified",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "mimeType",
+            "columnName": "mimeType",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "allowMetered",
+            "columnName": "allowMetered",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "requireCharging",
+            "columnName": "requireCharging",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "attempt",
+            "columnName": "attempt",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "integrityFailures",
+            "columnName": "integrityFailures",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "nextAttemptAt",
+            "columnName": "nextAttemptAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastError",
+            "columnName": "lastError",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastHttpStatus",
+            "columnName": "lastHttpStatus",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastStopReason",
+            "columnName": "lastStopReason",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "completedAt",
+            "columnName": "completedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "runnerToken",
+            "columnName": "runnerToken",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "episodeId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_download_state_lane_priority_requestedAt",
+            "unique": false,
+            "columnNames": [
+              "state",
+              "lane",
+              "priority",
+              "requestedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_download_state_lane_priority_requestedAt` ON `${TABLE_NAME}` (`state`, `lane`, `priority`, `requestedAt`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "episode",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "episodeId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "artwork",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`key` TEXT NOT NULL, `url` TEXT, `localPath` TEXT, `width` INTEGER, `height` INTEGER, `seedArgb` INTEGER, `avgArgb` INTEGER, `version` INTEGER NOT NULL DEFAULT 0, `fetchedAt` INTEGER, `pinCount` INTEGER NOT NULL DEFAULT 0, `lastError` TEXT, PRIMARY KEY(`key`))",
+        "fields": [
+          {
+            "fieldPath": "key",
+            "columnName": "key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "url",
+            "columnName": "url",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "localPath",
+            "columnName": "localPath",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "width",
+            "columnName": "width",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "height",
+            "columnName": "height",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "seedArgb",
+            "columnName": "seedArgb",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "avgArgb",
+            "columnName": "avgArgb",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "version",
+            "columnName": "version",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "fetchedAt",
+            "columnName": "fetchedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "pinCount",
+            "columnName": "pinCount",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "lastError",
+            "columnName": "lastError",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "key"
+          ]
+        }
+      },
+      {
+        "tableName": "import_session",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `createdAt` INTEGER NOT NULL, `finishedAt` INTEGER, `sourceName` TEXT, `sourceFormat` TEXT NOT NULL, `state` TEXT NOT NULL, `recoveredBySalvage` INTEGER NOT NULL DEFAULT 0, `payloadPath` TEXT, `optionsJson` TEXT, `warningsJson` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "finishedAt",
+            "columnName": "finishedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "sourceName",
+            "columnName": "sourceName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sourceFormat",
+            "columnName": "sourceFormat",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recoveredBySalvage",
+            "columnName": "recoveredBySalvage",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "payloadPath",
+            "columnName": "payloadPath",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "optionsJson",
+            "columnName": "optionsJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "warningsJson",
+            "columnName": "warningsJson",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "import_item",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`sessionId` INTEGER NOT NULL, `ordinal` INTEGER NOT NULL, `title` TEXT, `originalUrl` TEXT NOT NULL, `normalizedUrl` TEXT, `kind` TEXT NOT NULL, `groupNamesJson` TEXT NOT NULL, `selected` INTEGER NOT NULL, `status` TEXT NOT NULL, `podcastId` INTEGER, `errorDetail` TEXT, PRIMARY KEY(`sessionId`, `ordinal`), FOREIGN KEY(`sessionId`) REFERENCES `import_session`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`podcastId`) REFERENCES `podcast`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "fields": [
+          {
+            "fieldPath": "sessionId",
+            "columnName": "sessionId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ordinal",
+            "columnName": "ordinal",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "originalUrl",
+            "columnName": "originalUrl",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "normalizedUrl",
+            "columnName": "normalizedUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupNamesJson",
+            "columnName": "groupNamesJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "selected",
+            "columnName": "selected",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "podcastId",
+            "columnName": "podcastId",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "errorDetail",
+            "columnName": "errorDetail",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "sessionId",
+            "ordinal"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_import_item_sessionId_status",
+            "unique": false,
+            "columnNames": [
+              "sessionId",
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_import_item_sessionId_status` ON `${TABLE_NAME}` (`sessionId`, `status`)"
+          },
+          {
+            "name": "index_import_item_podcastId",
+            "unique": false,
+            "columnNames": [
+              "podcastId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_import_item_podcastId` ON `${TABLE_NAME}` (`podcastId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "import_session",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "sessionId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "podcast",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "podcastId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "sync_state",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `enabled` INTEGER NOT NULL DEFAULT 0, `applying` INTEGER NOT NULL DEFAULT 0, `serverUrl` TEXT, `accountId` TEXT, `deviceId` TEXT, `cursor` TEXT, `hlc` INTEGER NOT NULL DEFAULT 0, `nodeId` TEXT, `clockOffsetMs` INTEGER NOT NULL DEFAULT 0, `protocol` INTEGER, `linkedAt` INTEGER, `lastSyncAt` INTEGER, `lastError` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "enabled",
+            "columnName": "enabled",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "applying",
+            "columnName": "applying",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "serverUrl",
+            "columnName": "serverUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "accountId",
+            "columnName": "accountId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "deviceId",
+            "columnName": "deviceId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "cursor",
+            "columnName": "cursor",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "hlc",
+            "columnName": "hlc",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "nodeId",
+            "columnName": "nodeId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "clockOffsetMs",
+            "columnName": "clockOffsetMs",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "protocol",
+            "columnName": "protocol",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "linkedAt",
+            "columnName": "linkedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastSyncAt",
+            "columnName": "lastSyncAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastError",
+            "columnName": "lastError",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "sync_outbox",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`coll` TEXT NOT NULL, `rid` TEXT NOT NULL, `field` TEXT NOT NULL, `hlc` INTEGER NOT NULL, `nodeId` TEXT NOT NULL, `captureKind` TEXT NOT NULL DEFAULT 'LOCAL', `value` TEXT, PRIMARY KEY(`coll`, `rid`, `field`)) WITHOUT ROWID",
+        "fields": [
+          {
+            "fieldPath": "coll",
+            "columnName": "coll",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rid",
+            "columnName": "rid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "field",
+            "columnName": "field",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hlc",
+            "columnName": "hlc",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nodeId",
+            "columnName": "nodeId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "captureKind",
+            "columnName": "captureKind",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'LOCAL'"
+          },
+          {
+            "fieldPath": "value",
+            "columnName": "value",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "coll",
+            "rid",
+            "field"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sync_outbox_hlc_nodeId",
+            "unique": false,
+            "columnNames": [
+              "hlc",
+              "nodeId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_outbox_hlc_nodeId` ON `${TABLE_NAME}` (`hlc`, `nodeId`)"
+          }
+        ],
+        "withoutRowId": true
+      },
+      {
+        "tableName": "sync_clock",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`coll` TEXT NOT NULL, `rid` TEXT NOT NULL, `clocks` TEXT NOT NULL, PRIMARY KEY(`coll`, `rid`)) WITHOUT ROWID",
+        "fields": [
+          {
+            "fieldPath": "coll",
+            "columnName": "coll",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rid",
+            "columnName": "rid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "clocks",
+            "columnName": "clocks",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "coll",
+            "rid"
+          ]
+        },
+        "withoutRowId": true
+      },
+      {
+        "tableName": "sync_parked",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `podcastSyncId` TEXT NOT NULL, `identityKey` TEXT NOT NULL, `guid` TEXT, `enclosureKey` TEXT, `record` TEXT NOT NULL, `receivedAt` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "podcastSyncId",
+            "columnName": "podcastSyncId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "identityKey",
+            "columnName": "identityKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "guid",
+            "columnName": "guid",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "enclosureKey",
+            "columnName": "enclosureKey",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "record",
+            "columnName": "record",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "receivedAt",
+            "columnName": "receivedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sync_parked_podcastSyncId",
+            "unique": false,
+            "columnNames": [
+              "podcastSyncId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_parked_podcastSyncId` ON `${TABLE_NAME}` (`podcastSyncId`)"
+          },
+          {
+            "name": "index_sync_parked_guid",
+            "unique": false,
+            "columnNames": [
+              "guid"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_parked_guid` ON `${TABLE_NAME}` (`guid`)"
+          },
+          {
+            "name": "index_sync_parked_enclosureKey",
+            "unique": false,
+            "columnNames": [
+              "enclosureKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_parked_enclosureKey` ON `${TABLE_NAME}` (`enclosureKey`)"
+          }
+        ]
+      },
+      {
+        "tableName": "sync_held",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `batch` TEXT NOT NULL, `summary` TEXT NOT NULL, `heldAt` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "batch",
+            "columnName": "batch",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "summary",
+            "columnName": "summary",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "heldAt",
+            "columnName": "heldAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '64db5260314641a1873ea867d0630abe')"
+    ]
+  }
+}
