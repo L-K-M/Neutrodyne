@@ -106,7 +106,8 @@ public fun EpisodeRow(
     val dimmed =
         (caps.offline && downloadState != DownloadState.COMPLETED) ||
             row.availability != Availability.AVAILABLE
-    val summary = EpisodeRowSummary.describe(row, live, nowMs, caps).asString()
+    val summary =
+        EpisodeRowSummary.describe(row, live, nowMs, LocalPlatformKind.current, caps).asString()
     val stateDesc = rowStateDescription(row, live)
     var menuOpen by remember { mutableStateOf(false) }
     val interactionSource = remember { MutableInteractionSource() }
