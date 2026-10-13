@@ -637,7 +637,7 @@ object EpisodeDescriptionCodec {             // the only way to read or write `h
 
 `decode` never throws only on the unknown-header UTF-8 fallback (corrupt or pre-codec blobs decode as themselves). The codec-owned `0x00`/`0x01` forms fail with `IllegalStateException` on a corrupt or truncated deflate body or on decoded output past the producer bound — every supported producer is capped at 03's `ParseLimits.maxTextChars` (512 Ki chars per element), so legitimate decoded output is at most 2 MiB of UTF-8; anything past it is a corruption signal, not show notes. `encode` enforces the same bound on its input (`IllegalArgumentException`), so a custom `ParseLimits` raised past the codec bound fails before persistence instead of writing an unreadable blob — a successful encode always round-trips.
 
-The column holds raw HTML from the feed (or plain text for YouTube and Atom); sanitising happens at display time ([D27](../PLAN.md#3-key-decisions), [03 Show notes](03-feeds-and-discovery.md#show-notes)). Compression shrinks the largest table to roughly a third (see [Expected size](#expected-size)); encoding runs on `Default` before the ingest transaction.
+The column holds raw HTML from the feed (or plain text for YouTube and Atom); sanitising happens at display time ([D27](../PLAN.md#3-key-decisions), [03 Show notes](03-feeds-and-discovery.md#show-notes)). Compression shrinks the largest table to roughly a third (see [Expected size](#expected-size)). Encoding runs in the ingest's prepare step — off the write transaction for a refresh ingest, inside it for subscribe's single-transaction path, where an encode rejection aborts the whole subscribe: no podcast, alias, membership or episode row survives it (03 Subscribe transaction; covered by `SubscribeFlowTest`'s over-bound rollback and exact-bound commit cases).
 
 ### episode_transcript
 
@@ -871,7 +871,7 @@ Serves R7.1, R7.3, R7.4, N1, N6 ([D93](../PLAN.md#3-key-decisions)). Delivered i
 
 | Rule | Detail |
 |---|---|
-| Inert without a server | With no configured server, only the `sync_state` singleton exists; `enabled = 0` makes every capture trigger inert. After a valid link token, explicit first-link metadata writes may run while capture stays disabled ([R7.1](../PLAN.md#21-functional-requirements); `SyncInertTest`, M1 acceptance 11, MS0 acceptance 3) |
+| Inert without a server | With no configured server, only the `sync_state` singleton exists; `enabled = 0` makes every capture trigger inert. After a valid link token, explicit first-link metadata writes may run while capture stays disabled ([R7.1](../PLAN.md#21-functional-requirements); `SyncInertTest`, M1 acceptance 11, MS0 acceptance 3; M1a 2026-10-07: `SyncInertTest` covers the schema leg and the subscribe leg of M1 acceptance 11 runs as `:core:data`'s `SubscribeFlowTest`) |
 | Keys | Records are addressed by their canonical `rid` text, never by local row IDs, so outbox rows survive local re-keys of row IDs and a restore on another device has nothing to translate ([10 Record IDs](10-sync.md#record-ids)) |
 | No foreign keys | `rid` and `podcastSyncId` are text references that may point at records this device does not have; the deletion paths below keep the tables tidy instead |
 | Never travel | Not in backups (the database is never backed up; [D34](../PLAN.md#3-key-decisions)), not in the diagnostics export (`DiagExportScrub` empties them, [db-maintenance worker](#db-maintenance-worker)), not synced themselves |
