@@ -2,7 +2,13 @@
 
 package ch.lkmc.neutrodyne.feature.feeds
 
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
+import androidx.compose.runtime.saveable.SaveableStateRegistry
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
@@ -52,6 +58,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * The All feed driven through `runComposeUiTest` on the desktop JVM (09): the onboarding empty
@@ -80,13 +87,25 @@ class FeedsScreenTest {
     }
 
     @Test
-    fun emptyLibraryShowsOnboarding() =
+    fun emptyLibraryOffersSearchBeforeAddByUrl() =
         runComposeUiTest {
-            var added = false
-            setFeeds(state = FeedsUiState(hasSubscriptions = false), onAddPodcast = { added = true })
+            var searches = 0
+            var additions = 0
+            setFeeds(
+                state = FeedsUiState(hasSubscriptions = false),
+                onSearch = { searches++ },
+                onAddPodcast = { additions++ },
+            )
             onNodeWithText("Your feeds live here").assertIsDisplayed()
-            onNodeWithText("Add a podcast").performClick()
-            assertEquals(true, added)
+            val search = onNodeWithText("Search podcasts").assertIsDisplayed()
+            val add = onNodeWithText("Add by URL or YouTube link").assertIsDisplayed()
+            assertTrue(search.fetchSemanticsNode().boundsInRoot.top < add.fetchSemanticsNode().boundsInRoot.top)
+            search.performClick()
+            assertEquals(1, searches)
+            assertEquals(0, additions)
+            add.performClick()
+            assertEquals(1, additions)
+            assertEquals(1, searches)
         }
 
     @Test
@@ -192,6 +211,40 @@ class FeedsScreenTest {
         }
 
     @Test
+    fun markAllConfirmationSurvivesSaveAndRestore() =
+        runComposeUiTest {
+            var confirmations = 0
+            var registry by mutableStateOf<SaveableStateRegistry?>(SaveableStateRegistry(null) { true })
+            var saved: Map<String, List<Any?>> = emptyMap()
+            setFeeds(
+                state = FeedsUiState(hasSubscriptions = true),
+                rows = listOf(testEpisodeRow(1)),
+                onMarkAllPlayed = { confirmations++ },
+                wrapScreen = { screen ->
+                    registry?.let {
+                        CompositionLocalProvider(LocalSaveableStateRegistry provides it) { screen() }
+                    }
+                },
+            )
+            onNodeWithContentDescription("More actions").performClick()
+            onNodeWithText("Mark all as played…").performClick()
+            onNodeWithText("Cancel").assertIsDisplayed()
+            runOnIdle {
+                saved = registry!!.performSave()
+                registry = null
+            }
+            waitForIdle()
+            runOnIdle { registry = SaveableStateRegistry(saved) { true } }
+            waitForIdle()
+
+            onNodeWithText("Cancel").assertIsDisplayed()
+            assertEquals(0, confirmations)
+            onAllNodes(hasClickAction() and hasText("Mark all as played…")).onFirst().performClick()
+            assertEquals(1, confirmations)
+            onNodeWithText("Cancel").assertDoesNotExist()
+        }
+
+    @Test
     fun desktopRefreshButtonCallsOnRefresh() =
         runComposeUiTest {
             var refreshes = 0
@@ -245,6 +298,7 @@ class FeedsScreenTest {
         onMarkAllPlayed: () -> Unit = {},
         onAddPodcast: () -> Unit = {},
         onSearch: () -> Unit = {},
+        wrapScreen: @Composable (@Composable () -> Unit) -> Unit = { it() },
     ): LazyPagingItems<FeedItem> {
         lateinit var pagingItems: androidx.paging.compose.LazyPagingItems<FeedItem>
         val feed: Flow<PagingData<FeedItem>> =
@@ -260,16 +314,19 @@ class FeedsScreenTest {
                 LocalPlatformActions provides TestPlatformActions,
             ) {
                 NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
-                    FeedsScreen(
-                        state = state,
-                        items = feed.collectAsLazyPagingItems().also { pagingItems = it },
-                        onRefresh = onRefresh,
-                        onFiltersChange = onFiltersChange,
-                        onAction = onAction,
-                        onMarkAllPlayedClick = onMarkAllPlayed,
-                        onAddPodcast = onAddPodcast,
-                        onSearch = onSearch,
-                    )
+                    val items = feed.collectAsLazyPagingItems().also { pagingItems = it }
+                    wrapScreen {
+                        FeedsScreen(
+                            state = state,
+                            items = items,
+                            onRefresh = onRefresh,
+                            onFiltersChange = onFiltersChange,
+                            onAction = onAction,
+                            onMarkAllPlayedClick = onMarkAllPlayed,
+                            onAddPodcast = onAddPodcast,
+                            onSearch = onSearch,
+                        )
+                    }
                 }
             }
         }

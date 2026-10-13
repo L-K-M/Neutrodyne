@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,7 +60,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_more
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry
-import ch.lkmc.neutrodyne.core.ui.resources.add_title
+import ch.lkmc.neutrodyne.core.ui.resources.feeds_add_url
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_caught_up
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_empty_body
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_load_error
@@ -98,7 +99,7 @@ internal fun FeedsScreen(
     onSearch: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var confirmMarkAll by remember { mutableStateOf(false) }
+    var confirmMarkAll by rememberSaveable { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize()) {
         NdTopAppBar(
@@ -122,10 +123,10 @@ internal fun FeedsScreen(
                     icon = NdIcons.DynamicFeed,
                     title = stringResource(Res.string.feeds_onboarding_title),
                     body = stringResource(Res.string.feeds_empty_body),
-                    actionLabel = stringResource(Res.string.add_title),
-                    onAction = onAddPodcast,
-                    secondaryLabel = stringResource(Res.string.feeds_search),
-                    onSecondary = onSearch,
+                    actionLabel = stringResource(Res.string.feeds_search),
+                    onAction = onSearch,
+                    secondaryLabel = stringResource(Res.string.feeds_add_url),
+                    onSecondary = onAddPodcast,
                 )
             } else {
                 FeedList(
