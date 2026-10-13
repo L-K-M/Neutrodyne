@@ -272,6 +272,7 @@
     <string name="podcast_enter_password">Enter password</string>
     <string name="podcast_gone">This feed no longer exists</string>
     <string name="podcast_maybe_moved">This feed hasn&apos;t updated since %1$s — it may have moved</string>
+    <string name="podcast_maybe_moved_never">This feed hasn&apos;t updated since you added it — it may have moved</string>
     <string name="podcast_load_older">Load older episodes</string>
     <string name="podcast_mark_played">Mark all as played</string>
     <string name="podcast_copy_feed">Copy feed address</string>

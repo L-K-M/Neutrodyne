@@ -211,6 +211,31 @@ class PodcastScreenTest {
         }
 
     @Test
+    fun possiblyDeadWithoutSuccessShowsDatelessCopy() =
+        runComposeUiTest {
+            // A feed that never fetched successfully has no `lastSuccessAt` to format —
+            // the banner falls back to the date-less copy, not a dangling "since  —".
+            setPodcast(
+                PodcastUiState(
+                    detail =
+                        testPodcastDetail(
+                            7,
+                            health =
+                                testFeedHealth(
+                                    failureCount = 12,
+                                    lastSuccessAt = null,
+                                    possiblyDead = true,
+                                ),
+                        ),
+                    loaded = true,
+                ),
+            )
+            onNodeWithText(
+                "This feed hasn't updated since you added it — it may have moved",
+            ).assertIsDisplayed()
+        }
+
+    @Test
     fun loadOlderCallsBack() =
         runComposeUiTest {
             var older = 0

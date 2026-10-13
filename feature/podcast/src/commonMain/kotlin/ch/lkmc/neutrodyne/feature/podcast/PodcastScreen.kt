@@ -98,6 +98,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.podcast_load_older
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_loading
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_mark_played
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_maybe_moved
+import ch.lkmc.neutrodyne.core.ui.resources.podcast_maybe_moved_never
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_needs_password
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_no_episodes
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_settings
@@ -564,13 +565,18 @@ private fun FeedStateBanner(
 
         health.possiblyDead -> {
             NdBanner(
+                // A feed that never fetched successfully has no `lastSuccessAt` to format —
+                // 03 anchors PossiblyDead on COALESCE(lastSuccessAt, subscribedAt) and the
+                // detail model does not carry `subscribedAt`, so the copy goes date-less.
                 message =
-                    stringResource(
-                        Res.string.podcast_maybe_moved,
-                        health.lastSuccessAt
-                            ?.let { FeedDates.relative(it, nowMs).asString() }
-                            ?: "",
-                    ),
+                    health.lastSuccessAt
+                        ?.let {
+                            stringResource(
+                                Res.string.podcast_maybe_moved,
+                                FeedDates.relative(it, nowMs).asString(),
+                            )
+                        }
+                        ?: stringResource(Res.string.podcast_maybe_moved_never),
                 icon = NdIcons.Error,
                 primary =
                     NdDialogAction(stringResource(Res.string.action_retry), onClick = onRetryFeed),
