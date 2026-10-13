@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: Unlicense
+import org.gradle.api.attributes.Usage
+import org.gradle.api.tasks.testing.Test
+import org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType
+
 plugins {
     alias(libs.plugins.neutrodyne.android.application)
     // On the build classpath via build-logic (version pinned in the catalog there), so id-only apply.
@@ -137,4 +141,48 @@ dependencies {
 
     // S11's worker-side getString test resolves Res strings on the JVM.
     testImplementation(libs.cmp.resources)
+    // Startup recovery verifies the real periodic work against WorkManager's host backend.
+    testImplementation(libs.androidx.work.testing)
+}
+
+// The production graph uses the Android bundled driver, whose JNI loader needs a host library
+// under Robolectric. Extract the same pinned SQLite version's JVM native without adding the
+// JVM driver classes to the Android test classpath.
+val startupHostSqlite =
+    configurations.create("startupHostSqlite") {
+        isCanBeConsumed = false
+        isTransitive = false
+        attributes {
+            attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage.JAVA_RUNTIME))
+            attribute(KotlinPlatformType.attribute, KotlinPlatformType.jvm)
+        }
+    }
+dependencies { add(startupHostSqlite.name, libs.androidx.sqlite.bundled) }
+
+val hostOs =
+    providers.systemProperty("os.name").get().lowercase().let {
+        when {
+            it.startsWith("windows") -> "windows"
+            it.startsWith("mac") -> "osx"
+            else -> "linux"
+        }
+    }
+val hostArch =
+    when (providers.systemProperty("os.arch").get()) {
+        "aarch64", "arm64" -> "arm64"
+        else -> "x64"
+    }
+val startupHostNativeDir = layout.buildDirectory.dir("startup-host-sqlite/$hostOs/$hostArch")
+val extractStartupHostSqlite =
+    tasks.register<Sync>("extractStartupHostSqlite") {
+        from(startupHostSqlite.map { zipTree(it) }) {
+            include("natives/${hostOs}_$hostArch/*")
+            eachFile { path = name }
+            includeEmptyDirs = false
+        }
+        into(startupHostNativeDir)
+    }
+tasks.withType<Test>().configureEach {
+    dependsOn(extractStartupHostSqlite)
+    jvmArgs("-Djava.library.path=${startupHostNativeDir.get().asFile.absolutePath}")
 }
