@@ -2799,6 +2799,7 @@ Serves N1, N4, N6. Expected failures arrive as values (01 [Errors](01-foundation
 8. The screens' desktop-JVM tests stand in for the M1a desktop-window variant, the same stand-in the Library slice uses; `NdScrollbar`, context menus and the desktop refresh button land with the M0b shell.
 9. The custom-title dialog pre-fills the effective `displayTitle` — the `PodcastDetail` read model does not expose the raw `customTitle` column — so an untouched save writes the feed title back as a custom title (visually identical); an empty field still writes `null`.
 10. `EpisodeRow`'s PODCAST date block is `defaultMinSize(48 dp)` rather than the spec's fixed 48 dp so the enlarged day and month stay inside it at `fontScale ≥ 1.5` (UI review round 2, P2); the podcast screen is this row style's first consumer.
+11. The "No episodes yet" state keys on the paged list settling empty rather than on `PodcastDetail.episodeCount` (2026-10-13): a fetched feed holding zero episodes shows the spec'd `emptyFeed` copy, and with filters still active the same state keeps the "Show played episodes" reset action — a zero-episode feed can carry a filter selection that hides nothing yet.
 
 ---
 

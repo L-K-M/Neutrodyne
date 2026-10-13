@@ -242,11 +242,11 @@ internal fun PodcastScreen(
                         }
                     }
 
-                    if (items.itemCount == 0 &&
-                        items.loadState.refresh is LoadState.NotLoading &&
-                        detail.episodeCount > 0
-                    ) {
-                        item(key = "emptyFiltered", contentType = "empty") {
+                    // 08's `emptyFeed` doubles as the filtered-empty state: a fetched feed
+                    // holding zero episodes gets the bare copy, while an active filter adds
+                    // the reset action.
+                    if (items.itemCount == 0 && items.loadState.refresh is LoadState.NotLoading) {
+                        item(key = "empty", contentType = "empty") {
                             EmptyState(
                                 icon = NdIcons.FilterList,
                                 title = stringResource(Res.string.podcast_no_episodes),

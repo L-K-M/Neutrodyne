@@ -488,6 +488,21 @@ class PodcastScreenTest {
             assertEquals(FeedFilters(), filters)
         }
 
+    @Test
+    fun emptyFeedShowsNoEpisodesYet() =
+        runComposeUiTest {
+            // 08's `emptyFeed`: a fetched feed holding zero episodes gets the same copy as
+            // the filtered-empty case, but no reset action while no filters are active.
+            setPodcast(
+                PodcastUiState(
+                    detail = testPodcastDetail(7, episodeCount = 0, latestEpisodeAt = null),
+                    loaded = true,
+                ),
+            )
+            onNodeWithText("No episodes yet").assertIsDisplayed()
+            onNodeWithText("Show played episodes").assertDoesNotExist()
+        }
+
     private fun ComposeUiTest.setPodcast(
         state: PodcastUiState,
         rows: List<EpisodeRow> = emptyList(),
