@@ -288,6 +288,39 @@ class AddPodcastSheetTest {
             assertNull(viewModel.uiState.value.done)
         }
 
+    /**
+     * 95-4: while the subscribe transaction runs the preview card shows the "Subscribing…"
+     * indicator (08's wording) and the primary action is disabled — a tap used to no-op
+     * through the ViewModel's guard while the button still read enabled.
+     */
+    @Test
+    fun subscribingShowsProgressAndDisablesSubscribe() =
+        runComposeUiTest {
+            resolver.nextResolution = AddResolution.Feed(testFeedPreview())
+            val gate = CompletableDeferred<Unit>()
+            subscribe.gate = gate
+            setSheet()
+
+            feedField().performTextInput("https://example.com/feed")
+            onNodeWithText("Subscribe").performClick()
+            waitForIdle()
+            onNodeWithText("Subscribe").performClick()
+            waitForIdle()
+
+            onNodeWithText("Subscribing…").assertIsDisplayed()
+            onNodeWithText("Subscribe").assertIsNotEnabled()
+
+            // Success lands in `done` and the route pops the sheet over it — the step's
+            // flag is not cleared for a composition that is already leaving. The gated
+            // coroutine resumes on the Swing Main queue waitUntil pumps.
+            gate.complete(Unit)
+            waitUntil(timeoutMillis = 5_000) { viewModel.uiState.value.done != null }
+            assertEquals(
+                SubscribedPodcast(1L, "A Show", viewModel.uiState.value.operationGeneration),
+                viewModel.uiState.value.done,
+            )
+        }
+
     @Test
     fun editingTheAddressKeepsTheSheetOnB() =
         runComposeUiTest {

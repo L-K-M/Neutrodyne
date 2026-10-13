@@ -325,6 +325,7 @@
     <string name="add_paste">Paste</string>
     <string name="add_looking_up">Looking up…</string>
     <string name="add_subscribe">Subscribe</string>
+    <string name="add_subscribing">Subscribing…</string>
     <string name="add_private">Private feed</string>
     <string name="add_empty_feed">This feed has no episodes yet</string>
     <plurals name="add_episodes_count">

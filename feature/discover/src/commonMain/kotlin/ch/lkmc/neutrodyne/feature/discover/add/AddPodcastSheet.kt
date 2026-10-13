@@ -75,6 +75,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.add_open
 import ch.lkmc.neutrodyne.core.ui.resources.add_paste
 import ch.lkmc.neutrodyne.core.ui.resources.add_private
 import ch.lkmc.neutrodyne.core.ui.resources.add_subscribe
+import ch.lkmc.neutrodyne.core.ui.resources.add_subscribing
 import ch.lkmc.neutrodyne.core.ui.resources.add_title
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
@@ -130,12 +131,13 @@ internal fun AddPodcastSheet(
             (step.preview.emptyFeed || step.preview.episodeCount > 0)
 
     // Enter and the bottom button share this rule (08: "Enter runs Subscribe when it is
-    // enabled"): a running lookup may not be re-submitted, and while `Choose` lists
-    // candidates only a candidate row advances — the field's value no longer leads.
+    // enabled"): a running lookup or subscribe may not be re-submitted, and while `Choose`
+    // lists candidates only a candidate row advances — the field's value no longer leads.
     val submitEnabled =
         input.isNotBlank() &&
             step !is AddSheetStep.Resolving &&
-            step !is AddSheetStep.Choosing
+            step !is AddSheetStep.Choosing &&
+            (step as? AddSheetStep.Preview)?.subscribing != true
 
     // Subscribe's single submit: preview → subscribe, auth fields → credentialed resolve,
     // otherwise resolve the field's input. Enter, the button and a failed state's Retry share it.
@@ -443,6 +445,16 @@ private fun PreviewCard(step: AddSheetStep.Preview) {
                     error.asString(),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = CARD_GAP),
+                )
+            }
+            // 08's "subscribing indicator": the transaction re-fetches an evicted preview and
+            // can take a moment, so the card reports progress while Subscribe sits disabled.
+            if (step.subscribing) {
+                Text(
+                    stringResource(Res.string.add_subscribing),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = CARD_GAP),
                 )
             }
