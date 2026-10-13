@@ -91,6 +91,7 @@ class FakePodcastRepository : PodcastRepository {
         podcastId: Long,
         credentials: BasicCredentials,
     ): Outcome<Unit, AddPodcastError> {
+        writeError?.let { throw it }
         calls += "setCredentials($podcastId, ${credentials.username})"
         return credentialsOutcome
     }
@@ -99,6 +100,7 @@ class FakePodcastRepository : PodcastRepository {
         podcastId: Long,
         input: String,
     ): Outcome<Unit, AddPodcastError> {
+        writeError?.let { throw it }
         calls += "editFeedUrl($podcastId, $input)"
         return editUrlOutcome
     }
