@@ -881,6 +881,18 @@ Android (WorkManager); the desktop has no tick of its own ([Desktop refresh](#de
   Called by the start-up initializer (order 200 on both platforms, [01 Application start-up](01-foundation.md#application-start-up)), after changes to the global interval or Wi-Fi setting, after any podcast or group refresh-interval change (05 calls it), after subscribe, unsubscribe, merge and membership changes (05 calls it for memberships), and after a pulled sync page added or removed podcasts or memberships (10 calls it through `RefreshController.reschedulePeriodic()`). Refresh intervals themselves never sync ([Settings](#settings)), so the rebase always uses this device's values.
 - WorkManager's periodic minimum is 15 min and periodic work drifts by up to the flex window; the UI says "about every N hours", never a clock time ([define work](https://developer.android.com/develop/background-work/background-tasks/persistent/getting-started/define-work)).
 
+**M1a start-up recovery (2026-10-13).** The shared database success barrier
+([01 Application start-up](01-foundation.md#application-start-up)) holds refresh
+initialization until the first successful open, including a gate retry after
+an initial failure. Android reconciles `refresh-periodic` at order 200, then
+registers the foreground observer at 220, exactly once per process startup.
+Desktop starts its runner and rebases the schedule at order 200. Neither
+platform resolves these database-backed dependencies during a failed open;
+repeated successful `awaitOpen()` calls do not repeat their installation. A held initializer that itself fails after the open is logged by
+`runInitializers` and not retried in that process; Android reinstalls
+`refresh-periodic` at the next rebase trigger (a settings change, subscribe or
+unsubscribe) or the next start, the desktop runner at the next start.
+
 ### Work requests
 
 | Unique name | Request | Constraints | Policy | Input |
