@@ -211,6 +211,7 @@ internal class FeedRefresher(
         var timedOut = false
         var completed = false
         var report: RefreshReport? = null
+        var bodyFailure: Throwable? = null
         try {
             coroutineScope {
                 batcherLock.withLock { batcher = FetchStateBatcher(db.podcastDao(), clock, this) }
@@ -235,18 +236,13 @@ internal class FeedRefresher(
                                 launched++
                                 launch {
                                     global.withPermit {
-                                        hostPermits
-                                            .semaphore(
-                                                adapter.hostKey(
-                                                    feed,
-                                                    if (request.pagesOnly) {
-                                                        feed.pagingNextUrl ?: feed.feedUrl
-                                                    } else {
-                                                        feed.feedUrl
-                                                    },
-                                                ),
-                                            ).withPermit {
-                                                slots[index] = refreshOne(feed, adapter, request)
+                                        slots[index] =
+                                            if (request.pagesOnly) {
+                                                runPagingSession(feed, adapter, request, hostPermits)
+                                            } else {
+                                                hostPermits
+                                                    .semaphore(adapter.hostKey(feed, feed.feedUrl))
+                                                    .withPermit { refreshOne(feed, adapter) }
                                             }
                                     }
                                 }
@@ -267,13 +263,21 @@ internal class FeedRefresher(
                 }
             }
             completed = true
+        } catch (e: Throwable) {
+            // The body's failure is the run's primary cause: a finalisation flush failure
+            // attaches to it as suppressed rather than replacing it.
+            bodyFailure = e
+            throw e
         } finally {
             // Finalisation survives cancellation (03 Engine run): the buffered fetch-state rows
             // flush, and the finished slots still report their committed outcomes so the summary
             // and status reflect what actually landed.
             withContext(NonCancellable) {
                 val active = batcherLock.withLock { batcher.also { batcher = null } }
-                suspendRunCatching { active?.flush() }
+                val flushFailure = suspendRunCatching { active?.flush() }.exceptionOrNull()
+                if (flushFailure != null) {
+                    Log.e(TAG, flushFailure) { "final fetch-state flush failed" }
+                }
 
                 val outcomes = mutableMapOf<Long, FeedOutcome>()
                 for ((index, feed) in due.withIndex()) {
@@ -289,38 +293,57 @@ internal class FeedRefresher(
                         remaining = due.size - outcomes.size,
                         stoppedByDeadline = timedOut || launched < due.size || !completed,
                     )
-                suspendRunCatching { writeDiagnostics(request, finalReport, finishedAt) }
-                    .onFailure { Log.w(TAG, it) { "diagnostics write failed" } }
+                // A failed flush means the outcome rows never committed: no completion
+                // diagnostics (`lastAllRunFinishedAt` would suppress the foreground trigger's
+                // next refresh for a whole tick) and no report — the failure propagates once
+                // the status reset below has run. The diagnostics write itself is also guarded:
+                // a throw here must not wedge `running` or mask the flush outcome.
+                if (flushFailure == null) {
+                    suspendRunCatching { writeDiagnostics(request, finalReport, finishedAt) }
+                        .onFailure { Log.w(TAG, it) { "diagnostics write failed" } }
+                }
                 _status.value =
                     RefreshStatus(
                         running = false,
                         scope = null,
                         done = outcomes.size,
                         total = due.size,
-                        lastRunFinishedAt = finishedAt,
+                        lastRunFinishedAt =
+                            if (flushFailure == null) finishedAt else previousFinishedAt,
                     )
-                report = finalReport
+                if (flushFailure == null) {
+                    report = finalReport
+                } else {
+                    // A failed commit never reports a completed run. With no earlier failure the
+                    // flush failure is the run's failure; otherwise it rides the body's exception
+                    // as suppressed so the primary cause — including cancellation — is preserved.
+                    val primary = bodyFailure
+                    if (primary == null) throw flushFailure
+                    primary.addSuppressed(flushFailure)
+                }
             }
         }
         return report ?: error("report unset")
     }
 
     /**
-     * One feed of the fan-out: a paging session for `pagesOnly` runs, else fetch → policy →
-     * ingest/write → outcome. Returns `null` when the run was cancelled before the feed finished.
+     * One refresh feed of the fan-out: fetch → policy → ingest/write → outcome.
+     * Cancellation propagates so an unfinished feed never publishes an outcome.
      */
     private suspend fun refreshOne(
         feed: DueFeed,
         adapter: SourceAdapter,
-        request: RefreshRequest,
-    ): FeedOutcome? {
-        if (request.pagesOnly) return runPagingSession(feed, adapter, request)
+    ): FeedOutcome {
         val result =
             suspendRunCatching { adapter.fetchAndParse(feed, FetchMode.REFRESH) }
                 .getOrElse { e ->
                     if (e is CancellationException) throw e
                     Log.w(TAG, e) { "fetchAndParse threw for podcast ${feed.id}" }
-                    writeFailure(feed, FeedErrorKind.UNKNOWN, retryAfterMs = null, detail = e.message)
+                    // An eager batch flush can fault here too; isolate it just like an
+                    // outcome-handling failure so siblings finish before finalisation retries.
+                    suspendRunCatching {
+                        writeFailure(feed, FeedErrorKind.UNKNOWN, retryAfterMs = null, detail = e.message)
+                    }.onFailure { Log.w(TAG, it) { "failure-state write failed for podcast ${feed.id}" } }
                     return FeedOutcome.Failed(FeedErrorKind.UNKNOWN, null)
                 }
         // Outcome handling (ingest, fetch-state rows, pending moves, hooks) is guarded per feed:
@@ -627,13 +650,21 @@ internal class FeedRefresher(
         feed: DueFeed,
         adapter: SourceAdapter,
         request: RefreshRequest,
+        hostPermits: HostPermits,
     ): FeedOutcome? {
         val session = PagingSession(feed, adapter)
         val manual = request.origin == RefreshOrigin.MANUAL
         val stopAt = pagingStopAt(request)
         val pages: suspend () -> Unit = {
             while (session.active && clock.elapsedRealtime() < stopAt) {
-                session.active = onePageGuarded(session, manual)
+                // A cursor can move hosts after ingest, so each page takes its current lane.
+                hostPermits
+                    .semaphore(adapter.hostKey(session.feed, session.feed.pagingNextUrl ?: session.feed.feedUrl))
+                    .withPermit {
+                        if (clock.elapsedRealtime() < stopAt) {
+                            session.active = onePageGuarded(session, manual)
+                        }
+                    }
             }
         }
         if (stopAt == Long.MAX_VALUE) {
