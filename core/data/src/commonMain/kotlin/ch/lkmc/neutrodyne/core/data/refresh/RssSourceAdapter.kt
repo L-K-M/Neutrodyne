@@ -18,6 +18,7 @@ import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.TlsKind
+import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.model.isPartialWindow
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
 import ch.lkmc.neutrodyne.feeds.parse.ParseFailure
@@ -62,16 +63,20 @@ internal class RssSourceAdapter(
     private val parseDispatcher = io.limitedParallelism(PARSE_PARALLELISM)
 
     /**
-     * The per-host semaphore key of the fan-out limit (lowercase request host, without the port,
-     * as OkHttp's per-host limit): `https://u@Feeds.example.com:8443/f` → `feeds.example.com`,
-     * `https://[2001:db8::1]:8080/f` → `[2001:db8::1]`.
+     * The per-host semaphore key of the fan-out limit (the request host, without the port, as
+     * OkHttp's per-host limit): canonicalised through [UrlNormalizer]'s identity rules so every
+     * equivalent host spelling shares the semaphore: `https://u@Feeds.example.com:8443/f`
+     * → `feeds.example.com`, `https://[2001:DB8::1]:8080/f` → `[2001:db8::1]`, `http://127.1/f`
+     * → `127.0.0.1`. IPv6 hosts keep their brackets.
      */
     override fun hostKey(
         feed: DueFeed,
         requestUrl: String,
     ): String {
+        // Keep the raw authority when canonicalisation fails so the adapter can report the
+        // invalid URL's fetch failure instead of failing while acquiring its host lane.
         val authority =
-            requestUrl
+            (UrlNormalizer.origin(requestUrl) ?: requestUrl)
                 .substringAfter("://", requestUrl)
                 .substringBefore("/")
                 .substringBefore("?")
