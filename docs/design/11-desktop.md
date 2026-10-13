@@ -498,6 +498,14 @@ data class LaneStatus(val running: Boolean, val lastStartAt: Instant?, val lastE
 ### Tick algorithm
 
 1. `start()` waits until the database is open (band 100 has completed), then 5 s more so the first frame and the session restore are not competing with I/O.
+
+   **M1a start-up recovery (2026-10-13).** The shared band-100 initializer
+   suspends after a failed open until the gate's "Try again" succeeds
+   ([01 Application start-up](01-foundation.md#application-start-up)). The
+   original sequence then starts `DesktopJobRunner` and rebases the refresh
+   schedule once at band 200. Repeated successful opens do not start a second
+   runner. Healthy startup ordering and the runner's 5 s settle remain unchanged;
+   the suspended sequence does not block the window or its first frame.
 2. **Tick** every 60 s on `@ApplicationScope`, or earlier when `poke(name)` arrives or `PowerMonitor` emits `Resumed`.
 3. Per tick, for each lane in the fixed order `sync`, `refresh`, `import-backup`, `downloads-manual`, `downloads-auto`, `downloads-move`, `artwork`, `app-update-check`, `engine-update`, `maintenance`:
    - running already → if poked, set `rerun = true` and continue;
