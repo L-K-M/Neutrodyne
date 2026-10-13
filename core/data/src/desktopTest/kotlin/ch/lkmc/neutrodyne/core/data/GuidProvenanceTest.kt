@@ -281,8 +281,8 @@ class GuidProvenanceTest {
             assertEquals("https://cdn/b.mp3", bAfter.enclosureUrl)
             assertTrue(db.episodeStateDao().byEpisode(b.id)!!.isFavorite)
 
-            // A repeated contested document still cannot resolve: no transfer, and the item is
-            // dropped once every claimable key is taken rather than overwriting either owner.
+            // A repeated contested document preserves presence without transferring state or
+            // overwriting either owner, even when its GUID cannot claim by key.
             val third =
                 ingest(
                     id,
@@ -1022,6 +1022,78 @@ class GuidProvenanceTest {
             assertTrue(db.podcastDao().aliases(id).isEmpty())
             assertNotNull(db.podcastDao().byId(id))
         }
+
+    @Test
+    fun unchangedUndatedSharedEnclosureKeepsFallbackPresence() = runTest { assertFallbackPresence(pubDate = null) }
+
+    @Test
+    fun unchangedIdenticalTitleDaySharedEnclosureKeepsFallbackPresence() =
+        runTest { assertFallbackPresence(pubDate = NOW - DAY) }
+
+    @Test
+    fun changedSharedEnclosureReofferDoesNotClaimFallback() =
+        runTest { assertFallbackPresence(pubDate = NOW - DAY, reoffer = Reoffer.CHANGED) }
+
+    private enum class Reoffer { UNCHANGED, CHANGED }
+
+    private suspend fun assertFallbackPresence(
+        pubDate: Long?,
+        reoffer: Reoffer = Reoffer.UNCHANGED,
+    ) {
+        val id = seedPodcast(db, feedUrl = "https://example.com/feed.xml", guidCoverageSince = null)
+        db.ingestDao().insertEpisodes(
+            listOf(
+                episodeEntity(podcastId = id, identityKey = "g:p") {
+                    copy(guid = "old", title = "Ghost", pubDate = pubDate, enclosureUrl = "https://cdn/a.mp3")
+                },
+                episodeEntity(podcastId = id, identityKey = "g:Z") {
+                    copy(guid = "Z", title = "Ghost", pubDate = pubDate, enclosureUrl = "https://cdn/b.mp3")
+                },
+            ),
+        )
+        val offered =
+            parsedEpisode(0, guid = "p", title = "Ghost", pubDate = pubDate, enclosureUrl = "https://cdn/b.mp3")
+        val first = ingest(id, parsedFeed(items = listOf(offered)))
+        val fallbackId = first.inserted.single()
+        val fallback = db.episodeDao().byId(fallbackId)!!
+        assertFalse(fallback.identityKey.startsWith("g:"))
+        db.episodeStateDao().upsert(episodeStateEntity(fallbackId) { copy(isFavorite = true) })
+        val owners = db.ingestDao().existing(id).filter { it.id != fallbackId }
+        for (owner in owners) {
+            db.episodeStateDao().upsert(episodeStateEntity(owner.id) { copy(playedAt = NOW - 1_000) })
+        }
+        // feedOrder is outside the hash; presence must not rewrite even that feed field.
+        val again = offered.copy(feedOrder = 9, durationMs = if (reoffer == Reoffer.CHANGED) 60_000 else null)
+        for (round in 1..4) {
+            // Recover false absence left by earlier builds as well as preserving presence.
+            if (round == 2) db.ingestDao().setInFeed(listOf(fallbackId), false)
+            clock.nowMs += 2 * DAY
+            val result = ingest(id, parsedFeed(items = listOf(again)))
+            assertEquals(0, result.rekeyed)
+            assertEquals(0, result.updated)
+            val after = db.episodeDao().byId(fallbackId)!!
+            when (reoffer) {
+                Reoffer.UNCHANGED -> {
+                    assertTrue(after.inFeed, "unchanged fallback must stay present on refresh ${round + 1}")
+                    assertEquals(0, result.inserted.size)
+                    assertEquals(clock.now(), after.lastSeenAt)
+                    assertEquals(fallback.copy(lastSeenAt = clock.now()), after)
+                    assertEquals(3, db.podcastDao().episodeCount(id))
+                }
+
+                Reoffer.CHANGED -> {
+                    assertFalse(after.inFeed)
+                    assertEquals(fallback.copy(inFeed = false), after)
+                }
+            }
+            assertTrue(db.episodeStateDao().byEpisode(fallbackId)!!.isFavorite)
+            for (owner in owners) {
+                assertEquals(owner, db.ingestDao().existing(id).single { it.id == owner.id })
+                assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(owner.id)!!.playedAt)
+            }
+            assertEquals(GuidKnowledge.KNOWN_AMBIGUOUS, db.ingestDao().guidKnowledge(id)["p"])
+        }
+    }
 
     private companion object {
         const val DAY = 86_400_000L

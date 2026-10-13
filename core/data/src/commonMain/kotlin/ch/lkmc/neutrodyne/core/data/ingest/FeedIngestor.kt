@@ -297,6 +297,35 @@ internal class FeedIngestor(
             taken += row.id
         }
 
+        // An unchanged fallback re-offer can prove presence even when pass 2 cannot prove
+        // identity. Keep this separate from claims so it cannot rekey, rewrite feed fields or
+        // transfer state; require a unique pair on both sides before acknowledging it.
+        val presenceCandidates =
+            prepared.items
+                .filter { it.matchedTo == null && !it.dropped }
+                .associateWith { item ->
+                    val guid = EpisodeKeys.canonicalGuid(item.episode.guid)
+                    EpisodeKeys
+                        .nonGuidKeys(item.episode)
+                        .mapNotNull { byKey[it] }
+                        .filter { row ->
+                            row.id !in taken && guid != null &&
+                                EpisodeKeys.canonicalGuid(row.guid) == guid &&
+                                row.contentHash == item.contentHash
+                        }
+                }
+        val presenceRowCounts =
+            presenceCandidates.values
+                .flatten()
+                .groupingBy { it.id }
+                .eachCount()
+        val presenceOnly =
+            presenceCandidates
+                .mapNotNull { (item, rows) ->
+                    rows.singleOrNull()?.takeIf { presenceRowCounts[it.id] == 1 }?.let { item to it }
+                }.toMap()
+        taken += presenceOnly.values.map { it.id }
+
         // An unmatched item whose assigned key a stored row holds (lost to a better enclosure
         // match above) re-derives a free fallback; with none it is dropped as a duplicate.
         // An unresolved contested item re-derives from every non-`g:` content key instead —
@@ -304,7 +333,7 @@ internal class FeedIngestor(
         // rather than claiming a `g:` slot or vanishing while its identity stays unproven (D98).
         val liveDocKeys = prepared.items.mapTo(HashSet()) { it.docKey }
         for (item in prepared.items) {
-            if (item.matchedTo != null || item.dropped || item.docKey !in storedKeys) continue
+            if (item.matchedTo != null || item in presenceOnly || item.dropped || item.docKey !in storedKeys) continue
             val fresh =
                 (if (item.unresolved) EpisodeKeys.nonGuidKeys(item.episode) else item.fallbackKeys)
                     .firstOrNull { it !in storedKeys && it !in liveDocKeys }
@@ -327,12 +356,12 @@ internal class FeedIngestor(
         var updated = 0
         var flippedOut = 0
         val matchedItems = prepared.items.filter { it.matchedTo != null }
-        val insertedItems = prepared.items.filter { it.matchedTo == null && !it.dropped }
+        val insertedItems = prepared.items.filter { it.matchedTo == null && it !in presenceOnly && !it.dropped }
 
         if (prepared.items.isNotEmpty()) {
             // Step 6: changed matched rows rewrite feed columns and children; out-of-feed rows
             // that re-appear flip back to inFeed = 1.
-            val restored = mutableListOf<Long>()
+            val restored = presenceOnly.values.filter { !it.inFeed }.mapTo(mutableListOf()) { it.id }
             for (item in matchedItems) {
                 val row = item.matchedTo ?: continue
                 if (row.contentHash != item.contentHash) {
@@ -409,7 +438,8 @@ internal class FeedIngestor(
                     ctx.absenceFloor ?: if (ctx.partial) {
                         val docSortDates =
                             matchedItems.map { it.sortDate(it.matchedTo?.firstSeenAt ?: prepared.firstSeenAt) } +
-                                insertedItems.map { it.sortDate(prepared.firstSeenAt) }
+                                insertedItems.map { it.sortDate(prepared.firstSeenAt) } +
+                                presenceOnly.map { (item, row) -> item.sortDate(row.firstSeenAt) }
                         docSortDates.minOrNull() ?: Long.MAX_VALUE
                     } else {
                         Long.MIN_VALUE
