@@ -32,5 +32,8 @@ sealed interface SubscribeError {
 
     data object NoMedia : SubscribeError
 
+    /** The resolved feed URL carries no usable identity — the feed can never be subscribed. */
+    data object InvalidUrl : SubscribeError
+
     data object Storage : SubscribeError
 }

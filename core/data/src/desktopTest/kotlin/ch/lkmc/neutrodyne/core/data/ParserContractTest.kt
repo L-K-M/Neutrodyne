@@ -4,7 +4,10 @@ package ch.lkmc.neutrodyne.core.data
 
 import ch.lkmc.neutrodyne.core.data.refresh.AdapterResult
 import ch.lkmc.neutrodyne.core.data.refresh.FetchMode
+import ch.lkmc.neutrodyne.core.domain.AddPodcastError
+import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
+import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
 import ch.lkmc.neutrodyne.feeds.parse.ParseFailure
@@ -130,6 +133,52 @@ class ParserContractTest {
                 val failed = assertIs<AdapterResult.Failed>(result)
                 assertEquals(FeedErrorKind.STORAGE, failed.kind)
                 assertTrue(failed.transient)
+            } finally {
+                bundle.close()
+            }
+        }
+
+    // --- `AddPodcastResolverImpl` (03 Add podcast flow) ---------------------------------------------
+
+    @Test
+    fun oversizedDocumentMapsToTooLarge() =
+        runTest {
+            setUpRoot()
+            server.enqueue(mockResponse(body = rssBody()))
+            val bundle = newResolver(root, db, clock, parser = stubParser(tooLarge))
+            try {
+                val failure = assertIs<AddResolution.Failure>(bundle.resolver.resolve(feedUrl()))
+                assertEquals(AddPodcastError.TooLarge, failure.error)
+            } finally {
+                bundle.close()
+            }
+        }
+
+    @Test
+    fun malformedDocumentStillMapsToMalformed() =
+        runTest {
+            setUpRoot()
+            server.enqueue(mockResponse(body = rssBody()))
+            val bundle = newResolver(root, db, clock, parser = stubParser(malformed))
+            try {
+                val failure = assertIs<AddResolution.Failure>(bundle.resolver.resolve(feedUrl()))
+                assertEquals(AddPodcastError.Malformed, failure.error)
+            } finally {
+                bundle.close()
+            }
+        }
+
+    @Test
+    fun propagatedSourceIoMapsToNetworkNotMalformed() =
+        runTest {
+            setUpRoot()
+            server.enqueue(mockResponse(body = rssBody()))
+            val bundle = newResolver(root, db, clock, parser = ioParser)
+            try {
+                // Source I/O is a fetch-class fault (03 Parser), the same bucket the fetcher's
+                // `FetchOutcome.Storage` uses — never `Malformed`.
+                val failure = assertIs<AddResolution.Failure>(bundle.resolver.resolve(feedUrl()))
+                assertEquals(AddPodcastError.Network(NetError.Other("storage")), failure.error)
             } finally {
                 bundle.close()
             }
