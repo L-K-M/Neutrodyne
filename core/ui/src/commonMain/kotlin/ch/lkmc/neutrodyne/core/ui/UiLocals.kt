@@ -15,14 +15,17 @@ public val LocalUiClock: androidx.compose.runtime.ProvidableCompositionLocal<Clo
     staticCompositionLocalOf { UiSystemClock }
 
 private object UiSystemClock : Clock {
+    // 01's Clock contract needs real monotonic milliseconds: one process-wide origin, not a
+    // mark-and-read in the same expression (that always yields 0).
+    private val origin = TimeSource.Monotonic.markNow()
+
     override fun now(): Long =
         kotlin.time.Clock.System
             .now()
             .toEpochMilliseconds()
 
     override fun elapsedRealtime(): Long =
-        TimeSource.Monotonic
-            .markNow()
+        origin
             .elapsedNow()
             .inWholeMilliseconds
 }

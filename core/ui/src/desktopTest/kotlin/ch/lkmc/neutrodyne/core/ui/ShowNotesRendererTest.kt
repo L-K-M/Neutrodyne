@@ -33,7 +33,12 @@ import ch.lkmc.neutrodyne.core.model.ShowNoteBlock
 import ch.lkmc.neutrodyne.core.model.ShowNoteSpan
 import ch.lkmc.neutrodyne.core.model.ShowNotes
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
+import coil3.ImageLoader
+import coil3.SingletonImageLoader
+import coil3.intercept.Interceptor
+import coil3.request.ErrorResult
 import coil3.test.FakeImage
+import coil3.test.FakeImageLoaderEngine
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.test.AfterTest
@@ -229,6 +234,22 @@ class ShowNotesRendererTest {
         }
 
     @Test
+    fun shownImageThatFailsToLoadShowsPlaceholderRow() =
+        runComposeUiTest {
+            // 08: "not loaded or failed → a 48 dp row "Image: {alt}"" — a failed SHOWN image must
+            // not leave an empty pre-sized box.
+            installFailingImageLoader()
+            setNotes(
+                notesOf(ShowNoteBlock.Image(url = "https://example.com/broken.png", alt = "diagram")),
+                imageMode = ShowNotesImageMode.SHOWN,
+            )
+            waitUntil(timeoutMillis = 5_000) {
+                onAllNodesWithText("Image: diagram").fetchSemanticsNodes().isNotEmpty()
+            }
+            onNodeWithText("Image: diagram").assertIsDisplayed()
+        }
+
+    @Test
     fun absurdImageDimensionsStayUnderTheHeightCap() =
         runComposeUiTest {
             // Feed-declared <img> dimensions are untrusted hints: "3 x 10000" (and the mirrored
@@ -315,8 +336,10 @@ class ShowNotesRendererTest {
                 onLink = { opened += it },
             )
             val text = semanticsText("the episode page")
-            val link = assertIs<LinkAnnotation.Clickable>(text.getLinkAnnotations(0, text.length).single().item)
-            assertEquals("https://example.com/ep", link.tag)
+            val link = assertIs<LinkAnnotation.Url>(text.getLinkAnnotations(0, text.length).single().item)
+            assertEquals("https://example.com/ep", link.url)
+            // 08 styles links primary and underlined — colour alone must not carry the link cue.
+            assertEquals(TextDecoration.Underline, link.styles?.style?.textDecoration)
 
             onNodeWithText("the episode page").performClick()
             assertEquals(listOf("https://example.com/ep"), opened)
@@ -420,6 +443,25 @@ class ShowNotesRendererTest {
                     .item.fontFamily,
             )
         }
+
+    /** Every image request errors — SHOWN-mode failure coverage (still no network, 09's rule). */
+    private fun installFailingImageLoader() {
+        SingletonImageLoader.setUnsafe { context ->
+            ImageLoader
+                .Builder(context)
+                .components {
+                    add(
+                        FakeImageLoaderEngine
+                            .Builder()
+                            .default(
+                                Interceptor { chain ->
+                                    ErrorResult(null, chain.request, IllegalStateException("no image"))
+                                },
+                            ).build(),
+                    )
+                }.build()
+        }
+    }
 
     private fun ComposeUiTest.setNotes(
         notes: ShowNotes,

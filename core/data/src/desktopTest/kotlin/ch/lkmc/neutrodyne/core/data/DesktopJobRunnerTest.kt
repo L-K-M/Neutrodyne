@@ -7,11 +7,13 @@ import ch.lkmc.neutrodyne.core.common.JobLane
 import ch.lkmc.neutrodyne.core.common.PowerEvent
 import ch.lkmc.neutrodyne.core.common.PowerMonitor
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
+import ch.lkmc.neutrodyne.core.data.refresh.LaneStatus
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.ExperimentalForInheritanceCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -19,6 +21,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestScope
@@ -26,6 +29,7 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.max
 import kotlin.test.Test
@@ -265,8 +269,7 @@ class DesktopJobRunnerTest {
             runCurrent()
 
             awaitRuns(refresh, 2)
-            runCurrent()
-            assertEquals(1, maintenance.runCount.get(), "a regain must not poke non-network lanes")
+            expectQuietly { maintenance.runCount.get() == 1 }
 
             runner.stop(3.seconds)
         }
@@ -297,7 +300,7 @@ class DesktopJobRunnerTest {
             awaitRuns(lane, 1)
             awaitStatus(runner, lane.name) { it.failures == 1L }
 
-            // f2 after one skipped tick, f3 after two: backoff 1 min, then 2, then 4.
+            // f2 on the first tick after f1, f3 after one skipped tick: backoff 1 min, then 2, then 4.
             advanceTick(probe, 2, clock)
             awaitRuns(lane, 2)
             awaitStatus(runner, lane.name) { it.failures == 2L }
@@ -357,6 +360,50 @@ class DesktopJobRunnerTest {
             runner.stop(3.seconds)
         }
 
+    @OptIn(ExperimentalForInheritanceCoroutinesApi::class)
+    @Test
+    fun idleStatusIsPublishedBeforeTheLaneLockIsReleased() =
+        runTest {
+            val lane = GateLane("refresh")
+            val runner = runner(lane)
+            // Observe the idle CAS under the ownership lock: this deterministically checks the
+            // ordering that prevents an old completion from hiding a newly launched run.
+            val statesField = runner.javaClass.getDeclaredField("states").apply { isAccessible = true }
+            val state = (statesField.get(runner) as Map<*, *>)[lane.name]!!
+            val lock =
+                state.javaClass
+                    .getDeclaredField("lock")
+                    .apply { isAccessible = true }
+                    .get(state)
+            val statusField = runner.javaClass.getDeclaredField("_status").apply { isAccessible = true }
+
+            @Suppress("UNCHECKED_CAST")
+            val status = statusField.get(runner) as MutableStateFlow<Map<String, LaneStatus>>
+            val idleUnderLock = AtomicBoolean(false)
+            statusField.set(
+                runner,
+                object : MutableStateFlow<Map<String, LaneStatus>> by status {
+                    override fun compareAndSet(
+                        expect: Map<String, LaneStatus>,
+                        update: Map<String, LaneStatus>,
+                    ): Boolean {
+                        if (expect.getValue(lane.name).running && !update.getValue(lane.name).running) {
+                            idleUnderLock.set(Thread.holdsLock(lock))
+                        }
+                        return status.compareAndSet(expect, update)
+                    }
+                },
+            )
+            runner.start()
+            advanceTimeBy(DesktopJobRunner.START_SETTLE_MS + 1.seconds)
+            awaitRuns(lane, 1)
+            lane.gates.send(Outcome.SUCCEED)
+            awaitStatus(runner, lane.name) { it.runs == 1L }
+
+            assertTrue(idleUnderLock.get(), "idle must publish before another tick can claim the lane")
+            runner.stop(3.seconds)
+        }
+
     // --- Shutdown ------------------------------------------------------------------------------
 
     /**
@@ -370,9 +417,10 @@ class DesktopJobRunnerTest {
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
             try {
                 val lane = FinalizerLane("refresh")
+                val marker = QuietLane("maintenance")
                 val runner =
                     DesktopJobRunner(
-                        lanes = setOf(lane),
+                        lanes = setOf(lane, marker),
                         clock = TestClock(),
                         power = NoPower,
                         network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE),
@@ -382,8 +430,14 @@ class DesktopJobRunnerTest {
                 runner.start()
                 awaitBlocking("${lane.name} run #1") { lane.runCount.get() >= 1 }
 
-                runner.poke("refresh") // arms the rerun while the run is in flight
-                Thread.sleep(POKE_SETTLE_MS) // give the tick its dispatch to consume the poke
+                awaitBlocking("${marker.name} idle after run #1") {
+                    val markerStatus = runner.status.value.getValue(marker.name)
+                    marker.runCount.get() == 1 && !markerStatus.running
+                }
+                runner.poke("refresh")
+                // The marker follows refresh in the tick order: its next run acknowledges
+                // that this tick consumed the poke and armed the rerun, before the 60-s tick.
+                awaitBlocking("${marker.name} run #2") { marker.runCount.get() >= 2 }
 
                 runner.stop(3.seconds)
 
@@ -550,8 +604,8 @@ class DesktopJobRunnerTest {
 
     /**
      * Waits for a settled `LaneStatus` shape: [predicate] and the lane released. The runner
-     * publishes `running = false` only after it gives up ownership, so the next tick is
-     * guaranteed to see the lane idle — no real-time beat needed under load.
+     * publishes `running = false` under the ownership lock, so the next tick is guaranteed
+     * to see the lane idle — no real-time beat needed under load.
      */
     private suspend fun TestScope.awaitStatus(
         runner: DesktopJobRunner,
@@ -624,7 +678,6 @@ class DesktopJobRunnerTest {
         val SLEEP = 3.hours
 
         const val FINALIZE_MS = 150L
-        const val POKE_SETTLE_MS = 200L
         const val AWAIT_NS = 10_000_000_000L
         const val QUIET_NS = 150_000_000L
     }

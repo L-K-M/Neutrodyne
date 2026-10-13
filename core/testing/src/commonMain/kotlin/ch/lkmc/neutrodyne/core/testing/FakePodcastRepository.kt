@@ -16,15 +16,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
  * In-memory [PodcastRepository] for ViewModel/UI tests (09 `:core:testing` inventory): drives
- * the observable reads with `MutableStateFlow`s and records the writes. `unsubscribe` removes the
- * ids from [detail] and [feedInfo]; `retry` is a recorded no-op.
+ * the observable reads with `MutableStateFlow`s and records the writes. `unsubscribe` records
+ * the call and removes ids from [subscribedIds]; tests seed and clear the single-slot [detail]
+ * and [feedInfo] flows themselves. `retry` is a recorded no-op.
  */
 class FakePodcastRepository : PodcastRepository {
     val tiles = MutableStateFlow<List<LibraryTile>>(emptyList())
     val detail = MutableStateFlow<PodcastDetail?>(null)
     val feedInfo = MutableStateFlow<FeedInfo?>(null)
 
-    /** Removed by [unsubscribe]; the ids the cascade actually dropped. */
+    /** Test-seeded subscription ids; [unsubscribe] removes its requested ids from this set. */
     val subscribedIds = MutableStateFlow<Set<Long>>(emptySet())
 
     /** Canned answers for the `Outcome` writes — success by default. */
