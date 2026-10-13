@@ -874,7 +874,9 @@ sealed interface PodcastUiState {
     data class Failed(val error: UiText, val retryable: Boolean) : PodcastUiState
 }
 data class UserMessage(val id: Long, val text: UiText, val action: UiText? = null)
-// ViewModel API: fun onMessageShown(id: Long); fun onNavigationHandled()
+// ViewModel API: fun onMessageShown(id: Long); fun onMessageAction(id: Long); fun onNavigationHandled()
+// onMessageAction(id) is the snackbar's action tap (SnackbarResult.ActionPerformed) reported back
+// by message id; the posting ViewModel owns the id-to-action mapping (08's Undo catalogue).
 
 // :core:ui — resource-free text for ViewModels, resolved in composition (Compose resources, D83)
 sealed interface UiText {
@@ -1423,6 +1425,7 @@ The navigation host is shared by both shells and lives in `:core:ui`'s `commonMa
 class RootActions(
     val retryStartup: () -> Unit, val dismissNotice: (RootNotice) -> Unit,   // "Review" pushes SyncHeldChangesKey(id) itself
     val continueHere: () -> Unit, val dismissRemoteSession: () -> Unit, val playbackKey: (PlaybackKey) -> Boolean,
+    val userMessageAction: (Long) -> Unit = {},                              // snackbar action tap, by UserMessage.id
 )
 class RootSlots(val player: @Composable (PlayerSlotState) -> Unit, val userMessages: Flow<UserMessage>)
 
