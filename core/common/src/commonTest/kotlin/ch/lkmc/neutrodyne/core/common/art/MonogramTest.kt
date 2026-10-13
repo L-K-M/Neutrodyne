@@ -40,7 +40,9 @@ class MonogramTest {
 
     @Test
     fun `words starting with punctuation are dropped`() {
-        // "'68" is not a word start (apostrophe isn't kept), so initials come from "Comeback".
+        // "'68" is dropped: an apostrophe is not a letter, digit or emoji start.
+        assertEquals("C", Monogram.spec("'68 Comeback").initials)
+        // A trailing apostrophe stays inside the word: "68'" still starts with a digit.
         assertEquals("6C", Monogram.spec("68' Comeback").initials)
     }
 

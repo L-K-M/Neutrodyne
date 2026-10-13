@@ -185,7 +185,7 @@ JSON columns are typed `String` in entities. Encoding and decoding happen in `:c
 
 ```kotlin
 // commonMain
-@Database(entities = [/* the 27 entities of §Tables */], version = NeutrodyneDatabase.VERSION, exportSchema = true)
+@Database(entities = [/* the 28 entities of §Tables */], version = NeutrodyneDatabase.VERSION, exportSchema = true)
 @ConstructedBy(NeutrodyneDatabaseConstructor::class)
 @ColumnTypeConverters(NeutrodyneConverters::class)
 abstract class NeutrodyneDatabase : RoomDatabase() {
@@ -195,7 +195,7 @@ abstract class NeutrodyneDatabase : RoomDatabase() {
     abstract fun feedDao(): FeedDao
     // … one accessor per DAO listed in "New names introduced here", including the five Sync*Dao
     companion object {
-        const val VERSION = 1
+        const val VERSION = 2
         const val FILE_NAME = "neutrodyne.db"
         fun build(factory: DatabaseFactory, driver: SQLiteDriver, io: CoroutineContext, cb: RoomDatabase.Callback) =
             factory.builder()
@@ -651,7 +651,7 @@ data class EpisodeGuidProvenanceEntity(
 | `UNKNOWN` | Authority absence — no `KNOWN_*` row — including every GUID of a V1-migrated podcast (which is never covered, so no first observation or independence is ever recorded for it; the exceptions are positive ambiguity observed live and knowledge merged in at feed-merge step 7 — tracked evidence, not reconstructed history): erased history cannot be reconstructed, so stored-only carriage and sole current observation never promote an uncovered GUID to independent. Unknown is not penalising — only contested evidence (a `g:` claim whose enclosure is owned by another row) takes the conservative insert-or-drop path |
 | Lifecycle | Deleted only by the unsubscribe cascade on `podcast` (the knowledge is feed-scoped and dies with the subscription). Rekey, retention, `inFeed` flips and restarts never touch it; a failed ingest rolls the writes back with the episodes ([Transactions and threading](#transactions-and-threading)) |
 
-Dated note (2026-10-13, #88 MA14): an unchanged re-offer of a previously inserted fallback row may acknowledge presence after both identity passes fail, only when canonical GUID equality, a matching `EpisodeKeys.nonGuidKeys` key and unchanged `contentHash` identify a unique item/row pair on both sides. This preserves or restores `inFeed` and refreshes `lastSeenAt` through the existing day-granularity touch, without a key claim, rekey, feed-field update or state transfer. Ambiguous GUIDs still claim by no key, and pass 2 still requires uniqueness on both sides ([03 Diff algorithm](03-feeds-and-discovery.md#diff-algorithm)).
+Dated note (2026-10-13, #88 MA14): an unchanged re-offer of a previously inserted fallback row may acknowledge presence after both identity passes fail, only when canonical GUID equality, a matching `EpisodeKeys.nonGuidKeys` key and unchanged `contentHash` identify a unique item/row pair on both sides. This preserves or restores `inFeed` and refreshes `lastSeenAt` through the existing day-granularity touch, without a key claim, rekey, feed-content update or state transfer (`inFeed` is presence, not feed content). Ambiguous GUIDs still claim by no key, and pass 2 still requires uniqueness on both sides ([03 Diff algorithm](03-feeds-and-discovery.md#diff-algorithm)).
 
 ### episode_description
 
@@ -662,7 +662,7 @@ Show notes, kept out of the hot `episode` table. Read only by episode detail, ch
 data class EpisodeDescriptionEntity(@PrimaryKey val episodeId: Long, val html: ByteArray)
 
 object EpisodeDescriptionCodec {             // the only way to read or write `html`
-    fun encode(text: String, format: DescriptionFormat): ByteArray
+    fun encode(text: String, format: DescriptionFormat): ByteArray   // header byte + UTF-8 (< 512 B) or raw DEFLATE (nowrap, level 6)
     fun decode(bytes: ByteArray): DecodedDescription     // the text plus its stored format
 }
 ```

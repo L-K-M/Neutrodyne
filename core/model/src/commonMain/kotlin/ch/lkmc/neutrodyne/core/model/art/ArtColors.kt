@@ -34,8 +34,9 @@ public object ArtColors {
         val cosH = cos(hRad)
         val sinH = sin(hRad)
 
-        if (inGamut(labToSrgb(l, c * cosH, c * sinH))) {
-            return argbOf(labToSrgb(l, c * cosH, c * sinH))
+        val srgb = labToSrgb(l, c * cosH, c * sinH)
+        if (inGamut(srgb)) {
+            return argbOf(srgb)
         }
 
         // Bisect the chroma toward 0 until the colour fits sRGB.
