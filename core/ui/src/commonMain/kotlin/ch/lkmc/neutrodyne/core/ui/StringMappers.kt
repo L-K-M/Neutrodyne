@@ -84,12 +84,15 @@ import ch.lkmc.neutrodyne.core.ui.resources.summary_video
 public object EpisodeRowSummary {
     /**
      * [caps] is needed only for the "Opens in YouTube" wording of external-mode YouTube rows;
-     * `null` treats every row as in-app playable.
+     * `null` treats every row as in-app playable. [platform] picks the STORAGE wait's wording
+     * (07: desktop reads "download folder") — pass `LocalPlatformKind.current` like the visible
+     * status line does, or the spoken summary disagrees with it.
      */
     public fun describe(
         row: EpisodeRow,
         live: RowLive?,
         nowMs: Long,
+        platform: PlatformKind,
         caps: RowCaps? = null,
     ): UiText {
         val parts = mutableListOf<UiText>()
@@ -131,7 +134,7 @@ public object EpisodeRowSummary {
                     error = live?.lastError,
                     nextAttemptAt = live?.nextAttemptAt,
                     nowMs = nowMs,
-                    platform = PlatformKind.ANDROID,
+                    platform = platform,
                 )
             if (downloadText != null) parts += downloadText
         }

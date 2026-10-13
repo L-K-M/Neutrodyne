@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<resources>
+    <!-- The count read before the unsubscribe dialog is a read, not a write (94-5). -->
+    <string name="read_failed">Couldn&apos;t load the data</string>
+</resources>
