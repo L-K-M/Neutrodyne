@@ -8,8 +8,10 @@ import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.Dispatcher
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
+import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers.Default
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
 import ch.lkmc.neutrodyne.core.domain.FeedRepository
@@ -31,6 +33,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metrox.viewmodel.ViewModelKey
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -65,6 +68,7 @@ public class FeedsViewModel(
     private val network: NetworkMonitor,
     podcasts: PodcastRepository,
     private val clock: Clock,
+    @Dispatcher(Default) private val defaultDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
     private val filters = MutableStateFlow(FeedFilters())
     private val userMessages = UserMessages()
@@ -77,7 +81,7 @@ public class FeedsViewModel(
         filters
             .flatMapLatest {
                 feedRepository.pagedFeed(FeedSource.All, it, FeedOrder.NEWEST_FIRST)
-            }.withDayHeaders(clock.now())
+            }.withDayHeaders(clock, defaultDispatcher)
             .cachedIn(viewModelScope)
 
     @OptIn(ExperimentalCoroutinesApi::class)

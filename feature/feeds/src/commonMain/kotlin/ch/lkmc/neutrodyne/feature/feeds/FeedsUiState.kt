@@ -6,6 +6,7 @@ import androidx.compose.runtime.Immutable
 import androidx.paging.PagingData
 import androidx.paging.insertSeparators
 import androidx.paging.map
+import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.ui.FeedDates
@@ -13,8 +14,10 @@ import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 
 /**
  * The All feed's M1a state (08 Group feed pager → Data and state, trimmed to its one page): tab
@@ -48,18 +51,27 @@ public sealed interface FeedItem {
  * memory: `insertSeparators` between rows whose `sortDate` days differ; headers are ordinary
  * items keyed `"d:{epochDay}"`, never sticky).
  */
-public fun PagingData<EpisodeRow>.withDayHeaders(nowMs: Long): PagingData<FeedItem> =
-    map<EpisodeRow, FeedItem> { FeedItem.Episode(it) }.insertSeparators { before, after ->
-        val afterRow = (after as? FeedItem.Episode)?.row ?: return@insertSeparators null
-        val day = FeedDates.dayKey(afterRow.sortDate)
-        val beforeDay = (before as? FeedItem.Episode)?.row?.let { FeedDates.dayKey(it.sortDate) }
-        if (beforeDay == day) {
-            null
-        } else {
-            FeedItem.Day(label = FeedDates.dayLabel(afterRow.sortDate, nowMs), key = "d:$day")
+public fun PagingData<EpisodeRow>.withDayHeaders(
+    nowMs: Long,
+    defaultDispatcher: CoroutineDispatcher,
+): PagingData<FeedItem> =
+    // Paging defers these callbacks to page collection; outer flowOn cannot move them off Main.
+    map<EpisodeRow, FeedItem> { withContext(defaultDispatcher) { FeedItem.Episode(it) } }
+        .insertSeparators { before, after ->
+            withContext(defaultDispatcher) {
+                val afterRow = (after as? FeedItem.Episode)?.row ?: return@withContext null
+                val day = FeedDates.dayKey(afterRow.sortDate)
+                val beforeDay = (before as? FeedItem.Episode)?.row?.let { FeedDates.dayKey(it.sortDate) }
+                if (beforeDay == day) {
+                    null
+                } else {
+                    FeedItem.Day(label = FeedDates.dayLabel(afterRow.sortDate, nowMs), key = "d:$day")
+                }
+            }
         }
-    }
 
-/** [withDayHeaders] on the feed's flow. */
-public fun Flow<PagingData<EpisodeRow>>.withDayHeaders(nowMs: Long): Flow<PagingData<FeedItem>> =
-    map { it.withDayHeaders(nowMs) }
+/** Reads the clock per generation so a later emission does not retain yesterday's "Today". */
+public fun Flow<PagingData<EpisodeRow>>.withDayHeaders(
+    clock: Clock,
+    defaultDispatcher: CoroutineDispatcher,
+): Flow<PagingData<FeedItem>> = map { it.withDayHeaders(clock.now(), defaultDispatcher) }

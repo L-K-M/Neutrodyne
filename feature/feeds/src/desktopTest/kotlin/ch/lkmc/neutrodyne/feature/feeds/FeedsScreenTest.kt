@@ -45,6 +45,7 @@ import ch.lkmc.neutrodyne.core.ui.platform.FileSaver
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
 import ch.lkmc.neutrodyne.core.ui.platform.PlatformActions
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import java.util.Locale
 import kotlin.test.AfterTest
@@ -250,7 +251,7 @@ class FeedsScreenTest {
             Pager(PagingConfig(pageSize = pageSize, initialLoadSize = pageSize)) {
                 source ?: PagedListSource(listOf(rows))
             }.flow
-                .withDayHeaders(TestClock.DEFAULT_NOW)
+                .withDayHeaders(TestClock(), Dispatchers.Unconfined)
         setContent {
             CompositionLocalProvider(
                 LocalPlatformKind provides PlatformKind.DESKTOP,

@@ -40,6 +40,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.days
 
 /**
  * `FeedsViewModel` on the desktop JVM (09 Test matrix): feed paging against
@@ -55,7 +56,7 @@ class FeedsViewModelTest : MainDispatcherTest() {
     private val podcasts = FakePodcastRepository()
     private val clock = TestClock()
 
-    private fun viewModel() = FeedsViewModel(feeds, episodes, refreshController, network, podcasts, clock)
+    private fun viewModel() = FeedsViewModel(feeds, episodes, refreshController, network, podcasts, clock, dispatcher)
 
     private fun TestScope.collect(viewModel: FeedsViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
@@ -125,6 +126,32 @@ class FeedsViewModelTest : MainDispatcherTest() {
                 days.map { it.label },
             )
             assertEquals(listOf(1L, 2L, 3L), items.filterIsInstance<FeedItem.Episode>().map { it.row.id })
+        }
+
+    @Test
+    fun dayLabelsUseClockAtEachFeedEmission() =
+        runTest {
+            val viewModel = viewModel()
+            feeds.rows.value = listOf(testEpisodeRow(1, sortDate = clock.now()))
+            val first =
+                viewModel.feed
+                    .take(1)
+                    .asSnapshot()
+                    .filterIsInstance<FeedItem.Day>()
+                    .single()
+            assertEquals(UiText.Res(Res.string.date_today), first.label)
+
+            clock.advanceBy(1.days)
+            // A filter change requests a new generation in the same ViewModel after midnight.
+            viewModel.onFiltersChange(FeedFilters(unplayedOnly = true))
+            advanceUntilIdle()
+            val next =
+                viewModel.feed
+                    .take(1)
+                    .asSnapshot()
+                    .filterIsInstance<FeedItem.Day>()
+                    .single()
+            assertEquals(UiText.Res(Res.string.date_yesterday), next.label)
         }
 
     @Test
