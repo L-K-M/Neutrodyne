@@ -21,17 +21,19 @@ public fun ShowUserMessages(
     onAcknowledgeMessage: (Long) -> Unit,
 ) {
     val snackbar = LocalSnackbarHost.current
-    // Keep the current acknowledgement without restarting the visible snackbar.
+    // Keep the current callback without restarting the visible snackbar.
     val acknowledge by rememberUpdatedState(onAcknowledgeMessage)
 
-    LaunchedEffect(messages) {
-        for (message in messages) {
-            snackbar.showSnackbar(
-                message = message.text.resolve(),
-                actionLabel = message.action?.resolve(),
-                withDismissAction = message.action != null,
-            )
-            acknowledge(message.id)
-        }
+    // Key on the head message's id, not the list: appending a pending message must not cancel
+    // and replay the visible snackbar. When the head is acknowledged and removed, the new head's
+    // id launches the next show.
+    LaunchedEffect(messages.firstOrNull()?.id) {
+        val message = messages.firstOrNull() ?: return@LaunchedEffect
+        snackbar.showSnackbar(
+            message = message.text.resolve(),
+            actionLabel = message.action?.resolve(),
+            withDismissAction = message.action != null,
+        )
+        acknowledge(message.id)
     }
 }
