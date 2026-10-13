@@ -89,12 +89,14 @@ class DesktopJobRunnerTest {
             advanceTimeBy(DesktopJobRunner.START_SETTLE_MS + 1.seconds)
             awaitRuns(refresh, 1)
             awaitRuns(sync, 1)
+            awaitIdle(runner, refresh, sync)
 
             // One poke: an early tick, not the next minute — every idle lane launches on it.
             runner.poke("refresh")
             runCurrent()
             awaitRuns(refresh, 2)
             awaitRuns(sync, 2)
+            awaitIdle(runner, refresh, sync)
 
             // Two pokes inside one wait window still produce a single tick.
             runner.poke("refresh")
@@ -168,14 +170,14 @@ class DesktopJobRunnerTest {
             awaitStatus(runner, lane.name) { it.failures == 1L }
 
             // 1 min: the failure at t≈5 s is due again at the first minute tick.
-            advanceTick(probe, ++probeRuns, clock)
+            advanceTick(runner, probe, ++probeRuns, clock)
             awaitRuns(lane, 2)
             awaitStatus(runner, lane.name) { it.failures == 2L }
 
             // 2 min: one skipped tick, then a run.
-            advanceTick(probe, ++probeRuns, clock)
+            advanceTick(runner, probe, ++probeRuns, clock)
             expectQuietly { lane.runCount.get() == 2 }
-            advanceTick(probe, ++probeRuns, clock)
+            advanceTick(runner, probe, ++probeRuns, clock)
             awaitRuns(lane, 3)
             awaitStatus(runner, lane.name) { it.failures == 3L }
 
@@ -183,10 +185,10 @@ class DesktopJobRunnerTest {
             var laneRuns = 3
             for (k in BACKOFF_LEGS_MIN) {
                 repeat(k - 1) {
-                    advanceTick(probe, ++probeRuns, clock)
+                    advanceTick(runner, probe, ++probeRuns, clock)
                     expectQuietly { lane.runCount.get() == laneRuns }
                 }
-                advanceTick(probe, ++probeRuns, clock)
+                advanceTick(runner, probe, ++probeRuns, clock)
                 awaitRuns(lane, ++laneRuns)
                 awaitStatus(runner, lane.name) { it.failures == laneRuns.toLong() }
             }
@@ -194,14 +196,14 @@ class DesktopJobRunnerTest {
 
             // failure 6's 2^5 = 32 min clamps at the 30-min cap: 29 skips, then a run.
             repeat(29) {
-                advanceTick(probe, ++probeRuns, clock)
+                advanceTick(runner, probe, ++probeRuns, clock)
                 expectQuietly { lane.runCount.get() == laneRuns }
             }
 
             // That run succeeds: it clears the hold (`LaneStatus.failures` is the cumulative
             // diagnostics counter, not the backoff one — the hold clearing is the tell).
             lane.outcome = Outcome.SUCCEED
-            advanceTick(probe, ++probeRuns, clock)
+            advanceTick(runner, probe, ++probeRuns, clock)
             awaitRuns(lane, ++laneRuns)
             awaitStatus(runner, lane.name) {
                 it.backoffUntil == null && it.lastError == null && !it.running
@@ -220,6 +222,7 @@ class DesktopJobRunnerTest {
             advanceTimeBy(DesktopJobRunner.START_SETTLE_MS + 1.seconds)
             awaitRuns(lane, 1)
             awaitRuns(healthy, 1)
+            awaitIdle(runner, healthy)
 
             // The failing lane sits out its minute of backoff while the healthy one keeps ticking.
             advanceTimeBy(60.seconds)
@@ -242,6 +245,7 @@ class DesktopJobRunnerTest {
             advanceTimeBy(DesktopJobRunner.START_SETTLE_MS + 1.seconds)
             awaitRuns(nasty, 1)
             awaitRuns(healthy, 1)
+            awaitIdle(runner, healthy)
 
             advanceTimeBy(60.seconds)
             awaitRuns(healthy, 2)
@@ -301,11 +305,11 @@ class DesktopJobRunnerTest {
             awaitStatus(runner, lane.name) { it.failures == 1L }
 
             // f2 on the first tick after f1, f3 after one skipped tick: backoff 1 min, then 2, then 4.
-            advanceTick(probe, 2, clock)
+            advanceTick(runner, probe, 2, clock)
             awaitRuns(lane, 2)
             awaitStatus(runner, lane.name) { it.failures == 2L }
-            advanceTick(probe, 3, clock)
-            advanceTick(probe, 4, clock)
+            advanceTick(runner, probe, 3, clock)
+            advanceTick(runner, probe, 4, clock)
             awaitRuns(lane, 3)
             awaitStatus(runner, lane.name) { it.failures == 3L && it.backoffUntil != null }
 
@@ -341,11 +345,11 @@ class DesktopJobRunnerTest {
             advanceTimeBy(DesktopJobRunner.START_SETTLE_MS + 1.seconds)
             awaitRuns(lane, 1)
             awaitStatus(runner, lane.name) { it.failures == 1L }
-            advanceTick(probe, 2, clock)
+            advanceTick(runner, probe, 2, clock)
             awaitRuns(lane, 2)
             awaitStatus(runner, lane.name) { it.failures == 2L }
-            advanceTick(probe, 3, clock)
-            advanceTick(probe, 4, clock)
+            advanceTick(runner, probe, 3, clock)
+            advanceTick(runner, probe, 4, clock)
             awaitRuns(lane, 3)
             awaitStatus(runner, lane.name) { it.failures == 3L && it.backoffUntil != null }
 
@@ -618,6 +622,16 @@ class DesktopJobRunnerTest {
         runCurrent()
     }
 
+    /**
+     * Waits until [lanes] have released their last run. A tick skips a lane that is still
+     * running unless it was poked, and [awaitRuns] only proves a run started: under load the
+     * lane's I/O thread can still be unwinding when the scheduler fires the next tick.
+     */
+    private suspend fun TestScope.awaitIdle(
+        runner: DesktopJobRunner,
+        vararg lanes: CountingLane,
+    ) = lanes.forEach { awaitStatus(runner, it.name) { true } }
+
     private suspend fun TestScope.awaitCondition(
         what: String,
         predicate: () -> Boolean,
@@ -661,10 +675,14 @@ class DesktopJobRunnerTest {
      * arithmetic stays deterministic only when they advance together.
      */
     private suspend fun TestScope.advanceTick(
+        runner: DesktopJobRunner,
         probe: CountingLane,
         n: Int,
         clock: TestClock,
     ) {
+        // Run n−1 must have started before "idle" means released rather than not yet launched.
+        awaitRuns(probe, n - 1)
+        awaitIdle(runner, probe)
         clock.advanceBy(60.seconds)
         advanceTimeBy(60.seconds)
         awaitRuns(probe, n)

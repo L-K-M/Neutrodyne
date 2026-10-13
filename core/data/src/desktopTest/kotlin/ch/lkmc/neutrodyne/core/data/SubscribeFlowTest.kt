@@ -686,9 +686,10 @@ class SubscribeFlowTest {
             assertEquals(stateBefore, db.episodeStateDao().byEpisode(keepEpisode.id))
             assertEquals(
                 "seeded notes",
-                EpisodeDescriptionCodec.decode(
-                    assertNotNull(db.episodeDao().observeDescription(keepEpisode.id).first()),
-                ),
+                EpisodeDescriptionCodec
+                    .decode(
+                        assertNotNull(db.episodeDao().observeDescription(keepEpisode.id).first()),
+                    ).text,
             )
             assertEquals(0, scheduler.rescheduleCount)
             assertTrue(scheduler.nowRequests.isEmpty())
@@ -726,7 +727,7 @@ class SubscribeFlowTest {
             assertEquals(1, db.podcastDao().episodeCount(id))
             val episode = assertNotNull(db.episodeDao().byIdentityKey(id, "g:edge"))
             val blob = assertNotNull(db.episodeDao().observeDescription(episode.id).first())
-            assertEquals(atBound, EpisodeDescriptionCodec.decode(blob))
+            assertEquals(atBound, EpisodeDescriptionCodec.decode(blob).text)
         }
 
     /** Parses [body] through the real parser under a producer's widened text limit. */
