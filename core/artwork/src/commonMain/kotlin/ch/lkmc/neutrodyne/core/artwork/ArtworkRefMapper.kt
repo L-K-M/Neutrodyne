@@ -10,9 +10,11 @@ import okio.Path
 
 /**
  * Coil mapper for [ArtworkRef] (08 Coil ImageLoader): the pinned file first — its in-memory
- * index lookup does no disk I/O on the main thread — else the URL. `m-` keys and provider
- * `{key}.fallback.png` index entries map to the URL path (never the fallback raster): callers
- * render the monogram painter for `m-` rows, and an in-app failure leaves the URL retryable.
+ * index lookup does no disk I/O on the main thread — else the URL. `m-` keys return null:
+ * callers render the monogram painter for `m-` rows and never enqueue them, so a request
+ * that slips through errors as unmapped rather than no-oping. Provider `{key}.fallback.png`
+ * index entries map to the URL (never the fallback raster): an in-app failure leaves the
+ * URL retryable.
  */
 @Inject
 public class ArtworkRefMapper(
