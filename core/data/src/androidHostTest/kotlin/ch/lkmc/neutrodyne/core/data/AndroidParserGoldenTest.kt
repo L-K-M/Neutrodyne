@@ -75,7 +75,12 @@ class AndroidParserGoldenTest {
     private companion object {
         /** The corpus tree, via the `neutrodyne.rootDir` test system property (same as leg a). */
         val FIXTURES_DIR: File =
-            File(System.getProperty("neutrodyne.rootDir")!!, "feeds/src/test/resources/feeds")
+            File(
+                checkNotNull(System.getProperty("neutrodyne.rootDir")) {
+                    "neutrodyne.rootDir is unset; run tests through Gradle (TestConventions sets it)"
+                },
+                "feeds/src/test/resources/feeds",
+            )
 
         val CANONICAL_JSON =
             Json {
