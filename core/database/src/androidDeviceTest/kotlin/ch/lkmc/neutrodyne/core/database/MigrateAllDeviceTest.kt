@@ -15,12 +15,20 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import kotlin.test.assertEquals
 
 /**
  * The GMD half of `MigrateAllTest` (02 Testing): the Android `MigrationTestHelper` creates v1
  * from the packaged `assets/<FQN>/1.json` (the frozen export, wired as a symlink under
- * `src/androidDeviceTest/assets/`), `db/v1-fixture.sql` fills every table, the chain runs, and
- * [MigrationInvariants] verifies nothing was lost — on both drivers.
+ * `src/androidDeviceTest/assets/`), `db/v1-fixture.sql` fills every table, the chain runs to the
+ * current version, and [MigrationInvariants] verifies nothing was lost — on both drivers. V2
+ * additionally asserts the migration's own additions: `episode_guid_provenance` starts empty and
+ * every migrated `podcast.guidCoverageSince` stays NULL (02 episode_guid_provenance).
+ *
+ * As on the desktop, this needs the runtime's `SchemaInfoUtil.readIndex` `key=0` filter
+ * (vendored patch 0003, `RoomIndexInfoTest`): without it `runMigrationsAndValidate`'s
+ * per-table check sees `sync_outbox`'s implicit WITHOUT ROWID key suffix — a table no
+ * migration touches — as undeclared index columns.
  */
 @RunWith(AndroidJUnit4::class)
 class MigrateAllDeviceTest {
@@ -73,7 +81,15 @@ class MigrateAllDeviceTest {
         val after =
             h
                 .runMigrationsAndValidate(NeutrodyneDatabase.VERSION, ALL_MIGRATIONS.toList())
-                .use { conn -> MigrationInvariants.capture(conn) }
+                .use { conn ->
+                    val snapshot = MigrationInvariants.capture(conn)
+                    assertEquals(0L, conn.longQuery("SELECT COUNT(*) FROM episode_guid_provenance"))
+                    assertEquals(
+                        conn.longQuery("SELECT COUNT(*) FROM podcast"),
+                        conn.longQuery("SELECT COUNT(*) FROM podcast WHERE guidCoverageSince IS NULL"),
+                    )
+                    snapshot
+                }
         MigrationInvariants.assertPreserved(before, after)
     }
 }
@@ -81,6 +97,12 @@ class MigrateAllDeviceTest {
 internal suspend fun SQLiteConnection.exec(sql: String) {
     prepare(sql).use { it.step() }
 }
+
+internal suspend fun SQLiteConnection.longQuery(sql: String): Long =
+    prepare(sql).use { stmt ->
+        check(stmt.step()) { "no row for $sql" }
+        stmt.getLong(0)
+    }
 
 /** The same `db/v1-fixture.sql` as `desktopTest`, packaged into the test APK's assets. */
 internal fun fixtureStatements(context: android.content.Context): List<String> =

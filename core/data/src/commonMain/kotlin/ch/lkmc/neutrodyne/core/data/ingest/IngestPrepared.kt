@@ -76,6 +76,13 @@ internal class PreparedItem(
     /** A still-unmatched item with no free fallback left — skipped by the insert phase. */
     var dropped: Boolean = false
 
+    /**
+     * D98: a contested claim was refused — the item carries a GUID without independence proof
+     * while its enclosure belongs to a different stored row. Unresolved items skip every match
+     * pass and take the insert/duplicate path, so neither owner's user state is arbitrated away.
+     */
+    var unresolved: Boolean = false
+
     private val parsedIsVideo: Boolean get() = EnclosureTypes.isVideo(episode.primaryEnclosure?.effectiveType)
 
     /** `sortDate = min(pubDateValid ?: firstSeenAt, firstSeenAt + 24 h)` (03 sortDate and clock). */
