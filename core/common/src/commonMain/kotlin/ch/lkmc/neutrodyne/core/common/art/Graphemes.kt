@@ -5,7 +5,8 @@ package ch.lkmc.neutrodyne.core.common.art
 /**
  * 08: a pure-Kotlin subset of UAX #29 grapheme segmentation — enough for a *leading* cluster
  * (combining marks, variation selectors, emoji modifiers, ZWJ sequences, tag sequences and
- * regional-indicator pairs stay with their base).
+ * regional-indicator pairs stay with their base). Decomposed Hangul jamo (L/V/T sequences)
+ * are not composed (GB6–GB8 are not implemented); precomposed syllables work.
  * `BreakIterator` is JVM-only and banned in `commonMain`.
  */
 public object Graphemes {
