@@ -189,12 +189,7 @@ private fun ReadyRoot(
     // by message id (08's Undo catalogue).
     LaunchedEffect(slots) {
         slots.userMessages.collect { message ->
-            val result =
-                snackbarHost.showSnackbar(
-                    message = message.text.resolve(),
-                    actionLabel = message.action?.resolve(),
-                    withDismissAction = message.action != null,
-                )
+            val result = snackbarHost.showUserMessage(message)
             if (result == SnackbarResult.ActionPerformed) actions.userMessageAction(message.id)
         }
     }

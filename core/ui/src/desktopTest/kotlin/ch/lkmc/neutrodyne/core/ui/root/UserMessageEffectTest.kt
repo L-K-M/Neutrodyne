@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.ui.root
 
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.CompositionLocalProvider
@@ -106,5 +107,48 @@ class UserMessageEffectTest {
             onNodeWithText("Undo").performClick()
             assertEquals(listOf(0L), actioned)
             assertEquals(listOf(0L), acknowledged)
+        }
+
+    @Test
+    fun actionMessageShowsLongAndPlainMessageShort() =
+        runDesktopComposeUiTest(width = 400, height = 300) {
+            // 08's duration rule: an action (the Undo catalogue) shows `Long` (10 s), a plain
+            // confirmation `Short`. Material3 defaults an actionLabel snackbar to `Indefinite`,
+            // which would hold this serial queue until the user dismisses it.
+            val host = SnackbarHostState()
+            var messages by
+                mutableStateOf<ImmutableList<UserMessage>>(
+                    persistentListOf(UserMessage(0, UiText.Raw("Removed"), UiText.Raw("Undo"))),
+                )
+            setContent {
+                CompositionLocalProvider(LocalSnackbarHost provides host) {
+                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                        ShowUserMessages(
+                            messages = messages,
+                            onAcknowledgeMessage = { id ->
+                                messages = messages.filterNot { it.id == id }.toImmutableList()
+                            },
+                        )
+                        SnackbarHost(host)
+                    }
+                }
+            }
+
+            waitUntil(timeoutMillis = 5_000) { host.currentSnackbarData != null }
+            assertEquals(
+                SnackbarDuration.Long,
+                host.currentSnackbarData?.visuals?.duration,
+                "A snackbar with an action must show for SnackbarDuration.Long",
+            )
+
+            host.currentSnackbarData?.dismiss()
+            waitUntil(timeoutMillis = 5_000) { host.currentSnackbarData == null }
+            messages = persistentListOf(UserMessage(1, UiText.Raw("Copied")))
+            waitUntil(timeoutMillis = 5_000) { host.currentSnackbarData != null }
+            assertEquals(
+                SnackbarDuration.Short,
+                host.currentSnackbarData?.visuals?.duration,
+                "A snackbar without an action must show for SnackbarDuration.Short",
+            )
         }
 }

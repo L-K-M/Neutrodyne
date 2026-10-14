@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.feature.podcast
 
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -37,6 +38,9 @@ internal fun rememberNoHandlerFallback(): (String) -> Unit {
                         message = message,
                         actionLabel = copy,
                         withDismissAction = true,
+                        // 08's duration rule: an action shows `Long` (10 s) — Material3 would
+                        // default this to `Indefinite` and hold the one serial host.
+                        duration = SnackbarDuration.Long,
                     )
                 if (result == SnackbarResult.ActionPerformed) {
                     clipboard.setText(AnnotatedString(url))
