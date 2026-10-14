@@ -258,6 +258,7 @@
     <string name="podcast_enter_password">Passwort eingeben</string>
     <string name="podcast_gone">Dieser Feed existiert nicht mehr</string>
     <string name="podcast_maybe_moved">Dieser Feed wurde seit %1$s nicht aktualisiert — er ist evtl. umgezogen</string>
+    <string name="podcast_maybe_moved_never">Dieser Feed wurde seit dem Abonnieren nicht aktualisiert — er ist evtl. umgezogen</string>
     <string name="podcast_load_older">Ältere Folgen laden</string>
     <string name="podcast_mark_played">Alle als gespielt markieren</string>
     <string name="podcast_mark_all_title">Alle in %1$s als gespielt markieren?</string>
