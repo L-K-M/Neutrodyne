@@ -24,6 +24,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.NdActionRole
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
@@ -248,6 +254,13 @@ private fun SortMenu(
                         open = false
                         onSort(option)
                     },
+                    // The check icon is decorative; the radio role plus `selected` is what
+                    // screen readers announce (94 review).
+                    modifier =
+                        Modifier.semantics {
+                            selected = option == sort
+                            role = Role.RadioButton
+                        },
                 )
             }
         }
@@ -289,6 +302,13 @@ private fun OverflowMenu(
                     open = false
                     onToggleTitles(!showTitles)
                 },
+                // Same gap as the sort menu: the check icon alone is decorative, so the
+                // item reports a switch role with its toggleable state (94 review).
+                modifier =
+                    Modifier.semantics {
+                        toggleableState = ToggleableState(showTitles)
+                        role = Role.Switch
+                    },
             )
         }
     }

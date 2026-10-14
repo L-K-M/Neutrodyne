@@ -13,6 +13,9 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
@@ -326,6 +329,31 @@ class LibraryScreenTest {
             onNodeWithContentDescription("More actions").performClick()
             onNodeWithText("Show titles").performClick()
             assertEquals(true, showTitles)
+        }
+
+    /**
+     * The menu must report which sort is active (94 review): every option carries the
+     * radio-button role with `selected` exposed on the current sort only — a decorative
+     * check icon alone leaves screen readers guessing.
+     */
+    @Test
+    fun sortMenuMarksOnlyTheActiveOption() =
+        runComposeUiTest {
+            setLibrary(LibraryUiState(loaded = true, sort = LibrarySort.RECENTLY_UPDATED))
+            onNodeWithContentDescription("Sort").performClick()
+            onNodeWithText("Recently updated").assertIsSelected()
+            onNodeWithText("Title (A–Z)").assertIsNotSelected()
+            onNodeWithText("Most unplayed").assertIsNotSelected()
+            onNodeWithText("Recently added").assertIsNotSelected()
+        }
+
+    /** The titles item reports its on/off state as a switch (94 review). */
+    @Test
+    fun titlesItemExposesSwitchState() =
+        runComposeUiTest {
+            setLibrary(LibraryUiState(loaded = true, showTitles = true))
+            onNodeWithContentDescription("More actions").performClick()
+            onNodeWithText("Show titles").assertIsOn()
         }
 
     @Test
