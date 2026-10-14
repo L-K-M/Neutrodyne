@@ -3,7 +3,6 @@
 package ch.lkmc.neutrodyne.feature.podcast
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,7 +22,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -59,9 +57,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_copy
 import ch.lkmc.neutrodyne.core.ui.resources.action_save
-import ch.lkmc.neutrodyne.core.ui.resources.add_auth_password
 import ch.lkmc.neutrodyne.core.ui.resources.add_auth_title
-import ch.lkmc.neutrodyne.core.ui.resources.add_auth_username
 import ch.lkmc.neutrodyne.core.ui.resources.order_newest
 import ch.lkmc.neutrodyne.core.ui.resources.order_oldest
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_copy_feed
@@ -517,7 +513,7 @@ private fun EditUrlDialog(
 }
 
 @Composable
-private fun SettingsCredentialsDialog(
+internal fun SettingsCredentialsDialog(
     onSubmit: (BasicCredentials) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -533,26 +529,17 @@ private fun SettingsCredentialsDialog(
             },
         dismiss = NdDialogAction(stringResource(Res.string.action_cancel), onClick = onDismiss),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(FIELD_GAP)) {
-            OutlinedTextField(
-                value = username,
-                onValueChange = { username = it },
-                label = { Text(stringResource(Res.string.add_auth_username)) },
-                singleLine = true,
-            )
-            OutlinedTextField(
-                value = password,
-                onValueChange = { password = it },
-                label = { Text(stringResource(Res.string.add_auth_password)) },
-                singleLine = true,
-            )
-        }
+        CredentialFields(
+            username = username,
+            onUsernameChange = { username = it },
+            password = password,
+            onPasswordChange = { password = it },
+        )
     }
 }
 
 private val SECTION_PADDING = 16.dp
 private val ROW_PADDING = 16.dp
 private val RADIO_GAP = 16.dp
-private val FIELD_GAP = 12.dp
 private val LOADING_PADDING = 32.dp
 private val LOADING_TEXT_GAP = 16.dp

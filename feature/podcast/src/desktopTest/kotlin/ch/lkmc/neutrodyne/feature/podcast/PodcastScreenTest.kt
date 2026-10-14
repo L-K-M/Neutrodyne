@@ -4,13 +4,17 @@ package ch.lkmc.neutrodyne.feature.podcast
 
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -19,9 +23,11 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.v2.runComposeUiTest
+import androidx.compose.ui.text.AnnotatedString
 import androidx.paging.LoadState
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
@@ -266,6 +272,37 @@ class PodcastScreenTest {
             assertEquals(false, confirmed)
             onAllNodes(hasClickAction() and hasText("Mark all as played")).onFirst().performClick()
             assertEquals(true, confirmed)
+        }
+
+    @Test
+    fun credentialsDialogMasksThePasswordUntilToggled() =
+        runComposeUiTest {
+            setCredentialsDialog()
+
+            val password = onAllNodes(hasSetTextAction())[1]
+            password.performTextInput("hunter2")
+
+            // 08's dialogs table ("masked, show toggle"): the secret stays transformed —
+            // the Password semantics marker is set and the field's text is the mask, not
+            // the raw password — until the trailing toggle reveals it. The marker stays
+            // set after revealing: it tracks the password keyboard, not the mask.
+            password.assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+            password.assert(
+                SemanticsMatcher.expectValue(
+                    SemanticsProperties.EditableText,
+                    AnnotatedString("•••••••"),
+                ),
+            )
+            onNodeWithContentDescription("Show password").assertIsDisplayed()
+
+            onNodeWithContentDescription("Show password").performClick()
+            password.assert(
+                SemanticsMatcher.expectValue(
+                    SemanticsProperties.EditableText,
+                    AnnotatedString("hunter2"),
+                ),
+            )
+            onNodeWithContentDescription("Hide password").assertIsDisplayed()
         }
 
     @Test
@@ -603,6 +640,26 @@ class PodcastScreenTest {
             waitForIdle()
         }
         return pagingItems
+    }
+
+    /** The banner's credentials dialog rendered directly — its entry point waits for M1b. */
+    private fun ComposeUiTest.setCredentialsDialog(
+        onSubmit: (BasicCredentials) -> Unit = {},
+        onDismiss: () -> Unit = {},
+    ) {
+        setContent {
+            CompositionLocalProvider(
+                LocalPlatformKind provides PlatformKind.DESKTOP,
+                LocalUiClock provides TestClock(),
+                LocalAppNavigator provides navigator,
+                LocalPlatformActions provides TestPlatformActions,
+            ) {
+                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    CredentialsDialog(onSubmit = onSubmit, onDismiss = onDismiss)
+                }
+            }
+        }
+        waitForIdle()
     }
 }
 

@@ -20,7 +20,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
@@ -81,9 +80,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_retry
 import ch.lkmc.neutrodyne.core.ui.resources.action_save
 import ch.lkmc.neutrodyne.core.ui.resources.action_share
 import ch.lkmc.neutrodyne.core.ui.resources.action_watch_on_youtube
-import ch.lkmc.neutrodyne.core.ui.resources.add_auth_password
 import ch.lkmc.neutrodyne.core.ui.resources.add_auth_title
-import ch.lkmc.neutrodyne.core.ui.resources.add_auth_username
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_load_error
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_refresh
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_show_played
@@ -657,9 +654,12 @@ private fun ChipsRow(
     }
 }
 
-/** 03 Basic auth: the "Enter password" dialog of the needs-credentials banner. */
+/**
+ * 03 Basic auth: the "Enter password" dialog of the needs-credentials banner. `internal` so
+ * desktop tests can drive the gated control before M1b flips the flag.
+ */
 @Composable
-private fun CredentialsDialog(
+internal fun CredentialsDialog(
     onSubmit: (BasicCredentials) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -673,20 +673,12 @@ private fun CredentialsDialog(
             NdDialogAction(stringResource(Res.string.action_save)) { onSubmit(BasicCredentials(username, password)) },
         dismiss = NdDialogAction(stringResource(Res.string.action_cancel), onClick = onDismiss),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(FIELD_GAP)) {
-            OutlinedTextField(
-                value = username,
-                onValueChange = { username = it },
-                label = { Text(stringResource(Res.string.add_auth_username)) },
-                singleLine = true,
-            )
-            OutlinedTextField(
-                value = password,
-                onValueChange = { password = it },
-                label = { Text(stringResource(Res.string.add_auth_password)) },
-                singleLine = true,
-            )
-        }
+        CredentialFields(
+            username = username,
+            onUsernameChange = { username = it },
+            password = password,
+            onPasswordChange = { password = it },
+        )
     }
 }
 
@@ -766,7 +758,6 @@ private fun LoadingBody() {
 }
 
 private val FOOTER_PADDING = 16.dp
-private val FIELD_GAP = 12.dp
 private val LOADING_PADDING = 32.dp
 private val LOADING_TEXT_GAP = 16.dp
 

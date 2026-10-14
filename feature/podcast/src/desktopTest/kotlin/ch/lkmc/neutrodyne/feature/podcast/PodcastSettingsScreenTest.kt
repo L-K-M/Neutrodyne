@@ -3,8 +3,13 @@
 package ch.lkmc.neutrodyne.feature.podcast
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
+import androidx.compose.runtime.saveable.SaveableStateRegistry
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasSetTextAction
@@ -13,8 +18,10 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.v2.runComposeUiTest
+import androidx.compose.ui.text.AnnotatedString
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
@@ -223,6 +230,37 @@ class PodcastSettingsScreenTest {
         }
 
     @Test
+    fun credentialsDialogMasksThePasswordUntilToggled() =
+        runComposeUiTest {
+            setSettingsCredentialsDialog()
+
+            val password = onAllNodes(hasSetTextAction())[1]
+            password.performTextInput("hunter2")
+
+            // 08's dialogs table ("masked, show toggle"): the secret stays transformed —
+            // the Password semantics marker is set and the field's text is the mask, not
+            // the raw password — until the trailing toggle reveals it. The marker stays
+            // set after revealing: it tracks the password keyboard, not the mask.
+            password.assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+            password.assert(
+                SemanticsMatcher.expectValue(
+                    SemanticsProperties.EditableText,
+                    AnnotatedString("•••••••"),
+                ),
+            )
+            onNodeWithContentDescription("Show password").assertIsDisplayed()
+
+            onNodeWithContentDescription("Show password").performClick()
+            password.assert(
+                SemanticsMatcher.expectValue(
+                    SemanticsProperties.EditableText,
+                    AnnotatedString("hunter2"),
+                ),
+            )
+            onNodeWithContentDescription("Hide password").assertIsDisplayed()
+        }
+
+    @Test
     fun youtubeFeedHidesEditAddress() =
         runComposeUiTest {
             setSettings(
@@ -260,6 +298,28 @@ class PodcastSettingsScreenTest {
                         onEditFeedUrl = onEditFeedUrl,
                         onCredentials = onCredentials,
                     )
+                }
+            }
+        }
+        waitForIdle()
+    }
+
+    /** The "Username and password" dialog rendered directly — its row waits for M1b. */
+    private fun ComposeUiTest.setSettingsCredentialsDialog(
+        registry: SaveableStateRegistry = SaveableStateRegistry(null) { true },
+        onSubmit: (BasicCredentials) -> Unit = {},
+        onDismiss: () -> Unit = {},
+    ) {
+        setContent {
+            CompositionLocalProvider(
+                LocalPlatformKind provides PlatformKind.DESKTOP,
+                LocalUiClock provides TestClock(),
+                LocalAppNavigator provides navigator,
+                LocalPlatformActions provides TestPlatformActions,
+                LocalSaveableStateRegistry provides registry,
+            ) {
+                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    SettingsCredentialsDialog(onSubmit = onSubmit, onDismiss = onDismiss)
                 }
             }
         }
