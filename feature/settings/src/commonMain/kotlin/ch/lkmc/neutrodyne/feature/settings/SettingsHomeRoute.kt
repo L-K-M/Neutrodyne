@@ -8,6 +8,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
@@ -39,10 +40,13 @@ import ch.lkmc.neutrodyne.feature.settings.resources.Res as SettingsRes
 @Composable
 internal fun SettingsHomeRoute(settings: SettingsRepository) {
     val navigator = LocalAppNavigator.current
+    // observe() builds a fresh, unequal Flow every call — an unremembered instance would
+    // restart the collection on each recomposition.
+    val intervalFlow = remember(settings) { settings.observe(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES) }
     val interval by
-        settings
-            .observe(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES)
-            .collectAsStateWithLifecycle(initialValue = FeedsSettingKeys.REFRESH_INTERVAL_MINUTES.default)
+        intervalFlow.collectAsStateWithLifecycle(
+            initialValue = FeedsSettingKeys.REFRESH_INTERVAL_MINUTES.default,
+        )
 
     Column(Modifier.fillMaxSize()) {
         NdTopAppBar(
