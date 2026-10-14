@@ -657,6 +657,7 @@ class PodcastMergeTest {
                     JsoupShowNotesSanitizer(),
                     clock,
                     merger,
+                    unusedPreviewResolver,
                 )
 
             repository.merge(loser, winner, ChangeOrigin.SYNC)

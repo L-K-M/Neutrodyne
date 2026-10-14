@@ -39,6 +39,7 @@ class PodcastRepositoryTest {
             sanitizer = JsoupShowNotesSanitizer(),
             clock = clock,
             merger = PodcastMerger(db, FakeCredentialCommitCoordinator(), clock),
+            resolver = unusedPreviewResolver,
         )
 
     @Test

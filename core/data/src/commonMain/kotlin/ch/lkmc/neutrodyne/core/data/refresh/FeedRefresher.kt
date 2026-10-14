@@ -2,10 +2,14 @@
 
 package ch.lkmc.neutrodyne.core.data.refresh
 
+import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Log
+import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.data.add.PreviewEntry
+import ch.lkmc.neutrodyne.core.data.add.isAccepted
 import ch.lkmc.neutrodyne.core.data.fetch.FeedTempFiles
 import ch.lkmc.neutrodyne.core.data.ingest.FeedIngestor
 import ch.lkmc.neutrodyne.core.data.ingest.IngestContext
@@ -17,10 +21,12 @@ import ch.lkmc.neutrodyne.core.database.DueFeed
 import ch.lkmc.neutrodyne.core.database.FetchStateBatcher
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastFetchState
+import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.RefreshStatus
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
+import ch.lkmc.neutrodyne.core.model.AliasReason
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.NewEpisodes
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
@@ -29,6 +35,7 @@ import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.feeds.identity.PodcastGuid
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.model.ParseWarning
+import ch.lkmc.neutrodyne.feeds.model.isPartialWindow
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.SingleIn
@@ -185,6 +192,85 @@ internal class FeedRefresher(
     suspend fun flushFetchStates() {
         batcherLock.withLock { batcher }?.flush()
     }
+
+    /** Serialize the probe and commit with refresh runs and other edits, avoiding stale outcomes. */
+    suspend fun editFeedUrl(
+        podcastId: Long,
+        probe: suspend () -> Outcome<PreviewEntry, AddPodcastError>,
+    ): Outcome<Unit, AddPodcastError> =
+        mutex.withLock {
+            val podcasts = db.podcastDao()
+            if (podcasts.byId(podcastId)?.sourceType != SourceType.RSS) {
+                return@withLock Outcome.Failure(AddPodcastError.InvalidUrl)
+            }
+            val entry =
+                when (val result = probe()) {
+                    is Outcome.Success -> result.value
+                    is Outcome.Failure -> return@withLock result
+                }
+            // A redirect can introduce userinfo too; it must never enter the stored feed URL.
+            val targetUrl =
+                UrlNormalizer
+                    .splitUserInfo(
+                        entry.meta.permanentUrl.takeIf { entry.feed.items.any { it.isAccepted() } }
+                            ?: entry.meta.requestedUrl,
+                    ).first
+            if (UrlNormalizer.forIdentity(targetUrl) == null) {
+                return@withLock Outcome.Failure(AddPodcastError.InvalidUrl)
+            }
+            flushFetchStates()
+            var targetId = podcastId
+            var merged = false
+            var committed: Pair<DueFeed, IngestResult>?
+            while (true) {
+                try {
+                    committed =
+                        db.withWriteTransaction {
+                            val stored = podcasts.byId(targetId) ?: return@withWriteTransaction null
+                            if (stored.sourceType != SourceType.RSS) return@withWriteTransaction null
+                            if (!merged) moves.applyInTransaction(stored, targetUrl, AliasReason.SUBSCRIBE_INPUT)
+                            podcasts.clearRefreshBlock(targetId)
+                            val current = podcasts.dueFeedById(targetId) ?: return@withWriteTransaction null
+                            val mode =
+                                if (current.initialFetch || current.status == PodcastStatus.PENDING_FIRST_FETCH) {
+                                    IngestMode.INITIAL
+                                } else {
+                                    IngestMode.REFRESH
+                                }
+                            current to
+                                ingestor.ingestInTransaction(
+                                    current,
+                                    entry.feed,
+                                    IngestContext(
+                                        mode = mode,
+                                        partial = entry.feed.paging.isPartialWindow,
+                                        fetch = entry.meta.copy(permanentUrl = null),
+                                        validators = IngestValidators.DISCARD,
+                                    ),
+                                )
+                        }
+                    break
+                } catch (collision: FeedMoveCollision) {
+                    // The writer has unwound before credential cleanup acquires its coordinator.
+                    val survivor = moves.mergeCollision(targetId, collision) ?: continue
+                    targetId = survivor.id
+                    merged = true
+                }
+            }
+            val (feed, ingest) = committed ?: return@withLock Outcome.Failure(AddPodcastError.InvalidUrl)
+            withContext(NonCancellable) {
+                announceIngest(
+                    feed,
+                    adapters.getValue(SourceType.RSS),
+                    ingest,
+                    initialFetch = feed.initialFetch || feed.status == PodcastStatus.PENDING_FIRST_FETCH,
+                )
+                // Scheduling cannot undo the committed edit, as in the subscribe path.
+                suspendRunCatching { scheduler().reschedulePeriodic() }
+                    .onFailure { Log.w(TAG, it) { "post-edit reschedule failed" } }
+            }
+            Outcome.Success(Unit)
+        }
 
     private suspend fun runLocked(request: RefreshRequest): RefreshReport {
         mergedThisRun = false

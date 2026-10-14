@@ -7,6 +7,8 @@ import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.Redactor
+import ch.lkmc.neutrodyne.core.data.add.HostChecks
+import ch.lkmc.neutrodyne.core.data.add.PreviewEntryResolver
 import ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshScheduler
@@ -39,7 +41,7 @@ import kotlinx.serialization.json.Json
 /**
  * `PodcastRepository` (03 Unsubscribe and other podcast operations): read models mapped in Kotlin
  * from the 02 DAOs and the write paths M1a owns (unsubscribe, user columns, retry). `setCredentials`
- * and `editFeedUrl` are M1b and throw; `SyncStateDao.withApplying` lands with
+ * is M1b and throws; `SyncStateDao.withApplying` lands with
  * MS0 so `ChangeOrigin.SYNC` runs the same cascade for now (deviation 2026-10-07).
  */
 @SingleIn(AppScope::class)
@@ -52,6 +54,7 @@ internal class PodcastRepositoryImpl(
     private val sanitizer: ShowNotesSanitizer,
     private val clock: Clock,
     private val merger: PodcastMerger,
+    private val resolver: PreviewEntryResolver,
 ) : PodcastRepository {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -174,11 +177,35 @@ internal class PodcastRepositoryImpl(
         credentials: BasicCredentials,
     ): Outcome<Unit, AddPodcastError> = throw UnsupportedOperationException("setCredentials is M1b")
 
-    /** 03 Edit URL: feed moves and `new-feed-url` aliases land in M1b. */
+    /** 03 Edit URL: validate before an atomic move and ingest, preserving user state. */
     override suspend fun editFeedUrl(
         podcastId: Long,
         input: String,
-    ): Outcome<Unit, AddPodcastError> = throw UnsupportedOperationException("editFeedUrl is M1b")
+    ): Outcome<Unit, AddPodcastError> =
+        refresher.editFeedUrl(podcastId) {
+            // TODO(M1b PR4): store input credentials under their request origin after a successful probe.
+            when (val result = resolver.probe(input)) {
+                is Outcome.Failure -> {
+                    if (result.error == AddPodcastError.YouTubeNotYetSupported) {
+                        Outcome.Failure(AddPodcastError.InvalidUrl)
+                    } else {
+                        result
+                    }
+                }
+
+                is Outcome.Success -> {
+                    val meta = result.value.meta
+                    // Match subscribe's guard, including the URL that would become the identity.
+                    if (HostChecks.isYouTube(meta.finalUrl) ||
+                        HostChecks.isYouTube(meta.permanentUrl ?: meta.requestedUrl)
+                    ) {
+                        Outcome.Failure(AddPodcastError.InvalidUrl)
+                    } else {
+                        result
+                    }
+                }
+            }
+        }
 
     /**
      * "Try again" (03 Per-feed states): flush the batcher, clear the failure block, then a
