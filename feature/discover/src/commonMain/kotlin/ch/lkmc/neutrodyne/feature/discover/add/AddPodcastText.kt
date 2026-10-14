@@ -101,7 +101,7 @@ internal object AddPodcastText {
         }
 }
 
-/** `SubscribeError` → `UiText`; [alreadyText]/[mismatchText] come from the sheet's call site. */
+/** `SubscribeError` → `UiText`; `AlreadySubscribed` is handled inline by the sheet's call site. */
 internal object SubscribeErrorText {
     fun describe(error: SubscribeError): UiText =
         when (error) {
