@@ -230,6 +230,22 @@ class PodcastSettingsScreenTest {
         }
 
     @Test
+    fun neverFetchedShowsNeverAlone() =
+        runComposeUiTest {
+            setSettings(
+                PodcastSettingsUiState(
+                    detail = testPodcastDetail(7),
+                    feedInfo = testFeedInfo(lastSuccessAt = null, lastErrorKind = null),
+                    loaded = true,
+                ),
+            )
+            // A feed that never fetched has no outcome to report — "Never" alone, not a
+            // contradictory "Never · OK".
+            onNodeWithText("Never").assertIsDisplayed()
+            onNodeWithText("Never · OK").assertDoesNotExist()
+        }
+
+    @Test
     fun credentialsDialogMasksThePasswordUntilToggled() =
         runComposeUiTest {
             setSettingsCredentialsDialog()

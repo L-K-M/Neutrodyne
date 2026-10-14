@@ -342,6 +342,10 @@ private fun lastRefreshSummary(
     feedInfo: FeedInfo,
     nowMs: Long,
 ): UiText {
+    // A feed that never fetched has no outcome to report — "Never" alone, not "Never · OK".
+    if (feedInfo.lastSuccessAt == null && feedInfo.lastErrorKind == null) {
+        return UiText.Res(Res.string.ps_never)
+    }
     val whenText =
         feedInfo.lastSuccessAt?.let { FeedDates.relative(it, nowMs) }
             ?: UiText.Res(Res.string.ps_never)
