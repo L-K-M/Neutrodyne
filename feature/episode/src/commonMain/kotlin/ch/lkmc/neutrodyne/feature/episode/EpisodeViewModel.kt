@@ -114,15 +114,12 @@ public class EpisodeViewModel
         }
 
         public fun onLinkOpenFailed(url: String) {
-            userMessages.post(
-                UiText.Res(Res.string.no_handler),
-                action = UiText.Res(Res.string.action_copy_link),
-            )
-            failedLinks[
-                userMessages.flow.value
-                    .last()
-                    .id,
-            ] = url
+            val message =
+                userMessages.post(
+                    UiText.Res(Res.string.no_handler),
+                    action = UiText.Res(Res.string.action_copy_link),
+                )
+            failedLinks[message.id] = url
         }
 
         /** Only the failed link attached to this message may be copied by the route. */
