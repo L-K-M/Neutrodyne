@@ -2,6 +2,8 @@
 
 package ch.lkmc.neutrodyne.core.ui.root
 
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -34,13 +36,27 @@ public fun ShowUserMessages(
     // id launches the next show.
     LaunchedEffect(messages.firstOrNull()?.id) {
         val message = messages.firstOrNull() ?: return@LaunchedEffect
-        val result =
-            snackbar.showSnackbar(
-                message = message.text.resolve(),
-                actionLabel = message.action?.resolve(),
-                withDismissAction = message.action != null,
-            )
+        val result = snackbar.showUserMessage(message)
         if (result == SnackbarResult.ActionPerformed) action(message.id)
         acknowledge(message.id)
     }
 }
+
+/**
+ * Shows [message] on the root host. 08's duration rule: `Long` (10 s) for anything with an
+ * action (the Undo catalogue), `Short` for plain confirmations — Material3's default of
+ * `Indefinite` whenever an actionLabel is set would hold the one serial host until the user
+ * dismisses it. `Indefinite` stays reserved for the `GroupError.NameTaken` case.
+ */
+internal suspend fun SnackbarHostState.showUserMessage(message: UserMessage): SnackbarResult =
+    showSnackbar(
+        message = message.text.resolve(),
+        actionLabel = message.action?.resolve(),
+        withDismissAction = message.action != null,
+        duration =
+            if (message.action != null) {
+                SnackbarDuration.Long
+            } else {
+                SnackbarDuration.Short
+            },
+    )

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -61,7 +62,14 @@ internal fun AboutPage(buildInfo: BuildInfo) {
     fun openLink(url: String) {
         if (urls.open(url) == OpenResult.OPENED) return
         scope.launch {
-            val result = snackbarHost.showSnackbar(message = noHandlerMessage, actionLabel = copyLabel)
+            // 08's duration rule: an action shows `Long` (10 s) — Material3 would default this
+            // to `Indefinite` and hold the one serial host.
+            val result =
+                snackbarHost.showSnackbar(
+                    message = noHandlerMessage,
+                    actionLabel = copyLabel,
+                    duration = SnackbarDuration.Long,
+                )
             if (result == SnackbarResult.ActionPerformed) {
                 clipboard.setText(AnnotatedString(url))
             }
