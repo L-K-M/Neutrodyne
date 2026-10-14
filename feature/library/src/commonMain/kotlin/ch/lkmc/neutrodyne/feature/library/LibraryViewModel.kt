@@ -116,8 +116,8 @@ public class LibraryViewModel(
     /** A settings write: the repository reports failures as `Outcome.Failure`, not a throw. */
     private fun writeSetting(block: suspend () -> Outcome<Unit, *>) {
         viewModelScope.launch {
-            val failed = suspendRunCatching { block() }.getOrNull() !is Outcome.Success
-            if (failed) reportWriteFailed(null)
+            val result = suspendRunCatching { block() }
+            if (result.getOrNull() !is Outcome.Success) reportWriteFailed(result.exceptionOrNull())
         }
     }
 
