@@ -51,7 +51,7 @@ public class LibraryViewModel(
     private val podcasts: PodcastRepository,
     private val episodes: EpisodeRepository,
     private val refreshController: RefreshController,
-    private val unsubscribe: UnsubscribeUseCase,
+    private val unsubscribeUseCase: UnsubscribeUseCase,
     private val settings: SettingsRepository,
     private val collator: TitleCollator,
     network: NetworkMonitor,
@@ -98,7 +98,7 @@ public class LibraryViewModel(
     public suspend fun downloadedCount(podcastId: Long): Int = podcasts.downloadedEpisodeIds(listOf(podcastId)).size
 
     public fun unsubscribe(podcastId: Long) {
-        write { unsubscribe(listOf(podcastId)) }
+        write { unsubscribeUseCase(listOf(podcastId)) }
     }
 
     /** The screen acks a shown snackbar so its [UserMessage] leaves the state. */
