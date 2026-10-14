@@ -135,7 +135,7 @@ fun testEpisodeRow(
         downloadState = downloadState,
     )
 
-/** A `PodcastDetail`; [episodeOrder] null + [showType] SERIAL exercises 05's oldest-first default. */
+/** A `PodcastDetail`; pass `episodeOrder = null, showType = ShowType.SERIAL` to exercise 05's oldest-first default. */
 fun testPodcastDetail(
     id: Long = 1,
     displayTitle: String = "Podcast $id",

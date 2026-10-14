@@ -70,6 +70,7 @@
     <string name="date_weekday_sat">Saturday</string>
     <string name="date_weekday_sun">Sunday</string>
     <string name="date_duration_minutes">%1$d min</string>
+    <string name="date_duration_lt_minute">&lt;1 min</string>
     <string name="date_duration_hours">%1$d h</string>
     <string name="date_duration_hours_minutes">%1$d h %2$d min</string>
     <string name="date_just_now">Just now</string>
@@ -274,6 +275,7 @@
     <string name="podcast_maybe_moved">This feed hasn&apos;t updated since %1$s — it may have moved</string>
     <string name="podcast_load_older">Load older episodes</string>
     <string name="podcast_mark_played">Mark all as played</string>
+    <string name="podcast_mark_all_title">Mark all as played in %1$s?</string>
     <string name="podcast_copy_feed">Copy feed address</string>
     <string name="podcast_copy_feed_warning">This feed address is private — anyone with it can read the feed.</string>
     <string name="podcast_loading">Loading podcast…</string>
@@ -313,6 +315,7 @@
         <item quantity="other">%1$d min left</item>
     </plurals>
     <string name="shownotes_image">Image: %1$s</string>
+    <string name="shownotes_load_images">Load images</string>
     <string name="no_handler">No app can open this link</string>
 
     <!-- Discover (M1a: add-by-URL entry point only). -->

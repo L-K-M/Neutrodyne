@@ -108,8 +108,10 @@ public fun PodcastHeader(
 @Composable
 private fun Description(notes: ShowNotes) {
     val plain = remember(notes) { notes.plainText() }
-    var expanded by remember { mutableStateOf(false) }
-    var overflows by remember { mutableStateOf(false) }
+    // Keyed on notes like `plain`: a recycled call site must not inherit a previous
+    // description's expanded/overflow state.
+    var expanded by remember(notes) { mutableStateOf(false) }
+    var overflows by remember(notes) { mutableStateOf(false) }
     Text(
         plain,
         style = MaterialTheme.typography.bodyMedium,
@@ -155,8 +157,17 @@ private fun MetaLine(
     )
 }
 
-/** The description as plain text — paragraphs and list items separated by newlines. */
-private fun ShowNotes.plainText(): String = blocks.joinToString("\n") { it.plainText() }.trim()
+/**
+ * The description as plain text — paragraphs and list items separated by newlines. Blank blocks
+ * (alt-less images, rules) are dropped before joining so they don't eat the 3-line preview
+ * budget as empty lines.
+ */
+private fun ShowNotes.plainText(): String =
+    blocks
+        .map { it.plainText() }
+        .filter { it.isNotBlank() }
+        .joinToString("\n")
+        .trim()
 
 private fun ShowNoteBlock.plainText(): String =
     when (this) {

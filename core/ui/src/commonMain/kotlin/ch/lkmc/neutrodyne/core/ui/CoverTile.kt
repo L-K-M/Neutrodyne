@@ -80,7 +80,7 @@ public fun CoverTile(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var menuOpen by remember { mutableStateOf(false) }
+    var menuOpen by remember(tile.podcastId) { mutableStateOf(false) }
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
     var focused by remember { mutableStateOf(false) }
@@ -99,8 +99,9 @@ public fun CoverTile(
             modifier
                 .hoverable(interactionSource)
                 .onFocusChanged { focused = it.isFocused }
-                .onSecondaryClick { if (menuActions.isNotEmpty()) menuOpen = true }
-                .semantics(
+                .onSecondaryClick {
+                    if (selected == null && menuActions.isNotEmpty()) menuOpen = true
+                }.semantics(
                     mergeDescendants = true,
                 ) {
                     if (description != null) contentDescription = description
@@ -174,7 +175,9 @@ public fun CoverTile(
                 }
             }
 
-            if (hovered || focused || menuOpen) {
+            // In selection mode the per-item overflow is superseded by the SelectionTopBar
+            // (08) — and the ⋮ sits exactly where the selected check badge draws.
+            if (selected == null && (hovered || focused || menuOpen)) {
                 if (menuActions.isNotEmpty()) {
                     NdIconButton(
                         onClick = { menuOpen = true },

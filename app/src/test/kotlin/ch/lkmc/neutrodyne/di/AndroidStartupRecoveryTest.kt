@@ -115,7 +115,7 @@ class AndroidStartupRecoveryTest {
             .get(5, TimeUnit.SECONDS)
 
     private fun pumpUntil(ready: () -> Boolean) {
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(STARTUP_BOUND_SECONDS)
         while (!ready()) {
             check(System.nanoTime() < deadline) { "startup did not finish" }
             Shadows.shadowOf(Looper.getMainLooper()).idle()
@@ -132,6 +132,12 @@ class AndroidStartupRecoveryTest {
     private enum class Startup { HEALTHY, RETRY }
 
     private companion object {
+        /**
+         * A hang detector, not a performance budget: each case took up to 12 s idle and up to
+         * 28 s under CPU contention, where a 10 s bound on the Robolectric start-up failed.
+         */
+        const val STARTUP_BOUND_SECONDS = 60L
+
         val REFRESH_INITIALIZERS = listOf("PeriodicRefreshInitializer", "RefreshForegroundObserverInitializer")
     }
 }

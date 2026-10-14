@@ -4,11 +4,9 @@ package ch.lkmc.neutrodyne.core.designsystem.components
 
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshState
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 
 /**
@@ -47,13 +45,6 @@ public fun NdPullToRefresh(
         onRefresh = onRefresh,
         modifier = modifier,
         state = state,
-        indicator = {
-            PullToRefreshDefaults.Indicator(
-                state = state,
-                isRefreshing = isRefreshing,
-                modifier = Modifier.align(Alignment.TopCenter),
-            )
-        },
         content = content,
     )
 }

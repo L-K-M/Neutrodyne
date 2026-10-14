@@ -24,6 +24,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.NdActionRole
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
@@ -57,6 +63,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.library_sort_recent
 import ch.lkmc.neutrodyne.core.ui.resources.library_sort_title
 import ch.lkmc.neutrodyne.core.ui.resources.library_sort_unplayed
 import ch.lkmc.neutrodyne.core.ui.resources.nav_library
+import ch.lkmc.neutrodyne.core.ui.resources.podcast_mark_all_title
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_mark_played
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_settings
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_unsubscribe
@@ -83,7 +90,7 @@ internal data class PendingUnsubscribe(
 internal fun LibraryScreen(
     state: LibraryUiState,
     pendingUnsubscribe: PendingUnsubscribe?,
-    pendingMarkAll: Long?,
+    pendingMarkAll: LibraryTile?,
     onSort: (LibrarySort) -> Unit,
     onToggleTitles: (Boolean) -> Unit,
     onOpenPodcast: (Long) -> Unit,
@@ -159,14 +166,14 @@ internal fun LibraryScreen(
 
     // 08's required confirmation before the write (UI review round 2); the "Older than"
     // options of the dialog table wait on M2's `countUnplayed` (deviation recorded).
-    if (pendingMarkAll != null) {
+    pendingMarkAll?.let { pending ->
         NdDialog(
             onDismissRequest = onDismissMarkAll,
             icon = NdIcons.DoneAll,
-            title = stringResource(Res.string.podcast_mark_played),
+            title = stringResource(Res.string.podcast_mark_all_title, pending.displayTitle),
             confirm =
                 NdDialogAction(stringResource(Res.string.podcast_mark_played)) {
-                    onConfirmMarkAll(pendingMarkAll)
+                    onConfirmMarkAll(pending.podcastId)
                 },
             dismiss =
                 NdDialogAction(
@@ -247,6 +254,13 @@ private fun SortMenu(
                         open = false
                         onSort(option)
                     },
+                    // The check icon is decorative; the radio role plus `selected` is what
+                    // screen readers announce (94 review).
+                    modifier =
+                        Modifier.semantics {
+                            selected = option == sort
+                            role = Role.RadioButton
+                        },
                 )
             }
         }
@@ -288,6 +302,13 @@ private fun OverflowMenu(
                     open = false
                     onToggleTitles(!showTitles)
                 },
+                // Same gap as the sort menu: the check icon alone is decorative, so the
+                // item reports a switch role with its toggleable state (94 review).
+                modifier =
+                    Modifier.semantics {
+                        toggleableState = ToggleableState(showTitles)
+                        role = Role.Switch
+                    },
             )
         }
     }

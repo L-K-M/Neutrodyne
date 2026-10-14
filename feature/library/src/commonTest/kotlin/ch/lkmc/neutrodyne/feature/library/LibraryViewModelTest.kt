@@ -91,6 +91,8 @@ class LibraryViewModelTest : MainDispatcherTest() {
         runTest {
             val viewModel = viewModel()
             collect(viewModel)
+            // A new LibrarySort must extend the table below, or it ships without coverage.
+            assertEquals(LibrarySort.entries.toList(), SORT_ORDERS.map { it.first })
             val day = 24 * 3_600_000L
             podcasts.tiles.value =
                 listOf(
@@ -255,7 +257,7 @@ class LibraryViewModelTest : MainDispatcherTest() {
                 viewModel.uiState.value.messages
                     .isNotEmpty(),
             )
-            assertTrue(settings.get(AppearanceSettingKeys.LIBRARY_SORT) != LibrarySort.MOST_UNPLAYED)
+            assertEquals(LibrarySort.TITLE, settings.get(AppearanceSettingKeys.LIBRARY_SORT))
         }
 
     private companion object {

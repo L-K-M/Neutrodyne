@@ -24,6 +24,7 @@ class FakePodcastRepository : PodcastRepository {
     val tiles = MutableStateFlow<List<LibraryTile>>(emptyList())
     val detail = MutableStateFlow<PodcastDetail?>(null)
     val feedInfo = MutableStateFlow<FeedInfo?>(null)
+    val categoryCounts = MutableStateFlow<List<CategoryCount>>(emptyList())
 
     /** Test-seeded subscription ids; [unsubscribe] removes its requested ids from this set. */
     val subscribedIds = MutableStateFlow<Set<Long>>(emptySet())
@@ -91,6 +92,7 @@ class FakePodcastRepository : PodcastRepository {
         podcastId: Long,
         credentials: BasicCredentials,
     ): Outcome<Unit, AddPodcastError> {
+        writeError?.let { throw it }
         calls += "setCredentials($podcastId, ${credentials.username})"
         return credentialsOutcome
     }
@@ -99,6 +101,7 @@ class FakePodcastRepository : PodcastRepository {
         podcastId: Long,
         input: String,
     ): Outcome<Unit, AddPodcastError> {
+        writeError?.let { throw it }
         calls += "editFeedUrl($podcastId, $input)"
         return editUrlOutcome
     }
@@ -111,5 +114,5 @@ class FakePodcastRepository : PodcastRepository {
         calls += "retry($podcastId, $refresh)"
     }
 
-    override fun observeCategoryCounts(): Flow<List<CategoryCount>> = MutableStateFlow(emptyList())
+    override fun observeCategoryCounts(): Flow<List<CategoryCount>> = categoryCounts
 }

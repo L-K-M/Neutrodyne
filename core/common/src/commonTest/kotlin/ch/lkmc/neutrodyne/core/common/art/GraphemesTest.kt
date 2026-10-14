@@ -83,6 +83,15 @@ class GraphemesTest {
     }
 
     @Test
+    fun `zwj joins a pictograph only to a pictographic base`() {
+        // GB11 is ExtPict Extend* ZWJ × ExtPict: "a" is no pictograph, so the ZWJ
+        // stays (GB9) but 🎮 does not join the cluster.
+        assertEquals("a‍", Graphemes.first("a‍🎮!"))
+        // An emoji base still joins the whole ZWJ sequence.
+        assertEquals("👨‍👩‍👧", Graphemes.first("👨‍👩‍👧!"))
+    }
+
+    @Test
     fun `startsWith tests the first code point`() {
         assertTrue(Graphemes.startsWith("🎧 Show") { it == 0x1F3A7 })
         assertTrue(Graphemes.startsWith("9lives") { it.toChar().isDigit() })
