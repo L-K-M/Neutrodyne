@@ -271,6 +271,28 @@ class FeedsViewModelTest : MainDispatcherTest() {
             assertEquals(Res.string.episode_offline_toast, (message.text as UiText.Res).id)
         }
 
+    /**
+     * 08's deviation note 7: the gate must also answer a tap landing before uiState's first
+     * combine emission — until then `uiState.value` still holds its offline=false initial
+     * value, so the gate has to read the live network status.
+     */
+    @Test
+    fun offlinePlayToggleBeforeUiStateEmissionPostsTheToast() =
+        runTest {
+            val viewModel = viewModel()
+            network.setStatus(FakeNetworkMonitor.OFFLINE)
+
+            // Nothing collects uiState yet: its value is still the offline=false initial state.
+            viewModel.onRowAction(EpisodeAction.PlayToggle(42))
+            collect(viewModel)
+            advanceUntilIdle()
+
+            val message =
+                viewModel.uiState.value.messages
+                    .single()
+            assertEquals(Res.string.episode_offline_toast, (message.text as UiText.Res).id)
+        }
+
     /** A downloaded episode's offline tap would play under M4 — silent like every pre-M4 play. */
     @Test
     fun downloadedEpisodeStaysSilentOnOfflinePlayToggle() =

@@ -113,7 +113,10 @@ public class FeedsViewModel(
             // player is M4 the tap answers with the offline toast — only when the episode has
             // no download, since a downloaded row would play.
             is EpisodeAction.PlayToggle -> {
-                if (uiState.value.offline) {
+                // uiState still holds its offline=false initial value before the first
+                // combine emission (and a stale value after a WhileSubscribed restart), so
+                // the gate reads the live StateFlow — an early tap still answers (08's note).
+                if (!network.status.value.isConnected) {
                     viewModelScope.launch {
                         val downloaded =
                             suspendRunCatching {
