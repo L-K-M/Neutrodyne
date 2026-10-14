@@ -142,7 +142,11 @@ internal fun PodcastScreen(
     listState: LazyListState = rememberLazyListState(),
 ) {
     val detail = state.detail
-    val headerGone by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 } }
+    // The offline banner is a real list item before the header: the title only joins the
+    // top bar once the header itself scrolled off, so its index shifts when offline.
+    val headerIndex = if (state.offline) 1 else 0
+    val headerGone by
+        remember(headerIndex) { derivedStateOf { listState.firstVisibleItemIndex > headerIndex } }
     val nowMs = LocalUiClock.current.now()
 
     Column(modifier = modifier.fillMaxSize()) {

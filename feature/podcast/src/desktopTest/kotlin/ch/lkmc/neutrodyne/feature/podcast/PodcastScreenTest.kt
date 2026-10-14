@@ -70,6 +70,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIsNot
+import kotlin.test.assertTrue
 
 /**
  * The podcast detail screen through `runComposeUiTest` (08 Podcast detail): loading, the header
@@ -135,6 +136,42 @@ class PodcastScreenTest {
             onNodeWithText("You're offline — downloaded episodes still play").assertIsDisplayed()
             onNodeWithContentDescription("Refresh").assertIsNotEnabled().performClick()
             assertEquals(0, refreshes)
+        }
+
+    @Test
+    fun offlineBannerShiftsTheHeaderIndex() =
+        runComposeUiTest {
+            val listState = LazyListState()
+            setPodcast(
+                PodcastUiState(
+                    detail = testPodcastDetail(7, displayTitle = "The Show"),
+                    loaded = true,
+                    offline = true,
+                ),
+                rows = (1L..40L).map { testEpisodeRow(it, podcastId = 7) },
+                listState = listState,
+            )
+            onNodeWithText("You're offline — downloaded episodes still play").assertIsDisplayed()
+            val barBottom =
+                onNodeWithContentDescription("Back").fetchSemanticsNode().boundsInRoot.bottom
+
+            // The offline banner takes list index 0; scrolling only it off leaves the header
+            // first, so the title must stay in the scrolling header, not the top bar.
+            listState.scrollToItem(1)
+            waitForIdle()
+            assertTrue(
+                onAllNodes(hasText("The Show"))
+                    .fetchSemanticsNodes()
+                    .all { it.boundsInRoot.top >= barBottom - 0.5f },
+            )
+
+            listState.scrollToItem(2)
+            waitForIdle()
+            assertTrue(
+                onAllNodes(hasText("The Show"))
+                    .fetchSemanticsNodes()
+                    .any { it.boundsInRoot.top < barBottom },
+            )
         }
 
     @Test
