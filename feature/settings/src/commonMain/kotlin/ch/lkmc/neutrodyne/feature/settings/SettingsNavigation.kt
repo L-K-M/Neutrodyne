@@ -54,10 +54,16 @@ public object SettingsNavigation {
                         detailPlaceholder = { AppearancePage(settingsRepository, dynamicColorSupport) },
                     ),
             ) {
-                SettingsHomeRoute()
+                SettingsHomeRoute(settingsRepository)
             }
             entry<SettingsKey>(metadata = NdSceneMetadata.paneDetail()) { key ->
-                SettingsRoute(key, buildInfo, settingsRepository, dynamicColorSupport)
+                SettingsRoute(
+                    key,
+                    buildInfo,
+                    settingsRepository,
+                    dynamicColorSupport,
+                    platformInfo.kind,
+                )
             }
             entry<LicencesKey>(metadata = NdSceneMetadata.paneDetail()) {
                 LicencesRoute(licencesSource, buildInfo)
