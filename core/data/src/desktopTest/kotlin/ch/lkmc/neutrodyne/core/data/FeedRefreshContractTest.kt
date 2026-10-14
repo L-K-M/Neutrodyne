@@ -30,6 +30,10 @@ import mockwebserver3.junit4.MockWebServerRule
 import okio.ByteString.Companion.encodeUtf8
 import okio.Source
 import org.junit.Rule
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.AfterTest
@@ -155,7 +159,7 @@ class FeedRefreshContractTest {
         existing = db.ingestDao().existing(podcastId),
     )
 
-    private data class EpisodeSide(
+    private class EpisodeSide(
         val episode: EpisodeEntity,
         val state: EpisodeStateEntity,
         val description: ByteArray,
@@ -266,6 +270,7 @@ class FeedRefreshContractTest {
     fun html200PersistsErrorAndPreservesEpisodeAndState() =
         runTest {
             val (id, epId) = seedFeed()
+            forbidEpisodeWrites()
             val before = episodeSide(id, epId)
             val podcast = assertNotNull(db.podcastDao().byId(id))
             server.enqueue(
@@ -293,6 +298,7 @@ class FeedRefreshContractTest {
     fun http410PersistsGoneAndExcludesFurtherRefresh() =
         runTest {
             val (id, epId) = seedFeed()
+            forbidEpisodeWrites()
             val before = episodeSide(id, epId)
             server.enqueue(mockResponse(code = 410, body = ""))
 
@@ -320,6 +326,7 @@ class FeedRefreshContractTest {
 
     private suspend fun assertBasicChallenge(code: Int) {
         val (id, epId) = seedFeed()
+        forbidEpisodeWrites()
         val before = episodeSide(id, epId)
         server.enqueue(mockResponse(code = code, body = "", "WWW-Authenticate" to "Basic realm=\"feeds\""))
 
@@ -344,13 +351,20 @@ class FeedRefreshContractTest {
 
     @Test
     fun retryAfterHttpDateDefers429UntilStoredDeadline() =
-        runTest { assertRetryAfter(429, "Sun, 04 Oct 2026 06:00:00 GMT") }
+        runTest { assertRetryAfter(429, httpDate(NOW + 360 * MINUTE_MS)) }
+
+    /** RFC 9110 IMF-fixdate, e.g. `Sun, 04 Oct 2026 06:00:00 GMT`. */
+    private fun httpDate(epochMs: Long): String =
+        DateTimeFormatter
+            .ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US)
+            .format(Instant.ofEpochMilli(epochMs).atZone(ZoneOffset.UTC))
 
     private suspend fun assertRetryAfter(
         code: Int,
         header: String,
     ) {
         val (id, epId) = seedFeed()
+        forbidEpisodeWrites()
         val before = episodeSide(id, epId)
         // Six hours exceeds every first-failure backoff jitter (24 to 36 minutes).
         val nextRefresh = NOW + 360 * MINUTE_MS

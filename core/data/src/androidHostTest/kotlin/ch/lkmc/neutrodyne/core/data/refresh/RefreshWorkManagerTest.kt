@@ -57,6 +57,7 @@ import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * The WorkManager-driven refresh journey of M1 AC4 (03 Work requests / Engine run, audit G3):
@@ -86,7 +87,7 @@ class RefreshWorkManagerTest {
 
     @Test
     fun `the driven run fetches only due feeds and the deadline continuation stops at ten`() =
-        runTest {
+        runTest(timeout = TEST_TIMEOUT) {
             db = newDb(app, clock)
             val dueIds =
                 List(DUE_FEED_COUNT) {
@@ -139,6 +140,7 @@ class RefreshWorkManagerTest {
             testDriver.setInitialDelayMet(continuation.id)
             repeat(ATTEMPT_CAP) { attempt ->
                 if (attempt > 0) {
+                    awaitRescheduled(continuation.id)
                     (testDriver as TestScheduler).schedule(specOf(continuation.id.toString()))
                 }
                 testDriver.setAllConstraintsMet(continuation.id)
@@ -162,7 +164,7 @@ class RefreshWorkManagerTest {
 
     @Test
     fun `cancelling inside an ingest transaction leaves the feed untouched`() =
-        runTest {
+        runTest(timeout = TEST_TIMEOUT) {
             val barrier = StatementBarrier()
             db = newDb(app, clock, driver = BarrierDriver(AndroidSQLiteDriver(), barrier))
             val podcastId = seedPodcast(db, FEED_URL, nextRefreshAt = 0L)
@@ -341,7 +343,22 @@ class RefreshWorkManagerTest {
             workManager.getWorkInfoById(id).get()?.let { if (predicate(it)) return it }
             Thread.sleep(POLL_MS)
         }
-        error("work $id stuck at ${workManager.getWorkInfoById(id).get()} (awaited ${AWAIT_MS}ms)")
+        val last = workManager.getWorkInfoById(id).get(AWAIT_MS, TimeUnit.MILLISECONDS)
+        error("work $id stuck at $last (awaited ${AWAIT_MS}ms)")
+    }
+
+    /**
+     * After a retry, WorkManager's reschedule pass (`Schedulers.registerRescheduling`) runs
+     * asynchronously: it cancels the scheduler's tokens for the work, then schedules it again and
+     * stamps `scheduleRequestedAt`. A re-delivery that lands before that cancel has its fresh run
+     * stopped ("not doing any work"), so wait for the stamp first.
+     */
+    private suspend fun awaitRescheduled(id: UUID) {
+        val deadlineMs = System.currentTimeMillis() + AWAIT_MS
+        while (specOf(id.toString()).scheduleRequestedAt == WorkSpec.SCHEDULE_NOT_REQUESTED_YET) {
+            check(System.currentTimeMillis() < deadlineMs) { "work $id not rescheduled within ${AWAIT_MS}ms" }
+            Thread.sleep(POLL_MS)
+        }
     }
 
     /** The persisted spec: `WorkInfo` hides the input data. */
@@ -414,8 +431,9 @@ class RefreshWorkManagerTest {
             releaseLatch.countDown()
         }
 
+        /** Counts only the rollback of the parked transaction, not any earlier one. */
         fun onRollback() {
-            rolledBack.countDown()
+            if (consumed.get()) rolledBack.countDown()
         }
 
         /** Blocks the caller when this statement is the first armed in-transaction write. */
@@ -501,6 +519,10 @@ class RefreshWorkManagerTest {
         const val DEADLINE_TRIP_MS = 9 * 60_000L
         const val AWAIT_MS = 10_000L
         const val POLL_MS = 10L
+
+        /** Above the sum of the journey's bounded waits, so their diagnostics win over runTest's. */
+        val TEST_TIMEOUT = 5.minutes
+
         const val HEAD_CHARS = 48
         const val FAR_FUTURE = TestClock.DEFAULT_NOW + 365L * 24 * 60 * 60 * 1_000L
     }
