@@ -274,7 +274,7 @@ class AddPodcastViewModelTest : MainDispatcherTest() {
             advanceUntilIdle()
 
             // Subscribe A parks at its gate; the field is then edited to B without
-            // submitting — the interval review round 3 identified.
+            // submitting — the UI review round 3 identified.
             val gate = CompletableDeferred<Unit>()
             subscribe.gate = gate
             subscribe.nextOutcome = Outcome.Success(7L)
