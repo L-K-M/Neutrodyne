@@ -36,6 +36,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
@@ -54,6 +55,7 @@ import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.WaitReason
 import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.action_cancel_download
 import ch.lkmc.neutrodyne.core.ui.resources.action_check_again
 import ch.lkmc.neutrodyne.core.ui.resources.action_delete_download
 import ch.lkmc.neutrodyne.core.ui.resources.action_download
@@ -64,16 +66,18 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_mark_unplayed
 import ch.lkmc.neutrodyne.core.ui.resources.action_more
 import ch.lkmc.neutrodyne.core.ui.resources.action_open
 import ch.lkmc.neutrodyne.core.ui.resources.action_pause
+import ch.lkmc.neutrodyne.core.ui.resources.action_pause_download
 import ch.lkmc.neutrodyne.core.ui.resources.action_play_again
 import ch.lkmc.neutrodyne.core.ui.resources.action_play_last
 import ch.lkmc.neutrodyne.core.ui.resources.action_play_next
 import ch.lkmc.neutrodyne.core.ui.resources.action_resume
+import ch.lkmc.neutrodyne.core.ui.resources.action_resume_download
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry_download
 import ch.lkmc.neutrodyne.core.ui.resources.action_watch_on_youtube
+import ch.lkmc.neutrodyne.core.ui.resources.episode_minutes_left
 import ch.lkmc.neutrodyne.core.ui.resources.episode_offline_row
 import ch.lkmc.neutrodyne.core.ui.resources.episode_opens_youtube
 import ch.lkmc.neutrodyne.core.ui.resources.summary_downloading
-import ch.lkmc.neutrodyne.core.ui.resources.summary_minutes_left
 import ch.lkmc.neutrodyne.core.ui.resources.summary_percent_played
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
@@ -109,7 +113,7 @@ public fun EpisodeRow(
     val summary =
         EpisodeRowSummary.describe(row, live, nowMs, LocalPlatformKind.current, caps).asString()
     val stateDesc = rowStateDescription(row, live)
-    var menuOpen by remember { mutableStateOf(false) }
+    var menuOpen by remember(row.id) { mutableStateOf(false) }
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
     var focused by remember { mutableStateOf(false) }
@@ -191,22 +195,16 @@ public fun EpisodeRow(
                 ProgressLine(row, live)
                 StatusLine(row, live, caps, nowMs)
             }
-            TrailingSlot(row, live, caps, onAction)
-        }
-
-        if (hovered || focused || menuOpen) {
-            val more = stringResource(Res.string.action_more)
-            NdIconButton(
-                onClick = { menuOpen = true },
-                icon = NdIcons.MoreVert,
-                contentDescription = more,
-                modifier =
-                    Modifier
-                        .align(Alignment.CenterEnd)
-                        .padding(end = OVERFLOW_END_PAD)
-                        .clearAndSetSemantics {},
+            TrailingSlot(
+                row = row,
+                live = live,
+                caps = caps,
+                onAction = onAction,
+                showOverflow = hovered || focused || menuOpen,
+                onOpenMenu = { menuOpen = true },
             )
         }
+
         Box(Modifier.align(Alignment.CenterEnd)) {
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 menuActions.forEach { (label, action) ->
@@ -257,8 +255,29 @@ private fun rowMenuActions(
                 EpisodeAction.DownloadToggle(row.id)
         }
 
-        else -> {
+        // 08's tap table: Download now + Cancel while queued, Cancel while resolving, no
+        // download action while verifying, Pause while downloading, Resume while paused.
+        DownloadState.QUEUED -> {
             actions += stringResource(Res.string.action_download_now) to
+                EpisodeAction.DownloadToggle(row.id)
+            actions += stringResource(Res.string.action_cancel_download) to
+                EpisodeAction.DownloadToggle(row.id)
+        }
+
+        DownloadState.RESOLVING -> {
+            actions += stringResource(Res.string.action_cancel_download) to
+                EpisodeAction.DownloadToggle(row.id)
+        }
+
+        DownloadState.VERIFYING -> {}
+
+        DownloadState.DOWNLOADING -> {
+            actions += stringResource(Res.string.action_pause_download) to
+                EpisodeAction.DownloadToggle(row.id)
+        }
+
+        DownloadState.PAUSED -> {
+            actions += stringResource(Res.string.action_resume_download) to
                 EpisodeAction.DownloadToggle(row.id)
         }
     }
@@ -294,13 +313,12 @@ private fun rowStateDescription(
         return stringResource(Res.string.summary_downloading, percent)
     }
     val position = live?.positionMs ?: return ""
-    val duration = live?.durationMs ?: row.durationMs ?: return ""
+    // A live duration of 0 is "still resolving", not "no duration" — fall back to the
+    // persisted row value rather than hide it (same at the meta and progress lines).
+    val duration = live?.durationMs?.takeIf { it > 0 } ?: row.durationMs ?: return ""
     if (duration <= 0) return ""
-    return pluralStringResource(
-        Res.plurals.summary_percent_played,
-        ((position * PERCENT) / duration).toInt().coerceIn(0, 100),
-        (position * PERCENT / duration).toInt().coerceIn(0, 100),
-    )
+    val percent = ((position * PERCENT) / duration).toInt().coerceIn(0, 100)
+    return pluralStringResource(Res.plurals.summary_percent_played, percent, percent)
 }
 
 @Composable
@@ -419,7 +437,7 @@ private fun MetaLine(
     nowMs: Long,
 ) {
     val date = FeedDates.dayLabel(row.pubDate ?: row.sortDate, nowMs)
-    val duration = FeedDates.duration(live?.durationMs ?: row.durationMs)
+    val duration = FeedDates.duration(live?.durationMs?.takeIf { it > 0 } ?: row.durationMs)
     val meta =
         when (style) {
             EpisodeRowStyle.FEED, EpisodeRowStyle.QUEUE -> {
@@ -451,7 +469,7 @@ private fun ProgressLine(
     live: RowLive?,
 ) {
     if (row.startedAt == null || row.playedAt != null) return
-    val duration = live?.durationMs ?: row.durationMs ?: return
+    val duration = live?.durationMs?.takeIf { it > 0 } ?: row.durationMs ?: return
     if (duration <= 0) return
     val position = live?.positionMs ?: return
     val left = ((duration - position).coerceAtLeast(0) + MS_PER_MINUTE - 1) / MS_PER_MINUTE
@@ -461,7 +479,7 @@ private fun ProgressLine(
             modifier = Modifier.weight(1f).padding(top = PROGRESS_TOP_GAP),
         )
         Text(
-            pluralStringResource(Res.plurals.summary_minutes_left, left.toInt(), left),
+            pluralStringResource(Res.plurals.episode_minutes_left, left.toInt(), left),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = PROGRESS_LABEL_GAP),
@@ -521,70 +539,89 @@ private fun StatusLine(
     )
 }
 
-/** Trailing download button then play button, each ≥ 48 dp (08). */
+/**
+ * Trailing download button then play button, each ≥ 48 dp (08). The hover/focus overflow button
+ * composes in-flow as the last child — a `CenterEnd` overlay on the row would sit on top of the
+ * play affordance and win hit-testing exactly when a mouse user reaches for it.
+ */
 @Composable
 private fun TrailingSlot(
     row: EpisodeRow,
     live: RowLive?,
     caps: RowCaps,
     onAction: (EpisodeAction) -> Unit,
+    showOverflow: Boolean,
+    onOpenMenu: () -> Unit,
 ) {
     val downloadState = live?.downloadState ?: row.downloadState
-    if (row.sourceType != SourceType.RSS && !caps.inAppPlayback) {
-        NdIconButton(
-            onClick = {
-                row.externalMediaId?.let { id -> onAction(EpisodeAction.WatchOnYouTube(row.id, id)) }
-            },
-            icon = NdIcons.OpenInNew,
-            contentDescription = stringResource(Res.string.action_watch_on_youtube),
-            modifier = Modifier.clearAndSetSemantics {},
-        )
-        return
-    }
-
     Row(verticalAlignment = Alignment.CenterVertically) {
-        if (caps.downloads) {
-            DownloadStateButton(
-                state = downloadState,
-                waitReason = live?.waitReason,
-                progress = live?.downloadProgress(),
-                onClick = { onAction(EpisodeAction.DownloadToggle(row.id)) },
+        if (row.sourceType != SourceType.RSS && !caps.inAppPlayback) {
+            // External mode (08): `open_in_new` replaces both buttons; a row without a video id
+            // (malformed/legacy YouTube rows) gets a disabled affordance rather than a dead one.
+            NdIconButton(
+                onClick = {
+                    row.externalMediaId?.let { id ->
+                        onAction(EpisodeAction.WatchOnYouTube(row.id, id))
+                    }
+                },
+                icon = NdIcons.OpenInNew,
+                contentDescription = stringResource(Res.string.action_watch_on_youtube),
                 modifier = Modifier.clearAndSetSemantics {},
+                enabled = row.externalMediaId != null,
+            )
+        } else {
+            if (caps.downloads) {
+                DownloadStateButton(
+                    state = downloadState,
+                    waitReason = live?.waitReason,
+                    progress = live?.downloadProgress(),
+                    onClick = { onAction(EpisodeAction.DownloadToggle(row.id)) },
+                    modifier = Modifier.clearAndSetSemantics {},
+                )
+            }
+
+            val playing = live?.isNowPlaying == true && live.isPlaying
+            val (icon, label) =
+                when {
+                    playing -> {
+                        NdIcons.Pause to stringResource(Res.string.action_pause)
+                    }
+
+                    live?.isNowPlaying == true || row.startedAt != null -> {
+                        NdIcons.PlayArrow to stringResource(Res.string.action_resume)
+                    }
+
+                    row.playedAt != null -> {
+                        NdIcons.PlayArrow to stringResource(Res.string.action_play_again)
+                    }
+
+                    else -> {
+                        NdIcons.PlayArrow to stringResource(Res.string.action_open)
+                    }
+                }
+            // Offline and not downloaded: the affordance stays enabled as `cloud_off` at 60 %
+            // alpha (08's row table) — the tap still dispatches PlayToggle so the screen answers
+            // with the offline snackbar instead of a dead button.
+            val offlineBlocked = caps.offline && downloadState != DownloadState.COMPLETED
+            NdIconButton(
+                onClick = { onAction(EpisodeAction.PlayToggle(row.id)) },
+                icon = if (offlineBlocked) NdIcons.CloudOff else icon,
+                contentDescription = label,
+                modifier =
+                    Modifier
+                        .clearAndSetSemantics {}
+                        .alpha(if (offlineBlocked) DIMMED_ALPHA else 1f),
             )
         }
 
-        val playing = live?.isNowPlaying == true && live.isPlaying
-        val (icon, label) =
-            when {
-                playing -> {
-                    NdIcons.Pause to stringResource(Res.string.action_pause)
-                }
-
-                live?.isNowPlaying == true || row.startedAt != null -> {
-                    NdIcons.PlayArrow to stringResource(Res.string.action_resume)
-                }
-
-                row.playedAt != null -> {
-                    NdIcons.PlayArrow to stringResource(Res.string.action_play_again)
-                }
-
-                else -> {
-                    NdIcons.PlayArrow to stringResource(Res.string.action_open)
-                }
-            }
-        // Offline and not downloaded: the affordance stays enabled as `cloud_off` at 60 % alpha
-        // (08's row table) — the tap still dispatches PlayToggle so the screen answers with the
-        // offline snackbar instead of a dead button.
-        val offlineBlocked = caps.offline && downloadState != DownloadState.COMPLETED
-        NdIconButton(
-            onClick = { onAction(EpisodeAction.PlayToggle(row.id)) },
-            icon = if (offlineBlocked) NdIcons.CloudOff else icon,
-            contentDescription = label,
-            modifier =
-                Modifier
-                    .clearAndSetSemantics {}
-                    .alpha(if (offlineBlocked) DIMMED_ALPHA else 1f),
-        )
+        if (showOverflow) {
+            NdIconButton(
+                onClick = onOpenMenu,
+                icon = NdIcons.MoreVert,
+                contentDescription = stringResource(Res.string.action_more),
+                modifier = Modifier.clearAndSetSemantics {},
+            )
+        }
     }
 }
 
@@ -612,9 +649,12 @@ public fun DownloadStateButton(
                 nowMs = LocalUiClock.current.now(),
                 platform = LocalPlatformKind.current,
             )?.asString() ?: stringResource(Res.string.action_download)
+    // RESOLVING/VERIFYING have no status text (DownloadStatusText returns null) — the tap
+    // cancels, so the bare ring carries the cancel label rather than the "Download" fallback.
+    val spinnerLabel = stringResource(Res.string.action_cancel_download)
 
     Box(
-        modifier = modifier.size(TOUCH_TARGET).clickable(onClick = onClick),
+        modifier = modifier.size(TOUCH_TARGET).clickable(onClick = onClick, role = Role.Button),
         contentAlignment = Alignment.Center,
     ) {
         when (state) {
@@ -628,7 +668,12 @@ public fun DownloadStateButton(
             }
 
             DownloadState.RESOLVING, DownloadState.VERIFYING -> {
-                CircularProgressIndicator(modifier = Modifier.size(ICON_SIZE + RING_PAD))
+                CircularProgressIndicator(
+                    modifier =
+                        Modifier
+                            .size(ICON_SIZE + RING_PAD)
+                            .semantics { contentDescription = spinnerLabel },
+                )
             }
 
             DownloadState.DOWNLOADING -> {
@@ -657,8 +702,10 @@ public fun DownloadStateButton(
             }
 
             DownloadState.FAILED -> {
+                // 08's state table: FAILED is the filled `error` in the error colour; MISSING
+                // below keeps the untinted outline glyph.
                 Icon(
-                    NdIcons.Error,
+                    NdIcons.ErrorFilled,
                     contentDescription = label,
                     modifier = Modifier.size(ICON_SIZE),
                     tint = MaterialTheme.colorScheme.error,
@@ -687,7 +734,6 @@ private val ICON_SIZE = 24.dp
 private val ICON_INNER = 14.dp
 private val RING_PAD = 6.dp
 private val TOUCH_TARGET = 48.dp
-private val OVERFLOW_END_PAD = 4.dp
 private val PROGRESS_TOP_GAP = 4.dp
 private val PROGRESS_LABEL_GAP = 8.dp
 
