@@ -100,7 +100,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: scripts/ci/report-nightly.sh instrumented-full --close
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !success() }}
         with:
           name: instrumented-full-results
@@ -252,7 +252,7 @@ jobs:
       # The device log of both emulator steps, for diagnosing a failed run (system_server state).
       - name: Upload the emulator logs
         if: ${{ !success() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: api37-16k-logcat
           path: ${{ runner.temp }}/logcat-api37-*.txt
@@ -375,7 +375,7 @@ jobs:
             b="app/build/outputs/apk/release/$(basename "$a")"
             diffoscope --html "diff-$(basename "$a").html" "$a" "$b" || true
           done
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: steps.diff.outputs.identical == '0'
         with:
           name: repro-diffoscope
