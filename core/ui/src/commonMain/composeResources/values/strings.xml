@@ -70,6 +70,7 @@
     <string name="date_weekday_sat">Saturday</string>
     <string name="date_weekday_sun">Sunday</string>
     <string name="date_duration_minutes">%1$d min</string>
+    <string name="date_duration_lt_minute">&lt;1 min</string>
     <string name="date_duration_hours">%1$d h</string>
     <string name="date_duration_hours_minutes">%1$d h %2$d min</string>
     <string name="date_just_now">Just now</string>
@@ -313,6 +314,7 @@
         <item quantity="other">%1$d min left</item>
     </plurals>
     <string name="shownotes_image">Image: %1$s</string>
+    <string name="shownotes_load_images">Load images</string>
     <string name="no_handler">No app can open this link</string>
 
     <!-- Discover (M1a: add-by-URL entry point only). -->

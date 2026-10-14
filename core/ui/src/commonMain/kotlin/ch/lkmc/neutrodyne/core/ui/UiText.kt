@@ -63,7 +63,11 @@ public fun UiText.asString(): String =
 
         // `map`/`filter` are inline, so the composable `asString()` calls are legal here.
         is UiText.Joined -> {
-            parts.map { it.asString() }.filter { it.isNotEmpty() }.joinToString(separator) + suffix
+            parts
+                .map { it.asString() }
+                .filter { it.isNotEmpty() }
+                .joinToString(separator)
+                .withSuffix(suffix)
         }
     }
 
@@ -84,7 +88,15 @@ private suspend fun joined(
     separator: String,
     suffix: String,
     resolve: suspend (UiText) -> String,
-): String = parts.map { resolve(it) }.filter { it.isNotEmpty() }.joinToString(separator) + suffix
+): String =
+    parts
+        .map { resolve(it) }
+        .filter { it.isNotEmpty() }
+        .joinToString(separator)
+        .withSuffix(suffix)
+
+/** The closing suffix belongs to the sentence — an empty join stays empty, never a lone ".". */
+private fun String.withSuffix(suffix: String): String = if (isEmpty()) this else this + suffix
 
 // Args flatten nested UiText; primitives pass through to the platform formatter.
 @Composable

@@ -34,6 +34,7 @@ import ch.lkmc.neutrodyne.feeds.parse.FeedParser
 import ch.lkmc.neutrodyne.feeds.parse.ParseLimits
 import ch.lkmc.neutrodyne.feeds.parse.ParseResult
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
@@ -140,7 +141,11 @@ class SubscribeFlowTest {
     fun subscribeEmitsTheInitialFetchAnnouncement() =
         runTest {
             val previewId = resolvePreview()
-            val emitted = backgroundScope.async { subscribeBundle.eventBus.newEpisodes.first() }
+            // Register before subscribe even when the database dispatch completes without suspending.
+            val emitted =
+                backgroundScope.async(start = CoroutineStart.UNDISPATCHED) {
+                    subscribeBundle.eventBus.newEpisodes.first()
+                }
 
             val id = assertIs<Outcome.Success<Long>>(subscribeBundle.useCase(previewId, emptySet())).value
 
@@ -162,7 +167,10 @@ class SubscribeFlowTest {
         val throwing = ThrowingScheduler(scheduler, step)
         val bundle = newSubscribe(db, resolverBundle.cache, resolverBundle.resolver, throwing, settings, clock)
         val previewId = cachePagedPreview()
-        val emitted = backgroundScope.async { bundle.eventBus.newEpisodes.first() }
+        val emitted =
+            backgroundScope.async(start = CoroutineStart.UNDISPATCHED) {
+                bundle.eventBus.newEpisodes.first()
+            }
 
         val id = assertIs<Outcome.Success<Long>>(bundle.useCase(previewId, emptySet())).value
 

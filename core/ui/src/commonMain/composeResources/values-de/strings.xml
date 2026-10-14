@@ -64,6 +64,7 @@
     <string name="date_weekday_sat">Samstag</string>
     <string name="date_weekday_sun">Sonntag</string>
     <string name="date_duration_minutes">%1$d Min.</string>
+    <string name="date_duration_lt_minute">&lt;1 Min.</string>
     <string name="date_duration_hours">%1$d Std.</string>
     <string name="date_duration_hours_minutes">%1$d Std. %2$d Min.</string>
     <string name="date_just_now">Gerade eben</string>
@@ -129,7 +130,7 @@
     <string name="summary_new">Neu</string>
     <string name="summary_video">Video</string>
     <string name="summary_downloaded">Heruntergeladen</string>
-    <string name="summary_downloading">Wird geladen, %1$d Prozent</string>
+    <string name="summary_downloading">Wird heruntergeladen, %1$d Prozent</string>
     <string name="summary_now_playing">Läuft gerade</string>
     <plurals name="summary_minutes_left">
         <item quantity="one">%1$d Minute übrig</item>
@@ -181,7 +182,7 @@
     <string name="net_dns">Server nicht gefunden</string>
     <string name="net_connection">Verbindung fehlgeschlagen</string>
     <string name="net_lan">Feeds im lokalen Netzwerk werden noch nicht unterstützt</string>
-    <string name="net_tls_untrusted">Das Zertifikat des Servers wird nicht vertraut</string>
+    <string name="net_tls_untrusted">Dem Zertifikat des Servers wird nicht vertraut</string>
     <string name="net_tls_handshake">Sichere Verbindung fehlgeschlagen</string>
     <string name="net_cancelled">Abgebrochen</string>
     <string name="net_other">Etwas ist schiefgelaufen</string>
@@ -296,6 +297,7 @@
         <item quantity="other">%1$d Min. übrig</item>
     </plurals>
     <string name="shownotes_image">Bild: %1$s</string>
+    <string name="shownotes_load_images">Bilder laden</string>
     <string name="no_handler">Keine App kann diesen Link öffnen</string>
 
     <string name="discover_add_url">Per URL hinzufügen</string>
