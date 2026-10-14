@@ -365,6 +365,8 @@ class AddPodcastViewModelTest : MainDispatcherTest() {
             resolver.nextResolution = AddResolution.Feed(Preview)
             viewModel.resolve("https://example.com/feed")
             viewModel.cancelResolve()
+            // An uncancelled resolve would publish the Preview over Input — let it run out.
+            advanceUntilIdle()
 
             assertIs<AddSheetStep.Input>(viewModel.uiState.value.step)
         }
