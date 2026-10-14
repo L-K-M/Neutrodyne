@@ -842,7 +842,7 @@ interface RefreshScheduler {                 // androidMain: WorkManagerRefreshS
     suspend fun enqueueContinuation(): Boolean  // Android: refresh-continuation, KEEP, enqueue awaited; desktop: no-op (no soft deadline)
     fun requestFirstFetch()                  // Android: import-sync; desktop: poke the refresh lane
 }
-@Inject class NextRefreshRebaser(/* EffectiveSettingsResolver, PodcastDao, FetchStateBatcher, Clock */) {
+@Inject internal class NextRefreshRebaser(/* EffectiveSettingsResolver, PodcastDao, FetchStateBatcher, Clock */) {
     suspend fun rebase()                     // step 2 of Periodic tick, shared by both schedulers
 }
 @SingleIn(AppScope::class)
