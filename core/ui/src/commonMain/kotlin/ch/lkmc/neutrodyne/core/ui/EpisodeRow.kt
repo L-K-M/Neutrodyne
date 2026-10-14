@@ -59,7 +59,6 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_cancel_download
 import ch.lkmc.neutrodyne.core.ui.resources.action_check_again
 import ch.lkmc.neutrodyne.core.ui.resources.action_delete_download
 import ch.lkmc.neutrodyne.core.ui.resources.action_download
-import ch.lkmc.neutrodyne.core.ui.resources.action_download_now
 import ch.lkmc.neutrodyne.core.ui.resources.action_go_to_podcast
 import ch.lkmc.neutrodyne.core.ui.resources.action_mark_played
 import ch.lkmc.neutrodyne.core.ui.resources.action_mark_unplayed
@@ -255,11 +254,11 @@ private fun rowMenuActions(
                 EpisodeAction.DownloadToggle(row.id)
         }
 
-        // 08's tap table: Download now + Cancel while queued, Cancel while resolving, no
-        // download action while verifying, Pause while downloading, Resume while paused.
+        // 08's tap table: Cancel while queued or resolving, no download action while
+        // verifying, Pause while downloading, Resume while paused. 08's "Download now"
+        // while queued is 07's `promote`, which one toggle cannot express next to Cancel;
+        // it arrives with M6's download actions.
         DownloadState.QUEUED -> {
-            actions += stringResource(Res.string.action_download_now) to
-                EpisodeAction.DownloadToggle(row.id)
             actions += stringResource(Res.string.action_cancel_download) to
                 EpisodeAction.DownloadToggle(row.id)
         }

@@ -152,8 +152,8 @@ class EpisodeRowTest {
                 }
             }
 
-            // 08's tap table: Download now + Cancel while queued, Cancel while resolving,
-            // nothing while verifying, Pause while downloading, Resume while paused.
+            // 08's tap table: Cancel while queued or resolving, nothing while verifying,
+            // Pause while downloading, Resume while paused ("Download now" waits for M6).
             val downloadLabels =
                 listOf(
                     "Download",
@@ -167,10 +167,7 @@ class EpisodeRowTest {
 
             downloadState = DownloadState.QUEUED
             waitForIdle()
-            assertEquals(
-                listOf("Download now", "Cancel download"),
-                downloadActionLabels(downloadLabels),
-            )
+            assertEquals(listOf("Cancel download"), downloadActionLabels(downloadLabels))
 
             downloadState = DownloadState.RESOLVING
             waitForIdle()
