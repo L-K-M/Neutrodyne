@@ -17,6 +17,7 @@ import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshScheduler
 import ch.lkmc.neutrodyne.core.data.refresh.RssSourceAdapter
 import ch.lkmc.neutrodyne.core.data.refresh.SourceAdapter
+import ch.lkmc.neutrodyne.core.data.repo.PodcastMerger
 import ch.lkmc.neutrodyne.core.data.repo.PodcastRepositoryImpl
 import ch.lkmc.neutrodyne.core.database.DueFeed
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
@@ -30,6 +31,7 @@ import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -503,5 +505,6 @@ internal fun newUnsubscribe(
             scheduler = scheduler,
             sanitizer = JsoupShowNotesSanitizer(),
             clock = clock,
+            merger = PodcastMerger(db, FakeCredentialCommitCoordinator(), clock),
         ),
     )

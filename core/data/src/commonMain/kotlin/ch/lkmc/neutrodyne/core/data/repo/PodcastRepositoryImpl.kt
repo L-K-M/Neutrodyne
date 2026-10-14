@@ -38,8 +38,8 @@ import kotlinx.serialization.json.Json
 
 /**
  * `PodcastRepository` (03 Unsubscribe and other podcast operations): read models mapped in Kotlin
- * from the 02 DAOs and the write paths M1a owns (unsubscribe, user columns, retry). `merge`,
- * `setCredentials` and `editFeedUrl` are M1b and throw; `SyncStateDao.withApplying` lands with
+ * from the 02 DAOs and the write paths M1a owns (unsubscribe, user columns, retry). `setCredentials`
+ * and `editFeedUrl` are M1b and throw; `SyncStateDao.withApplying` lands with
  * MS0 so `ChangeOrigin.SYNC` runs the same cascade for now (deviation 2026-10-07).
  */
 @SingleIn(AppScope::class)
@@ -51,6 +51,7 @@ internal class PodcastRepositoryImpl(
     private val scheduler: RefreshScheduler,
     private val sanitizer: ShowNotesSanitizer,
     private val clock: Clock,
+    private val merger: PodcastMerger,
 ) : PodcastRepository {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -149,7 +150,10 @@ internal class PodcastRepositoryImpl(
         loserId: Long,
         winnerId: Long,
         origin: ChangeOrigin,
-    ): Unit = throw UnsupportedOperationException("merge is M1b")
+    ) {
+        refresher.flushFetchStates()
+        merger.merge(loserId, winnerId, origin)
+    }
 
     override suspend fun downloadedEpisodeIds(podcastIds: List<Long>): List<Long> =
         db.downloadDao().downloadedEpisodeIds(podcastIds)

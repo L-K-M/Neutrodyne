@@ -3,11 +3,13 @@
 package ch.lkmc.neutrodyne.core.data
 
 import androidx.room3.useWriterConnection
+import ch.lkmc.neutrodyne.core.data.repo.PodcastMerger
 import ch.lkmc.neutrodyne.core.data.repo.PodcastRepositoryImpl
 import ch.lkmc.neutrodyne.core.database.ArtworkEntity
 import ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity
 import ch.lkmc.neutrodyne.core.model.AliasReason
 import ch.lkmc.neutrodyne.core.model.ChangeOrigin
+import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.feeds.jvm.html.JsoupShowNotesSanitizer
@@ -36,6 +38,7 @@ class PodcastRepositoryTest {
             scheduler = scheduler,
             sanitizer = JsoupShowNotesSanitizer(),
             clock = clock,
+            merger = PodcastMerger(db, FakeCredentialCommitCoordinator(), clock),
         )
 
     @Test

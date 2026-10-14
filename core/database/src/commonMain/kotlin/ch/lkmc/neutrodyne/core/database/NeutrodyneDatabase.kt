@@ -57,6 +57,8 @@ import kotlin.coroutines.CoroutineContext
 abstract class NeutrodyneDatabase : RoomDatabase() {
     abstract fun podcastDao(): PodcastDao
 
+    abstract fun podcastMergeDao(): PodcastMergeDao
+
     abstract fun episodeDao(): EpisodeDao
 
     abstract fun ingestDao(): IngestDao
