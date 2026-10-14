@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.di
 
+import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
@@ -114,8 +115,13 @@ class DesktopAppGraphTest {
 
         val viewModel =
             graph.metroViewModelFactory.create(LibraryViewModel::class, CreationExtras.Empty)
-
-        assertThat(viewModel).isInstanceOf(LibraryViewModel::class.java)
+        // ViewModel.clear is internal; cancelling its scope is the public way to stop the
+        // repository collectors a dropped VM would otherwise leave running.
+        try {
+            assertThat(viewModel).isInstanceOf(LibraryViewModel::class.java)
+        } finally {
+            viewModel.viewModelScope.cancel()
+        }
     }
 
     /**
@@ -131,18 +137,21 @@ class DesktopAppGraphTest {
         val factory = graph.imageLoaderFactory
 
         val loader = factory.newImageLoader(PlatformContext.INSTANCE)
-        assertThat(loader.memoryCache).isNotNull()
-        assertThat(loader.diskCache).isNotNull()
+        try {
+            assertThat(loader.memoryCache).isNotNull()
+            assertThat(loader.diskCache).isNotNull()
 
-        val ref = ArtworkRef(key = ArtworkKeys.forUrl(ARTWORK_URL), url = ARTWORK_URL, version = 0)
-        val mapper =
-            loader.components.mappers
-                .map { it.first }
-                .filterIsInstance<ArtworkRefMapper>()
-                .single()
-        val resolved = (mapper as Mapper<ArtworkRef, Any>).map(ref, Options(PlatformContext.INSTANCE))
-        assertThat(resolved).isEqualTo(ARTWORK_URL)
-        loader.shutdown()
+            val ref = ArtworkRef(key = ArtworkKeys.forUrl(ARTWORK_URL), url = ARTWORK_URL, version = 0)
+            val mapper =
+                loader.components.mappers
+                    .map { it.first }
+                    .filterIsInstance<ArtworkRefMapper>()
+                    .single()
+            val resolved = (mapper as Mapper<ArtworkRef, Any>).map(ref, Options(PlatformContext.INSTANCE))
+            assertThat(resolved).isEqualTo(ARTWORK_URL)
+        } finally {
+            loader.shutdown()
+        }
     }
 
     @Test
