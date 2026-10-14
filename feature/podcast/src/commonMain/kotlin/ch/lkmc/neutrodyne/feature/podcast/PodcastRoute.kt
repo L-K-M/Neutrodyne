@@ -23,9 +23,9 @@ import ch.lkmc.neutrodyne.core.ui.dispatchEpisodeRoute
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.resolve
 import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.net_other
 import ch.lkmc.neutrodyne.core.ui.resources.offline_banner
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_removed
-import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
 import ch.lkmc.neutrodyne.core.ui.whenOutcome
@@ -116,9 +116,10 @@ internal fun PodcastRoute(key: PodcastKey) {
             scope.launch {
                 val title = state.detail?.displayTitle ?: return@launch
                 // A failed count read must not crash — and the dialog can't show without it.
+                // The read isn't a write, so it reports the generic load failure.
                 val count =
                     suspendRunCatching { viewModel.downloadedCount() }.getOrNull() ?: run {
-                        snackbar.showSnackbar(getString(Res.string.write_failed))
+                        snackbar.showSnackbar(getString(Res.string.net_other))
                         return@launch
                     }
                 pending = PendingUnsubscribe(title, count)
