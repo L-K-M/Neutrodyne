@@ -13,10 +13,8 @@ import dev.zacsweers.metro.IntoSet
 import dev.zacsweers.metro.Provides
 
 /**
- * Contributes `:feature:podcast`'s nav entries into the `Set<EntryProviderInstaller>`
- * multibinding (01 Feature entry installers): `PodcastKey` and `PodcastSettingsKey` are detail
- * panes of whichever tab pushed them (08 Screen inventory). The entries render M1a placeholders
- * until the Podcast slice (#96) lands the real routes.
+ * Contributes `:feature:podcast`'s nav entries (01 Feature entry installers): `PodcastKey` and
+ * `PodcastSettingsKey` are detail panes of whichever tab pushed them (08 Screen inventory).
  */
 @ContributesTo(AppScope::class)
 @BindingContainer
@@ -25,9 +23,9 @@ public object PodcastNavigation {
     @IntoSet
     public fun entries(): EntryProviderInstaller =
         {
-            entry<PodcastKey>(metadata = NdSceneMetadata.paneDetail()) { PodcastPlaceholder() }
-            entry<PodcastSettingsKey>(metadata = NdSceneMetadata.paneDetail()) {
-                PodcastSettingsPlaceholder()
+            entry<PodcastKey>(metadata = NdSceneMetadata.paneDetail()) { key -> PodcastRoute(key) }
+            entry<PodcastSettingsKey>(metadata = NdSceneMetadata.paneDetail()) { key ->
+                PodcastSettingsRoute(key)
             }
         }
 }

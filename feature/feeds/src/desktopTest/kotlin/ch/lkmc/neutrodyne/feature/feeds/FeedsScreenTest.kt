@@ -22,6 +22,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.paging.LoadState
@@ -288,45 +289,50 @@ class FeedsScreenTest {
         }
 
     @Test
-    fun appendErrorShowsOneFooterBanner() =
+    fun appendErrorPinsOneBannerMidList() =
         runComposeUiTest {
-            val pageSize = 20
-            val source =
-                PagedListSource(
-                    pages =
-                        listOf(
-                            (1..pageSize).map { testEpisodeRow(it.toLong(), title = "Ep $it") },
-                            emptyList(),
-                        ),
-                    appendError = IllegalStateException("boom"),
-                )
+            // 08's revised paging-error rule: an append failure pins its banner under the
+            // app bar — the spec's footer row was dropped because placeholders park it far
+            // past the viewport. A 300-row catalogue with 80 loaded rows and placeholders
+            // makes the spot real: mid-list, the pinned banner is the only surface.
+            val source = CatalogueSource(CATALOGUE_SIZE)
             val items =
                 setFeeds(
                     state = FeedsUiState(hasSubscriptions = true),
                     source = source,
-                    pageSize = pageSize,
+                    paging =
+                        PagingConfig(
+                            pageSize = 20,
+                            initialLoadSize = 80,
+                            enablePlaceholders = true,
+                        ),
                 )
-            // Scrolling to the last loaded row drives the failing append load.
-            onAllNodes(hasScrollToIndexAction())
-                .onFirst()
-                .performScrollToNode(hasText("Ep $pageSize"))
-            waitUntil(timeoutMillis = 5_000) { items.loadState.append is LoadState.Error }
-            // Bring the error footer into view before counting banners.
-            onAllNodes(hasScrollToIndexAction())
-                .onFirst()
-                .performScrollToNode(hasText("Couldn't load episodes"))
-            waitForIdle()
+            assertTrue(items.itemCount >= CATALOGUE_SIZE)
 
-            // 08's letter: an append failure owns the LoadState.Error footer row — one
-            // banner, not the footer plus a second one pinned under the app bar.
+            // Accessing the placeholder edge of the loaded page triggers the failing append.
+            source.failNextAppend = true
+            onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(90)
+            waitUntil(timeoutMillis = 5_000) { items.loadState.append is LoadState.Error }
+
+            // Mid-list — hundreds of placeholders short of the old footer spot — the pinned
+            // banner is already on screen and is the error's only surface.
+            onNodeWithText("Couldn't load episodes").assertIsDisplayed()
             assertEquals(1, onAllNodesWithText("Couldn't load episodes").fetchSemanticsNodes().size)
+
+            // Retry replays the failed append through `items.retry()`; the page lands.
+            onNodeWithText("Retry").performClick()
+            waitUntil(timeoutMillis = 5_000) {
+                items.itemSnapshotList.items.count { it is FeedItem.Episode } >= 100
+            }
+            assertTrue(items.loadState.append !is LoadState.Error)
         }
 
     private fun ComposeUiTest.setFeeds(
         state: FeedsUiState,
         rows: List<EpisodeRow> = emptyList(),
-        source: PagedListSource? = null,
+        source: PagingSource<Int, EpisodeRow>? = null,
         pageSize: Int = 5,
+        paging: PagingConfig? = null,
         onRefresh: () -> Unit = {},
         onFiltersChange: (FeedFilters) -> Unit = {},
         onAction: (EpisodeAction) -> Unit = {},
@@ -337,7 +343,7 @@ class FeedsScreenTest {
     ): LazyPagingItems<FeedItem> {
         lateinit var pagingItems: androidx.paging.compose.LazyPagingItems<FeedItem>
         val feed: Flow<PagingData<FeedItem>> =
-            Pager(PagingConfig(pageSize = pageSize, initialLoadSize = pageSize)) {
+            Pager(paging ?: PagingConfig(pageSize = pageSize, initialLoadSize = pageSize)) {
                 source ?: PagedListSource(listOf(rows))
             }.flow
                 .withDayHeaders(TestClock(), Dispatchers.Unconfined)
@@ -380,7 +386,6 @@ class FeedsScreenTest {
 private class PagedListSource(
     private val pages: List<List<EpisodeRow>>,
     private val refreshError: Throwable? = null,
-    private val appendError: Throwable? = null,
 ) : PagingSource<Int, EpisodeRow>() {
     var loads = 0
         private set
@@ -391,7 +396,6 @@ private class PagedListSource(
         val index = params.key ?: 0
         // Page 0 is the refresh load; a later key is an append (page 0's null prevKey means
         // no prepend load ever runs).
-        if (index > 0) appendError?.let { return LoadResult.Error(it) }
         return LoadResult.Page(
             data = pages[index],
             prevKey = if (index == 0) null else index - 1,
@@ -405,6 +409,45 @@ private class PagedListSource(
         fun failing(error: Throwable = IllegalStateException("boom")) =
             PagedListSource(emptyList(), refreshError = error)
     }
+}
+
+/** The append-error test's catalogue; index 90 lands among the placeholders past the 80 loaded rows. */
+private const val CATALOGUE_SIZE = 300
+
+/**
+ * An offset-keyed catalogue of [total] rows reporting `itemsBefore`/`itemsAfter`, so the Pager
+ * knows the full count and hands out null placeholders for the unloaded tail — the shape the
+ * production feed source produces with 05's placeholders on. [failNextAppend] fails the next
+ * append load once, so a Retry lands on a working source.
+ */
+private class CatalogueSource(
+    private val total: Int,
+) : PagingSource<Int, EpisodeRow>() {
+    var failNextAppend = false
+    var loads = 0
+        private set
+
+    override suspend fun load(params: LoadParams<Int>): LoadResult<Int, EpisodeRow> {
+        loads++
+        val offset = params.key ?: 0
+        if (params is LoadParams.Append && failNextAppend) {
+            failNextAppend = false
+            return LoadResult.Error(IllegalStateException("boom"))
+        }
+        val data =
+            (offset until minOf(offset + params.loadSize, total)).map {
+                testEpisodeRow(it + 1L, title = "Ep ${it + 1}")
+            }
+        return LoadResult.Page(
+            data = data,
+            prevKey = if (offset > 0) maxOf(offset - params.loadSize, 0) else null,
+            nextKey = if (offset + data.size < total) offset + data.size else null,
+            itemsBefore = offset,
+            itemsAfter = total - offset - data.size,
+        )
+    }
+
+    override fun getRefreshKey(state: PagingState<Int, EpisodeRow>): Int? = null
 }
 
 /** The shells' `PlatformActions` contract on the desktop test composition. */

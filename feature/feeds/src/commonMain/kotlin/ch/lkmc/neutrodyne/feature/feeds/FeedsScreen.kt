@@ -211,9 +211,11 @@ private fun FeedList(
     }
 
     Column(Modifier.fillMaxSize()) {
-        // 08's paging-error rule (2026-10-12 deviation): a refresh failure over visible
-        // content or a prepend failure pins a banner under the app bar; an append failure
-        // keeps its LoadState.Error footer row instead.
+        // 08's paging-error rule (revised 2026-10-14): every load failure over a non-empty
+        // list — append, prepend or refresh — pins a banner under the app bar. With 05's
+        // placeholders the spec's append footer can sit thousands of rows away, a prepend
+        // failure has no footer at all, and keeping both surfaces duplicated the error at
+        // the list end.
         LoadErrorBanner(items)
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
             offlineBannerItem(state.offline)
@@ -277,34 +279,17 @@ private fun FeedList(
                     }
                 }
             }
-            when (items.loadState.append) {
-                is LoadState.Loading -> {
-                    item(key = "appendLoading", contentType = "status") {
-                        Box(
-                            Modifier.fillMaxWidth().padding(FOOTER_PAD),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            CircularProgressIndicator(Modifier.size(FOOTER_SPINNER))
-                        }
+            // An append failure gets no footer row (08's revised paging-error rule): the
+            // pinned banner owns it — a footer would sit past every placeholder and repeat
+            // the banner once finally scrolled to. The loading spinner footer stays.
+            if (items.loadState.append is LoadState.Loading) {
+                item(key = "appendLoading", contentType = "status") {
+                    Box(
+                        Modifier.fillMaxWidth().padding(FOOTER_PAD),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(Modifier.size(FOOTER_SPINNER))
                     }
-                }
-
-                is LoadState.Error -> {
-                    item(key = "appendError", contentType = "status") {
-                        NdBanner(
-                            message = stringResource(Res.string.feeds_load_error),
-                            icon = NdIcons.Error,
-                            primary =
-                                NdDialogAction(
-                                    stringResource(Res.string.action_retry),
-                                    onClick = items::retry,
-                                ),
-                        )
-                    }
-                }
-
-                else -> {
-                    Unit
                 }
             }
         }
@@ -312,16 +297,18 @@ private fun FeedList(
 }
 
 /**
- * The paged list's load error, pinned where the user is (08's paging-error rule, 2026-10-12):
- * a refresh failure with episodes still shown, or a prepend failure (which has no footer at
- * all), surfaces as a banner under the app bar. An append failure keeps its own footer row —
- * a second banner here would duplicate it. Retry replays every failed load via
- * `items.retry()`; the empty first-page failure keeps the standalone error state instead.
+ * The paged list's load error, pinned where the user is (08's paging-error rule, revised
+ * 2026-10-14): every failure with rows on screen — append, prepend or refresh — surfaces as
+ * this banner under the app bar. There is no append footer row: placeholders can park it
+ * thousands of rows away, a prepend failure never had one, and showing both duplicated the
+ * error at the list end. Retry replays every failed load via `items.retry()`; the empty
+ * first-page failure keeps the standalone error state instead.
  */
 @Composable
 private fun LoadErrorBanner(items: LazyPagingItems<*>) {
     val failed =
         items.loadState.prepend is LoadState.Error ||
+            items.loadState.append is LoadState.Error ||
             (items.loadState.refresh is LoadState.Error && items.itemCount > 0)
     if (!failed) return
     NdBanner(

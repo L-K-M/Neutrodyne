@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!-- SPDX-License-Identifier: Unlicense -->
-<resources>
-    <!-- M1a placeholders; the Podcast slice (#96) replaces them with the real screens. -->
-    <string name="podcast_placeholder_title">Podcast</string>
-    <string name="podcast_arrives_later">This screen arrives in a later update.</string>
-</resources>
