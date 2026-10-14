@@ -28,9 +28,10 @@ import org.jetbrains.compose.resources.getString
  * Popping disposes this entry mid-effect, so the close + snackbar run in `NonCancellable`; the
  * snackbar's result still arrives — the `SnackbarHostState` is root-scoped.
  *
- * The effect re-checks the live operation generation before popping: a newer resolve may have
- * started after `done` was collected, and only the latest operation may close the sheet (UI
- * review round 2).
+ * The effect acknowledges `done` through `consumeDone` before acting on it (01): the consume
+ * re-checks the live operation generation — a newer resolve may have started after `done` was
+ * collected, and only the latest operation may close the sheet (UI review round 2) — and a
+ * replayed effect then finds nothing to re-pop over the screen beneath.
  */
 @Composable
 internal fun AddPodcastRoute(
@@ -42,11 +43,8 @@ internal fun AddPodcastRoute(
     val snackbar = LocalSnackbarHost.current
 
     LaunchedEffect(state.done) {
-        val done = state.done ?: return@LaunchedEffect
+        val done = viewModel.consumeDone() ?: return@LaunchedEffect
         withContext(NonCancellable) {
-            if (viewModel.uiState.value.operationGeneration != done.operationGeneration) {
-                return@withContext
-            }
             navigator.pop()
             // Long, not the action-label default (Indefinite): the root host drains every
             // screen's messages through one mutex, so an ignored snackbar must release it

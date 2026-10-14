@@ -151,6 +151,22 @@ public class AddPodcastViewModel(
         nextGeneration { it.copy(step = AddSheetStep.Input()) }
     }
 
+    /**
+     * The route's acknowledgement of the terminal `done` (01: one-shot events are state with
+     * acknowledgement): reads and clears it atomically, so a recreated effect finds nothing and
+     * cannot replay the pop over the screen beneath the sheet. Returns `done` only while its
+     * generation still owns the sheet — a newer resolve may have started after it was collected
+     * (UI review round 2).
+     */
+    public fun consumeDone(): SubscribedPodcast? {
+        var consumed: SubscribedPodcast? = null
+        mutableState.update { state ->
+            consumed = state.done?.takeIf { it.operationGeneration == state.operationGeneration }
+            if (consumed == null) state else state.copy(done = null)
+        }
+        return consumed
+    }
+
     /** "Looking up…" is cancellable (08) — back to the editable field. */
     public fun cancelResolve() {
         resolveJob?.cancel()

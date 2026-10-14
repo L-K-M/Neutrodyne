@@ -343,6 +343,23 @@ class AddPodcastViewModelTest : MainDispatcherTest() {
         }
 
     @Test
+    fun consumeDoneAcknowledgesTheClose() =
+        runTest {
+            subscribe.nextOutcome = Outcome.Success(7L)
+            resolver.nextResolution = AddResolution.Feed(Preview)
+            viewModel.resolve("https://example.com/feed")
+            advanceUntilIdle()
+            viewModel.subscribe()
+            advanceUntilIdle()
+
+            // 01's acknowledgement: the route consumes `done` when it pops, so a recreated
+            // effect must not see it again and re-pop the screen beneath the sheet.
+            assertEquals(7L, viewModel.consumeDone()?.podcastId)
+            assertNull(viewModel.uiState.value.done)
+            assertNull(viewModel.consumeDone())
+        }
+
+    @Test
     fun cancelResolveReturnsToInput() =
         runTest {
             resolver.nextResolution = AddResolution.Feed(Preview)
