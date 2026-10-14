@@ -216,10 +216,10 @@ internal fun PodcastScreen(
 
             else -> {
                 // 08's paging-error rule, applied where the user actually is: with placeholders
-                // on, an append failure's footer sits thousands of rows away and a prepend
-                // failure has no footer at all — the error pins a banner under the app bar
-                // instead (2026-10-08 deviation in 08). The footer row still marks the spot
-                // the failure happened.
+                // on, an append failure's footer would sit thousands of rows away and a
+                // prepend failure has no footer at all — every non-empty-list failure pins a
+                // banner under the app bar instead (revised 2026-10-14: the append footer row
+                // is gone; it duplicated the banner once the user scrolled to it).
                 LoadErrorBanner(items)
                 LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
                     offlineBannerItem(state.offline)
@@ -328,21 +328,6 @@ internal fun PodcastScreen(
                             ) {
                                 NdLoading()
                             }
-                        }
-                    }
-                    // 08's paged-list convention: a LoadState.Error becomes a footer row with
-                    // Retry (`items.retry()`), same as the Feeds list.
-                    if (items.loadState.append is LoadState.Error) {
-                        item(key = "appendError", contentType = "status") {
-                            NdBanner(
-                                message = stringResource(Res.string.feeds_load_error),
-                                icon = NdIcons.Error,
-                                primary =
-                                    NdDialogAction(
-                                        stringResource(Res.string.action_retry),
-                                        onClick = items::retry,
-                                    ),
-                            )
                         }
                     }
                 }
@@ -743,11 +728,12 @@ private fun EpisodeRowPlaceholder() {
 }
 
 /**
- * The paged list's load error, pinned where the user is (08's paging-error rule, 2026-10-08):
- * a refresh failure with episodes still shown, or an append/prepend failure whose footer row
- * may be thousands of placeholders away (a prepend failure has no footer at all), surfaces as
- * a banner under the app bar. Retry replays every failed load via `items.retry()`; the empty
- * first-page failure keeps the in-list error state instead.
+ * The paged list's load error, pinned where the user is (08's paging-error rule, revised
+ * 2026-10-14): a refresh failure with episodes still shown, or an append/prepend failure,
+ * surfaces as this banner under the app bar. There is no append footer row — placeholders
+ * can park it thousands of rows away, a prepend failure never had one, and showing both
+ * duplicated the error at the list end. Retry replays every failed load via
+ * `items.retry()`; the empty first-page failure keeps the in-list error state instead.
  */
 @Composable
 private fun LoadErrorBanner(items: LazyPagingItems<*>) {

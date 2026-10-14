@@ -19,6 +19,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.paging.LoadState
 import androidx.paging.Pager
@@ -351,10 +353,13 @@ class PodcastScreenTest {
     @Test
     fun appendErrorOffersRetry() =
         runComposeUiTest {
-            // A failed append shows the convention's footer row with Retry (`items.retry()`).
-            // Page one is sized past the viewport + prefetch distance so the failing append
-            // is triggered by an access hint from scrolling — the hint is what `retry()`
-            // replays; an auto-append after refresh carries no hint and cannot be retried.
+            // A failed append surfaces once: the pinned banner under the top bar — 08's
+            // revised paging-error rule dropped the spec's footer row, which placeholders
+            // can park thousands of rows away and which repeated the banner at the list
+            // end. Page one is sized past the viewport + prefetch distance so the failing
+            // append is triggered by an access hint from scrolling — the hint is what
+            // `retry()` replays; an auto-append after refresh carries no hint and cannot
+            // be retried.
             val source =
                 PagedListSource(
                     pages =
@@ -374,15 +379,21 @@ class PodcastScreenTest {
             onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToNode(hasText("Ep 59"))
             waitUntil(timeoutMillis = 5_000) { pagingItems.loadState.append is LoadState.Error }
 
-            onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToNode(hasText("Retry"))
-            // The error is offered twice: the footer row at the failure's spot and the
-            // banner pinned under the app bar — both retry through `items.retry()`.
-            onAllNodes(hasText("Retry")).assertCountEquals(2)
-            onAllNodes(hasText("Retry"))[1].performClick()
+            // At the very end of the list — past the last loaded row, where the spec's
+            // footer row used to sit — the error stays a single surface.
+            onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToNode(hasText("Ep 60"))
+            onAllNodes(hasScrollToIndexAction()).onFirst().performTouchInput {
+                repeat(2) { swipeUp() }
+            }
+            waitForIdle()
+            onAllNodes(hasText("Couldn't load episodes")).assertCountEquals(1)
+            onAllNodes(hasText("Retry")).assertCountEquals(1)
+
+            onNodeWithText("Retry").performClick()
             // Poll state, not idle: the retry's append spinner animates indefinitely.
             waitUntil(timeoutMillis = 5_000) { pagingItems.itemCount == 70 }
 
-            // The retry replayed the failed append (load #3); the footer cleared with it.
+            // The retry replayed the failed append (load #3); the banner cleared with it.
             assertEquals(3, source.loads)
             assertEquals("Ep 70", pagingItems.itemSnapshotList[69]?.title)
             assertIsNot<LoadState.Error>(pagingItems.loadState.append)
@@ -414,8 +425,10 @@ class PodcastScreenTest {
             onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(85)
             waitUntil(timeoutMillis = 5_000) { pagingItems.loadState.append is LoadState.Error }
 
-            // The error banner is already on screen — no scroll to the faraway footer.
+            // The error banner is already on screen — no scroll to the faraway footer —
+            // and it is the error's only surface: the spec's append footer row is gone.
             onNodeWithText("Couldn't load episodes").assertIsDisplayed()
+            onAllNodes(hasText("Retry")).assertCountEquals(1)
             onNodeWithText("Retry").performClick()
             // The retried append lands (a successful page can retrigger appends for the
             // placeholders still in view, so wait for the row itself, not a load count).
