@@ -196,7 +196,12 @@ class EpisodeScreenTest {
             onNodeWithText("Up next").performClick()
             onNodeWithText("Play next").assertIsDisplayed()
             onNodeWithText("Play last").performClick()
-            assertEquals(listOf<EpisodeAction>(EpisodeAction.PlayLast(9)), actions)
+            onNodeWithText("Up next").performClick()
+            onNodeWithText("Play next").performClick()
+            assertEquals(
+                listOf<EpisodeAction>(EpisodeAction.PlayLast(9), EpisodeAction.PlayNext(9)),
+                actions,
+            )
         }
 
     @Test
