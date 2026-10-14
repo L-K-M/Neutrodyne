@@ -24,8 +24,6 @@ import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
-import ch.lkmc.neutrodyne.core.model.PodcastDetail
-import ch.lkmc.neutrodyne.core.model.ShowType
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
@@ -182,10 +180,6 @@ public class PodcastViewModel
             val SHARING = SharingStarted.WhileSubscribed(5_000)
         }
     }
-
-private fun PodcastDetail?.effectiveOrder(): FeedOrder =
-    this?.episodeOrder
-        ?: if (this?.showType == ShowType.SERIAL) FeedOrder.OLDEST_FIRST else FeedOrder.NEWEST_FIRST
 
 private fun RefreshStatus.covers(podcastId: Long): Boolean =
     running && scope is RefreshScope.Podcasts && podcastId in (scope as RefreshScope.Podcasts).ids

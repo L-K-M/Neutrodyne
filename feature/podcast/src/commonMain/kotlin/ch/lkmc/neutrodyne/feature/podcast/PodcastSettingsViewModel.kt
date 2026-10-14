@@ -17,7 +17,6 @@ import ch.lkmc.neutrodyne.core.model.FeedInfo
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.PodcastDetail
-import ch.lkmc.neutrodyne.core.model.ShowType
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.UserMessages
@@ -55,13 +54,7 @@ public data class PodcastSettingsUiState(
 
     /** The effective order — 05's default reads serial shows oldest-first. */
     public val effectiveOrder: FeedOrder
-        get() =
-            detail?.episodeOrder
-                ?: if (detail?.showType == ShowType.SERIAL) {
-                    FeedOrder.OLDEST_FIRST
-                } else {
-                    FeedOrder.NEWEST_FIRST
-                }
+        get() = detail.effectiveOrder()
 }
 
 /**

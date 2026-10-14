@@ -32,11 +32,18 @@ public data class PodcastUiState(
         get() = loaded && detail == null
 
     public val effectiveOrder: FeedOrder
-        get() =
-            detail?.episodeOrder
-                ?: if (detail?.showType == ShowType.SERIAL) {
-                    FeedOrder.OLDEST_FIRST
-                } else {
-                    FeedOrder.NEWEST_FIRST
-                }
+        get() = detail.effectiveOrder()
 }
+
+/**
+ * 05's order default, shared by the two screen states and the view model's feed request:
+ * the persisted choice wins, a serial show reads oldest-first, and a missing detail falls
+ * back to newest-first.
+ */
+internal fun PodcastDetail?.effectiveOrder(): FeedOrder =
+    this?.episodeOrder
+        ?: if (this?.showType == ShowType.SERIAL) {
+            FeedOrder.OLDEST_FIRST
+        } else {
+            FeedOrder.NEWEST_FIRST
+        }
