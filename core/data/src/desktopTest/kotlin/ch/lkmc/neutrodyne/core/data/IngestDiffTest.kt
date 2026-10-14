@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.episodeStateEntity
+import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
 import ch.lkmc.neutrodyne.feeds.model.WarningCode
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
@@ -43,7 +44,7 @@ class IngestDiffTest {
         seedPodcast(
             db,
             feedUrl = feedUrl,
-            feedKey = feedUrl,
+            feedKey = UrlNormalizer.forIdentity(feedUrl) ?: feedUrl,
             subscribedAt = subscribedAt,
             initialFetch = initialFetch,
             status = status,

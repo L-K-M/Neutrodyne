@@ -43,6 +43,24 @@ abstract class PodcastDao(
     @Delete
     abstract suspend fun deleteAliases(rows: List<PodcastUrlAliasEntity>)
 
+    /** Move-only columns; the caller checks key and alias ownership under the same writer. */
+    @Query(
+        "UPDATE podcast SET feedUrl = :url, feedKey = :key, etag = NULL," +
+            " lastModified = NULL, contentSha256 = NULL WHERE id = :id",
+    )
+    abstract suspend fun moveFeed(
+        id: Long,
+        url: String,
+        key: String,
+    )
+
+    /** A target alias of this podcast must disappear before it becomes the primary key. */
+    @Query("DELETE FROM podcast_url_alias WHERE podcastId = :podcastId AND url = :url")
+    abstract suspend fun deleteAlias(
+        podcastId: Long,
+        url: String,
+    )
+
     // --- Add-flow dedupe and repository reads (03, added 2026-10-07) -----------------------------
 
     /** The podcast owning the alias `url` (`feedKey` is checked separately by the caller). */
@@ -175,11 +193,7 @@ abstract class PodcastDao(
         order: FeedOrder,
     )
 
-    /**
-     * Records a `pendingNewFeedUrl` outside an ingest — a permanent redirect that ends in a 304
-     * announces a move but produces no body for the ingest transaction (03 Permanent redirects).
-     * The probe machinery adopts or drops it once a fetched body proves the move.
-     */
+    /** Records a publisher-announced `itunes:new-feed-url` target for a later probe (03). */
     @Query("UPDATE podcast SET pendingNewFeedUrl = :url WHERE id = :id")
     abstract suspend fun setPendingNewFeedUrl(
         id: Long,

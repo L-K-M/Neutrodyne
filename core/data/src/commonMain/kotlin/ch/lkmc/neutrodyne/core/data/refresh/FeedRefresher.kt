@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.data.ingest.FeedIngestor
 import ch.lkmc.neutrodyne.core.data.ingest.IngestContext
 import ch.lkmc.neutrodyne.core.data.ingest.IngestMode
 import ch.lkmc.neutrodyne.core.data.ingest.IngestResult
+import ch.lkmc.neutrodyne.core.data.ingest.IngestValidators
 import ch.lkmc.neutrodyne.core.data.ingest.IngestionEventBus
 import ch.lkmc.neutrodyne.core.database.DueFeed
 import ch.lkmc.neutrodyne.core.database.FetchStateBatcher
@@ -29,6 +30,7 @@ import ch.lkmc.neutrodyne.feeds.identity.PodcastGuid
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.model.ParseWarning
 import dev.zacsweers.metro.Inject
+import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
@@ -72,8 +74,14 @@ internal class FeedRefresher(
     private val settings: SettingsRepository,
     private val clock: Clock,
     private val random: Random,
+    private val moves: FeedMoveCommitter,
+    private val scheduler: Provider<RefreshScheduler>,
 ) {
     private val mutex = Mutex()
+
+    // Fetches remain parallel; commits and batch additions cannot race a collision survivor.
+    private val commitMutex = Mutex()
+    private var mergedThisRun = false
 
     private val _status =
         MutableStateFlow(
@@ -177,6 +185,7 @@ internal class FeedRefresher(
     }
 
     private suspend fun runLocked(request: RefreshRequest): RefreshReport {
+        mergedThisRun = false
         // The run that just released the mutex may have committed an older outcome on top of
         // this request's marks (a backoff over `nextRefreshAt = 0`, a 410's `gone`): the
         // user's intent is re-applied inside the critical section, before selection (r3 F3).
@@ -311,6 +320,12 @@ internal class FeedRefresher(
                         lastRunFinishedAt =
                             if (flushFailure == null) finishedAt else previousFinishedAt,
                     )
+                // A committed merge must rebase even if its subsequent ingest was cancelled.
+                // A scheduler fault cannot turn committed outcomes into a failed run.
+                if (mergedThisRun) {
+                    suspendRunCatching { scheduler().reschedulePeriodic() }
+                        .onFailure { Log.w(TAG, it) { "post-merge reschedule failed" } }
+                }
                 if (flushFailure == null) {
                     report = finalReport
                 } else {
@@ -349,18 +364,32 @@ internal class FeedRefresher(
         // Outcome handling (ingest, fetch-state rows, pending moves, hooks) is guarded per feed:
         // one feed's unexpected DAO fault records a STORAGE failure instead of cancelling the
         // run and every sibling feed with it (03's per-feed isolation).
-        return suspendRunCatching { applyAdapterResult(feed, adapter, result) }
-            .getOrElse { e ->
-                if (e is CancellationException) throw e
-                Log.w(TAG, e) { "outcome handling failed for podcast ${feed.id}" }
-                // The isolation guard holds here too: writeFailure hits the DAO (a full or
-                // aged-out batch flushes inside `add`), and a second fault must not escape
-                // refreshOne and cancel the run. suspendRunCatching keeps cancellation fatal.
-                suspendRunCatching {
-                    writeFailure(feed, FeedErrorKind.STORAGE, retryAfterMs = null, detail = e.message)
-                }.onFailure { Log.w(TAG, it) { "failure-state write failed for podcast ${feed.id}" } }
-                FeedOutcome.Failed(FeedErrorKind.STORAGE, null)
+        return suspendRunCatching {
+            commitMutex.withLock {
+                // Failures and deferrals cannot move a feed; retain their existing write path.
+                if (result is AdapterResult.Failed || result is AdapterResult.Deferred) {
+                    return@withLock applyAdapterResult(feed, adapter, result)
+                }
+                val current =
+                    db.podcastDao().dueFeedById(feed.id)
+                        ?: return@withLock FeedOutcome.Failed(FeedErrorKind.UNKNOWN, null)
+                // A response for an address replaced during the fetch cannot undo that move.
+                if (current.feedUrl != feed.feedUrl) {
+                    return@withLock FeedOutcome.Deferred(currentNextAt(current.id))
+                }
+                applyAdapterResult(current, adapter, result)
             }
+        }.getOrElse { e ->
+            if (e is CancellationException) throw e
+            Log.w(TAG, e) { "outcome handling failed for podcast ${feed.id}" }
+            // The isolation guard holds here too: writeFailure hits the DAO (a full or
+            // aged-out batch flushes inside `add`), and a second fault must not escape
+            // refreshOne and cancel the run. suspendRunCatching keeps cancellation fatal.
+            suspendRunCatching {
+                writeFailure(feed, FeedErrorKind.STORAGE, retryAfterMs = null, detail = e.message)
+            }.onFailure { Log.w(TAG, it) { "failure-state write failed for podcast ${feed.id}" } }
+            FeedOutcome.Failed(FeedErrorKind.STORAGE, null)
+        }
     }
 
     /** The outcome table of 03 Engine run: each adapter result becomes one `FeedOutcome`. */
@@ -370,6 +399,16 @@ internal class FeedRefresher(
         result: AdapterResult,
     ): FeedOutcome {
         val now = clock.now()
+        val move =
+            if (result is AdapterResult.NotModified || result is AdapterResult.Unchanged) {
+                if (moves.willMove(feed.id)) flushFetchStates()
+                moves.renormalise(feed.id)
+            } else {
+                null
+            }
+        if (move?.mergedInto != null) mergedThisRun = true
+        if (move != null && move.feed == null) return FeedOutcome.Failed(FeedErrorKind.UNKNOWN, null)
+        val refreshed = move?.feed ?: feed
         return when (result) {
             is AdapterResult.Parsed -> {
                 ingestOutcome(feed, adapter, result, now)
@@ -379,49 +418,78 @@ internal class FeedRefresher(
                 val meta = result.meta
                 addFetchState(
                     fetchStateOf(
-                        feed,
+                        refreshed,
                         lastAttemptAt = now,
                         lastSuccessAt = now,
                         nextRefreshAt =
-                            adapter.nextRefreshAt(feed, result, successNextAt(feed, now, meta?.maxAgeSec)),
+                            adapter.nextRefreshAt(refreshed, result, successNextAt(refreshed, now, meta?.maxAgeSec)),
                         failureCount = 0,
                         lastErrorKind = null,
                         lastErrorDetail = null,
-                        etag = meta?.etag ?: feed.etag,
-                        lastModified = meta?.lastModified ?: feed.lastModified,
-                        lastFullFetchAt = feed.lastFullFetchAt,
-                        lastParseOk = feed.lastParseOk,
+                        etag =
+                            if (move?.moved == true ||
+                                move?.mergedInto != null
+                            ) {
+                                refreshed.etag
+                            } else {
+                                meta?.etag ?: refreshed.etag
+                            },
+                        lastModified =
+                            if (move?.moved == true ||
+                                move?.mergedInto != null
+                            ) {
+                                refreshed.lastModified
+                            } else {
+                                meta?.lastModified
+                                    ?: refreshed.lastModified
+                            },
+                        lastFullFetchAt = refreshed.lastFullFetchAt,
+                        lastParseOk = refreshed.lastParseOk,
                     ),
                 )
-                // A permanent redirect that ends in a 304 announces a move but yields no body to
-                // prove it, so the ≥1-item adoption gate (03 Permanent redirects) cannot run on
-                // this outcome. Record the announced target as pending instead — the probe path
-                // fetches it, checks plausibility, and only then moves the feed.
-                meta?.permanentUrl?.let { recordPendingMove(feed, it) }
-                FeedOutcome.NotModified
+                move?.mergedInto?.let { FeedOutcome.Merged(it) } ?: FeedOutcome.NotModified
             }
 
             is AdapterResult.Unchanged -> {
                 addFetchState(
                     fetchStateOf(
-                        feed,
+                        refreshed,
                         lastAttemptAt = now,
                         lastSuccessAt = now,
                         nextRefreshAt =
-                            adapter.nextRefreshAt(feed, result, successNextAt(feed, now, result.meta.maxAgeSec)),
+                            adapter.nextRefreshAt(
+                                refreshed,
+                                result,
+                                successNextAt(refreshed, now, result.meta.maxAgeSec),
+                            ),
                         failureCount = 0,
                         lastErrorKind = null,
                         lastErrorDetail = null,
-                        etag = result.meta.etag ?: feed.etag,
-                        lastModified = result.meta.lastModified ?: feed.lastModified,
+                        etag =
+                            if (move?.moved == true ||
+                                move?.mergedInto != null
+                            ) {
+                                refreshed.etag
+                            } else {
+                                result.meta.etag ?: refreshed.etag
+                            },
+                        lastModified =
+                            if (move?.moved == true ||
+                                move?.mergedInto != null
+                            ) {
+                                refreshed.lastModified
+                            } else {
+                                result.meta.lastModified
+                                    ?: refreshed.lastModified
+                            },
                         // `lastFullFetchAt` tracks unconditional 200s (03 full-fetch rule).
-                        lastFullFetchAt = if (result.meta.unconditional) now else feed.lastFullFetchAt,
-                        lastParseOk = feed.lastParseOk,
+                        lastFullFetchAt = if (result.meta.unconditional) now else refreshed.lastFullFetchAt,
+                        lastParseOk = refreshed.lastParseOk,
                     ),
                 )
                 // 03 Source adapters: `afterIngest` runs after Unchanged too, with empty lists.
-                callAfterIngest(feed, adapter, emptyList(), emptyList())
-                FeedOutcome.Unchanged
+                callAfterIngest(refreshed, adapter, emptyList(), emptyList())
+                move?.mergedInto?.let { FeedOutcome.Merged(it) } ?: FeedOutcome.Unchanged
             }
 
             is AdapterResult.Deferred -> {
@@ -463,31 +531,52 @@ internal class FeedRefresher(
         result: AdapterResult.Parsed,
         now: Long,
     ): FeedOutcome {
-        val mode =
-            if (feed.initialFetch || feed.status == PodcastStatus.PENDING_FIRST_FETCH) {
-                IngestMode.INITIAL
-            } else {
-                IngestMode.REFRESH
+        val permanentUrl =
+            result.meta.permanentUrl.takeIf {
+                result.feed.items.any { it.primaryEnclosure != null || it.externalMediaId != null }
             }
-        val ctx =
-            IngestContext(
-                mode = mode,
-                partial = result.partial,
-                fetch = result.meta,
-                rowHints = result.rowHints,
-                absenceFloor = result.absenceFloor,
-            )
-        val ingest =
-            suspendRunCatching { ingestor.ingest(feed, result.feed, ctx) }
-                .getOrElse { e ->
-                    if (e is CancellationException) throw e
-                    Log.w(TAG, e) { "ingest failed for podcast ${feed.id}" }
-                    val kind = if (isUniqueViolation(e)) FeedErrorKind.IDENTITY_CONFLICT else FeedErrorKind.STORAGE
-                    writeFailure(feed, kind, retryAfterMs = null, detail = e.message)
-                    return FeedOutcome.Failed(kind, null)
+        if (moves.willMove(feed.id, permanentUrl)) flushFetchStates()
+        var target = feed
+        var mergedInto: Long? = null
+        var mode: IngestMode
+        var ingest: IngestResult
+        while (true) {
+            mode =
+                if (target.initialFetch || target.status == PodcastStatus.PENDING_FIRST_FETCH) {
+                    IngestMode.INITIAL
+                } else {
+                    IngestMode.REFRESH
                 }
+            val ctx =
+                IngestContext(
+                    mode = mode,
+                    partial = result.partial,
+                    fetch = if (mergedInto == null) result.meta else result.meta.copy(permanentUrl = null),
+                    rowHints = result.rowHints,
+                    absenceFloor = result.absenceFloor,
+                    validators = if (mergedInto == null) IngestValidators.STORE else IngestValidators.DISCARD,
+                )
+            try {
+                ingest = ingestor.ingest(target, result.feed, ctx)
+                break
+            } catch (collision: FeedMoveCollision) {
+                // The failed ingest released Room; flush before the merger changes its survivor.
+                flushFetchStates()
+                val survivor = moves.mergeCollision(target.id, collision) ?: continue
+                target = survivor
+                mergedInto = survivor.id
+                mergedThisRun = true
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                Log.w(TAG, e) { "ingest failed for podcast ${target.id}" }
+                val kind = if (isUniqueViolation(e)) FeedErrorKind.IDENTITY_CONFLICT else FeedErrorKind.STORAGE
+                writeFailure(target, kind, retryAfterMs = null, detail = e.message)
+                return FeedOutcome.Failed(kind, null)
+            }
+        }
 
-        rememberWarnings(feed.id, ingest.warnings)
+        target = db.podcastDao().dueFeedById(target.id) ?: target
+        rememberWarnings(target.id, ingest.warnings)
         // `vanished` means the podcast row was deleted mid-run — there is no row left to write a
         // fetch state onto, and the row being gone is itself the terminal state.
         if (ingest.vanished) return FeedOutcome.Failed(FeedErrorKind.UNKNOWN, null)
@@ -500,31 +589,33 @@ internal class FeedRefresher(
             // what was actually committed; otherwise a 304 would quietly clear the error.
             addFetchState(
                 fetchStateOf(
-                    feed,
+                    target,
                     lastAttemptAt = now,
                     lastSuccessAt = now,
                     nextRefreshAt =
-                        adapter.nextRefreshAt(feed, result, successNextAt(feed, now, result.meta.maxAgeSec)),
+                        adapter.nextRefreshAt(target, result, successNextAt(target, now, result.meta.maxAgeSec)),
                     failureCount = 0,
                     lastErrorKind = emptyKind,
                     lastErrorDetail = null,
-                    etag = feed.etag,
-                    lastModified = feed.lastModified,
-                    lastFullFetchAt = feed.lastFullFetchAt,
-                    lastParseOk = feed.lastParseOk,
+                    etag = target.etag,
+                    lastModified = target.lastModified,
+                    lastFullFetchAt = target.lastFullFetchAt,
+                    lastParseOk = target.lastParseOk,
                 ),
             )
-            return FeedOutcome.Failed(emptyKind, null)
+            return mergedInto?.let { FeedOutcome.Merged(it) } ?: FeedOutcome.Failed(emptyKind, null)
         }
 
-        announceIngest(feed, adapter, ingest, initialFetch = mode == IngestMode.INITIAL)
+        announceIngest(target, adapter, ingest, initialFetch = mode == IngestMode.INITIAL)
+        if (mergedInto != null) return FeedOutcome.Merged(mergedInto)
+
         val realGuid = result.feed.podcastGuid?.let(PodcastGuid::parse)
         val sameGuidAs =
             realGuid?.let { guid ->
                 db
                     .podcastDao()
                     .byRealGuid(guid)
-                    .firstOrNull { it.id != feed.id }
+                    .firstOrNull { it.id != target.id }
                     ?.id
             }
         return FeedOutcome.Ingested(
@@ -1032,21 +1123,7 @@ internal class FeedRefresher(
         batcher?.add(row) ?: db.podcastDao().updateFetchStates(listOf(row))
     }
 
-    /**
-     * A 304-after-301 move announcement recorded as `pendingNewFeedUrl` (03 Permanent redirects):
-     * the same pending column the `itunes:new-feed-url` path fills on ingest — a target already
-     * pending is left alone, non-http(s) targets are skipped, and a URL this podcast once moved
-     * away from (an alias) is a loop and never recorded.
-     */
-    private suspend fun recordPendingMove(
-        feed: DueFeed,
-        target: String,
-    ) {
-        if (feed.pendingNewFeedUrl == target) return
-        val identity = UrlNormalizer.forIdentity(target) ?: return
-        if (db.podcastDao().aliases(feed.id).any { it.url == identity }) return
-        db.podcastDao().setPendingNewFeedUrl(feed.id, target)
-    }
+    private suspend fun currentNextAt(id: Long): Long = db.podcastDao().byId(id)?.nextRefreshAt ?: clock.now()
 
     private fun successNextAt(
         feed: DueFeed,
@@ -1166,6 +1243,7 @@ internal class FeedRefresher(
             put("ingested", report.outcomes.values.count { it is FeedOutcome.Ingested })
             put("notModified", report.outcomes.values.count { it is FeedOutcome.NotModified })
             put("unchanged", report.outcomes.values.count { it is FeedOutcome.Unchanged })
+            put("merged", report.outcomes.values.count { it is FeedOutcome.Merged })
             putJsonObject("failed") { failed.forEach { (kind, count) -> put(kind, count) } }
             put("remaining", report.remaining)
             put("stoppedByDeadline", report.stoppedByDeadline)

@@ -2,16 +2,20 @@
 
 package ch.lkmc.neutrodyne.core.data
 
+import ch.lkmc.neutrodyne.core.data.refresh.AdapterResult
 import ch.lkmc.neutrodyne.core.data.refresh.FetchMode
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.feeds.parse.FeedParser
 import kotlinx.coroutines.test.runTest
 import mockwebserver3.junit4.MockWebServerRule
+import okio.ByteString.Companion.encodeUtf8
 import org.junit.Rule
 import java.io.File
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 
 /**
  * `RssSourceAdapter` seams the engine tests do not reach: the per-host semaphore key
@@ -151,6 +155,70 @@ class RssSourceAdapterTest {
             } finally {
                 bundle.close()
             }
+        }
+
+    @Test
+    fun identicalBodyWithoutPermanentTargetStillReturnsUnchanged() =
+        runTest {
+            setUpRoot()
+            val body = rssBody(items = arrayOf(rssItem("x")))
+            val id =
+                seedPodcast(db, server.url("/f").toString()) {
+                    copy(
+                        contentSha256 = body.encodeUtf8().sha256().hex(),
+                        parserVersion = FeedParser.VERSION,
+                        lastParseOk = true,
+                        lastFullFetchAt = NOW,
+                    )
+                }
+            server.enqueue(mockResponse(body = body))
+            newRssAdapter(root, clock).use { bundle ->
+                val result = bundle.adapter.fetchAndParse(dueFeedOf(db, id), FetchMode.REFRESH)
+                assertIs<AdapterResult.Unchanged>(result)
+            }
+            assertEquals(1, server.requestCount)
+        }
+
+    @Test
+    fun identicalBodyWithPermanentTargetReturnsParsed() =
+        runTest {
+            setUpRoot()
+            val body = rssBody(items = arrayOf(rssItem("x")))
+            val id =
+                seedPodcast(db, server.url("/f").toString()) {
+                    copy(
+                        contentSha256 = body.encodeUtf8().sha256().hex(),
+                        parserVersion = FeedParser.VERSION,
+                        lastParseOk = true,
+                        lastFullFetchAt = NOW,
+                    )
+                }
+            server.enqueue(mockResponse(301, "", "Location" to "/new"))
+            server.enqueue(mockResponse(body = body))
+            newRssAdapter(root, clock).use { bundle ->
+                val fetched = bundle.adapter.fetchAndParse(dueFeedOf(db, id), FetchMode.REFRESH)
+                val result = assertIs<AdapterResult.Parsed>(fetched)
+                assertEquals(server.url("/new").toString(), result.meta.permanentUrl)
+                assertEquals(1, result.feed.items.size)
+            }
+            assertEquals(2, server.requestCount)
+        }
+
+    @Test
+    fun olderPageUnsolicited304DoesNotConfirm() =
+        runTest {
+            setUpRoot()
+            val id =
+                seedPodcast(db, server.url("/f").toString()) {
+                    copy(pagingNextUrl = server.url("/page").toString())
+                }
+            server.enqueue(mockResponse(301, "", "Location" to "/new-page"))
+            server.enqueue(mockResponse(304, ""))
+            newRssAdapter(root, clock).use { bundle ->
+                val result = bundle.adapter.fetchAndParse(dueFeedOf(db, id), FetchMode.OLDER_PAGE)
+                assertIs<AdapterResult.Failed>(result)
+            }
+            assertEquals(2, server.requestCount)
         }
 
     private companion object {

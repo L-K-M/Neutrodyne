@@ -9,11 +9,13 @@ import ch.lkmc.neutrodyne.core.data.fetch.FeedTempFiles
 import ch.lkmc.neutrodyne.core.data.ingest.FeedIngestor
 import ch.lkmc.neutrodyne.core.data.ingest.IngestionEventBus
 import ch.lkmc.neutrodyne.core.data.refresh.AdapterResult
+import ch.lkmc.neutrodyne.core.data.refresh.FeedMoveCommitter
 import ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher
 import ch.lkmc.neutrodyne.core.data.refresh.FetchMode
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshScheduler
 import ch.lkmc.neutrodyne.core.data.refresh.SourceAdapter
+import ch.lkmc.neutrodyne.core.data.repo.PodcastMerger
 import ch.lkmc.neutrodyne.core.database.DueFeed
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
@@ -23,9 +25,11 @@ import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
+import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.jvm.html.JsoupShowNotesSanitizer
 import kotlinx.coroutines.Dispatchers
 import okio.FileSystem
@@ -46,7 +50,7 @@ internal fun newIngestor(
     db: NeutrodyneDatabase,
     clock: Clock,
     settings: SettingsRepository = FakeSettingsRepository(),
-) = FeedIngestor(db, JsoupShowNotesSanitizer(), settings, clock, Dispatchers.Default)
+) = FeedIngestor(db, JsoupShowNotesSanitizer(), settings, clock, newFeedMoves(db, clock), Dispatchers.Default)
 
 internal fun newRefresher(
     context: Context,
@@ -59,13 +63,32 @@ internal fun newRefresher(
     tempFiles: FeedTempFiles = FeedTempFiles(StoragePaths(context), FileSystem.SYSTEM),
     random: Random = Random(1),
     ingestor: FeedIngestor = newIngestor(db, clock, settings),
-): FeedRefresher = FeedRefresher(db, adapters, ingestor, eventBus, syncHook, tempFiles, settings, clock, random)
+    scheduler: RefreshScheduler = FakeRefreshScheduler(),
+): FeedRefresher =
+    FeedRefresher(
+        db,
+        adapters,
+        ingestor,
+        eventBus,
+        syncHook,
+        tempFiles,
+        settings,
+        clock,
+        random,
+        newFeedMoves(
+            db,
+            clock,
+        ),
+        {
+            scheduler
+        },
+    )
 
 /** A subscribed podcast row whose `feedKey` matches [feedUrl]; returns the new id. */
 internal suspend fun seedPodcast(
     db: NeutrodyneDatabase,
     feedUrl: String,
-    feedKey: String = feedUrl,
+    feedKey: String = UrlNormalizer.forIdentity(feedUrl) ?: feedUrl,
     title: String = "Seeded",
     status: PodcastStatus = PodcastStatus.ACTIVE,
     initialFetch: Boolean = false,
@@ -223,3 +246,8 @@ internal class FakeRefreshScheduler : RefreshScheduler {
         firstFetchCount++
     }
 }
+
+private fun newFeedMoves(
+    db: NeutrodyneDatabase,
+    clock: Clock,
+) = FeedMoveCommitter(db, PodcastMerger(db, FakeCredentialCommitCoordinator(), clock), clock)
