@@ -124,14 +124,25 @@ class NdScaffoldAndDialogTest {
                     )
                 }
             }
-            val pixels = onNodeWithText("Delete").captureToImage().toPixelMap()
-            var redPixels = 0
-            for (x in 0 until pixels.width) {
-                for (y in 0 until pixels.height) {
-                    val c = pixels[x, y]
-                    if (c.alpha > 0f && c.red > c.green + c.blue) redPixels++
+
+            fun redDominantPixelCount(label: String): Int {
+                val map = onNodeWithText(label).captureToImage().toPixelMap()
+                var count = 0
+                for (x in 0 until map.width) {
+                    for (y in 0 until map.height) {
+                        val c = map[x, y]
+                        if (c.alpha > 0f && c.red > c.green + c.blue) count++
+                    }
                 }
+                return count
             }
-            assertTrue(redPixels > 0, "the destructive confirm must draw in the error colour")
+            assertTrue(
+                redDominantPixelCount("Delete") > 0,
+                "the destructive confirm must draw in the error colour",
+            )
+            assertTrue(
+                redDominantPixelCount("Cancel") == 0,
+                "a normal action must not draw in the error colour",
+            )
         }
 }

@@ -35,9 +35,9 @@ internal fun LibraryRoute(viewModel: LibraryViewModel = metroViewModel()) {
     val navigator = LocalAppNavigator.current
     val snackbar = LocalSnackbarHost.current
     val scope = rememberCoroutineScope()
-    // 08: dialogs keep their pending state across recreation. Only the id and count are
-    // saveable primitives; the dialog's PendingUnsubscribe re-derives from the emitted tiles,
-    // so a restored dialog can never show a stale display title (94-2).
+    // 08: dialogs keep their pending state across recreation. Only the ids and count are
+    // saveable primitives; the dialogs' tiles re-derive from the emitted tiles, so a
+    // restored dialog can never show a stale display title (94-2).
     var pendingUnsubscribeId by rememberSaveable { mutableStateOf<Long?>(null) }
     var pendingUnsubscribeDownloads by rememberSaveable { mutableIntStateOf(0) }
     var pendingMarkAll by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -49,7 +49,7 @@ internal fun LibraryRoute(viewModel: LibraryViewModel = metroViewModel()) {
     LibraryScreen(
         state = state,
         pendingUnsubscribe = pending,
-        pendingMarkAll = pendingMarkAll,
+        pendingMarkAll = state.tiles.firstOrNull { it.podcastId == pendingMarkAll },
         onSort = viewModel::setSort,
         onToggleTitles = viewModel::setShowTitles,
         onOpenPodcast = { navigator.pushDetail(PodcastKey(it)) },

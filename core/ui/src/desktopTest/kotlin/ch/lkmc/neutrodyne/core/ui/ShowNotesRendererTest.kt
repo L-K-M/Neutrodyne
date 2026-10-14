@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -13,6 +14,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -202,7 +204,15 @@ class ShowNotesRendererTest {
                 imageMode = ShowNotesImageMode.TAP_TO_LOAD,
                 onLoadImages = { loads++ },
             )
-            onNodeWithText("Image: diagram").assertIsDisplayed().performClick()
+            val row = onNodeWithText("Image: diagram")
+            row.assertIsDisplayed()
+            // The tap triggers network image loads, so the click action must say what it does
+            // ("Load images"), not just "double-tap to activate" (08's privacy-gated affordance).
+            assertEquals(
+                "Load images",
+                row.fetchSemanticsNode().config[SemanticsActions.OnClick].label,
+            )
+            row.performClick()
             assertEquals(1, loads)
         }
 
@@ -318,7 +328,56 @@ class ShowNotesRendererTest {
             // The bitmap arrives asynchronously — poll the laid-out bounds until it settles.
             waitUntil(timeoutMillis = 5_000) {
                 val bounds =
-                    onNodeWithContentDescription("tall").fetchSemanticsNode().boundsInRoot
+                    onAllNodesWithContentDescription("tall")
+                        .fetchSemanticsNodes()
+                        .firstOrNull()
+                        ?.boundsInRoot
+                        ?: return@waitUntil false
+                abs(bounds.width - expectedWidth) <= 1 && abs(bounds.height - capPx) <= 1
+            }
+        }
+
+    @Test
+    fun loadedBitmapAspectCorrectsAWrongDeclaredHint() =
+        runComposeUiTest {
+            // The feed's declared 100 x 100 only pre-sizes the box; once the real 600 x 1200
+            // bitmap lands, its aspect takes over — 240 x 480 in a 360 dp column under the
+            // 480 dp cap, not the hinted 360 x 360 (08: "at the intrinsic aspect").
+            installFakeImageLoader(mapOf(TALL_IMAGE_URL to FakeImage(600, 1200)))
+            setContent {
+                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    Column(Modifier.width(360.dp)) {
+                        LazyColumn {
+                            showNotes(
+                                notes =
+                                    notesOf(
+                                        ShowNoteBlock.Image(
+                                            url = TALL_IMAGE_URL,
+                                            alt = "tall",
+                                            width = 100,
+                                            height = 100,
+                                        ),
+                                    ),
+                                imageMode = ShowNotesImageMode.SHOWN,
+                                durationMs = null,
+                                onLink = {},
+                                onTimestamp = {},
+                                onLoadImages = {},
+                            )
+                        }
+                    }
+                }
+            }
+            val density = onNodeWithContentDescription("tall").fetchSemanticsNode().layoutInfo.density
+            val expectedWidth = with(density) { 240.dp.toPx() }
+            val capPx = with(density) { IMAGE_MAX_HEIGHT_PX.toPx() }
+            waitUntil(timeoutMillis = 5_000) {
+                val bounds =
+                    onAllNodesWithContentDescription("tall")
+                        .fetchSemanticsNodes()
+                        .firstOrNull()
+                        ?.boundsInRoot
+                        ?: return@waitUntil false
                 abs(bounds.width - expectedWidth) <= 1 && abs(bounds.height - capPx) <= 1
             }
         }

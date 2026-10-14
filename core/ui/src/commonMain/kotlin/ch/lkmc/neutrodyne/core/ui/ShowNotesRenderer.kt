@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.HorizontalDivider
@@ -48,6 +49,7 @@ import ch.lkmc.neutrodyne.core.model.ShowNoteSpan
 import ch.lkmc.neutrodyne.core.model.ShowNotes
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.shownotes_image
+import ch.lkmc.neutrodyne.core.ui.resources.shownotes_load_images
 import coil3.compose.AsyncImage
 import coil3.compose.LocalPlatformContext
 import coil3.request.ImageRequest
@@ -173,7 +175,7 @@ private fun NoteList(
                 Text(
                     if (block.ordered) "${index + 1}." else "•",
                     style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.width(LIST_MARKER_WIDTH),
+                    modifier = Modifier.widthIn(min = LIST_MARKER_WIDTH),
                 )
                 Column(Modifier.weight(1f)) {
                     itemBlocks.forEach { itemBlock ->
@@ -259,7 +261,11 @@ private fun NoteImage(
         ImagePlaceholderRow(block = block, emphasised = false, onClick = null)
         return
     }
-    val aspect = declaredAspect(block.width, block.height) ?: loadedAspect
+    // The loaded bitmap's aspect wins over the feed's declared hint once it lands; both are
+    // clamped to the range aspectRatio() can represent.
+    val aspect =
+        (loadedAspect ?: declaredAspect(block.width, block.height))
+            ?.coerceIn(MIN_IMAGE_ASPECT, MAX_IMAGE_ASPECT)
     AsyncImage(
         model = request,
         contentDescription = block.alt,
@@ -291,14 +297,22 @@ private fun ImagePlaceholderRow(
     emphasised: Boolean,
     onClick: (() -> Unit)?,
 ) {
+    // The tap loads remote images, so screen readers must hear what the tap does (08's
+    // "Load images" privacy gate), not just "double-tap to activate".
+    val loadLabel = stringResource(Res.string.shownotes_load_images)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier =
             Modifier
                 .fillMaxWidth()
                 .heightIn(min = TOUCH_TARGET)
-                .let { m -> if (onClick != null) m.clickable(onClick = onClick) else m }
-                .padding(bottom = PARAGRAPH_GAP),
+                .let { m ->
+                    if (onClick != null) {
+                        m.clickable(onClickLabel = loadLabel, onClick = onClick)
+                    } else {
+                        m
+                    }
+                }.padding(bottom = PARAGRAPH_GAP),
     ) {
         Icon(NdIcons.Image, contentDescription = null, modifier = Modifier.size(ICON_SIZE))
         Text(
