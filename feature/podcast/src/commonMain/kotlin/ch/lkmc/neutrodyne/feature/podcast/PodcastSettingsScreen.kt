@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -518,7 +519,8 @@ internal fun SettingsCredentialsDialog(
     onDismiss: () -> Unit,
 ) {
     var username by rememberSaveable { mutableStateOf("") }
-    var password by rememberSaveable { mutableStateOf("") }
+    // Secrets never enter saved state: a recreated dialog starts with an empty password.
+    var password by remember { mutableStateOf("") }
     NdDialog(
         onDismissRequest = onDismiss,
         icon = NdIcons.Key,

@@ -260,6 +260,39 @@ class PodcastSettingsScreenTest {
             onNodeWithContentDescription("Hide password").assertIsDisplayed()
         }
 
+    /**
+     * Secrets never enter saved state: after a save/restore round trip the username comes
+     * back but the password field starts empty.
+     */
+    @Test
+    fun credentialsDialogRestoresUsernameButNotPassword() =
+        runComposeUiTest {
+            var restored: Map<String, List<Any?>> = emptyMap()
+            var registry = SaveableStateRegistry(restored) { true }
+            setSettingsCredentialsDialog(registry = registry)
+
+            onAllNodes(hasSetTextAction())[0].performTextInput("alice")
+            onAllNodes(hasSetTextAction())[1].performTextInput("hunter2")
+
+            runOnIdle { restored = registry.performSave() }
+            registry = SaveableStateRegistry(restored) { true }
+            setSettingsCredentialsDialog(registry = registry)
+
+            val fields = onAllNodes(hasSetTextAction())
+            fields[0].assert(
+                SemanticsMatcher.expectValue(
+                    SemanticsProperties.EditableText,
+                    AnnotatedString("alice"),
+                ),
+            )
+            fields[1].assert(
+                SemanticsMatcher.expectValue(
+                    SemanticsProperties.EditableText,
+                    AnnotatedString(""),
+                ),
+            )
+        }
+
     @Test
     fun youtubeFeedHidesEditAddress() =
         runComposeUiTest {
