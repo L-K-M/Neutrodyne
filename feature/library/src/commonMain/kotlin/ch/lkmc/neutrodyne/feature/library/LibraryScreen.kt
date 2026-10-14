@@ -57,6 +57,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.library_sort_recent
 import ch.lkmc.neutrodyne.core.ui.resources.library_sort_title
 import ch.lkmc.neutrodyne.core.ui.resources.library_sort_unplayed
 import ch.lkmc.neutrodyne.core.ui.resources.nav_library
+import ch.lkmc.neutrodyne.core.ui.resources.podcast_mark_all_title
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_mark_played
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_settings
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_unsubscribe
@@ -83,7 +84,7 @@ internal data class PendingUnsubscribe(
 internal fun LibraryScreen(
     state: LibraryUiState,
     pendingUnsubscribe: PendingUnsubscribe?,
-    pendingMarkAll: Long?,
+    pendingMarkAll: LibraryTile?,
     onSort: (LibrarySort) -> Unit,
     onToggleTitles: (Boolean) -> Unit,
     onOpenPodcast: (Long) -> Unit,
@@ -159,14 +160,14 @@ internal fun LibraryScreen(
 
     // 08's required confirmation before the write (UI review round 2); the "Older than"
     // options of the dialog table wait on M2's `countUnplayed` (deviation recorded).
-    if (pendingMarkAll != null) {
+    pendingMarkAll?.let { pending ->
         NdDialog(
             onDismissRequest = onDismissMarkAll,
             icon = NdIcons.DoneAll,
-            title = stringResource(Res.string.podcast_mark_played),
+            title = stringResource(Res.string.podcast_mark_all_title, pending.displayTitle),
             confirm =
                 NdDialogAction(stringResource(Res.string.podcast_mark_played)) {
-                    onConfirmMarkAll(pendingMarkAll)
+                    onConfirmMarkAll(pending.podcastId)
                 },
             dismiss =
                 NdDialogAction(

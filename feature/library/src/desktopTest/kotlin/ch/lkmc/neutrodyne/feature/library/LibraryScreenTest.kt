@@ -429,14 +429,16 @@ class LibraryScreenTest {
             onNodeWithContentDescription("Tap Show")
                 .performCustomAccessibilityActionWithLabel("Mark all as played…")
             waitForIdle()
-            // The dialog's title and its confirm button both read "Mark all as played".
-            onAllNodes(hasText("Mark all as played")).assertCountEquals(2)
+            // The title names the podcast (94 review); the confirm keeps the bare label.
+            onNodeWithText("Mark all as played in Tap Show?").assertIsDisplayed()
+            onAllNodes(hasText("Mark all as played")).assertCountEquals(1)
 
             runOnIdle { restored = registry.performSave() }
             registry = SaveableStateRegistry(restored) { true }
             setLibraryRoute(registry = registry)
 
-            onAllNodes(hasText("Mark all as played")).assertCountEquals(2)
+            onNodeWithText("Mark all as played in Tap Show?").assertIsDisplayed()
+            onAllNodes(hasText("Mark all as played")).assertCountEquals(1)
         }
 
     /**
@@ -472,8 +474,8 @@ class LibraryScreenTest {
                 .performCustomAccessibilityActionWithLabel("Mark all as played…")
             waitForIdle()
 
-            // The dialog's title and its confirm button both read "Mark all as played".
-            onAllNodes(hasText("Mark all as played")).assertCountEquals(2)
+            // The title names the podcast; the confirm keeps the bare label.
+            onNodeWithText("Mark all as played in Tap Show?").assertIsDisplayed()
             assertEquals(emptyList(), episodes.calls)
 
             onAllNodes(hasText("Mark all as played") and hasClickAction()).onFirst().performClick()
@@ -509,7 +511,7 @@ class LibraryScreenTest {
     private fun ComposeUiTest.setLibrary(
         state: LibraryUiState,
         pendingUnsubscribe: PendingUnsubscribe? = null,
-        pendingMarkAll: Long? = null,
+        pendingMarkAll: LibraryTile? = null,
         onSort: (LibrarySort) -> Unit = {},
         onToggleTitles: (Boolean) -> Unit = {},
         onOpenPodcast: (Long) -> Unit = {},
