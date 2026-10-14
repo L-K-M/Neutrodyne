@@ -321,14 +321,15 @@ private fun AuthFields(
             trailingIcon = {
                 NdIconButton(
                     onClick = onTogglePassword,
-                    icon = NdIcons.VisibilityOff,
+                    icon = if (showPassword) NdIcons.VisibilityOff else NdIcons.Visibility,
                     contentDescription =
                         stringResource(
                             if (showPassword) Res.string.add_auth_hide else Res.string.add_auth_show,
                         ),
                 )
             },
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+            keyboardOptions =
+                KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Go),
             keyboardActions = KeyboardActions(onGo = { onSubmit() }),
             modifier = Modifier.fillMaxWidth().padding(top = FIELD_GAP),
         )
