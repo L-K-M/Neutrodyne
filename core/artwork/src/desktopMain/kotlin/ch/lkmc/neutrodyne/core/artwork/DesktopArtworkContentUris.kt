@@ -17,5 +17,5 @@ internal class DesktopArtworkContentUris : ArtworkContentUris {
         key: String,
         version: Int,
         path: Path?,
-    ): String = path?.let { "file://$it" } ?: ""
+    ): String = path?.let { it.toNioPath().toUri().toASCIIString() } ?: ""
 }

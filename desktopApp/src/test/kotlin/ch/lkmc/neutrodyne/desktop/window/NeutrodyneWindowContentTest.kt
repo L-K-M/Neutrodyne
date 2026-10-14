@@ -119,6 +119,8 @@ class NeutrodyneWindowContentTest {
     @Test
     fun theWindowProvidesTheDesktopPlatformKind() =
         runComposeUiTest {
+            // The default (Feeds) tab is VM-backed: the database accessor gates on the open.
+            runBlocking { graph.databaseOpener.awaitOpen() }
             var provided: PlatformKind? = null
             val menuActions = DesktopMenuActions()
             setContent {
@@ -158,6 +160,9 @@ class NeutrodyneWindowContentTest {
         }
 
     private fun ComposeUiTest.setWindowContent() {
+        // The default (Feeds) tab is VM-backed: its repositories come from the graph's database
+        // accessor, which gates on the open — idempotent, so per-test awaits stay harmless.
+        runBlocking { graph.databaseOpener.awaitOpen() }
         setContent {
             NeutrodyneWindowContent(
                 installers = graph.entryInstallers,

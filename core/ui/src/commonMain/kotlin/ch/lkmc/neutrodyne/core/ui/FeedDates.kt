@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.date_days_ago
 import ch.lkmc.neutrodyne.core.ui.resources.date_duration_hours
 import ch.lkmc.neutrodyne.core.ui.resources.date_duration_hours_minutes
+import ch.lkmc.neutrodyne.core.ui.resources.date_duration_lt_minute
 import ch.lkmc.neutrodyne.core.ui.resources.date_duration_minutes
 import ch.lkmc.neutrodyne.core.ui.resources.date_hours_ago
 import ch.lkmc.neutrodyne.core.ui.resources.date_in_days
@@ -57,11 +58,15 @@ public object FeedDates {
     }
 
     /**
-     * Compact duration ("45 min", "1 h 5 min") for row meta and details. Null duration → the empty
-     * raw so `Joined` drops it.
+     * Compact duration ("45 min", "1 h 5 min") for row meta and details. Null/negative duration →
+     * the empty raw so `Joined` drops it; a positive sub-minute duration is "<1 min" rather than
+     * the misleading "0 min".
      */
     public fun duration(durationMs: Long?): UiText {
         if (durationMs == null || durationMs < 0) return UiText.Raw("")
+        if (durationMs in 1 until MS_PER_MINUTE) {
+            return UiText.Res(Res.string.date_duration_lt_minute)
+        }
         val minutes = durationMs / MS_PER_MINUTE
         val hours = minutes / MINUTES_PER_HOUR
         val remMinutes = minutes % MINUTES_PER_HOUR

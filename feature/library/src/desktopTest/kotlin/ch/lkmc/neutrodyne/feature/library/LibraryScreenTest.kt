@@ -13,6 +13,9 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
@@ -328,6 +331,31 @@ class LibraryScreenTest {
             assertEquals(true, showTitles)
         }
 
+    /**
+     * The menu must report which sort is active (94 review): every option carries the
+     * radio-button role with `selected` exposed on the current sort only — a decorative
+     * check icon alone leaves screen readers guessing.
+     */
+    @Test
+    fun sortMenuMarksOnlyTheActiveOption() =
+        runComposeUiTest {
+            setLibrary(LibraryUiState(loaded = true, sort = LibrarySort.RECENTLY_UPDATED))
+            onNodeWithContentDescription("Sort").performClick()
+            onNodeWithText("Recently updated").assertIsSelected()
+            onNodeWithText("Title (A–Z)").assertIsNotSelected()
+            onNodeWithText("Most unplayed").assertIsNotSelected()
+            onNodeWithText("Recently added").assertIsNotSelected()
+        }
+
+    /** The titles item reports its on/off state as a switch (94 review). */
+    @Test
+    fun titlesItemExposesSwitchState() =
+        runComposeUiTest {
+            setLibrary(LibraryUiState(loaded = true, showTitles = true))
+            onNodeWithContentDescription("More actions").performClick()
+            onNodeWithText("Show titles").assertIsOn()
+        }
+
     @Test
     fun unsubscribeDialogCountsDownloads() =
         runComposeUiTest {
@@ -429,14 +457,16 @@ class LibraryScreenTest {
             onNodeWithContentDescription("Tap Show")
                 .performCustomAccessibilityActionWithLabel("Mark all as played…")
             waitForIdle()
-            // The dialog's title and its confirm button both read "Mark all as played".
-            onAllNodes(hasText("Mark all as played")).assertCountEquals(2)
+            // The title names the podcast (94 review); the confirm keeps the bare label.
+            onNodeWithText("Mark all as played in Tap Show?").assertIsDisplayed()
+            onAllNodes(hasText("Mark all as played")).assertCountEquals(1)
 
             runOnIdle { restored = registry.performSave() }
             registry = SaveableStateRegistry(restored) { true }
             setLibraryRoute(registry = registry)
 
-            onAllNodes(hasText("Mark all as played")).assertCountEquals(2)
+            onNodeWithText("Mark all as played in Tap Show?").assertIsDisplayed()
+            onAllNodes(hasText("Mark all as played")).assertCountEquals(1)
         }
 
     /**
@@ -472,8 +502,8 @@ class LibraryScreenTest {
                 .performCustomAccessibilityActionWithLabel("Mark all as played…")
             waitForIdle()
 
-            // The dialog's title and its confirm button both read "Mark all as played".
-            onAllNodes(hasText("Mark all as played")).assertCountEquals(2)
+            // The title names the podcast; the confirm keeps the bare label.
+            onNodeWithText("Mark all as played in Tap Show?").assertIsDisplayed()
             assertEquals(emptyList(), episodes.calls)
 
             onAllNodes(hasText("Mark all as played") and hasClickAction()).onFirst().performClick()
@@ -509,7 +539,7 @@ class LibraryScreenTest {
     private fun ComposeUiTest.setLibrary(
         state: LibraryUiState,
         pendingUnsubscribe: PendingUnsubscribe? = null,
-        pendingMarkAll: Long? = null,
+        pendingMarkAll: LibraryTile? = null,
         onSort: (LibrarySort) -> Unit = {},
         onToggleTitles: (Boolean) -> Unit = {},
         onOpenPodcast: (Long) -> Unit = {},
@@ -622,7 +652,9 @@ private val TestPlatformActions =
 
 /**
  * True for a pixel that reads as the Material error red: hue near 0° with enough saturation
- * to exclude the amber primary (hue ~33°) and the neutral surfaces, at any blend depth.
+ * to exclude the amber primary (hue ~33°) and the neutral surfaces. The saturation floor
+ * means only sufficiently saturated red pixels count — blends toward light surfaces and
+ * antialiased glyph edges are rejected, not detected.
  */
 private fun Color.isErrorRed(): Boolean {
     if (alpha <= 0f) return false
