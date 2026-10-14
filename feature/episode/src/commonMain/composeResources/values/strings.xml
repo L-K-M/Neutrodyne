@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!-- SPDX-License-Identifier: Unlicense -->
-<resources>
-    <!-- M1a placeholder; the episode-detail slice replaces it with the real screen. -->
-    <string name="episode_placeholder_title">Episode</string>
-    <string name="episode_arrives_later">This screen arrives in a later update.</string>
-</resources>
