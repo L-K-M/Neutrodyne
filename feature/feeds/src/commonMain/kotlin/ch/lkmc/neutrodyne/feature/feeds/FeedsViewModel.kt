@@ -184,6 +184,7 @@ public class FeedsViewModel(
     }
 
     /** 08 Pull to refresh: the indicator tracks `running`, but never longer than 30 s. */
+    @OptIn(ExperimentalCoroutinesApi::class)
     private fun refreshIndicator(): Flow<Boolean> =
         refreshController
             .observeStatus()
