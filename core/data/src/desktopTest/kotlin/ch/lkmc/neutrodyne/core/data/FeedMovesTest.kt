@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.data
 
 import androidx.room3.useWriterConnection
 import androidx.room3.withWriteTransaction
+import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.data.refresh.FeedMoveCommitter
 import ch.lkmc.neutrodyne.core.data.refresh.FeedOutcome
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
@@ -25,7 +26,9 @@ import ch.lkmc.neutrodyne.feeds.parse.FeedParser
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
+import mockwebserver3.MockWebServer
 import mockwebserver3.junit4.MockWebServerRule
+import okio.ByteString.Companion.encodeUtf8
 import org.junit.Rule
 import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
@@ -604,6 +607,269 @@ class FeedMovesTest {
             assertNull(db.podcastDao().byId(loser))
             assertEquals(1, db.podcastDao().episodeCount(winner))
             assertEquals(1, scheduler.rescheduleCount)
+        }
+
+    private fun announcedBody(
+        target: String,
+        title: String = "Test Show",
+        guid: String = "episode",
+    ): String =
+        rssBody(title = title, items = arrayOf(rssItem(guid)))
+            .replace(
+                "<rss version=\"2.0\">",
+                "<rss version=\"2.0\" xmlns:itunes=\"http://www.itunes.com/dtds/podcast-1.0.dtd\">",
+            ).replace("</channel>", "<itunes:new-feed-url>$target</itunes:new-feed-url></channel>")
+
+    @Test
+    fun plausibleAnnouncementAdoptsWithNewFeedUrlAlias() =
+        runTest {
+            val id = seed()
+            server.enqueue(mockResponse(200, announcedBody(url("/new"))))
+            server.enqueue(mockResponse(200, body, "ETag" to "target-validator"))
+
+            assertIs<FeedOutcome.Ingested>(refresh(id))
+            assertMove(id, url("/new"), key(url("/old")), AliasReason.NEW_FEED_URL)
+            assertNull(db.podcastDao().byId(id)?.pendingNewFeedUrl)
+            assertEquals("/old", server.takeRequest().url.encodedPath)
+            val target = server.takeRequest()
+            assertEquals("/new", target.url.encodedPath)
+            assertNull(target.headers["If-None-Match"])
+            assertNull(target.headers["If-Modified-Since"])
+            assertEquals(2, server.requestCount)
+        }
+
+    @Test
+    fun implausibleAnnouncementStaysPending() =
+        runTest {
+            val id = seed()
+            server.enqueue(mockResponse(200, announcedBody(url("/new"))))
+            val unrelated = rssBody(title = "Unrelated programme", items = arrayOf(rssItem("different")))
+            server.enqueue(mockResponse(200, unrelated))
+
+            assertIs<FeedOutcome.Ingested>(refresh(id))
+            val stored = assertNotNull(db.podcastDao().byId(id))
+            assertEquals(url("/old"), stored.feedUrl)
+            assertEquals(url("/new"), stored.pendingNewFeedUrl)
+            assertTrue(db.podcastDao().aliases(id).isEmpty())
+            assertEquals(1, db.podcastDao().episodeCount(id))
+            assertEquals(2, server.requestCount)
+        }
+
+    @Test
+    fun failedAnnouncementTargetKeepsSuccessfulCurrentIngestAndPending() =
+        runTest {
+            val id = seed()
+            server.enqueue(mockResponse(200, announcedBody(url("/new"))))
+            server.enqueue(mockResponse(404, ""))
+
+            assertIs<FeedOutcome.Ingested>(refresh(id))
+            val stored = assertNotNull(db.podcastDao().byId(id))
+            assertEquals(url("/new"), stored.pendingNewFeedUrl)
+            assertEquals(0, stored.failureCount)
+            assertNull(stored.lastErrorKind)
+            assertEquals(1, db.podcastDao().episodeCount(id))
+        }
+
+    @Test
+    fun notModifiedNeverProbesPendingAnnouncement() =
+        runTest {
+            val id =
+                seed {
+                    copy(
+                        etag = "validator",
+                        parserVersion = FeedParser.VERSION,
+                        lastParseOk = true,
+                        lastFullFetchAt = NOW,
+                        pendingNewFeedUrl = url("/new"),
+                    )
+                }
+            server.enqueue(mockResponse(304, ""))
+
+            assertEquals(FeedOutcome.NotModified, refresh(id))
+            assertEquals(1, server.requestCount)
+            assertEquals(url("/new"), db.podcastDao().byId(id)?.pendingNewFeedUrl)
+        }
+
+    @Test
+    fun unchangedNeverProbesPendingAnnouncement() =
+        runTest {
+            val tagged = announcedBody(url("/new"))
+            val hash = tagged.encodeUtf8().sha256().hex()
+            val id =
+                seed {
+                    copy(
+                        contentSha256 = hash,
+                        parserVersion = FeedParser.VERSION,
+                        lastParseOk = true,
+                        lastFullFetchAt = NOW,
+                        pendingNewFeedUrl = url("/new"),
+                    )
+                }
+            server.enqueue(mockResponse(200, tagged))
+
+            assertEquals(FeedOutcome.Unchanged, refresh(id))
+            assertEquals(1, server.requestCount)
+            assertEquals(url("/new"), db.podcastDao().byId(id)?.pendingNewFeedUrl)
+        }
+
+    @Test
+    fun redirect304ConfirmationNeverProbesItsTag() =
+        runTest {
+            val id =
+                seed {
+                    copy(
+                        etag = "validator",
+                        parserVersion = FeedParser.VERSION,
+                        lastParseOk = true,
+                        lastFullFetchAt = NOW,
+                    )
+                }
+            server.enqueue(redirect(301, "/permanent"))
+            server.enqueue(mockResponse(304, ""))
+            server.enqueue(redirect(301, "/permanent"))
+            server.enqueue(mockResponse(200, announcedBody(url("/tag-target"))))
+
+            assertIs<FeedOutcome.Ingested>(refresh(id))
+            assertEquals(url("/permanent"), db.podcastDao().byId(id)?.feedUrl)
+            assertEquals(url("/tag-target"), db.podcastDao().byId(id)?.pendingNewFeedUrl)
+            assertEquals(4, server.requestCount)
+        }
+
+    @Test
+    fun announcementMergesIntoPrimaryOwner() =
+        runTest {
+            announcementCollision(alias = false)
+        }
+
+    @Test
+    fun announcementMergesIntoAliasOwner() =
+        runTest {
+            announcementCollision(alias = true)
+        }
+
+    private suspend fun announcementCollision(alias: Boolean) {
+        val loser = seed()
+        val winner = seed(if (alias) url("/winner") else url("/new"))
+        if (alias) {
+            db.podcastDao().insertAlias(
+                PodcastUrlAliasEntity(key(url("/new")), winner, AliasReason.REDIRECT, NOW),
+            )
+        }
+        server.enqueue(mockResponse(200, announcedBody(url("/new"))))
+        server.enqueue(mockResponse(200, rssBody(items = arrayOf(rssItem("episode"), rssItem("new-episode")))))
+
+        assertEquals(FeedOutcome.Merged(winner), refresh(loser))
+        assertNull(db.podcastDao().byId(loser))
+        val stored = assertNotNull(db.podcastDao().byId(winner))
+        assertEquals(if (alias) url("/winner") else url("/new"), stored.feedUrl)
+        assertNull(stored.pendingNewFeedUrl)
+        assertEquals(2, db.podcastDao().episodeCount(winner))
+        assertEquals(1, scheduler.rescheduleCount)
+    }
+
+    @Test
+    fun chainedAnnouncementsAdoptEachHopAndStopAliasLoop() =
+        runTest {
+            val id = seed()
+            server.enqueue(mockResponse(200, announcedBody(url("/middle"))))
+            server.enqueue(mockResponse(200, announcedBody(url("/new"))))
+            server.enqueue(mockResponse(200, announcedBody(url("/old"))))
+
+            assertIs<FeedOutcome.Ingested>(refresh(id))
+            val stored = assertNotNull(db.podcastDao().byId(id))
+            assertEquals(url("/new"), stored.feedUrl)
+            assertNull(stored.pendingNewFeedUrl)
+            val aliases = db.podcastDao().aliases(id)
+            assertEquals(setOf(key(url("/old")), key(url("/middle"))), aliases.map { it.url }.toSet())
+            assertTrue(aliases.all { it.reason == AliasReason.NEW_FEED_URL })
+            assertEquals(3, server.requestCount)
+        }
+
+    @Test
+    fun rejectedSecondHopKeepsFirstMoveAndSecondPending() =
+        runTest {
+            val id = seed()
+            server.enqueue(mockResponse(200, announcedBody(url("/middle"))))
+            server.enqueue(mockResponse(200, announcedBody(url("/new"))))
+            server.enqueue(mockResponse(404, ""))
+
+            assertIs<FeedOutcome.Ingested>(refresh(id))
+            assertEquals(url("/middle"), db.podcastDao().byId(id)?.feedUrl)
+            assertEquals(url("/new"), db.podcastDao().byId(id)?.pendingNewFeedUrl)
+            assertEquals(
+                AliasReason.NEW_FEED_URL,
+                db
+                    .podcastDao()
+                    .aliases(id)
+                    .single()
+                    .reason,
+            )
+        }
+
+    @Test
+    fun announcementMoveRollsBackWithFailedTargetIngest() =
+        runTest {
+            val id = seed()
+            db.useWriterConnection { writer ->
+                writer.usePrepared(
+                    "CREATE TRIGGER fail_target_ingest BEFORE INSERT ON episode" +
+                        " WHEN NEW.guid = 'target-only'" +
+                        " BEGIN SELECT RAISE(ABORT, 'target failed'); END",
+                ) { it.step() }
+            }
+            server.enqueue(mockResponse(200, announcedBody(url("/new"))))
+            server.enqueue(mockResponse(200, rssBody(items = arrayOf(rssItem("episode"), rssItem("target-only")))))
+
+            assertIs<FeedOutcome.Ingested>(refresh(id))
+            val stored = assertNotNull(db.podcastDao().byId(id))
+            assertEquals(url("/old"), stored.feedUrl)
+            assertEquals(url("/new"), stored.pendingNewFeedUrl)
+            assertTrue(db.podcastDao().aliases(id).isEmpty())
+            assertEquals(1, db.podcastDao().episodeCount(id))
+        }
+
+    @Test
+    fun announcementProbeUsesOnlyTargetOriginCredentials() =
+        runTest {
+            val second = MockWebServer()
+            try {
+                second.start()
+                val target = second.url("/new").toString()
+                val id = seed()
+                for (targetCredential in listOf(null, "Basic dGFyZ2V0")) {
+                    val credentials =
+                        CredentialLookup { origin ->
+                            when (origin.port) {
+                                server.port -> "Basic c291cmNl"
+                                second.port -> targetCredential
+                                else -> null
+                            }
+                        }
+                    // Each iteration starts at the original subscription address.
+                    db.podcastDao().moveFeed(id, url("/old"), key(url("/old")))
+                    db.podcastDao().deleteAlias(id, key(url("/old")))
+                    server.enqueue(mockResponse(200, announcedBody(target)))
+                    second.enqueue(mockResponse(200, body))
+                    newRssAdapter(root, clock, credentials = credentials).use { bundle ->
+                        val engine =
+                            newRefresher(
+                                db,
+                                mapOf(SourceType.RSS to bundle.adapter),
+                                clock,
+                                tempFiles = bundle.tempFiles,
+                            )
+                        assertIs<FeedOutcome.Ingested>(engine.run(request(id)).outcomes[id])
+                    }
+                    assertEquals("Basic c291cmNl", server.takeRequest().headers["Authorization"])
+                    val probe = second.takeRequest()
+                    assertEquals(targetCredential, probe.headers["Authorization"])
+                    assertNull(probe.headers["If-None-Match"])
+                    assertNull(probe.headers["If-Modified-Since"])
+                    assertEquals(target, db.podcastDao().byId(id)?.feedUrl)
+                }
+            } finally {
+                second.close()
+            }
         }
 
     private companion object {

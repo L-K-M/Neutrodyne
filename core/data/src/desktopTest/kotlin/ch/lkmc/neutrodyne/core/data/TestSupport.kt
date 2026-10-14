@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.data.refresh.AdapterResult
 import ch.lkmc.neutrodyne.core.data.refresh.FeedMoveCommitter
 import ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher
 import ch.lkmc.neutrodyne.core.data.refresh.FetchMode
+import ch.lkmc.neutrodyne.core.data.refresh.NewFeedUrlProbe
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshScheduler
 import ch.lkmc.neutrodyne.core.data.refresh.RssSourceAdapter
@@ -165,6 +166,8 @@ internal fun newRefresher(
         clock,
         random,
         moves,
+        ch.lkmc.neutrodyne.core.data.refresh
+            .NewFeedUrlProbe(db, clock),
         { scheduler },
     )
 

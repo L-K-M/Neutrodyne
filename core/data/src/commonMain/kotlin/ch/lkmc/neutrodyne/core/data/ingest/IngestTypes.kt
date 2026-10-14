@@ -32,6 +32,8 @@ internal data class IngestContext(
     /** 04's replacement for the partial-window floor of diff step 8 (`Long.MAX_VALUE` flips nothing). */
     val absenceFloor: Long? = null,
     val validators: IngestValidators = IngestValidators.STORE,
+    /** A validated publisher announcement, adopted atomically with this body. */
+    val newFeedUrl: String? = null,
 )
 
 /** The validator and URL data of one 200 response that parsed (03 IngestContext). */

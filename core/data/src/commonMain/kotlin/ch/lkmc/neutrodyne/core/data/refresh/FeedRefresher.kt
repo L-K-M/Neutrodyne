@@ -75,6 +75,7 @@ internal class FeedRefresher(
     private val clock: Clock,
     private val random: Random,
     private val moves: FeedMoveCommitter,
+    private val newFeedUrlProbe: NewFeedUrlProbe,
     private val scheduler: Provider<RefreshScheduler>,
 ) {
     private val mutex = Mutex()
@@ -82,6 +83,7 @@ internal class FeedRefresher(
     // Fetches remain parallel; commits and batch additions cannot race a collision survivor.
     private val commitMutex = Mutex()
     private var mergedThisRun = false
+    private val probedThisRun = mutableSetOf<Long>()
 
     private val _status =
         MutableStateFlow(
@@ -186,6 +188,7 @@ internal class FeedRefresher(
 
     private suspend fun runLocked(request: RefreshRequest): RefreshReport {
         mergedThisRun = false
+        probedThisRun.clear()
         // The run that just released the mutex may have committed an older outcome on top of
         // this request's marks (a backoff over `nextRefreshAt = 0`, a 410's `gone`): the
         // user's intent is re-applied inside the critical section, before selection (r3 F3).
@@ -249,9 +252,7 @@ internal class FeedRefresher(
                                             if (request.pagesOnly) {
                                                 runPagingSession(feed, adapter, request, hostPermits)
                                             } else {
-                                                hostPermits
-                                                    .semaphore(adapter.hostKey(feed, feed.feedUrl))
-                                                    .withPermit { refreshOne(feed, adapter) }
+                                                refreshOne(feed, adapter, request, hostPermits) { slots[index] = it }
                                             }
                                     }
                                 }
@@ -348,37 +349,101 @@ internal class FeedRefresher(
     private suspend fun refreshOne(
         feed: DueFeed,
         adapter: SourceAdapter,
+        request: RefreshRequest,
+        hostPermits: HostPermits,
+        committed: (FeedOutcome) -> Unit,
     ): FeedOutcome {
         val result =
-            suspendRunCatching { adapter.fetchAndParse(feed, FetchMode.REFRESH) }
-                .getOrElse { e ->
-                    if (e is CancellationException) throw e
-                    Log.w(TAG, e) { "fetchAndParse threw for podcast ${feed.id}" }
-                    // An eager batch flush can fault here too; isolate it just like an
-                    // outcome-handling failure so siblings finish before finalisation retries.
-                    suspendRunCatching {
-                        writeFailure(feed, FeedErrorKind.UNKNOWN, retryAfterMs = null, detail = e.message)
-                    }.onFailure { Log.w(TAG, it) { "failure-state write failed for podcast ${feed.id}" } }
-                    return FeedOutcome.Failed(FeedErrorKind.UNKNOWN, null)
+            suspendRunCatching {
+                hostPermits.semaphore(adapter.hostKey(feed, feed.feedUrl)).withPermit {
+                    adapter.fetchAndParse(feed, FetchMode.REFRESH)
                 }
+            }.getOrElse { e ->
+                if (e is CancellationException) throw e
+                Log.w(TAG, e) { "fetchAndParse threw for podcast ${feed.id}" }
+                // An eager batch flush can fault here too; isolate it just like an
+                // outcome-handling failure so siblings finish before finalisation retries.
+                suspendRunCatching {
+                    writeFailure(feed, FeedErrorKind.UNKNOWN, retryAfterMs = null, detail = e.message)
+                }.onFailure { Log.w(TAG, it) { "failure-state write failed for podcast ${feed.id}" } }
+                return FeedOutcome.Failed(FeedErrorKind.UNKNOWN, null)
+            }
         // Outcome handling (ingest, fetch-state rows, pending moves, hooks) is guarded per feed:
         // one feed's unexpected DAO fault records a STORAGE failure instead of cancelling the
         // run and every sibling feed with it (03's per-feed isolation).
         return suspendRunCatching {
-            commitMutex.withLock {
-                // Failures and deferrals cannot move a feed; retain their existing write path.
-                if (result is AdapterResult.Failed || result is AdapterResult.Deferred) {
-                    return@withLock applyAdapterResult(feed, adapter, result)
+            val outcome =
+                commitMutex.withLock {
+                    // Failures and deferrals cannot move a feed; retain their existing write path.
+                    if (result is AdapterResult.Failed || result is AdapterResult.Deferred) {
+                        return@withLock applyAdapterResult(feed, adapter, result)
+                    }
+                    val current =
+                        db.podcastDao().dueFeedById(feed.id)
+                            ?: return@withLock FeedOutcome.Failed(FeedErrorKind.UNKNOWN, null)
+                    // A response for an address replaced during the fetch cannot undo that move.
+                    if (current.feedUrl != feed.feedUrl) {
+                        return@withLock FeedOutcome.Deferred(currentNextAt(current.id))
+                    }
+                    applyAdapterResult(current, adapter, result)
                 }
-                val current =
-                    db.podcastDao().dueFeedById(feed.id)
-                        ?: return@withLock FeedOutcome.Failed(FeedErrorKind.UNKNOWN, null)
-                // A response for an address replaced during the fetch cannot undo that move.
-                if (current.feedUrl != feed.feedUrl) {
-                    return@withLock FeedOutcome.Deferred(currentNextAt(current.id))
-                }
-                applyAdapterResult(current, adapter, result)
+            // Preserve the committed current-body outcome if cancellation interrupts a probe.
+            committed(outcome)
+            if (feed.sourceType != SourceType.RSS || result !is AdapterResult.Parsed ||
+                result.purpose == ParsePurpose.REDIRECT_CONFIRMATION ||
+                (outcome !is FeedOutcome.Ingested && outcome !is FeedOutcome.Merged)
+            ) {
+                return@suspendRunCatching outcome
             }
+
+            val id = (outcome as? FeedOutcome.Merged)?.intoPodcastId ?: feed.id
+            val claimed = commitMutex.withLock { probedThisRun.add(id) }
+            if (!claimed) return@suspendRunCatching outcome
+
+            var latest = outcome
+            newFeedUrlProbe.run(
+                podcastId = id,
+                current = result.feed,
+                deadlineElapsedMs = request.deadlineElapsedMs,
+                fetch = { target ->
+                    hostPermits.semaphore(adapter.hostKey(target, target.feedUrl)).withPermit {
+                        if (request.deadlineElapsedMs != RefreshRequest.NO_DEADLINE &&
+                            clock.elapsedRealtime() >= request.deadlineElapsedMs - DEADLINE_MARGIN_MS
+                        ) {
+                            return@withPermit AdapterResult.Deferred(clock.now())
+                        }
+
+                        val fetched = adapter.fetchAndParse(target, FetchMode.FULL)
+                        if (fetched is AdapterResult.Failed) fetched.htmlBody?.let { tempFiles.delete(it) }
+                        fetched
+                    }
+                },
+                adopt = { source, url, candidate ->
+                    commitMutex.withLock {
+                        val current = db.podcastDao().dueFeedById(source.id)
+                        val pending = db.podcastDao().byId(source.id)?.pendingNewFeedUrl
+                        if (current == null || current.feedUrl != source.feedUrl || pending != url) {
+                            return@withLock FeedOutcome.Deferred(currentNextAt(source.id))
+                        }
+                        val adopted = ingestOutcome(current, adapter, candidate, clock.now(), newFeedUrl = url)
+                        if (adopted is FeedOutcome.Ingested || adopted is FeedOutcome.Merged) {
+                            val survivor = (adopted as? FeedOutcome.Merged)?.intoPodcastId
+                            latest =
+                                if (survivor != null) {
+                                    adopted
+                                } else if (latest is FeedOutcome.Merged) {
+                                    latest
+                                } else {
+                                    adopted
+                                }
+                            committed(latest)
+                        }
+                        adopted
+                    }
+                },
+                claimSurvivor = { survivor -> commitMutex.withLock { probedThisRun.add(survivor) } },
+            )
+            latest
         }.getOrElse { e ->
             if (e is CancellationException) throw e
             Log.w(TAG, e) { "outcome handling failed for podcast ${feed.id}" }
@@ -530,19 +595,22 @@ internal class FeedRefresher(
         adapter: SourceAdapter,
         result: AdapterResult.Parsed,
         now: Long,
+        newFeedUrl: String? = null,
     ): FeedOutcome {
         val permanentUrl =
             result.meta.permanentUrl.takeIf {
                 result.feed.items.any { it.primaryEnclosure != null || it.externalMediaId != null }
             }
-        if (moves.willMove(feed.id, permanentUrl)) flushFetchStates()
+        if (moves.willMove(feed.id, newFeedUrl ?: permanentUrl)) flushFetchStates()
         var target = feed
         var mergedInto: Long? = null
         var mode: IngestMode
         var ingest: IngestResult
         while (true) {
             mode =
-                if (target.initialFetch || target.status == PodcastStatus.PENDING_FIRST_FETCH) {
+                if ((newFeedUrl == null || mergedInto != null) &&
+                    (target.initialFetch || target.status == PodcastStatus.PENDING_FIRST_FETCH)
+                ) {
                     IngestMode.INITIAL
                 } else {
                     IngestMode.REFRESH
@@ -555,6 +623,7 @@ internal class FeedRefresher(
                     rowHints = result.rowHints,
                     absenceFloor = result.absenceFloor,
                     validators = if (mergedInto == null) IngestValidators.STORE else IngestValidators.DISCARD,
+                    newFeedUrl = newFeedUrl.takeIf { mergedInto == null },
                 )
             try {
                 ingest = ingestor.ingest(target, result.feed, ctx)
@@ -570,7 +639,7 @@ internal class FeedRefresher(
                 if (e is CancellationException) throw e
                 Log.w(TAG, e) { "ingest failed for podcast ${target.id}" }
                 val kind = if (isUniqueViolation(e)) FeedErrorKind.IDENTITY_CONFLICT else FeedErrorKind.STORAGE
-                writeFailure(target, kind, retryAfterMs = null, detail = e.message)
+                if (newFeedUrl == null) writeFailure(target, kind, retryAfterMs = null, detail = e.message)
                 return FeedOutcome.Failed(kind, null)
             }
         }
