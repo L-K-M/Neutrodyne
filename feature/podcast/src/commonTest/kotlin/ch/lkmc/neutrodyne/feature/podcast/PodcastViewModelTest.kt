@@ -95,6 +95,7 @@ class PodcastViewModelTest : MainDispatcherTest() {
             podcasts.detail.value = testPodcastDetail(7, showType = ShowType.EPISODIC, episodeOrder = null)
             feeds.rows.value = listOf(testEpisodeRow(1, podcastId = 7))
 
+            collect(viewModel)
             viewModel.feed.take(1).asSnapshot()
             advanceUntilIdle()
 

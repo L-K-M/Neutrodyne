@@ -187,7 +187,7 @@ class PodcastScreenTest {
         }
 
     @Test
-    fun orderChipPersistsChoice() =
+    fun orderChipSelectsNewestFirst() =
         runComposeUiTest {
             var order: FeedOrder? = null
             setPodcast(
@@ -481,12 +481,13 @@ class PodcastScreenTest {
             onAllNodes(hasText("Couldn't load episodes")).assertCountEquals(1)
             onAllNodes(hasText("Retry")).assertCountEquals(1)
 
+            val loadsBeforeRetry = source.loads
             onNodeWithText("Retry").performClick()
             // Poll state, not idle: the retry's append spinner animates indefinitely.
             waitUntil(timeoutMillis = 5_000) { pagingItems.itemCount == 70 }
 
-            // The retry replayed the failed append (load #3); the banner cleared with it.
-            assertEquals(3, source.loads)
+            // The retry replayed exactly the failed append; the banner cleared with it.
+            assertEquals(loadsBeforeRetry + 1, source.loads)
             assertEquals("Ep 70", pagingItems.itemSnapshotList[69]?.title)
             assertIsNot<LoadState.Error>(pagingItems.loadState.append)
         }
