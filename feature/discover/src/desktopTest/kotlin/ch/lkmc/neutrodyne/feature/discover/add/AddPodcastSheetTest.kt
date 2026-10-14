@@ -341,7 +341,9 @@ class AddPodcastSheetTest {
             feedField().performTextReplacement("https://b.example.com/feed")
             waitForIdle()
             gate.complete(Unit)
-            waitForIdle()
+            // waitForIdle can return before the EDT runs A's posted resumption; runOnIdle's
+            // invokeAndWait drains it, so a regressed VM would write `done` before the assert.
+            runOnIdle {}
 
             assertNull(viewModel.uiState.value.done)
             val field = feedField().fetchSemanticsNode()
