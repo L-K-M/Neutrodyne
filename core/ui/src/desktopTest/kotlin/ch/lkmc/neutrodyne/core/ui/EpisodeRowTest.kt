@@ -15,6 +15,7 @@ import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runDesktopComposeUiTest
@@ -26,6 +27,7 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.DownloadState
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
 import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
@@ -119,7 +121,7 @@ class EpisodeRowTest {
             onNodeWithText("Episode 1").performMouseInput { moveTo(center) }
             waitForIdle()
 
-            onNodeWithContentDescription("Open", useUnmergedTree = true)
+            onNodeWithContentDescription("Play", useUnmergedTree = true)
                 .performMouseInput { click(center) }
             assertEquals(listOf<EpisodeAction>(EpisodeAction.PlayToggle(1)), actions)
             onNodeWithText("Mark played").assertDoesNotExist()
@@ -215,10 +217,91 @@ class EpisodeRowTest {
                 caps = RowCaps.FULL.copy(offline = true),
                 onAction = { actions += it },
             )
-            onNodeWithContentDescription("Open", useUnmergedTree = true)
+            onNodeWithContentDescription("Play", useUnmergedTree = true)
                 .performTouchInput { click(center) }
             assertEquals(listOf<EpisodeAction>(EpisodeAction.PlayToggle(1)), actions)
         }
+
+    @Test
+    fun playbackCustomActionFollowsPlaybackState() =
+        runDesktopComposeUiTest(width = 400, height = 200) {
+            // 08's catalogue leads the row's custom actions with the play button's action:
+            // the merged node clears the button's semantics, so the row-level action is the
+            // only screen-reader path to it and must carry the button's per-state label.
+            var live by mutableStateOf<RowLive?>(null)
+            var startedAt by mutableStateOf<Long?>(null)
+            var playedAt by mutableStateOf<Long?>(null)
+            val actions = mutableListOf<EpisodeAction>()
+            setContent {
+                CompositionLocalProvider(
+                    LocalPlatformKind provides PlatformKind.DESKTOP,
+                    LocalUiClock provides TestClock(),
+                ) {
+                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                        EpisodeRow(
+                            row = testEpisodeRow(1, startedAt = startedAt, playedAt = playedAt),
+                            live = live,
+                            style = EpisodeRowStyle.PODCAST,
+                            caps = RowCaps.FULL,
+                            highlightNew = false,
+                            selected = null,
+                            onAction = { actions += it },
+                        )
+                    }
+                }
+            }
+
+            assertEquals("Play", firstCustomActionLabel())
+            onNodeWithText("Episode 1").performCustomAccessibilityActionWithLabel("Play")
+            assertEquals(listOf<EpisodeAction>(EpisodeAction.PlayToggle(1)), actions)
+
+            startedAt = 1L
+            waitForIdle()
+            assertEquals("Resume", firstCustomActionLabel())
+
+            live = RowLive(isNowPlaying = true, isPlaying = true)
+            waitForIdle()
+            assertEquals("Pause", firstCustomActionLabel())
+
+            live = RowLive(isNowPlaying = true)
+            waitForIdle()
+            assertEquals("Resume", firstCustomActionLabel())
+
+            live = null
+            startedAt = null
+            playedAt = 1L
+            waitForIdle()
+            assertEquals("Play again", firstCustomActionLabel())
+        }
+
+    @Test
+    fun externalRowPlaybackActionWatchesOnYouTube() =
+        runDesktopComposeUiTest(width = 400, height = 200) {
+            // External mode (08's row table): the playback slot becomes "Watch on YouTube"
+            // and dispatches WatchOnYouTube like the trailing open_in_new button.
+            val actions = mutableListOf<EpisodeAction>()
+            setRow(
+                testEpisodeRow(
+                    1,
+                    sourceType = SourceType.YOUTUBE_CHANNEL,
+                    externalMediaId = "vid-42",
+                ),
+                caps = RowCaps.FULL.copy(inAppPlayback = false),
+                onAction = { actions += it },
+            )
+            assertEquals("Watch on YouTube", firstCustomActionLabel())
+            onNodeWithText("Episode 1")
+                .performCustomAccessibilityActionWithLabel("Watch on YouTube")
+            assertEquals(listOf<EpisodeAction>(EpisodeAction.WatchOnYouTube(1, "vid-42")), actions)
+        }
+
+    /** The leading custom action's label on the merged row node (08's playback slot). */
+    private fun ComposeUiTest.firstCustomActionLabel(): String =
+        onNodeWithText("Episode 1")
+            .fetchSemanticsNode()
+            .config[SemanticsActions.CustomActions]
+            .first()
+            .label
 
     /** The row's custom-action labels intersected with the download catalogue (order kept). */
     private fun ComposeUiTest.downloadActionLabels(downloadLabels: List<String>): List<String> =
