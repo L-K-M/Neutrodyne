@@ -84,7 +84,7 @@ class AndroidParserGoldenInstrumentedTest {
         const val FIXTURES_DIR = "feeds"
         const val BASE_URL = "https://example.com/feed.xml"
 
-        /** M1 acceptance 1's corpus minimum (03 Golden corpus); the tree currently holds 70. */
+        /** M1 acceptance 1's corpus minimum (03 Golden corpus); the tree currently holds 71. */
         const val MIN_FIXTURES = 40
 
         val CANONICAL_JSON =
