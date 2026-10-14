@@ -418,7 +418,7 @@ jobs:
       # seeded iterations per fixture inside the 128 MB `mutationTest` heap.
       # The parses run single-fork, so this is tens of minutes of wall time.
       - name: Mutation robustness, 1,000 iterations per fixture
-        run: ./gradlew mutationTest -PmutationIterations=1000
+        run: ./gradlew mutationTest -PmutationIterations=1000 --continue
       - name: Report failure
         if: ${{ !success() }}
         env:
@@ -431,7 +431,7 @@ jobs:
         run: scripts/ci/report-nightly.sh mutation-full --close
       # The JUnit XML and HTML report carry the failing fixture name and its
       # stack; the fixture's name hash is the reproducer seed.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !success() }}
         with:
           name: mutation-full-results
