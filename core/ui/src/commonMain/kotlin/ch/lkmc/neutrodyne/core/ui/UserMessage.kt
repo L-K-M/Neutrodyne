@@ -33,11 +33,14 @@ public class UserMessages {
     /** The outstanding messages; merge into the UiState or collect beside it. */
     public val flow: StateFlow<ImmutableList<UserMessage>> = pending.asStateFlow()
 
+    /** Queues a snackbar message; returns it so a caller can bind follow-up state to its id. */
     public fun post(
         text: UiText,
         action: UiText? = null,
-    ) {
-        pending.update { (it + UserMessage(nextId++, text, action)).toImmutableList() }
+    ): UserMessage {
+        val message = UserMessage(nextId++, text, action)
+        pending.update { (it + message).toImmutableList() }
+        return message
     }
 
     /** Acknowledgement: the screen calls it after [id]'s snackbar was dismissed. */

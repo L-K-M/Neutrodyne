@@ -159,12 +159,11 @@ public class FeedsViewModel(
 
     /** A `NO_HANDLER` external open: "No app can open this link" with a "Copy link" action (08). */
     public fun onNoHandler(url: String) {
-        userMessages.post(
-            UiText.Res(Res.string.no_handler),
-            UiText.Res(Res.string.action_copy_link),
-        )
-        // `post` appends synchronously: the flow's tail is the message just posted.
-        val message = userMessages.flow.value.last()
+        val message =
+            userMessages.post(
+                UiText.Res(Res.string.no_handler),
+                UiText.Res(Res.string.action_copy_link),
+            )
         copyLinks[message.id] = url
     }
 
