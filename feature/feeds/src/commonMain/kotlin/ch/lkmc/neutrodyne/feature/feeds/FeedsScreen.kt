@@ -211,9 +211,9 @@ private fun FeedList(
     }
 
     Column(Modifier.fillMaxSize()) {
-        // 08's paging-error rule, applied where the user actually is: an append failure's
-        // footer can sit thousands of placeholder rows away and a prepend failure has none —
-        // the error pins a banner under the app bar (2026-10-08 deviation in 08).
+        // 08's paging-error rule (2026-10-12 deviation): a refresh failure over visible
+        // content or a prepend failure pins a banner under the app bar; an append failure
+        // keeps its LoadState.Error footer row instead.
         LoadErrorBanner(items)
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
             offlineBannerItem(state.offline)
@@ -312,17 +312,16 @@ private fun FeedList(
 }
 
 /**
- * The paged list's load error, pinned where the user is (08's paging-error rule, 2026-10-08):
- * a refresh failure with episodes still shown, or an append/prepend failure whose footer row
- * may be thousands of placeholders away (a prepend failure has no footer at all), surfaces as
- * a banner under the app bar. Retry replays every failed load via `items.retry()`; the empty
- * first-page failure keeps the standalone error state instead.
+ * The paged list's load error, pinned where the user is (08's paging-error rule, 2026-10-12):
+ * a refresh failure with episodes still shown, or a prepend failure (which has no footer at
+ * all), surfaces as a banner under the app bar. An append failure keeps its own footer row —
+ * a second banner here would duplicate it. Retry replays every failed load via
+ * `items.retry()`; the empty first-page failure keeps the standalone error state instead.
  */
 @Composable
 private fun LoadErrorBanner(items: LazyPagingItems<*>) {
     val failed =
         items.loadState.prepend is LoadState.Error ||
-            items.loadState.append is LoadState.Error ||
             (items.loadState.refresh is LoadState.Error && items.itemCount > 0)
     if (!failed) return
     NdBanner(

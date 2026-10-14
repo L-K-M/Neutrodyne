@@ -287,6 +287,41 @@ class FeedsScreenTest {
             assertEquals(2, source.loads)
         }
 
+    @Test
+    fun appendErrorShowsOneFooterBanner() =
+        runComposeUiTest {
+            val pageSize = 20
+            val source =
+                PagedListSource(
+                    pages =
+                        listOf(
+                            (1..pageSize).map { testEpisodeRow(it.toLong(), title = "Ep $it") },
+                            emptyList(),
+                        ),
+                    appendError = IllegalStateException("boom"),
+                )
+            val items =
+                setFeeds(
+                    state = FeedsUiState(hasSubscriptions = true),
+                    source = source,
+                    pageSize = pageSize,
+                )
+            // Scrolling to the last loaded row drives the failing append load.
+            onAllNodes(hasScrollToIndexAction())
+                .onFirst()
+                .performScrollToNode(hasText("Ep $pageSize"))
+            waitUntil(timeoutMillis = 5_000) { items.loadState.append is LoadState.Error }
+            // Bring the error footer into view before counting banners.
+            onAllNodes(hasScrollToIndexAction())
+                .onFirst()
+                .performScrollToNode(hasText("Couldn't load episodes"))
+            waitForIdle()
+
+            // 08's letter: an append failure owns the LoadState.Error footer row — one
+            // banner, not the footer plus a second one pinned under the app bar.
+            assertEquals(1, onAllNodesWithText("Couldn't load episodes").fetchSemanticsNodes().size)
+        }
+
     private fun ComposeUiTest.setFeeds(
         state: FeedsUiState,
         rows: List<EpisodeRow> = emptyList(),
@@ -345,6 +380,7 @@ class FeedsScreenTest {
 private class PagedListSource(
     private val pages: List<List<EpisodeRow>>,
     private val refreshError: Throwable? = null,
+    private val appendError: Throwable? = null,
 ) : PagingSource<Int, EpisodeRow>() {
     var loads = 0
         private set
@@ -353,6 +389,9 @@ private class PagedListSource(
         loads++
         refreshError?.let { return LoadResult.Error(it) }
         val index = params.key ?: 0
+        // Page 0 is the refresh load; a later key is an append (page 0's null prevKey means
+        // no prepend load ever runs).
+        if (index > 0) appendError?.let { return LoadResult.Error(it) }
         return LoadResult.Page(
             data = pages[index],
             prevKey = if (index == 0) null else index - 1,
