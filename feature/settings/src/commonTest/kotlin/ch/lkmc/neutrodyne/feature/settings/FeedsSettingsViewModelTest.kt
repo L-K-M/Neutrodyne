@@ -102,11 +102,13 @@ class FeedsSettingsViewModelTest : MainDispatcherTest() {
             val logs = mutableListOf<String>()
             Log.install(LogSink { _, _, message -> logs += message })
             try {
+                var intervalAtReschedule: Int? = null
                 val failingScheduler =
                     object : RefreshController by refreshController {
                         override suspend fun reschedulePeriodic() {
-                            // Persistence must complete before the scheduler re-reads settings.
-                            assertEquals(MINUTES_PER_HOUR, settings.get(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES))
+                            // Captured, not asserted: the ViewModel's suspendRunCatching
+                            // swallows an AssertionError thrown inside this callback.
+                            intervalAtReschedule = settings.get(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES)
                             throw IllegalStateException("scheduler unavailable")
                         }
                     }
@@ -115,6 +117,11 @@ class FeedsSettingsViewModelTest : MainDispatcherTest() {
                 viewModel.setRefreshIntervalMinutes(MINUTES_PER_HOUR)
                 advanceUntilIdle()
 
+                assertEquals(
+                    MINUTES_PER_HOUR,
+                    intervalAtReschedule,
+                    "The interval must be persisted before rescheduling",
+                )
                 assertEquals(MINUTES_PER_HOUR, settings.get(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES))
                 assertEquals(MINUTES_PER_HOUR, viewModel.uiState.value.intervalMinutes)
                 assertTrue(
