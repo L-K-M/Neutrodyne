@@ -310,6 +310,7 @@
     <string name="add_paste">Einfügen</string>
     <string name="add_looking_up">Suche läuft…</string>
     <string name="add_subscribe">Abonnieren</string>
+    <string name="add_subscribing">Abonnieren läuft…</string>
     <string name="add_private">Privater Feed</string>
     <string name="add_empty_feed">Dieser Feed hat noch keine Folgen</string>
     <plurals name="add_episodes_count">
