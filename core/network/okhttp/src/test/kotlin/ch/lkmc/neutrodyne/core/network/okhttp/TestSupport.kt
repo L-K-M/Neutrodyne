@@ -42,7 +42,7 @@ internal fun newNetworkClients(
     access: LocalNetworkAccess = LocalNetworkAccess(),
     platform: PlatformInfo = fakePlatform(),
     hints: DnsFamilyHints = DnsFamilyHints(),
-): NetworkClients = NetworkClients(newCoreClients(access, platform, hints), AuthInterceptor(credentials))
+): NetworkClients = NetworkClients(newCoreClients(access, platform, hints), AuthInterceptor { credentials })
 
 internal fun mockResponse(
     code: Int = 200,

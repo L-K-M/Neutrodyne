@@ -65,7 +65,7 @@ internal fun newNetworkClients(
             hints = hints,
             debugInterceptors = emptySet(),
         ),
-        AuthInterceptor(credentials),
+        AuthInterceptor { credentials },
     )
 
 internal fun newHttpClients(
