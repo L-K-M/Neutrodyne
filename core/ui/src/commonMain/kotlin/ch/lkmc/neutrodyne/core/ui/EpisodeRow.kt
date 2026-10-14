@@ -66,6 +66,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_more
 import ch.lkmc.neutrodyne.core.ui.resources.action_open
 import ch.lkmc.neutrodyne.core.ui.resources.action_pause
 import ch.lkmc.neutrodyne.core.ui.resources.action_pause_download
+import ch.lkmc.neutrodyne.core.ui.resources.action_play
 import ch.lkmc.neutrodyne.core.ui.resources.action_play_again
 import ch.lkmc.neutrodyne.core.ui.resources.action_play_last
 import ch.lkmc.neutrodyne.core.ui.resources.action_play_next
@@ -105,7 +106,6 @@ public fun EpisodeRow(
     modifier: Modifier = Modifier,
 ) {
     val nowMs = LocalUiClock.current.now()
-    val downloadState = live?.downloadState ?: row.downloadState
     // 08 dims the whole row only for availability; offline-and-not-downloaded dims just the
     // play affordance (TrailingSlot's cloud_off at 60 %), the status line carries the reason.
     val dimmed = row.availability != Availability.AVAILABLE
@@ -123,7 +123,7 @@ public fun EpisodeRow(
         } else {
             MaterialTheme.colorScheme.surface
         }
-    val menuActions = rowMenuActions(row, caps, downloadState)
+    val menuActions = rowMenuActions(row, live, caps)
 
     Box(modifier = modifier) {
         Row(
@@ -224,10 +224,23 @@ public fun EpisodeRow(
 @Composable
 private fun rowMenuActions(
     row: EpisodeRow,
+    live: RowLive?,
     caps: RowCaps,
-    downloadState: DownloadState?,
 ): List<Pair<String, EpisodeAction>> {
+    val downloadState = live?.downloadState ?: row.downloadState
     val actions = mutableListOf<Pair<String, EpisodeAction>>()
+    // 08's catalogue leads with the playback action the merged node hides: the trailing
+    // button's Play/Pause/Resume, or "Watch on YouTube" in external mode. A YouTube row
+    // without a video id shows a disabled affordance, so it offers no action here either.
+    val videoId = row.externalMediaId
+    if (row.sourceType != SourceType.RSS && !caps.inAppPlayback) {
+        if (videoId != null) {
+            actions += stringResource(Res.string.action_watch_on_youtube) to
+                EpisodeAction.WatchOnYouTube(row.id, videoId)
+        }
+    } else {
+        actions += playActionLabel(row, live) to EpisodeAction.PlayToggle(row.id)
+    }
     actions += stringResource(Res.string.action_open) to EpisodeAction.Open(row.id)
     if (row.playedAt == null) {
         actions += stringResource(Res.string.action_mark_played) to
@@ -290,8 +303,9 @@ private fun rowMenuActions(
         actions += stringResource(Res.string.action_check_again) to
             EpisodeAction.CheckAvailability(row.id)
     }
-    val videoId = row.externalMediaId
-    if (row.sourceType != SourceType.RSS && videoId != null) {
+    // In-app YouTube rows keep a secondary "Watch on YouTube" entry; in external mode the
+    // playback slot above already carries it.
+    if (row.sourceType != SourceType.RSS && videoId != null && caps.inAppPlayback) {
         actions += stringResource(Res.string.action_watch_on_youtube) to
             EpisodeAction.WatchOnYouTube(row.id, videoId)
     }
@@ -299,6 +313,24 @@ private fun rowMenuActions(
         EpisodeAction.OpenPodcast(row.id, row.podcastId)
     return actions
 }
+
+/**
+ * The play affordance's spoken label per 08's playback-state table. Shared by the trailing
+ * button and the row's playback custom action so the two never disagree.
+ */
+@Composable
+private fun playActionLabel(
+    row: EpisodeRow,
+    live: RowLive?,
+): String =
+    stringResource(
+        when {
+            live?.isNowPlaying == true && live.isPlaying -> Res.string.action_pause
+            live?.isNowPlaying == true || row.startedAt != null -> Res.string.action_resume
+            row.playedAt != null -> Res.string.action_play_again
+            else -> Res.string.action_play
+        },
+    )
 
 /** The row's `stateDescription` (08: "40 percent played" / "Downloading, 34 percent"). */
 @Composable
@@ -580,24 +612,8 @@ private fun TrailingSlot(
             }
 
             val playing = live?.isNowPlaying == true && live.isPlaying
-            val (icon, label) =
-                when {
-                    playing -> {
-                        NdIcons.Pause to stringResource(Res.string.action_pause)
-                    }
-
-                    live?.isNowPlaying == true || row.startedAt != null -> {
-                        NdIcons.PlayArrow to stringResource(Res.string.action_resume)
-                    }
-
-                    row.playedAt != null -> {
-                        NdIcons.PlayArrow to stringResource(Res.string.action_play_again)
-                    }
-
-                    else -> {
-                        NdIcons.PlayArrow to stringResource(Res.string.action_open)
-                    }
-                }
+            val icon = if (playing) NdIcons.Pause else NdIcons.PlayArrow
+            val label = playActionLabel(row, live)
             // Offline and not downloaded: the affordance stays enabled as `cloud_off` at 60 %
             // alpha (08's row table) — the tap still dispatches PlayToggle so the screen answers
             // with the offline snackbar instead of a dead button.
