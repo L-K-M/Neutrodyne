@@ -21,6 +21,9 @@ import kotlin.test.assertIs
 class SupplementaryReferencesTest {
     private val baseUrl = "https://example.com/feed.xml"
 
+    /** The golden writer's config (`Goldens`: no explicit nulls), so absent fields decode alike. */
+    private val goldenJson = Json { explicitNulls = false }
+
     private fun feedOf(xml: String): ParsedFeed =
         XmlPullFeedParser
             .discovered()
@@ -32,7 +35,10 @@ class SupplementaryReferencesTest {
     /** Generated goldens pin output; these literal expectations also catch a corrupted baseline. */
     @Test
     fun corpusGoldenPreservesDecimalAndHexSupplementaryCharacters() {
-        val golden = Json.decodeFromString<ParsedFeed>(Goldens.fixture("supplementary-refs.golden.json").readText())
+        val golden =
+            goldenJson.decodeFromString<ParsedFeed>(
+                Goldens.fixture("supplementary-refs.golden.json").readText(),
+            )
         val item = golden.items.single()
         assertEquals("ep-😀-🚀", item.guid)
         assertEquals("Episode 😀 🚀", item.title)
