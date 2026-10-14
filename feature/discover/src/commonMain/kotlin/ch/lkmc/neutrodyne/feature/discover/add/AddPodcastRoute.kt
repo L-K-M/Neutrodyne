@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.feature.discover.add
 
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -47,11 +48,15 @@ internal fun AddPodcastRoute(
                 return@withContext
             }
             navigator.pop()
+            // Long, not the action-label default (Indefinite): the root host drains every
+            // screen's messages through one mutex, so an ignored snackbar must release it
+            // on its own (08's durations rule).
             val result =
                 snackbar.showSnackbar(
                     message = getString(Res.string.add_subscribed_toast, done.title),
                     actionLabel = getString(Res.string.add_open),
                     withDismissAction = true,
+                    duration = SnackbarDuration.Long,
                 )
             if (result == SnackbarResult.ActionPerformed) {
                 navigator.pushDetail(PodcastKey(done.podcastId))
