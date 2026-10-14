@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.model.BuildInfo
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.Multibinds
+import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.Qualifier
 import dev.zacsweers.metro.SingleIn
@@ -56,7 +57,7 @@ interface NetworkIslandBindings {
         ): CoreClients = CoreClients(ua, lanGuard, hints, debugInterceptors)
 
         @Provides
-        fun authInterceptor(lookup: CredentialLookup): AuthInterceptor = AuthInterceptor(lookup)
+        fun authInterceptor(lookup: Provider<CredentialLookup>): AuthInterceptor = AuthInterceptor(lookup)
 
         /** The per-kind client family every purpose client derives from (01 Interceptors). */
         @Provides
@@ -65,13 +66,6 @@ interface NetworkIslandBindings {
             core: CoreClients,
             auth: AuthInterceptor,
         ): NetworkClients = NetworkClients(core, auth)
-
-        /**
-         * M1a: no `SecretStore` yet — the lookup never answers, so the auth interceptor and
-         * `FeedFetcher`'s 401 path are inert until M1b's store replaces this binding.
-         */
-        @Provides
-        fun credentialLookup(): CredentialLookup = CredentialLookup.None
 
         /** 11's wake path — the shared pool bound under its eviction port. */
         @Provides

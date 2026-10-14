@@ -34,6 +34,7 @@ import ch.lkmc.neutrodyne.core.model.MemberSource
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.SourceKind
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.feeds.jvm.html.JsoupShowNotesSanitizer
 import kotlinx.coroutines.CompletableDeferred
@@ -658,6 +659,10 @@ class PodcastMergeTest {
                     clock,
                     merger,
                     unusedPreviewResolver,
+                    FakeSecretStore(),
+                    FakeCredentialCommitCoordinator(),
+                    unusedProbeFetcher,
+                    scratchTempFiles("merge"),
                 )
 
             repository.merge(loser, winner, ChangeOrigin.SYNC)

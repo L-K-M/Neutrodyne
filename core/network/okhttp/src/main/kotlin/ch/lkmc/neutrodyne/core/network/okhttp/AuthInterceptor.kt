@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.common.Origin
 import dev.zacsweers.metro.Inject
+import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.SingleIn
 import okhttp3.HttpUrl
 import okhttp3.Interceptor
@@ -27,12 +28,16 @@ fun Origin.Companion.of(url: HttpUrl): Origin = Origin(url.scheme, url.host.lowe
 @SingleIn(AppScope::class)
 @Inject
 class AuthInterceptor(
-    private val lookup: CredentialLookup,
+    // Lazy (01 DI rule 7): the lookup is the M1b `SecretStore`, which reaches the database —
+    // resolving it at construction would pull `requireDatabase` into anything that touches the
+    // client family (e.g. `imageLoaderFactory` at `Application.onCreate`). Requests only run on
+    // background threads after the start-up gate, so the first `get()` cannot stall the UI.
+    private val lookup: Provider<CredentialLookup>,
 ) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         if (request.header("Authorization") != null) return chain.proceed(request)
-        val value = lookup.basicAuthorization(Origin.of(request.url)) ?: return chain.proceed(request)
+        val value = lookup().basicAuthorization(Origin.of(request.url)) ?: return chain.proceed(request)
         return chain.proceed(request.newBuilder().header("Authorization", value).build())
     }
 }

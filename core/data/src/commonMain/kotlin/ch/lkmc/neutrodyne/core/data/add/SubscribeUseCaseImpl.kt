@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.data.credentials.removeUnreferenced
 import ch.lkmc.neutrodyne.core.data.ingest.FeedIngestor
 import ch.lkmc.neutrodyne.core.data.ingest.IngestContext
 import ch.lkmc.neutrodyne.core.data.ingest.IngestMode
@@ -21,8 +22,10 @@ import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.database.PodcastGroupMemberEntity
 import ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
+import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
+import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SubscribeError
 import ch.lkmc.neutrodyne.core.domain.SubscribeUseCase
@@ -44,11 +47,11 @@ import kotlin.uuid.Uuid
  * The RSS subscribe transaction of 03 (one `withWriteTransaction`): dedupe inside it, insert the
  * podcast with a fresh `syncId`, the input/redirect aliases, the `INITIAL` ingest and the
  * requested memberships; post-commit it emits `NewEpisodes(initialFetch = true)`, schedules the
- * pending paging run and rebases the periodic tick.
+ * pending paging run and rebases the periodic tick. A preview's pending credentials commit under
+ * `CredentialCommitCoordinator` (03 step 2): `put` before the transaction, the referencing
+ * `credentialId` write inside it, the rollback still inside the same block.
  *
- * M1a deviations (2026-10-07): `SecretStore.put`/`CredentialCommitCoordinator` are M1b — pending
- * preview credentials are dropped and `credentialId` stays null until M1b lands; the artwork pin
- * request is M4.
+ * M1a deviations (2026-10-07): the artwork pin request is M4.
  */
 @SingleIn(AppScope::class)
 @ContributesBinding(AppScope::class)
@@ -57,6 +60,8 @@ internal class SubscribeUseCaseImpl(
     private val db: NeutrodyneDatabase,
     private val cache: PreviewCache,
     private val resolver: PreviewEntryResolver,
+    private val secrets: SecretStore,
+    private val coordinator: CredentialCommitCoordinator,
     private val ingestor: FeedIngestor,
     private val eventBus: IngestionEventBus,
     private val scheduler: RefreshScheduler,
@@ -114,95 +119,98 @@ internal class SubscribeUseCaseImpl(
         var pendingPaging = false
         val result =
             suspendRunCatching {
-                db.withWriteTransaction<TxOutcome> {
-                    val dao = db.podcastDao()
+                inCredentialCommit(entry) { credentialId ->
+                    db.withWriteTransaction<TxOutcome> {
+                        val dao = db.podcastDao()
 
-                    // Step 3.1: dedupe again inside the transaction (03 Subscribe) — every URL
-                    // the entry knows is checked against both primary feedKeys and aliases, so
-                    // a hop URL that is another feed's current URL also dedupes.
-                    var existing: Long? = null
-                    for (key in candidateKeys) {
-                        existing = dao.byFeedKey(key)?.id ?: dao.aliasOwner(key)
-                        if (existing != null) break
-                    }
-                    if (existing != null) return@withWriteTransaction TxOutcome.Duplicate(existing)
-
-                    // Step 3.2: the podcast row; paging columns per `feeds.backfill_paged_feeds`.
-                    pendingPaging = backfill && link != null
-                    val id =
-                        dao.insertPodcast(
-                            PodcastEntity(
-                                syncId = Uuid.random().toString(),
-                                sourceType = SourceType.RSS,
-                                feedUrl = feedUrl,
-                                feedKey = feedKey,
-                                title = feed.title?.takeUnless { it.isBlank() } ?: feedUrl,
-                                artworkUrl = artworkUrl,
-                                artworkKey =
-                                    artworkUrl?.let(ArtworkKeys::forUrl) ?: ArtworkKeys.monogram(feedKey),
-                                status = PodcastStatus.ACTIVE,
-                                initialFetch = false,
-                                subscribedAt = now,
-                                lastAttemptAt = now,
-                                lastSuccessAt = now,
-                                // "pending" / "not wanted" / "nothing older" (03 RFC 5005 paging).
-                                pagingNextUrl = link,
-                                pagingComplete = link == null || !backfill,
-                                // D98: a fresh subscribe observes every accepted item from here
-                                // on — complete coverage, so sole-observed GUIDs may record
-                                // KNOWN_INDEPENDENT. Migrated/restored rows stay NULL (unknown).
-                                guidCoverageSince = now,
-                            ),
-                        )
-
-                    // Step 3.3: the normalised input plus every redirect hop that differs from feedKey.
-                    val aliases =
-                        buildList {
-                            if (inputKey != null && inputKey != feedKey) {
-                                add(PodcastUrlAliasEntity(inputKey, id, AliasReason.SUBSCRIBE_INPUT, now))
-                            }
-                            for (key in hopKeys) {
-                                if (key != feedKey && key != inputKey) {
-                                    add(PodcastUrlAliasEntity(key, id, AliasReason.REDIRECT, now))
-                                }
-                            }
+                        // Step 3.1: dedupe again inside the transaction (03 Subscribe) — every
+                        // URL the entry knows is checked against both primary feedKeys and
+                        // aliases, so a hop URL that is another feed's current URL also dedupes.
+                        var existing: Long? = null
+                        for (key in candidateKeys) {
+                            existing = dao.byFeedKey(key)?.id ?: dao.aliasOwner(key)
+                            if (existing != null) break
                         }
-                    if (aliases.isNotEmpty()) dao.insertAliases(aliases)
+                        if (existing != null) return@withWriteTransaction TxOutcome.Duplicate(existing)
 
-                    // Step 3.4: the initial ingest writes feed metadata, validators and scheduling.
-                    val dueFeed = dao.dueFeedById(id) ?: return@withWriteTransaction TxOutcome.Missing
-                    val ingest =
-                        ingestor.ingestInTransaction(
-                            podcast = dueFeed,
-                            parsed = feed,
-                            ctx =
-                                IngestContext(
-                                    mode = IngestMode.INITIAL,
-                                    partial = false,
-                                    fetch = entry.meta,
-                                ),
-                        )
-                    // An error-valued ingest must not commit an ACTIVE podcast: step 1 and the
-                    // resolver already refuse blog/list feeds, so an `emptyKind` here means the
-                    // entry slipped past both — roll back and report it (03 Accepted items).
-                    ingest.emptyKind?.let { throw RejectedIngestException(it) }
-
-                    // Step 3.5: requested group memberships (`OrderKey.after` per group).
-                    for (groupId in groupIds) {
-                        db
-                            .groupDao()
-                            .insertMember(
-                                PodcastGroupMemberEntity(
-                                    groupId = groupId,
-                                    podcastId = id,
-                                    orderKey =
-                                        orderKeys.after(db.groupDao().lastMemberOrderKey(groupId)),
-                                    addedAt = now,
-                                    source = MemberSource.MANUAL,
+                        // Step 3.2: the podcast row; paging columns per `feeds.backfill_paged_feeds`.
+                        pendingPaging = backfill && link != null
+                        val id =
+                            dao.insertPodcast(
+                                PodcastEntity(
+                                    syncId = Uuid.random().toString(),
+                                    sourceType = SourceType.RSS,
+                                    feedUrl = feedUrl,
+                                    feedKey = feedKey,
+                                    title = feed.title?.takeUnless { it.isBlank() } ?: feedUrl,
+                                    artworkUrl = artworkUrl,
+                                    artworkKey =
+                                        artworkUrl?.let(ArtworkKeys::forUrl) ?: ArtworkKeys.monogram(feedKey),
+                                    status = PodcastStatus.ACTIVE,
+                                    initialFetch = false,
+                                    subscribedAt = now,
+                                    lastAttemptAt = now,
+                                    lastSuccessAt = now,
+                                    // "pending" / "not wanted" / "nothing older" (03 RFC 5005 paging).
+                                    pagingNextUrl = link,
+                                    pagingComplete = link == null || !backfill,
+                                    credentialId = credentialId,
+                                    // D98: a fresh subscribe observes every accepted item from here
+                                    // on — complete coverage, so sole-observed GUIDs may record
+                                    // KNOWN_INDEPENDENT. Migrated/restored rows stay NULL (unknown).
+                                    guidCoverageSince = now,
                                 ),
                             )
+
+                        // Step 3.3: the normalised input + redirect hops that differ from feedKey.
+                        val aliases =
+                            buildList {
+                                if (inputKey != null && inputKey != feedKey) {
+                                    add(PodcastUrlAliasEntity(inputKey, id, AliasReason.SUBSCRIBE_INPUT, now))
+                                }
+                                for (key in hopKeys) {
+                                    if (key != feedKey && key != inputKey) {
+                                        add(PodcastUrlAliasEntity(key, id, AliasReason.REDIRECT, now))
+                                    }
+                                }
+                            }
+                        if (aliases.isNotEmpty()) dao.insertAliases(aliases)
+
+                        // Step 3.4: the initial ingest writes feed metadata, validators and scheduling.
+                        val dueFeed = dao.dueFeedById(id) ?: return@withWriteTransaction TxOutcome.Missing
+                        val ingest =
+                            ingestor.ingestInTransaction(
+                                podcast = dueFeed,
+                                parsed = feed,
+                                ctx =
+                                    IngestContext(
+                                        mode = IngestMode.INITIAL,
+                                        partial = false,
+                                        fetch = entry.meta,
+                                    ),
+                            )
+                        // An error-valued ingest must not commit an ACTIVE podcast: step 1 and the
+                        // resolver already refuse blog/list feeds, so an `emptyKind` here means the
+                        // entry slipped past both — roll back and report it (03 Accepted items).
+                        ingest.emptyKind?.let { throw RejectedIngestException(it) }
+
+                        // Step 3.5: requested group memberships (`OrderKey.after` per group).
+                        for (groupId in groupIds) {
+                            db
+                                .groupDao()
+                                .insertMember(
+                                    PodcastGroupMemberEntity(
+                                        groupId = groupId,
+                                        podcastId = id,
+                                        orderKey =
+                                            orderKeys.after(db.groupDao().lastMemberOrderKey(groupId)),
+                                        addedAt = now,
+                                        source = MemberSource.MANUAL,
+                                    ),
+                                )
+                        }
+                        TxOutcome.Inserted(id, ingest)
                     }
-                    TxOutcome.Inserted(id, ingest)
                 }
             }.getOrElse { e ->
                 // The rejected-ingest guard carries its own kind; the transaction rolled back.
@@ -270,6 +278,42 @@ internal class SubscribeUseCaseImpl(
             }
         }
         return Outcome.Success(podcastId)
+    }
+
+    /**
+     * 03 step 2's commit coordination: the preview's pending credentials are stored under the
+     * ORIGINAL request's origin — the one they were sent to; a cross-origin redirect never
+     * relabels them — and [tx] runs inside `withCredentialCommit` after the `put`. A transaction
+     * that fails or commits nothing referencing the credential rolls the `put` back — unless
+     * another podcast already references the row (a shared origin's replaced password stays).
+     */
+    private suspend fun inCredentialCommit(
+        entry: PreviewEntry,
+        tx: suspend (credentialId: Long?) -> TxOutcome,
+    ): TxOutcome {
+        val credentials = entry.credentials ?: return tx(null)
+        // `put` canonicalises again; the explicit origin keeps the request-first rule here.
+        val origin = UrlNormalizer.origin(entry.meta.requestedUrl) ?: return tx(null)
+        return coordinator.withCredentialCommit {
+            val credentialId =
+                secrets.put(origin, credentials.username, credentials.password.toCharArray())
+            try {
+                tx(credentialId).also { outcome ->
+                    // A commit that references nothing (dedupe hit, a lost insert) leaves the put
+                    // orphaned — remove it unless another podcast already claims the row.
+                    if (outcome !is TxOutcome.Inserted) {
+                        withContext(NonCancellable) {
+                            secrets.removeUnreferenced(db.credentialDao(), origin, credentialId)
+                        }
+                    }
+                }
+            } catch (t: Throwable) {
+                withContext(NonCancellable) {
+                    secrets.removeUnreferenced(db.credentialDao(), origin, credentialId)
+                }
+                throw t
+            }
+        }
     }
 
     /** Rolls the transaction back carrying the ingest's `emptyKind` (S14). */

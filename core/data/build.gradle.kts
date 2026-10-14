@@ -38,6 +38,10 @@ kotlin {
         }
         desktopMain.dependencies {
             implementation(project(":feeds:jvm"))
+            // JNA for Windows DPAPI (`CryptProtectData`) — the secrets.bin protection (11 Secrets,
+            // PO-44); also used by :core:common's AppDirs known-folder lookup.
+            implementation(libs.jna)
+            implementation(libs.jna.platform)
         }
         findByName("androidHostTest")?.dependencies {
             implementation(libs.robolectric)

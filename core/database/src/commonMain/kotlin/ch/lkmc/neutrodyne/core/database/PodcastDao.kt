@@ -212,6 +212,13 @@ abstract class PodcastDao(
         credentialId: Long?,
     )
 
+    /**
+     * `setCredentials` clears the auth block once the `credentialId` commit lands — unlike
+     * `clearRefreshBlock` it touches nothing else (03 Basic auth: "clear `needsCredentials`").
+     */
+    @Query("UPDATE podcast SET needsCredentials = 0 WHERE id = :podcastId")
+    abstract suspend fun clearNeedsCredentials(podcastId: Long)
+
     // --- Refresh selection and fetch-state writes (02; 03 Refresh scheduling) --------------------
 
     /**
