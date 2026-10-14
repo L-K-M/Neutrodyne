@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Unlicense
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.plugins.JavaPluginExtension
 import org.gradle.api.provider.Property
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 import org.gradle.jvm.toolchain.JavaToolchainService
+import org.gradle.kotlin.dsl.configure
 import org.gradle.kotlin.dsl.getByType
 import org.gradle.kotlin.dsl.register
 import org.jetbrains.compose.ComposeExtension
@@ -29,6 +31,12 @@ class DesktopApplicationConventionPlugin : Plugin<Project> {
             assertKotlinPluginVersion()
             forbidDynamicVersions()
             configureDesktopJvm()
+            // Compile against the versions the shell ships: a library seen only at compile time
+            // (metrox-viewmodel brings lifecycle 2.10.0 next to the features' 2.11.0) would link
+            // against a signature the runtime no longer has (NoSuchMethodError).
+            extensions.configure<JavaPluginExtension> {
+                consistentResolution { useRuntimeClasspathVersions() }
+            }
 
             // --- the bundled runtime of runtime.lock and the packaging target this host serves -------
             val hostTarget = desktopPackagingTargetOf(System.getProperty("os.name"), System.getProperty("os.arch"))

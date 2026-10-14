@@ -104,4 +104,45 @@ class NdScaffoldAndDialogTest {
                 "the dialog body must scroll with a positive range (max was ${range.maxValue()})",
             )
         }
+
+    /**
+     * A destructive confirm draws in the scheme's error colour; an ordinary action keeps the
+     * default content colour (94-3). The scheme pins error to pure red so antialiased glyph
+     * pixels stay red-dominant while the purple primary never is.
+     */
+    @Test
+    fun destructiveConfirmUsesErrorColour() =
+        runComposeUiTest {
+            setContent {
+                MaterialTheme(colorScheme = lightColorScheme(error = Color(0xFFFF0000))) {
+                    NdDialog(
+                        onDismissRequest = {},
+                        title = "Confirm",
+                        text = "Body",
+                        confirm = NdDialogAction("Delete", role = NdActionRole.DESTRUCTIVE) {},
+                        dismiss = NdDialogAction("Cancel") {},
+                    )
+                }
+            }
+
+            fun redDominantPixelCount(label: String): Int {
+                val map = onNodeWithText(label).captureToImage().toPixelMap()
+                var count = 0
+                for (x in 0 until map.width) {
+                    for (y in 0 until map.height) {
+                        val c = map[x, y]
+                        if (c.alpha > 0f && c.red > c.green + c.blue) count++
+                    }
+                }
+                return count
+            }
+            assertTrue(
+                redDominantPixelCount("Delete") > 0,
+                "the destructive confirm must draw in the error colour",
+            )
+            assertTrue(
+                redDominantPixelCount("Cancel") == 0,
+                "a normal action must not draw in the error colour",
+            )
+        }
 }

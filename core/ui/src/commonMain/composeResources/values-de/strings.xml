@@ -260,6 +260,7 @@
     <string name="podcast_maybe_moved">Dieser Feed wurde seit %1$s nicht aktualisiert — er ist evtl. umgezogen</string>
     <string name="podcast_load_older">Ältere Folgen laden</string>
     <string name="podcast_mark_played">Alle als gespielt markieren</string>
+    <string name="podcast_mark_all_title">Alle in %1$s als gespielt markieren?</string>
     <string name="podcast_copy_feed">Feed-Adresse kopieren</string>
     <string name="podcast_copy_feed_warning">Diese Feed-Adresse ist privat — jeder mit ihr kann den Feed lesen.</string>
     <string name="podcast_loading">Podcast wird geladen…</string>
