@@ -6,9 +6,11 @@ import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.data.ingest.IngestContext
 import ch.lkmc.neutrodyne.core.data.ingest.IngestMode
 import ch.lkmc.neutrodyne.core.database.ChapterEntity
+import ch.lkmc.neutrodyne.core.database.EpisodePositionEntity
 import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
+import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.episodeStateEntity
 import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
@@ -696,17 +698,21 @@ class IngestDiffTest {
         runTest {
             val id = podcastId(subscribedAt = NOW - 30 * DAY)
             val items =
-                (0 until 25).map { i ->
+                (0 until 300).map { i ->
                     parsedEpisode(i, guid = "g$i", pubDate = NOW - i * 60 * 60 * 1_000L)
                 }
 
             val result = ingest(id, parsedFeed(items = items))
 
+            assertEquals(300, result.accepted)
+            assertEquals(300, result.inserted.size)
+            assertEquals(300, db.podcastDao().episodeCount(id))
             assertEquals(3, result.newIds.size)
             assertTrue(result.warnings.any { it.code == WarningCode.BACK_CATALOGUE_DUMP })
             // The newest three by (sortDate, feedOrder): feed order 0, 1, 2 published most recently.
-            val stored = (0 until 25).map { db.episodeDao().byIdentityKey(id, "g:g$it")!! }
-            assertEquals(listOf(true, true, true) + List(22) { false }, stored.map { it.isNew })
+            val stored = (0 until 300).map { db.episodeDao().byIdentityKey(id, "g:g$it")!! }
+            assertEquals(listOf(true, true, true) + List(297) { false }, stored.map { it.isNew })
+            assertEquals(stored.take(3).map { it.id }.toSet(), result.newIds.toSet())
         }
 
     // --- Matching: pass 1 and pass 2 ------------------------------------------------------------
@@ -739,7 +745,26 @@ class IngestDiffTest {
                 mode = IngestMode.INITIAL,
             )
             val aBefore = db.episodeDao().byIdentityKey(id, "g:g1")!!
-            db.episodeStateDao().upsert(episodeStateEntity(aBefore.id, playedAt = NOW - 1_000))
+            val bBefore = db.episodeDao().byIdentityKey(id, "g:g2")!!
+            val originalIds = setOf(aBefore.id, bBefore.id)
+            assertEquals(2, db.podcastDao().episodeCount(id))
+            val states =
+                listOf(aBefore, bBefore).mapIndexed { index, episode ->
+                    episodeStateEntity(episode.id, playedAt = NOW - (index + 1) * 1_000) {
+                        copy(isFavorite = true)
+                    }
+                }
+            val positions =
+                listOf(aBefore, bBefore).mapIndexed { index, episode ->
+                    EpisodePositionEntity(
+                        episodeId = episode.id,
+                        positionMs = (index + 1) * 42_000L,
+                        positionSource = PositionSource.STREAM,
+                        updatedAt = NOW,
+                    )
+                }
+            states.forEach { db.episodeStateDao().upsert(it) }
+            positions.forEach { db.positionDao().upsert(it) }
 
             // v2: the publisher rewrote every GUID; enclosures stayed.
             val result =
@@ -769,9 +794,58 @@ class IngestDiffTest {
             assertEquals(2, result.rekeyed)
             assertEquals(emptyList(), result.inserted)
             val aAfter = db.episodeDao().byIdentityKey(id, "g:x1")!!
+            val bAfter = db.episodeDao().byIdentityKey(id, "g:x2")!!
             assertEquals(aBefore.id, aAfter.id)
+            assertEquals(bBefore.id, bAfter.id)
             assertEquals("x1", aAfter.guid)
-            assertEquals(NOW - 1_000, db.episodeStateDao().byEpisode(aBefore.id)!!.playedAt)
+            assertEquals("x2", bAfter.guid)
+            assertEquals(2, db.podcastDao().episodeCount(id))
+            assertEquals(
+                originalIds,
+                db
+                    .ingestDao()
+                    .existing(id)
+                    .map { it.id }
+                    .toSet(),
+            )
+            assertTrue(aAfter.inFeed)
+            assertTrue(bAfter.inFeed)
+            states.forEach { assertEquals(it, db.episodeStateDao().byEpisode(it.episodeId)) }
+            positions.forEach { assertEquals(it, db.positionDao().byEpisode(it.episodeId)) }
+
+            // v3 removes B after the rewrite: absence must not erase its listening state.
+            val v3 =
+                ingest(
+                    id,
+                    parsedFeed(
+                        items =
+                            listOf(
+                                parsedEpisode(
+                                    0,
+                                    guid = "x1",
+                                    enclosureUrl = "https://cdn.example.com/a.mp3",
+                                    pubDate = NOW - DAY,
+                                ),
+                            ),
+                    ),
+                )
+
+            assertEquals(emptyList(), v3.inserted)
+            assertEquals(2, db.podcastDao().episodeCount(id))
+            assertEquals(
+                originalIds,
+                db
+                    .ingestDao()
+                    .existing(id)
+                    .map { it.id }
+                    .toSet(),
+            )
+            assertEquals(aBefore.id, db.episodeDao().byIdentityKey(id, "g:x1")!!.id)
+            assertEquals(bBefore.id, db.episodeDao().byIdentityKey(id, "g:x2")!!.id)
+            assertTrue(db.episodeDao().byId(aBefore.id)!!.inFeed)
+            assertFalse(db.episodeDao().byId(bBefore.id)!!.inFeed)
+            states.forEach { assertEquals(it, db.episodeStateDao().byEpisode(it.episodeId)) }
+            positions.forEach { assertEquals(it, db.positionDao().byEpisode(it.episodeId)) }
         }
 
     @Test
