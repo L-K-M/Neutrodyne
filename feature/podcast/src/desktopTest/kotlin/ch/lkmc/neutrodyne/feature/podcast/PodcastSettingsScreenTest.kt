@@ -135,8 +135,15 @@ class PodcastSettingsScreenTest {
                     loaded = true,
                 ),
             )
+            // The full URL stays out of the tree before consent, while the warning is
+            // open, and after cancelling it — only confirming reveals it.
+            onNodeWithText("https://secret.example.com/feed.xml").assertDoesNotExist()
             onNodeWithText("Feed address").performClick()
-            // The private-feed warning gates the reveal.
+            onNodeWithText("https://secret.example.com/feed.xml").assertDoesNotExist()
+            onAllNodes(hasClickAction() and hasText("Cancel")).onFirst().performClick()
+            onNodeWithText("https://secret.example.com/feed.xml").assertDoesNotExist()
+
+            onNodeWithText("Feed address").performClick()
             onAllNodes(hasClickAction() and hasText("Tap to show")).onFirst().performClick()
             onNodeWithText("https://secret.example.com/feed.xml").assertIsDisplayed()
         }
