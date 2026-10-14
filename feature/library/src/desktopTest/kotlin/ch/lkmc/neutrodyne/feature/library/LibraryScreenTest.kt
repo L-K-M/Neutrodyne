@@ -652,7 +652,9 @@ private val TestPlatformActions =
 
 /**
  * True for a pixel that reads as the Material error red: hue near 0° with enough saturation
- * to exclude the amber primary (hue ~33°) and the neutral surfaces, at any blend depth.
+ * to exclude the amber primary (hue ~33°) and the neutral surfaces. The saturation floor
+ * means only sufficiently saturated red pixels count — blends toward light surfaces and
+ * antialiased glyph edges are rejected, not detected.
  */
 private fun Color.isErrorRed(): Boolean {
     if (alpha <= 0f) return false
