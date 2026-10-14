@@ -456,6 +456,8 @@ private fun PodcastOverflow(
             )
             DropdownMenuItem(
                 text = { Text(stringResource(Res.string.podcast_unsubscribe)) },
+                // Without a detail there is no feed to leave — the top bar shows early.
+                enabled = detail != null,
                 onClick = {
                     open = false
                     onUnsubscribe()

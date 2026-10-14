@@ -11,6 +11,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToIndexAction
@@ -272,6 +273,23 @@ class PodcastScreenTest {
             assertEquals(false, confirmed)
             onAllNodes(hasClickAction() and hasText("Mark all as played")).onFirst().performClick()
             assertEquals(true, confirmed)
+        }
+
+    @Test
+    fun overflowDisablesUnsubscribeWithoutDetail() =
+        runComposeUiTest {
+            var requested = false
+            // The top bar shows before the detail resolves; unsubscribing a feed we have no
+            // detail for has nothing to act on, so only that item disables.
+            setPodcast(
+                PodcastUiState(detail = null, loaded = true),
+                onUnsubscribeRequest = { requested = true },
+            )
+            onNodeWithContentDescription("More actions").performClick()
+            onNodeWithText("Unsubscribe").assertIsNotEnabled()
+            onNodeWithText("Mark all as played").assertIsEnabled()
+            onNodeWithText("Unsubscribe").performClick()
+            assertEquals(false, requested)
         }
 
     @Test
