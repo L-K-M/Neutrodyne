@@ -25,6 +25,7 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.rememberWindowState
 import ch.lkmc.neutrodyne.core.common.AppDirs
+import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.designsystem.components.DesktopScrollbars
@@ -35,6 +36,7 @@ import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
+import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.rememberDesktopPlatformActions
 import ch.lkmc.neutrodyne.core.ui.root.NeutrodyneRoot
@@ -47,6 +49,8 @@ import ch.lkmc.neutrodyne.desktop.resources.tray_quit
 import ch.lkmc.neutrodyne.desktop.resources.tray_show
 import ch.lkmc.neutrodyne.desktop.resources.tray_tooltip
 import ch.lkmc.neutrodyne.desktop.resources.window_title
+import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
+import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
@@ -79,6 +83,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     databaseOpener: DatabaseOpener,
     appScope: CoroutineScope,
     dataDir: Path,
+    viewModelFactory: MetroViewModelFactory,
     onQuitRequest: () -> Unit,
 ) {
     val state = rememberNeutrodyneWindowState()
@@ -109,6 +114,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
             startup = openState.toGateState(),
             onRetryStartup = { appScope.launch { suspendRunCatching { databaseOpener.awaitOpen() } } },
             dataDir = dataDir,
+            viewModelFactory = viewModelFactory,
         )
     }
 
@@ -246,13 +252,16 @@ private fun DesktopApplicationMenu(
  * [startup] carries the database open's gate state (01 Splash and start-up gate; `Ready` by
  * default, so the UI test and smoke render straight through). [onRetryStartup] is the failed
  * gate's "Try again"; [dataDir] arms the `DISK_FULL` variant's "Manage storage", which reveals
- * the data folder (08 Banners and the startup gate). The remaining callbacks stay inert until
- * playback, notices and sync wire their milestones.
+ * the data folder (08 Banners and the startup gate). [viewModelFactory] is the graph's
+ * `metroViewModel()` seam: every VM-backed entry resolves through it here, exactly where the
+ * window, the UI test and smoke mode compose the same tree (01 Feature entry installers).
+ * The remaining callbacks stay inert until playback, notices and sync wire their milestones.
  */
 @Composable
 internal fun NeutrodyneWindowContent(
     installers: Set<EntryProviderInstaller>,
     menuActions: DesktopMenuActions,
+    viewModelFactory: MetroViewModelFactory,
     startup: StartupGateState = StartupGateState.Ready,
     onRetryStartup: () -> Unit = {},
     dataDir: Path? = null,
@@ -261,7 +270,11 @@ internal fun NeutrodyneWindowContent(
     val platformActions = rememberDesktopPlatformActions()
     CompositionLocalProvider(
         LocalPlatformActions provides platformActions,
+        // 07 Storage rows: without a provider the local falls back to ANDROID wording.
+        LocalPlatformKind provides PlatformKind.DESKTOP,
         LocalScrollbars provides DesktopScrollbars.style,
+        // 01 Feature entry installers: metroViewModel()/assistedMetroViewModel() resolve here.
+        LocalMetroViewModelFactory provides viewModelFactory,
     ) {
         NeutrodyneRoot(
             state = RootUiState.READY.copy(startup = startup),

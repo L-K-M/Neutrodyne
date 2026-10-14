@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.di
 
 import android.app.Application
 import androidx.work.WorkerFactory
+import ch.lkmc.neutrodyne.core.artwork.NeutrodyneImageLoaderFactory
 import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
@@ -16,6 +17,7 @@ import ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule
 import dev.zacsweers.metro.Binds
 import dev.zacsweers.metro.DependencyGraph
 import dev.zacsweers.metro.Provides
+import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.coroutines.CoroutineScope
 
 /**
@@ -43,6 +45,15 @@ interface AndroidAppGraph {
 
     /** `MainActivity` maps `openState` onto the start-up gate (01 Splash and start-up gate). */
     val databaseOpener: DatabaseOpener
+
+    /** The Coil `SingletonImageLoader.Factory` installed in `NeutrodyneApplication` (08 Coil ImageLoader). */
+    val imageLoaderFactory: NeutrodyneImageLoaderFactory
+
+    /**
+     * `metroViewModel()`/`assistedMetroViewModel()` resolve through `LocalMetroViewModelFactory`,
+     * provided with this binding at the root (01 Feature entry installers).
+     */
+    val metroViewModelFactory: MetroViewModelFactory
 
     @Binds
     val MetroWorkerFactory.bindWorkerFactory: WorkerFactory

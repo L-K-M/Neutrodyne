@@ -25,6 +25,7 @@ import ch.lkmc.neutrodyne.desktop.window.NeutrodyneWindowContent
 import ch.lkmc.neutrodyne.desktop.window.WindowIcons
 import ch.lkmc.neutrodyne.desktop.window.rememberNeutrodyneWindowState
 import ch.lkmc.neutrodyne.desktop.window.toGateState
+import coil3.SingletonImageLoader
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
@@ -74,6 +75,9 @@ internal class SmokeMode(
             // band 100's `DatabaseOpenInitializer` then returns at once (11 Smoke mode, M1a).
             step("database") { runBlocking { graph.databaseOpener.awaitOpen() } }
             step("initializers") { runBlocking { runInitializers(graph.initializers) } }
+            // The real host installs the artwork-aware Coil singleton at start-up (08); smoke
+            // composes the same window, so it provisions the same loader before the first frame.
+            step("imageLoader") { SingletonImageLoader.setSafe(graph.imageLoaderFactory) }
 
             // 11 step 2's window half: show it, wait for the first frame, close it again.
             val firstFrameMs = step("window") { windowStep(graph) }
@@ -203,6 +207,7 @@ internal class SmokeMode(
                     NeutrodyneWindowContent(
                         installers = graph.entryInstallers,
                         menuActions = menuActions,
+                        viewModelFactory = graph.metroViewModelFactory,
                         startup =
                             graph.databaseOpener.openState.value
                                 .toGateState(),

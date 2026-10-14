@@ -1,17 +1,25 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.di
 
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
+import ch.lkmc.neutrodyne.core.artwork.ArtworkKeys
+import ch.lkmc.neutrodyne.core.artwork.ArtworkRefMapper
 import ch.lkmc.neutrodyne.core.common.CrashReporter
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenInitializer
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.model.ArtworkRef
+import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
+import ch.lkmc.neutrodyne.core.navigation.PodcastKey
+import ch.lkmc.neutrodyne.core.navigation.PodcastSettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
@@ -21,8 +29,13 @@ import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
+import ch.lkmc.neutrodyne.feature.library.LibraryViewModel
+import coil3.PlatformContext
+import coil3.map.Mapper
+import coil3.request.Options
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Test
 
@@ -76,6 +89,71 @@ class DesktopAppGraphTest {
         }
     }
 
+    /**
+     * Every key `LibraryRoute` pushes must resolve through the production installers: nav3's
+     * provider throws `IllegalStateException("Unknown screen")` for a key no feature module
+     * contributes, and the host resolves entries eagerly at the next composition — a missing
+     * contribution crashes the app (94-1).
+     */
+    @Test
+    fun everyKeyTheLibraryPushesHasAnEntry() {
+        val provider = entryProvider<NavKey> { graph.entryInstallers.forEach { install -> install() } }
+
+        for (key in LIBRARY_PUSHED_KEYS) {
+            assertThat(provider(key).contentKey).isNotNull()
+        }
+    }
+
+    /**
+     * 01 Feature entry installers: the window root hands this to `LocalMetroViewModelFactory`, so
+     * `metroViewModel()` inside the Library route can only work if the factory resolves the VM.
+     * Graph compilation alone does not prove that — the VM is created through the public factory.
+     */
+    @Test
+    fun theMetroViewModelFactoryCarriesTheLibraryViewModel() {
+        runBlocking { graph.databaseOpener.awaitOpen() }
+
+        val viewModel =
+            graph.metroViewModelFactory.create(LibraryViewModel::class, CreationExtras.Empty)
+        // ViewModel.clear is internal; cancelling its scope is the public way to stop the
+        // repository collectors a dropped VM would otherwise leave running.
+        try {
+            assertThat(viewModel).isInstanceOf(LibraryViewModel::class.java)
+        } finally {
+            viewModel.viewModelScope.cancel()
+        }
+    }
+
+    /**
+     * 08 Coil ImageLoader: the singleton the hosts install is built here, and the `ArtworkRef`
+     * model of a `u-` key resolves through `ArtworkRefMapper` on it — the default loader has no
+     * such mapper, so a provisioning gap would surface as an unresolvable image request.
+     */
+    @Test
+    fun theCoilLoaderFactoryIsProvisionedAndMapsArtworkRefs() {
+        // `store()` inside the factory resolves `ArtworkStore`, which opens the database.
+        runBlocking { graph.databaseOpener.awaitOpen() }
+
+        val factory = graph.imageLoaderFactory
+
+        val loader = factory.newImageLoader(PlatformContext.INSTANCE)
+        try {
+            assertThat(loader.memoryCache).isNotNull()
+            assertThat(loader.diskCache).isNotNull()
+
+            val ref = ArtworkRef(key = ArtworkKeys.forUrl(ARTWORK_URL), url = ARTWORK_URL, version = 0)
+            val mapper =
+                loader.components.mappers
+                    .map { it.first }
+                    .filterIsInstance<ArtworkRefMapper>()
+                    .single()
+            val resolved = (mapper as Mapper<ArtworkRef, Any>).map(ref, Options(PlatformContext.INSTANCE))
+            assertThat(resolved).isEqualTo(ARTWORK_URL)
+        } finally {
+            loader.shutdown()
+        }
+    }
+
     @Test
     fun initializerOrdersLieInStartupBands() {
         for (initializer in graph.initializers) {
@@ -85,6 +163,8 @@ class DesktopAppGraphTest {
 
     private companion object {
         const val FIRST_BAND = 0
+
+        const val ARTWORK_URL = "https://img.example/cover.png"
 
         /** The five destinations and the Settings screens M0 renders (01 M0 checklist step 29). */
         val M0B_KEYS: List<NavKey> =
@@ -97,6 +177,14 @@ class DesktopAppGraphTest {
                 SettingsHomeKey,
                 SettingsKey(SettingsPage.ABOUT),
                 LicencesKey,
+            )
+
+        /** The keys `LibraryRoute` pushes: tile tap, tile-menu settings and the empty-state actions. */
+        val LIBRARY_PUSHED_KEYS: List<NavKey> =
+            listOf(
+                PodcastKey(7),
+                PodcastSettingsKey(7),
+                AddPodcastKey(null),
             )
     }
 }

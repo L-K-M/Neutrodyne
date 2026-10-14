@@ -5,11 +5,14 @@ import android.app.Application
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenInitializer
+import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
+import ch.lkmc.neutrodyne.core.navigation.PodcastKey
+import ch.lkmc.neutrodyne.core.navigation.PodcastSettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
@@ -37,6 +40,21 @@ class AndroidAppGraphTest {
         val provider = entryProvider<NavKey> { graph.entryInstallers.forEach { install -> install() } }
 
         for (key in M0A_KEYS) {
+            assertThat(provider(key).contentKey).isNotNull()
+        }
+    }
+
+    /**
+     * Every key `LibraryRoute` pushes must resolve through the production installers: nav3's
+     * provider throws `IllegalStateException("Unknown screen")` for a key no feature module
+     * contributes, and the host resolves entries eagerly at the next composition — a missing
+     * contribution crashes the app (94-1).
+     */
+    @Test
+    fun everyKeyTheLibraryPushesHasAnEntry() {
+        val provider = entryProvider<NavKey> { graph.entryInstallers.forEach { install -> install() } }
+
+        for (key in LIBRARY_PUSHED_KEYS) {
             assertThat(provider(key).contentKey).isNotNull()
         }
     }
@@ -86,6 +104,14 @@ class AndroidAppGraphTest {
                 SettingsHomeKey,
                 SettingsKey(SettingsPage.ABOUT),
                 LicencesKey,
+            )
+
+        /** The keys `LibraryRoute` pushes: tile tap, tile-menu settings and the empty-state actions. */
+        val LIBRARY_PUSHED_KEYS: List<NavKey> =
+            listOf(
+                PodcastKey(7),
+                PodcastSettingsKey(7),
+                AddPodcastKey(null),
             )
     }
 }
