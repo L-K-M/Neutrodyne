@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.data.refresh
 
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.database.DueFeed
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
@@ -54,12 +55,20 @@ internal class NewFeedUrlProbe(
             val feed = db.podcastDao().dueFeedById(id) ?: return outcome
             // No source validators or explicitly typed credentials accompany a new origin.
             val target = feed.copy(feedUrl = url, etag = null, lastModified = null, contentSha256 = null)
-            val result = suspendRunCatching { fetch(target) }.getOrNull()
+            val result =
+                suspendRunCatching { fetch(target) }
+                    .getOrElse { e ->
+                        Log.w(TAG, e) { "new-feed-url probe fetch failed for podcast $id" }
+                        null
+                    }
             currentCoroutineContext().ensureActive()
             if (deadlineElapsedMs != RefreshRequest.NO_DEADLINE && clock.elapsedRealtime() >= deadlineElapsedMs) {
                 return outcome
             }
             if (result is AdapterResult.Deferred) return outcome
+            // A failed fetch says nothing about the target: it stays pending for the next changed
+            // body, and only implausible targets enter the rejection LRU (03).
+            if (result == null || result is AdapterResult.Failed) return outcome
 
             val realEvidence = evidence.copy(podcastGuid = stored.podcastGuid.takeUnless { stored.podcastGuidDerived })
             if (result !is AdapterResult.Parsed ||
@@ -70,7 +79,12 @@ internal class NewFeedUrlProbe(
                 return outcome
             }
 
-            val committed = suspendRunCatching { adopt(feed, url, result) }.getOrNull()
+            val committed =
+                suspendRunCatching { adopt(feed, url, result) }
+                    .getOrElse { e ->
+                        Log.w(TAG, e) { "new-feed-url adoption failed for podcast $id" }
+                        null
+                    }
             if (committed !is FeedOutcome.Ingested && committed !is FeedOutcome.Merged) {
                 reject(key)
                 return outcome
@@ -102,6 +116,7 @@ internal class NewFeedUrlProbe(
         }
 
     private companion object {
+        const val TAG = "NewFeedUrlProbe"
         const val MAX_HOPS = 5
         const val REJECTION_CAPACITY = 100
         const val REJECTION_TTL_MS = 24 * 60 * 60 * 1000L
