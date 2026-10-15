@@ -560,6 +560,7 @@ class FeedMovesTest {
                         tempFiles = bundle.tempFiles,
                         moves = moves,
                         scheduler = scheduler,
+                        coordinator = coordinator,
                     )
                 val run = async { engine.run(request(loser)) }
                 entered.await()

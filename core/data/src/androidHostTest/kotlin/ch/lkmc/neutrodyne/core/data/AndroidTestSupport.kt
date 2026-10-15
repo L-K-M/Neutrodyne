@@ -20,13 +20,16 @@ import ch.lkmc.neutrodyne.core.data.repo.PodcastMerger
 import ch.lkmc.neutrodyne.core.database.DueFeed
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
+import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
+import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
@@ -65,6 +68,8 @@ internal fun newRefresher(
     random: Random = Random(1),
     ingestor: FeedIngestor = newIngestor(db, clock, settings),
     scheduler: RefreshScheduler = FakeRefreshScheduler(),
+    secrets: SecretStore = FakeSecretStore(),
+    coordinator: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
 ): FeedRefresher =
     FeedRefresher(
         db,
@@ -79,12 +84,15 @@ internal fun newRefresher(
         newFeedMoves(
             db,
             clock,
+            coordinator,
         ),
         ch.lkmc.neutrodyne.core.data.refresh
             .NewFeedUrlProbe(db, clock),
         {
             scheduler
         },
+        secrets,
+        coordinator,
     )
 
 /** A subscribed podcast row whose `feedKey` matches [feedUrl]; returns the new id. */
@@ -253,4 +261,5 @@ internal class FakeRefreshScheduler : RefreshScheduler {
 private fun newFeedMoves(
     db: NeutrodyneDatabase,
     clock: Clock,
-) = FeedMoveCommitter(db, PodcastMerger(db, FakeCredentialCommitCoordinator(), clock), clock)
+    coordinator: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
+) = FeedMoveCommitter(db, PodcastMerger(db, coordinator, clock), clock)

@@ -20,8 +20,9 @@ import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.getString
 
 /**
- * The `PodcastSettingsKey` route (08 Podcast settings): a gone podcast pops; `editFeedUrl` and
- * `setCredentials` failures surface as snackbars through `addPodcastErrorText`.
+ * The `PodcastSettingsKey` route (08 Podcast settings): a gone podcast pops; `editFeedUrl`
+ * failures return their `UiText` for the dialog's inline error, `setCredentials` failures
+ * surface as snackbars through `addPodcastErrorText`.
  */
 @Composable
 internal fun PodcastSettingsRoute(key: PodcastSettingsKey) {
@@ -46,13 +47,12 @@ internal fun PodcastSettingsRoute(key: PodcastSettingsKey) {
         onCustomTitle = viewModel::setCustomTitle,
         onOrderChange = viewModel::setOrder,
         onIncludeInAll = viewModel::setIncludeInAll,
+        // The edit-URL dialog shows this failure inline and stays open; `null` closes it.
         onEditFeedUrl = { input ->
-            scope.launch {
-                viewModel.editFeedUrl(input).whenOutcome(
-                    onSuccess = {},
-                    onFailure = { snackbar.showSnackbar(addPodcastErrorText(it).resolve()) },
-                )
-            }
+            viewModel.editFeedUrl(input).whenOutcome(
+                onSuccess = { null },
+                onFailure = { addPodcastErrorText(it) },
+            )
         },
         onCredentials = { credentials ->
             scope.launch {
