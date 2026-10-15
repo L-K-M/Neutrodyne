@@ -36,9 +36,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import mockwebserver3.junit4.MockWebServerRule
 import okio.FileSystem
@@ -53,6 +55,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * `PodcastRepositoryImpl` over a real database: the `FeedMove` host contract, the artwork
@@ -305,7 +308,11 @@ class PodcastRepositoryTest {
      */
     @Test
     fun setCredentialsOutrunsAStaleAuthFailure() =
-        runBlocking {
+        // A lock-order regression must fail here, not hang the suite.
+        runBlocking { withTimeout(LOCK_TEST_TIMEOUT) { setCredentialsOutrunsAStaleAuthFailureBody() } }
+
+    private suspend fun setCredentialsOutrunsAStaleAuthFailureBody() =
+        coroutineScope {
             val root = Files.createTempDirectory("nd-setcreds").toFile()
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
             val store = newSecretsStore(root, scope)
@@ -414,6 +421,9 @@ class PodcastRepositoryTest {
         }
 
     private companion object {
+        /** The whole real-time lock test; its own windows are seconds long. */
+        val LOCK_TEST_TIMEOUT = 60.seconds
+
         const val NOW = 1_791_000_000_000L
         const val SET_CREDENTIALS_WINDOW_MS = 5_000L
     }

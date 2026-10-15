@@ -7,7 +7,7 @@ import ch.lkmc.neutrodyne.feeds.identity.PodcastGuid
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
-import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeSource
 
 class FeedMovePlausibilityTest {
@@ -173,7 +173,10 @@ class FeedMovePlausibilityTest {
     private companion object {
         const val GUID = "12345678-1234-1234-1234-123456789abc"
 
-        /** Generous bound for a bounded-prefix comparison; the real cost is ~1 ms. */
-        val TITLE_COMPARE_BUDGET = 200.milliseconds
+        /**
+         * Covers linear normalisation of a 500,000-char title on a slow CI runner (230 ms seen)
+         * while still failing fast without the bound, which took 3.4 s at 30,000 chars.
+         */
+        val TITLE_COMPARE_BUDGET = 2.seconds
     }
 }
