@@ -20,6 +20,7 @@ import ch.lkmc.neutrodyne.core.database.PersonEntity
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.database.PodcastFeedMetadata
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.model.AliasReason
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.GuidKnowledge
 import ch.lkmc.neutrodyne.core.model.OwnerType
@@ -125,7 +126,15 @@ internal class FeedIngestor(
             if (ctx.mode == IngestMode.OLDER_PAGE) {
                 original
             } else {
-                moves.applyInTransaction(original, permanentUrl)
+                if (ctx.newFeedUrl != null && prepared.items.isNotEmpty()) {
+                    moves.applyInTransaction(
+                        original,
+                        ctx.newFeedUrl,
+                        AliasReason.NEW_FEED_URL,
+                    )
+                } else {
+                    moves.applyInTransaction(original, permanentUrl)
+                }
             }
         val discardValidators =
             ctx.validators == IngestValidators.DISCARD ||

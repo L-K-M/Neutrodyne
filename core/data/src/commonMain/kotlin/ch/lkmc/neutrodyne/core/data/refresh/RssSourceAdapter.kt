@@ -114,6 +114,7 @@ internal class RssSourceAdapter(
                     feed.feedUrl
                 }
             }
+        var purpose = ParsePurpose.CURRENT_FEED
         var outcome =
             fetcher.fetch(
                 FeedRequest(
@@ -131,6 +132,7 @@ internal class RssSourceAdapter(
                 fetcher.fetch(FeedRequest(url = url, etag = null, lastModified = null, conditional = false))
             if (confirmation is FetchOutcome.Body) {
                 unconditional = true
+                purpose = ParsePurpose.REDIRECT_CONFIRMATION
                 outcome = confirmation
             }
         }
@@ -187,7 +189,8 @@ internal class RssSourceAdapter(
             }
 
             is FetchOutcome.Body -> {
-                bodyOutcome(feed, fetched, unconditional)
+                val result = bodyOutcome(feed, fetched, unconditional)
+                if (result is AdapterResult.Parsed) result.copy(purpose = purpose) else result
             }
         }
     }

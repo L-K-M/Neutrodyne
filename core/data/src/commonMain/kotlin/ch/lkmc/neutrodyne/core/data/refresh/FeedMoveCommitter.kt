@@ -37,6 +37,7 @@ internal class FeedMoveCommitter(
     suspend fun applyInTransaction(
         stored: PodcastEntity,
         permanentUrl: String?,
+        reason: AliasReason = if (permanentUrl != null) AliasReason.REDIRECT else AliasReason.RENORMALISED,
     ): PodcastEntity {
         if (stored.sourceType != SourceType.RSS) return stored
 
@@ -55,7 +56,7 @@ internal class FeedMoveCommitter(
                 PodcastUrlAliasEntity(
                     url = stored.feedKey,
                     podcastId = stored.id,
-                    reason = if (permanentUrl != null) AliasReason.REDIRECT else AliasReason.RENORMALISED,
+                    reason = reason,
                     addedAt = clock.now(),
                 ),
             )
