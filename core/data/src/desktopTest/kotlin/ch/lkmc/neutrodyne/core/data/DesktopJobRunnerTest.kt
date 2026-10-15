@@ -6,10 +6,18 @@ import ch.lkmc.neutrodyne.core.common.ConnectionPoolEvictor
 import ch.lkmc.neutrodyne.core.common.JobLane
 import ch.lkmc.neutrodyne.core.common.PowerEvent
 import ch.lkmc.neutrodyne.core.common.PowerMonitor
+import ch.lkmc.neutrodyne.core.data.refresh.AdapterResult
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
+import ch.lkmc.neutrodyne.core.data.refresh.DesktopRefreshLane
+import ch.lkmc.neutrodyne.core.data.refresh.DesktopRefreshScheduler
+import ch.lkmc.neutrodyne.core.data.refresh.FetchMode
 import ch.lkmc.neutrodyne.core.data.refresh.LaneStatus
+import ch.lkmc.neutrodyne.core.data.refresh.NextRefreshRebaser
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -24,6 +32,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -31,6 +40,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -42,14 +52,14 @@ import kotlin.time.Instant
 
 /**
  * `DesktopJobRunnerTest` — the M1a legs of 11's Testing row (fake lanes, `TestClock`), the
- * runner half of PLAN M1 AC10: the first tick launches every lane after the settle, a `poke`
+ * runner coverage of PLAN M1 AC10: the first tick launches every lane after the settle, a `poke`
  * runs a lane within one dispatch and pokes coalesce, a running lane is never started twice and
  * a poke during a run reruns it once, a poke bypasses an active backoff, failures back off
  * `min(2^(n−1) min, 30 min)` and clear on success, a throw outside the lane's
  * `suspendRunCatching` guard ends only that lane, a return to "online" pokes 11 step 6's
  * network lanes, and `stop(grace)` cancels an in-flight run, awaits its finalizer and drops the
- * armed rerun. Whether a *lane* considers work due at all is the lane's own gate — 03's
- * `DesktopRefreshLaneTest` owns that side.
+ * armed rerun. The real refresh lane also runs against Room to prove due-only fetches on the
+ * minute tick and fetch start after sleep; `DesktopRefreshLaneTest` covers its other gates.
  *
  * The tick loop rides the virtual scheduler; lane bodies run on `Dispatchers.IO` threads, so
  * every wait below is a real-time-bounded pump of [runCurrent] — never a bare sleep.
@@ -279,6 +289,106 @@ class DesktopJobRunnerTest {
         }
 
     // --- Wake catch-up (PLAN M1 AC10's 3-hour sleep, 11 Testing's last leg) -----------------------
+
+    @Test
+    fun theRealRefreshLaneFetchesOnlyDueFeedsOnATickAndAfterSleep() =
+        runTest {
+            val clock = TestClock()
+            val dispatcher = StandardTestDispatcher(testScheduler)
+            val db = newDb(clock, queryContext = dispatcher)
+            val settings = FakeSettingsRepository()
+            val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
+            val power = FakePowerMonitor()
+            val probe = QuietLane("sync")
+            val wakeFetchStartedAt = AtomicLong(-1)
+            val finishWakeFetch = Channel<Unit>(Channel.UNLIMITED)
+            val adapter =
+                stubAdapter(onFetch = { feed, _ ->
+                    if (feed.feedUrl == "https://sleep.example.com/f") {
+                        wakeFetchStartedAt.set(testScheduler.currentTime)
+                        // Hold the response so the acceptance bound proves fetch start.
+                        finishWakeFetch.receive()
+                    }
+                    AdapterResult.NotModified(meta = null)
+                })
+            lateinit var jobRunner: DesktopJobRunner
+            val queue =
+                DesktopRefreshScheduler(
+                    db = db,
+                    rebaser = NextRefreshRebaser(db, settings),
+                    poker = Provider { jobRunner },
+                    appScope = backgroundScope,
+                )
+            val lane =
+                DesktopRefreshLane(
+                    refresher =
+                        newRefresher(
+                            db,
+                            mapOf(SourceType.RSS to adapter),
+                            clock,
+                            settings,
+                            ingestor = newIngestor(db, clock, settings, defaultDispatcher = dispatcher),
+                        ),
+                    db = db,
+                    network = network,
+                    queue = queue,
+                    clock = clock,
+                )
+            jobRunner = runner(lane, probe, clock = clock, network = network, power = power)
+            try {
+                jobRunner.start()
+                advanceTimeBy(DesktopJobRunner.START_SETTLE_MS + 1.seconds)
+                awaitRuns(probe, 1)
+                awaitIdle(jobRunner, probe)
+                awaitStatus(jobRunner, lane.name) { it.runs == 1L && it.failures == 0L }
+
+                // Seed after startup to prove the minute tick, rather than the settle run.
+                val now = clock.now()
+                val due = seedPodcast(db, "https://due.example.com/f", nextRefreshAt = now)
+                val future =
+                    seedPodcast(
+                        db,
+                        "https://future.example.com/f",
+                        nextRefreshAt =
+                            now + 6.hours.inWholeMilliseconds,
+                    )
+                val afterSleep =
+                    seedPodcast(
+                        db,
+                        "https://sleep.example.com/f",
+                        nextRefreshAt =
+                            now + 2.hours.inWholeMilliseconds,
+                    )
+                advanceTick(jobRunner, probe, 2, clock)
+                awaitStatus(jobRunner, lane.name) { it.runs == 2L && it.failures == 0L }
+
+                assertEquals(listOf(due to FetchMode.REFRESH), adapter.calls)
+                assertEquals(-1L, wakeFetchStartedAt.get())
+
+                val monotonicBeforeSleep = clock.elapsedRealtime()
+                clock.nowMs += SLEEP.inWholeMilliseconds
+                assertEquals(monotonicBeforeSleep, clock.elapsedRealtime())
+                val wakeAt = testScheduler.currentTime
+                power.resume()
+                advanceTimeBy(1.seconds)
+                awaitCondition("newly overdue feed's fetch start") { wakeFetchStartedAt.get() >= 0 }
+
+                assertEquals(Instant.fromEpochMilliseconds(clock.now()), jobRunner.lastWakeAt.value)
+                assertTrue(wakeFetchStartedAt.get() - wakeAt in 0L..120.seconds.inWholeMilliseconds)
+                finishWakeFetch.send(Unit)
+                awaitStatus(jobRunner, lane.name) { it.runs >= 3L && it.failures == 0L }
+                awaitIdle(jobRunner, probe)
+
+                assertEquals(listOf(due to FetchMode.REFRESH, afterSleep to FetchMode.REFRESH), adapter.calls)
+                assertEquals(null, db.podcastDao().byId(future)!!.lastAttemptAt)
+                assertTrue(
+                    db.podcastDao().byId(future)!!.nextRefreshAt!! > clock.now() + DesktopRefreshLane.DUE_SLACK_MS,
+                )
+            } finally {
+                jobRunner.stop(3.seconds)
+                db.close()
+            }
+        }
 
     @Test
     fun aResumedEventAfterASleepWakesEveryLaneIntoAnImmediateRun() =

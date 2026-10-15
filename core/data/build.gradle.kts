@@ -46,6 +46,9 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.androidx.work.testing)
             implementation(libs.androidx.room.runtime)
+            // The cancel-atomicity test wraps `AndroidSQLiteDriver` to park a statement inside a
+            // real Room write transaction (M1 AC4 / audit G3).
+            implementation(libs.androidx.sqlite.framework)
             implementation(libs.androidx.lifecycle.process)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.okio)
