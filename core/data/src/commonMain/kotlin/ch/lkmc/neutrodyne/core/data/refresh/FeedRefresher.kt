@@ -533,48 +533,52 @@ internal class FeedRefresher(
             if (!claimed) return@suspendRunCatching outcome
 
             var latest = outcome
-            newFeedUrlProbe.run(
-                podcastId = id,
-                current = result.feed,
-                deadlineElapsedMs = request.deadlineElapsedMs,
-                fetch = { target ->
-                    hostPermits.semaphore(adapter.hostKey(target, target.feedUrl)).withPermit {
-                        if (request.deadlineElapsedMs != RefreshRequest.NO_DEADLINE &&
-                            clock.elapsedRealtime() >= request.deadlineElapsedMs - DEADLINE_MARGIN_MS
-                        ) {
-                            return@withPermit AdapterResult.Deferred(clock.now())
-                        }
+            // The current ingest already committed: a probe fault must not reach the handler
+            // below, which would record a STORAGE failure over that success.
+            suspendRunCatching {
+                newFeedUrlProbe.run(
+                    podcastId = id,
+                    current = result.feed,
+                    deadlineElapsedMs = request.deadlineElapsedMs,
+                    fetch = { target ->
+                        hostPermits.semaphore(adapter.hostKey(target, target.feedUrl)).withPermit {
+                            if (request.deadlineElapsedMs != RefreshRequest.NO_DEADLINE &&
+                                clock.elapsedRealtime() >= request.deadlineElapsedMs - DEADLINE_MARGIN_MS
+                            ) {
+                                return@withPermit AdapterResult.Deferred(clock.now())
+                            }
 
-                        val fetched = adapter.fetchAndParse(target, FetchMode.FULL)
-                        if (fetched is AdapterResult.Failed) fetched.htmlBody?.let { tempFiles.delete(it) }
-                        fetched
-                    }
-                },
-                adopt = { source, url, candidate ->
-                    commitMutex.withLock {
-                        val current = db.podcastDao().dueFeedById(source.id)
-                        val pending = db.podcastDao().byId(source.id)?.pendingNewFeedUrl
-                        if (current == null || current.feedUrl != source.feedUrl || pending != url) {
-                            return@withLock FeedOutcome.Deferred(currentNextAt(source.id))
+                            val fetched = adapter.fetchAndParse(target, FetchMode.FULL)
+                            if (fetched is AdapterResult.Failed) fetched.htmlBody?.let { tempFiles.delete(it) }
+                            fetched
                         }
-                        val adopted = ingestOutcome(current, adapter, candidate, clock.now(), newFeedUrl = url)
-                        if (adopted is FeedOutcome.Ingested || adopted is FeedOutcome.Merged) {
-                            val survivor = (adopted as? FeedOutcome.Merged)?.intoPodcastId
-                            latest =
-                                if (survivor != null) {
-                                    adopted
-                                } else if (latest is FeedOutcome.Merged) {
-                                    latest
-                                } else {
-                                    adopted
-                                }
-                            committed(latest)
+                    },
+                    adopt = { source, url, candidate ->
+                        commitMutex.withLock {
+                            val current = db.podcastDao().dueFeedById(source.id)
+                            val pending = db.podcastDao().byId(source.id)?.pendingNewFeedUrl
+                            if (current == null || current.feedUrl != source.feedUrl || pending != url) {
+                                return@withLock FeedOutcome.Deferred(currentNextAt(source.id))
+                            }
+                            val adopted = ingestOutcome(current, adapter, candidate, clock.now(), newFeedUrl = url)
+                            if (adopted is FeedOutcome.Ingested || adopted is FeedOutcome.Merged) {
+                                val survivor = (adopted as? FeedOutcome.Merged)?.intoPodcastId
+                                latest =
+                                    if (survivor != null) {
+                                        adopted
+                                    } else if (latest is FeedOutcome.Merged) {
+                                        latest
+                                    } else {
+                                        adopted
+                                    }
+                                committed(latest)
+                            }
+                            adopted
                         }
-                        adopted
-                    }
-                },
-                claimSurvivor = { survivor -> commitMutex.withLock { probedThisRun.add(survivor) } },
-            )
+                    },
+                    claimSurvivor = { survivor -> commitMutex.withLock { probedThisRun.add(survivor) } },
+                )
+            }.onFailure { e -> Log.w(TAG, e) { "new-feed-url probe failed for podcast $id" } }
             latest
         }.getOrElse { e ->
             if (e is CancellationException) throw e

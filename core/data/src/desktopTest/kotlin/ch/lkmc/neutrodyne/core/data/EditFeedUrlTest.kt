@@ -26,6 +26,7 @@ import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.episodeStateEntity
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
