@@ -42,7 +42,7 @@ internal fun storedOriginToOrigin(stored: String): Origin? {
         // Bracketed IP-literal: the host runs to `]`, an optional `:port` may follow.
         val close = authority.indexOf(']')
         if (close < 0) return null
-        host = authority.substring(0, close + 1)
+        host = authority.substring(1, close)
         val rest = authority.substring(close + 1)
         port =
             when {

@@ -781,7 +781,7 @@ internal class FeedIngestor(
         stored: PodcastEntity,
         aliases: List<ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity>,
     ): String? {
-        val raw = parsed.newFeedUrl ?: return null
+        val raw = parsed.newFeedUrl?.let { UrlNormalizer.splitUserInfo(it).first } ?: return null
         val identity = UrlNormalizer.forIdentity(raw) ?: return null
         if (identity == stored.feedKey) return null
         return if (aliases.none { it.url == identity }) raw else null
@@ -797,11 +797,11 @@ internal class FeedIngestor(
         mode: IngestMode,
         stored: PodcastEntity,
     ): Pair<String?, Boolean> {
-        val link = parsed.paging.next ?: parsed.paging.prevArchive
+        val link = (parsed.paging.next ?: parsed.paging.prevArchive)?.let { UrlNormalizer.splitUserInfo(it).first }
         return when {
             mode == IngestMode.OLDER_PAGE -> link to (link == null)
             stored.pagingNextUrl == null && !stored.pagingComplete -> link to true
-            else -> stored.pagingNextUrl to stored.pagingComplete
+            else -> stored.pagingNextUrl?.let { UrlNormalizer.splitUserInfo(it).first } to stored.pagingComplete
         }
     }
 

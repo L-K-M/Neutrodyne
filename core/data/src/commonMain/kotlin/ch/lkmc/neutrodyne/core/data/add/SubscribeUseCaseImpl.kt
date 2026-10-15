@@ -95,7 +95,7 @@ internal class SubscribeUseCaseImpl(
         val now = clock.now()
         // `permanentUrl ?: requestedUrl` is the subscribe identity (03 redirects/dedupe): a
         // temporary redirect's target never becomes the subscription's feedUrl/feedKey.
-        val feedUrl = entry.meta.permanentUrl ?: entry.meta.requestedUrl
+        val feedUrl = UrlNormalizer.splitUserInfo(entry.meta.permanentUrl ?: entry.meta.requestedUrl).first
         // The resolver already rejects a null identity before offering the preview; this guard
         // keeps the invariant at the write path — a null identity is an InvalidUrl, not a
         // storage fault.
@@ -113,7 +113,7 @@ internal class SubscribeUseCaseImpl(
                 addAll(hopKeys)
             }
         val backfill = settings.get(FeedsSettingKeys.BACKFILL_PAGED_FEEDS)
-        val link = feed.paging.next ?: feed.paging.prevArchive
+        val link = (feed.paging.next ?: feed.paging.prevArchive)?.let { UrlNormalizer.splitUserInfo(it).first }
         val artworkUrl = feed.artwork.firstOrNull()?.url
 
         var pendingPaging = false
