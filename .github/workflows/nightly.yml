@@ -418,6 +418,8 @@ jobs:
       # seeded iterations per fixture inside the 128 MB `mutationTest` heap.
       # The parses run single-fork, so this is tens of minutes of wall time.
       - name: Mutation robustness, 1,000 iterations per fixture
+        # Leaves the job's last 15 minutes for the failure report and upload.
+        timeout-minutes: 75
         run: ./gradlew mutationTest -PmutationIterations=1000 --continue
       - name: Report failure
         if: ${{ !success() }}
