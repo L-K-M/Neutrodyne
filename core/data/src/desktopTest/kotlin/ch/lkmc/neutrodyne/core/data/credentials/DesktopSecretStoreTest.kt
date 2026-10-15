@@ -282,7 +282,8 @@ class DesktopSecretStoreTest {
             val flaky =
                 object : SecretProtection {
                     override val fileName: String = "secrets.json"
-                    var failWrites = false
+
+                    @Volatile var failWrites = false
 
                     override fun protect(plain: ByteArray): ByteArray =
                         if (failWrites) throw IOException("simulated storage failure") else plain
@@ -396,7 +397,7 @@ class DesktopSecretStoreTest {
         }
 
     @Test
-    fun `an unreadable file marks podcasts needsCredentials, deletes rows and resets`() =
+    fun `an unreadable file marks podcasts needsCredentials, deletes rows and is kept aside`() =
         runTest {
             val f = newFixture()
             val writerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -409,9 +410,9 @@ class DesktopSecretStoreTest {
 
                 // Key loss (03): DPAPI cannot unwrap a foreign-machine blob, or the JSON is
                 // unreadable — both land here as corrupt bytes. The writer's own collection is
-                // stopped so only the fresh store drives the recovery below.
-                Files.write(f.secretsPath(IdentitySecretProtection), "not secrets".encodeToByteArray())
+                // stopped first so only the fresh store drives the recovery below.
                 writerScope.cancel()
+                Files.write(f.secretsPath(IdentitySecretProtection), "not secrets".encodeToByteArray())
 
                 val reader = newStore(f, readerScope)
                 awaitLoaded(reader) // startup must survive the loss
@@ -432,13 +433,10 @@ class DesktopSecretStoreTest {
                 assertTrue(podcast.needsCredentials)
                 assertNull(podcast.credentialId)
 
-                // The file was reset to a clean empty v1 file rather than left unreadable.
-                awaitReal {
-                    runCatching {
-                        val root = Json.parseToJsonElement(rawSecretsFile(f)).jsonObject
-                        root["v"]!!.jsonPrimitive.int == 1 && root["entries"]!!.jsonObject.isEmpty()
-                    }.getOrDefault(false)
-                }
+                // The unreadable bytes are set aside for manual recovery, never overwritten.
+                val aside = f.secretsPath(IdentitySecretProtection).resolveSibling("secrets.json.unreadable")
+                awaitReal { Files.exists(aside) }
+                assertEquals("not secrets", Files.readAllBytes(aside).decodeToString())
             } finally {
                 writerScope.cancel()
                 readerScope.cancel()

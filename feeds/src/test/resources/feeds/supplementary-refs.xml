@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Supplementary references</title>
+    <link>https://example.com/supplementary</link>
+    <description>Synthetic numeric character references in text and attributes.</description>
+    <item>
+      <guid isPermaLink="false">ep-&#128512;-&#x1F680;</guid>
+      <title>Episode &#128512; &#x1F680;</title>
+      <description>Notes &#128512; &#x1F680;</description>
+      <enclosure url="https://cdn.example.com/&#128512;-&#x1F680;.mp3" length="1000" type="audio/mpeg"/>
+    </item>
+  </channel>
+</rss>
