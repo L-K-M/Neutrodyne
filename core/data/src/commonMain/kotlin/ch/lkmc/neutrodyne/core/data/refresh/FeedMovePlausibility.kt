@@ -23,9 +23,14 @@ internal object FeedMovePlausibility {
         val left = current.title?.let(TitleMatch::normalise).orEmpty()
         val right = candidate.title?.let(TitleMatch::normalise).orEmpty()
         if (left.isEmpty() || right.isEmpty()) return false
+        if (left == right) return true
 
-        val length = maxOf(left.length, right.length)
-        return levenshtein(left, right) <= length * MAX_TITLE_DISTANCE
+        // Titles are publisher-controlled and the parser accepts up to 512 KiB: the fuzzy
+        // rule compares a bounded prefix so it stays cheap whatever a feed publishes.
+        val boundedLeft = left.take(MAX_TITLE_COMPARE_CHARS)
+        val boundedRight = right.take(MAX_TITLE_COMPARE_CHARS)
+        val length = maxOf(boundedLeft.length, boundedRight.length)
+        return levenshtein(boundedLeft, boundedRight) <= length * MAX_TITLE_DISTANCE
     }
 
     private fun newestGuidKeys(feed: ParsedFeed): Set<String> =
@@ -59,4 +64,11 @@ internal object FeedMovePlausibility {
 
     private const val NEWEST_ITEMS = 20
     private const val MAX_TITLE_DISTANCE = 0.2
+
+    /**
+     * The most of each normalised title the fuzzy rule compares. Real show titles are a few
+     * dozen characters; the bound caps the Levenshtein at 256² cell updates while exact
+     * equality beyond it still counts as a match.
+     */
+    private const val MAX_TITLE_COMPARE_CHARS = 256
 }

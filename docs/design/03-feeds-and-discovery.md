@@ -729,6 +729,8 @@ object UrlNormalizer {
 3. Plausible → move (alias reason `NEW_FEED_URL`) and ingest the probed body in REFRESH mode in one transaction; `pendingNewFeedUrl = null`. Not plausible or failed → keep it pending; the probe is repeated only after a later ingest of a changed body (304 and `Unchanged` outcomes never probe), and an in-memory LRU (100 URLs, 24 h) of implausible targets prevents repeats within a process, so a stale or hostile tag costs at most one extra request per published episode. Diagnostics list podcasts with a pending URL. At most 5 hops (chained `new-feed-url`s) per run.
 Apple asks publishers to keep both the 301 and the tag for at least four weeks, so lazy adoption is safe ([Apple: change the RSS feed URL](https://podcasters.apple.com/support/change-the-rss-feed-url)). A device that learns a move through sync needs no probe: the device that adopted it already checked plausibility.
 
+- **Implementation note (2026-10-15, M1b).** The normalised-title rule bounds its inputs: equality is checked on the full `TitleMatch` forms first, then the Levenshtein runs on at most the first 256 characters of each, so titles that differ only beyond the bound read as similar. Show titles are a few dozen characters while the parser accepts up to 512 KiB, and the distance is O(n²) in its inputs — an unbounded comparison would let one hostile feed stall a refresh run behind the run and commit locks.
+
 ### Basic auth and CredentialStore
 
 The heading keeps its name; since the scope revision the Android `CredentialStore` is `KeystoreCredentialStore`, one of two implementations of the common `SecretStore` contract, which also holds the user's Podcast Index key and 10's sync token ([PO-44](../PLAN.md#48-further-product-owner-decisions)).
