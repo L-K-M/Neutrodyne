@@ -7,6 +7,8 @@ import ch.lkmc.neutrodyne.feeds.identity.PodcastGuid
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 
 class FeedMovePlausibilityTest {
     @Test
@@ -117,6 +119,50 @@ class FeedMovePlausibilityTest {
         assertFalse(FeedMovePlausibility.isPlausibleMove(parsedFeed(title = "abcd"), parsedFeed(title = "abcxyz")))
     }
 
+    /**
+     * Titles are publisher-controlled and the parser accepts them up to 512 KiB, so the
+     * normalised-title rule must not be quadratic in their length (a 500,000-char pair is
+     * ~2.5e11 Levenshtein cell updates, minutes of work while the run's locks are held). The
+     * rule compares a bounded prefix instead; the small case exists so a regression fails on
+     * the elapsed assertion quickly instead of stalling the suite on the 500,000-char pair.
+     */
+    @Test
+    fun publisherSizedTitlesCompareInBoundedTime() {
+        for (size in listOf(30_000, 500_000)) {
+            val mark = TimeSource.Monotonic.markNow()
+            val plausible =
+                FeedMovePlausibility.isPlausibleMove(
+                    parsedFeed(title = "a".repeat(size)),
+                    parsedFeed(title = "b".repeat(size)),
+                )
+            val elapsed = mark.elapsedNow()
+            assertFalse(plausible)
+            assertTrue(elapsed < TITLE_COMPARE_BUDGET, "$size-char title comparison took $elapsed")
+        }
+    }
+
+    /**
+     * The bound reads the compared prefix only (03 itunes:new-feed-url, implementation note):
+     * identical prefixes count as similar when the tails differ, and identical tails do not
+     * rescue prefixes over the threshold.
+     */
+    @Test
+    fun titleRuleSeesOnlyTheBoundedPrefix() {
+        val longTail = "shared".repeat(40_000)
+        assertFalse(
+            FeedMovePlausibility.isPlausibleMove(
+                parsedFeed(title = "x".repeat(256) + longTail),
+                parsedFeed(title = "y".repeat(256) + longTail),
+            ),
+        )
+        assertTrue(
+            FeedMovePlausibility.isPlausibleMove(
+                parsedFeed(title = "pre".repeat(86) + "one"),
+                parsedFeed(title = "pre".repeat(86) + "two"),
+            ),
+        )
+    }
+
     @Test
     fun emptyTitlesProvideNoEvidence() {
         for (title in listOf(null, "", "   ")) {
@@ -126,5 +172,11 @@ class FeedMovePlausibilityTest {
 
     private companion object {
         const val GUID = "12345678-1234-1234-1234-123456789abc"
+
+        /**
+         * Covers linear normalisation of a 500,000-char title on a slow CI runner (230 ms seen)
+         * while still failing fast without the bound, which took 3.4 s at 30,000 chars.
+         */
+        val TITLE_COMPARE_BUDGET = 2.seconds
     }
 }

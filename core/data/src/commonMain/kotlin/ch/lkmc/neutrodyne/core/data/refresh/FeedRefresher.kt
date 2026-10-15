@@ -91,6 +91,10 @@ internal class FeedRefresher(
     private val secrets: SecretStore,
     private val coordinator: CredentialCommitCoordinator,
 ) {
+    // Lock order, outermost first: the run [mutex] → [commitMutex] →
+    // CredentialCommitCoordinator → the Room writer ([batcherLock] is a leaf guard).
+    // A holder of a later lock never waits on an earlier one — [withRunExclusive] and
+    // [editFeedUrl] entrants must arrive holding none of them.
     private val mutex = Mutex()
 
     // Fetches remain parallel; commits and batch additions cannot race a collision survivor.
@@ -198,6 +202,15 @@ internal class FeedRefresher(
     suspend fun flushFetchStates() {
         batcherLock.withLock { batcher }?.flush()
     }
+
+    /**
+     * The stronger form of [flushFetchStates]'s user-action barrier: [block] runs under the
+     * run [mutex] itself, so every outcome of an in-flight run — not just the batched ones —
+     * commits before [block] starts. `setCredentials` commits this way so a refresh that
+     * fetched before the credentials existed cannot re-set `needsCredentials` behind them.
+     * Not reentrant: the mutex is held for a whole run and by [editFeedUrl].
+     */
+    suspend fun <T> withRunExclusive(block: suspend () -> T): T = mutex.withLock { block() }
 
     /** Serialize the probe and commit with refresh runs and other edits, avoiding stale outcomes. */
     suspend fun editFeedUrl(
