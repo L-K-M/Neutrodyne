@@ -803,7 +803,7 @@ flowchart LR
 | `sync_parked` | Records that reference a podcast or episode this device does not have yet ([Parked state and stubs](#parked-state-and-stubs)) |
 | `sync_held` | Staged and held removals ([Mass-change guard](#mass-change-guard)) and removals deferred while playing |
 
-All five tables exist in schema v1 (M1a) and stay empty until the first link; the triggers arrive with MS0 by an additive migration ([02 Sync capture triggers](02-data-model.md#sync-capture-triggers)).
+All five tables exist in schema v1 (M1a); until the first link the four work tables stay empty and `sync_state` holds only its unlinked default row; the triggers arrive with MS0 by an additive migration ([02 Sync capture triggers](02-data-model.md#sync-capture-triggers)).
 
 ### Capture rules
 

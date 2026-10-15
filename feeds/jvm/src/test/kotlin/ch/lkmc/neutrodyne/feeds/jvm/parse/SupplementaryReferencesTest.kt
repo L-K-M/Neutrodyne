@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.feeds.jvm.parse
 
+import ch.lkmc.neutrodyne.feeds.jvm.Goldens
 import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
 import ch.lkmc.neutrodyne.feeds.parse.ParseResult
+import kotlinx.serialization.json.Json
 import okio.Buffer
 import org.junit.Test
 import kotlin.test.assertEquals
@@ -19,6 +21,9 @@ import kotlin.test.assertIs
 class SupplementaryReferencesTest {
     private val baseUrl = "https://example.com/feed.xml"
 
+    /** The golden writer's config (`Goldens`: no explicit nulls), so absent fields decode alike. */
+    private val goldenJson = Json { explicitNulls = false }
+
     private fun feedOf(xml: String): ParsedFeed =
         XmlPullFeedParser
             .discovered()
@@ -26,6 +31,20 @@ class SupplementaryReferencesTest {
             .let { assertIs<ParseResult.Ok>(it).feed }
 
     private fun itemXml(content: String): String = "<rss version=\"2.0\"><channel><item>$content</item></channel></rss>"
+
+    /** Generated goldens pin output; these literal expectations also catch a corrupted baseline. */
+    @Test
+    fun corpusGoldenPreservesDecimalAndHexSupplementaryCharacters() {
+        val golden =
+            goldenJson.decodeFromString<ParsedFeed>(
+                Goldens.fixture("supplementary-refs.golden.json").readText(),
+            )
+        val item = golden.items.single()
+        assertEquals("ep-😀-🚀", item.guid)
+        assertEquals("Episode 😀 🚀", item.title)
+        assertEquals("Notes 😀 🚀", item.descriptionHtml)
+        assertEquals("https://cdn.example.com/😀-🚀.mp3", item.enclosures.single().url)
+    }
 
     @Test
     fun supplementaryReferenceInGuidMatchesLiteral() {

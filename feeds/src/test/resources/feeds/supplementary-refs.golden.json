@@ -1,0 +1,29 @@
+{
+  "descriptionHtml": "Synthetic numeric character references in text and attributes.",
+  "format": "RSS2",
+  "items": [
+    {
+      "descriptionHtml": "Notes 😀 🚀",
+      "descriptionIsHtml": true,
+      "enclosures": [
+        {
+          "effectiveType": "audio/mpeg",
+          "length": 1000,
+          "type": "audio/mpeg",
+          "url": "https://cdn.example.com/😀-🚀.mp3"
+        }
+      ],
+      "feedOrder": 0,
+      "guid": "ep-😀-🚀",
+      "primaryEnclosure": {
+        "effectiveType": "audio/mpeg",
+        "length": 1000,
+        "type": "audio/mpeg",
+        "url": "https://cdn.example.com/😀-🚀.mp3"
+      },
+      "title": "Episode 😀 🚀"
+    }
+  ],
+  "link": "https://example.com/supplementary",
+  "title": "Supplementary references"
+}

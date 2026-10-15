@@ -5,17 +5,19 @@ package ch.lkmc.neutrodyne.core.testing
 import ch.lkmc.neutrodyne.core.common.Clock
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestCoroutineScheduler
+import kotlin.concurrent.Volatile
 import kotlin.time.Duration
 
 /**
  * Deterministic [Clock] for tests (09 Shared helpers). The default instant is fixed at
  * `1_791_072_000_000` = 2026-10-04T00:00:00Z so tests never depend on the wall clock.
  * `TestClock.from(scheduler)` keeps the clock in lockstep with a `runTest`/`StandardTestDispatcher`
- * virtual time — advance the scheduler and the clock sees it.
+ * virtual time — advance the scheduler and the clock sees it. Both fields are volatile: worker
+ * threads (WorkManager, a desktop lane) read what the test thread or a hook writes.
  */
 class TestClock(
-    var nowMs: Long = DEFAULT_NOW,
-    var elapsedMs: Long = 0L,
+    @Volatile var nowMs: Long = DEFAULT_NOW,
+    @Volatile var elapsedMs: Long = 0L,
 ) : Clock {
     override fun now(): Long = nowMs
 
