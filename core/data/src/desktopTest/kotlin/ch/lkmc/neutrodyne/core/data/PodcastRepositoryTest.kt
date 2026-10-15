@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.data.credentials.DesktopSecretStore
 import ch.lkmc.neutrodyne.core.data.credentials.IdentitySecretProtection
 import ch.lkmc.neutrodyne.core.data.fetch.FeedTempFiles
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
+import ch.lkmc.neutrodyne.core.data.repo.PodcastMerger
 import ch.lkmc.neutrodyne.core.data.repo.PodcastRepositoryImpl
 import ch.lkmc.neutrodyne.core.database.ArtworkEntity
 import ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity
@@ -68,6 +69,7 @@ class PodcastRepositoryTest {
         scheduler = scheduler,
         sanitizer = JsoupShowNotesSanitizer(),
         clock = clock,
+        merger = PodcastMerger(db, coordinator, clock),
         secrets = secrets,
         coordinator = coordinator,
         fetcher = Provider { fetcherBundle?.fetcher ?: error("no probe fetcher in this fixture") },

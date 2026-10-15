@@ -18,6 +18,7 @@ import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshScheduler
 import ch.lkmc.neutrodyne.core.data.refresh.RssSourceAdapter
 import ch.lkmc.neutrodyne.core.data.refresh.SourceAdapter
+import ch.lkmc.neutrodyne.core.data.repo.PodcastMerger
 import ch.lkmc.neutrodyne.core.data.repo.PodcastRepositoryImpl
 import ch.lkmc.neutrodyne.core.database.DueFeed
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
@@ -568,9 +569,27 @@ internal fun newUnsubscribe(
             scheduler = scheduler,
             sanitizer = JsoupShowNotesSanitizer(),
             clock = clock,
+            merger = PodcastMerger(db, coordinator, clock),
             secrets = secrets,
             coordinator = coordinator,
             fetcher = fetcher,
             tempFiles = tempFiles,
         ),
+    )
+
+/** `setCredentials`'s probe fetcher for fixtures that never set credentials. */
+internal val unusedProbeFetcher: Provider<FeedFetcher> =
+    Provider { error("setCredentials is not wired in this fixture") }
+
+/** A fresh `FeedTempFiles` under `build/tmp/<tag>` for repository fixtures. */
+internal fun scratchTempFiles(tag: String): FeedTempFiles =
+    FeedTempFiles(
+        storagePathsFor(
+            File("build/tmp/$tag").resolve(
+                java.util.UUID
+                    .randomUUID()
+                    .toString(),
+            ),
+        ),
+        FileSystem.SYSTEM,
     )

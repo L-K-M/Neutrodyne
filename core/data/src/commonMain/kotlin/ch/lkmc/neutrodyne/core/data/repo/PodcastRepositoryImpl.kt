@@ -50,7 +50,7 @@ import kotlinx.serialization.json.Json
 /**
  * `PodcastRepository` (03 Unsubscribe and other podcast operations): read models mapped in Kotlin
  * from the 02 DAOs and the write paths M1a owns (unsubscribe, user columns, retry) plus M1b's
- * `setCredentials`. `merge` and `editFeedUrl` land with the rest of M1b and still throw;
+ * `setCredentials` and `merge`. `editFeedUrl` lands with the rest of M1b and still throws;
  * `SyncStateDao.withApplying` lands with MS0 so `ChangeOrigin.SYNC` runs the same cascade for now
  * (deviation 2026-10-07).
  */
@@ -63,6 +63,7 @@ internal class PodcastRepositoryImpl(
     private val scheduler: RefreshScheduler,
     private val sanitizer: ShowNotesSanitizer,
     private val clock: Clock,
+    private val merger: PodcastMerger,
     private val secrets: SecretStore,
     private val coordinator: CredentialCommitCoordinator,
     // Lazy (01 DI rule 7): the fetcher's `CredentialLookup` reaches the database, and building it
@@ -170,7 +171,10 @@ internal class PodcastRepositoryImpl(
         loserId: Long,
         winnerId: Long,
         origin: ChangeOrigin,
-    ): Unit = throw UnsupportedOperationException("merge is M1b")
+    ) {
+        refresher.flushFetchStates()
+        merger.merge(loserId, winnerId, origin)
+    }
 
     override suspend fun downloadedEpisodeIds(podcastIds: List<Long>): List<Long> =
         db.downloadDao().downloadedEpisodeIds(podcastIds)
