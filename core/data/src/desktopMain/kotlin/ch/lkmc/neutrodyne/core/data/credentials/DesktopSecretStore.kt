@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.Origin
 import ch.lkmc.neutrodyne.core.database.CredentialDao
@@ -36,11 +37,12 @@ import kotlinx.coroutines.CoroutineScope
  * entry is lost material and can never be committed first — and a `credential` row whose file
  * entry is gone resolves as [SecretLostException] (needsCredentials + delete).
  *
- * The Metro binding exposes `SecretStore` only. `CredentialLookup.None` stays the
- * `CredentialLookup` provider until the switchover wiring lands (M1b PR4).
+ * The Metro bindings expose `SecretStore` and the `AuthInterceptor`'s [CredentialLookup] —
+ * the same singleton answers both (03 Start-up: `FeedFetcher` also awaits its load).
  */
 @SingleIn(AppScope::class)
 @ContributesBinding(AppScope::class, binding<SecretStore>())
+@ContributesBinding(AppScope::class, binding<CredentialLookup>())
 @Inject
 internal class DesktopSecretStore(
     db: NeutrodyneDatabase,

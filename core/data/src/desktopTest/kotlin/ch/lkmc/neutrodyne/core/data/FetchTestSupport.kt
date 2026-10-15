@@ -68,7 +68,7 @@ internal fun newNetworkClients(
             hints = DnsFamilyHints(),
             debugInterceptors = emptySet(),
         ),
-        AuthInterceptor(credentials),
+        AuthInterceptor { credentials },
     )
 
 /** The desktop classifier with a synthetic "connected" flag (Offline never wins in tests). */
@@ -78,18 +78,19 @@ internal val testClassifier =
             JvmNetErrors.classify(e, connected = true)
     }
 
-/** Desktop `StoragePaths` over [root] (DataStore files land under `config/`). */
-internal fun storagePathsFor(root: File): StoragePaths =
-    StoragePaths(
-        AppDirs(
-            data = root.resolve("data").toPath(),
-            config = root.resolve("config").toPath(),
-            cache = root.resolve("cache").toPath(),
-            state = root.resolve("state").toPath(),
-            logs = root.resolve("logs").toPath(),
-            downloadsDefault = root.resolve("downloads").toPath(),
-        ),
+/** Desktop `AppDirs` over [root] — the store tests need them for `DesktopSecretStore`. */
+internal fun appDirsFor(root: File): AppDirs =
+    AppDirs(
+        data = root.resolve("data").toPath(),
+        config = root.resolve("config").toPath(),
+        cache = root.resolve("cache").toPath(),
+        state = root.resolve("state").toPath(),
+        logs = root.resolve("logs").toPath(),
+        downloadsDefault = root.resolve("downloads").toPath(),
     )
+
+/** Desktop `StoragePaths` over [root] (DataStore files land under `config/`). */
+internal fun storagePathsFor(root: File): StoragePaths = StoragePaths(appDirsFor(root))
 
 /** A `FeedFetcher` over the real client stack; temp bodies land under `root/cache/feeds`. */
 internal fun newFetcher(

@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.data.credentials
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.common.Origin
 import ch.lkmc.neutrodyne.core.database.CredentialDao
 import ch.lkmc.neutrodyne.core.database.CredentialEntity
@@ -30,11 +31,12 @@ import java.security.GeneralSecurityException
  * [SecretLostException] on the next emission; the core then marks referencing podcasts
  * `needsCredentials` and deletes the row in one transaction.
  *
- * The Metro binding exposes `SecretStore` only. `CredentialLookup.None` stays the
- * `CredentialLookup` provider until the switchover wiring lands (M1b PR4).
+ * The Metro bindings expose `SecretStore` and the `AuthInterceptor`'s [CredentialLookup] —
+ * the same singleton answers both (03 Start-up: `FeedFetcher` also awaits its load).
  */
 @SingleIn(AppScope::class)
 @ContributesBinding(AppScope::class, binding<SecretStore>())
+@ContributesBinding(AppScope::class, binding<CredentialLookup>())
 @Inject
 internal class KeystoreCredentialStore(
     db: NeutrodyneDatabase,
