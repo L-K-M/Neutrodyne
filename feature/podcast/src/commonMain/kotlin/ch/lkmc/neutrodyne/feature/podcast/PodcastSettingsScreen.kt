@@ -90,10 +90,10 @@ import org.jetbrains.compose.resources.stringResource
 
 /**
  * Podcast settings (08 Podcast settings — General and Feed of M1): a scroll list of rows; writes
- * are fire-and-forget repository calls while `editFeedUrl`/`setCredentials` surface their
- * `AddPodcastError` as a snackbar. The playback/downloads/notifications/refresh sections arrive
- * with their milestones, and the M1b edit-address/credentials rows hide behind
- * [FEED_ACCOUNT_CONTROLS_ENABLED].
+ * are fire-and-forget repository calls while `setCredentials` surfaces its `AddPodcastError` as a
+ * snackbar and `editFeedUrl`'s returns as the dialog's inline error (08's Edit-URL dialog keeps
+ * the dialog open on failure). The playback/downloads/notifications/refresh sections arrive with
+ * their milestones.
  */
 @Composable
 internal fun PodcastSettingsScreen(
@@ -101,7 +101,7 @@ internal fun PodcastSettingsScreen(
     onCustomTitle: (String?) -> Unit,
     onOrderChange: (FeedOrder) -> Unit,
     onIncludeInAll: (Boolean) -> Unit,
-    onEditFeedUrl: (String) -> Unit,
+    onEditFeedUrl: suspend (String) -> UiText?,
     onCredentials: (BasicCredentials) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -210,7 +210,7 @@ private fun GeneralSection(
 private fun FeedSection(
     feedInfo: FeedInfo,
     detail: PodcastDetail,
-    onEditFeedUrl: (String) -> Unit,
+    onEditFeedUrl: suspend (String) -> UiText?,
     onCredentials: (BasicCredentials) -> Unit,
 ) {
     val nowMs = LocalUiClock.current.now()
@@ -281,16 +281,15 @@ private fun FeedSection(
             )
         }
 
-        // M1b's edit-address and credentials rows stay hidden while their repository methods throw.
-        if (FEED_ACCOUNT_CONTROLS_ENABLED && detail.sourceType == SourceType.RSS) {
+        // RSS-only: a YouTube channel has neither a feed URL to move nor Basic-auth
+        // credentials to set (03's credential flow applies to HTTP feeds).
+        if (detail.sourceType == SourceType.RSS) {
             SettingsRow(
                 icon = NdIcons.Edit,
                 title = stringResource(Res.string.ps_edit_url),
                 summary = feedInfo.pendingNewFeedUrl,
                 onClick = { editDialog = true },
             )
-        }
-        if (FEED_ACCOUNT_CONTROLS_ENABLED) {
             SettingsRow(
                 icon = NdIcons.Key,
                 title = stringResource(Res.string.ps_credentials),
@@ -318,10 +317,7 @@ private fun FeedSection(
     if (editDialog) {
         EditUrlDialog(
             current = feedInfo.feedUrl,
-            onSubmit = {
-                editDialog = false
-                onEditFeedUrl(it)
-            },
+            onSubmit = onEditFeedUrl,
             onDismiss = { editDialog = false },
         )
     }
@@ -490,13 +486,21 @@ private fun OrderDialog(
     }
 }
 
+/**
+ * 08's Edit-URL dialog: the submit returns the failure's `UiText` — shown inline under the field
+ * with the dialog left open — while `null` closes it. A second tap during an in-flight edit is
+ * ignored; [onDismiss] may still cancel it (the launch dies with the dialog's scope).
+ */
 @Composable
 private fun EditUrlDialog(
     current: String,
-    onSubmit: (String) -> Unit,
+    onSubmit: suspend (String) -> UiText?,
     onDismiss: () -> Unit,
 ) {
     var text by rememberSaveable { mutableStateOf(current) }
+    var error by remember { mutableStateOf<UiText?>(null) }
+    var submitting by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     NdDialog(
         onDismissRequest = onDismiss,
         icon = NdIcons.Edit,
@@ -504,14 +508,27 @@ private fun EditUrlDialog(
         confirm =
             NdDialogAction(stringResource(Res.string.action_save)) {
                 val url = text.trim()
-                if (url.isNotEmpty()) onSubmit(url)
+                if (url.isEmpty() || submitting) return@NdDialogAction
+                submitting = true
+                scope.launch {
+                    error = onSubmit(url)
+                    submitting = false
+                    if (error == null) onDismiss()
+                }
             },
         dismiss = NdDialogAction(stringResource(Res.string.action_cancel), onClick = onDismiss),
     ) {
         OutlinedTextField(
             value = text,
-            onValueChange = { text = it },
+            onValueChange = {
+                text = it
+                error = null
+            },
             label = { Text(stringResource(Res.string.ps_edit_url_title)) },
+            isError = error != null,
+            supportingText = {
+                error?.let { Text(it.asString(), color = MaterialTheme.colorScheme.error) }
+            },
             singleLine = true,
         )
     }

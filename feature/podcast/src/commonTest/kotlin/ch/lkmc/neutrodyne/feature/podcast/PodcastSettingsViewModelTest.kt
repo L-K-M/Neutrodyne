@@ -25,6 +25,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -148,6 +149,37 @@ class PodcastSettingsViewModelTest : MainDispatcherTest() {
 
             podcasts.credentialsOutcome = Outcome.Failure(AddPodcastError.Network(NetError.Offline))
             assertIs<Outcome.Failure<*>>(viewModel.setCredentials(BasicCredentials("u", "p")))
+        }
+
+    /** A throwing edit returns null for the dialog's inline error and never escapes into the UI. */
+    @Test
+    fun editFeedUrlFaultReturnsNull() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            podcasts.writeError = Exception("disk full")
+
+            assertNull(viewModel.editFeedUrl("https://new.example.com/feed"))
+            advanceUntilIdle()
+            assertTrue(
+                viewModel.uiState.value.messages
+                    .isEmpty(),
+            )
+        }
+
+    @Test
+    fun setCredentialsFaultPostsAMessage() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            podcasts.writeError = Exception("disk full")
+
+            assertNull(viewModel.setCredentials(BasicCredentials("u", "p")))
+            advanceUntilIdle()
+            val message =
+                viewModel.uiState.value.messages
+                    .single()
+            assertEquals(Res.string.write_failed, (message.text as UiText.Res).id)
         }
 
     /** A throwing repository write becomes a snackbar message — not an uncaught exception (01). */

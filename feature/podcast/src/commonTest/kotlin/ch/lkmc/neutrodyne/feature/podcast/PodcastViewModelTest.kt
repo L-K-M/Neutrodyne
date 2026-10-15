@@ -36,6 +36,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -306,6 +307,21 @@ class PodcastViewModelTest : MainDispatcherTest() {
             assertTrue(
                 viewModel.uiState.value.messages
                     .isEmpty(),
+            )
+        }
+
+    @Test
+    fun setCredentialsFaultPostsAMessage() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            podcasts.writeError = Exception("disk full")
+
+            assertNull(viewModel.setCredentials(BasicCredentials("u", "p")))
+            advanceUntilIdle()
+            assertTrue(
+                viewModel.uiState.value.messages
+                    .isNotEmpty(),
             )
         }
 

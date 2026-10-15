@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.feature.podcast
 
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -204,17 +205,23 @@ class PodcastScreenTest {
         }
 
     @Test
-    fun needsCredentialsHidesPasswordAction() =
+    fun needsCredentialsOpensThePasswordDialogAndSubmits() =
         runComposeUiTest {
+            var submitted: BasicCredentials? = null
             setPodcast(
                 PodcastUiState(
                     detail = testPodcastDetail(7, health = testFeedHealth(needsCredentials = true)),
                     loaded = true,
                 ),
+                onEnterCredentials = { submitted = it },
             )
             onNodeWithText("This feed needs a password").assertIsDisplayed()
-            // `setCredentials` is M1b: the banner keeps its warning but no entry point.
-            onNodeWithText("Enter password").assertDoesNotExist()
+            // 08 Podcast detail: the banner's "Enter password" opens the credential dialog.
+            onNodeWithText("Enter password").performClick()
+            onAllNodes(hasSetTextAction())[0].performTextInput("alice")
+            onAllNodes(hasSetTextAction())[1].performTextInput("hunter2")
+            onAllNodes(hasClickAction() and hasText("Save")).onFirst().performClick()
+            assertEquals(BasicCredentials("alice", "hunter2"), submitted)
         }
 
     @Test
@@ -358,6 +365,21 @@ class PodcastScreenTest {
                 ),
             )
             onNodeWithContentDescription("Hide password").assertIsDisplayed()
+        }
+
+    @Test
+    fun credentialFieldsCarryAutofillContentTypes() =
+        runComposeUiTest {
+            setCredentialsDialog()
+
+            // CMP 1.12 autofill: the platform's credential manager reads the ContentType
+            // hint — username on field 0, password on field 1.
+            onAllNodes(hasSetTextAction())[0].assert(
+                SemanticsMatcher.expectValue(SemanticsProperties.ContentType, ContentType.Username),
+            )
+            onAllNodes(hasSetTextAction())[1].assert(
+                SemanticsMatcher.expectValue(SemanticsProperties.ContentType, ContentType.Password),
+            )
         }
 
     @Test
@@ -698,7 +720,7 @@ class PodcastScreenTest {
         return pagingItems
     }
 
-    /** The banner's credentials dialog rendered directly — its entry point waits for M1b. */
+    /** The banner's credentials dialog rendered directly. */
     private fun ComposeUiTest.setCredentialsDialog(
         onSubmit: (BasicCredentials) -> Unit = {},
         onDismiss: () -> Unit = {},
