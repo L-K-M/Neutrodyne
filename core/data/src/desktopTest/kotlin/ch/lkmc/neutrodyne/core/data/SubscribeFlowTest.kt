@@ -115,6 +115,49 @@ class SubscribeFlowTest {
     // --- The subscribe transaction (03 Subscribe transaction) -----------------------------------------
 
     @Test
+    fun subscribeDropsRedirectAndPagingUserinfo() =
+        runTest {
+            val target = feedUrl("/new")
+            val hop = feedUrl("/middle")
+            val older = feedUrl("/older")
+
+            fun withUserinfo(url: String) = url.replace("://", "://user:synthetic-subscribe-password@")
+            server.enqueue(mockResponse(301, "", "Location" to withUserinfo(hop)))
+            server.enqueue(mockResponse(308, "", "Location" to withUserinfo(target)))
+            val body =
+                rssBody(items = arrayOf(rssItem("e1"))).replace(
+                    "</channel>",
+                    """<atom:link xmlns:atom="http://www.w3.org/2005/Atom" rel="next" href="${withUserinfo(
+                        older,
+                    )}"/></channel>""",
+                )
+            server.enqueue(mockResponse(200, body))
+            val preview = assertIs<AddResolution.Feed>(resolverBundle.resolver.resolve(feedUrl())).preview
+            val id = assertIs<Outcome.Success<Long>>(subscribeBundle.useCase(preview.previewId, emptySet())).value
+            val row = assertNotNull(db.podcastDao().byId(id))
+
+            assertEquals(target, row.feedUrl)
+            assertEquals(UrlNormalizer.forIdentity(target), row.feedKey)
+            assertEquals(older, row.pagingNextUrl)
+            val aliases =
+                db
+                    .podcastDao()
+                    .aliases(id)
+                    .map { it.url }
+                    .toSet()
+            assertEquals(setOf(UrlNormalizer.forIdentity(feedUrl()), UrlNormalizer.forIdentity(hop)), aliases)
+            assertTrue(aliases.all { '@' !in it && "synthetic-subscribe-password" !in it })
+            assertNull(row.credentialId)
+            assertTrue(
+                db
+                    .credentialDao()
+                    .observeAll()
+                    .first()
+                    .isEmpty(),
+            )
+        }
+
+    @Test
     fun subscribeWritesTheRowAliasesAndInitialIngest() =
         runTest {
             val previewId = resolvePreview()

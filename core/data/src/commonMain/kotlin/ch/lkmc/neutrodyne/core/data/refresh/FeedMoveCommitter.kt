@@ -28,7 +28,7 @@ internal class FeedMoveCommitter(
     ): Boolean {
         val stored = db.podcastDao().byId(podcastId) ?: return false
         if (stored.sourceType != SourceType.RSS) return false
-        val target = permanentUrl ?: stored.feedUrl
+        val target = UrlNormalizer.splitUserInfo(permanentUrl ?: stored.feedUrl).first
         val key = UrlNormalizer.forIdentity(target) ?: return false
         return target != stored.feedUrl || key != stored.feedKey
     }
@@ -41,7 +41,7 @@ internal class FeedMoveCommitter(
     ): PodcastEntity {
         if (stored.sourceType != SourceType.RSS) return stored
 
-        val target = permanentUrl ?: stored.feedUrl
+        val target = UrlNormalizer.splitUserInfo(permanentUrl ?: stored.feedUrl).first
         val key = UrlNormalizer.forIdentity(target) ?: return stored
         if (target == stored.feedUrl && key == stored.feedKey) return stored
 

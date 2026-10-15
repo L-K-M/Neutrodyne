@@ -329,6 +329,27 @@ class PodcastSettingsScreenTest {
             onNodeWithContentDescription("Hide password").assertIsDisplayed()
         }
 
+    @Test
+    fun editUrlDraftNeverEntersSavedState() =
+        runComposeUiTest {
+            val registry = SaveableStateRegistry(null) { true }
+            setSettings(
+                PodcastSettingsUiState(
+                    detail = testPodcastDetail(7),
+                    feedInfo = testFeedInfo(),
+                    loaded = true,
+                ),
+                registry = registry,
+            )
+            onNodeWithText("Edit feed address").performClick()
+            onAllNodes(hasSetTextAction())
+                .onFirst()
+                .performTextReplacement("https://alice:synthetic-draft-password@host/feed")
+            var saved: Map<String, List<Any?>> = emptyMap()
+            runOnIdle { saved = registry.performSave() }
+            kotlin.test.assertFalse("synthetic-draft-password" in saved.toString())
+        }
+
     /**
      * Secrets never enter saved state: after a save/restore round trip the username comes
      * back but the password field starts empty.
@@ -384,9 +405,11 @@ class PodcastSettingsScreenTest {
         onIncludeInAll: (Boolean) -> Unit = {},
         onEditFeedUrl: suspend (String) -> UiText? = { null },
         onCredentials: (BasicCredentials) -> Unit = {},
+        registry: SaveableStateRegistry = SaveableStateRegistry(null) { true },
     ) {
         setContent {
             CompositionLocalProvider(
+                LocalSaveableStateRegistry provides registry,
                 LocalPlatformKind provides PlatformKind.DESKTOP,
                 LocalUiClock provides TestClock(),
                 LocalAppNavigator provides navigator,

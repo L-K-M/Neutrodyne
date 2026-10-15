@@ -497,7 +497,8 @@ private fun EditUrlDialog(
     onSubmit: suspend (String) -> UiText?,
     onDismiss: () -> Unit,
 ) {
-    var text by rememberSaveable { mutableStateOf(current) }
+    // A typed URL can contain a password, so its draft must stay out of saved state.
+    var text by remember { mutableStateOf(current) }
     var error by remember { mutableStateOf<UiText?>(null) }
     var submitting by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()

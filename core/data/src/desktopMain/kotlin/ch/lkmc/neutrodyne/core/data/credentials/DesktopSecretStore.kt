@@ -126,7 +126,7 @@ internal class DesktopSecretStore(
             if (prior == null) file.remove(origin) else file.put(origin, prior)
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
-            Log.w(TAG, t) { "could not roll back the secrets file after a failed row write" }
+            Log.w(TAG) { "could not roll back the secrets file after a failed row write (${t::class.simpleName})" }
         }
     }
 
