@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: Unlicense
 #
 # nightly.yml — 09's overnight jobs. M0a carries `instrumented-full` (debug
-# leg), `api37-16k`, `release-build-smoke` and the report-only `repro`; the
-# other jobs land with their milestones (`system-tests` M6b, `no-engine-build`
-# M9a, `desktop-matrix` M0b, `sync-convergence` MS0, `server-image-smoke` MS1,
-# `benchmark-dryrun` M10, `screenshots-full` M10, `mutation-full` M1a,
-# `live-canary`, `youtube-canary` and `engine-nightly-canary` M9a).
+# leg), `api37-16k`, `release-build-smoke` and the report-only `repro`; M1a
+# adds `mutation-full`. The other jobs land with their milestones
+# (`system-tests` M6b, `no-engine-build` M9a, `desktop-matrix` M0b,
+# `sync-convergence` MS0, `server-image-smoke` MS1, `benchmark-dryrun` M10,
+# `screenshots-full` M10, `live-canary`, `youtube-canary` and
+# `engine-nightly-canary` M9a).
 #
 # A failing job runs scripts/ci/report-nightly.sh, which opens or updates one
 # issue per job (label `nightly-failure`) and closes it after the next green
@@ -100,7 +101,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: scripts/ci/report-nightly.sh instrumented-full --close
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !success() }}
         with:
           name: instrumented-full-results
@@ -252,7 +253,7 @@ jobs:
       # The device log of both emulator steps, for diagnosing a failed run (system_server state).
       - name: Upload the emulator logs
         if: ${{ !success() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: api37-16k-logcat
           path: ${{ runner.temp }}/logcat-api37-*.txt
@@ -375,7 +376,7 @@ jobs:
             b="app/build/outputs/apk/release/$(basename "$a")"
             diffoscope --html "diff-$(basename "$a").html" "$a" "$b" || true
           done
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: steps.diff.outputs.identical == '0'
         with:
           name: repro-diffoscope
@@ -390,3 +391,52 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: scripts/ci/report-nightly.sh repro --label repro --close
+
+  mutation-full:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      issues: write # report-nightly.sh
+    if: inputs.scope == '' || inputs.scope == 'full'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+          cache-read-only: true
+      # 09's deep pass over the capped-heap suites the PR gate samples: 1,000
+      # seeded iterations per fixture inside the 128 MB `mutationTest` heap.
+      # The parses run single-fork, so this is tens of minutes of wall time.
+      - name: Mutation robustness, 1,000 iterations per fixture
+        # Leaves the job's last 15 minutes for the failure report and upload.
+        timeout-minutes: 75
+        run: ./gradlew mutationTest -PmutationIterations=1000 --continue
+      - name: Report failure
+        if: ${{ !success() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh mutation-full
+      - name: Report recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh mutation-full --close
+      # The JUnit XML and HTML report carry the failing fixture name and its
+      # stack; the fixture's name hash is the reproducer seed.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !success() }}
+        with:
+          name: mutation-full-results
+          path: |
+            **/build/reports/tests/
+            **/build/test-results/
