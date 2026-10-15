@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.data.ingest.FeedIngestor
 import ch.lkmc.neutrodyne.core.data.ingest.FetchMeta
 import ch.lkmc.neutrodyne.core.data.ingest.IngestionEventBus
 import ch.lkmc.neutrodyne.core.data.refresh.AdapterResult
+import ch.lkmc.neutrodyne.core.data.refresh.FeedMoveCommitter
 import ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher
 import ch.lkmc.neutrodyne.core.data.refresh.FetchMode
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
@@ -41,6 +42,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.feeds.html.ShowNotesSanitizer
+import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.jvm.html.JsoupShowNotesSanitizer
 import ch.lkmc.neutrodyne.feeds.jvm.parse.XmlPullFeedParser
 import ch.lkmc.neutrodyne.feeds.model.Enclosure
@@ -130,7 +132,7 @@ internal fun newIngestor(
     settings: SettingsRepository = FakeSettingsRepository(),
     sanitizer: ShowNotesSanitizer = JsoupShowNotesSanitizer(),
     defaultDispatcher: CoroutineDispatcher = Dispatchers.Default,
-): FeedIngestor = FeedIngestor(db, sanitizer, settings, clock, defaultDispatcher)
+): FeedIngestor = FeedIngestor(db, sanitizer, settings, clock, newFeedMoves(db, clock), defaultDispatcher)
 
 internal fun newRefresher(
     db: NeutrodyneDatabase,
@@ -154,7 +156,22 @@ internal fun newRefresher(
         ),
     random: Random = Random(1),
     ingestor: FeedIngestor = newIngestor(db, clock, settings),
-): FeedRefresher = FeedRefresher(db, adapters, ingestor, eventBus, syncHook, tempFiles, settings, clock, random)
+    scheduler: RefreshScheduler = FakeRefreshScheduler(),
+    moves: FeedMoveCommitter = newFeedMoves(db, clock),
+): FeedRefresher =
+    FeedRefresher(
+        db,
+        adapters,
+        ingestor,
+        eventBus,
+        syncHook,
+        tempFiles,
+        settings,
+        clock,
+        random,
+        moves,
+        { scheduler },
+    )
 
 internal fun fetchMeta(
     finalUrl: String = "https://example.com/feed.xml",
@@ -183,7 +200,7 @@ internal fun fetchMeta(
 internal suspend fun seedPodcast(
     db: NeutrodyneDatabase,
     feedUrl: String,
-    feedKey: String = feedUrl,
+    feedKey: String = UrlNormalizer.forIdentity(feedUrl) ?: feedUrl,
     title: String = "Seeded",
     status: PodcastStatus = PodcastStatus.ACTIVE,
     initialFetch: Boolean = false,
@@ -576,6 +593,11 @@ internal fun newUnsubscribe(
             tempFiles = tempFiles,
         ),
     )
+
+private fun newFeedMoves(
+    db: NeutrodyneDatabase,
+    clock: TestClock,
+) = FeedMoveCommitter(db, PodcastMerger(db, FakeCredentialCommitCoordinator(), clock), clock)
 
 /** `setCredentials`'s probe fetcher for fixtures that never set credentials. */
 internal val unusedProbeFetcher: Provider<FeedFetcher> =

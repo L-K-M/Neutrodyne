@@ -72,7 +72,7 @@ internal sealed interface FeedOutcome {
         val httpStatus: Int?,
     ) : FeedOutcome
 
-    /** 04 only: not attempted; only `nextRefreshAt` moves (03 API). */
+    /** Adapter deferral (04) or a response superseded by a concurrent address change (03 API). */
     data class Deferred(
         val untilMs: Long,
     ) : FeedOutcome

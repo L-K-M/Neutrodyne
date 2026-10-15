@@ -24,59 +24,83 @@ internal class PodcastMerger(
         // Last-reference deletion must exclude credential puts before acquiring the Room writer.
         coordinator.withCredentialCommit {
             db.withWriteTransaction {
-                val podcasts = db.podcastDao()
-                val loser = requireNotNull(podcasts.byId(loserId)) { "Losing podcast does not exist" }
-                requireNotNull(podcasts.byId(winnerId)) { "Winning podcast does not exist" }
-                val dao = db.podcastMergeDao()
-                val now = clock.now()
-
-                // Re-read under the writer: an ingest may have changed either feed while we waited.
-                val winningEpisodes = db.ingestDao().existing(winnerId).sortedBy { it.id }
-                val byKey = winningEpisodes.associateBy { it.identityKey }
-                val byUrl =
-                    winningEpisodes
-                        .mapNotNull { row ->
-                            row.enclosureUrl?.let(UrlNormalizer::forIdentity)?.let { it to row }
-                        }.groupBy({ it.first }, { it.second })
-                val losingEpisodes = db.ingestDao().existing(loserId)
-
-                dao.copyMemberships(loserId, winnerId)
-                dao.moveAliases(loserId, winnerId)
-                val urls = setOfNotNull(loser.feedKey, UrlNormalizer.forIdentity(loser.feedUrl))
-                for (url in urls) dao.addMergeAlias(loserId, winnerId, url, now)
-                dao.removeFeedKeyAliases(loserId, winnerId)
-                dao.copySettings(loserId, winnerId)
-                dao.copyMissingTitle(loserId, winnerId)
-
-                for (episode in losingEpisodes) {
-                    val winner =
-                        byKey[episode.identityKey] ?: episode.enclosureUrl
-                            ?.let(UrlNormalizer::forIdentity)
-                            ?.let { byUrl[it]?.firstOrNull() }
-                    if (winner == null) {
-                        dao.reparentEpisode(episode.id, winnerId)
-                        continue
-                    }
-
-                    dao.copyState(episode.id, winner.id)
-                    dao.unionState(episode.id, winner.id)
-                    dao.clearPlayedStart(winner.id)
-                    dao.copyPosition(episode.id, winner.id)
-                    dao.mergePosition(episode.id, winner.id)
-                    dao.resetPlayedPosition(winner.id)
-                    dao.ensureProgressState(winner.id)
-                    dao.deriveProgressStart(winner.id)
-                    dao.moveQueue(episode.id, winner.id)
-                    dao.moveDownload(episode.id, winner.id)
-                    dao.moveCurrentEpisode(episode.id, winner.id)
-                }
-
-                dao.moveContext(loserId, winnerId)
-                dao.moveImportItems(loserId, winnerId)
-                dao.copyProvenance(loserId, winnerId)
-                dao.unionAmbiguity(loserId, winnerId)
-                podcasts.deleteCascade(loserId, now)
+                mergeInTransaction(loserId, winnerId)
             }
         }
+    }
+
+    /** Revalidate both primary and alias ownership after taking the coordinator and writer. */
+    suspend fun mergeIntoKeyOwner(
+        loserId: Long,
+        key: String,
+    ): Long? =
+        coordinator.withCredentialCommit {
+            db.withWriteTransaction {
+                val podcasts = db.podcastDao()
+                if (podcasts.byId(loserId) == null) return@withWriteTransaction null
+                val owner = podcasts.byFeedKey(key)?.id ?: podcasts.aliasOwner(key)
+                if (owner == null || owner == loserId) return@withWriteTransaction null
+
+                mergeInTransaction(loserId, owner)
+                owner
+            }
+        }
+
+    private suspend fun mergeInTransaction(
+        loserId: Long,
+        winnerId: Long,
+    ) {
+        val podcasts = db.podcastDao()
+        val loser = requireNotNull(podcasts.byId(loserId)) { "Losing podcast does not exist" }
+        requireNotNull(podcasts.byId(winnerId)) { "Winning podcast does not exist" }
+        val dao = db.podcastMergeDao()
+        val now = clock.now()
+
+        // Re-read under the writer: an ingest may have changed either feed while we waited.
+        val winningEpisodes = db.ingestDao().existing(winnerId).sortedBy { it.id }
+        val byKey = winningEpisodes.associateBy { it.identityKey }
+        val byUrl =
+            winningEpisodes
+                .mapNotNull { row ->
+                    row.enclosureUrl?.let(UrlNormalizer::forIdentity)?.let { it to row }
+                }.groupBy({ it.first }, { it.second })
+        val losingEpisodes = db.ingestDao().existing(loserId)
+
+        dao.copyMemberships(loserId, winnerId)
+        dao.moveAliases(loserId, winnerId)
+        val urls = setOfNotNull(loser.feedKey, UrlNormalizer.forIdentity(loser.feedUrl))
+        for (url in urls) dao.addMergeAlias(loserId, winnerId, url, now)
+        dao.removeFeedKeyAliases(loserId, winnerId)
+        dao.copySettings(loserId, winnerId)
+        dao.copyMissingTitle(loserId, winnerId)
+
+        for (episode in losingEpisodes) {
+            val winner =
+                byKey[episode.identityKey] ?: episode.enclosureUrl
+                    ?.let(UrlNormalizer::forIdentity)
+                    ?.let { byUrl[it]?.firstOrNull() }
+            if (winner == null) {
+                dao.reparentEpisode(episode.id, winnerId)
+                continue
+            }
+
+            dao.copyState(episode.id, winner.id)
+            dao.unionState(episode.id, winner.id)
+            dao.clearPlayedStart(winner.id)
+            dao.copyPosition(episode.id, winner.id)
+            dao.mergePosition(episode.id, winner.id)
+            dao.resetPlayedPosition(winner.id)
+            dao.ensureProgressState(winner.id)
+            dao.deriveProgressStart(winner.id)
+            dao.moveQueue(episode.id, winner.id)
+            dao.moveDownload(episode.id, winner.id)
+            dao.moveCurrentEpisode(episode.id, winner.id)
+        }
+
+        dao.moveContext(loserId, winnerId)
+        dao.moveImportItems(loserId, winnerId)
+        dao.copyProvenance(loserId, winnerId)
+        dao.unionAmbiguity(loserId, winnerId)
+        podcasts.deleteCascade(loserId, now)
     }
 }
