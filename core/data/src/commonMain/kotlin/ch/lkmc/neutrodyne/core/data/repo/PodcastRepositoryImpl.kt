@@ -283,7 +283,6 @@ internal class PodcastRepositoryImpl(
         input: String,
     ): Outcome<Unit, AddPodcastError> =
         refresher.editFeedUrl(podcastId) {
-            // TODO(M1b PR4): store input credentials under their request origin after a successful probe.
             when (val result = resolver.probe(input)) {
                 is Outcome.Failure -> {
                     if (result.error == AddPodcastError.YouTubeNotYetSupported) {

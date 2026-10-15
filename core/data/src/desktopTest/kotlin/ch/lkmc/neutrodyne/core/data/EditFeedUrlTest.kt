@@ -6,16 +6,23 @@ import androidx.room3.useWriterConnection
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.add.PreviewEntry
 import ch.lkmc.neutrodyne.core.data.add.PreviewEntryResolver
+import ch.lkmc.neutrodyne.core.data.credentials.DesktopSecretStore
+import ch.lkmc.neutrodyne.core.data.credentials.IdentitySecretProtection
 import ch.lkmc.neutrodyne.core.data.ingest.FetchMeta
 import ch.lkmc.neutrodyne.core.data.ingest.IngestContext
 import ch.lkmc.neutrodyne.core.data.ingest.IngestMode
+import ch.lkmc.neutrodyne.core.data.refresh.FeedOutcome
+import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
+import ch.lkmc.neutrodyne.core.data.refresh.RefreshRequest
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshScheduler
 import ch.lkmc.neutrodyne.core.data.repo.PodcastMerger
 import ch.lkmc.neutrodyne.core.data.repo.PodcastRepositoryImpl
 import ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.AddResolution
+import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.model.AliasReason
+import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
@@ -26,8 +33,11 @@ import ch.lkmc.neutrodyne.core.testing.database.episodeStateEntity
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.jvm.html.JsoupShowNotesSanitizer
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import mockwebserver3.MockResponse
@@ -56,7 +66,29 @@ class EditFeedUrlTest {
     private val resolver = newResolver(root, db, clock)
     private val scheduler = FakeRefreshScheduler()
     private val adapter = stubAdapter()
-    private val engine = newRefresher(db, mapOf(SourceType.RSS to adapter), clock, scheduler = scheduler)
+
+    // One shared coordinator, and a real store: `podcast.credentialId` references real
+    // `credential` rows, and refresh's origin lookup only exists against the persisted map.
+    private val coordinator = FakeCredentialCommitCoordinator()
+    private val storeScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val store =
+        DesktopSecretStore(
+            db = db,
+            appDirs = appDirsFor(root),
+            coordinator = coordinator,
+            clock = clock,
+            protection = IdentitySecretProtection,
+            scope = storeScope,
+        )
+    private val engine =
+        newRefresher(
+            db,
+            mapOf(SourceType.RSS to adapter),
+            clock,
+            scheduler = scheduler,
+            secrets = store,
+            coordinator = coordinator,
+        )
     private val repository =
         PodcastRepositoryImpl(
             db,
@@ -64,22 +96,33 @@ class EditFeedUrlTest {
             scheduler,
             JsoupShowNotesSanitizer(),
             clock,
-            PodcastMerger(db, FakeCredentialCommitCoordinator(), clock),
+            PodcastMerger(db, coordinator, clock),
             resolver.resolver,
-            FakeSecretStore(),
-            FakeCredentialCommitCoordinator(),
+            store,
+            coordinator,
             unusedProbeFetcher,
             scratchTempFiles("edit-feed-url"),
         )
 
     @AfterTest
     fun tearDown() {
+        storeScope.cancel()
         resolver.close()
         db.close()
         root.deleteRecursively()
     }
 
     private fun url(path: String = "/new") = server.url(path).toString()
+
+    private fun origin(url: String) = requireNotNull(UrlNormalizer.origin(url))
+
+    private fun request(id: Long) =
+        RefreshRequest(
+            scope = RefreshScope.Podcasts(listOf(id)),
+            force = true,
+            pagesOnly = false,
+            origin = RefreshOrigin.MANUAL,
+        )
 
     private fun key(url: String) = requireNotNull(UrlNormalizer.forIdentity(url))
 
@@ -169,6 +212,7 @@ class EditFeedUrlTest {
     private fun repositoryWithMeta(
         entry: PreviewEntry,
         meta: FetchMeta,
+        credentials: BasicCredentials? = entry.credentials,
     ): PodcastRepositoryImpl {
         val probe =
             object : PreviewEntryResolver by resolver.resolver {
@@ -180,7 +224,7 @@ class EditFeedUrlTest {
                             entry.feed,
                             meta,
                             entry.hops,
-                            entry.credentials,
+                            credentials,
                             entry.createdAt,
                         ),
                     )
@@ -191,10 +235,10 @@ class EditFeedUrlTest {
             scheduler,
             JsoupShowNotesSanitizer(),
             clock,
-            PodcastMerger(db, FakeCredentialCommitCoordinator(), clock),
+            PodcastMerger(db, coordinator, clock),
             probe,
-            FakeSecretStore(),
-            FakeCredentialCommitCoordinator(),
+            store,
+            coordinator,
             unusedProbeFetcher,
             scratchTempFiles("edit-feed-url"),
         )
@@ -455,8 +499,13 @@ class EditFeedUrlTest {
             assertEquals(0, server.requestCount)
         }
 
+    /**
+     * 03 Edit URL + Basic auth: the request URL's userinfo probes the feed, then persists under
+     * the ORIGINAL request origin inside the credential commit — the stored feed URL never
+     * carries it, and the next refresh answers the fetcher's lookup through `credentialId`.
+     */
     @Test
-    fun userinfoIsUsedOnlyForTheProbeAndNeverStored() =
+    fun userinfoIsPersistedUnderItsRequestOriginAndReusedByRefresh() =
         runTest {
             val id = seedPodcast(db, url("/old"))
             server.enqueue(mockResponse(body = body()))
@@ -466,9 +515,78 @@ class EditFeedUrlTest {
             val stored = assertNotNull(db.podcastDao().byId(id))
             assertEquals(url(), stored.feedUrl)
             assertEquals(key(url()), stored.feedKey)
-            assertNull(stored.credentialId)
             assertNull(resolver.cache.findByUrl(url()))
             assertTrue(db.podcastDao().aliases(id).none { it.url.contains('@') })
+
+            val credential =
+                db
+                    .credentialDao()
+                    .byOrigin(origin(url()))
+                    .single()
+            assertEquals(credential.id, stored.credentialId)
+
+            // The refresh run's fetcher resolves the credential by the feed's request origin.
+            server.enqueue(mockResponse(body = rssBody(title = "Refreshed")))
+            newRssAdapter(root, clock, credentials = store).use { bundle ->
+                val refreshEngine =
+                    newRefresher(
+                        db,
+                        mapOf(SourceType.RSS to bundle.adapter),
+                        clock,
+                        tempFiles = bundle.tempFiles,
+                        scheduler = scheduler,
+                        secrets = store,
+                        coordinator = coordinator,
+                    )
+                assertIs<FeedOutcome.Ingested>(refreshEngine.run(request(id)).outcomes[id])
+            }
+            assertEquals("Basic dTpwQHNz", server.takeRequest().headers["Authorization"])
+        }
+
+    @Test
+    fun aFailedProbeStoresNoCredentials() =
+        runTest {
+            val id = seedPodcast(db, url("/old"))
+            server.enqueue(mockResponse(404, "Missing"))
+            val input = "http://u:p@${server.hostName}:${server.port}/new"
+            assertEquals(
+                Outcome.Failure(AddPodcastError.Http(404)),
+                repository.editFeedUrl(id, input),
+            )
+            assertTrue(db.credentialDao().byOrigin(origin(url())).isEmpty())
+            assertNull(db.podcastDao().byId(id)!!.credentialId)
+        }
+
+    /**
+     * The credential keeps the ORIGINAL request's origin even when a permanent redirect moves
+     * the subscription elsewhere — it must never be relabelled to the target (03).
+     */
+    @Test
+    fun aRedirectTargetNeverInheritsTheRequestCredentials() =
+        runTest {
+            val id = seedPodcast(db, url("/old"))
+            server.enqueue(mockResponse(body = body()))
+            val entry = assertIs<Outcome.Success<PreviewEntry>>(resolver.resolver.probe(url())).value
+            server.takeRequest()
+            val repo =
+                repositoryWithMeta(
+                    entry,
+                    entry.meta.copy(
+                        requestedUrl = "https://request.example.com/feed",
+                        permanentUrl = url("/moved"),
+                    ),
+                    credentials = BasicCredentials("u", "p"),
+                )
+            assertEquals(Outcome.Success(Unit), repo.editFeedUrl(id, url("/typed")))
+            val stored = assertNotNull(db.podcastDao().byId(id))
+            assertEquals(url("/moved"), stored.feedUrl)
+            val credential =
+                db
+                    .credentialDao()
+                    .byOrigin("https://request.example.com")
+                    .single()
+            assertEquals(credential.id, stored.credentialId)
+            assertTrue(db.credentialDao().byOrigin(origin(url("/moved"))).isEmpty())
         }
 
     @Test
@@ -535,10 +653,14 @@ class EditFeedUrlTest {
                 )
             }
             server.enqueue(mockResponse(body = body()))
-            assertTrue(runCatching { repository.editFeedUrl(id, url()) }.isFailure)
+            // The userinfo `put` commits before the write transaction; the abort rolls both
+            // back — no `credential` row may outlive a failed commit (03's cleanup rule).
+            val input = "http://u:p@${server.hostName}:${server.port}/new"
+            assertTrue(runCatching { repository.editFeedUrl(id, input) }.isFailure)
             assertEquals(before, db.podcastDao().byId(id))
             assertTrue(db.podcastDao().aliases(id).isEmpty())
             assertEquals(episodes, db.ingestDao().existing(id))
+            assertTrue(db.credentialDao().byOrigin(origin(url())).isEmpty())
             assertEquals(0, scheduler.rescheduleCount)
         }
 
@@ -556,6 +678,8 @@ class EditFeedUrlTest {
                     mapOf(SourceType.RSS to adapter),
                     clock,
                     scheduler = failingScheduler,
+                    secrets = store,
+                    coordinator = coordinator,
                 )
             val repo =
                 PodcastRepositoryImpl(
@@ -564,10 +688,10 @@ class EditFeedUrlTest {
                     failingScheduler,
                     JsoupShowNotesSanitizer(),
                     clock,
-                    PodcastMerger(db, FakeCredentialCommitCoordinator(), clock),
+                    PodcastMerger(db, coordinator, clock),
                     resolver.resolver,
-                    FakeSecretStore(),
-                    FakeCredentialCommitCoordinator(),
+                    store,
+                    coordinator,
                     unusedProbeFetcher,
                     scratchTempFiles("edit-feed-url"),
                 )

@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.data.add.PreviewEntry
 import ch.lkmc.neutrodyne.core.data.add.isAccepted
+import ch.lkmc.neutrodyne.core.data.credentials.removeUnreferenced
 import ch.lkmc.neutrodyne.core.data.fetch.FeedTempFiles
 import ch.lkmc.neutrodyne.core.data.ingest.FeedIngestor
 import ch.lkmc.neutrodyne.core.data.ingest.IngestContext
@@ -22,11 +23,14 @@ import ch.lkmc.neutrodyne.core.database.FetchStateBatcher
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastFetchState
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
+import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.RefreshStatus
+import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.model.AliasReason
+import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.NewEpisodes
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
@@ -84,6 +88,8 @@ internal class FeedRefresher(
     private val moves: FeedMoveCommitter,
     private val newFeedUrlProbe: NewFeedUrlProbe,
     private val scheduler: Provider<RefreshScheduler>,
+    private val secrets: SecretStore,
+    private val coordinator: CredentialCommitCoordinator,
 ) {
     private val mutex = Mutex()
 
@@ -225,33 +231,36 @@ internal class FeedRefresher(
             while (true) {
                 try {
                     committed =
-                        db.withWriteTransaction {
-                            val stored = podcasts.byId(targetId) ?: return@withWriteTransaction null
-                            if (stored.sourceType != SourceType.RSS) return@withWriteTransaction null
-                            if (!merged) moves.applyInTransaction(stored, targetUrl, AliasReason.SUBSCRIBE_INPUT)
-                            podcasts.clearRefreshBlock(targetId)
-                            val current = podcasts.dueFeedById(targetId) ?: return@withWriteTransaction null
-                            val mode =
-                                if (current.initialFetch || current.status == PodcastStatus.PENDING_FIRST_FETCH) {
-                                    IngestMode.INITIAL
-                                } else {
-                                    IngestMode.REFRESH
-                                }
-                            current to
-                                ingestor.ingestInTransaction(
-                                    current,
-                                    entry.feed,
-                                    IngestContext(
-                                        mode = mode,
-                                        partial = entry.feed.paging.isPartialWindow,
-                                        fetch = entry.meta.copy(permanentUrl = null),
-                                        validators = IngestValidators.DISCARD,
-                                    ),
-                                )
+                        inCredentialCommit(entry) { credentialId ->
+                            db.withWriteTransaction {
+                                val stored = podcasts.byId(targetId) ?: return@withWriteTransaction null
+                                if (stored.sourceType != SourceType.RSS) return@withWriteTransaction null
+                                if (!merged) moves.applyInTransaction(stored, targetUrl, AliasReason.SUBSCRIBE_INPUT)
+                                if (credentialId != null) podcasts.setCredentialId(targetId, credentialId)
+                                podcasts.clearRefreshBlock(targetId)
+                                val current = podcasts.dueFeedById(targetId) ?: return@withWriteTransaction null
+                                val mode =
+                                    if (current.initialFetch || current.status == PodcastStatus.PENDING_FIRST_FETCH) {
+                                        IngestMode.INITIAL
+                                    } else {
+                                        IngestMode.REFRESH
+                                    }
+                                current to
+                                    ingestor.ingestInTransaction(
+                                        current,
+                                        entry.feed,
+                                        IngestContext(
+                                            mode = mode,
+                                            partial = entry.feed.paging.isPartialWindow,
+                                            fetch = entry.meta.copy(permanentUrl = null),
+                                            validators = IngestValidators.DISCARD,
+                                        ),
+                                    )
+                            }
                         }
                     break
                 } catch (collision: FeedMoveCollision) {
-                    // The writer has unwound before credential cleanup acquires its coordinator.
+                    // The commit block has unwound before credential cleanup acquires its coordinator.
                     val survivor = moves.mergeCollision(targetId, collision) ?: continue
                     targetId = survivor.id
                     merged = true
@@ -271,6 +280,43 @@ internal class FeedRefresher(
             }
             Outcome.Success(Unit)
         }
+
+    /**
+     * 03's credential commit on the edit path (subscribe's `inCredentialCommit`): when the
+     * probe request carried userinfo, `put` stores it under the ORIGINAL request's origin —
+     * a redirect target never inherits the label — inside `withCredentialCommit`, and [tx]'s
+     * write transaction lands the referencing `podcast.credentialId` in the same coordinated
+     * block. A transaction that fails or commits no reference rolls the `put` back.
+     *
+     * Not reentrant: a `FeedMoveCollision` propagates out of the commit so the retry's
+     * merge can acquire the coordinator. The retried `put` is idempotent for the same origin.
+     */
+    private suspend fun inCredentialCommit(
+        entry: PreviewEntry,
+        tx: suspend (credentialId: Long?) -> Pair<DueFeed, IngestResult>?,
+    ): Pair<DueFeed, IngestResult>? {
+        val credentials = entry.credentials ?: return tx(null)
+        // `put` normalises the origin again; requestedUrl keeps the request-first rule.
+        val origin = UrlNormalizer.origin(entry.meta.requestedUrl) ?: return tx(null)
+        return coordinator.withCredentialCommit {
+            val credentialId =
+                secrets.put(origin, credentials.username, credentials.password.toCharArray())
+            try {
+                tx(credentialId).also { committed ->
+                    if (committed == null) {
+                        withContext(NonCancellable) {
+                            secrets.removeUnreferenced(db.credentialDao(), origin, credentialId)
+                        }
+                    }
+                }
+            } catch (t: Throwable) {
+                withContext(NonCancellable) {
+                    secrets.removeUnreferenced(db.credentialDao(), origin, credentialId)
+                }
+                throw t
+            }
+        }
+    }
 
     private suspend fun runLocked(request: RefreshRequest): RefreshReport {
         mergedThisRun = false
@@ -487,48 +533,52 @@ internal class FeedRefresher(
             if (!claimed) return@suspendRunCatching outcome
 
             var latest = outcome
-            newFeedUrlProbe.run(
-                podcastId = id,
-                current = result.feed,
-                deadlineElapsedMs = request.deadlineElapsedMs,
-                fetch = { target ->
-                    hostPermits.semaphore(adapter.hostKey(target, target.feedUrl)).withPermit {
-                        if (request.deadlineElapsedMs != RefreshRequest.NO_DEADLINE &&
-                            clock.elapsedRealtime() >= request.deadlineElapsedMs - DEADLINE_MARGIN_MS
-                        ) {
-                            return@withPermit AdapterResult.Deferred(clock.now())
-                        }
+            // The current ingest already committed: a probe fault must not reach the handler
+            // below, which would record a STORAGE failure over that success.
+            suspendRunCatching {
+                newFeedUrlProbe.run(
+                    podcastId = id,
+                    current = result.feed,
+                    deadlineElapsedMs = request.deadlineElapsedMs,
+                    fetch = { target ->
+                        hostPermits.semaphore(adapter.hostKey(target, target.feedUrl)).withPermit {
+                            if (request.deadlineElapsedMs != RefreshRequest.NO_DEADLINE &&
+                                clock.elapsedRealtime() >= request.deadlineElapsedMs - DEADLINE_MARGIN_MS
+                            ) {
+                                return@withPermit AdapterResult.Deferred(clock.now())
+                            }
 
-                        val fetched = adapter.fetchAndParse(target, FetchMode.FULL)
-                        if (fetched is AdapterResult.Failed) fetched.htmlBody?.let { tempFiles.delete(it) }
-                        fetched
-                    }
-                },
-                adopt = { source, url, candidate ->
-                    commitMutex.withLock {
-                        val current = db.podcastDao().dueFeedById(source.id)
-                        val pending = db.podcastDao().byId(source.id)?.pendingNewFeedUrl
-                        if (current == null || current.feedUrl != source.feedUrl || pending != url) {
-                            return@withLock FeedOutcome.Deferred(currentNextAt(source.id))
+                            val fetched = adapter.fetchAndParse(target, FetchMode.FULL)
+                            if (fetched is AdapterResult.Failed) fetched.htmlBody?.let { tempFiles.delete(it) }
+                            fetched
                         }
-                        val adopted = ingestOutcome(current, adapter, candidate, clock.now(), newFeedUrl = url)
-                        if (adopted is FeedOutcome.Ingested || adopted is FeedOutcome.Merged) {
-                            val survivor = (adopted as? FeedOutcome.Merged)?.intoPodcastId
-                            latest =
-                                if (survivor != null) {
-                                    adopted
-                                } else if (latest is FeedOutcome.Merged) {
-                                    latest
-                                } else {
-                                    adopted
-                                }
-                            committed(latest)
+                    },
+                    adopt = { source, url, candidate ->
+                        commitMutex.withLock {
+                            val current = db.podcastDao().dueFeedById(source.id)
+                            val pending = db.podcastDao().byId(source.id)?.pendingNewFeedUrl
+                            if (current == null || current.feedUrl != source.feedUrl || pending != url) {
+                                return@withLock FeedOutcome.Deferred(currentNextAt(source.id))
+                            }
+                            val adopted = ingestOutcome(current, adapter, candidate, clock.now(), newFeedUrl = url)
+                            if (adopted is FeedOutcome.Ingested || adopted is FeedOutcome.Merged) {
+                                val survivor = (adopted as? FeedOutcome.Merged)?.intoPodcastId
+                                latest =
+                                    if (survivor != null) {
+                                        adopted
+                                    } else if (latest is FeedOutcome.Merged) {
+                                        latest
+                                    } else {
+                                        adopted
+                                    }
+                                committed(latest)
+                            }
+                            adopted
                         }
-                        adopted
-                    }
-                },
-                claimSurvivor = { survivor -> commitMutex.withLock { probedThisRun.add(survivor) } },
-            )
+                    },
+                    claimSurvivor = { survivor -> commitMutex.withLock { probedThisRun.add(survivor) } },
+                )
+            }.onFailure { e -> Log.w(TAG, e) { "new-feed-url probe failed for podcast $id" } }
             latest
         }.getOrElse { e ->
             if (e is CancellationException) throw e

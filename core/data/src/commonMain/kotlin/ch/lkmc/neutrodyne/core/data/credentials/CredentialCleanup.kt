@@ -20,9 +20,12 @@ internal suspend fun SecretStore.removeUnreferenced(
     origin: String,
     rowId: Long?,
 ) {
-    if (rowId != null && dao.referenceCount(rowId) > 0) return
-    suspendRunCatching { remove(origin) }
-        .onFailure { e -> Log.w(TAG, e) { "credential rollback for a failed commit failed" } }
+    // The reference check runs inside the guard too: when the database is why the commit
+    // failed, it throws as well. Unknown or present references keep the credential; the
+    // maintenance sweep removes true orphans.
+    suspendRunCatching {
+        if (rowId != null && dao.referenceCount(rowId) == 0) remove(origin)
+    }.onFailure { e -> Log.w(TAG, e) { "credential rollback for a failed commit failed" } }
 }
 
 private const val TAG = "CredentialCommit"

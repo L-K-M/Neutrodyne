@@ -252,10 +252,34 @@ class FeedMovesTest {
                 server.enqueue(mockResponse(304, ""))
             }
 
-            assertEquals(FeedErrorKind.HTTP_CLIENT, assertIs<FeedOutcome.Failed>(refresh(id)).kind)
+            // The first 304 already proved the feed healthy; a confirmation without a body keeps
+            // that success and the next refresh tries again.
+            assertEquals(FeedOutcome.NotModified, refresh(id))
             assertEquals(4, server.requestCount)
-            assertEquals(url("/old"), db.podcastDao().byId(id)?.feedUrl)
-            assertNull(db.podcastDao().byId(id)?.pendingNewFeedUrl)
+            val stored = assertNotNull(db.podcastDao().byId(id))
+            assertEquals(url("/old"), stored.feedUrl)
+            assertEquals(0, stored.failureCount)
+            assertNull(stored.pendingNewFeedUrl)
+            assertTrue(db.podcastDao().aliases(id).isEmpty())
+        }
+
+    @Test
+    fun failedConfirmationKeepsThe304Success() =
+        runTest {
+            val id =
+                seed {
+                    copy(etag = "old", parserVersion = FeedParser.VERSION, lastParseOk = true, lastFullFetchAt = NOW)
+                }
+            server.enqueue(redirect(301, "/new"))
+            server.enqueue(mockResponse(304, ""))
+            server.enqueue(redirect(301, "/new"))
+            server.enqueue(mockResponse(500, ""))
+
+            assertEquals(FeedOutcome.NotModified, refresh(id))
+            val stored = assertNotNull(db.podcastDao().byId(id))
+            assertEquals(url("/old"), stored.feedUrl)
+            assertEquals(0, stored.failureCount)
+            assertNull(stored.lastErrorKind)
             assertTrue(db.podcastDao().aliases(id).isEmpty())
         }
 
@@ -560,6 +584,7 @@ class FeedMovesTest {
                         tempFiles = bundle.tempFiles,
                         moves = moves,
                         scheduler = scheduler,
+                        coordinator = coordinator,
                     )
                 val run = async { engine.run(request(loser)) }
                 entered.await()

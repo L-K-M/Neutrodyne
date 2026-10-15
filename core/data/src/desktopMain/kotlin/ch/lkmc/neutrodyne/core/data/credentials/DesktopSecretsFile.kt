@@ -19,11 +19,14 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import java.io.IOException
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption
 import java.nio.file.attribute.PosixFilePermissions
 
 /**
@@ -135,8 +138,9 @@ internal class DesktopSecretsFile(
 
     /**
      * First-touch read. A missing file is an empty store; a present-but-unreadable file is key
-     * loss — latch the empty set and leave a clean empty file behind (11's reset rule). Caller
-     * holds [mutex].
+     * loss (03) — latch the empty set and set the file aside as `<name>.unreadable`, so a transient
+     * failure or a returning profile never costs the only copy; the next write starts a fresh
+     * file. Caller holds [mutex].
      */
     private fun ensureLoaded() {
         if (loaded) return
@@ -150,9 +154,10 @@ internal class DesktopSecretsFile(
                 if (t is CancellationException) throw t
                 Log.e(TAG, t) { "secrets file unreadable; treating its entries as lost" }
                 try {
-                    writeAtomically(protection.protect(encode(emptyMap())))
-                } catch (resetFailure: Exception) {
-                    Log.w(TAG, resetFailure) { "could not reset the unreadable secrets file" }
+                    val aside = path.resolveSibling(path.fileName.toString() + UNREADABLE_SUFFIX)
+                    Files.move(path, aside, StandardCopyOption.REPLACE_EXISTING)
+                } catch (asideFailure: IOException) {
+                    Log.w(TAG, asideFailure) { "could not set the unreadable secrets file aside" }
                 }
                 emptyMap()
             }
@@ -181,13 +186,28 @@ internal class DesktopSecretsFile(
 
         val tmp = createTemp(dir)
         try {
-            Files.write(tmp, bytes)
+            FileChannel.open(tmp, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING).use { channel ->
+                val buffer = ByteBuffer.wrap(bytes)
+                while (buffer.hasRemaining()) channel.write(buffer)
+                // On disk before the rename: a crash right after it must never expose a short file.
+                channel.force(true)
+            }
             move.move(tmp, path)
+            syncDirectory(dir)
         } catch (e: AtomicMoveNotSupportedException) {
             throw SecretStorageException("filesystem does not support atomic rename for $path", e)
         } finally {
             // After a successful move the temp name no longer exists.
             runCatching { Files.deleteIfExists(tmp) }
+        }
+    }
+
+    /** Makes the rename itself durable where the platform allows opening a directory (POSIX). */
+    private fun syncDirectory(dir: Path) {
+        try {
+            FileChannel.open(dir, StandardOpenOption.READ).use { it.force(true) }
+        } catch (e: IOException) {
+            // Windows cannot open a directory as a channel; NTFS journals the rename itself.
         }
     }
 
@@ -268,6 +288,7 @@ internal class DesktopSecretsFile(
         const val KEY_SECRET = "secret"
         const val TEMP_PREFIX = "secrets"
         const val TEMP_SUFFIX = ".tmp"
+        const val UNREADABLE_SUFFIX = ".unreadable"
         val POSIX_DIR_PERMISSIONS = PosixFilePermissions.fromString("rwx------")
         val POSIX_FILE_PERMISSIONS = PosixFilePermissions.fromString("rw-------")
     }

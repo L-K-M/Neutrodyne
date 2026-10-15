@@ -162,7 +162,9 @@ internal fun newRefresher(
     random: Random = Random(1),
     ingestor: FeedIngestor = newIngestor(db, clock, settings),
     scheduler: RefreshScheduler = FakeRefreshScheduler(),
-    moves: FeedMoveCommitter = newFeedMoves(db, clock),
+    secrets: SecretStore = FakeSecretStore(),
+    coordinator: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
+    moves: FeedMoveCommitter = newFeedMoves(db, clock, coordinator),
 ): FeedRefresher =
     FeedRefresher(
         db,
@@ -178,6 +180,8 @@ internal fun newRefresher(
         ch.lkmc.neutrodyne.core.data.refresh
             .NewFeedUrlProbe(db, clock),
         { scheduler },
+        secrets,
+        coordinator,
     )
 
 internal fun fetchMeta(
@@ -606,7 +610,8 @@ internal fun newUnsubscribe(
 private fun newFeedMoves(
     db: NeutrodyneDatabase,
     clock: TestClock,
-) = FeedMoveCommitter(db, PodcastMerger(db, FakeCredentialCommitCoordinator(), clock), clock)
+    coordinator: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
+) = FeedMoveCommitter(db, PodcastMerger(db, coordinator, clock), clock)
 
 /** `setCredentials`'s probe fetcher for fixtures that never set credentials. */
 internal val unusedProbeFetcher: Provider<FeedFetcher> =

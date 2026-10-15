@@ -15,6 +15,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.runTest
+import java.io.IOException
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -30,6 +31,9 @@ class NewFeedUrlProbeTest {
     private val current = parsedFeed(items = listOf(parsedEpisode(order = 0, guid = "shared")))
     private val attempts = mutableListOf<String>()
     private val adopted = mutableListOf<String>()
+
+    /** A fetched, parsed target that fails every plausibility rule — what the rejection LRU holds. */
+    private val implausible = parsedFeed(title = "Unrelated", items = listOf(parsedEpisode(order = 0, guid = "other")))
 
     @AfterTest
     fun tearDown() = db.close()
@@ -48,7 +52,7 @@ class NewFeedUrlProbeTest {
         id: Long,
         evidence: ParsedFeed = current,
         deadline: Long = RefreshRequest.NO_DEADLINE,
-        fetch: suspend (DueFeed) -> AdapterResult = { failed() },
+        fetch: suspend (DueFeed) -> AdapterResult = { candidate(it.feedUrl, implausible) },
         adopt: suspend (DueFeed, String, AdapterResult.Parsed) -> FeedOutcome = { feed, url, result ->
             adopted += url
             db.podcastDao().setPendingNewFeedUrl(feed.id, result.feed.newFeedUrl)
@@ -64,14 +68,27 @@ class NewFeedUrlProbeTest {
         }, adopt = adopt)
 
     @Test
-    fun failureRetainsPendingAndRejectsRepeatedTarget() =
+    fun failureRetainsPendingWithoutRejecting() =
+        runTest {
+            // A failed or faulted fetch says nothing about the target (03: the LRU holds
+            // implausible targets), so the next probe tries it again.
+            val id = seed()
+            assertNull(run(id, fetch = { failed() }))
+            assertNull(run(id, fetch = { throw IOException("connection reset") }))
+            assertNull(run(id))
+            assertEquals(listOf(TARGET, TARGET, TARGET), attempts)
+            assertEquals(TARGET, db.podcastDao().byId(id)?.pendingNewFeedUrl)
+            assertTrue(adopted.isEmpty())
+        }
+
+    @Test
+    fun implausibleTargetIsRejectedForRepeats() =
         runTest {
             val id = seed()
             assertNull(run(id))
             assertNull(run(id))
             assertEquals(listOf(TARGET), attempts)
             assertEquals(TARGET, db.podcastDao().byId(id)?.pendingNewFeedUrl)
-            assertTrue(adopted.isEmpty())
         }
 
     @Test

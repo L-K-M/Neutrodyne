@@ -59,6 +59,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertSame
@@ -122,6 +123,8 @@ class SubscribeFlowTest {
 
             val id = assertIs<Outcome.Success<Long>>(outcome).value
             val row = assertNotNull(db.podcastDao().byId(id))
+            val uuidV4 = Regex("[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
+            assertTrue(row.syncId.matches(uuidV4), "syncId ${row.syncId} is not a lowercase UUIDv4")
             assertEquals(feedUrl(), row.feedUrl)
             assertEquals(UrlNormalizer.forIdentity(feedUrl()), row.feedKey)
             assertEquals("Test Show", row.title)
@@ -143,6 +146,14 @@ class SubscribeFlowTest {
             assertTrue(scheduler.nowRequests.isEmpty())
             // The preview entry is dropped at the end of the transaction (03 step 4).
             assertNull(resolverBundle.cache.get(previewId))
+            // A different feed must receive its own identity through the same subscribe path.
+            val otherPreviewId = resolvePreview(path = "/other.xml")
+            val otherId = assertIs<Outcome.Success<Long>>(subscribeBundle.useCase(otherPreviewId, emptySet())).value
+            val other = assertNotNull(db.podcastDao().byId(otherId))
+            assertEquals(feedUrl("/other.xml"), other.feedUrl)
+            assertNotEquals(id, otherId)
+            assertTrue(other.syncId.matches(uuidV4), "syncId ${other.syncId} is not a lowercase UUIDv4")
+            assertNotEquals(row.syncId, other.syncId)
             // AC11: sync groundwork stays inert.
             assertSyncInert()
         }

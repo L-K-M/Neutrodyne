@@ -27,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -528,15 +529,10 @@ private fun FeedStateBanner(
             NdBanner(
                 message = stringResource(Res.string.podcast_needs_password),
                 icon = NdIcons.Key,
-                // `setCredentials` is M1b: the warning stays, the entry point waits for the flag.
                 primary =
-                    if (FEED_ACCOUNT_CONTROLS_ENABLED) {
-                        NdDialogAction(
-                            stringResource(Res.string.podcast_enter_password),
-                        ) { credentialsOpen = true }
-                    } else {
-                        null
-                    },
+                    NdDialogAction(
+                        stringResource(Res.string.podcast_enter_password),
+                    ) { credentialsOpen = true },
             )
         }
 
@@ -662,14 +658,14 @@ private fun ChipsRow(
 
 /**
  * 03 Basic auth: the "Enter password" dialog of the needs-credentials banner. `internal` so
- * desktop tests can drive the gated control before M1b flips the flag.
+ * desktop tests can drive the control.
  */
 @Composable
 internal fun CredentialsDialog(
     onSubmit: (BasicCredentials) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var username by remember { mutableStateOf("") }
+    var username by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     NdDialog(
         onDismissRequest = onDismiss,

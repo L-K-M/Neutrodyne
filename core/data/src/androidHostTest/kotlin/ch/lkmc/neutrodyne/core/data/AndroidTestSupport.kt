@@ -3,10 +3,13 @@
 package ch.lkmc.neutrodyne.core.data
 
 import android.content.Context
+import androidx.sqlite.SQLiteDriver
+import androidx.sqlite.driver.AndroidSQLiteDriver
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.StoragePaths
 import ch.lkmc.neutrodyne.core.data.fetch.FeedTempFiles
 import ch.lkmc.neutrodyne.core.data.ingest.FeedIngestor
+import ch.lkmc.neutrodyne.core.data.ingest.FetchMeta
 import ch.lkmc.neutrodyne.core.data.ingest.IngestionEventBus
 import ch.lkmc.neutrodyne.core.data.refresh.AdapterResult
 import ch.lkmc.neutrodyne.core.data.refresh.FeedMoveCommitter
@@ -20,18 +23,27 @@ import ch.lkmc.neutrodyne.core.data.repo.PodcastMerger
 import ch.lkmc.neutrodyne.core.database.DueFeed
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
+import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
+import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.jvm.html.JsoupShowNotesSanitizer
+import ch.lkmc.neutrodyne.feeds.model.Enclosure
+import ch.lkmc.neutrodyne.feeds.model.FeedFormat
+import ch.lkmc.neutrodyne.feeds.model.Paging
+import ch.lkmc.neutrodyne.feeds.model.ParseWarning
+import ch.lkmc.neutrodyne.feeds.model.ParsedEpisode
+import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
 import kotlinx.coroutines.Dispatchers
 import okio.FileSystem
 import java.util.UUID
@@ -45,7 +57,8 @@ import kotlin.random.Random
 internal fun newDb(
     context: Context,
     clock: Clock = TestClock(),
-): NeutrodyneDatabase = TestDb.inMemory(context, clock = clock)
+    driver: SQLiteDriver = AndroidSQLiteDriver(),
+): NeutrodyneDatabase = TestDb.inMemory(context, driver = driver, clock = clock)
 
 internal fun newIngestor(
     db: NeutrodyneDatabase,
@@ -65,6 +78,8 @@ internal fun newRefresher(
     random: Random = Random(1),
     ingestor: FeedIngestor = newIngestor(db, clock, settings),
     scheduler: RefreshScheduler = FakeRefreshScheduler(),
+    secrets: SecretStore = FakeSecretStore(),
+    coordinator: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
 ): FeedRefresher =
     FeedRefresher(
         db,
@@ -79,12 +94,15 @@ internal fun newRefresher(
         newFeedMoves(
             db,
             clock,
+            coordinator,
         ),
         ch.lkmc.neutrodyne.core.data.refresh
             .NewFeedUrlProbe(db, clock),
         {
             scheduler
         },
+        secrets,
+        coordinator,
     )
 
 /** A subscribed podcast row whose `feedKey` matches [feedUrl]; returns the new id. */
@@ -212,6 +230,84 @@ internal fun stubAdapter(
 internal fun adapterFailed(kind: FeedErrorKind = FeedErrorKind.UNKNOWN) =
     AdapterResult.Failed(kind = kind, http = null, retryAfterMs = null, transient = true)
 
+// --- Feed documents (mirror of desktopTest/TestSupport.kt) ----------------------------------------
+
+internal fun enclosure(
+    url: String,
+    type: String? = "audio/mpeg",
+    length: Long? = 12345,
+): Enclosure = Enclosure(url = url, type = type, length = length, effectiveType = type)
+
+internal fun parsedEpisode(
+    order: Int,
+    guid: String? = null,
+    title: String? = "Episode $order",
+    pubDate: Long? = null,
+    enclosureUrl: String? = "https://cdn.example.com/ep$order.mp3",
+    durationMs: Long? = null,
+    descriptionHtml: String? = null,
+    // The parser marks RSS descriptions and Atom `type="html"` bodies as markup; the helpers
+    // hand it HTML, so the stored default matches what a real parse would emit.
+    descriptionIsHtml: Boolean = true,
+): ParsedEpisode =
+    ParsedEpisode(
+        feedOrder = order,
+        guid = guid,
+        title = title,
+        pubDate = pubDate,
+        descriptionHtml = descriptionHtml,
+        descriptionIsHtml = descriptionIsHtml,
+        primaryEnclosure = enclosureUrl?.let { enclosure(it) },
+        durationMs = durationMs,
+    )
+
+internal fun parsedFeed(
+    title: String? = "Test Show",
+    items: List<ParsedEpisode> = emptyList(),
+    complete: Boolean = false,
+    ttlMinutes: Int? = null,
+    paging: Paging = Paging(),
+    warnings: List<ParseWarning> = emptyList(),
+): ParsedFeed =
+    ParsedFeed(
+        format = FeedFormat.RSS2,
+        title = title,
+        items = items,
+        complete = complete,
+        ttlMinutes = ttlMinutes,
+        paging = paging,
+        warnings = warnings,
+    )
+
+internal fun fetchMeta(
+    finalUrl: String,
+    etag: String? = null,
+    lastModified: String? = null,
+): FetchMeta =
+    FetchMeta(
+        finalUrl = finalUrl,
+        requestedUrl = finalUrl,
+        permanentUrl = null,
+        etag = etag,
+        lastModified = lastModified,
+        sha256Hex = "a".repeat(64),
+        serverDateMs = null,
+        maxAgeSec = null,
+    )
+
+/** A parsed-document adapter result (03 `AdapterResult.Parsed`). */
+internal fun adapterParsed(
+    feed: ParsedFeed,
+    partial: Boolean = false,
+    meta: FetchMeta,
+) = AdapterResult.Parsed(feed = feed, partial = partial, meta = meta)
+
+/** The `DueFeed` row the engine selects for [id] — `dueForRefresh`'s projection. */
+internal suspend fun dueFeedOf(
+    db: NeutrodyneDatabase,
+    id: Long,
+): DueFeed = checkNotNull(db.podcastDao().dueFeedById(id)) { "podcast $id missing" }
+
 /** A scheduler fake: records every call; `reschedulePeriodic` still bumps a counter. */
 internal class FakeRefreshScheduler : RefreshScheduler {
     data class NowRequest(
@@ -253,4 +349,5 @@ internal class FakeRefreshScheduler : RefreshScheduler {
 private fun newFeedMoves(
     db: NeutrodyneDatabase,
     clock: Clock,
-) = FeedMoveCommitter(db, PodcastMerger(db, FakeCredentialCommitCoordinator(), clock), clock)
+    coordinator: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
+) = FeedMoveCommitter(db, PodcastMerger(db, coordinator, clock), clock)
