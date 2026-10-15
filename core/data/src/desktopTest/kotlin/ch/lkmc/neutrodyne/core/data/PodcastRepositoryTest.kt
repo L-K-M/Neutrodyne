@@ -70,6 +70,7 @@ class PodcastRepositoryTest {
         sanitizer = JsoupShowNotesSanitizer(),
         clock = clock,
         merger = PodcastMerger(db, coordinator, clock),
+        resolver = unusedPreviewResolver,
         secrets = secrets,
         coordinator = coordinator,
         fetcher = Provider { fetcherBundle?.fetcher ?: error("no probe fetcher in this fixture") },

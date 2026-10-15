@@ -3,8 +3,11 @@
 package ch.lkmc.neutrodyne.core.data
 
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
+import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.add.AddPodcastResolverImpl
 import ch.lkmc.neutrodyne.core.data.add.PreviewCache
+import ch.lkmc.neutrodyne.core.data.add.PreviewEntry
+import ch.lkmc.neutrodyne.core.data.add.PreviewEntryResolver
 import ch.lkmc.neutrodyne.core.data.add.SubscribeUseCaseImpl
 import ch.lkmc.neutrodyne.core.data.fetch.FeedFetcher
 import ch.lkmc.neutrodyne.core.data.fetch.FeedTempFiles
@@ -26,6 +29,7 @@ import ch.lkmc.neutrodyne.core.database.DueFeed
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.database.PodcastFetchState
+import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
@@ -518,6 +522,7 @@ internal fun newResolver(
             fileSystem = FileSystem.SYSTEM,
             cache = cache,
             db = db,
+            clock = clock,
             io = io,
         )
     return ResolverBundle(resolver, cache, bundle.tempFiles, bundle)
@@ -590,6 +595,7 @@ internal fun newUnsubscribe(
             sanitizer = JsoupShowNotesSanitizer(),
             clock = clock,
             merger = PodcastMerger(db, coordinator, clock),
+            resolver = unusedPreviewResolver,
             secrets = secrets,
             coordinator = coordinator,
             fetcher = fetcher,
@@ -601,6 +607,16 @@ private fun newFeedMoves(
     db: NeutrodyneDatabase,
     clock: TestClock,
 ) = FeedMoveCommitter(db, PodcastMerger(db, FakeCredentialCommitCoordinator(), clock), clock)
+
+/** Read/merge-only repository tests must never fetch a preview. */
+internal val unusedPreviewResolver =
+    object : PreviewEntryResolver {
+        override suspend fun probe(input: String): Outcome<PreviewEntry, AddPodcastError> =
+            error("Unexpected feed probe")
+
+        override suspend fun resolveEntry(feedUrl: String): Outcome<PreviewEntry, AddPodcastError> =
+            error("Unexpected preview resolution")
+    }
 
 /** `setCredentials`'s probe fetcher for fixtures that never set credentials. */
 internal val unusedProbeFetcher: Provider<FeedFetcher> =

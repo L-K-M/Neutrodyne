@@ -658,6 +658,7 @@ class PodcastMergeTest {
                     JsoupShowNotesSanitizer(),
                     clock,
                     merger,
+                    unusedPreviewResolver,
                     FakeSecretStore(),
                     FakeCredentialCommitCoordinator(),
                     unusedProbeFetcher,
