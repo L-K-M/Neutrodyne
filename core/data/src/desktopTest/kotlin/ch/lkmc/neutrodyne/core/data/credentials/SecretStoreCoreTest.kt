@@ -13,16 +13,19 @@ import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.io.encoding.Base64
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -56,6 +59,14 @@ class SecretStoreCoreTest {
         @Volatile var rowless = emptyMap<String, StoredSecret>()
         val droppedOrigins = java.util.concurrent.CopyOnWriteArrayList<String>()
 
+        /** Origins with platform state outside rows — the desktop file's entries. */
+        val persisted: MutableSet<String> =
+            java.util.concurrent.ConcurrentHashMap
+                .newKeySet()
+
+        /** Runs at the top of [rowDropped], before the platform state is dropped. */
+        @Volatile var beforeDrop: (suspend (String) -> Unit)? = null
+
         override suspend fun resolve(row: CredentialEntity): StoredSecret? {
             resolveCalls++
             if (row.id in lostIds) throw SecretLostException(IllegalStateException("lost key"))
@@ -71,7 +82,9 @@ class SecretStoreCoreTest {
         }
 
         override suspend fun rowDropped(origin: String) {
+            beforeDrop?.invoke(origin)
             droppedOrigins += origin
+            persisted.remove(origin)
         }
     }
 
@@ -537,11 +550,47 @@ class SecretStoreCoreTest {
             db.close()
         }
 
+    @Test
+    fun `a put racing a dropped row keeps its platform state`() =
+        runTest {
+            val db = TestDb.inMemory()
+            val seam = FakeSeam()
+            val flow = newFlow()
+            val core = newCore(db, seam, flow)
+
+            suspend fun putTracked(secret: String) =
+                core.put(ORIGIN) { canonical ->
+                    persistPlain(db.credentialDao(), canonical, "u", secret).also { seam.persisted += canonical }
+                }
+            val id = putTracked("p")!!
+            flow.tryEmit(currentRows(db))
+            awaitReal { seam.reconcilePasses >= 1 }
+
+            // The cascade deletes the row. While the reconcile drops the origin's platform state,
+            // the user stores the origin again; that put must keep what it just persisted.
+            var racer: Job? = null
+            seam.beforeDrop = {
+                racer = backgroundScope.launch(Dispatchers.Default) { putTracked("p2") }
+                withContext(Dispatchers.Default) { withTimeoutOrNull(RACE_WINDOW_MS) { racer?.join() } }
+            }
+            db.credentialDao().delete(id)
+            flow.tryEmit(emptyList())
+            awaitReal { seam.droppedOrigins.isNotEmpty() && racer?.isCompleted == true }
+
+            assertTrue(ORIGIN in seam.persisted)
+            assertEquals("p2", core.get(ORIGIN)?.secret?.concatToString())
+            db.close()
+        }
+
     private companion object {
         const val FAKE_IV_BYTE: Byte = 1
         const val CREATED_AT = 1_791_000_000_000L
         const val FLOW_BUFFER = 32
         const val REAL_TIMEOUT_MS = 10_000L
         const val POLL_MS = 10L
+        const val ORIGIN = "https://a.test"
+
+        /** Long enough for an unblocked racing put to commit against an in-memory database. */
+        const val RACE_WINDOW_MS = 500L
     }
 }

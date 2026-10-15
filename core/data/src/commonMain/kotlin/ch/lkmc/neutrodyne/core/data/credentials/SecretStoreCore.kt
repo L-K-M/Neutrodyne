@@ -60,7 +60,7 @@ internal interface SecretStoreSeam {
      * A row-backed stored origin left the row set (cascade, sweep): drop whatever the platform
      * keeps outside rows — on the desktop, the `secrets.json` entry. No-op on Android, where the
      * row carries everything. Key-loss deletions do not call this — their outside-row state is
-     * the platform's problem.
+     * the platform's problem. Runs under the core's lock, so it must not call back into the core.
      */
     suspend fun rowDropped(origin: String) {}
 }
@@ -320,13 +320,16 @@ internal class SecretStoreCore(
             tombstones.entries.removeAll { it.key !in emittedIds }
             entries = next
             publish()
+
+            // Under the lock: a `put` for the same origin waits, so its freshly persisted
+            // platform state is never the one dropped here.
+            for (origin in droppedOrigins) seam.rowDropped(origin)
         }
 
         if (lost.isNotEmpty()) {
             // One transaction marks every referencing podcast before the SET_NULL delete runs.
             coordinator.withCredentialCommit { dao.dropLostRows(lost) }
         }
-        for (origin in droppedOrigins) seam.rowDropped(origin)
     }
 
     private fun publish() {
