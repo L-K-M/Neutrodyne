@@ -20,6 +20,7 @@ import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.episodeStateEntity
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
@@ -65,6 +66,10 @@ class EditFeedUrlTest {
             clock,
             PodcastMerger(db, FakeCredentialCommitCoordinator(), clock),
             resolver.resolver,
+            FakeSecretStore(),
+            FakeCredentialCommitCoordinator(),
+            unusedProbeFetcher,
+            scratchTempFiles("edit-feed-url"),
         )
 
     @AfterTest
@@ -188,6 +193,10 @@ class EditFeedUrlTest {
             clock,
             PodcastMerger(db, FakeCredentialCommitCoordinator(), clock),
             probe,
+            FakeSecretStore(),
+            FakeCredentialCommitCoordinator(),
+            unusedProbeFetcher,
+            scratchTempFiles("edit-feed-url"),
         )
     }
 
@@ -557,6 +566,10 @@ class EditFeedUrlTest {
                     clock,
                     PodcastMerger(db, FakeCredentialCommitCoordinator(), clock),
                     resolver.resolver,
+                    FakeSecretStore(),
+                    FakeCredentialCommitCoordinator(),
+                    unusedProbeFetcher,
+                    scratchTempFiles("edit-feed-url"),
                 )
             server.enqueue(mockResponse(body = body()))
             assertEquals(Outcome.Success(Unit), repo.editFeedUrl(id, url()))

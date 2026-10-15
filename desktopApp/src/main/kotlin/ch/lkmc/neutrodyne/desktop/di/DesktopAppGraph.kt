@@ -8,10 +8,12 @@ import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.CrashContext
 import ch.lkmc.neutrodyne.core.common.CrashReporter
+import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
@@ -59,6 +61,15 @@ interface DesktopAppGraph {
 
     /** The window maps `openState` onto the start-up gate (01 Splash and start-up gate). */
     val databaseOpener: DatabaseOpener
+
+    /**
+     * M1b: the secrets-file store — graph tests prove `CredentialLookup` resolves to it, so
+     * `AuthInterceptor` can never be left reading `None` in the app process.
+     */
+    val secretStore: SecretStore
+
+    /** What `AuthInterceptor` injects: the same singleton as [secretStore]. */
+    val credentialLookup: CredentialLookup
 
     /**
      * The runner the shutdown stops (11 Shutdown step 2). Resolving pulls the lane chain through

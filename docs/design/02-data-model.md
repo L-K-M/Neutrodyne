@@ -1204,6 +1204,8 @@ The `h` and `t` concatenations are unambiguous by construction: `esc` output nev
 
 `podcast.syncId` is a random UUIDv4 in lowercase canonical form, `UNIQUE` (`index_podcast_syncId`), set by every insert path — subscribe (03), import commit (05), restore (05: the backup's optional `syncId` when it is present and no local row uses it, otherwise a new one) and sync apply (the record's ID, 10) — in schema v1 from M1a, whether or not sync is ever used ([D93](../PLAN.md#3-key-decisions)). It is the podcast's sync record ID and the prefix of its episode, Up next and membership `rid`s, independent of the feed URL, so feed moves, renormalisation and merges of `feedKey` never re-identify synced state ([Podcast feedKey and aliases](#podcast-feedkey-and-aliases)). Only a sync redirect changes it (`UPDATE podcast SET syncId = :survivor WHERE id = :id`, with `applying = 1`, after which 10 rewrites the `rid` prefixes in `sync_outbox` and `sync_clock`, [10 Redirects on clients](10-sync.md#redirects-on-clients)). It never appears in media IDs, file names or URIs; backups carry it as an optional field ([D33](../PLAN.md#3-key-decisions)). Without sync it is never read.
 
+Dated acceptance note (2026-10-14): M1a proves subscribe, the required unique `syncId` schema and inert sync tables; import and restore generation and preservation are proved with M3 when those paths are implemented ([PLAN M1 acceptance 11](../PLAN.md#m1-subscribe-and-ingest-rss)).
+
 No database-side rule derives a `syncId` from feed data: two devices that subscribe to the same feed offline create two IDs, and the server merges them by feed key ([10 Same podcast on two devices](10-sync.md#same-podcast-on-two-devices)).
 
 ### Group uuid and nameKey

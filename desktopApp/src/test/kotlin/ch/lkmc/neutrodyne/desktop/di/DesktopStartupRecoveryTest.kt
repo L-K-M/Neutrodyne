@@ -67,7 +67,7 @@ class DesktopStartupRecoveryTest {
                                 override val order = initializer.order
 
                                 override suspend fun run() {
-                                    if (initializer::class.simpleName == "DesktopRunnerInitializer") {
+                                    if (initializer::class.simpleName in POST_OPEN_INITIALIZERS) {
                                         runnerStarts += graph.databaseOpener.openState.value
                                     }
                                     initializer.run()
@@ -110,7 +110,12 @@ class DesktopStartupRecoveryTest {
                         .getValue("refresh")
                         .failures,
                 )
-                assertEquals(listOf(graph.databaseOpener.openState.value), runnerStarts)
+                // The credential load (120) and the refresh runner (200) both ran post-open — a
+                // failed open keeps them parked behind band 100's retry wait.
+                assertEquals(
+                    List(POST_OPEN_INITIALIZERS.size) { graph.databaseOpener.openState.value },
+                    runnerStarts,
+                )
             } finally {
                 if (graph.databaseOpener.openState.value is DatabaseOpenState.Opened) {
                     graph.jobRunner.stop(3.seconds)
@@ -133,5 +138,8 @@ class DesktopStartupRecoveryTest {
 
     private companion object {
         val CLEANUP_TIMEOUT = 10.seconds
+
+        /** The bands whose `openState` is sampled: `credential-load` (120) and the runner (200). */
+        val POST_OPEN_INITIALIZERS = setOf("CredentialLoadInitializer", "DesktopRunnerInitializer")
     }
 }

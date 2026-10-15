@@ -47,7 +47,7 @@ class AndroidStartupRecoveryTest {
         val file = app.getDatabasePath(NeutrodyneDatabase.FILE_NAME)
         val lifecycle = ProcessLifecycleOwner.get().lifecycle as LifecycleRegistry
         val observersBefore = lifecycle.observerCount
-        val refreshInstalls = CopyOnWriteArrayList<Pair<String, DatabaseOpenState>>()
+        val postOpenRuns = CopyOnWriteArrayList<Pair<String, DatabaseOpenState>>()
         try {
             assertTrue(!file.exists(), "a fresh database path is required")
             if (startup == Startup.RETRY) assertTrue(file.mkdirs())
@@ -60,8 +60,8 @@ class AndroidStartupRecoveryTest {
 
                             override suspend fun run() {
                                 val name = checkNotNull(initializer::class.simpleName)
-                                if (name in REFRESH_INITIALIZERS) {
-                                    refreshInstalls += name to graph.databaseOpener.openState.value
+                                if (name in POST_OPEN_INITIALIZERS) {
+                                    postOpenRuns += name to graph.databaseOpener.openState.value
                                 }
                                 initializer.run()
                             }
@@ -94,8 +94,8 @@ class AndroidStartupRecoveryTest {
             assertEquals(work.id, periodicWork().single().id)
             assertEquals(observersBefore + 1, lifecycle.observerCount)
             assertEquals(
-                REFRESH_INITIALIZERS.map { it to graph.databaseOpener.openState.value },
-                refreshInstalls,
+                POST_OPEN_INITIALIZERS.map { it to graph.databaseOpener.openState.value },
+                postOpenRuns,
             )
         } finally {
             graph.appScope.cancel()
@@ -138,6 +138,17 @@ class AndroidStartupRecoveryTest {
          */
         const val STARTUP_BOUND_SECONDS = 60L
 
-        val REFRESH_INITIALIZERS = listOf("PeriodicRefreshInitializer", "RefreshForegroundObserverInitializer")
+        /**
+         * Bands that must never run while the database is still closed — the M1b credential load
+         * (120) waits on the Keystore store's `credential` emission and the refresh installs
+         * (200/220) on the opened database. Recorded in run order; on the retry path every one
+         * must see `Opened`, proving a failed open keeps them parked behind band 100's retry wait.
+         */
+        val POST_OPEN_INITIALIZERS =
+            listOf(
+                "CredentialLoadInitializer",
+                "PeriodicRefreshInitializer",
+                "RefreshForegroundObserverInitializer",
+            )
     }
 }
