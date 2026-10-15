@@ -173,6 +173,32 @@ class DesktopAppGraphTest {
         for (initializer in graph.initializers) {
             assertThat(initializer.order).isAtLeast(FIRST_BAND)
         }
+
+        // 03 Start-up: `credential-load` at 120 sits after the database open and before the
+        // refresh runner — `FeedFetcher` awaits the store, so an early request never reads an
+        // unloaded map.
+        val orders =
+            graph.initializers.associate { (it::class.simpleName ?: it::class.toString()) to it.order }
+        val dbOrder =
+            graph.initializers
+                .filterIsInstance<DatabaseOpenInitializer>()
+                .single()
+                .order
+        assertThat(dbOrder).isLessThan(orders.getValue("CredentialLoadInitializer"))
+        assertThat(orders.getValue("CredentialLoadInitializer"))
+            .isLessThan(orders.getValue("DesktopRunnerInitializer"))
+    }
+
+    /**
+     * M1b wiring: `AuthInterceptor` reads `CredentialLookup`, which must be the secrets-file
+     * `SecretStore` singleton — never a leftover `None` (03 Basic auth). Resolving either
+     * accessor touches the database, so the open runs first.
+     */
+    @Test
+    fun theCredentialLookupIsTheSecretStore() {
+        runBlocking { graph.databaseOpener.awaitOpen() }
+
+        assertThat(graph.credentialLookup).isSameInstanceAs(graph.secretStore)
     }
 
     private companion object {

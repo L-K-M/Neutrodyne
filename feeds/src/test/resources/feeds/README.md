@@ -20,6 +20,7 @@ lists (real-world failure modes of feed generators, reproduced with generated co
 | `large-831-items.xml` | the shape of 99% Invisible's feed (831 items newest-first, weekly cadence 2010–2026, `content:encoded` + `description`, GUID-per-episode); generated with a deterministic script, lorem-ipsum-style text, ~3.5 MB |
 | `windows1252-declared-utf8.xml` | feeds whose CMS sends windows-1252 bytes with a UTF-8 XML declaration |
 | `itunes-undeclared-prefix.xml` | feeds that use `itunes:` without declaring the namespace |
+| `supplementary-refs.xml` | decimal and hex supplementary-plane character references in GUID, title, description text and enclosure URL; exercises parser review deviation 24 on all three corpus legs |
 | `youtube-atom-*.xml` | YouTube's channel and playlist Atom feeds (`yt:` namespace, `media:group`) |
 | everything else | the failure mode named in 03's corpus table, with synthetic content |
 

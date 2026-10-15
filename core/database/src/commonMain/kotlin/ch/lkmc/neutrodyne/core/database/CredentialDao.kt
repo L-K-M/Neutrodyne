@@ -59,6 +59,34 @@ abstract class CredentialDao(
     @Query("SELECT COUNT(*) FROM podcast WHERE credentialId = :id")
     abstract suspend fun referenceCount(id: Long): Int
 
+    @Query("SELECT * FROM credential WHERE id IN (:ids)")
+    abstract suspend fun byIds(ids: List<Long>): List<CredentialEntity>
+
+    /**
+     * Key-loss recovery (03 Basic auth and CredentialStore): mark every podcast referencing
+     * [rows]' ids `needsCredentials = 1`, then delete those rows. `podcast.credentialId` is an
+     * `ON DELETE SET NULL` FK, so the mark must precede the delete inside this one transaction —
+     * deleting first would null the reference set before it can be read. The rows are re-read
+     * inside the transaction: a row rewritten or deleted since [rows] was observed is left alone
+     * (the observed content is stale, not the store's current secret).
+     */
+    suspend fun dropLostRows(rows: List<CredentialEntity>) {
+        if (rows.isEmpty()) return
+        db.withWriteTransaction {
+            val live = byIds(rows.map { it.id }).associateBy { it.id }
+            val unchanged = rows.filter { it == live[it.id] }.map { it.id }
+            if (unchanged.isEmpty()) return@withWriteTransaction
+            markCredentialsLost(unchanged)
+            deleteIds(unchanged)
+        }
+    }
+
+    @Query("UPDATE podcast SET needsCredentials = 1 WHERE credentialId IN (:ids)")
+    protected abstract suspend fun markCredentialsLost(ids: List<Long>)
+
+    @Query("DELETE FROM credential WHERE id IN (:ids)")
+    protected abstract suspend fun deleteIds(ids: List<Long>)
+
     @Update
     protected abstract suspend fun update(row: CredentialEntity)
 }
