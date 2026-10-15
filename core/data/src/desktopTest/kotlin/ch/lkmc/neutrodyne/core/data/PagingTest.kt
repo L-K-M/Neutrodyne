@@ -180,16 +180,25 @@ class PagingTest {
         runTest {
             val id = subscribe()
             enqueuePage(2, 3)
+            var hookRuns = 0
+            val hookFailures = mutableListOf<Throwable>()
             val hook =
                 SyncIngestHook { podcastId ->
-                    // The hook runs after commit: both the inserted episode and its cursor must be visible.
-                    assertEquals(id, podcastId)
-                    assertEquals(2, db.podcastDao().episodeCount(id))
-                    assertCursor(id, 3, PagingState.PENDING)
+                    hookRuns++
+                    // The engine logs and swallows hook failures (03 step 11), so the hook records
+                    // its own: after commit, the inserted episode and its cursor must be visible.
+                    runCatching {
+                        assertEquals(id, podcastId)
+                        assertEquals(2, db.podcastDao().episodeCount(id))
+                        assertCursor(id, 3, PagingState.PENDING)
+                    }.onFailure { hookFailures += it }
                     clock.elapsedMs = DEADLINE_MS - PAGING_MARGIN_MS
                 }
 
             run(scheduledRequest().copy(deadlineElapsedMs = DEADLINE_MS), hook)
+
+            assertEquals(1, hookRuns)
+            hookFailures.firstOrNull()?.let { throw it }
 
             assertCursor(id, 3, PagingState.PENDING)
             assertEquals(2, db.podcastDao().episodeCount(id))
