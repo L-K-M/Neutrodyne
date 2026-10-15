@@ -186,6 +186,18 @@ abstract class PodcastDao(
         url: String?,
     )
 
+    /**
+     * The `credentialId` write that pairs a `SecretStore.put` with its first referencing
+     * commit (03 Basic auth: subscribe, `setCredentials`, import, sync installs) and that
+     * clears the reference again when the credential is dropped. Runs inside
+     * `CredentialCommitCoordinator.withCredentialCommit`, like every credential-commit path.
+     */
+    @Query("UPDATE podcast SET credentialId = :credentialId WHERE id = :podcastId")
+    abstract suspend fun setCredentialId(
+        podcastId: Long,
+        credentialId: Long?,
+    )
+
     // --- Refresh selection and fetch-state writes (02; 03 Refresh scheduling) --------------------
 
     /**
