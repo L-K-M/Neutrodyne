@@ -195,8 +195,9 @@ internal class PodcastRepositoryImpl(
      * 03 Basic auth, "On refresh": the typed credentials probe `feedUrl` once — only an auth
      * refusal rejects them; any other outcome (the server down today, a temporarily moved feed)
      * still stores them for the next refresh. The `put` and the `credentialId`/`needsCredentials`
-     * writes commit inside `withCredentialCommit` after `FetchStateBatcher` is flushed, then a
-     * manual refresh proves the pair end to end.
+     * writes commit inside `withCredentialCommit` under the refresher's run mutex — after
+     * `FetchStateBatcher` is flushed, so no in-flight outcome can re-set the flag behind
+     * them — then a manual refresh proves the pair end to end.
      */
     override suspend fun setCredentials(
         podcastId: Long,
@@ -233,35 +234,40 @@ internal class PodcastRepositoryImpl(
             else -> {}
         }
 
-        // A batched fetch-state write must not land after the flag clear and re-set it.
-        refresher.flushFetchStates()
+        // An in-flight run can still commit a pre-credential outcome (a stale HTTP_AUTH
+        // re-sets needsCredentials) after the batcher flush — flush and commit therefore
+        // run under the engine's run mutex, keeping 02's lock order run mutex →
+        // CredentialCommitCoordinator → Room writer. The probe above stays outside it.
         val committed =
-            coordinator.withCredentialCommit {
-                val rowId = secrets.put(origin, credentials.username, credentials.password.toCharArray())
-                val linked =
-                    try {
-                        db.withWriteTransaction<Boolean> {
-                            val dao = db.podcastDao()
-                            if (dao.byId(podcastId) == null) {
-                                false
-                            } else {
-                                dao.setCredentialId(podcastId, rowId)
-                                dao.clearNeedsCredentials(podcastId)
-                                true
+            refresher.withRunExclusive {
+                refresher.flushFetchStates()
+                coordinator.withCredentialCommit {
+                    val rowId = secrets.put(origin, credentials.username, credentials.password.toCharArray())
+                    val linked =
+                        try {
+                            db.withWriteTransaction<Boolean> {
+                                val dao = db.podcastDao()
+                                if (dao.byId(podcastId) == null) {
+                                    false
+                                } else {
+                                    dao.setCredentialId(podcastId, rowId)
+                                    dao.clearNeedsCredentials(podcastId)
+                                    true
+                                }
                             }
+                        } catch (t: Throwable) {
+                            withContext(NonCancellable) {
+                                secrets.removeUnreferenced(db.credentialDao(), origin, rowId)
+                            }
+                            throw t
                         }
-                    } catch (t: Throwable) {
+                    if (!linked) {
                         withContext(NonCancellable) {
                             secrets.removeUnreferenced(db.credentialDao(), origin, rowId)
                         }
-                        throw t
                     }
-                if (!linked) {
-                    withContext(NonCancellable) {
-                        secrets.removeUnreferenced(db.credentialDao(), origin, rowId)
-                    }
+                    linked
                 }
-                linked
             }
         if (!committed) {
             // The podcast vanished mid-commit — an unsubscribe won the race; nothing is stored.
