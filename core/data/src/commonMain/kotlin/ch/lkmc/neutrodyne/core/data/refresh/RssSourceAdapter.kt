@@ -124,10 +124,15 @@ internal class RssSourceAdapter(
                 ),
             )
         // A redirect announcement needs an accepted parse, even when validators hid the body.
-        // Confirm from the original URL once; a second 304 is handled without another fetch.
+        // Confirm from the original URL once. Only a body can prove the move: anything else (a
+        // second 304, an error) keeps the first 304's success, and the next refresh tries again.
         if (mode != FetchMode.OLDER_PAGE && outcome is FetchOutcome.NotModified && outcome.permanentUrl != null) {
-            unconditional = true
-            outcome = fetcher.fetch(FeedRequest(url = url, etag = null, lastModified = null, conditional = false))
+            val confirmation =
+                fetcher.fetch(FeedRequest(url = url, etag = null, lastModified = null, conditional = false))
+            if (confirmation is FetchOutcome.Body) {
+                unconditional = true
+                outcome = confirmation
+            }
         }
         return when (val fetched = outcome) {
             is FetchOutcome.NotModified -> {
