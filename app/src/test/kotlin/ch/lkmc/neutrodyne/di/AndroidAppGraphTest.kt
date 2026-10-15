@@ -20,6 +20,7 @@ import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import com.google.common.truth.Truth.assertThat
 import dev.zacsweers.metro.createGraphFactory
+import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -86,23 +87,43 @@ class AndroidAppGraphTest {
     fun refreshInitializersFollowTheDatabaseBand() {
         val orders = graph.initializers.associate { (it::class.simpleName ?: it::class.toString()) to it.order }
 
-        // 01 Application start-up: band 100 opens the database; the M1a refresh initializers run
-        // in band 200 (periodic tick) and 220 (foreground observer) — after it and in that order.
+        // 01 Application start-up: band 100 opens the database, M1b's `credential-load` waits for
+        // the store at 120, and the M1a refresh initializers run in band 200 (periodic tick) and
+        // 220 (foreground observer) — after it and in that order (03 Start-up).
         val dbOrder =
             graph.initializers
                 .filterIsInstance<DatabaseOpenInitializer>()
                 .single()
                 .order
-        assertThat(dbOrder).isLessThan(orders.getValue("PeriodicRefreshInitializer"))
+        assertThat(dbOrder).isLessThan(orders.getValue("CredentialLoadInitializer"))
+        assertThat(orders.getValue("CredentialLoadInitializer"))
+            .isLessThan(orders.getValue("PeriodicRefreshInitializer"))
         assertThat(orders.getValue("PeriodicRefreshInitializer"))
             .isLessThan(orders.getValue("RefreshForegroundObserverInitializer"))
+    }
+
+    /**
+     * M1b wiring: `AuthInterceptor` reads `CredentialLookup`, which must be the Keystore-backed
+     * `SecretStore` singleton — never a leftover `None` (03 Basic auth). Resolving either
+     * accessor touches the database, so the open runs first.
+     */
+    @Test
+    fun theCredentialLookupIsTheSecretStore() {
+        runBlocking { graph.databaseOpener.awaitOpen() }
+        try {
+            assertThat(graph.credentialLookup).isSameInstanceAs(graph.secretStore)
+        } finally {
+            graph.databaseOpener.requireDatabase().close()
+        }
     }
 
     private companion object {
         val STARTUP_BANDS =
             mapOf(
                 "DebugToolsInitializer" to 0..99,
-                "DatabaseOpenInitializer" to 100..199,
+                "DatabaseOpenInitializer" to 100..119,
+                // M1b's `credential-load` sits at 120: after the database, before refresh work.
+                "CredentialLoadInitializer" to 120..199,
                 "PeriodicRefreshInitializer" to 200..299,
                 "RefreshForegroundObserverInitializer" to 200..299,
             )

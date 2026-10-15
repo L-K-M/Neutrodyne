@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.network
 
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
+import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.common.HttpClientKind
 import ch.lkmc.neutrodyne.core.common.LocalNetworkAccess
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
@@ -26,7 +27,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import org.junit.Test
 
-/** The AppScope graph the shells will shape — requesting every networking binding this package adds. */
+/**
+ * The AppScope graph the shells will shape — requesting every networking binding this package
+ * adds. It has no `core:data` `SecretStore`, so `AuthInterceptor`'s lookup binds `None` — the
+ * credential-free shape 01 assigns to engine-only graphs.
+ */
 @DependencyGraph(AppScope::class)
 interface S12AppGraph {
     val clients: NeutrodyneHttpClients
@@ -38,6 +43,9 @@ interface S12AppGraph {
     val hints: DnsFamilyHints
     val guard: LocalNetworkGuard
     val access: LocalNetworkAccess
+
+    @Provides
+    fun credentialLookup(): CredentialLookup = CredentialLookup.None
 
     @DependencyGraph.Factory
     fun interface Factory {

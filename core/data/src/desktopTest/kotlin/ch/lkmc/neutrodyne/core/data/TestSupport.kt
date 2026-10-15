@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.data.add.AddPodcastResolverImpl
 import ch.lkmc.neutrodyne.core.data.add.PreviewCache
 import ch.lkmc.neutrodyne.core.data.add.SubscribeUseCaseImpl
+import ch.lkmc.neutrodyne.core.data.fetch.FeedFetcher
 import ch.lkmc.neutrodyne.core.data.fetch.FeedTempFiles
 import ch.lkmc.neutrodyne.core.data.ingest.FeedIngestor
 import ch.lkmc.neutrodyne.core.data.ingest.FetchMeta
@@ -23,8 +24,10 @@ import ch.lkmc.neutrodyne.core.database.DueFeed
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.database.PodcastFetchState
+import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
+import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SyncIngestHook
 import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
@@ -33,6 +36,7 @@ import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
+import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
@@ -46,6 +50,7 @@ import ch.lkmc.neutrodyne.feeds.model.ParseWarning
 import ch.lkmc.neutrodyne.feeds.model.ParsedEpisode
 import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
+import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import okio.FileSystem
@@ -298,6 +303,43 @@ internal suspend fun androidx.room3.PooledConnection.execSql(sql: String) {
     usePrepared(sql) { it.step() }
 }
 
+/** The `Authorization: Basic …` header value 03's auth flows send for `u:p` pairs. */
+internal fun basicAuthHeader(
+    username: String,
+    secret: String,
+): String =
+    "Basic " +
+        kotlin.io.encoding.Base64
+            .encode("$username:$secret".encodeToByteArray())
+
+/**
+ * Parks the first `put` after the delegate's row commits so a test can run code inside the
+ * put→reference gap while the caller still holds `CredentialCommitCoordinator` (03's commit
+ * ordering). `putCommitted` signals the gap is open; `release` ends it.
+ */
+internal class GatedSecretStore(
+    private val delegate: SecretStore,
+) : SecretStore by delegate {
+    val putCommitted = kotlinx.coroutines.CompletableDeferred<Unit>()
+    val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+    private var gated = true
+
+    override suspend fun put(
+        origin: String,
+        username: String,
+        secret: CharArray,
+        attributes: Map<String, String>,
+    ): Long? {
+        val id = delegate.put(origin, username, secret, attributes)
+        if (gated) {
+            gated = false
+            putCommitted.complete(Unit)
+            release.await()
+        }
+        return id
+    }
+}
+
 internal fun fetchState(
     id: Long,
     nextRefreshAt: Long?,
@@ -474,6 +516,8 @@ internal fun newSubscribe(
     scheduler: RefreshScheduler,
     settings: SettingsRepository,
     clock: TestClock,
+    secrets: SecretStore = FakeSecretStore(),
+    coordinator: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
     eventBus: IngestionEventBus = IngestionEventBus(),
     orderKeys: OrderKeys = OrderKeys { last -> if (last == null) "a" else "$last~" },
 ): SubscribeBundle =
@@ -482,6 +526,8 @@ internal fun newSubscribe(
             db = db,
             cache = cache,
             resolver = resolver,
+            secrets = secrets,
+            coordinator = coordinator,
             ingestor = newIngestor(db, clock, settings),
             eventBus = eventBus,
             scheduler = scheduler,
@@ -492,11 +538,29 @@ internal fun newSubscribe(
         eventBus,
     )
 
-/** `UnsubscribeUseCase` over the real `PodcastRepositoryImpl` (and a real `FeedRefresher`). */
+/**
+ * `UnsubscribeUseCase` over the real `PodcastRepositoryImpl` (and a real `FeedRefresher`). The
+ * `fetcher` provider is never invoked on the unsubscribe path — a fixture reaching it signals a
+ * `setCredentials` path exercised without a wired probe.
+ */
 internal fun newUnsubscribe(
     db: NeutrodyneDatabase,
     scheduler: RefreshScheduler,
     clock: TestClock,
+    secrets: SecretStore = FakeSecretStore(),
+    coordinator: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
+    fetcher: Provider<FeedFetcher> = Provider { error("setCredentials is not wired in this fixture") },
+    tempFiles: FeedTempFiles =
+        FeedTempFiles(
+            storagePathsFor(
+                File("build/tmp/m1b-setcreds").resolve(
+                    java.util.UUID
+                        .randomUUID()
+                        .toString(),
+                ),
+            ),
+            FileSystem.SYSTEM,
+        ),
 ): UnsubscribeUseCase =
     UnsubscribeUseCase(
         PodcastRepositoryImpl(
@@ -505,6 +569,27 @@ internal fun newUnsubscribe(
             scheduler = scheduler,
             sanitizer = JsoupShowNotesSanitizer(),
             clock = clock,
-            merger = PodcastMerger(db, FakeCredentialCommitCoordinator(), clock),
+            merger = PodcastMerger(db, coordinator, clock),
+            secrets = secrets,
+            coordinator = coordinator,
+            fetcher = fetcher,
+            tempFiles = tempFiles,
         ),
+    )
+
+/** `setCredentials`'s probe fetcher for fixtures that never set credentials. */
+internal val unusedProbeFetcher: Provider<FeedFetcher> =
+    Provider { error("setCredentials is not wired in this fixture") }
+
+/** A fresh `FeedTempFiles` under `build/tmp/<tag>` for repository fixtures. */
+internal fun scratchTempFiles(tag: String): FeedTempFiles =
+    FeedTempFiles(
+        storagePathsFor(
+            File("build/tmp/$tag").resolve(
+                java.util.UUID
+                    .randomUUID()
+                    .toString(),
+            ),
+        ),
+        FileSystem.SYSTEM,
     )

@@ -7,8 +7,10 @@ import ch.lkmc.neutrodyne.core.artwork.NeutrodyneImageLoaderFactory
 import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
+import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
@@ -45,6 +47,15 @@ interface AndroidAppGraph {
 
     /** `MainActivity` maps `openState` onto the start-up gate (01 Splash and start-up gate). */
     val databaseOpener: DatabaseOpener
+
+    /**
+     * M1b: the Keystore-backed store — graph tests prove `CredentialLookup` resolves to it, so
+     * `AuthInterceptor` can never be left reading `None` in the app process.
+     */
+    val secretStore: SecretStore
+
+    /** What `AuthInterceptor` injects: the same singleton as [secretStore]. */
+    val credentialLookup: CredentialLookup
 
     /** The Coil `SingletonImageLoader.Factory` installed in `NeutrodyneApplication` (08 Coil ImageLoader). */
     val imageLoaderFactory: NeutrodyneImageLoaderFactory
