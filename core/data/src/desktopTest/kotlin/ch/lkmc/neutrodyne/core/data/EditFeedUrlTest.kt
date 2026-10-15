@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.data.credentials.IdentitySecretProtection
 import ch.lkmc.neutrodyne.core.data.ingest.FetchMeta
 import ch.lkmc.neutrodyne.core.data.ingest.IngestContext
 import ch.lkmc.neutrodyne.core.data.ingest.IngestMode
+import ch.lkmc.neutrodyne.core.data.refresh.FeedOutcome
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshRequest
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshScheduler
@@ -537,7 +538,7 @@ class EditFeedUrlTest {
                         secrets = store,
                         coordinator = coordinator,
                     )
-                requireNotNull(refreshEngine.run(request(id)).outcomes[id])
+                assertIs<FeedOutcome.Ingested>(refreshEngine.run(request(id)).outcomes[id])
             }
             assertEquals("Basic dTpwQHNz", server.takeRequest().headers["Authorization"])
         }

@@ -9,9 +9,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.PodcastSettingsKey
+import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.resolve
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_removed
+import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
 import ch.lkmc.neutrodyne.core.ui.whenOutcome
@@ -49,14 +51,14 @@ internal fun PodcastSettingsRoute(key: PodcastSettingsKey) {
         onIncludeInAll = viewModel::setIncludeInAll,
         // The edit-URL dialog shows this failure inline and stays open; `null` closes it.
         onEditFeedUrl = { input ->
-            viewModel.editFeedUrl(input).whenOutcome(
-                onSuccess = { null },
-                onFailure = { addPodcastErrorText(it) },
-            )
+            when (val outcome = viewModel.editFeedUrl(input)) {
+                null -> UiText.Res(Res.string.write_failed)
+                else -> outcome.whenOutcome(onSuccess = { null }, onFailure = { addPodcastErrorText(it) })
+            }
         },
         onCredentials = { credentials ->
             scope.launch {
-                viewModel.setCredentials(credentials).whenOutcome(
+                viewModel.setCredentials(credentials)?.whenOutcome(
                     onSuccess = {},
                     onFailure = { snackbar.showSnackbar(addPodcastErrorText(it).resolve()) },
                 )
