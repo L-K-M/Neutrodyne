@@ -103,7 +103,7 @@ internal fun PodcastRoute(key: PodcastKey) {
         onRetryFeed = viewModel::retryFeed,
         onEnterCredentials = { credentials ->
             scope.launch {
-                viewModel.setCredentials(credentials).whenOutcome(
+                viewModel.setCredentials(credentials)?.whenOutcome(
                     onSuccess = {},
                     onFailure = { error ->
                         snackbar.showSnackbar(addPodcastErrorText(error).resolve())

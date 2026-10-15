@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
 import ch.lkmc.neutrodyne.feeds.parse.ParseFailure
 import ch.lkmc.neutrodyne.feeds.parse.ParseLimits
@@ -82,7 +83,7 @@ class ParserContractTest {
         runTest {
             setUpRoot()
             val feedUrl = feedUrl()
-            val id = seedPodcast(db, feedUrl = feedUrl, feedKey = feedUrl)
+            val id = seedPodcast(db, feedUrl = feedUrl, feedKey = UrlNormalizer.forIdentity(feedUrl) ?: feedUrl)
             server.enqueue(mockResponse(body = rssBody()))
             val bundle = newRssAdapter(root, clock, parser = stubParser(tooLarge))
             try {
@@ -103,7 +104,7 @@ class ParserContractTest {
         runTest {
             setUpRoot()
             val feedUrl = feedUrl()
-            val id = seedPodcast(db, feedUrl = feedUrl, feedKey = feedUrl)
+            val id = seedPodcast(db, feedUrl = feedUrl, feedKey = UrlNormalizer.forIdentity(feedUrl) ?: feedUrl)
             server.enqueue(mockResponse(body = rssBody()))
             val bundle = newRssAdapter(root, clock, parser = stubParser(malformed))
             try {
@@ -122,7 +123,7 @@ class ParserContractTest {
         runTest {
             setUpRoot()
             val feedUrl = feedUrl()
-            val id = seedPodcast(db, feedUrl = feedUrl, feedKey = feedUrl)
+            val id = seedPodcast(db, feedUrl = feedUrl, feedKey = UrlNormalizer.forIdentity(feedUrl) ?: feedUrl)
             server.enqueue(mockResponse(body = rssBody()))
             val bundle = newRssAdapter(root, clock, parser = ioParser)
             try {

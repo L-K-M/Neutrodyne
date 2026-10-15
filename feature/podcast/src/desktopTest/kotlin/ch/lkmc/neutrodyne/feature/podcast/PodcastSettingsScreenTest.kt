@@ -37,12 +37,15 @@ import ch.lkmc.neutrodyne.core.testing.testFeedInfo
 import ch.lkmc.neutrodyne.core.testing.testPodcastDetail
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.LocalUiClock
+import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.platform.ExternalUrlOpener
 import ch.lkmc.neutrodyne.core.ui.platform.FilePicker
 import ch.lkmc.neutrodyne.core.ui.platform.FileSaver
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
 import ch.lkmc.neutrodyne.core.ui.platform.PlatformActions
+import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.feed_err_not_a_feed
 import java.util.Locale
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -221,19 +224,62 @@ class PodcastSettingsScreenTest {
         }
 
     @Test
-    fun m1bFeedAccountControlsHidden() =
+    fun feedAccountControlsDispatchEditAndCredentials() =
+        runComposeUiTest {
+            var edited: String? = null
+            var credentials: BasicCredentials? = null
+            setSettings(
+                PodcastSettingsUiState(
+                    detail = testPodcastDetail(7),
+                    feedInfo = testFeedInfo(feedUrl = "https://feeds.example.com/show.xml"),
+                    loaded = true,
+                ),
+                onEditFeedUrl = {
+                    edited = it
+                    null
+                },
+                onCredentials = { credentials = it },
+            )
+            // M1b restores both Feed-section rows (08's resolved deviation).
+            onNodeWithText("Edit feed address").performClick()
+            onAllNodes(hasSetTextAction())
+                .onFirst()
+                .performTextReplacement("https://other.example.com/feed")
+            onAllNodes(hasClickAction() and hasText("Save")).onFirst().performClick()
+            waitForIdle()
+            assertEquals("https://other.example.com/feed", edited)
+            // A null return committed the edit — the dialog closes.
+            onNodeWithText("New feed address").assertDoesNotExist()
+
+            onNodeWithText("Username and password").performClick()
+            onAllNodes(hasSetTextAction())[0].performTextInput("alice")
+            onAllNodes(hasSetTextAction())[1].performTextInput("hunter2")
+            onAllNodes(hasClickAction() and hasText("Save")).onFirst().performClick()
+            assertEquals(BasicCredentials("alice", "hunter2"), credentials)
+        }
+
+    @Test
+    fun editUrlFailureShowsInlineErrorAndKeepsTheDialog() =
         runComposeUiTest {
             setSettings(
                 PodcastSettingsUiState(
                     detail = testPodcastDetail(7),
-                    feedInfo = testFeedInfo(),
+                    feedInfo = testFeedInfo(feedUrl = "https://feeds.example.com/show.xml"),
                     loaded = true,
                 ),
+                onEditFeedUrl = { UiText.Res(Res.string.feed_err_not_a_feed) },
             )
-            // The edit-address and credentials writes are M1b's: their repository methods still
-            // throw, so the rows stay hidden until `FEED_ACCOUNT_CONTROLS_ENABLED` flips.
-            onNodeWithText("Edit feed address").assertDoesNotExist()
-            onNodeWithText("Username and password").assertDoesNotExist()
+            onNodeWithText("Edit feed address").performClick()
+            onAllNodes(hasSetTextAction())
+                .onFirst()
+                .performTextReplacement("https://other.example.com/page")
+            onAllNodes(hasClickAction() and hasText("Save")).onFirst().performClick()
+            waitForIdle()
+            // 08's Edit-URL dialog: the failure renders inline and the dialog stays open.
+            // The field merges its label with the error, so the Save button is the
+            // unambiguous "dialog still open" check.
+            onNodeWithText("This isn't a podcast feed").assertIsDisplayed()
+            onAllNodes(hasClickAction() and hasText("Save")).onFirst().assertIsDisplayed()
         }
 
     @Test
@@ -283,6 +329,27 @@ class PodcastSettingsScreenTest {
             onNodeWithContentDescription("Hide password").assertIsDisplayed()
         }
 
+    @Test
+    fun editUrlDraftNeverEntersSavedState() =
+        runComposeUiTest {
+            val registry = SaveableStateRegistry(null) { true }
+            setSettings(
+                PodcastSettingsUiState(
+                    detail = testPodcastDetail(7),
+                    feedInfo = testFeedInfo(),
+                    loaded = true,
+                ),
+                registry = registry,
+            )
+            onNodeWithText("Edit feed address").performClick()
+            onAllNodes(hasSetTextAction())
+                .onFirst()
+                .performTextReplacement("https://alice:synthetic-draft-password@host/feed")
+            var saved: Map<String, List<Any?>> = emptyMap()
+            runOnIdle { saved = registry.performSave() }
+            kotlin.test.assertFalse("synthetic-draft-password" in saved.toString())
+        }
+
     /**
      * Secrets never enter saved state: after a save/restore round trip the username comes
      * back but the password field starts empty.
@@ -317,7 +384,7 @@ class PodcastSettingsScreenTest {
         }
 
     @Test
-    fun youtubeFeedHidesEditAddress() =
+    fun youtubeFeedHidesTheRssAccountControls() =
         runComposeUiTest {
             setSettings(
                 PodcastSettingsUiState(
@@ -326,6 +393,7 @@ class PodcastSettingsScreenTest {
                     loaded = true,
                 ),
             )
+            // A YouTube channel has no feed URL to move and no Basic-auth credential (03).
             onNodeWithText("Edit feed address").assertDoesNotExist()
             onNodeWithText("Username and password").assertDoesNotExist()
         }
@@ -335,11 +403,13 @@ class PodcastSettingsScreenTest {
         onCustomTitle: (String?) -> Unit = {},
         onOrderChange: (FeedOrder) -> Unit = {},
         onIncludeInAll: (Boolean) -> Unit = {},
-        onEditFeedUrl: (String) -> Unit = {},
+        onEditFeedUrl: suspend (String) -> UiText? = { null },
         onCredentials: (BasicCredentials) -> Unit = {},
+        registry: SaveableStateRegistry = SaveableStateRegistry(null) { true },
     ) {
         setContent {
             CompositionLocalProvider(
+                LocalSaveableStateRegistry provides registry,
                 LocalPlatformKind provides PlatformKind.DESKTOP,
                 LocalUiClock provides TestClock(),
                 LocalAppNavigator provides navigator,
@@ -360,7 +430,7 @@ class PodcastSettingsScreenTest {
         waitForIdle()
     }
 
-    /** The "Username and password" dialog rendered directly — its row waits for M1b. */
+    /** The "Username and password" dialog rendered directly. */
     private fun ComposeUiTest.setSettingsCredentialsDialog(
         registry: SaveableStateRegistry = SaveableStateRegistry(null) { true },
         onSubmit: (BasicCredentials) -> Unit = {},

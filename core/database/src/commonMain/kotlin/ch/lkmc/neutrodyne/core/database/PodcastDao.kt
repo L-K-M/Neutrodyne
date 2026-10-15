@@ -43,6 +43,24 @@ abstract class PodcastDao(
     @Delete
     abstract suspend fun deleteAliases(rows: List<PodcastUrlAliasEntity>)
 
+    /** Move-only columns; the caller checks key and alias ownership under the same writer. */
+    @Query(
+        "UPDATE podcast SET feedUrl = :url, feedKey = :key, etag = NULL," +
+            " lastModified = NULL, contentSha256 = NULL WHERE id = :id",
+    )
+    abstract suspend fun moveFeed(
+        id: Long,
+        url: String,
+        key: String,
+    )
+
+    /** A target alias of this podcast must disappear before it becomes the primary key. */
+    @Query("DELETE FROM podcast_url_alias WHERE podcastId = :podcastId AND url = :url")
+    abstract suspend fun deleteAlias(
+        podcastId: Long,
+        url: String,
+    )
+
     // --- Add-flow dedupe and repository reads (03, added 2026-10-07) -----------------------------
 
     /** The podcast owning the alias `url` (`feedKey` is checked separately by the caller). */
@@ -175,16 +193,31 @@ abstract class PodcastDao(
         order: FeedOrder,
     )
 
-    /**
-     * Records a `pendingNewFeedUrl` outside an ingest — a permanent redirect that ends in a 304
-     * announces a move but produces no body for the ingest transaction (03 Permanent redirects).
-     * The probe machinery adopts or drops it once a fetched body proves the move.
-     */
+    /** Records a publisher-announced `itunes:new-feed-url` target for a later probe (03). */
     @Query("UPDATE podcast SET pendingNewFeedUrl = :url WHERE id = :id")
     abstract suspend fun setPendingNewFeedUrl(
         id: Long,
         url: String?,
     )
+
+    /**
+     * The `credentialId` write that pairs a `SecretStore.put` with its first referencing
+     * commit (03 Basic auth: subscribe, `setCredentials`, import, sync installs) and that
+     * clears the reference again when the credential is dropped. Runs inside
+     * `CredentialCommitCoordinator.withCredentialCommit`, like every credential-commit path.
+     */
+    @Query("UPDATE podcast SET credentialId = :credentialId WHERE id = :podcastId")
+    abstract suspend fun setCredentialId(
+        podcastId: Long,
+        credentialId: Long?,
+    )
+
+    /**
+     * `setCredentials` clears the auth block once the `credentialId` commit lands — unlike
+     * `clearRefreshBlock` it touches nothing else (03 Basic auth: "clear `needsCredentials`").
+     */
+    @Query("UPDATE podcast SET needsCredentials = 0 WHERE id = :podcastId")
+    abstract suspend fun clearNeedsCredentials(podcastId: Long)
 
     // --- Refresh selection and fetch-state writes (02; 03 Refresh scheduling) --------------------
 

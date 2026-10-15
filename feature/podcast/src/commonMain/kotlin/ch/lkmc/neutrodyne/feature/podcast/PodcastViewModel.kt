@@ -136,8 +136,10 @@ public class PodcastViewModel
         }
 
         /** The "Enter password" dialog's commit (03 Basic auth; M1b API already bound). */
-        public suspend fun setCredentials(credentials: BasicCredentials): Outcome<Unit, AddPodcastError> =
-            podcasts.setCredentials(podcastId, credentials)
+        public suspend fun setCredentials(credentials: BasicCredentials): Outcome<Unit, AddPodcastError>? =
+            suspendRunCatching { podcasts.setCredentials(podcastId, credentials) }
+                .onFailure(::reportWriteFailed)
+                .getOrNull()
 
         public fun unsubscribe() {
             write { unsubscribe(listOf(podcastId)) }

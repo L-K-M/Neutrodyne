@@ -5,10 +5,13 @@ package ch.lkmc.neutrodyne.core.data
 import androidx.room3.useReaderConnection
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.add.PreviewEntry
+import ch.lkmc.neutrodyne.core.data.credentials.DesktopSecretStore
+import ch.lkmc.neutrodyne.core.data.credentials.IdentitySecretProtection
 import ch.lkmc.neutrodyne.core.data.fetch.RedirectHop
 import ch.lkmc.neutrodyne.core.data.ingest.IngestContext
 import ch.lkmc.neutrodyne.core.data.ingest.IngestMode
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
+import ch.lkmc.neutrodyne.core.data.refresh.RefreshRequest
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshScheduler
 import ch.lkmc.neutrodyne.core.database.EpisodeDescriptionCodec
 import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
@@ -21,8 +24,11 @@ import ch.lkmc.neutrodyne.core.domain.AddResolution
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SubscribeError
 import ch.lkmc.neutrodyne.core.model.AliasReason
+import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
+import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
@@ -34,8 +40,12 @@ import ch.lkmc.neutrodyne.feeds.parse.FeedParser
 import ch.lkmc.neutrodyne.feeds.parse.ParseLimits
 import ch.lkmc.neutrodyne.feeds.parse.ParseResult
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -103,6 +113,49 @@ class SubscribeFlowTest {
     }
 
     // --- The subscribe transaction (03 Subscribe transaction) -----------------------------------------
+
+    @Test
+    fun subscribeDropsRedirectAndPagingUserinfo() =
+        runTest {
+            val target = feedUrl("/new")
+            val hop = feedUrl("/middle")
+            val older = feedUrl("/older")
+
+            fun withUserinfo(url: String) = url.replace("://", "://user:synthetic-subscribe-password@")
+            server.enqueue(mockResponse(301, "", "Location" to withUserinfo(hop)))
+            server.enqueue(mockResponse(308, "", "Location" to withUserinfo(target)))
+            val body =
+                rssBody(items = arrayOf(rssItem("e1"))).replace(
+                    "</channel>",
+                    """<atom:link xmlns:atom="http://www.w3.org/2005/Atom" rel="next" href="${withUserinfo(
+                        older,
+                    )}"/></channel>""",
+                )
+            server.enqueue(mockResponse(200, body))
+            val preview = assertIs<AddResolution.Feed>(resolverBundle.resolver.resolve(feedUrl())).preview
+            val id = assertIs<Outcome.Success<Long>>(subscribeBundle.useCase(preview.previewId, emptySet())).value
+            val row = assertNotNull(db.podcastDao().byId(id))
+
+            assertEquals(target, row.feedUrl)
+            assertEquals(UrlNormalizer.forIdentity(target), row.feedKey)
+            assertEquals(older, row.pagingNextUrl)
+            val aliases =
+                db
+                    .podcastDao()
+                    .aliases(id)
+                    .map { it.url }
+                    .toSet()
+            assertEquals(setOf(UrlNormalizer.forIdentity(feedUrl()), UrlNormalizer.forIdentity(hop)), aliases)
+            assertTrue(aliases.all { '@' !in it && "synthetic-subscribe-password" !in it })
+            assertNull(row.credentialId)
+            assertTrue(
+                db
+                    .credentialDao()
+                    .observeAll()
+                    .first()
+                    .isEmpty(),
+            )
+        }
 
     @Test
     fun subscribeWritesTheRowAliasesAndInitialIngest() =
@@ -830,6 +883,128 @@ class SubscribeFlowTest {
             // "not wanted": the link stays for UI but the row completes (03 paging columns).
             assertEquals(true, row.pagingComplete)
             assertTrue(scheduler.nowRequests.isEmpty())
+        }
+
+    // --- M1b credentials (03 Basic auth and CredentialStore) ------------------------------------------
+
+    /**
+     * The credential journey end to end (03): a 401 preview asks for the pair, the retry carries
+     * it on the wire, the subscribe persists it under the requested origin and the next refresh
+     * authenticates from the store alone. The restart half: a fresh `DesktopSecretStore` over the
+     * same data dir and database reloads the entry — `FeedFetcher` awaits the load — so the next
+     * refresh is still authenticated.
+     */
+    @Test
+    fun credentialsSurviveSubscribeRefreshAndAStoreReload() =
+        runTest {
+            val coordinator = FakeCredentialCommitCoordinator()
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            val store =
+                DesktopSecretStore(
+                    db = db,
+                    appDirs = appDirsFor(root),
+                    coordinator = coordinator,
+                    clock = clock,
+                    protection = IdentitySecretProtection,
+                    scope = scope,
+                )
+            val subscribing =
+                newSubscribe(
+                    db,
+                    resolverBundle.cache,
+                    resolverBundle.resolver,
+                    scheduler,
+                    settings,
+                    clock,
+                    secrets = store,
+                    coordinator = coordinator,
+                )
+            val rss = newRssAdapter(root, clock, credentials = store)
+            try {
+                // 401 → AuthRequired; the unauthenticated request carried no header.
+                server.enqueue(
+                    mockResponse(401, "", "WWW-Authenticate" to "Basic realm=\"members\""),
+                )
+                val denied =
+                    assertIs<AddResolution.Failure>(resolverBundle.resolver.resolve(feedUrl()))
+                assertIs<AddPodcastError.AuthRequired>(denied.error)
+                assertNull(server.takeRequest().headers["Authorization"])
+
+                // The retry sends the pair; the preview entry caches it for the subscribe.
+                server.enqueue(mockResponse(body = rssBody(items = arrayOf(rssItem("e1")))))
+                val resolved = resolverBundle.resolver.resolve(feedUrl(), BasicCredentials("u", "p"))
+                val previewId = assertIs<AddResolution.Feed>(resolved).preview.previewId
+                assertEquals(
+                    basicAuthHeader("u", "p"),
+                    server.takeRequest().headers["Authorization"],
+                )
+
+                val id =
+                    assertIs<Outcome.Success<Long>>(subscribing.useCase(previewId, emptySet())).value
+                val row = assertNotNull(db.podcastDao().byId(id))
+                val credRow =
+                    db
+                        .credentialDao()
+                        .byOrigin(UrlNormalizer.origin(feedUrl())!!)
+                        .single()
+                assertEquals(credRow.id, row.credentialId)
+
+                // The refresh authenticates out of the store alone — no explicit credentials.
+                val refresher =
+                    newRefresher(db, mapOf(SourceType.RSS to rss.adapter), clock, settings)
+                server.enqueue(mockResponse(body = rssBody(items = arrayOf(rssItem("e1")))))
+                refresher.run(
+                    RefreshRequest(
+                        scope = RefreshScope.Podcasts(listOf(id)),
+                        force = true,
+                        pagesOnly = false,
+                        origin = RefreshOrigin.MANUAL,
+                    ),
+                )
+                assertEquals(
+                    basicAuthHeader("u", "p"),
+                    server.takeRequest().headers["Authorization"],
+                )
+
+                // The process-restart shape: a second store instance over the same dir and
+                // database loads the entry back; the fetch still authenticates.
+                val secondScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+                val second =
+                    DesktopSecretStore(
+                        db = db,
+                        appDirs = appDirsFor(root),
+                        coordinator = coordinator,
+                        clock = clock,
+                        protection = IdentitySecretProtection,
+                        scope = secondScope,
+                    )
+                val secondRss = newRssAdapter(root, clock, credentials = second)
+                try {
+                    val refresher2 =
+                        newRefresher(db, mapOf(SourceType.RSS to secondRss.adapter), clock, settings)
+                    server.enqueue(
+                        mockResponse(body = rssBody(items = arrayOf(rssItem("e1"), rssItem("e3")))),
+                    )
+                    refresher2.run(
+                        RefreshRequest(
+                            scope = RefreshScope.Podcasts(listOf(id)),
+                            force = true,
+                            pagesOnly = false,
+                            origin = RefreshOrigin.MANUAL,
+                        ),
+                    )
+                    assertEquals(
+                        basicAuthHeader("u", "p"),
+                        server.takeRequest().headers["Authorization"],
+                    )
+                } finally {
+                    secondScope.cancel()
+                    secondRss.close()
+                }
+            } finally {
+                rss.close()
+                scope.cancel()
+            }
         }
 
     // --- Unsubscribe (03 Unsubscribe) -----------------------------------------------------------------

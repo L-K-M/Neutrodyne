@@ -95,13 +95,20 @@ public class PodcastSettingsViewModel
             write { podcasts.setIncludeInAll(podcastId, include) }
         }
 
-        /** "Edit feed address" (03 Edit URL; RSS rows only). */
-        public suspend fun editFeedUrl(input: String): Outcome<Unit, AddPodcastError> =
-            podcasts.editFeedUrl(podcastId, input)
+        /**
+         * "Edit feed address" (03 Edit URL; RSS rows only). An unexpected fault is logged and
+         * returns null, which the dialog shows inline; it never escapes into the UI scope.
+         */
+        public suspend fun editFeedUrl(input: String): Outcome<Unit, AddPodcastError>? =
+            suspendRunCatching { podcasts.editFeedUrl(podcastId, input) }
+                .onFailure { Log.w(TAG, it) { "edit feed URL failed" } }
+                .getOrNull()
 
-        /** "Username and password" (03 Basic auth). */
-        public suspend fun setCredentials(credentials: BasicCredentials): Outcome<Unit, AddPodcastError> =
-            podcasts.setCredentials(podcastId, credentials)
+        /** "Username and password" (03 Basic auth). An unexpected fault is reported like a failed write. */
+        public suspend fun setCredentials(credentials: BasicCredentials): Outcome<Unit, AddPodcastError>? =
+            suspendRunCatching { podcasts.setCredentials(podcastId, credentials) }
+                .onFailure(::reportWriteFailed)
+                .getOrNull()
 
         /** The screen acks a shown snackbar so its [UserMessage] leaves the state. */
         public fun onMessageShown(id: Long) {

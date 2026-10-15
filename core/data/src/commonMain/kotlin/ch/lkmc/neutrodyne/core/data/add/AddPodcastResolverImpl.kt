@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.data.add
 
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Dispatcher
 import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.common.Outcome
@@ -61,6 +62,7 @@ internal class AddPodcastResolverImpl(
     private val fileSystem: FileSystem,
     private val cache: PreviewCache,
     private val db: NeutrodyneDatabase,
+    private val clock: Clock,
     @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
 ) : AddPodcastResolver,
     PreviewEntryResolver {
@@ -86,7 +88,7 @@ internal class AddPodcastResolverImpl(
         if (entry != null) return Outcome.Success(buildPreview(entry))
         if (HostChecks.isYouTube(feedUrl)) return Outcome.Failure(AddPodcastError.YouTubeNotYetSupported)
         return when (val r = fetchAndParse(feedUrl, feedUrl, null, schemeGuessed = false)) {
-            is PreviewOutcome.Done -> Outcome.Success(buildPreview(r.entry))
+            is PreviewOutcome.Done -> Outcome.Success(buildPreview(cacheEntry(r.entry)))
             is PreviewOutcome.Failed -> Outcome.Failure(r.error)
         }
     }
@@ -94,10 +96,22 @@ internal class AddPodcastResolverImpl(
     private suspend fun resolveInner(
         input: String,
         credentials: BasicCredentials?,
-    ): AddResolution {
+    ): AddResolution =
+        when (val result = probe(input, credentials)) {
+            is Outcome.Success -> AddResolution.Feed(buildPreview(cacheEntry(result.value)))
+            is Outcome.Failure -> AddResolution.Failure(result.error)
+        }
+
+    /** Edit URL always probes afresh; it neither reuses nor retains preview credentials. */
+    override suspend fun probe(input: String): Outcome<PreviewEntry, AddPodcastError> = probe(input, null)
+
+    private suspend fun probe(
+        input: String,
+        credentials: BasicCredentials?,
+    ): Outcome<PreviewEntry, AddPodcastError> {
         // YouTube pre-check on the raw text and each token (the M1–M2 host check, 03).
         if (input.split(Regex("""\s+""")).any { HostChecks.isYouTube(it) }) {
-            return AddResolution.Failure(AddPodcastError.YouTubeNotYetSupported)
+            return Outcome.Failure(AddPodcastError.YouTubeNotYetSupported)
         }
         val url =
             when (val n = AddInputNormalizer.normalize(input)) {
@@ -106,28 +120,28 @@ internal class AddPodcastResolverImpl(
                 }
 
                 NormalizedInput.Invalid -> {
-                    return AddResolution.Failure(AddPodcastError.InvalidUrl)
+                    return Outcome.Failure(AddPodcastError.InvalidUrl)
                 }
 
                 is NormalizedInput.NotAUrl -> {
-                    return AddResolution.Failure(AddPodcastError.NotAUrl(n.query))
+                    return Outcome.Failure(AddPodcastError.NotAUrl(n.query))
                 }
             }
 
         // Every URL the pipeline fetches passes the YouTube check (03 Host recognition).
         if (HostChecks.isYouTube(url.url)) {
-            return AddResolution.Failure(AddPodcastError.YouTubeNotYetSupported)
+            return Outcome.Failure(AddPodcastError.YouTubeNotYetSupported)
         }
-        if (HostChecks.isSpotifyShow(url.url)) return AddResolution.Failure(AddPodcastError.SpotifyShow)
+        if (HostChecks.isSpotifyShow(url.url)) return Outcome.Failure(AddPodcastError.SpotifyShow)
 
         val creds = credentials ?: url.credentials?.let { BasicCredentials(it.username, it.password) }
         return when (val r = fetchAndParse(url.url, url.url, creds, url.schemeGuessed)) {
-            is PreviewOutcome.Done -> AddResolution.Feed(buildPreview(r.entry))
-            is PreviewOutcome.Failed -> AddResolution.Failure(r.error)
+            is PreviewOutcome.Done -> Outcome.Success(r.entry)
+            is PreviewOutcome.Failed -> Outcome.Failure(r.error)
         }
     }
 
-    /** Fetch → sniff → parse → dedupe → cache. Never persists the parsed feed (D24). */
+    /** Shared unconditional fetch → sniff → parse; callers choose whether to cache (D24). */
     private suspend fun fetchAndParse(
         url: String,
         inputUrl: String,
@@ -271,7 +285,16 @@ internal class AddPodcastResolverImpl(
         if (UrlNormalizer.forIdentity(meta.permanentUrl ?: meta.requestedUrl) == null) {
             return PreviewOutcome.Failed(AddPodcastError.InvalidUrl)
         }
-        val entry = cache.put(meta.permanentUrl ?: meta.requestedUrl, inputUrl, feed, meta, body.hops, credentials)
+        val entry =
+            PreviewEntry(
+                previewId = meta.permanentUrl ?: meta.requestedUrl,
+                inputUrl = inputUrl,
+                feed = feed,
+                meta = meta,
+                hops = body.hops,
+                credentials = credentials,
+                createdAt = clock.now(),
+            )
         return PreviewOutcome.Done(entry)
     }
 
@@ -282,10 +305,13 @@ internal class AddPodcastResolverImpl(
     override suspend fun resolveEntry(feedUrl: String): Outcome<PreviewEntry, AddPodcastError> {
         cache.get(feedUrl)?.let { return Outcome.Success(it) }
         return when (val r = fetchAndParse(feedUrl, feedUrl, null, schemeGuessed = false)) {
-            is PreviewOutcome.Done -> Outcome.Success(r.entry)
+            is PreviewOutcome.Done -> Outcome.Success(cacheEntry(r.entry))
             is PreviewOutcome.Failed -> Outcome.Failure(r.error)
         }
     }
+
+    private suspend fun cacheEntry(entry: PreviewEntry): PreviewEntry =
+        cache.put(entry.previewId, entry.inputUrl, entry.feed, entry.meta, entry.hops, entry.credentials)
 
     /** `FeedPreview` of a live cache entry (03 Preview and dedupe). */
     private suspend fun buildPreview(entry: PreviewEntry): FeedPreview {
@@ -357,9 +383,6 @@ internal class AddPodcastResolverImpl(
         ) : PreviewOutcome
     }
 
-    /** 03's accepted-item rule: a primary enclosure or an `externalMediaId` (04's rows). */
-    private fun ParsedEpisode.isAccepted(): Boolean = primaryEnclosure != null || externalMediaId != null
-
     private val NetError.isTransport: Boolean
         get() =
             when (this) {
@@ -377,6 +400,9 @@ internal class AddPodcastResolverImpl(
         const val PREVIEW_EPISODE_LIMIT = 200
     }
 }
+
+/** 03's accepted-item rule, shared by add previews and explicit moves. */
+internal fun ParsedEpisode.isAccepted(): Boolean = primaryEnclosure != null || externalMediaId != null
 
 /**
  * The M1a subset of 03's `HostRecognizer` host table: the YouTube host check that stands in for

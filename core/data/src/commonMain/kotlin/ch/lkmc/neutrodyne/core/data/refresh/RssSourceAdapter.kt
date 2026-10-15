@@ -94,7 +94,7 @@ internal class RssSourceAdapter(
         feed: DueFeed,
         mode: FetchMode,
     ): AdapterResult {
-        val unconditional =
+        var unconditional =
             when (mode) {
                 FetchMode.OLDER_PAGE -> true
                 FetchMode.FULL -> true
@@ -114,7 +114,8 @@ internal class RssSourceAdapter(
                     feed.feedUrl
                 }
             }
-        val outcome =
+        var purpose = ParsePurpose.CURRENT_FEED
+        var outcome =
             fetcher.fetch(
                 FeedRequest(
                     url = url,
@@ -123,7 +124,19 @@ internal class RssSourceAdapter(
                     conditional = !unconditional,
                 ),
             )
-        return when (outcome) {
+        // A redirect announcement needs an accepted parse, even when validators hid the body.
+        // Confirm from the original URL once. Only a body can prove the move: anything else (a
+        // second 304, an error) keeps the first 304's success, and the next refresh tries again.
+        if (mode != FetchMode.OLDER_PAGE && outcome is FetchOutcome.NotModified && outcome.permanentUrl != null) {
+            val confirmation =
+                fetcher.fetch(FeedRequest(url = url, etag = null, lastModified = null, conditional = false))
+            if (confirmation is FetchOutcome.Body) {
+                unconditional = true
+                purpose = ParsePurpose.REDIRECT_CONFIRMATION
+                outcome = confirmation
+            }
+        }
+        return when (val fetched = outcome) {
             is FetchOutcome.NotModified -> {
                 AdapterResult.NotModified(
                     meta =
@@ -131,29 +144,29 @@ internal class RssSourceAdapter(
                             // The 304 came back from the end of the redirect chain, and a
                             // leading 301/308 run still announces a move the engine must see
                             // (03 Permanent redirects) — the stored URL is only `requestedUrl`.
-                            finalUrl = outcome.finalUrl,
+                            finalUrl = fetched.finalUrl,
                             requestedUrl = feed.feedUrl,
-                            permanentUrl = outcome.permanentUrl,
-                            etag = outcome.etag ?: feed.etag,
-                            lastModified = outcome.lastModified ?: feed.lastModified,
+                            permanentUrl = fetched.permanentUrl,
+                            etag = fetched.etag ?: feed.etag,
+                            lastModified = fetched.lastModified ?: feed.lastModified,
                             sha256Hex = feed.contentSha256.orEmpty(),
-                            serverDateMs = outcome.serverDateMs,
-                            maxAgeSec = outcome.maxAgeSec,
+                            serverDateMs = fetched.serverDateMs,
+                            maxAgeSec = fetched.maxAgeSec,
                         ),
                 )
             }
 
             is FetchOutcome.Network -> {
-                networkOutcome(outcome.error)
+                networkOutcome(fetched.error)
             }
 
             is FetchOutcome.Http -> {
                 AdapterResult.Failed(
-                    kind = httpErrorKind(outcome.code, outcome.basicChallenge),
-                    http = outcome.code,
-                    retryAfterMs = outcome.retryAfterMs,
+                    kind = httpErrorKind(fetched.code, fetched.basicChallenge),
+                    http = fetched.code,
+                    retryAfterMs = fetched.retryAfterMs,
                     // `transient` only gates `gone`: the RSS adapter asks for it on a real 410.
-                    transient = outcome.code != HTTP_GONE,
+                    transient = fetched.code != HTTP_GONE,
                 )
             }
 
@@ -163,7 +176,7 @@ internal class RssSourceAdapter(
                     http = null,
                     retryAfterMs = null,
                     transient = true,
-                    detail = outcome.detail,
+                    detail = fetched.detail,
                 )
             }
 
@@ -176,7 +189,8 @@ internal class RssSourceAdapter(
             }
 
             is FetchOutcome.Body -> {
-                bodyOutcome(feed, outcome, unconditional)
+                val result = bodyOutcome(feed, fetched, unconditional)
+                if (result is AdapterResult.Parsed) result.copy(purpose = purpose) else result
             }
         }
     }
@@ -220,7 +234,8 @@ internal class RssSourceAdapter(
         // current; a parser-version bump or a failed parse re-parses the same bytes (03).
         if (body.sha256Hex == feed.contentSha256 &&
             feed.parserVersion == FeedParser.VERSION &&
-            feed.lastParseOk
+            feed.lastParseOk &&
+            body.permanentUrl == null
         ) {
             tempFiles.delete(body.file)
             return AdapterResult.Unchanged(meta)

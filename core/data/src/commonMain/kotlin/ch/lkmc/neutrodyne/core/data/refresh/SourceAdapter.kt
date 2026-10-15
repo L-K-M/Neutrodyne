@@ -67,6 +67,8 @@ internal sealed interface AdapterResult {
         val rowHints: Map<String, RowHint> = emptyMap(),
         /** 04: overrides the partial-window floor of diff step 8. */
         val absenceFloor: Long? = null,
+        /** A bodyless redirect confirmation supplies no tag-probe eligibility (03). */
+        val purpose: ParsePurpose = ParsePurpose.CURRENT_FEED,
     ) : AdapterResult
 
     data class NotModified(
@@ -102,3 +104,6 @@ internal sealed interface AdapterResult {
 internal annotation class SourceTypeKey(
     val value: SourceType,
 )
+
+/** Keeps redirect confirmation separate from a changed current feed body. */
+internal enum class ParsePurpose { CURRENT_FEED, REDIRECT_CONFIRMATION }

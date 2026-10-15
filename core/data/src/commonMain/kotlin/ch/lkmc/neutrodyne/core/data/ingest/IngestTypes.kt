@@ -15,6 +15,9 @@ import ch.lkmc.neutrodyne.feeds.model.ParseWarning
 /** Which ingest the transaction performs (03 Diff algorithm). */
 internal enum class IngestMode { REFRESH, INITIAL, OLDER_PAGE }
 
+/** A collision body belongs to the losing request, never to the survivor's validators. */
+internal enum class IngestValidators { STORE, DISCARD }
+
 /**
  * Everything the diff needs beyond the parsed document (03 Ingestion and diff): the fetch outcome's
  * validator and move data, 04's per-item overrides and the absent-row floor.
@@ -28,6 +31,9 @@ internal data class IngestContext(
     val rowHints: Map<String, RowHint> = emptyMap(),
     /** 04's replacement for the partial-window floor of diff step 8 (`Long.MAX_VALUE` flips nothing). */
     val absenceFloor: Long? = null,
+    val validators: IngestValidators = IngestValidators.STORE,
+    /** A validated publisher announcement, adopted atomically with this body. */
+    val newFeedUrl: String? = null,
 )
 
 /** The validator and URL data of one 200 response that parsed (03 IngestContext). */

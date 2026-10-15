@@ -30,11 +30,13 @@ internal class PreviewEntry(
 )
 
 /**
- * The subscribe path's re-resolve surface (03 Subscribe step 1): an evicted preview's URL is
- * re-fetched into a fresh [PreviewEntry]. Narrower than `AddPodcastResolver` — the domain
- * interface cannot expose the data-internal entry's fetch meta and redirect hops.
+ * Subscribe re-resolves an evicted preview; Edit URL probes unconditionally without caching.
+ * Narrower than `AddPodcastResolver`: the domain interface cannot expose the data-internal
+ * entry's fetch metadata and redirect hops.
  */
 internal interface PreviewEntryResolver {
+    suspend fun probe(input: String): Outcome<PreviewEntry, AddPodcastError>
+
     suspend fun resolveEntry(feedUrl: String): Outcome<PreviewEntry, AddPodcastError>
 }
 

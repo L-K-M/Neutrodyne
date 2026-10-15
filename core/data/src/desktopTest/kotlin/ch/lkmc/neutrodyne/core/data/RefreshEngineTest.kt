@@ -24,6 +24,7 @@ import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.jvm.parse.XmlPullFeedParser
 import ch.lkmc.neutrodyne.feeds.model.Paging
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
@@ -97,7 +98,7 @@ class RefreshEngineTest {
         seedPodcast(
             db,
             feedUrl = feedUrl,
-            feedKey = feedUrl,
+            feedKey = UrlNormalizer.forIdentity(feedUrl) ?: feedUrl,
             nextRefreshAt = nextRefreshAt,
             subscribedAt = NOW - 30 * DAY,
             block = block,
@@ -1432,10 +1433,9 @@ class RefreshEngineTest {
         }
 
     @Test
-    fun aPermanentRedirectInto304RecordsTheMoveAsPending() =
+    fun aPermanentRedirectInto304ConfirmsBeforeAdopting() =
         runTest {
-            // A 304 carries no body, so the design's ≥1-item adoption gate cannot run — but the
-            // announced move must still be recorded for the probe path (03 Permanent redirects).
+            // A conditional 304 needs one unconditional body from the original URL.
             setUpRoot()
             val feedUrl = server.url("/feed.xml").toString()
             val id =
@@ -1449,6 +1449,8 @@ class RefreshEngineTest {
                 }
             server.enqueue(mockResponse(301, "", "Location" to "/new.xml"))
             server.enqueue(mockResponse(code = 304, body = ""))
+            server.enqueue(mockResponse(301, "", "Location" to "/new.xml"))
+            server.enqueue(mockResponse(body = rssBody(items = arrayOf(rssItem("moved")))))
             val bundle = newRssAdapter(root, clock)
             try {
                 val engine =
@@ -1462,11 +1464,13 @@ class RefreshEngineTest {
 
                 val report = engine.run(request())
 
-                assertEquals(FeedOutcome.NotModified, report.outcomes[id])
+                assertIs<FeedOutcome.Ingested>(report.outcomes[id])
                 assertEquals(
                     server.url("/new.xml").toString(),
-                    db.podcastDao().byId(id)!!.pendingNewFeedUrl,
+                    db.podcastDao().byId(id)!!.feedUrl,
                 )
+                assertNull(db.podcastDao().byId(id)!!.pendingNewFeedUrl)
+                assertEquals(4, server.requestCount)
             } finally {
                 bundle.close()
             }
@@ -1513,10 +1517,9 @@ class RefreshEngineTest {
     @Test
     fun anOutcomeHandlingFaultIsIsolatedToTheFeed() =
         runTest {
-            // The outcome table's own writes (recordPendingMove here) run outside the ingest
-            // transaction; a fault there must degrade this feed to Failed, not abort the run
-            // and its siblings.
-            val a = due("https://a.example.com/f")
+            // A scheduling-only outcome still checks key renormalisation under the writer.
+            // Its fault must degrade this feed to Failed while its sibling finishes.
+            val a = due("https://a.example.com/f") { copy(feedKey = "legacy-key") }
             val b = due("https://b.example.com/f")
             val adapter =
                 stubAdapter(
@@ -1530,8 +1533,8 @@ class RefreshEngineTest {
                 )
             db.useWriterConnection {
                 it.execSql(
-                    "CREATE TRIGGER fail_pending BEFORE UPDATE OF pendingNewFeedUrl ON podcast" +
-                        " WHEN old.id = $a BEGIN SELECT RAISE(ABORT, 'pending write'); END",
+                    "CREATE TRIGGER fail_move BEFORE UPDATE OF feedKey ON podcast" +
+                        " WHEN old.id = $a BEGIN SELECT RAISE(ABORT, 'move write'); END",
                 )
             }
 
@@ -1687,27 +1690,31 @@ class RefreshEngineTest {
             // refreshOne and cancel the run (r2 regression pin).
             val a = due("https://a.example.com/f")
             val b = due("https://b.example.com/f")
+            val aFinished = CompletableDeferred<Unit>()
             val adapter =
                 stubAdapter(
                     mutableMapOf(
-                        "https://a.example.com/f" to AdapterResult.NotModified(meta = fetchMeta()),
+                        "https://a.example.com/f" to AdapterResult.Unchanged(meta = fetchMeta()),
                         "https://b.example.com/f" to
                             AdapterResult.NotModified(
                                 meta = fetchMeta(permanentUrl = "https://new.example.com/f"),
                             ),
                     ),
                     onFetch = { feed, _ ->
-                        // Age A's buffered row past the batcher's 5 s deadline so B's
-                        // writeFailure flushes — and faults — inside the guard's getOrElse.
-                        if (feed.id == b) clock.elapsedMs += 6_000L
+                        // Age A's buffered row so B's eager batch flush faults;
+                        // writeFailure then faults again inside the isolation guard.
+                        if (feed.id == b) {
+                            aFinished.await()
+                            clock.elapsedMs += 6_000L
+                        }
                         null
+                    },
+                    announce = { podcastId, _, newIds ->
+                        if (podcastId == a) aFinished.complete(Unit)
+                        newIds
                     },
                 )
             db.useWriterConnection {
-                it.execSql(
-                    "CREATE TRIGGER fail_pending BEFORE UPDATE OF pendingNewFeedUrl ON podcast" +
-                        " WHEN old.id = $b BEGIN SELECT RAISE(ABORT, 'pending write'); END",
-                )
                 it.execSql(
                     "CREATE TRIGGER fail_fs BEFORE UPDATE OF failureCount ON podcast" +
                         " WHEN old.id = $a BEGIN SELECT RAISE(ABORT, 'fs write'); END",
@@ -1725,7 +1732,7 @@ class RefreshEngineTest {
 
             assertEquals("fs write", thrown.message?.substringAfter("message: "))
             // Both feeds produced an outcome before the flush surfaced: the sibling is isolated.
-            assertEquals(FeedOutcome.NotModified, events.single { it.podcastId == a }.outcome)
+            assertEquals(FeedOutcome.Unchanged, events.single { it.podcastId == a }.outcome)
             val bOutcome = assertIs<FeedOutcome.Failed>(events.single { it.podcastId == b }.outcome)
             assertEquals(FeedErrorKind.STORAGE, bOutcome.kind)
         }

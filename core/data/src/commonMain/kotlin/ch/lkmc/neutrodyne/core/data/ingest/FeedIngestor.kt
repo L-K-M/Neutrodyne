@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.artwork.ArtworkKeys
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Dispatcher
 import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
+import ch.lkmc.neutrodyne.core.data.refresh.FeedMoveCommitter
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshPolicy
 import ch.lkmc.neutrodyne.core.database.DescriptionFormat
 import ch.lkmc.neutrodyne.core.database.DueFeed
@@ -19,6 +20,7 @@ import ch.lkmc.neutrodyne.core.database.PersonEntity
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.database.PodcastFeedMetadata
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.model.AliasReason
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.GuidKnowledge
 import ch.lkmc.neutrodyne.core.model.OwnerType
@@ -50,8 +52,8 @@ import kotlin.math.max
  * same body for callers already inside one (the subscribe commit — 03 Subscribe). Only 02's
  * feed-owned columns are ever written: user state is not in any write list here.
  *
- * `NO_MEDIA` (items but none acceptable) and `UNSUPPORTED_LIST_FEED` (empty `medium*L`) write
- * nothing: the engine records the kind plus success scheduling instead (03 Accepted items).
+ * `NO_MEDIA` and `UNSUPPORTED_LIST_FEED` preserve feed metadata and episodes; successful-refresh
+ * key renormalisation still applies. The engine records the kind plus success scheduling (03).
  */
 @Inject
 internal class FeedIngestor(
@@ -59,6 +61,7 @@ internal class FeedIngestor(
     private val sanitizer: ShowNotesSanitizer,
     private val settings: SettingsRepository,
     private val clock: Clock,
+    private val moves: FeedMoveCommitter,
     @Dispatcher(NeutrodyneDispatchers.Default) private val defaultDispatcher: CoroutineDispatcher,
 ) {
     /**
@@ -110,12 +113,35 @@ internal class FeedIngestor(
     ): IngestResult {
         val ingestDao = db.ingestDao()
         val podcastDao = db.podcastDao()
-        val stored =
+        val original =
             podcastDao.byId(podcast.id)
                 ?: return IngestResult.empty(prepared.warnings, vanished = true)
 
-        // Accepted-items table of 03: blog and list feeds write nothing at all — the engine
-        // records their error kind and the success scheduling through the batched fetch state.
+        // Only a current page-1 request with accepted media can adopt its redirect target.
+        val permanentUrl =
+            ctx.fetch.permanentUrl.takeIf {
+                prepared.items.isNotEmpty() && original.feedUrl == ctx.fetch.requestedUrl
+            }
+        val stored =
+            if (ctx.mode == IngestMode.OLDER_PAGE) {
+                original
+            } else {
+                if (ctx.newFeedUrl != null && prepared.items.isNotEmpty()) {
+                    moves.applyInTransaction(
+                        original,
+                        ctx.newFeedUrl,
+                        AliasReason.NEW_FEED_URL,
+                    )
+                } else {
+                    moves.applyInTransaction(original, permanentUrl)
+                }
+            }
+        val discardValidators =
+            ctx.validators == IngestValidators.DISCARD ||
+                stored.feedUrl != original.feedUrl || stored.feedKey != original.feedKey
+
+        // Blog and list feeds preserve metadata and episodes; identity upkeep above still applies.
+        // The engine records their error kind and success schedule through the batched fetch state.
         if (ctx.mode != IngestMode.OLDER_PAGE && parsed.items.isNotEmpty() && prepared.items.isEmpty()) {
             return IngestResult.empty(prepared.warnings, FeedErrorKind.NO_MEDIA)
         }
@@ -516,9 +542,9 @@ internal class FeedIngestor(
                 status = PodcastStatus.ACTIVE,
                 initialFetch = false,
                 latestEpisodeAt = latestEpisodeAt,
-                etag = ctx.fetch.etag,
-                lastModified = ctx.fetch.lastModified,
-                contentSha256 = ctx.fetch.sha256Hex,
+                etag = ctx.fetch.etag.takeUnless { discardValidators },
+                lastModified = ctx.fetch.lastModified.takeUnless { discardValidators },
+                contentSha256 = ctx.fetch.sha256Hex.takeUnless { discardValidators },
                 parserVersion = FeedParser.VERSION,
                 lastParseOk = true,
                 lastAttemptAt = prepared.now,
@@ -755,7 +781,7 @@ internal class FeedIngestor(
         stored: PodcastEntity,
         aliases: List<ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity>,
     ): String? {
-        val raw = parsed.newFeedUrl ?: return null
+        val raw = parsed.newFeedUrl?.let { UrlNormalizer.splitUserInfo(it).first } ?: return null
         val identity = UrlNormalizer.forIdentity(raw) ?: return null
         if (identity == stored.feedKey) return null
         return if (aliases.none { it.url == identity }) raw else null
@@ -771,11 +797,11 @@ internal class FeedIngestor(
         mode: IngestMode,
         stored: PodcastEntity,
     ): Pair<String?, Boolean> {
-        val link = parsed.paging.next ?: parsed.paging.prevArchive
+        val link = (parsed.paging.next ?: parsed.paging.prevArchive)?.let { UrlNormalizer.splitUserInfo(it).first }
         return when {
             mode == IngestMode.OLDER_PAGE -> link to (link == null)
             stored.pagingNextUrl == null && !stored.pagingComplete -> link to true
-            else -> stored.pagingNextUrl to stored.pagingComplete
+            else -> stored.pagingNextUrl?.let { UrlNormalizer.splitUserInfo(it).first } to stored.pagingComplete
         }
     }
 
