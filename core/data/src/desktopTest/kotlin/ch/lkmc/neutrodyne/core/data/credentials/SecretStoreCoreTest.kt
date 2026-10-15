@@ -2,6 +2,8 @@
 
 package ch.lkmc.neutrodyne.core.data.credentials
 
+import ch.lkmc.neutrodyne.core.common.Log
+import ch.lkmc.neutrodyne.core.common.LogSink
 import ch.lkmc.neutrodyne.core.common.Origin
 import ch.lkmc.neutrodyne.core.data.seedPodcast
 import ch.lkmc.neutrodyne.core.database.CredentialDao
@@ -70,7 +72,11 @@ class SecretStoreCoreTest {
         override suspend fun resolve(row: CredentialEntity): StoredSecret? {
             resolveCalls++
             if (row.id in lostIds) throw SecretLostException(IllegalStateException("lost key"))
-            if (row.id in brokenIds) throw IllegalStateException("transient")
+            if (row.id in
+                brokenIds
+            ) {
+                throw IllegalStateException("transient", IllegalArgumentException("synthetic-resolve-password"))
+            }
             return row.secretCipher
                 ?.decodeToString()
                 ?.let { StoredSecret(row.username, it.toCharArray(), emptyMap()) }
@@ -477,6 +483,29 @@ class SecretStoreCoreTest {
             assertFalse(db.podcastDao().byId(podcastId)!!.needsCredentials)
             assertEquals("p2", core.get("https://a.test")?.secret?.concatToString())
             db.close()
+        }
+
+    @Test
+    fun credentialResolutionNeverLogsExceptionMessagesOrCauses() =
+        runTest {
+            val db = TestDb.inMemory()
+            val seam = FakeSeam()
+            val rows = newFlow()
+            val core = newCore(db, seam, rows)
+            val messages = java.util.concurrent.CopyOnWriteArrayList<String>()
+            Log.install(LogSink { _, _, message -> messages += message })
+            try {
+                val stored = persistPlain(db.credentialDao(), "https://a.test", "u", "p")
+                seam.brokenIds += requireNotNull(stored.row).id
+                rows.emit(currentRows(db))
+                awaitReal { seam.reconcilePasses >= 1 }
+                assertNull(core.get("https://a.test"))
+                assertTrue(messages.any { "IllegalStateException" in it })
+                assertFalse(messages.any { "transient" in it || "synthetic-resolve-password" in it })
+            } finally {
+                Log.install()
+                db.close()
+            }
         }
 
     @Test

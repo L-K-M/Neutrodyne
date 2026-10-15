@@ -25,7 +25,7 @@ internal suspend fun SecretStore.removeUnreferenced(
     // maintenance sweep removes true orphans.
     suspendRunCatching {
         if (rowId != null && dao.referenceCount(rowId) == 0) remove(origin)
-    }.onFailure { e -> Log.w(TAG, e) { "credential rollback for a failed commit failed" } }
+    }.onFailure { e -> Log.w(TAG) { "credential rollback for a failed commit failed (${e::class.simpleName})" } }
 }
 
 private const val TAG = "CredentialCommit"

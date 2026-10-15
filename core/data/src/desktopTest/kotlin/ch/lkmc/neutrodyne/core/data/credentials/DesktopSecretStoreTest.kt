@@ -3,11 +3,14 @@
 package ch.lkmc.neutrodyne.core.data.credentials
 
 import ch.lkmc.neutrodyne.core.common.AppDirs
+import ch.lkmc.neutrodyne.core.common.Log
+import ch.lkmc.neutrodyne.core.common.LogSink
 import ch.lkmc.neutrodyne.core.common.Origin
 import ch.lkmc.neutrodyne.core.data.seedPodcast
 import ch.lkmc.neutrodyne.core.database.CredentialEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.StoredSecret
+import ch.lkmc.neutrodyne.core.network.okhttp.of
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import kotlinx.coroutines.CoroutineScope
@@ -22,6 +25,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assume.assumeTrue
 import java.io.IOException
 import java.nio.file.AtomicMoveNotSupportedException
@@ -121,6 +125,59 @@ class DesktopSecretStoreTest {
             )
         }
     }
+
+    @Test
+    fun malformedSecretsNeverLogPasswordExcerpts() =
+        runTest {
+            val f = newFixture()
+            val messages = mutableListOf<String>()
+            val password = "synthetic-json-password-719"
+            Log.install(LogSink { _, _, message -> messages += message })
+            try {
+                Files.writeString(
+                    f.secretsPath(IdentitySecretProtection),
+                    """{"v":1,"entries":{"https://a.test":{"secret":"$password" BROKEN}}}""",
+                )
+                assertTrue(f.diskEntries().isEmpty())
+                val unreadable = messages.single { "secrets file unreadable" in it }
+                assertTrue("JsonDecodingException" in unreadable)
+                assertFalse(messages.any { password in it }, "secret leaked into the log sink")
+                assertFalse("BROKEN" in unreadable)
+                assertFalse("\n" in unreadable, "exception stack or cause was logged")
+            } finally {
+                Log.install()
+                f.close()
+            }
+        }
+
+    @Test
+    fun ipv6CredentialsMatchTheHttpClientOrigin() =
+        runTest {
+            val f = newFixture()
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            try {
+                val store = newStore(f, scope)
+                val id = store.put("http://[2001:db8::1]:8080/f", "alice", "pw".toCharArray())!!
+                val canonical =
+                    f.db
+                        .credentialDao()
+                        .byIds(listOf(id))
+                        .single()
+                        .origin
+                assertEquals("http://[2001:db8::1]:8080", canonical)
+                val expected = Origin("http", "2001:db8::1", 8080)
+                assertEquals(expected, Origin.of("http://[2001:db8::1]:8080/f".toHttpUrl()))
+                assertEquals(expected, storedOriginToOrigin(canonical))
+                assertEquals(basicAuth("alice", "pw"), store.basicAuthorization(expected))
+
+                val reloaded = newStore(f, scope)
+                awaitLoaded(reloaded)
+                assertEquals(basicAuth("alice", "pw"), reloaded.basicAuthorization(expected))
+            } finally {
+                scope.cancel()
+                f.close()
+            }
+        }
 
     // --- file + row shape ----------------------------------------------------------------------------
 

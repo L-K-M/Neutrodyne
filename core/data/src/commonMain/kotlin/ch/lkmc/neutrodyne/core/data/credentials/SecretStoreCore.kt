@@ -139,14 +139,14 @@ internal class SecretStoreCore(
                         reconcile(emission)
                     } catch (t: Throwable) {
                         if (t is CancellationException) throw t
-                        Log.e(TAG, t) { "credential row reconcile failed" }
+                        Log.e(TAG) { "credential row reconcile failed (${t::class.simpleName})" }
                     }
                     // The first emission — even a failed reconcile — ends the load wait.
                     loaded.complete(Unit)
                 }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
-                Log.e(TAG, t) { "credential row observation ended" }
+                Log.e(TAG) { "credential row observation ended (${t::class.simpleName})" }
             } finally {
                 // A flow that dies before its first emission must not strand awaitLoaded callers.
                 loaded.complete(Unit)
@@ -246,7 +246,7 @@ internal class SecretStoreCore(
                 lost += row
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
-                Log.w(TAG, t) { "credential row ${row.id} could not be read" }
+                Log.w(TAG) { "credential row ${row.id} could not be read (${t::class.simpleName})" }
             }
         }
 

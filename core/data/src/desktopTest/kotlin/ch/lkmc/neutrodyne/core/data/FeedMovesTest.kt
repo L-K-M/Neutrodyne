@@ -115,6 +115,62 @@ class FeedMovesTest {
     }
 
     @Test
+    fun permanentRedirectDropsPublisherUserinfo() =
+        runTest {
+            for (code in listOf(301, 308)) {
+                val id = seed(url("/old-$code"))
+                val target = url("/new-$code")
+                server.enqueue(redirect(code, target.replace("://", "://user:synthetic-move-password@")))
+                server.enqueue(mockResponse(200, body))
+
+                assertIs<FeedOutcome.Ingested>(refresh(id))
+                assertMove(id, target, key(url("/old-$code")), AliasReason.REDIRECT)
+                assertNull(db.podcastDao().byId(id)?.credentialId)
+                assertTrue(db.podcastDao().aliases(id).all { '@' !in it.url && "synthetic-move-password" !in it.url })
+            }
+        }
+
+    @Test
+    fun announcementDropsUserinfoWhilePendingAndAfterAdoption() =
+        runTest {
+            val id = seed()
+            val target = url("/new")
+            val announced = target.replace("://", "://user:synthetic-announcement-password@")
+            server.enqueue(mockResponse(200, announcedBody(announced)))
+            server.enqueue(mockResponse(404, ""))
+
+            assertIs<FeedOutcome.Ingested>(refresh(id))
+            assertEquals(target, db.podcastDao().byId(id)?.pendingNewFeedUrl)
+
+            // A changed body retries the pending announcement; identical bodies skip the probe.
+            server.enqueue(mockResponse(200, announcedBody(announced) + "\n"))
+            server.enqueue(mockResponse(200, body))
+            assertIs<FeedOutcome.Ingested>(refresh(id))
+            assertMove(id, target, key(url("/old")), AliasReason.NEW_FEED_URL)
+            assertNull(db.podcastDao().byId(id)?.pendingNewFeedUrl)
+            assertNull(db.podcastDao().byId(id)?.credentialId)
+        }
+
+    @Test
+    fun refreshDropsUserinfoFromPagingLinks() =
+        runTest {
+            val id = seed { copy(pagingNextUrl = null, pagingComplete = false) }
+            val target = url("/older")
+            val paged =
+                body.replace(
+                    "</channel>",
+                    """<atom:link xmlns:atom="http://www.w3.org/2005/Atom" rel="next" href="${target.replace(
+                        "://",
+                        "://user:synthetic-paging-password@",
+                    )}"/></channel>""",
+                )
+            server.enqueue(mockResponse(200, paged))
+
+            assertIs<FeedOutcome.Ingested>(refresh(id))
+            assertEquals(target, db.podcastDao().byId(id)?.pagingNextUrl)
+        }
+
+    @Test
     fun leading301ChainAdoptsAndDiscardsValidators() =
         runTest {
             val original = url("/old")

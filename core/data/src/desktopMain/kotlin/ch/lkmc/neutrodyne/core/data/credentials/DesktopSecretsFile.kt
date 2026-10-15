@@ -152,12 +152,13 @@ internal class DesktopSecretsFile(
                 emptyMap()
             } catch (t: Exception) {
                 if (t is CancellationException) throw t
-                Log.e(TAG, t) { "secrets file unreadable; treating its entries as lost" }
+                // Decoder and protection exceptions may include plaintext secrets.
+                Log.e(TAG) { "secrets file unreadable; treating its entries as lost (${t::class.simpleName})" }
                 try {
                     val aside = path.resolveSibling(path.fileName.toString() + UNREADABLE_SUFFIX)
                     Files.move(path, aside, StandardCopyOption.REPLACE_EXISTING)
                 } catch (asideFailure: IOException) {
-                    Log.w(TAG, asideFailure) { "could not set the unreadable secrets file aside" }
+                    Log.w(TAG) { "could not set the unreadable secrets file aside (${asideFailure::class.simpleName})" }
                 }
                 emptyMap()
             }
