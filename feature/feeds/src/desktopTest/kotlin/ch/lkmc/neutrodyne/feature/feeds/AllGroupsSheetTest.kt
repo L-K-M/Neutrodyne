@@ -21,6 +21,7 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -258,6 +259,14 @@ class AllGroupsSheetTest {
             assertEquals("all", runBlocking { fixture.settings.get(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE) })
         }
 
+    @Test
+    fun androidLeavesInitialFocusToModalSheet() =
+        runComposeUiTest {
+            setContent { fixture.Content(SheetHost.OPENER, PlatformKind.ANDROID) }
+            onNodeWithText("Open groups").performClick()
+            onNodeWithText("New group").assertIsNotFocused()
+        }
+
     private fun ComposeUiTest.setSheet() {
         setContent { fixture.Content(SheetHost.OPENER) }
         onNodeWithText("Open groups").performClick()
@@ -297,7 +306,10 @@ private class AllGroupsSheetFixture {
 
     @Suppress("ktlint:compose:modifier-missing-check")
     @Composable
-    fun Content(host: SheetHost) {
+    fun Content(
+        host: SheetHost,
+        platform: PlatformKind = PlatformKind.DESKTOP,
+    ) {
         val dispatcher = rememberCoroutineScope().coroutineContext[ContinuationInterceptor] as CoroutineDispatcher
         val model =
             remember {
@@ -336,7 +348,7 @@ private class AllGroupsSheetFixture {
         CompositionLocalProvider(
             LocalAppNavigator provides navigator,
             LocalLifecycleOwner provides owner,
-            LocalPlatformKind provides PlatformKind.DESKTOP,
+            LocalPlatformKind provides platform,
             LocalUiClock provides clock,
         ) {
             NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {

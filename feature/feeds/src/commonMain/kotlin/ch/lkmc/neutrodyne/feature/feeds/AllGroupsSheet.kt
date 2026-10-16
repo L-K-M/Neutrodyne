@@ -36,8 +36,10 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.ui.GroupMosaic
+import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_all_groups
@@ -59,7 +61,11 @@ internal fun AllGroupsSheet(
     modifier: Modifier = Modifier,
 ) {
     val initialFocus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { initialFocus.requestFocus() }
+    val platform = LocalPlatformKind.current
+    LaunchedEffect(platform) {
+        if (platform != PlatformKind.DESKTOP) return@LaunchedEffect
+        initialFocus.requestFocus()
+    }
 
     Column(
         modifier.fillMaxWidth().testTag("all-groups-sheet").onPreviewKeyEvent { event ->
