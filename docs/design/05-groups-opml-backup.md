@@ -245,6 +245,12 @@ Many-to-many ([R2.2](../PLAN.md#21-functional-requirements)); rows are `source =
 | Library multi-select "Add to group…" | `AddToGroupsKey(ids)` | `applyMembership` with tri-state chips: checked for all → `add`, cleared → `remove`, indeterminate untouched |
 | Subscribe and import | — | 03's `SubscribeUseCase(groupIds)`; [Commit](#6-commit) |
 
+**Implementation note (2026-10-16, M2):** C3 uses the existing
+`RefreshController.reschedulePeriodic()` hook for effective-interval rebasing on
+both platforms. `GroupRepository` calls it after a membership transaction that
+changed rows commits (`setMembers`, `applyMembership`, `create` with initial
+members; delete and undo already do); no-op writes and failures do not.
+
 Every membership write is one write transaction (`INSERT OR IGNORE` / `DELETE … WHERE groupId = ? AND podcastId IN (…)`), then: `RefreshController.reschedulePeriodic()` (the minimum refresh interval over groups may change, [03 Periodic tick](03-feeds-and-discovery.md#periodic-tick); on the desktop it re-reads the refresh lane's due times) and `SnapshotScheduler.requestSoon()` (Android; a no-op on the desktop, [Auto Backup](#auto-backup)). Auto-download and notification policies follow automatically through the resolver flows ([Effective settings resolution](#effective-settings-resolution)).
 
 ```kotlin
@@ -631,8 +637,12 @@ interface ScopeSettingsRepository {
 **Implementation note (2026-10-16, M2):** B3 writes only the two M2 fields,
 preserving every other override column even when both M2 fields inherit. Its
 read-modify-write callback runs inside the Room write transaction. Scheduling
-hooks below arrive with C3, channel reconciliation with C5, and snapshot requests
-with M3; B3 does not invoke those hooks or rewire refresh scheduling.
+hooks below are implemented by C3 after the interval write commits, with a lazy
+`Provider<RefreshController>` to avoid a dependency cycle. Unchanged intervals,
+notification-only writes, invalid writes and missing scopes do not reschedule.
+A post-commit scheduling failure is logged; it does not turn a committed write
+into `SettingsError.WriteFailed`. Channel reconciliation arrives with C5, and
+snapshot requests with M3.
 
 - Writes are a read-modify-write inside one write transaction (`@Upsert` is allowed on these single-writer tables, [02 DAO rules](02-data-model.md#dao-rules)); a row whose fields are all `null` is deleted. Rule 1 (dependent fields) and validation run before the write; an invalid value returns 01's `SettingsError.OutOfRange(field name)` and writes nothing. A podcast or group that no longer exists makes the write a no-op returning success (the screen is closing anyway).
 - After a write: refresh interval changed → `RefreshController.reschedulePeriodic()`; `notifyNewEpisodes` changed → `GroupChannelSync.sync()` (Android; the screen requests `POST_NOTIFICATIONS` per 03's permission rule); always → `SnapshotScheduler.requestSoon()` (Android). 07 and 06 observe the resolver flows; nothing else is pushed. Sync needs no call: the triggers capture the synced columns (02).

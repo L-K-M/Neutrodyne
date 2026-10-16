@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.data.refresh.DesktopRefreshScheduler
 import ch.lkmc.neutrodyne.core.data.refresh.FetchMode
 import ch.lkmc.neutrodyne.core.data.refresh.LaneStatus
 import ch.lkmc.neutrodyne.core.data.refresh.NextRefreshRebaser
+import ch.lkmc.neutrodyne.core.data.settings.EffectiveSettingsResolverImpl
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
@@ -315,7 +316,7 @@ class DesktopJobRunnerTest {
             val queue =
                 DesktopRefreshScheduler(
                     db = db,
-                    rebaser = NextRefreshRebaser(db, settings),
+                    rebaser = NextRefreshRebaser(db, EffectiveSettingsResolverImpl(db, settings)),
                     poker = Provider { jobRunner },
                     appScope = backgroundScope,
                 )

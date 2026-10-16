@@ -12,16 +12,23 @@ import ch.lkmc.neutrodyne.core.data.refresh.AdapterResult
 import ch.lkmc.neutrodyne.core.data.refresh.FeedOutcome
 import ch.lkmc.neutrodyne.core.data.refresh.FeedRunEvent
 import ch.lkmc.neutrodyne.core.data.refresh.FetchMode
+import ch.lkmc.neutrodyne.core.data.refresh.NextRefreshRebaser
+import ch.lkmc.neutrodyne.core.data.refresh.RefreshControllerImpl
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
+import ch.lkmc.neutrodyne.core.data.refresh.RefreshPolicy
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshRequest
 import ch.lkmc.neutrodyne.core.data.settings.EffectiveSettingsResolverImpl
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
+import ch.lkmc.neutrodyne.core.database.PodcastGroupSettingsEntity
+import ch.lkmc.neutrodyne.core.database.PodcastSettingsEntity
+import ch.lkmc.neutrodyne.core.database.ScopeOverrides
 import ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.model.Effective
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
+import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
@@ -29,6 +36,8 @@ import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.testing.database.groupEntity
+import ch.lkmc.neutrodyne.core.testing.database.memberEntity
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.jvm.parse.XmlPullFeedParser
 import ch.lkmc.neutrodyne.feeds.model.Paging
@@ -331,6 +340,123 @@ class RefreshEngineTest {
 
             refresher(adapter).run(request(dueSlackMs = 61 * 60_000L))
             assertEquals(listOf(soon), adapter.calls.map { it.first })
+        }
+
+    @Test
+    fun groupFeedRefreshFetchesOnlyItsMemberPodcasts() =
+        runTest {
+            val a = due("https://a.example.com/f", NOW + DAY)
+            val b = due("https://b.example.com/f", NOW + DAY)
+            val outside = due("https://outside.example.com/f")
+            val group = db.groupDao().insert(groupEntity(orderKey = "a"))
+            db.groupDao().insertMember(memberEntity(group, a, "a"))
+            db.groupDao().insertMember(memberEntity(group, b, "b"))
+            val scheduler = FakeRefreshScheduler()
+            val adapter = stubAdapter()
+            val engine = refresher(adapter)
+            val controller = RefreshControllerImpl(scheduler, engine, db, clock, backgroundScope)
+
+            controller.refreshFeed(FeedSource.Group(group))
+            runCurrent()
+            val queued = scheduler.nowRequests.single()
+            engine.run(request(scope = queued.scope, force = queued.force, origin = queued.origin))
+
+            assertEquals(setOf(a, b), adapter.calls.map { it.first }.toSet())
+            assertNull(db.podcastDao().byId(outside)!!.lastAttemptAt)
+        }
+
+    @Test
+    fun outcomesUseEachPodcastsResolvedInterval() =
+        runTest {
+            val parsed = due("https://parsed.example.com/f")
+            val notModified = due("https://304.example.com/f")
+            val unchanged = due("https://unchanged.example.com/f")
+            val noMedia = due("https://no-media.example.com/f")
+            val group = db.groupDao().insert(groupEntity(orderKey = "a"))
+            db.groupDao().insertMember(memberEntity(group, parsed, "a"))
+            db.groupDao().insertMember(memberEntity(group, notModified, "b"))
+            db.scopeSettingsDao().upsertGroup(
+                PodcastGroupSettingsEntity(group, ScopeOverrides(refreshIntervalMinutes = 60)),
+            )
+            db.scopeSettingsDao().upsertPodcast(
+                PodcastSettingsEntity(notModified, ScopeOverrides(refreshIntervalMinutes = 120)),
+            )
+            db.scopeSettingsDao().upsertPodcast(
+                PodcastSettingsEntity(unchanged, ScopeOverrides(refreshIntervalMinutes = 480)),
+            )
+            db.scopeSettingsDao().upsertPodcast(
+                PodcastSettingsEntity(noMedia, ScopeOverrides(refreshIntervalMinutes = 720)),
+            )
+            val adapter =
+                stubAdapter(
+                    mutableMapOf(
+                        "https://parsed.example.com/f" to
+                            adapterParsed(parsedFeed(items = listOf(parsedEpisode(0, pubDate = NOW)))),
+                        "https://304.example.com/f" to AdapterResult.NotModified(null),
+                        "https://unchanged.example.com/f" to AdapterResult.Unchanged(fetchMeta()),
+                        "https://no-media.example.com/f" to
+                            adapterParsed(
+                                parsedFeed(
+                                    items = listOf(parsedEpisode(0, enclosureUrl = null, externalMediaId = null)),
+                                ),
+                            ),
+                    ),
+                )
+
+            val resolver = EffectiveSettingsResolverImpl(db, settings)
+            var intervalReads = 0
+            val counted =
+                object : EffectiveSettingsResolver by resolver {
+                    override suspend fun refreshIntervals(): Map<Long, Effective<Int?>> {
+                        intervalReads++
+                        return resolver.refreshIntervals()
+                    }
+                }
+            newRefresher(
+                db,
+                mapOf(SourceType.RSS to adapter),
+                clock,
+                settings,
+                effectiveSettings = counted,
+            ).run(request())
+            assertEquals(1, intervalReads)
+
+            for ((id, minutes) in mapOf(parsed to 60, notModified to 120, unchanged to 480, noMedia to 720)) {
+                assertEquals(NOW + minutes * 60_000L, db.podcastDao().byId(id)!!.nextRefreshAt, "podcast $id")
+            }
+        }
+
+    @Test
+    fun manualOnlyIsNeverAutoDueButForcedRefreshWorks() =
+        runTest {
+            val id = due("https://manual.example.com/f", NOW + DAY)
+            val parsed = due("https://parsed-manual.example.com/f", NOW + DAY)
+            db.scopeSettingsDao().upsertPodcast(PodcastSettingsEntity(id, ScopeOverrides(refreshIntervalMinutes = 0)))
+            db.scopeSettingsDao().upsertPodcast(
+                PodcastSettingsEntity(parsed, ScopeOverrides(refreshIntervalMinutes = 0)),
+            )
+            NextRefreshRebaser(db, EffectiveSettingsResolverImpl(db, settings)).rebase()
+            val adapter =
+                stubAdapter(
+                    mutableMapOf(
+                        "https://manual.example.com/f" to AdapterResult.NotModified(null),
+                        "https://parsed-manual.example.com/f" to
+                            adapterParsed(parsedFeed(items = listOf(parsedEpisode(0, pubDate = NOW)))),
+                    ),
+                )
+            val engine = refresher(adapter)
+
+            engine.run(request())
+            assertTrue(adapter.calls.isEmpty())
+            assertEquals(RefreshPolicy.NEVER, db.podcastDao().byId(id)!!.nextRefreshAt)
+
+            engine.run(
+                request(scope = RefreshScope.Podcasts(listOf(id, parsed)), force = true, origin = RefreshOrigin.MANUAL),
+            )
+            assertEquals(setOf(id, parsed), adapter.calls.map { it.first }.toSet())
+            assertEquals(RefreshPolicy.NEVER, db.podcastDao().byId(parsed)!!.nextRefreshAt)
+            assertEquals(RefreshPolicy.NEVER, db.podcastDao().byId(id)!!.nextRefreshAt)
+            assertTrue(db.podcastDao().dueForRefresh(NOW + 365 * DAY, scopeAll = true).isEmpty())
         }
 
     // --- Outcome table ----------------------------------------------------------------------------

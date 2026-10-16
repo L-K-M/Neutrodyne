@@ -9,7 +9,12 @@ import ch.lkmc.neutrodyne.core.data.refresh.DesktopRefreshScheduler
 import ch.lkmc.neutrodyne.core.data.refresh.FetchMode
 import ch.lkmc.neutrodyne.core.data.refresh.NextRefreshRebaser
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
+import ch.lkmc.neutrodyne.core.data.refresh.RefreshPolicy
+import ch.lkmc.neutrodyne.core.data.settings.EffectiveSettingsResolverImpl
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.database.PodcastGroupSettingsEntity
+import ch.lkmc.neutrodyne.core.database.PodcastSettingsEntity
+import ch.lkmc.neutrodyne.core.database.ScopeOverrides
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
@@ -17,6 +22,8 @@ import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
+import ch.lkmc.neutrodyne.core.testing.database.groupEntity
+import ch.lkmc.neutrodyne.core.testing.database.memberEntity
 import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
@@ -357,6 +364,62 @@ class DesktopRefreshLaneTest {
             assertEquals(listOf(DesktopRefreshLane.NAME), pokes)
         }
 
+    @Test
+    fun effectiveIntervalsDriveAutomaticSelectionAndManualOnlyStillAllowsForce() =
+        laneTest {
+            settings.set(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES, 720)
+            val timed =
+                seedPodcast(db, "https://timed.example.com/f", nextRefreshAt = null, subscribedAt = NOW - 60 * 60_000L)
+            val manual = seedPodcast(db, "https://manual.example.com/f", nextRefreshAt = null, subscribedAt = NOW)
+            val global = seedPodcast(db, "https://global.example.com/f", nextRefreshAt = null, subscribedAt = NOW)
+            val group = db.groupDao().insert(groupEntity(orderKey = "a"))
+            val manualGroup = db.groupDao().insert(groupEntity(name = "manual", orderKey = "b"))
+            db.groupDao().insertMember(memberEntity(group, timed, "a"))
+            db.groupDao().insertMember(memberEntity(manualGroup, timed, "a"))
+            db.scopeSettingsDao().upsertGroup(
+                PodcastGroupSettingsEntity(group, ScopeOverrides(refreshIntervalMinutes = 60)),
+            )
+            db.scopeSettingsDao().upsertGroup(
+                PodcastGroupSettingsEntity(manualGroup, ScopeOverrides(refreshIntervalMinutes = 0)),
+            )
+            db.scopeSettingsDao().upsertPodcast(
+                PodcastSettingsEntity(manual, ScopeOverrides(refreshIntervalMinutes = 0)),
+            )
+            val adapter = stubAdapter(onFetch = { _, _ -> AdapterResult.NotModified(null) })
+            val q = queue(this)
+            val lane = lane(adapter, q)
+
+            q.reschedulePeriodic()
+            lane.run(Instant.fromEpochMilliseconds(NOW))
+
+            assertEquals(listOf(timed), adapter.calls.map { it.first })
+            assertEquals(NOW + 60 * 60_000L, db.podcastDao().byId(timed)!!.nextRefreshAt)
+            assertEquals(RefreshPolicy.NEVER, db.podcastDao().byId(manual)!!.nextRefreshAt)
+            assertEquals(NOW + 720 * 60_000L, db.podcastDao().byId(global)!!.nextRefreshAt)
+
+            // Once the remaining timed podcasts switch to Manual only, the minute poll is idle.
+            db.scopeSettingsDao().upsertPodcast(
+                PodcastSettingsEntity(timed, ScopeOverrides(refreshIntervalMinutes = 0)),
+            )
+            db.scopeSettingsDao().upsertPodcast(
+                PodcastSettingsEntity(global, ScopeOverrides(refreshIntervalMinutes = 0)),
+            )
+            q.reschedulePeriodic()
+            lane.run(Instant.fromEpochMilliseconds(NOW))
+            assertEquals(1, adapter.calls.size)
+
+            q.enqueueNow(
+                RefreshScope.Podcasts(listOf(manual)),
+                force = true,
+                pagesOnly = false,
+                origin = RefreshOrigin.MANUAL,
+            )
+            testScheduler.advanceUntilIdle()
+            lane.run(Instant.fromEpochMilliseconds(NOW))
+            assertEquals(listOf(timed, manual), adapter.calls.map { it.first })
+            assertEquals(RefreshPolicy.NEVER, db.podcastDao().byId(manual)!!.nextRefreshAt)
+        }
+
     private suspend fun summaryCount(): Int = if (settings.get(FeedsSettingKeys.LAST_RUN_SUMMARY).isEmpty()) 0 else 1
 
     /**
@@ -377,7 +440,7 @@ class DesktopRefreshLaneTest {
     private fun queue(scope: CoroutineScope): DesktopRefreshScheduler =
         DesktopRefreshScheduler(
             db = db,
-            rebaser = NextRefreshRebaser(db, settings),
+            rebaser = NextRefreshRebaser(db, EffectiveSettingsResolverImpl(db, settings)),
             poker = Provider { JobLanePoker { name -> pokes += name } },
             appScope = scope,
         )

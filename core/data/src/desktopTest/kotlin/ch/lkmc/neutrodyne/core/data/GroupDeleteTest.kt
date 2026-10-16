@@ -97,6 +97,8 @@ class GroupDeleteTest {
                     )
                 }
 
+                // Creating groups with members rescheduled already; count only the delete's.
+                refresh.calls.clear()
                 val token = assertIs<Outcome.Success<DeletedGroupToken>>(repo.delete(tech)).value
 
                 // One transaction: row, members and the GROUP context are gone; podcasts stand.
