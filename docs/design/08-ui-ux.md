@@ -1481,9 +1481,23 @@ enum class CoverAspect { SQUARE, WIDE_16_9 }
 
 `FeedFilterChips` (`:core:ui`) in a horizontally scrolling row: Unplayed, Downloaded (M6), In progress (M4) as toggle `NdFilterChip`s with a leading check when selected; Media as a dropdown chip (All / Audio only / Video only); Sort as a dropdown chip (Newest first / Oldest first; hidden for All and Ungrouped, whose order is fixed in v1, 05); "Last 30 days" dropdown chip shown only while `hideOlderThanDays` is set (set from the page overflow); "Clear" chip when anything is active. Each change calls 05's `FeedRepository.setFilters/setFeedOrder/setHideOlderThanDays` immediately. Chips filter only; they never choose the group ([D55](../PLAN.md#3-key-decisions)).
 
-Implementation note (2026-10-16, M2): the shared row currently exposes
-Downloaded and In progress before M6/M4 supply their producers. Their
-stored-state predicates work, but the controls are not yet milestone-gated.
+**Implementation note (2026-10-16, M2):** D11 gates Downloaded until M6 and
+In progress until M4. Feature callers pass the shared
+`AVAILABLE_FEED_FILTER_CAPABILITIES` enum set from `:core:model` to
+`FeedFilterChips`; the same set derives effective page filters. The YouTube
+capability bindings are still stubs and the earlier feed-account flag was
+removed in M1b, so this shared model value is the single milestone source for
+both features. Stored downloaded/in-progress flags are ignored in page queries
+and chip state while gated, without rewriting saved or synced preferences on
+read. Editing filters writes the effective selection, including clearing any
+gated flags. The predicates remain available to repository callers and tests
+([05 Filters](05-groups-opml-backup.md#filters-order-and-hide-older-than)).
+
+D11's deterministic create-with-members, counted-tab, filter, mark-played,
+reorder, delete-fallback and undo journey lives in `:desktopApp`'s test source
+set. The shell already owns the complete feature graph and JVM UI setup;
+dynamic test bindings keep the real Room repositories with a fixed clock and
+virtual undo expiry. Core modules therefore need no feature or UI test edges.
 
 ### Banners, snackbars and undo
 
@@ -1806,8 +1820,10 @@ and the selection fallback remain D1/D2 UI work.
 route continues to render All; tab/pager rendering and lifecycle visit calls
 arrive in D2. `FeedsUiState.prefs` describes the selected source, while its
 compatibility `filters` field describes the rendered All page. The source-keyed
-cache uses B2's `pagedFeed(source)` helper to observe and compare effective
-filters/order before replacing a pager. Per-entry child scopes own `cachedIn`.
+cache observes preferences and compares effective filters/order before
+replacing a pager. D11 applies the milestone capabilities in the ViewModel
+before the explicit repository query, keeping hidden flags out of the query.
+Per-entry child scopes own `cachedIn`.
 The ViewModel exposes both the union live map and `liveBySource` projections,
 and `visitBaselines` retains each page's visit-start highlight baseline.
 Each changed stored reference waits for fresh tab and group emissions, so a

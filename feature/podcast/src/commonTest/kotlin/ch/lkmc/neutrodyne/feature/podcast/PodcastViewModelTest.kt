@@ -137,6 +137,19 @@ class PodcastViewModelTest : MainDispatcherTest() {
         }
 
     @Test
+    fun gatedFiltersAreIgnoredForTransientPodcastQueries() =
+        runTest {
+            val model = viewModel()
+            collect(model)
+            val effective = FeedFilters(unplayedOnly = true)
+            model.onFiltersChange(effective.copy(downloadedOnly = true, inProgressOnly = true))
+            model.feed.take(1).asSnapshot()
+            advanceUntilIdle()
+            assertEquals(effective, feeds.lastRequest?.second)
+            assertEquals(effective, model.uiState.value.filters)
+        }
+
+    @Test
     fun initialStateBeforeSubscription() =
         runTest {
             assertEquals(PodcastUiState(), viewModel().uiState.value)
