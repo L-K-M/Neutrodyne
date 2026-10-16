@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.data.fetch.FeedTempFiles
 import ch.lkmc.neutrodyne.core.data.ingest.FeedIngestor
 import ch.lkmc.neutrodyne.core.data.ingest.FetchMeta
 import ch.lkmc.neutrodyne.core.data.ingest.IngestionEventBus
+import ch.lkmc.neutrodyne.core.data.notifications.NewEpisodeNotifier
 import ch.lkmc.neutrodyne.core.data.refresh.AdapterResult
 import ch.lkmc.neutrodyne.core.data.refresh.FeedMoveCommitter
 import ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher
@@ -20,10 +21,12 @@ import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshScheduler
 import ch.lkmc.neutrodyne.core.data.refresh.SourceAdapter
 import ch.lkmc.neutrodyne.core.data.repo.PodcastMerger
+import ch.lkmc.neutrodyne.core.data.settings.EffectiveSettingsResolverImpl
 import ch.lkmc.neutrodyne.core.database.DueFeed
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
@@ -32,6 +35,7 @@ import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -80,6 +84,8 @@ internal fun newRefresher(
     scheduler: RefreshScheduler = FakeRefreshScheduler(),
     secrets: SecretStore = FakeSecretStore(),
     coordinator: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
+    effectiveSettings: EffectiveSettingsResolver = EffectiveSettingsResolverImpl(db, settings),
+    notifier: NewEpisodeNotifier = NewEpisodeNotifier(db, effectiveSettings, FakeNewEpisodePoster()),
 ): FeedRefresher =
     FeedRefresher(
         db,
@@ -89,6 +95,7 @@ internal fun newRefresher(
         syncHook,
         tempFiles,
         settings,
+        effectiveSettings,
         clock,
         random,
         newFeedMoves(
@@ -103,6 +110,7 @@ internal fun newRefresher(
         },
         secrets,
         coordinator,
+        notifier,
     )
 
 /** A subscribed podcast row whose `feedKey` matches [feedUrl]; returns the new id. */
