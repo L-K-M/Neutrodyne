@@ -247,10 +247,9 @@ Many-to-many ([R2.2](../PLAN.md#21-functional-requirements)); rows are `source =
 
 **Implementation note (2026-10-16, M2):** C3 uses the existing
 `RefreshController.reschedulePeriodic()` hook for effective-interval rebasing on
-both platforms. Membership writes are in the sibling B1 branch, absent from this
-slice. TODO (B1 integration): call that hook after `GroupRepository` membership
-transactions (`setMembers` / `applyMembership`, including initial members on
-create) commit. C3 does not add replacement membership writers.
+both platforms. `GroupRepository` calls it after a membership transaction that
+changed rows commits (`setMembers`, `applyMembership`, `create` with initial
+members; delete and undo already do); no-op writes and failures do not.
 
 Every membership write is one write transaction (`INSERT OR IGNORE` / `DELETE … WHERE groupId = ? AND podcastId IN (…)`), then: `RefreshController.reschedulePeriodic()` (the minimum refresh interval over groups may change, [03 Periodic tick](03-feeds-and-discovery.md#periodic-tick); on the desktop it re-reads the refresh lane's due times) and `SnapshotScheduler.requestSoon()` (Android; a no-op on the desktop, [Auto Backup](#auto-backup)). Auto-download and notification policies follow automatically through the resolver flows ([Effective settings resolution](#effective-settings-resolution)).
 

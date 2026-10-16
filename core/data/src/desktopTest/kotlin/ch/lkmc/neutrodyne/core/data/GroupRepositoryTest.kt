@@ -43,13 +43,14 @@ class GroupRepositoryTest {
     private val db = TestDb.inMemory(clock = clock)
     private val orderKeys = TestOrderKeys
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val refresh = FakeRefreshController()
     private val repo =
         GroupRepositoryImpl(
             db,
             clock,
             orderKeys,
             FakeGroupChannelSync(),
-            FakeRefreshController(),
+            refresh,
             appScope,
         )
 
@@ -307,6 +308,39 @@ class GroupRepositoryTest {
             // Only the edited group is stamped.
             assertEquals(clock.now(), db.groupDao().groupById(tech)?.updatedAt)
             assertEquals(newsStamp, db.groupDao().groupById(news)?.updatedAt)
+        }
+
+    /** 05 Membership: each committed membership change re-plans refresh; no-ops and failures do not. */
+    @Test fun membershipChangesRescheduleRefreshOnce() =
+        runTest {
+            val p1 = db.podcastDao().insertPodcast(podcastEntity())
+            val p2 = db.podcastDao().insertPodcast(podcastEntity())
+            val reschedules = { refresh.calls.count { it == "reschedulePeriodic()" } }
+
+            val empty = created(GroupDraft("Empty"))
+            assertEquals(0, reschedules())
+            val tech = created(GroupDraft("Tech"), setOf(p1))
+            assertEquals(1, reschedules())
+
+            assertEquals(Outcome.Success(Unit), repo.setMembers(tech, setOf(p1, p2)))
+            assertEquals(2, reschedules())
+            assertEquals(Outcome.Success(Unit), repo.setMembers(tech, setOf(p1, p2)))
+            assertEquals(2, reschedules())
+
+            assertEquals(
+                Outcome.Success(Unit),
+                repo.applyMembership(setOf(p1), add = setOf(empty), remove = emptySet()),
+            )
+            assertEquals(3, reschedules())
+            assertEquals(
+                Outcome.Success(Unit),
+                repo.applyMembership(setOf(p1), add = setOf(empty), remove = emptySet()),
+            )
+            assertEquals(3, reschedules())
+
+            assertEquals(Outcome.Failure(GroupError.NotFound), repo.setMembers(tech, setOf(-1)))
+            assertEquals(Outcome.Failure(GroupError.NotFound), repo.create(GroupDraft("X"), setOf(-1)))
+            assertEquals(3, reschedules())
         }
 
     @Test fun membershipNoOpsAndUnknownIdsDoNotWrite() =
