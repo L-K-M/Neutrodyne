@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.feature.groups
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
+import ch.lkmc.neutrodyne.core.navigation.GroupsManageKey
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
@@ -18,6 +19,7 @@ public object GroupsNavigation {
     @IntoSet
     public fun entries(): EntryProviderInstaller =
         {
+            entry<GroupsManageKey>(metadata = NdSceneMetadata.paneList()) { GroupsManageRoute() }
             entry<GroupEditKey>(metadata = NdSceneMetadata.paneDetail()) { key -> GroupEditRoute(key) }
         }
 }

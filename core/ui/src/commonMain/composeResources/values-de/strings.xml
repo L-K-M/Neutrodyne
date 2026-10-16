@@ -395,4 +395,13 @@
     <string name="group_edit_gone">Diese Gruppe existiert nicht mehr</string>
     <string name="group_edit_undo_expired">Zu spät zum Rückgängigmachen</string>
     <string name="group_edit_undo_name_taken">Eine Gruppe namens '%1$s' existiert bereits. Benenne sie um und tippe auf Rückgängig</string>
+
+    <!-- M2 manage groups -->
+    <string name="groups_manage_title">Gruppen verwalten</string>
+    <string name="groups_manage_empty">Noch keine Gruppen</string>
+    <string name="groups_manage_empty_body">Erstelle eine Gruppe, um deine Podcasts zu ordnen.</string>
+    <string name="groups_manage_changed">Gruppen geändert. Versuche es erneut</string>
+    <string name="groups_manage_up">Nach oben verschieben</string>
+    <string name="groups_manage_down">Nach unten verschieben</string>
+    <string name="groups_manage_top">An den Anfang verschieben</string>
 </resources>
