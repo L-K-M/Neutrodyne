@@ -6,16 +6,47 @@ import androidx.paging.PagingData
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
+import ch.lkmc.neutrodyne.core.model.FeedPrefs
 import ch.lkmc.neutrodyne.core.model.FeedSource
+import ch.lkmc.neutrodyne.core.model.FeedTab
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 
-/**
- * The feed contract (05 Group feeds), M1a slice: [pagedFeed] for `FeedSource.All` and
- * `FeedSource.Podcast` plus [setFeedOrder]. `observeTabs`, `observePrefs`, counts, visits,
- * `setFilters`, `markVisited`, `countUnplayed` and `downloadAllEstimate` arrive with M2's group
- * feeds; the canonical interface grows per milestone (05 Canonical APIs).
- */
+/** Feeds, persisted view preferences, ordered tabs and device visits (05 Group feeds). */
 interface FeedRepository {
+    fun observeTabs(): Flow<List<FeedTab>>
+
+    fun observePrefs(source: FeedSource): Flow<FeedPrefs>
+
+    /** Persisted preferences; visit/play-order changes alone must not replace a pager. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun pagedFeed(source: FeedSource): Flow<PagingData<EpisodeRow>> =
+        observePrefs(source)
+            .map { it.filters to it.feedOrder }
+            .distinctUntilChanged()
+            .flatMapLatest { (filters, order) -> pagedFeed(source, filters, order) }
+
+    /** Ignores minSortDate; Podcast filters are transient and throw IllegalArgumentException. */
+    suspend fun setFilters(
+        source: FeedSource,
+        filters: FeedFilters,
+    )
+
+    /** Allowed values: null, 1, 3, 7, 14, 30, 90, 365. Podcast throws IllegalArgumentException. */
+    suspend fun setHideOlderThanDays(
+        source: FeedSource,
+        days: Int?,
+    )
+
+    /** Device-local visit time; Podcast has no feed visit state and is a no-op. */
+    suspend fun markVisited(
+        source: FeedSource,
+        leftAt: Long,
+    )
+
     /**
      * One page flow of [source]'s episodes, built only through `FeedQueryBuilder` (05). The
      * implementation owns the `Pager` and 08's fixed `PagingConfig`; `cachedIn`, collection

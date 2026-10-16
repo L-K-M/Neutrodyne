@@ -1699,6 +1699,12 @@ sealed interface FeedItem { data class Day(val label: UiText, val key: String) :
 
 Groups are keyed by `uuid` (stable across Replace restores and undo), sources by `FeedSource` for queries; `FeedTab.groupUuid` maps one to the other.
 
+**Implementation note (2026-10-16, M2):** B2 places the storage-only
+`FeedSourceRef` in `:core:model` so pager, root routing and Library can share its
+encoding without depending on a feature module. Canonical UUID references
+round-trip; malformed values decode to All. Resolving a valid but unknown UUID
+and the selection fallback remain D1/D2 UI work.
+
 ### Selection persistence and fallback
 
 ```mermaid

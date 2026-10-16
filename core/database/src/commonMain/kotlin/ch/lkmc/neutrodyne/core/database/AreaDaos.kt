@@ -126,11 +126,49 @@ interface GroupDao {
     )
     suspend fun lastMemberOrderKey(groupId: Long): String?
 
+    @Query(
+        "SELECT EXISTS(SELECT 1 FROM podcast p WHERE NOT EXISTS" +
+            " (SELECT 1 FROM podcast_group_member m WHERE m.podcastId = p.id))",
+    )
+    fun observeHasUngroupedPodcasts(): Flow<Boolean>
+
+    @Query(
+        "UPDATE podcast_group SET filterFlags = :flags, mediaFilter = :media, updatedAt = :now" +
+            " WHERE id = :id AND (filterFlags <> :flags OR mediaFilter <> :media)",
+    )
+    suspend fun setFilters(
+        id: Long,
+        flags: Int,
+        media: MediaFilter,
+        now: Long,
+    )
+
+    @Query(
+        "UPDATE podcast_group SET hideOlderThanDays = :days, updatedAt = :now" +
+            " WHERE id = :id AND hideOlderThanDays IS NOT :days",
+    )
+    suspend fun setHideOlderThanDays(
+        id: Long,
+        days: Int?,
+        now: Long,
+    )
+
+    // Visits are device-local and must not change the group's edit timestamp or view columns.
+    @Query("UPDATE podcast_group SET lastViewedAt = :leftAt WHERE id = :id AND lastViewedAt IS NOT :leftAt")
+    suspend fun markVisited(
+        id: Long,
+        leftAt: Long,
+    )
+
     /** The group's feed order (05 `FeedRepository.setFeedOrder`, `FeedSource.Group`). */
-    @Query("UPDATE podcast_group SET feedOrder = :order WHERE id = :groupId")
+    @Query(
+        "UPDATE podcast_group SET feedOrder = :order, updatedAt = :now" +
+            " WHERE id = :groupId AND feedOrder <> :order",
+    )
     suspend fun setFeedOrder(
         groupId: Long,
         order: FeedOrder,
+        now: Long,
     )
 }
 
