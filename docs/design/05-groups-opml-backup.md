@@ -327,6 +327,19 @@ sequenceDiagram
 | Mosaic artwork `g-{uuid}` | unreferenced → collected |
 | Import history (`import_item.groupNamesJson`) | unaffected (names, not IDs) |
 
+**Implementation note (2026-10-16, M2)** — C1 lands the mechanism with two slices deferred to
+their owning milestones: `SnapshotScheduler.requestSoon()` does not run on delete yet because the
+port itself arrives with M3's backup work; the 10-second undo window runs as a `delay` job on the
+injected `@ApplicationScope` and `GroupChannelSync.onDeleted(uuid)` fires at its end — process
+death still finalizes the delete, and the start-up sweep spares exactly the uuids the repository
+reports through `GroupRepository.pendingUndoUuids()` (the "live undo tokens" the sweep rule above
+refers to). `NoGroupChannels` sits in `:core:domain` next to the port rather than
+`:core:data` `desktopMain`, so both shells bind the same interim no-op until C5's
+`GroupNotificationChannels` replaces it on Android. `GroupMerger` exists in `:core:data` with the
+transaction this document specifies — union memberships, keep the survivor's settings, move a
+GROUP play context, then `sync()` — but has no callers until the restore path (M3) and
+`SyncApplier` (M10) land.
+
 ### Notification channels
 
 Android only. Channel posting is 03's ([03 New-episode notifications](03-feeds-and-discovery.md#new-episode-notifications)); the lifecycle is here, in `GroupNotificationChannels` (`:core:data` `androidMain`), the Android implementation of the common port `GroupChannelSync` (`sync()`, `onUuidChanged(old, new)`, `onDeleted(uuid)`). The desktop has no channels: its `NoGroupChannels` does nothing, and `DesktopNotifier` applies the same per-group switches without a channel ([11 Notifications](11-desktop.md#notifications)).
