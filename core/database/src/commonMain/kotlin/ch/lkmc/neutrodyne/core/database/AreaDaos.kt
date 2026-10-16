@@ -140,22 +140,6 @@ data class GroupRow(
     val memberCount: Int,
 )
 
-/** `podcast_settings` + `podcast_group_settings` (M2: resolution reads; deletes on all-null). */
-@Dao
-interface ScopeSettingsDao {
-    @Upsert
-    suspend fun upsertPodcast(row: PodcastSettingsEntity)
-
-    @Upsert
-    suspend fun upsertGroup(row: PodcastGroupSettingsEntity)
-
-    @Query("SELECT * FROM podcast_settings WHERE podcastId = :podcastId")
-    suspend fun forPodcast(podcastId: Long): PodcastSettingsEntity?
-
-    @Query("SELECT * FROM podcast_group_settings WHERE groupId = :groupId")
-    suspend fun forGroup(groupId: Long): PodcastGroupSettingsEntity?
-}
-
 /** `episode_state` (M4: the user-state write chains of 02 User-state writes). */
 @Dao
 interface EpisodeStateDao {

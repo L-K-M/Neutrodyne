@@ -550,6 +550,14 @@ interface EffectiveSettingsResolver {
 | 03 `RefreshScheduler`, `FeedRefresher` and the desktop refresh lane ([03 Desktop refresh](03-feeds-and-discovery.md#desktop-refresh)) | tick computation; `nextRefreshAt` per feed | `refreshIntervals()` |
 | 03 `NewEpisodeNotifier` (Android channels; the desktop's `DesktopNotifier`) | once per engine run | `notifications(ids)`; channel choice is 03's (first notifying group by `orderKey`) |
 
+**Implementation note (2026-10-16, M2):** B3 exposes only refresh and
+notification resolution and scoped fields; playback, download fields and hints
+arrive in their owning milestones. Its sources use `PodcastOverride` for the
+podcast row and `Group(uuid, name)` / `Groups(List<Group>)` for stable group
+identity, rather than the numeric IDs in the API sample above. Attribution text
+remains as specified above and belongs to the later settings UI (D8). B3 adds
+observable refresh/notification batch reads alongside the snapshot methods.
+
 ### Writing overrides
 
 ```kotlin
@@ -581,6 +589,12 @@ interface ScopeSettingsRepository {
     suspend fun updateGroup(groupId: Long, change: (SettingOverrides) -> SettingOverrides): Outcome<Unit, SettingsError>
 }
 ```
+
+**Implementation note (2026-10-16, M2):** B3 writes only the two M2 fields,
+preserving every other override column even when both M2 fields inherit. Its
+read-modify-write callback runs inside the Room write transaction. Scheduling
+hooks below arrive with C3, channel reconciliation with C5, and snapshot requests
+with M3; B3 does not invoke those hooks or rewire refresh scheduling.
 
 - Writes are a read-modify-write inside one write transaction (`@Upsert` is allowed on these single-writer tables, [02 DAO rules](02-data-model.md#dao-rules)); a row whose fields are all `null` is deleted. Rule 1 (dependent fields) and validation run before the write; an invalid value returns 01's `SettingsError.OutOfRange(field name)` and writes nothing. A podcast or group that no longer exists makes the write a no-op returning success (the screen is closing anyway).
 - After a write: refresh interval changed → `RefreshController.reschedulePeriodic()`; `notifyNewEpisodes` changed → `GroupChannelSync.sync()` (Android; the screen requests `POST_NOTIFICATIONS` per 03's permission rule); always → `SnapshotScheduler.requestSoon()` (Android). 07 and 06 observe the resolver flows; nothing else is pushed. Sync needs no call: the triggers capture the synced columns (02).

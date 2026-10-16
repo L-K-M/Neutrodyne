@@ -22,6 +22,10 @@ object FeedsSettingKeys {
             default = DEFAULT_REFRESH_INTERVAL_MINUTES,
         )
 
+    /** Settings › Feeds › Notifications; device-local wishes, portable in backups (03/05). */
+    val NOTIFY_NEW_EPISODES: SettingKey.Bool =
+        SettingKey.Bool(name = "feeds.notify_new_episodes", default = false)
+
     /** Settings › Feeds › refresh only on unmetered networks (Android; unused on the desktop). */
     val REFRESH_WIFI_ONLY: SettingKey.Bool =
         SettingKey.Bool(name = "feeds.refresh_wifi_only", default = false)
@@ -86,6 +90,7 @@ object FeedsSettingKeys {
     val ALL: List<SettingKey<*>> =
         listOf(
             REFRESH_INTERVAL_MINUTES,
+            NOTIFY_NEW_EPISODES,
             REFRESH_WIFI_ONLY,
             REFRESH_ON_APP_OPEN,
             BACKFILL_PAGED_FEEDS,
