@@ -3,7 +3,9 @@
 package ch.lkmc.neutrodyne.core.testing
 
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.domain.DeletedGroupToken
 import ch.lkmc.neutrodyne.core.domain.GroupError
+import ch.lkmc.neutrodyne.core.domain.GroupRepository
 import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.GroupEdit
 import ch.lkmc.neutrodyne.core.model.GroupIcons
@@ -106,6 +108,44 @@ class FakeGroupRepositoryTest {
             assertEquals(Outcome.Failure(GroupError.NotFound), repo.reorder(listOf(ids[0], ids[1], 99L)))
             assertEquals(Outcome.Failure(GroupError.NotFound), repo.reorder(ids.dropLast(1)))
             assertEquals(listOf(ids[2], ids[0], ids[1]), repo.observeGroups().first().map { it.id })
+        }
+
+    @Test fun fakeDeleteUndoMirrorsTheWindowAndRestoreRules() =
+        runTest {
+            val clock = TestClock()
+            val channels = FakeGroupChannelSync()
+            // Podcast 2 counts as unsubscribed: undo restores only surviving members (05).
+            val repo = FakeGroupRepository(clock, channelSync = channels, podcastExists = { it != 2L })
+            val tech = assertIs<Outcome.Success<Long>>(repo.create(GroupDraft("Tech"), setOf(1L, 2L))).value
+            val news = assertIs<Outcome.Success<Long>>(repo.create(GroupDraft("News"), setOf(1L))).value
+            val original = repo.observeGroup(tech).first()!!
+
+            val token = assertIs<Outcome.Success<DeletedGroupToken>>(repo.delete(tech)).value
+            assertEquals(null, repo.observeGroup(tech).first())
+            assertEquals(emptySet(), repo.observeMemberIds(tech).first())
+            assertEquals(setOf(original.uuid), repo.pendingUndoUuids())
+
+            // A nameKey taken meanwhile fails the undo without writing; the token stays live.
+            val replacement = assertIs<Outcome.Success<Long>>(repo.create(GroupDraft(" tech "))).value
+            assertEquals(Outcome.Failure(GroupError.NameTaken(replacement)), repo.undoDelete(token))
+            assertEquals(Outcome.Success(Unit), repo.update(replacement, GroupEdit.Rename("Other")))
+
+            assertEquals(Outcome.Success(tech), repo.undoDelete(token))
+            // Identity and fields restore exactly; only the memberCount shrinks (podcast 2 gone).
+            assertEquals(original.copy(memberCount = 1), repo.observeGroup(tech).first())
+            assertEquals(setOf(1L), repo.observeMemberIds(tech).first())
+            assertEquals(setOf(1L), repo.observeMemberIds(news).first())
+            assertEquals(emptyList(), channels.calls)
+            assertEquals(Outcome.Failure(GroupError.UndoExpired), repo.undoDelete(token))
+
+            // Expiry is clock-driven: once the window passes, the token settles and fires onDeleted.
+            val newsUuid = repo.observeGroup(news).first()!!.uuid
+            val newsToken = assertIs<Outcome.Success<DeletedGroupToken>>(repo.delete(news)).value
+            clock.nowMs += GroupRepository.UNDO_WINDOW_MS
+            assertEquals(emptySet(), repo.pendingUndoUuids())
+            assertEquals(listOf("onDeleted($newsUuid)"), channels.calls)
+            assertEquals(Outcome.Failure(GroupError.UndoExpired), repo.undoDelete(newsToken))
+            assertEquals(Outcome.Failure(GroupError.NotFound), repo.delete(-1))
         }
 
     @Test fun paletteAndIconCataloguesFollowTheDocumentedValues() {

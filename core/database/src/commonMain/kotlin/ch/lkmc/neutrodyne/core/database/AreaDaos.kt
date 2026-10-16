@@ -172,6 +172,68 @@ interface GroupDao {
     /** 05 `observeMemberships()`: one flow over the whole join table, grouped in Kotlin. */
     @Query("SELECT podcastId, groupId FROM podcast_group_member")
     fun observeMembershipPairs(): Flow<List<MembershipPair>>
+
+    /** 05 Delete and undo: the row delete; memberships and settings rows cascade (02 FK). */
+    @Query("DELETE FROM podcast_group WHERE id = :groupId")
+    suspend fun deleteGroup(groupId: Long): Int
+
+    /**
+     * 05 Delete and undo step 2: clearing the GROUP play context inside the delete transaction —
+     * the same shape as `PodcastDao.clearPodcastContext`. The generation bump makes the write
+     * foreign to 06's planner: the current item keeps playing, then Up next, then stop.
+     */
+    @Query(
+        "UPDATE play_session SET contextType = NULL, contextId = NULL, contextAnchorEpisodeId = NULL," +
+            " contextAnchorSortDate = NULL, generation = generation + 1, updatedAt = :now" +
+            " WHERE contextType = 'GROUP' AND contextId = :groupId",
+    )
+    suspend fun clearGroupContext(
+        groupId: Long,
+        now: Long,
+    ): Int
+
+    /**
+     * 05 Delete and undo step 4: undo restores the cleared context — but only while `generation`
+     * still equals the post-delete value, so a session written meanwhile (a new context start)
+     * is never clobbered. Returns 0 when the guard rejected the write.
+     */
+    @Query(
+        "UPDATE play_session SET contextType = 'GROUP', contextId = :groupId," +
+            " contextAnchorEpisodeId = :anchorEpisodeId, contextAnchorSortDate = :anchorSortDate," +
+            " generation = generation + 1, updatedAt = :now" +
+            " WHERE id = 0 AND generation = :expectedGeneration",
+    )
+    suspend fun restoreGroupContext(
+        groupId: Long,
+        anchorEpisodeId: Long?,
+        anchorSortDate: Long?,
+        expectedGeneration: Long,
+        now: Long,
+    ): Int
+
+    /**
+     * 05 GroupMerger: a GROUP play context on the loser moves to the survivor — the same
+     * no-bump shape as `PodcastMergeDao.moveContext`.
+     */
+    @Query("UPDATE play_session SET contextId = :survivorId WHERE contextType = 'GROUP' AND contextId = :loserId")
+    suspend fun moveGroupContext(
+        loserId: Long,
+        survivorId: Long,
+    ): Int
+
+    /**
+     * 05 GroupMerger: memberships unite — the loser's member rows copy to the survivor keeping
+     * their own `orderKey`, `addedAt` and `source`; rows the survivor already has stay (IGNORE).
+     */
+    @Query(
+        "INSERT OR IGNORE INTO podcast_group_member(groupId, podcastId, orderKey, addedAt, source)" +
+            " SELECT :survivorId, podcastId, orderKey, addedAt, source" +
+            " FROM podcast_group_member WHERE groupId = :loserId",
+    )
+    suspend fun absorbMembers(
+        survivorId: Long,
+        loserId: Long,
+    )
 }
 
 /** The two-column projection of [GroupDao.observeMembershipPairs]. */

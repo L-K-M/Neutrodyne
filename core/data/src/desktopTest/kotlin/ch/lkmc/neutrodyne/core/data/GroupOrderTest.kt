@@ -10,8 +10,13 @@ import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
 import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.model.GroupDraft
+import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
+import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
@@ -28,7 +33,15 @@ import kotlin.test.assertTrue
 class GroupOrderTest {
     private val clock = TestClock()
     private val db = TestDb.inMemory(clock = clock)
-    private val repo = GroupRepositoryImpl(db, clock, TestOrderKeys)
+    private val repo =
+        GroupRepositoryImpl(
+            db,
+            clock,
+            TestOrderKeys,
+            FakeGroupChannelSync(),
+            FakeRefreshController(),
+            CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        )
 
     @AfterTest fun close() = db.close()
 
@@ -128,7 +141,15 @@ class GroupOrderTest {
     @Test fun keysBeyondTheProtocolLimitTriggerARewrite() =
         runTest {
             val (g1, g2, g3) = groups(3).let { listOf(it[0], it[1], it[2]) }
-            val longKeys = GroupRepositoryImpl(db, clock, OverlongKeys)
+            val longKeys =
+                GroupRepositoryImpl(
+                    db,
+                    clock,
+                    OverlongKeys,
+                    FakeGroupChannelSync(),
+                    FakeRefreshController(),
+                    CoroutineScope(SupervisorJob() + Dispatchers.Default),
+                )
             assertEquals(Outcome.Success(Unit), longKeys.reorder(listOf(g1, g3, g2)))
             val after = rows()
             assertEquals(listOf(g1, g3, g2), after.map { it.id })
