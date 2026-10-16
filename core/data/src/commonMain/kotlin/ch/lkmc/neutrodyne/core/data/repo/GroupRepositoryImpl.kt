@@ -325,7 +325,19 @@ internal class GroupRepositoryImpl(
         return Outcome.Success(token)
     }
 
-    override suspend fun undoDelete(token: DeletedGroupToken): Outcome<Long, GroupError> =
+    override suspend fun undoDelete(token: DeletedGroupToken): Outcome<Long, GroupError> {
+        val outcome = undoLocked(token)
+
+        // 05 step 2 in reverse: the restored group may lower the least refresh interval again.
+        // As in delete(), a failed reschedule never fails the committed undo.
+        if (outcome is Outcome.Success) {
+            suspendRunCatching { refreshController.reschedulePeriodic() }
+                .onFailure { Log.w(TAG, it) { "Refresh reschedule failed after group undo" } }
+        }
+        return outcome
+    }
+
+    private suspend fun undoLocked(token: DeletedGroupToken): Outcome<Long, GroupError> =
         undoMutex.withLock {
             val pending =
                 pendingDeletes[token.value]

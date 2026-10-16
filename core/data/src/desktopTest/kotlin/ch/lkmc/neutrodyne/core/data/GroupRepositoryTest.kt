@@ -25,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
@@ -41,6 +42,7 @@ class GroupRepositoryTest {
     private val clock = TestClock()
     private val db = TestDb.inMemory(clock = clock)
     private val orderKeys = TestOrderKeys
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val repo =
         GroupRepositoryImpl(
             db,
@@ -48,10 +50,14 @@ class GroupRepositoryTest {
             orderKeys,
             FakeGroupChannelSync(),
             FakeRefreshController(),
-            CoroutineScope(SupervisorJob() + Dispatchers.Default),
+            appScope,
         )
 
-    @AfterTest fun close() = db.close()
+    @AfterTest fun close() {
+        // Undo-expiry jobs must not outlive the database they write to.
+        appScope.cancel()
+        db.close()
+    }
 
     @Test fun createNormalizesTheNameAndAssignsDefaultsInOrder() =
         runTest {
@@ -182,7 +188,7 @@ class GroupRepositoryTest {
                                 orderKeys,
                                 FakeGroupChannelSync(),
                                 FakeRefreshController(),
-                                CoroutineScope(SupervisorJob() + Dispatchers.Default),
+                                appScope,
                             )
                         start.await()
                         independentRepo.create(GroupDraft(if (index % 2 == 0) "Café" else "CAFE\u0301"))

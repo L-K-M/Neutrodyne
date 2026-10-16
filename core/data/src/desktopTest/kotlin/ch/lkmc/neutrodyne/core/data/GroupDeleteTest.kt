@@ -155,6 +155,33 @@ class GroupDeleteTest {
             }
         }
 
+    /** 05 step 2 in reverse: the restored group may lower the least refresh interval again. */
+    @Test
+    fun successfulUndoReschedulesAndAFailedUndoDoesNot() =
+        runTest {
+            val clock = TestClock.from(testScheduler)
+            val db = TestDb.inMemory(clock = clock)
+            val scope = realExpiryScope()
+            try {
+                val repo = repository(db, clock, scope)
+                val tech = created(repo, GroupDraft("Tech"))
+                val token = assertIs<Outcome.Success<DeletedGroupToken>>(repo.delete(tech)).value
+                val replacement = created(repo, GroupDraft("tech"))
+                refresh.calls.clear()
+
+                assertEquals(Outcome.Failure(GroupError.NameTaken(replacement)), repo.undoDelete(token))
+                assertEquals(emptyList(), refresh.calls)
+
+                assertEquals(Outcome.Success(Unit), repo.update(replacement, GroupEdit.Rename("Other")))
+                refresh.calls.clear()
+                assertEquals(Outcome.Success(tech), repo.undoDelete(token))
+                assertEquals(listOf("reschedulePeriodic()"), refresh.calls)
+            } finally {
+                scope.cancel()
+                db.close()
+            }
+        }
+
     @Test
     fun undoRestoresIdentitySettingsSurvivingMembersAndContext() =
         runTest {
