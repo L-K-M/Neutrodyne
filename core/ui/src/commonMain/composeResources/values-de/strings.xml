@@ -360,4 +360,20 @@
     <string name="feeds_images_tap">Nur nach meinem Tippen</string>
     <string name="feeds_not_on_desktop">Wird auf Computern nicht verwendet</string>
     <string name="write_failed">Die Änderung konnte nicht gespeichert werden</string>
+    <!-- M2 effective settings and contextual notification permission. -->
+    <string name="section_notifications">Benachrichtigungen</string>
+    <string name="section_refresh">Aktualisierung</string>
+    <string name="new_episode_notifications">Neue Folgen</string>
+    <string name="setting_inherit">Übernehmen</string>
+    <string name="setting_on">Ein</string>
+    <string name="setting_off">Aus</string>
+    <string name="setting_podcast_override">Für diesen Podcast festgelegt</string>
+    <string name="setting_app_default">App-Standard</string>
+    <string name="setting_from_group">Aus Gruppe '%1$s'</string>
+    <string name="setting_from_two_groups">Aus den Gruppen '%1$s' und '%2$s'</string>
+    <string name="setting_from_groups">Aus %1$d Gruppen</string>
+    <string name="setting_groups_title">Gruppen, die diesen Wert bestimmen</string>
+    <string name="setting_invalid_value">Wähle einen unterstützten Wert</string>
+    <string name="notifications_blocked">Benachrichtigungen sind blockiert</string>
+    <string name="notifications_open_settings">Einstellungen öffnen</string>
 </resources>
