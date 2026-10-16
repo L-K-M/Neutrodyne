@@ -97,6 +97,15 @@ class AddPodcastSheetTest {
                 stateOverride =
                     AddPodcastUiState(
                         step = AddSheetStep.Preview(testFeedPreview()),
+                        creatingGroup = true,
+                    ),
+            )
+            onNodeWithText("Subscribe").assertIsNotEnabled()
+            setSheet(
+                initialInput = "https://example.com/feed",
+                stateOverride =
+                    AddPodcastUiState(
+                        step = AddSheetStep.Preview(testFeedPreview()),
                         createdGroupId = 9L,
                     ),
                 onSubscribe = { chosen = it },

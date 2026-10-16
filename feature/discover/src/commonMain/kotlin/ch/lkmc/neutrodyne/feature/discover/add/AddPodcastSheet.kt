@@ -147,6 +147,7 @@ internal fun AddPodcastSheet(
     // (08: "Enter runs Subscribe when it is enabled"). NoMedia previews are not subscribable.
     val canSubscribe =
         step is AddSheetStep.Preview &&
+            !state.creatingGroup &&
             !step.subscribing &&
             alreadyId == null &&
             (step.preview.emptyFeed || step.preview.episodeCount > 0)
@@ -156,6 +157,7 @@ internal fun AddPodcastSheet(
     // lists candidates only a candidate row advances — the field's value no longer leads.
     val submitEnabled =
         input.isNotBlank() &&
+            !state.creatingGroup &&
             step !is AddSheetStep.Resolving &&
             step !is AddSheetStep.Choosing &&
             (step as? AddSheetStep.Preview)?.subscribing != true

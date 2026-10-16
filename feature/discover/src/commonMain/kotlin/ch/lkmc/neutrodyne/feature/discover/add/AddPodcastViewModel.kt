@@ -249,7 +249,7 @@ public class AddPodcastViewModel(
      */
     public fun subscribe(groupIds: Set<Long> = emptySet()) {
         val step = mutableState.value.step as? AddSheetStep.Preview ?: return
-        if (step.subscribing || step.alreadySubscribedId != null) return
+        if (step.subscribing || step.alreadySubscribedId != null || mutableState.value.creatingGroup) return
         val generation =
             nextGeneration { it.copy(step = step.copy(subscribing = true, subscribeError = null)) }
         viewModelScope.launch {
