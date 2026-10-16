@@ -25,6 +25,7 @@ import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastFetchState
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.RefreshStatus
 import ch.lkmc.neutrodyne.core.domain.SecretStore
@@ -70,7 +71,7 @@ import kotlin.random.Random
  * fan-out capped at 2 per host, per-feed transactions, the batched fetch-state write and the
  * paging sessions. Source-specific behaviour lives behind the [SourceAdapter] multibinding.
  *
- * Run-local state ([batcher], [intervalMinutes], [announcements]) is safe because [mutex]
+ * Run-local state ([batcher], [intervals], [announcements]) is safe because [mutex]
  * serializes runs; parallel feed coroutines only append through the batcher's own lock or into
  * preallocated [slots] / a synchronized list.
  */
@@ -84,6 +85,7 @@ internal class FeedRefresher(
     private val syncHook: SyncIngestHook,
     private val tempFiles: FeedTempFiles,
     private val settings: SettingsRepository,
+    private val effectiveSettings: EffectiveSettingsResolver,
     private val clock: Clock,
     private val random: Random,
     private val moves: FeedMoveCommitter,
@@ -126,7 +128,7 @@ internal class FeedRefresher(
     /** Guards only the [batcher] reference so [flushFetchStates] never waits on a whole run. */
     private val batcherLock = Mutex()
     private var batcher: FetchStateBatcher? = null
-    private var intervalMinutes: Int? = null
+    private var intervals: Map<Long, Int?> = emptyMap()
     private val announcements = mutableListOf<NewEpisodes>()
     private val announcementsLock = Mutex()
     private val warningsLock = Mutex()
@@ -239,6 +241,7 @@ internal class FeedRefresher(
             if (UrlNormalizer.forIdentity(targetUrl) == null) {
                 return@withLock Outcome.Failure(AddPodcastError.InvalidUrl)
             }
+            val editIntervals = effectiveSettings.refreshIntervals()
             flushFetchStates()
             var targetId = podcastId
             var merged = false
@@ -270,6 +273,7 @@ internal class FeedRefresher(
                                             fetch = entry.meta.copy(permanentUrl = null),
                                             validators = IngestValidators.DISCARD,
                                         ),
+                                        editIntervals[current.id]?.value,
                                     )
                             }
                         }
@@ -345,9 +349,6 @@ internal class FeedRefresher(
                 .getOrNull()
                 ?.takeIf { it > 0 }
         tempFiles.sweep(clock.now())
-        intervalMinutes =
-            RefreshPolicy.effectiveIntervalMinutes(settings.get(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES))
-
         val due = selectDue(request).filter { adapters.containsKey(it.sourceType) }
         val pendingPages =
             if (request.pagesOnly) {
@@ -355,6 +356,8 @@ internal class FeedRefresher(
             } else {
                 selectPaging(request.scope).filter { adapters.containsKey(it.sourceType) }
             }
+        // Resolve after selection so concurrently subscribed feeds cannot enter without an interval.
+        intervals = effectiveSettings.refreshIntervals().mapValues { it.value.value }
         val slots = arrayOfNulls<FeedOutcome>(due.size)
         announcementsLock.withLock { announcements.clear() }
         _status.value =
@@ -784,7 +787,7 @@ internal class FeedRefresher(
                     newFeedUrl = newFeedUrl.takeIf { mergedInto == null },
                 )
             try {
-                ingest = ingestor.ingest(target, result.feed, ctx)
+                ingest = ingestor.ingest(target, result.feed, ctx, intervals[target.id])
                 break
             } catch (collision: FeedMoveCollision) {
                 // The failed ingest released Room; flush before the merger changes its survivor.
@@ -1052,6 +1055,7 @@ internal class FeedRefresher(
                                 rowHints = result.rowHints,
                                 absenceFloor = result.absenceFloor,
                             ),
+                            intervals[session.feed.id],
                         )
                     }.getOrElse { e ->
                         if (e is CancellationException) throw e
@@ -1359,7 +1363,7 @@ internal class FeedRefresher(
     ): Long =
         RefreshPolicy.successNextRefreshAt(
             now,
-            intervalMinutes,
+            intervals[feed.id],
             feed.complete,
             feed.latestEpisodeAt,
             feed.ttlMinutes,

@@ -3,9 +3,10 @@
 package ch.lkmc.neutrodyne.core.data.refresh
 
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
-import ch.lkmc.neutrodyne.core.domain.SettingsRepository
-import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
+import ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver
 import dev.zacsweers.metro.Inject
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * The `nextRefreshAt` rebase of 03 Periodic tick step 2 (`:core:data` internal): after an interval
@@ -22,32 +23,37 @@ import dev.zacsweers.metro.Inject
 @Inject
 internal class NextRefreshRebaser(
     private val db: NeutrodyneDatabase,
-    private val settings: SettingsRepository,
+    private val settings: EffectiveSettingsResolver,
 ) {
-    suspend fun rebase() {
-        val intervalMinutes =
-            RefreshPolicy.effectiveIntervalMinutes(settings.get(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES))
-        val dao = db.podcastDao()
-        for (candidate in dao.rebaseCandidates()) {
-            val stored = candidate.nextRefreshAt
-            if (stored == FORCED_DUE) continue
-            val target =
-                if (intervalMinutes == null) {
-                    RefreshPolicy.NEVER
-                } else {
-                    (candidate.lastSuccessAt ?: candidate.subscribedAt) + intervalMinutes * MINUTE_MS
+    private val mutex = Mutex()
+
+    // Serialize interval snapshots so an older Manual-only rebase cannot undo a newer timed one.
+    suspend fun rebase() =
+        mutex.withLock {
+            val intervals = settings.refreshIntervals()
+            val dao = db.podcastDao()
+            for (candidate in dao.rebaseCandidates()) {
+                // A subscription added after the batch read is handled by its own reschedule hook.
+                val intervalMinutes = (intervals[candidate.id] ?: continue).value
+                val stored = candidate.nextRefreshAt
+                if (stored == FORCED_DUE) continue
+                val target =
+                    if (intervalMinutes == null) {
+                        RefreshPolicy.NEVER
+                    } else {
+                        (candidate.lastSuccessAt ?: candidate.subscribedAt) + intervalMinutes * MINUTE_MS
+                    }
+                val shouldWrite =
+                    if (intervalMinutes == null) {
+                        stored != RefreshPolicy.NEVER
+                    } else {
+                        stored == null || stored == RefreshPolicy.NEVER || stored > target
+                    }
+                if (shouldWrite) {
+                    dao.rebaseNextRefreshAt(candidate.id, target, candidate.lastAttemptAt ?: NO_ATTEMPT)
                 }
-            val shouldWrite =
-                if (intervalMinutes == null) {
-                    stored != RefreshPolicy.NEVER
-                } else {
-                    stored == null || stored == RefreshPolicy.NEVER || stored > target
-                }
-            if (shouldWrite) {
-                dao.rebaseNextRefreshAt(candidate.id, target, candidate.lastAttemptAt ?: NO_ATTEMPT)
             }
         }
-    }
 
     private companion object {
         const val FORCED_DUE = 0L
