@@ -67,6 +67,7 @@ class KmpLibraryConventionPlugin : Plugin<Project> {
                 ":youtube:api",
                 ":sync:api",
                 ":sync:protocol",
+                ":feeds",
             )
     }
 }
