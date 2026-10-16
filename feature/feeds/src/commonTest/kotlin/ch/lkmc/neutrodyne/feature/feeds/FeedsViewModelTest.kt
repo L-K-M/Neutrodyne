@@ -9,6 +9,8 @@ import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
+import ch.lkmc.neutrodyne.core.model.RowLive
+import ch.lkmc.neutrodyne.core.testing.FakeEpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
@@ -51,16 +53,46 @@ import kotlin.time.Duration.Companion.days
 class FeedsViewModelTest : MainDispatcherTest() {
     private val feeds = FakeFeedRepository()
     private val episodes = FakeEpisodeRepository()
+    private val liveSource = FakeEpisodeLiveStateSource()
     private val refreshController = FakeRefreshController()
     private val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
     private val podcasts = FakePodcastRepository()
     private val clock = TestClock()
 
-    private fun viewModel() = FeedsViewModel(feeds, episodes, refreshController, network, podcasts, clock, dispatcher)
+    private fun viewModel() =
+        FeedsViewModel(feeds, episodes, refreshController, network, podcasts, clock, liveSource, dispatcher)
 
     private fun TestScope.collect(viewModel: FeedsViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
     }
+
+    @Test
+    fun liveRowsUseUnionOfComposedPageWindowsAndReleaseDisposedPages() =
+        runTest {
+            val viewModel = viewModel()
+            backgroundScope.launch { viewModel.live.collect {} }
+            val overlay = RowLive(positionMs = 500, durationMs = 1_000)
+            liveSource.live.value = mapOf(1L to overlay, 2L to RowLive(isNowPlaying = true), 3L to overlay)
+            viewModel.onVisibleIds(FeedSource.All, setOf(1, 2))
+            viewModel.onVisibleIds(FeedSource.Group(7), setOf(2, 3))
+            advanceUntilIdle()
+            assertEquals(setOf(1L, 2L, 3L), viewModel.live.value.keys)
+            assertEquals(overlay, viewModel.live.value[1])
+
+            // Removing All retains the shared ID still visible in the group page.
+            viewModel.onVisibleIds(FeedSource.All, emptySet())
+            advanceUntilIdle()
+            assertEquals(setOf(2L, 3L), viewModel.live.value.keys)
+
+            liveSource.live.value = mapOf(3L to RowLive(durationMs = 2_000))
+            advanceUntilIdle()
+            assertEquals(mapOf(3L to RowLive(durationMs = 2_000)), viewModel.live.value)
+            assertEquals(null, viewModel.live.value[2])
+
+            viewModel.onVisibleIds(FeedSource.Group(7), emptySet())
+            advanceUntilIdle()
+            assertEquals(emptyMap(), viewModel.live.value)
+        }
 
     @Test
     fun initialStateBeforeSubscription() =
