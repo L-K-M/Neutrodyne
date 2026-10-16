@@ -146,11 +146,49 @@ interface GroupDao {
     )
     suspend fun lastMemberOrderKey(groupId: Long): String?
 
+    @Query(
+        "SELECT EXISTS(SELECT 1 FROM podcast p WHERE NOT EXISTS" +
+            " (SELECT 1 FROM podcast_group_member m WHERE m.podcastId = p.id))",
+    )
+    fun observeHasUngroupedPodcasts(): Flow<Boolean>
+
+    @Query(
+        "UPDATE podcast_group SET filterFlags = :flags, mediaFilter = :media, updatedAt = :now" +
+            " WHERE id = :id AND (filterFlags <> :flags OR mediaFilter <> :media)",
+    )
+    suspend fun setFilters(
+        id: Long,
+        flags: Int,
+        media: MediaFilter,
+        now: Long,
+    )
+
+    @Query(
+        "UPDATE podcast_group SET hideOlderThanDays = :days, updatedAt = :now" +
+            " WHERE id = :id AND hideOlderThanDays IS NOT :days",
+    )
+    suspend fun setHideOlderThanDays(
+        id: Long,
+        days: Int?,
+        now: Long,
+    )
+
+    // Visits are device-local and must not change the group's edit timestamp or view columns.
+    @Query("UPDATE podcast_group SET lastViewedAt = :leftAt WHERE id = :id AND lastViewedAt IS NOT :leftAt")
+    suspend fun markVisited(
+        id: Long,
+        leftAt: Long,
+    )
+
     /** The group's feed order (05 `FeedRepository.setFeedOrder`, `FeedSource.Group`). */
-    @Query("UPDATE podcast_group SET feedOrder = :order WHERE id = :groupId")
+    @Query(
+        "UPDATE podcast_group SET feedOrder = :order, updatedAt = :now" +
+            " WHERE id = :groupId AND feedOrder <> :order",
+    )
     suspend fun setFeedOrder(
         groupId: Long,
         order: FeedOrder,
+        now: Long,
     )
 }
 
@@ -170,22 +208,6 @@ data class GroupMosaicRow(
     val artworkVersion: Int,
     val artworkAvgArgb: Int?,
 )
-
-/** `podcast_settings` + `podcast_group_settings` (M2: resolution reads; deletes on all-null). */
-@Dao
-interface ScopeSettingsDao {
-    @Upsert
-    suspend fun upsertPodcast(row: PodcastSettingsEntity)
-
-    @Upsert
-    suspend fun upsertGroup(row: PodcastGroupSettingsEntity)
-
-    @Query("SELECT * FROM podcast_settings WHERE podcastId = :podcastId")
-    suspend fun forPodcast(podcastId: Long): PodcastSettingsEntity?
-
-    @Query("SELECT * FROM podcast_group_settings WHERE groupId = :groupId")
-    suspend fun forGroup(groupId: Long): PodcastGroupSettingsEntity?
-}
 
 /** `episode_state` (M4: the user-state write chains of 02 User-state writes). */
 @Dao
@@ -240,6 +262,16 @@ interface EpisodeStateDao {
 
     @Query("SELECT * FROM episode_state WHERE episodeId = :episodeId")
     suspend fun byEpisode(episodeId: Long): EpisodeStateEntity?
+
+    /**
+     * 02 Live row state: the `episode_state` `IN` query behind `EpisodeLiveStateSource`; callers
+     * chunk at 200 ids. `playedAt`/`startedAt`/`isFavorite` travel along but stay paged fields.
+     */
+    @Query(
+        "SELECT episodeId, playedAt, startedAt, isFavorite, measuredDurationMs" +
+            " FROM episode_state WHERE episodeId IN (:ids)",
+    )
+    fun observeFor(ids: List<Long>): Flow<List<EpisodeStateLiveRow>>
 }
 
 /** `episode_position` (M4: position saves and `applyRemote`). */
@@ -257,6 +289,16 @@ interface PositionDao {
 
     @Query("SELECT * FROM episode_position WHERE episodeId = :episodeId")
     suspend fun byEpisode(episodeId: Long): EpisodePositionEntity?
+
+    /**
+     * 02 Live row state: the high-churn `episode_position` `IN` query; callers chunk at 200 ids.
+     * Observes only `episode_position`, so position saves never invalidate a paged feed.
+     */
+    @Query(
+        "SELECT episodeId, positionMs, durationMs, positionSource, updatedAt" +
+            " FROM episode_position WHERE episodeId IN (:ids)",
+    )
+    fun observeFor(ids: List<Long>): Flow<List<EpisodePositionEntity>>
 }
 
 /** `queue_entry` (M4: Up next ordering, adds and moves). */
@@ -291,6 +333,16 @@ interface DownloadDao {
             " WHERE e.podcastId IN (:podcastIds)",
     )
     suspend fun downloadedEpisodeIds(podcastIds: List<Long>): List<Long>
+
+    /**
+     * 02 Live row state: the `download` transition columns `RowLive` merges; callers chunk at
+     * 200 ids. `downloadedBytes` is persisted only on transitions (D17), never progress cadence.
+     */
+    @Query(
+        "SELECT episodeId, state, waitReason, downloadedBytes, totalBytes, estimatedBytes," +
+            " nextAttemptAt, lastError FROM download WHERE episodeId IN (:ids)",
+    )
+    fun observeLiveFor(ids: List<Long>): Flow<List<DownloadLiveRow>>
 }
 
 /** `artwork` (M4: references and garbage collection; `@Upsert`-able single-writer table). */
