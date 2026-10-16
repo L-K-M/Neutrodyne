@@ -39,12 +39,14 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlin.uuid.Uuid
 
 @SingleIn(AppScope::class)
@@ -151,7 +153,7 @@ internal class GroupRepositoryImpl(
                     groupId
                 }
             }
-        if (outcome is Outcome.Success && memberIds.isNotEmpty()) rescheduleAfterMembership("group create")
+        if (outcome is Outcome.Success && memberIds.isNotEmpty()) rescheduleAfterCommit("group create")
         return outcome
     }
 
@@ -244,7 +246,7 @@ internal class GroupRepositoryImpl(
                 changed = true
                 Outcome.Success(Unit)
             }
-        if (changed) rescheduleAfterMembership("membership edit")
+        if (changed) rescheduleAfterCommit("membership edit")
         return outcome
     }
 
@@ -281,18 +283,21 @@ internal class GroupRepositoryImpl(
                 changedAny = changed.isNotEmpty()
                 Outcome.Success(Unit)
             }
-        if (changedAny) rescheduleAfterMembership("membership edit")
+        if (changedAny) rescheduleAfterCommit("membership edit")
         return outcome
     }
 
     /**
-     * 05 Membership: a podcast's effective refresh interval is the least over its groups, so a
-     * committed membership change re-plans the periodic refresh. A failed reschedule never fails
-     * the committed write.
+     * 05: memberships and the group set decide each podcast's effective refresh interval (the
+     * least over its groups), so a committed change re-plans the periodic refresh. It runs
+     * NonCancellable like ScopeSettingsRepository's writes: a screen closing after the commit
+     * must not skip it. A failed reschedule never fails the committed write.
      */
-    private suspend fun rescheduleAfterMembership(write: String) {
-        suspendRunCatching { refreshController.reschedulePeriodic() }
-            .onFailure { Log.w(TAG, it) { "Refresh reschedule failed after $write" } }
+    private suspend fun rescheduleAfterCommit(write: String) {
+        withContext(NonCancellable) {
+            suspendRunCatching { refreshController.reschedulePeriodic() }
+                .onFailure { Log.w(TAG, it) { "Refresh reschedule failed after $write" } }
+        }
     }
 
     override suspend fun delete(groupId: Long): Outcome<DeletedGroupToken, GroupError> {
@@ -342,11 +347,10 @@ internal class GroupRepositoryImpl(
                 )
         }
 
-        // 05 step 2: the least refresh interval over the remaining groups may rise; a failed
-        // reschedule never turns a committed delete into a failure. SnapshotScheduler.requestSoon
-        // joins it when M3 brings that port (see the 2026-10-16 note in 05).
-        suspendRunCatching { refreshController.reschedulePeriodic() }
-            .onFailure { Log.w(TAG, it) { "Refresh reschedule failed after group delete" } }
+        // 05 step 2: the least refresh interval over the remaining groups may rise.
+        // SnapshotScheduler.requestSoon joins it when M3 brings that port (see the 2026-10-16
+        // note in 05).
+        rescheduleAfterCommit("group delete")
         return Outcome.Success(token)
     }
 
@@ -354,11 +358,7 @@ internal class GroupRepositoryImpl(
         val outcome = undoLocked(token)
 
         // 05 step 2 in reverse: the restored group may lower the least refresh interval again.
-        // As in delete(), a failed reschedule never fails the committed undo.
-        if (outcome is Outcome.Success) {
-            suspendRunCatching { refreshController.reschedulePeriodic() }
-                .onFailure { Log.w(TAG, it) { "Refresh reschedule failed after group undo" } }
-        }
+        if (outcome is Outcome.Success) rescheduleAfterCommit("group undo")
         return outcome
     }
 

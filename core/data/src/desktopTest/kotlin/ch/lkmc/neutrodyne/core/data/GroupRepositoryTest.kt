@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.repo.GroupRepositoryImpl
 import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
+import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.GroupEdit
@@ -27,6 +28,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -341,6 +343,34 @@ class GroupRepositoryTest {
             assertEquals(Outcome.Failure(GroupError.NotFound), repo.setMembers(tech, setOf(-1)))
             assertEquals(Outcome.Failure(GroupError.NotFound), repo.create(GroupDraft("X"), setOf(-1)))
             assertEquals(3, reschedules())
+        }
+
+    /** A committed membership change still reaches the scheduler when its screen goes away. */
+    @Test fun committedMembershipReschedulesEvenWhenTheCallerIsCancelled() =
+        runTest {
+            val p1 = db.podcastDao().insertPodcast(podcastEntity())
+            val tech = created(GroupDraft("Tech"))
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val finished = mutableListOf<String>()
+            val slow =
+                object : RefreshController by FakeRefreshController() {
+                    override suspend fun reschedulePeriodic() {
+                        entered.complete(Unit)
+                        release.await()
+                        finished += "reschedulePeriodic()"
+                    }
+                }
+            val screenRepo = GroupRepositoryImpl(db, clock, orderKeys, FakeGroupChannelSync(), slow, appScope)
+
+            val edit = launch(Dispatchers.Default) { screenRepo.setMembers(tech, setOf(p1)) }
+            entered.await()
+            edit.cancel()
+            release.complete(Unit)
+            edit.join()
+
+            assertEquals(setOf(p1), repo.observeMemberIds(tech).first())
+            assertEquals(listOf("reschedulePeriodic()"), finished)
         }
 
     @Test fun membershipNoOpsAndUnknownIdsDoNotWrite() =
