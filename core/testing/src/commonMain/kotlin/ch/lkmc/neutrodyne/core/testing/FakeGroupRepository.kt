@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.GroupEdit
 import ch.lkmc.neutrodyne.core.model.GroupIcons
+import ch.lkmc.neutrodyne.core.model.GroupMosaicMember
 import ch.lkmc.neutrodyne.core.model.GroupPalette
 import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
@@ -34,6 +35,9 @@ class FakeGroupRepository(
 
     /** Fixture membership state; A1 exposes only membership reads. */
     val members = MutableStateFlow<Map<Long, Set<Long>>>(emptyMap())
+
+    /** Fixture mosaic rows per group (B4): the fake does not derive them from [members]. */
+    val mosaics = MutableStateFlow<Map<Long, List<GroupMosaicMember>>>(emptyMap())
     private val mutex = Mutex()
 
     override fun observeGroups(): Flow<List<Group>> =
@@ -61,6 +65,8 @@ class FakeGroupRepository(
             }
             byPodcast
         }
+
+    override fun observeMosaics(): Flow<Map<Long, List<GroupMosaicMember>>> = mosaics
 
     override suspend fun checkName(
         name: String,
