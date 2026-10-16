@@ -710,7 +710,7 @@ Serves N11, N8. Delivered in M0a (enforced from the first commit; the desktop an
 | 6 | Shared implementations and the Android-only modules: `:playback:core` → `:playback:api`, `:core:{domain, model, common}`. `:playback:impl` → `:playback:{core, api}`, `:download:api`, `:youtube:api`, `:core:{domain, model, common, database, datastore, network, artwork}`, `:core:network:okhttp`. `:download:impl` → `:download:api`, `:youtube:api`, `:core:{domain, model, common, database, datastore, network, artwork}`. `:youtube:impl` → `:youtube:api`, `:core:{model, common, network}`. `:sync:impl` → `:sync:{api, protocol}`, `:core:{domain, model, common, database, datastore, network}`, `:feeds`. `:youtube:ytdlp` → `:youtube:{engine, api}`, `:core:{model, common, datastore}`, `:core:network:okhttp`. No implementation → `:core:data`, no implementation → another implementation, except `:core:artwork` (an infrastructure service any implementation may use) and `:playback:core` (the shared rule set of both platform players, [D84](../PLAN.md#3-key-decisions)). The update check has no module of its own ([D13](../PLAN.md#3-key-decisions)), so it adds no edge. YouTube Atom feeds are fetched and parsed by the generic refresh engine in `:core:data` ([03](03-feeds-and-discovery.md#refresh-scheduling)) using `:youtube:api` helpers; no YouTube module parses Atom. |
 | 7 | `:core:designsystem` → `:core:model` only. `:core:ui` → `:core:{designsystem, model, common, navigation}`, `:download:api` (the `:core:navigation` edge, added 2026-10-05, lets the shared navigation host and root layout live in `:core:ui` for both shells, [AppNavigator and per-tab back stacks](#appnavigator-and-per-tab-back-stacks)). `:core:navigation` → nothing project-internal. |
 | 8 | Common-only contracts and shared models: `:core:{model, common, domain}`, `:*:api`, `:feeds`, `:sync:protocol` have only `commonMain` code (the `actual`s of [Source sets and JVM islands](#source-sets-and-jvm-islands) excepted). `:feeds` and `:sync:protocol` depend on nothing project-internal ([D68](../PLAN.md#3-key-decisions)), so `:sync:server` can use them without the app's model. |
-| 9 | `:core:testing` → `:core:{domain, model, common, database, navigation}`, `:*:api` (incl. `:sync:api`), `:sync:protocol` (`:core:database` and `:core:navigation` added 2026-10-05 for `TestDb` and `RecordingAppNavigator`, [09 Shared helpers](09-quality-and-release.md#shared-helpers); the `:core:database` edge also carries `TestSqliteDriverBindings` in `androidMain`, the Robolectric driver override of [Test overrides](#test-overrides), S4 2026-10-06). It is test-only: only test configurations depend on it, and no main configuration of any module may reach it (`restricted`). |
+| 9 | `:core:testing` → `:core:{domain, model, common, database, navigation}`, `:*:api` (incl. `:sync:api`), `:sync:protocol`, `:feeds` (`:core:database` and `:core:navigation` added 2026-10-05 for `TestDb` and `RecordingAppNavigator`, [09 Shared helpers](09-quality-and-release.md#shared-helpers); the `:core:database` edge also carries `TestSqliteDriverBindings` in `androidMain`, the Robolectric driver override of [Test overrides](#test-overrides), S4 2026-10-06). It is test-only: only test configurations depend on it, and no main configuration of any module may reach it (`restricted`). |
 | 10 ⊕ | `:playback:api`, `:download:api`, `:youtube:api`, `:sync:api` → `:core:{model, common}`. |
 | 11 ⊕ | `:core:database`, `:core:datastore`, `:core:network` → `:core:{model, common}`; `:core:network`'s platform source sets also → `:core:network:okhttp`. |
 | 12 ⊕ | `:core:model` → nothing project-internal. `:core:common` → `:core:model` (edge added 2026-10-05: `Monogram` returns `MonogramSpec`, which [08 ArtColors tones](08-ui-ux.md#artcolors-tones-for-monograms-and-groups) places in `:core:model`; no cycle because `:core:model` has no project dependencies). |
@@ -774,6 +774,12 @@ flowchart TB
 
 ### Module-graph assertion configuration
 
+**Implementation note (2026-10-16, M2):** `:core:testing` also depends on
+`:feeds`, so `FakeGroupRepository` uses the same `GroupNames` validation as
+production. The module graph allows this edge. The KMP convention excludes
+`:feeds` from automatic `:core:testing` test dependencies to avoid a cycle;
+`:feeds` tests use the common test bundle directly.
+
 Applied by the convention plugins to `:app`, `:desktopApp` and `:sync:server` and, with the same rules, to `:core:testing` (the only main-code module reachable from no shell's main configurations, so rule 9 is otherwise unchecked); rules live in `build-logic/convention/src/main/kotlin/ModuleRules.kt` so they are reviewed like code.
 
 ```kotlin
@@ -810,7 +816,7 @@ moduleGraphAssert {
         ":playback:desktop -> :(download|youtube):api", ":playback:desktop -> :core:(domain|model|common|artwork|database|datastore)",
         ":desktop:system -> :playback:(native|api)", ":desktop:system -> :core:(model|common)",
         ":core:designsystem -> :core:model", ":core:ui -> :core:(designsystem|model|common|navigation)", ":core:ui -> :download:api",
-        ":core:testing -> :core:(domain|model|common|database|navigation)", ":core:testing -> :(playback|download|youtube|sync):api", ":core:testing -> :sync:protocol",
+        ":core:testing -> :core:(domain|model|common|database|navigation)", ":core:testing -> :(playback|download|youtube|sync):api", ":core:testing -> :sync:protocol", ":core:testing -> :feeds",
         ":(playback|download|youtube|sync):api -> :core:(model|common)",
         ":core:(database|datastore) -> :core:(model|common)", ":core:network -> :core:(model|common|network:okhttp)",
     )
