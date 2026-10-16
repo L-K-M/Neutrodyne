@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
+import ch.lkmc.neutrodyne.core.domain.EpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
 import ch.lkmc.neutrodyne.core.domain.FeedRepository
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
@@ -24,6 +25,7 @@ import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
+import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
@@ -64,10 +66,19 @@ public class PodcastViewModel
         private val refreshController: RefreshController,
         private val unsubscribe: UnsubscribeUseCase,
         network: NetworkMonitor,
+        liveStateSource: EpisodeLiveStateSource,
     ) : ViewModel() {
         private val filters = MutableStateFlow(FeedFilters())
         private val detail = podcasts.observePodcast(podcastId)
         private val userMessages = UserMessages()
+        private val visibleIds = MutableStateFlow<Set<Long>>(emptySet())
+
+        public val live: StateFlow<Map<Long, RowLive>> =
+            liveStateSource.observe(visibleIds).stateIn(viewModelScope, SHARING, emptyMap())
+
+        public fun onVisibleIds(ids: Set<Long>) {
+            visibleIds.value = ids
+        }
 
         @OptIn(ExperimentalCoroutinesApi::class)
         public val feed: Flow<PagingData<EpisodeRow>> =

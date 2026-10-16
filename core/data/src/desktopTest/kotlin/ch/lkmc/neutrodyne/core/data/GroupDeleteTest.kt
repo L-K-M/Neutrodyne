@@ -22,6 +22,7 @@ import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.GroupEdit
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
@@ -74,7 +75,7 @@ class GroupDeleteTest {
             val scope = realExpiryScope()
             try {
                 val repo = repository(db, clock, scope)
-                val feeds = FeedRepositoryImpl(db, clock)
+                val feeds = FeedRepositoryImpl(db, FakeSettingsRepository(), clock)
                 val shared = db.podcastDao().insertPodcast(podcastEntity(feedKey = "k-shared"))
                 val techOnly = db.podcastDao().insertPodcast(podcastEntity(feedKey = "k-tech"))
                 val episode = insertEpisode(db, shared, "g:ac4", sortDate = 100)

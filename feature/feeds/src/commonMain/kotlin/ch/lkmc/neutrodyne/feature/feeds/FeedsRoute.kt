@@ -8,6 +8,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.compose.collectAsLazyPagingItems
+import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
@@ -28,6 +29,7 @@ import dev.zacsweers.metrox.viewmodel.metroViewModel
 internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val items = viewModel.feed.collectAsLazyPagingItems()
+    val live = viewModel.live.collectAsStateWithLifecycle()
     val navigator = LocalAppNavigator.current
     val urls = LocalPlatformActions.current.urls
     val clipboard = LocalClipboardManager.current
@@ -35,6 +37,8 @@ internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
     FeedsScreen(
         state = state,
         items = items,
+        live = live,
+        onVisibleIds = { viewModel.onVisibleIds(FeedSource.All, it) },
         onRefresh = viewModel::onRefresh,
         onFiltersChange = viewModel::onFiltersChange,
         onAction = { action ->

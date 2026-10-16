@@ -415,6 +415,15 @@ Every source applies 02's `VISIBLE` fragment (Shorts unless opted in, upcoming, 
 
 `observePrefs` recomputes `minSortDate` on every emission and hourly while collected; rounding to the hour keeps the `RoomRawQuery` stable so `flatMapLatest` does not rebuild the pager on every tick. Filter chips write through `setFilters` immediately (one low-churn row update; `podcast_group` is not observed by the feed `PagingSource`, so the write does not invalidate the open list — the new `Pager` replaces it). On `FeedSource.Podcast`, `setFilters` and `setHideOlderThanDays` throw `IllegalArgumentException` (the podcast screen's filters are transient ViewModel state) and `setFeedOrder` writes `podcast.episodeOrder`. On `All` and `Ungrouped`, `setFeedOrder` throws `IllegalArgumentException` (fixed `NEWEST_FIRST` in v1; 08 shows no order control there).
 
+**Implementation note (2026-10-16, M2):** B2 retains the explicit
+`pagedFeed(source, filters, order)` query API for transient podcast filters and
+adds `pagedFeed(source)` for persisted preferences. The latter observes
+`observePrefs`, compares only effective filters and feed order, and replaces
+its pager only when that query changes. Visits and play-order changes do not
+replace it. Counts remain the separate C2 slice. `markVisited` is a no-op for
+Podcast, which has no feed visit state. The canonical Unit-returning writers
+propagate settings write failures as exceptions rather than reporting success.
+
 ### Paging hand-off to 08
 
 - One `Pager` per **visible** page: the Feeds ViewModel keeps at most 3 cached flows (current page ± 1) keyed by `(source, filters, order)` in an LRU and never builds pagers for every tab.
@@ -451,6 +460,15 @@ Every source applies 02's `VISIBLE` fragment (Shorts unless opted in, upcoming, 
 | Share as OPML (desktop: "Export group as OPML…") | per-group export; the desktop saves through a file dialog ([Destinations](#destinations)) | `ExportKey(groupId)` ([OPML export](#opml-export)) | M3 |
 | Import OPML into this group | picker; session created with this group as target | `ImportRepository.create(source, CreateImportOptions(targetGroupId = id))` | M3 |
 | Edit, Group settings, Delete | editor, settings screen, [Delete and undo](#delete-and-undo) | `GroupEditKey(id)`, `GroupSettingsKey(id)` | M2 |
+
+**Implementation note (2026-10-16, M2):** Count-aware callers freeze the
+chosen `sortDateBefore`, obtain `countUnplayed`, and pass both that cutoff and
+`expectedCount` to the guarded `EpisodeRepository.markFeedPlayed` overload.
+The repository revalidates the count inside its write transaction; a changed
+count returns `MarkFeedPlayedResult.SelectionChanged(actualCount)` and writes
+nothing. Show a refreshed confirmation before retrying. `Played(count)` reports
+the completed mark-played chain. Existing plain confirmation dialogs use the
+explicitly unchecked two-argument overload until the D9 dialog slice.
 
 `downloadAllEstimate` ([02 Download all candidates](02-data-model.md#download-all-candidates), M6): the feed's source predicate, its view filters and `hideOlderThanDays` bound (as [Playing a group](#playing-a-group) rules 1, 3 and 5, no anchor), unplayed, without a `download` row in `QUEUED`…`COMPLETED` (`FAILED` and `MISSING` rows count as candidates), without a tombstone (`downloadDismissedAt IS NULL`; the user deleted those deliberately), and downloadable (`enclosureUrl IS NOT NULL`, or YouTube when `YouTubeCapabilitiesSource.capabilities.value.downloads` at call time, [04 Capability matrix](04-youtube.md#capability-matrix)); newest first, **capped at 200** (`capped = true` → "200 newest of 1,234"). Unlike the context tail, Up next items and the current episode are **not** excluded: downloading them is wanted (answers 02's open question 7). Size per episode follows [07 Estimates](07-downloads.md#estimates): `enclosureLength` when ≥ 100 KB (smaller values are placeholders), else `durationMs × 16 000 B/s` (128 kbit/s) when known, else counted in `unknownSizeCount`; no invented numbers.
 
@@ -563,6 +581,14 @@ interface EffectiveSettingsResolver {
 | 03 `RefreshScheduler`, `FeedRefresher` and the desktop refresh lane ([03 Desktop refresh](03-feeds-and-discovery.md#desktop-refresh)) | tick computation; `nextRefreshAt` per feed | `refreshIntervals()` |
 | 03 `NewEpisodeNotifier` (Android channels; the desktop's `DesktopNotifier`) | once per engine run | `notifications(ids)`; channel choice is 03's (first notifying group by `orderKey`) |
 
+**Implementation note (2026-10-16, M2):** B3 exposes only refresh and
+notification resolution and scoped fields; playback, download fields and hints
+arrive in their owning milestones. Its sources use `PodcastOverride` for the
+podcast row and `Group(uuid, name)` / `Groups(List<Group>)` for stable group
+identity, rather than the numeric IDs in the API sample above. Attribution text
+remains as specified above and belongs to the later settings UI (D8). B3 adds
+observable refresh/notification batch reads alongside the snapshot methods.
+
 ### Writing overrides
 
 ```kotlin
@@ -594,6 +620,12 @@ interface ScopeSettingsRepository {
     suspend fun updateGroup(groupId: Long, change: (SettingOverrides) -> SettingOverrides): Outcome<Unit, SettingsError>
 }
 ```
+
+**Implementation note (2026-10-16, M2):** B3 writes only the two M2 fields,
+preserving every other override column even when both M2 fields inherit. Its
+read-modify-write callback runs inside the Room write transaction. Scheduling
+hooks below arrive with C3, channel reconciliation with C5, and snapshot requests
+with M3; B3 does not invoke those hooks or rewire refresh scheduling.
 
 - Writes are a read-modify-write inside one write transaction (`@Upsert` is allowed on these single-writer tables, [02 DAO rules](02-data-model.md#dao-rules)); a row whose fields are all `null` is deleted. Rule 1 (dependent fields) and validation run before the write; an invalid value returns 01's `SettingsError.OutOfRange(field name)` and writes nothing. A podcast or group that no longer exists makes the write a no-op returning success (the screen is closing anyway).
 - After a write: refresh interval changed → `RefreshController.reschedulePeriodic()`; `notifyNewEpisodes` changed → `GroupChannelSync.sync()` (Android; the screen requests `POST_NOTIFICATIONS` per 03's permission rule); always → `SnapshotScheduler.requestSoon()` (Android). 07 and 06 observe the resolver flows; nothing else is pushed. Sync needs no call: the triggers capture the synced columns (02).
