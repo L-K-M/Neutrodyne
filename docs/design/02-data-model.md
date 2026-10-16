@@ -1442,6 +1442,11 @@ WHERE p.id IN (SELECT m2.podcastId FROM podcast_group_member m2 JOIN podcast p2 
 ORDER BY m.groupId, p.latestEpisodeAt DESC, p.id DESC
 ```
 
+Implementation note (2026-10-16, M2): the shipped query also selects
+`COALESCE(p.customTitle, p.title) AS title` — the same expression as
+`observeLibraryTiles` — because the mosaic cell monogram fallback needs the
+member's display title, which the reference projection did not carry.
+
 ### Play context
 
 Rules (which items, start item, exclusions): [05 Playing a group](05-groups-opml-backup.md#playing-a-group); consumption: [06 Queue and play context](06-playback.md#queue-and-play-context). Delivered in M4. `FeedQueryBuilder.contextTail(scope, filters, order, anchor, k, youtubePlayable)` reuses the feed-page source predicates; `ContextType` maps to `GROUP → Group`, `PODCAST → Podcast`, `ALL → All`, `UNGROUPED → Ungrouped`, `DOWNLOADS` → no source predicate plus `d.state = 'COMPLETED'` (all podcasts, ignoring `includeInAll`), `EXTERNAL` → no tail. The filters come from `contextFilterFlags`, `contextMediaFilter` and `contextMinSortDate`.

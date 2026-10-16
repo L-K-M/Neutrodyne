@@ -4,9 +4,11 @@ package ch.lkmc.neutrodyne.core.testing
 
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.GroupError
+import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.GroupEdit
 import ch.lkmc.neutrodyne.core.model.GroupIcons
+import ch.lkmc.neutrodyne.core.model.GroupMosaicMember
 import ch.lkmc.neutrodyne.core.model.GroupPalette
 import ch.lkmc.neutrodyne.core.model.MediaFilter
 import kotlinx.coroutines.flow.first
@@ -68,6 +70,60 @@ class FakeGroupRepositoryTest {
             for (days in listOf(null, 1, 3, 7, 14, 30, 90, 365)) {
                 assertEquals(Outcome.Success(Unit), repo.update(id, GroupEdit.View(0, MediaFilter.ALL, days)))
             }
+        }
+
+    @Test fun fakeMembershipOpsMirrorTheRepositoryContract() =
+        runTest {
+            val repo = FakeGroupRepository()
+            val tech = assertIs<Outcome.Success<Long>>(repo.create(GroupDraft("Tech"), setOf(1L, 2L))).value
+            val news = assertIs<Outcome.Success<Long>>(repo.create(GroupDraft("News"))).value
+            assertEquals(setOf(1L, 2L), repo.observeMemberIds(tech).first())
+            assertEquals(2, repo.observeGroup(tech).first()?.memberCount)
+            assertEquals(setOf(tech), repo.observeMemberships().first().getValue(1L))
+
+            assertEquals(Outcome.Success(Unit), repo.setMembers(tech, setOf(2L, 3L)))
+            assertEquals(setOf(2L, 3L), repo.observeMemberIds(tech).first())
+            assertEquals(2, repo.observeGroup(tech).first()?.memberCount)
+            assertEquals(Outcome.Failure(GroupError.NotFound), repo.setMembers(999, emptySet()))
+
+            assertEquals(
+                Outcome.Success(Unit),
+                repo.applyMembership(setOf(2L), add = setOf(news), remove = setOf(tech)),
+            )
+            assertEquals(setOf(news), repo.observeMemberships().first().getValue(2L))
+            assertEquals(
+                Outcome.Failure(GroupError.NotFound),
+                repo.applyMembership(setOf(2L), add = setOf(999), remove = emptySet()),
+            )
+            assertEquals(setOf(news), repo.observeMemberships().first().getValue(2L))
+        }
+
+    @Test fun fakeReorderReordersAndRejectsNonPermutations() =
+        runTest {
+            val repo = FakeGroupRepository()
+            val ids = (1..3).map { assertIs<Outcome.Success<Long>>(repo.create(GroupDraft("G$it"))).value }
+            assertEquals(ids, repo.observeGroups().first().map { it.id })
+            assertEquals(Outcome.Success(Unit), repo.reorder(listOf(ids[2], ids[0], ids[1])))
+            assertEquals(listOf(ids[2], ids[0], ids[1]), repo.observeGroups().first().map { it.id })
+            assertEquals(Outcome.Failure(GroupError.NotFound), repo.reorder(listOf(ids[0], ids[1], 99L)))
+            assertEquals(Outcome.Failure(GroupError.NotFound), repo.reorder(ids.dropLast(1)))
+            assertEquals(listOf(ids[2], ids[0], ids[1]), repo.observeGroups().first().map { it.id })
+        }
+
+    @Test fun mosaicsReadTheFixtureState() =
+        runTest {
+            val repo = FakeGroupRepository()
+            assertEquals(emptyMap(), repo.observeMosaics().first())
+            val member =
+                GroupMosaicMember(
+                    groupId = 7,
+                    podcastId = 9,
+                    displayTitle = "Show",
+                    artwork = ArtworkRef("u-a", null, 0),
+                    artworkAvgArgb = null,
+                )
+            repo.mosaics.value = mapOf(7L to listOf(member))
+            assertEquals(listOf(member), repo.observeMosaics().first()[7L])
         }
 
     @Test fun paletteAndIconCataloguesFollowTheDocumentedValues() {
