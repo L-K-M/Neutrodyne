@@ -395,4 +395,8 @@
     <string name="feeds_all_groups">All groups</string>
     <string name="feeds_next_group">Next group</string>
     <string name="feeds_previous_group">Previous group</string>
+    <string name="groups_recent">Recent</string>
+    <string name="groups_new">New group</string>
+    <string name="groups_manage">Manage groups</string>
+    <string name="groups_empty">No groups yet</string>
 </resources>

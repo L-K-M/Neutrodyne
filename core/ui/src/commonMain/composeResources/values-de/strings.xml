@@ -373,4 +373,8 @@
     <string name="feeds_all_groups">Alle Gruppen</string>
     <string name="feeds_next_group">Nächste Gruppe</string>
     <string name="feeds_previous_group">Vorherige Gruppe</string>
+    <string name="groups_recent">Zuletzt angesehen</string>
+    <string name="groups_new">Neue Gruppe</string>
+    <string name="groups_manage">Gruppen verwalten</string>
+    <string name="groups_empty">Noch keine Gruppen</string>
 </resources>

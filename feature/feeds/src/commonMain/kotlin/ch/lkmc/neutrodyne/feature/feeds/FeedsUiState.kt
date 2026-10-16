@@ -38,6 +38,7 @@ public data class FeedsUiState(
     val offline: Boolean = false,
     val refreshing: Boolean = false,
     val hasSubscriptions: Boolean = true,
+    val hasGroups: Boolean = false,
     val messages: ImmutableList<UserMessage> = persistentListOf(),
 )
 

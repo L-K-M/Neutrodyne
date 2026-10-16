@@ -15,6 +15,7 @@ import androidx.navigation3.scene.Scene
 import androidx.navigation3.scene.SceneStrategy
 import androidx.navigation3.scene.SceneStrategyScope
 import ch.lkmc.neutrodyne.core.designsystem.components.NdModalBottomSheet
+import ch.lkmc.neutrodyne.core.designsystem.components.NdSheetExpansion
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 
 /**
@@ -34,7 +35,15 @@ private class NdSheetScene<T : Any>(
 
     override val content: @Composable (() -> Unit) = {
         val lifecycleOwner = rememberLifecycleOwner()
-        NdModalBottomSheet(onDismissRequest = onBack) {
+        NdModalBottomSheet(
+            onDismissRequest = onBack,
+            initialExpansion =
+                if (entry.metadata[NdSceneMetadata.KEY_HALF_HEIGHT] == true) {
+                    NdSheetExpansion.HALF
+                } else {
+                    NdSheetExpansion.EXPANDED
+                },
+        ) {
             CompositionLocalProvider(LocalLifecycleOwner provides lifecycleOwner) {
                 entry.Content()
             }
