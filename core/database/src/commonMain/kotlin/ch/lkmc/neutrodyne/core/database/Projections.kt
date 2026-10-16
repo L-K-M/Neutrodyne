@@ -4,12 +4,14 @@ package ch.lkmc.neutrodyne.core.database
 
 import ch.lkmc.neutrodyne.core.model.AliasReason
 import ch.lkmc.neutrodyne.core.model.Availability
+import ch.lkmc.neutrodyne.core.model.DownloadError
 import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.EpisodeType
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.GuidKnowledge
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.model.WaitReason
 
 /**
  * The feed page's row (02 Feed pages, `ROW_COLUMNS`): `:core:data` maps it to
@@ -164,6 +166,33 @@ data class ExistingEpisodeKey(
     val firstSeenAt: Long,
     /** Added 2026-10-07: step 6's JSON-chapters invalidation compares the stored value. */
     val chaptersUrl: String?,
+)
+
+/**
+ * `DownloadDao.observeLiveFor` row (02 Live row state): the `download` columns `RowLive` merges,
+ * state-transition data only, never progress-cadence bytes (D17).
+ */
+data class DownloadLiveRow(
+    val episodeId: Long,
+    val state: DownloadState,
+    val waitReason: WaitReason,
+    val downloadedBytes: Long,
+    val totalBytes: Long?,
+    val estimatedBytes: Long?,
+    val nextAttemptAt: Long?,
+    val lastError: DownloadError?,
+)
+
+/**
+ * `EpisodeStateDao.observeFor` row (02 Live row state). `playedAt`/`startedAt`/`isFavorite` are
+ * carried by the query but stay paged fields; only `measuredDurationMs` feeds `RowLive`.
+ */
+data class EpisodeStateLiveRow(
+    val episodeId: Long,
+    val playedAt: Long?,
+    val startedAt: Long?,
+    val isFavorite: Boolean,
+    val measuredDurationMs: Long?,
 )
 
 /** `IngestDao.guidKnowledge` row (D98): one stored provenance fact of the podcast. */

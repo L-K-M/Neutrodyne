@@ -1826,6 +1826,13 @@ An ID gets a map entry only if any field is non-null or it is now playing. `debo
 }
 ```
 
+**Implementation note (2026-10-16, M2):** The `:core:ui` reporter takes
+`itemCount` and `idAt` lambdas rather than `LazyPagingItems<FeedItem>`, keeping
+feature row types out of core UI. Callers translate lazy-list indices past the
+scrolling header and optional offline banner, use `peek`, and return `null` for
+day headers and placeholders. The reporter keeps the 10-item margin and clears
+the page's IDs when it leaves composition.
+
 The Feeds ViewModel keeps one set per composed page (at most 3) and feeds their union (≤ ~120 IDs) to `observe`; non-paged lists (Up next, Downloads, player tab) use an overload taking `List<Long>` of the list's item IDs and report their visible IDs the same way. The play-state of rows outside the window is never observed.
 
 ### Rendering rules
