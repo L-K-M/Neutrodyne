@@ -228,6 +228,30 @@ class EffectiveSettingsResolverTest {
             assertEquals(emptyMap(), resolver.observeNotifications(emptyList()).first())
         }
 
+    /** 02's 500-variable chunks: every podcast resolves once, with group rows kept together. */
+    @Test fun batchesSpanningSeveralBindChunksResolveEveryPodcast() =
+        runTest {
+            val ids = List(CHUNKED_BATCH) { podcast() }
+            val grouped = ids.last()
+            val source = group(grouped, "news", 60, true).second
+            val expected =
+                ids.associateWith {
+                    Effective(
+                        it == grouped,
+                        if (it ==
+                            grouped
+                        ) {
+                            source
+                        } else {
+                            SettingSource.AppDefault
+                        },
+                    )
+                }
+
+            assertEquals(expected, resolver.notifications(ids.reversed()))
+            assertEquals(expected, resolver.observeNotifications(ids).first())
+        }
+
     @Test fun resolverFlowsObserveGlobalsMembershipGroupNameAndOverrides() =
         runTest {
             val id = podcast()
@@ -272,5 +296,10 @@ class EffectiveSettingsResolverTest {
         )
         db.groupDao().insertMember(memberEntity(id, podcastId, "a"))
         return id to SettingSource.Group(row.uuid, name)
+    }
+
+    private companion object {
+        /** Three 500-ID chunks, the last one partial. */
+        const val CHUNKED_BATCH = 1_201
     }
 }

@@ -2,6 +2,8 @@
 
 package ch.lkmc.neutrodyne.core.model
 
+import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
+
 /** Attribution for M2 fields; groups carry their stable identity and current display name. */
 sealed interface SettingSource {
     data object PodcastOverride : SettingSource
@@ -29,11 +31,7 @@ data class SettingOverrides(
     val notifyNewEpisodes: Boolean? = null,
 ) {
     fun hasSupportedRefreshInterval(): Boolean =
-        refreshIntervalMinutes == null || refreshIntervalMinutes in REFRESH_CHOICES
-
-    private companion object {
-        val REFRESH_CHOICES = setOf(0, 60, 120, 240, 480, 720, 1440)
-    }
+        refreshIntervalMinutes == null || refreshIntervalMinutes in FeedsSettingKeys.REFRESH_INTERVAL_CHOICES
 }
 
 enum class SettingField { REFRESH_INTERVAL_MINUTES, NOTIFY_NEW_EPISODES }
