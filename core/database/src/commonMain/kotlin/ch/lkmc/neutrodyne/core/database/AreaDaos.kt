@@ -147,10 +147,44 @@ interface GroupDao {
     )
     suspend fun lastMemberOrderKey(groupId: Long): String?
 
+    @Query(
+        "SELECT EXISTS(SELECT 1 FROM podcast p WHERE NOT EXISTS" +
+            " (SELECT 1 FROM podcast_group_member m WHERE m.podcastId = p.id))",
+    )
+    fun observeHasUngroupedPodcasts(): Flow<Boolean>
+
+    @Query(
+        "UPDATE podcast_group SET filterFlags = :flags, mediaFilter = :media, updatedAt = :now" +
+            " WHERE id = :id AND (filterFlags <> :flags OR mediaFilter <> :media)",
+    )
+    suspend fun setFilters(
+        id: Long,
+        flags: Int,
+        media: MediaFilter,
+        now: Long,
+    )
+
+    @Query(
+        "UPDATE podcast_group SET hideOlderThanDays = :days, updatedAt = :now" +
+            " WHERE id = :id AND hideOlderThanDays IS NOT :days",
+    )
+    suspend fun setHideOlderThanDays(
+        id: Long,
+        days: Int?,
+        now: Long,
+    )
+
+    // Visits are device-local and must not change the group's edit timestamp or view columns.
+    @Query("UPDATE podcast_group SET lastViewedAt = :leftAt WHERE id = :id AND lastViewedAt IS NOT :leftAt")
+    suspend fun markVisited(
+        id: Long,
+        leftAt: Long,
+    )
+
     /** The group's feed order (05 `FeedRepository.setFeedOrder`, `FeedSource.Group`). */
     @Query(
-        "UPDATE podcast_group SET feedOrder = :order, updatedAt = :now WHERE id = :groupId" +
-            " AND feedOrder <> :order",
+        "UPDATE podcast_group SET feedOrder = :order, updatedAt = :now" +
+            " WHERE id = :groupId AND feedOrder <> :order",
     )
     suspend fun setFeedOrder(
         groupId: Long,
@@ -278,22 +312,6 @@ data class GroupMosaicRow(
     val artworkVersion: Int,
     val artworkAvgArgb: Int?,
 )
-
-/** `podcast_settings` + `podcast_group_settings` (M2: resolution reads; deletes on all-null). */
-@Dao
-interface ScopeSettingsDao {
-    @Upsert
-    suspend fun upsertPodcast(row: PodcastSettingsEntity)
-
-    @Upsert
-    suspend fun upsertGroup(row: PodcastGroupSettingsEntity)
-
-    @Query("SELECT * FROM podcast_settings WHERE podcastId = :podcastId")
-    suspend fun forPodcast(podcastId: Long): PodcastSettingsEntity?
-
-    @Query("SELECT * FROM podcast_group_settings WHERE groupId = :groupId")
-    suspend fun forGroup(groupId: Long): PodcastGroupSettingsEntity?
-}
 
 /** `episode_state` (M4: the user-state write chains of 02 User-state writes). */
 @Dao

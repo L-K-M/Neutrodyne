@@ -61,11 +61,7 @@ sealed interface GroupEdit {
         val mediaFilter: MediaFilter,
         val hideOlderThanDays: Int?,
     ) : GroupEdit {
-        fun hasSupportedAgeLimit(): Boolean = hideOlderThanDays == null || hideOlderThanDays in SUPPORTED_AGE_LIMITS
-
-        private companion object {
-            val SUPPORTED_AGE_LIMITS = setOf(1, 3, 7, 14, 30, 90, 365)
-        }
+        fun hasSupportedAgeLimit(): Boolean = isSupportedFeedAgeLimit(hideOlderThanDays)
     }
 
     data class ShowAsTab(

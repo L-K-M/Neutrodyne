@@ -64,6 +64,9 @@ class FakeGroupRepository(
 
     private val pending = mutableMapOf<String, Pending>()
 
+    /** Group uuids settled under the lock whose channel delete has not fired yet. */
+    private val settled = mutableListOf<String>()
+
     override fun observeGroups(): Flow<List<Group>> =
         combine(groups, members) { rows, memberships ->
             rows
@@ -253,11 +256,11 @@ class FakeGroupRepository(
         }
 
     override suspend fun delete(groupId: Long): Outcome<DeletedGroupToken, GroupError> =
-        mutex.withLock {
+        lockedThenNotify {
             expireElapsedLocked()
             val group =
                 groups.value.find { it.id == groupId }
-                    ?: return@withLock Outcome.Failure(GroupError.NotFound)
+                    ?: return@lockedThenNotify Outcome.Failure(GroupError.NotFound)
             groups.value = groups.value - group
             val memberIds = members.value[groupId].orEmpty()
             members.value = members.value - groupId
@@ -265,23 +268,23 @@ class FakeGroupRepository(
             pending[token.value] = Pending(group, memberIds, clock.now())
             appScope?.launch {
                 delay(GroupRepository.UNDO_WINDOW_MS)
-                mutex.withLock { expireLocked(token.value) }
+                lockedThenNotify { expireLocked(token.value) }
             }
             Outcome.Success(token)
         }
 
     override suspend fun undoDelete(token: DeletedGroupToken): Outcome<Long, GroupError> =
-        mutex.withLock {
+        lockedThenNotify {
             expireElapsedLocked()
-            val entry = pending[token.value] ?: return@withLock Outcome.Failure(GroupError.UndoExpired)
+            val entry = pending[token.value] ?: return@lockedThenNotify Outcome.Failure(GroupError.UndoExpired)
             val nameKey =
                 (GroupNames.validate(entry.group.name) as? GroupNames.Validation.Valid)?.nameKey
-                    ?: return@withLock Outcome.Failure(GroupError.NameEmpty)
+                    ?: return@lockedThenNotify Outcome.Failure(GroupError.NameEmpty)
             val holder =
                 groups.value.find {
                     (GroupNames.validate(it.name) as? GroupNames.Validation.Valid)?.nameKey == nameKey
                 }
-            if (holder != null) return@withLock Outcome.Failure(GroupError.NameTaken(holder.id))
+            if (holder != null) return@lockedThenNotify Outcome.Failure(GroupError.NameTaken(holder.id))
             groups.value = groups.value + entry.group
             members.value =
                 members.value + (entry.group.id to entry.memberIds.filterTo(HashSet(), podcastExists))
@@ -290,21 +293,35 @@ class FakeGroupRepository(
         }
 
     override suspend fun pendingUndoUuids(): Set<String> =
-        mutex.withLock {
+        lockedThenNotify {
             expireElapsedLocked()
             pending.values.mapTo(HashSet()) { it.group.uuid }
         }
 
+    /**
+     * Runs [block] under the lock, then fires the channel deletes it settled. Like the real
+     * repository, onDeleted runs outside the lock, so a channel sync may read this repository.
+     */
+    private suspend fun <T> lockedThenNotify(block: suspend () -> T): T {
+        val (result, settledUuids) =
+            mutex.withLock {
+                val value = block()
+                value to settled.toList().also { settled.clear() }
+            }
+        for (uuid in settledUuids) channelSync.onDeleted(uuid)
+        return result
+    }
+
     /** Settles every token whose window has passed; the channel delete fires per expiry. */
-    private suspend fun expireElapsedLocked() {
+    private fun expireElapsedLocked() {
         val expired =
             pending.filterValues { clock.now() - it.deletedAt >= GroupRepository.UNDO_WINDOW_MS }
         for (token in expired.keys) expireLocked(token)
     }
 
-    private suspend fun expireLocked(token: String) {
+    private fun expireLocked(token: String) {
         val entry = pending.remove(token) ?: return
-        channelSync.onDeleted(entry.group.uuid)
+        settled += entry.group.uuid
     }
 }
 
