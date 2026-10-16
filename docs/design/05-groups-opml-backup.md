@@ -409,6 +409,15 @@ Every source applies 02's `VISIBLE` fragment (Shorts unless opted in, upcoming, 
 
 `observePrefs` recomputes `minSortDate` on every emission and hourly while collected; rounding to the hour keeps the `RoomRawQuery` stable so `flatMapLatest` does not rebuild the pager on every tick. Filter chips write through `setFilters` immediately (one low-churn row update; `podcast_group` is not observed by the feed `PagingSource`, so the write does not invalidate the open list — the new `Pager` replaces it). On `FeedSource.Podcast`, `setFilters` and `setHideOlderThanDays` throw `IllegalArgumentException` (the podcast screen's filters are transient ViewModel state) and `setFeedOrder` writes `podcast.episodeOrder`. On `All` and `Ungrouped`, `setFeedOrder` throws `IllegalArgumentException` (fixed `NEWEST_FIRST` in v1; 08 shows no order control there).
 
+**Implementation note (2026-10-16, M2):** B2 retains the explicit
+`pagedFeed(source, filters, order)` query API for transient podcast filters and
+adds `pagedFeed(source)` for persisted preferences. The latter observes
+`observePrefs`, compares only effective filters and feed order, and replaces
+its pager only when that query changes. Visits and play-order changes do not
+replace it. Counts remain the separate C2 slice. `markVisited` is a no-op for
+Podcast, which has no feed visit state. The canonical Unit-returning writers
+propagate settings write failures as exceptions rather than reporting success.
+
 ### Paging hand-off to 08
 
 - One `Pager` per **visible** page: the Feeds ViewModel keeps at most 3 cached flows (current page ± 1) keyed by `(source, filters, order)` in an LRU and never builds pagers for every tab.
