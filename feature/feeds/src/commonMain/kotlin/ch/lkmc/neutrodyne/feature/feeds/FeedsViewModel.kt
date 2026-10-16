@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers.Default
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.domain.EpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
 import ch.lkmc.neutrodyne.core.domain.FeedRepository
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
@@ -21,6 +22,7 @@ import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
+import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
@@ -68,10 +70,26 @@ public class FeedsViewModel(
     private val network: NetworkMonitor,
     podcasts: PodcastRepository,
     private val clock: Clock,
+    liveStateSource: EpisodeLiveStateSource,
     @Dispatcher(Default) private val defaultDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
     private val filters = MutableStateFlow(FeedFilters())
     private val userMessages = UserMessages()
+    private val visiblePages = MutableStateFlow<Map<FeedSource, Set<Long>>>(emptyMap())
+
+    public val live: StateFlow<Map<Long, RowLive>> =
+        liveStateSource
+            .observe(visiblePages.map { pages -> pages.values.flatten().toSet() })
+            .stateIn(viewModelScope, SHARING, emptyMap())
+
+    /** Each composed page owns its window; disposal reports an empty set to release it. */
+    public fun onVisibleIds(
+        page: FeedSource,
+        ids: Set<Long>,
+    ) {
+        visiblePages.value =
+            if (ids.isEmpty()) visiblePages.value - page else visiblePages.value + (page to ids)
+    }
 
     /** Message id → URL behind a no-handler snackbar's "Copy link" action (08). */
     private val copyLinks = mutableMapOf<Long, String>()

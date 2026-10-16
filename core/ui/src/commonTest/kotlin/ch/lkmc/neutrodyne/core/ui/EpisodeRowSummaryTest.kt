@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.ui
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.model.DownloadError
 import ch.lkmc.neutrodyne.core.model.DownloadState
+import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.WaitReason
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.testEpisodeRow

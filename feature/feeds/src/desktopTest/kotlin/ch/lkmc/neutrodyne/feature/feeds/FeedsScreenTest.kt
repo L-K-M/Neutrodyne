@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.feature.feeds
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
@@ -39,6 +40,7 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.FeedFilters
+import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
@@ -138,6 +140,25 @@ class FeedsScreenTest {
             )
             onNodeWithText("Couldn't load episodes").assertIsDisplayed()
             onNodeWithText("Retry").assertIsDisplayed()
+        }
+
+    @Test
+    fun visibleIdsSkipHeadersAndLiveOverlayReachesTheRow() =
+        runComposeUiTest {
+            val live = mutableStateOf(mapOf(1L to RowLive(isNowPlaying = true, isPlaying = true)))
+            var visible = emptySet<Long>()
+            setFeeds(
+                state = FeedsUiState(hasSubscriptions = true, offline = true),
+                rows = listOf(testEpisodeRow(1)),
+                live = live,
+                onVisibleIds = { visible = it },
+            )
+            assertEquals(setOf(1L), visible)
+            onNodeWithContentDescription("Pause", useUnmergedTree = true).assertIsDisplayed()
+
+            runOnIdle { live.value = emptyMap() }
+            waitForIdle()
+            onNodeWithContentDescription("Play", useUnmergedTree = true).assertIsDisplayed()
         }
 
     @Test
@@ -330,6 +351,8 @@ class FeedsScreenTest {
     private fun ComposeUiTest.setFeeds(
         state: FeedsUiState,
         rows: List<EpisodeRow> = emptyList(),
+        live: State<Map<Long, RowLive>> = mutableStateOf(emptyMap()),
+        onVisibleIds: (Set<Long>) -> Unit = {},
         source: PagingSource<Int, EpisodeRow>? = null,
         pageSize: Int = 5,
         paging: PagingConfig? = null,
@@ -359,6 +382,8 @@ class FeedsScreenTest {
                     wrapScreen {
                         FeedsScreen(
                             state = state,
+                            live = live,
+                            onVisibleIds = onVisibleIds,
                             items = items,
                             onRefresh = onRefresh,
                             onFiltersChange = onFiltersChange,
