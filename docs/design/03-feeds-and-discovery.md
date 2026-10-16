@@ -905,6 +905,16 @@ repeated successful `awaitOpen()` calls do not repeat their installation. A held
 `refresh-periodic` at the next rebase trigger (a settings change, subscribe or
 unsubscribe) or the next start, the desktop runner at the next start.
 
+**Implementation note (2026-10-16, M2):** C3 reads the resolver once per engine
+run and passes each podcast's interval into parsed-body ingestion as well as
+batched outcome writes. The rebaser and Android tick use the same effective
+intervals. Android retains the specified 60-min tick floor, which also satisfies
+WorkManager's 15-min minimum; an empty library cancels periodic work. The desktop
+keeps its minute poll and 15-min slack, using the rebased per-podcast due times
+rather than adding an Android-style periodic timer. Manual-only success stores
+`NEVER`; explicit force marks and the failure/backoff exceptions in the policy
+table remain unchanged.
+
 ### Work requests
 
 | Unique name | Request | Constraints | Policy | Input |

@@ -20,6 +20,7 @@ import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
@@ -43,8 +44,8 @@ import java.util.concurrent.TimeUnit
  * libraries, and the `refresh-periodic` tick whose interval and constraint set are stored in
  * `feeds.scheduled_tick_*` so re-enqueues only happen on a change.
  *
- * M1a's tick is `max(60, feeds.refresh_interval_minutes)` minutes; `0` ("Manual only") cancels the
- * periodic work. 05's effective-settings resolver replaces the global read (03 Periodic tick).
+ * The tick is the minimum effective timed interval with a 60-min floor (03 Periodic tick).
+ * An empty library or entirely Manual-only library cancels periodic work.
  */
 @SingleIn(AppScope::class)
 @ContributesBinding(AppScope::class)
@@ -54,10 +55,12 @@ internal class WorkManagerRefreshScheduler
         private val application: Application,
         private val db: NeutrodyneDatabase,
         private val settings: SettingsRepository,
+        private val effectiveSettings: EffectiveSettingsResolver,
         private val rebaser: NextRefreshRebaser,
         @param:ApplicationScope private val appScope: CoroutineScope,
     ) : RefreshScheduler {
         private val enqueueMutex = Mutex()
+        private val periodicMutex = Mutex()
         private val workManager get() = WorkManager.getInstance(application)
 
         override fun enqueueNow(
@@ -100,61 +103,69 @@ internal class WorkManagerRefreshScheduler
             }
         }
 
-        override suspend fun reschedulePeriodic() {
-            val intervalMinutes = settings.get(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES).toLong()
-            val wifiOnly = settings.get(FeedsSettingKeys.REFRESH_WIFI_ONLY)
-            val tick = if (intervalMinutes == 0L) NO_TICK else maxOf(MIN_TICK_MINUTES, intervalMinutes)
-            val unmetered = wifiOnly
+        // Scoped writes may finish together; stale cancellation must not overtake a newer tick.
+        override suspend fun reschedulePeriodic() =
+            periodicMutex.withLock {
+                val intervalMinutes =
+                    effectiveSettings
+                        .refreshIntervals()
+                        .values
+                        .mapNotNull { it.value }
+                        .minOrNull()
+                        ?.toLong()
+                val wifiOnly = settings.get(FeedsSettingKeys.REFRESH_WIFI_ONLY)
+                val tick = intervalMinutes?.let { maxOf(MIN_TICK_MINUTES, it) } ?: NO_TICK
+                val unmetered = wifiOnly
 
-            val lastTick = settings.get(FeedsSettingKeys.SCHEDULED_TICK_MINUTES)
-            val lastUnmetered = settings.get(FeedsSettingKeys.SCHEDULED_TICK_UNMETERED)
-            // The persisted markers and WorkManager's actual unique work are reconciled here:
-            // a marker without live work (a failed enqueue, a wiped store) re-enqueues, and the
-            // markers are only written after the Operation reports success.
-            val live = periodicWorkLive()
-            if (tick == NO_TICK) {
-                if (lastTick != NO_TICK || live) {
-                    if (workManager.cancelUniqueWork(WORK_PERIODIC).awaitSuccess()) {
-                        settings.set(FeedsSettingKeys.SCHEDULED_TICK_MINUTES, NO_TICK)
+                val lastTick = settings.get(FeedsSettingKeys.SCHEDULED_TICK_MINUTES)
+                val lastUnmetered = settings.get(FeedsSettingKeys.SCHEDULED_TICK_UNMETERED)
+                // The persisted markers and WorkManager's actual unique work are reconciled here:
+                // a marker without live work (a failed enqueue, a wiped store) re-enqueues, and the
+                // markers are only written after the Operation reports success.
+                val live = periodicWorkLive()
+                if (tick == NO_TICK) {
+                    if (lastTick != NO_TICK || live) {
+                        if (workManager.cancelUniqueWork(WORK_PERIODIC).awaitSuccess()) {
+                            settings.set(FeedsSettingKeys.SCHEDULED_TICK_MINUTES, NO_TICK)
+                            settings.set(FeedsSettingKeys.SCHEDULED_TICK_UNMETERED, unmetered)
+                        }
+                    }
+                } else if (tick != lastTick || unmetered != lastUnmetered || !live) {
+                    val constraints =
+                        Constraints
+                            .Builder()
+                            .setRequiredNetworkType(if (unmetered) NetworkType.UNMETERED else NetworkType.CONNECTED)
+                            .setRequiresBatteryNotLow(true)
+                            .build()
+                    val request =
+                        PeriodicWorkRequestBuilder<RefreshWorker>(
+                            tick,
+                            TimeUnit.MINUTES,
+                            tick / FLEX_DIVISOR,
+                            TimeUnit.MINUTES,
+                        ).setConstraints(constraints)
+                            .setInputData(
+                                RefreshWorkData.of(
+                                    RefreshScope.All,
+                                    force = false,
+                                    pagesOnly = false,
+                                    RefreshOrigin.PERIODIC,
+                                ),
+                            ).addTag(TAG_REFRESH)
+                            .build()
+                    if (
+                        workManager
+                            .enqueueUniquePeriodicWork(WORK_PERIODIC, ExistingPeriodicWorkPolicy.UPDATE, request)
+                            .awaitSuccess()
+                    ) {
+                        settings.set(FeedsSettingKeys.SCHEDULED_TICK_MINUTES, tick)
                         settings.set(FeedsSettingKeys.SCHEDULED_TICK_UNMETERED, unmetered)
                     }
                 }
-            } else if (tick != lastTick || unmetered != lastUnmetered || !live) {
-                val constraints =
-                    Constraints
-                        .Builder()
-                        .setRequiredNetworkType(if (unmetered) NetworkType.UNMETERED else NetworkType.CONNECTED)
-                        .setRequiresBatteryNotLow(true)
-                        .build()
-                val request =
-                    PeriodicWorkRequestBuilder<RefreshWorker>(
-                        tick,
-                        TimeUnit.MINUTES,
-                        tick / FLEX_DIVISOR,
-                        TimeUnit.MINUTES,
-                    ).setConstraints(constraints)
-                        .setInputData(
-                            RefreshWorkData.of(
-                                RefreshScope.All,
-                                force = false,
-                                pagesOnly = false,
-                                RefreshOrigin.PERIODIC,
-                            ),
-                        ).addTag(TAG_REFRESH)
-                        .build()
-                if (
-                    workManager
-                        .enqueueUniquePeriodicWork(WORK_PERIODIC, ExistingPeriodicWorkPolicy.UPDATE, request)
-                        .awaitSuccess()
-                ) {
-                    settings.set(FeedsSettingKeys.SCHEDULED_TICK_MINUTES, tick)
-                    settings.set(FeedsSettingKeys.SCHEDULED_TICK_UNMETERED, unmetered)
-                }
-            }
 
-            // Interval changes take effect without waiting for the old schedule (03 Periodic tick).
-            rebaser.rebase()
-        }
+                // Interval changes take effect without waiting for the old schedule (03 Periodic tick).
+                rebaser.rebase()
+            }
 
         override suspend fun enqueueContinuation(): Boolean {
             val unmetered = settings.get(FeedsSettingKeys.REFRESH_WIFI_ONLY)

@@ -34,6 +34,8 @@ internal class GroupRepositoryImpl(
     private val clock: Clock,
     private val orderKeys: OrderKeys,
 ) : GroupRepository {
+    // TODO(M2 B1 integration, 2026-10-16): membership writes (setMembers/applyMembership)
+    // must call RefreshController.reschedulePeriodic() after commit; this slice has no writers.
     private val dao get() = db.groupDao()
 
     override fun observeGroups(): Flow<List<Group>> = dao.observeGroups().map { rows -> rows.map { it.toModel() } }
