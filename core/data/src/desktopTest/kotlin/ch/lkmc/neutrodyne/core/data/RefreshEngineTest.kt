@@ -7,21 +7,26 @@ import androidx.sqlite.SQLiteException
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.data.ingest.IngestContext
 import ch.lkmc.neutrodyne.core.data.ingest.IngestMode
+import ch.lkmc.neutrodyne.core.data.notifications.NewEpisodeNotifier
 import ch.lkmc.neutrodyne.core.data.refresh.AdapterResult
 import ch.lkmc.neutrodyne.core.data.refresh.FeedOutcome
 import ch.lkmc.neutrodyne.core.data.refresh.FeedRunEvent
 import ch.lkmc.neutrodyne.core.data.refresh.FetchMode
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshRequest
+import ch.lkmc.neutrodyne.core.data.settings.EffectiveSettingsResolverImpl
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
+import ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SettingsError
+import ch.lkmc.neutrodyne.core.model.Effective
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
+import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
@@ -33,6 +38,8 @@ import ch.lkmc.neutrodyne.feeds.parse.ParseResult
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -121,6 +128,148 @@ class RefreshEngineTest {
         dueSlackMs = dueSlackMs,
         pagingBudgetMs = pagingBudgetMs,
     )
+
+    @Test
+    fun notificationsAreBatchedOncePerRunAndDoNotLeakIntoTheNextRun() =
+        runTest {
+            settings.set(FeedsSettingKeys.NOTIFY_NEW_EPISODES, true)
+            val poster = FakeNewEpisodePoster()
+            val adapter =
+                stubAdapter(onFetch = { _, _ ->
+                    adapterParsed(parsedFeed(items = listOf(parsedEpisode(0, guid = "new", pubDate = NOW))))
+                })
+            val a = due("https://a.example.com/f")
+            val b = due("https://b.example.com/f")
+            val engine =
+                newRefresher(
+                    db,
+                    mapOf(SourceType.RSS to adapter),
+                    clock,
+                    settings,
+                    notifier = NewEpisodeNotifier(db, EffectiveSettingsResolverImpl(db, settings), poster),
+                )
+
+            val report = engine.run(request())
+
+            assertEquals(2, report.newEpisodes.size)
+            assertEquals(
+                setOf(a, b),
+                poster.posts
+                    .single()
+                    .single()
+                    .episodes
+                    .map { it.podcastId }
+                    .toSet(),
+            )
+            assertEquals(
+                report.newEpisodes.flatMap { it.episodeIds }.toSet(),
+                poster.posts
+                    .single()
+                    .single()
+                    .episodes
+                    .map { it.episodeId }
+                    .toSet(),
+            )
+            engine.run(request())
+            assertEquals(1, poster.posts.size)
+        }
+
+    @Test
+    fun cancellationAfterACommitStillPostsTheCommittedBatch() =
+        runTest {
+            settings.set(FeedsSettingKeys.NOTIFY_NEW_EPISODES, true)
+            val committed = CompletableDeferred<Unit>()
+            val a = due("https://a.example.com/f")
+            due("https://b.example.com/f")
+            val poster = FakeNewEpisodePoster()
+            val adapter =
+                stubAdapter(onFetch = { feed, _ ->
+                    if (feed.id != a) awaitCancellation()
+                    adapterParsed(parsedFeed(items = listOf(parsedEpisode(0, guid = "committed", pubDate = NOW))))
+                }, announce = { _, _, ids ->
+                    committed.complete(Unit)
+                    ids
+                })
+            val engine =
+                newRefresher(
+                    db,
+                    mapOf(SourceType.RSS to adapter),
+                    clock,
+                    settings,
+                    notifier = NewEpisodeNotifier(db, EffectiveSettingsResolverImpl(db, settings), poster),
+                )
+            val run = backgroundScope.launch { engine.run(request()) }
+            committed.await()
+
+            run.cancelAndJoin()
+
+            val notice = poster.posts.single().single()
+            assertEquals(listOf(a), notice.episodes.map { it.podcastId })
+            assertNotNull(db.episodeDao().byId(notice.episodes.single().episodeId))
+            assertFalse(engine.status.value.running)
+            assertTrue(run.isCancelled)
+        }
+
+    @Test
+    fun aNotifierReadFailureDoesNotFailTheRefreshRun() =
+        runTest {
+            settings.set(FeedsSettingKeys.NOTIFY_NEW_EPISODES, true)
+            val poster = FakeNewEpisodePoster()
+            val resolver =
+                object : ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver by EffectiveSettingsResolverImpl(
+                    db,
+                    settings,
+                ) {
+                    override suspend fun notifications(podcastIds: Collection<Long>): Map<Long, Effective<Boolean>> =
+                        throw CancellationException("resolution failed")
+                }
+            val a = due("https://a.example.com/f")
+            val adapter =
+                stubAdapter(onFetch = { _, _ ->
+                    adapterParsed(parsedFeed(items = listOf(parsedEpisode(0, guid = "new", pubDate = NOW))))
+                })
+            val engine =
+                newRefresher(
+                    db,
+                    mapOf(SourceType.RSS to adapter),
+                    clock,
+                    settings,
+                    notifier = NewEpisodeNotifier(db, resolver, poster),
+                )
+
+            val report = engine.run(request())
+
+            assertIs<FeedOutcome.Ingested>(report.outcomes[a])
+            assertEquals(1, report.newEpisodes.size)
+            assertTrue(poster.posts.isEmpty())
+            assertFalse(engine.status.value.running)
+        }
+
+    @Test
+    fun aPosterFailureDoesNotFailTheRefreshRun() =
+        runTest {
+            settings.set(FeedsSettingKeys.NOTIFY_NEW_EPISODES, true)
+            val poster = FakeNewEpisodePoster().apply { onPost = { error("posting failed") } }
+            val a = due("https://a.example.com/f")
+            val adapter =
+                stubAdapter(onFetch = { _, _ ->
+                    adapterParsed(parsedFeed(items = listOf(parsedEpisode(0, guid = "new", pubDate = NOW))))
+                })
+            val engine =
+                newRefresher(
+                    db,
+                    mapOf(SourceType.RSS to adapter),
+                    clock,
+                    settings,
+                    notifier = NewEpisodeNotifier(db, EffectiveSettingsResolverImpl(db, settings), poster),
+                )
+
+            val report = engine.run(request())
+
+            assertIs<FeedOutcome.Ingested>(report.outcomes[a])
+            assertEquals(1, poster.posts.size)
+            assertFalse(engine.status.value.running)
+        }
 
     // --- Selection ------------------------------------------------------------------------------
 

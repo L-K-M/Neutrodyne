@@ -49,6 +49,85 @@ class GroupDaoTest {
             }
         }
 
+    @Test fun mosaicsReturnFourNewestActiveMembersPerGroup() =
+        runTest {
+            val group = dao.insert(groupEntity(orderKey = "a"))
+            val podcasts =
+                (1..5).map { i ->
+                    db.podcastDao().insertPodcast(
+                        podcastEntity(title = "P$i").copy(latestEpisodeAt = i * 1000L),
+                    )
+                }
+            // Insert members out of recency order; the mosaic must still rank by latestEpisodeAt.
+            dao.insertMember(memberEntity(group, podcasts[0], "a"))
+            dao.insertMember(memberEntity(group, podcasts[4], "b"))
+            dao.insertMember(memberEntity(group, podcasts[2], "c"))
+            dao.insertMember(memberEntity(group, podcasts[3], "d"))
+            dao.insertMember(memberEntity(group, podcasts[1], "e"))
+
+            val rows = dao.observeMosaics().first()
+            assertEquals(
+                listOf(podcasts[4], podcasts[3], podcasts[2], podcasts[1]),
+                rows.map { it.podcastId },
+            )
+            assertEquals(rows.map { it.podcastId }.size, 4)
+            assertEquals(rows.map { it.groupId }.distinct(), listOf(group))
+        }
+
+    @Test fun mosaicsScopeMembersToTheirOwnGroupAndJoinArtwork() =
+        runTest {
+            val group = dao.insert(groupEntity(name = "One", orderKey = "a"))
+            val other = dao.insert(groupEntity(name = "Two", orderKey = "b"))
+            val pinned =
+                db.podcastDao().insertPodcast(
+                    podcastEntity(title = "Custom")
+                        .copy(
+                            artworkKey = "u-cover",
+                            artworkUrl = "https://x/c.jpg",
+                            customTitle = "Renamed",
+                            latestEpisodeAt = 5_000L,
+                        ),
+                )
+            val plain =
+                db.podcastDao().insertPodcast(
+                    podcastEntity(title = "Plain").copy(latestEpisodeAt = 9_000L),
+                )
+            // Never published: NULL latestEpisodeAt sorts last under DESC.
+            val never = db.podcastDao().insertPodcast(podcastEntity(title = "Never"))
+            dao.insertMember(memberEntity(group, pinned, "a"))
+            dao.insertMember(memberEntity(group, plain, "b"))
+            dao.insertMember(memberEntity(group, never, "c"))
+            dao.insertMember(memberEntity(other, plain, "a"))
+            db.artworkDao().upsert(ArtworkEntity(key = "u-cover", version = 7, avgArgb = 0xFF112233.toInt()))
+
+            val rows = dao.observeMosaics().first()
+            val mine = rows.filter { it.groupId == group }.map { it.podcastId }
+            // NULL latestEpisodeAt sorts last; only this group's members appear.
+            assertEquals(listOf(plain, pinned, never), mine)
+            val cover = rows.single { it.podcastId == pinned }
+            assertEquals("Renamed", cover.title)
+            assertEquals("u-cover", cover.artworkKey)
+            assertEquals("https://x/c.jpg", cover.artworkUrl)
+            assertEquals(7, cover.artworkVersion)
+            assertEquals(0xFF112233.toInt(), cover.artworkAvgArgb)
+            val plainRow = rows.single { it.groupId == group && it.podcastId == plain }
+            assertEquals(0, plainRow.artworkVersion)
+            assertNull(plainRow.artworkAvgArgb)
+        }
+
+    @Test fun mosaicsReemitOnMemberAndArtworkChanges() =
+        runTest {
+            val group = dao.insert(groupEntity(orderKey = "a"))
+            val podcast = db.podcastDao().insertPodcast(podcastEntity().copy(artworkKey = "u-a"))
+            dao.observeMosaics().test {
+                assertEquals(emptyList(), awaitItem())
+                dao.insertMember(memberEntity(group, podcast, "a"))
+                assertEquals(listOf(podcast), awaitItem().map { it.podcastId })
+                db.artworkDao().upsert(ArtworkEntity(key = "u-a", version = 2))
+                assertEquals(2, awaitItem().single().artworkVersion)
+            }
+        }
+
     @Test fun membershipsAreScopedAndGroupsOfPodcastUseGroupOrder() =
         runTest {
             val later = dao.insert(groupEntity(name = "Later", orderKey = "b"))

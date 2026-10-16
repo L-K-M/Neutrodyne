@@ -12,6 +12,8 @@ import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.StoragePaths
+import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
+import ch.lkmc.neutrodyne.core.domain.NoGroupChannels
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.platform.AndroidBuildInfo
@@ -77,7 +79,24 @@ object CoreBindings {
     @SingleIn(AppScope::class)
     fun storagePaths(application: Application): StoragePaths = StoragePaths(application)
 
-    /** The subscribe transaction's fractional-index port (10 Ordered lists). */
+    /** The subscribe transaction's and group reorder's fractional-index port (10 Ordered lists). */
     @Provides
-    fun orderKeys(): OrderKeys = OrderKeys { last -> OrderKey.after(last) }
+    fun orderKeys(): OrderKeys =
+        object : OrderKeys {
+            override fun after(last: String?): String = OrderKey.after(last)
+
+            override fun between(
+                previous: String?,
+                next: String?,
+            ): String = OrderKey.between(previous, next)
+
+            override fun rewrite(count: Int): List<String> = OrderKey.rewrite(count)
+        }
+
+    /**
+     * Interim no-op: 05's channel lifecycle port is bound so `GroupRepositoryImpl` can run
+     * delete/undo now; C5 replaces it with `GroupNotificationChannels` (`:core:data` androidMain).
+     */
+    @Provides
+    fun groupChannelSync(): GroupChannelSync = NoGroupChannels
 }

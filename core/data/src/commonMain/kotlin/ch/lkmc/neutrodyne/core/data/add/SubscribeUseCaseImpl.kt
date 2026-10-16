@@ -194,21 +194,26 @@ internal class SubscribeUseCaseImpl(
                         // entry slipped past both — roll back and report it (03 Accepted items).
                         ingest.emptyKind?.let { throw RejectedIngestException(it) }
 
-                        // Step 3.5: requested group memberships (`OrderKey.after` per group).
+                        // Step 3.5: requested group memberships (`OrderKey.after` per group);
+                        // the touched groups' updatedAt follows 05's membership-write rule.
+                        val stamped = mutableSetOf<Long>()
                         for (groupId in groupIds) {
-                            db
-                                .groupDao()
-                                .insertMember(
-                                    PodcastGroupMemberEntity(
-                                        groupId = groupId,
-                                        podcastId = id,
-                                        orderKey =
-                                            orderKeys.after(db.groupDao().lastMemberOrderKey(groupId)),
-                                        addedAt = now,
-                                        source = MemberSource.MANUAL,
-                                    ),
-                                )
+                            val inserted =
+                                db
+                                    .groupDao()
+                                    .insertMember(
+                                        PodcastGroupMemberEntity(
+                                            groupId = groupId,
+                                            podcastId = id,
+                                            orderKey =
+                                                orderKeys.after(db.groupDao().lastMemberOrderKey(groupId)),
+                                            addedAt = now,
+                                            source = MemberSource.MANUAL,
+                                        ),
+                                    )
+                            if (inserted != -1L) stamped += groupId
                         }
+                        if (stamped.isNotEmpty()) db.groupDao().touchUpdatedAt(stamped, now)
                         TxOutcome.Inserted(id, ingest)
                     }
                 }
