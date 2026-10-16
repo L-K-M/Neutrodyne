@@ -7,6 +7,7 @@ import androidx.room3.Insert
 import androidx.room3.Query
 import androidx.room3.Upsert
 import ch.lkmc.neutrodyne.core.model.FeedOrder
+import kotlinx.coroutines.flow.Flow
 
 // The remaining one-DAO-per-area surface (02 "New names introduced here"). M1a adds only the row
 // writers and lookups its own paths and fixtures need; each later milestone extends its DAO.
@@ -114,6 +115,16 @@ interface EpisodeStateDao {
 
     @Query("SELECT * FROM episode_state WHERE episodeId = :episodeId")
     suspend fun byEpisode(episodeId: Long): EpisodeStateEntity?
+
+    /**
+     * 02 Live row state: the `episode_state` `IN` query behind `EpisodeLiveStateSource`; callers
+     * chunk at 200 ids. `playedAt`/`startedAt`/`isFavorite` travel along but stay paged fields.
+     */
+    @Query(
+        "SELECT episodeId, playedAt, startedAt, isFavorite, measuredDurationMs" +
+            " FROM episode_state WHERE episodeId IN (:ids)",
+    )
+    fun observeFor(ids: List<Long>): Flow<List<EpisodeStateLiveRow>>
 }
 
 /** `episode_position` (M4: position saves and `applyRemote`). */
@@ -131,6 +142,16 @@ interface PositionDao {
 
     @Query("SELECT * FROM episode_position WHERE episodeId = :episodeId")
     suspend fun byEpisode(episodeId: Long): EpisodePositionEntity?
+
+    /**
+     * 02 Live row state: the high-churn `episode_position` `IN` query; callers chunk at 200 ids.
+     * Observes only `episode_position`, so position saves never invalidate a paged feed.
+     */
+    @Query(
+        "SELECT episodeId, positionMs, durationMs, positionSource, updatedAt" +
+            " FROM episode_position WHERE episodeId IN (:ids)",
+    )
+    fun observeFor(ids: List<Long>): Flow<List<EpisodePositionEntity>>
 }
 
 /** `queue_entry` (M4: Up next ordering, adds and moves). */
@@ -165,6 +186,16 @@ interface DownloadDao {
             " WHERE e.podcastId IN (:podcastIds)",
     )
     suspend fun downloadedEpisodeIds(podcastIds: List<Long>): List<Long>
+
+    /**
+     * 02 Live row state: the `download` transition columns `RowLive` merges; callers chunk at
+     * 200 ids. `downloadedBytes` is persisted only on transitions (D17), never progress cadence.
+     */
+    @Query(
+        "SELECT episodeId, state, waitReason, downloadedBytes, totalBytes, estimatedBytes," +
+            " nextAttemptAt, lastError FROM download WHERE episodeId IN (:ids)",
+    )
+    fun observeLiveFor(ids: List<Long>): Flow<List<DownloadLiveRow>>
 }
 
 /** `artwork` (M4: references and garbage collection; `@Upsert`-able single-writer table). */
