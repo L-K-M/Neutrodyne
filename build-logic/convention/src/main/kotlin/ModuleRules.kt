@@ -91,6 +91,7 @@ internal fun Project.configureModuleGraphAssert() {
                 ":core:testing -> :core:(domain|model|common|database|navigation)",
                 ":core:testing -> :(playback|download|youtube|sync):api",
                 ":core:testing -> :sync:protocol",
+                ":core:testing -> :feeds",
                 ":(playback|download|youtube|sync):api -> :core:(model|common)",
                 ":core:(database|datastore) -> :core:(model|common)",
                 ":core:network -> :core:(model|common|network:okhttp)",

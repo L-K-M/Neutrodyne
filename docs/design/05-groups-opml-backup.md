@@ -158,7 +158,7 @@ data class Group(
     val showAsTab: Boolean, val lastViewedAt: Long?, val createdAt: Long, val memberCount: Int,
 )
 data class GroupDraft(val name: String, val colorArgb: Int? = null, val iconKey: String? = null,
-                      val playOrder: FeedOrder = FeedOrder.NEWEST_FIRST)  // colour null → next free palette colour
+                      val playOrder: FeedOrder = FeedOrder.NEWEST_FIRST, val showAsTab: Boolean = true)  // colour null → next free palette colour
 sealed interface GroupEdit {
     data class Rename(val name: String) : GroupEdit
     data class Look(val colorArgb: Int?, val iconKey: String?) : GroupEdit
@@ -167,6 +167,18 @@ sealed interface GroupEdit {
     data class ShowAsTab(val show: Boolean) : GroupEdit
 }
 ```
+
+**Implementation note (2026-10-16, M2):** A1 adds `showAsTab = true` to
+`GroupDraft` so creation carries every non-membership editor field from 08.
+The basic repository exposes the four group/member reads, `checkName`, `create(draft)`
+and `update`; membership writes (including initial members), aggregate memberships,
+mosaics, reorder and delete/undo arrive in later M2 PRs. `GroupNames` returns its
+own `Validation` (`Valid(name, nameKey)`, `Empty`, `TooLong(max)`), mapped to
+`GroupError` by repositories, keeping `:feeds` independent of `:core:domain`.
+`GroupEdit` retains the full documented field shapes; A1 implements these targeted
+updates without adding membership operations. `View` rejects age limits outside
+`{null, 1, 3, 7, 14, 30, 90, 365}` with `GroupError.InvalidHideOlderThanDays`,
+matching the filter choices under [Group feeds](#group-feeds).
 
 `kind` is always `MANUAL` and `ruleJson` always `null` in v1 (smart groups reserved, [02 Reserved tables](02-data-model.md#reserved-tables)). `uuid` = `Uuid.random().toString()` (`kotlin.uuid`, lowercase, common code), generated once and never reused ([02 Group uuid and nameKey](02-data-model.md#group-uuid-and-namekey)); notification channels (Android), the mosaic artwork key `g-{groupUuid}`, backups and sync depend on it. It is the group's sync record ID and changes on a device only when a sync merge of two equally named groups redirects it ([10 Redirects on clients](10-sync.md#redirects-on-clients)), when a first sync link or a Replace restore matches the group by `nameKey` and adopts the other side's `uuid` ([Merge and Replace rules](#merge-and-replace-rules)); `GroupChannelSync.onUuidChanged` then carries the notification channel over ([Notification channels](#notification-channels)).
 
@@ -213,6 +225,11 @@ Examples (M2 acceptance 5): "Tech" is rejected when "tech" exists; a 41-code-poi
 | Daily life | `fitness_center`, `restaurant`, `travel_explore`, `child_care`, `self_improvement`, `bedtime`, `directions_car`, `work` |
 | General | `podcasts`, `smart_display`, `favorite`, `star` |
 
+**Implementation note (2026-10-16, M2):** The icon table lists 31 keys despite
+the “32 keys” description; `GroupIcons.KEYS` follows the listed keys without
+inventing another. Malformed keys return `GroupError.InvalidIconKey` from
+create/Look; unknown keys matching the format remain valid and are preserved.
+
 ### Order
 
 `orderKey` (a fractional index from `:sync:protocol`'s `OrderKey`, [D92](../PLAN.md#3-key-decisions)) defines tab order, the Library groups view, OPML folder order and the "primary group" of hybrid OPML; every list sorts by `orderKey, id` ([02 Group and member ordering](02-data-model.md#group-and-member-ordering)). Create assigns `OrderKey.after(last)`. `reorder(ids)` (drag reorder with `reorderable`, 08; "Move up/down" custom actions and desktop context menus) compares the requested order with the current one, keeps the longest run of groups that are already in relative order (a longest increasing subsequence of their current positions) and writes `OrderKey.between(previous, next)` only for the others, in one write transaction: one drag or one move writes one row (M2 acceptance 14, 02's `GroupOrderTest`), and two devices that move different groups both keep their moves after sync ([10 Ordered lists](10-sync.md#ordered-lists)). A key longer than 64 characters, or equal neighbour keys after concurrent inserts on two devices, makes 02 rewrite the list. Delete removes the row; nothing is renumbered. Backups still write `sortOrder` as each group's rank for older readers ([Archive](#archive)). Tested to 50 groups ([N5](../PLAN.md#22-non-functional-requirements)); there is no cap.
@@ -254,6 +271,8 @@ sealed interface GroupError {
     data class NameTooLong(val max: Int) : GroupError
     data class NameTaken(val groupId: Long) : GroupError
     data object NotFound : GroupError
+    data object InvalidIconKey : GroupError
+    data object InvalidHideOlderThanDays : GroupError
     data object UndoExpired : GroupError
 }
 ```
