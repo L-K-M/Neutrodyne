@@ -4,9 +4,11 @@ package ch.lkmc.neutrodyne.core.testing
 
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.GroupError
+import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.GroupEdit
 import ch.lkmc.neutrodyne.core.model.GroupIcons
+import ch.lkmc.neutrodyne.core.model.GroupMosaicMember
 import ch.lkmc.neutrodyne.core.model.GroupPalette
 import ch.lkmc.neutrodyne.core.model.MediaFilter
 import kotlinx.coroutines.flow.first
@@ -106,6 +108,22 @@ class FakeGroupRepositoryTest {
             assertEquals(Outcome.Failure(GroupError.NotFound), repo.reorder(listOf(ids[0], ids[1], 99L)))
             assertEquals(Outcome.Failure(GroupError.NotFound), repo.reorder(ids.dropLast(1)))
             assertEquals(listOf(ids[2], ids[0], ids[1]), repo.observeGroups().first().map { it.id })
+        }
+
+    @Test fun mosaicsReadTheFixtureState() =
+        runTest {
+            val repo = FakeGroupRepository()
+            assertEquals(emptyMap(), repo.observeMosaics().first())
+            val member =
+                GroupMosaicMember(
+                    groupId = 7,
+                    podcastId = 9,
+                    displayTitle = "Show",
+                    artwork = ArtworkRef("u-a", null, 0),
+                    artworkAvgArgb = null,
+                )
+            repo.mosaics.value = mapOf(7L to listOf(member))
+            assertEquals(listOf(member), repo.observeMosaics().first()[7L])
         }
 
     @Test fun paletteAndIconCataloguesFollowTheDocumentedValues() {

@@ -6,9 +6,10 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.GroupEdit
+import ch.lkmc.neutrodyne.core.model.GroupMosaicMember
 import kotlinx.coroutines.flow.Flow
 
-/** Group lifecycle, membership and ordering (05); mosaics and delete/undo arrive separately. */
+/** Group lifecycle, membership, mosaics and ordering (05); delete/undo arrives separately. */
 interface GroupRepository {
     /** Every group list is ordered by (orderKey, id). */
     fun observeGroups(): Flow<List<Group>>
@@ -21,6 +22,9 @@ interface GroupRepository {
 
     /** podcastId → groupIds; podcasts in no group are absent (05 Membership). */
     fun observeMemberships(): Flow<Map<Long, Set<Long>>>
+
+    /** Each group's four newest-active members for `GroupMosaic`, keyed by `groupId` (02, 05). */
+    fun observeMosaics(): Flow<Map<Long, List<GroupMosaicMember>>>
 
     suspend fun checkName(
         name: String,

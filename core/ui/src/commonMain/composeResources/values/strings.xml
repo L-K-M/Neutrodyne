@@ -53,6 +53,14 @@
         <item quantity="one">%1$d group</item>
         <item quantity="other">%1$d groups</item>
     </plurals>
+
+    <!-- Group visuals (08 GroupMosaic and group tab label). -->
+    <string name="group_hidden">Not shown as tab</string>
+    <string name="group_unplayed_fmt">%1$d unplayed</string>
+    <string name="group_new_fmt">%1$d new</string>
+    <string name="group_counts_join">%1$s · %2$s</string>
+    <string name="group_mosaic_desc">%1$s, %2$s, %3$s, %4$s</string>
+    <string name="group_tab_desc">%1$s, %2$s, %3$s</string>
     <string name="held_changes_message">%1$s removed %2$s and %3$s. Apply here too?</string>
     <string name="held_changes_unknown_device">Another device</string>
     <string name="review">Review</string>
