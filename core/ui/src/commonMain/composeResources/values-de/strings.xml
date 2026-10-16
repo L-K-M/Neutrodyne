@@ -374,12 +374,14 @@
     <string name="group_edit_title">Gruppe bearbeiten</string>
     <string name="group_edit_close">Editor schließen</string>
     <string name="group_edit_name">Name</string>
+    <string name="group_edit_name_count">%1$d/%2$d</string>
     <string name="group_edit_name_empty">Gib einen Namen ein</string>
     <string name="group_edit_name_long">Verwende höchstens %1$d Zeichen</string>
     <string name="group_edit_name_taken">Eine Gruppe namens '%1$s' existiert bereits</string>
     <string name="group_edit_color">Farbe</string>
     <string name="group_edit_custom">Benutzerdefiniert</string>
     <string name="group_edit_icon">Symbol</string>
+    <string name="group_edit_icon_value">Symbol: %1$s</string>
     <string name="group_edit_none">Keines</string>
     <string name="group_edit_order">Wiedergabereihenfolge</string>
     <string name="group_edit_oldest_hint">Älteste zuerst abspielen?</string>

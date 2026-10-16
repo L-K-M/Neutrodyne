@@ -394,12 +394,14 @@
     <string name="group_edit_title">Edit group</string>
     <string name="group_edit_close">Close editor</string>
     <string name="group_edit_name">Name</string>
+    <string name="group_edit_name_count">%1$d/%2$d</string>
     <string name="group_edit_name_empty">Enter a name</string>
     <string name="group_edit_name_long">Use at most %1$d characters</string>
     <string name="group_edit_name_taken">A group named '%1$s' already exists</string>
     <string name="group_edit_color">Colour</string>
     <string name="group_edit_custom">Custom</string>
     <string name="group_edit_icon">Icon</string>
+    <string name="group_edit_icon_value">Icon: %1$s</string>
     <string name="group_edit_none">None</string>
     <string name="group_edit_order">Play order</string>
     <string name="group_edit_oldest_hint">Play oldest first?</string>
