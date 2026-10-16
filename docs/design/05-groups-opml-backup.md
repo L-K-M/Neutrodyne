@@ -413,11 +413,18 @@ propagate settings write failures as exceptions rather than reporting success.
 
 ### Paging hand-off to 08
 
-- One `Pager` per **visible** page: the Feeds ViewModel keeps at most 3 cached flows (current page ± 1) keyed by `(source, filters, order)` in an LRU and never builds pagers for every tab.
-- `PagingConfig(pageSize = 40, prefetchDistance = 40, initialLoadSize = 80, enablePlaceholders = true, maxSize = 400)`; flows are built with `flatMapLatest` over `observePrefs(source)` and `.cachedIn(viewModelScope)` ([01 ViewModels and UI state](01-foundation.md#viewmodels-and-ui-state)).
+- One `Pager` per **visible** page: the Feeds ViewModel keeps at most 3 cached flows (current page ± 1) keyed by `FeedSource` in an LRU and never builds pagers for every tab.
+- `PagingConfig(pageSize = 40, prefetchDistance = 40, initialLoadSize = 80, enablePlaceholders = true, maxSize = 400)`; flows are built with `flatMapLatest` over `observePrefs(source)` and `.cachedIn(entryScope)` with a child scope cancelled on LRU eviction ([01 ViewModels and UI state](01-foundation.md#viewmodels-and-ui-state)).
 - Lists use `itemKey { it.id }` and `itemContentType { if (it.sourceType == SourceType.YOUTUBE_CHANNEL) 1 else 0 }` (16:9 thumbnails vs square covers, 08).
 - Positions, download progress and now-playing never come from the paged row ([D16](../PLAN.md#3-key-decisions)); rows overlay them from `EpisodeLiveStateSource` ([08 Live row state](08-ui-ux.md#live-row-state)).
 - Pull-to-refresh calls `RefreshController.refreshFeed(source)` ([03 Refresh scheduling](03-feeds-and-discovery.md#refresh-scheduling)).
+
+**Implementation note (2026-10-16, M2):** D1 follows 08's source-keyed
+three-entry LRU. The existing `FeedRepository.pagedFeed(source)` helper owns
+`observePrefs` and query-only `distinctUntilChanged` before `flatMapLatest`;
+the ViewModel adds day headers and caches in each entry's child scope.
+Changing filters replaces that source's pager inside its entry. Visit and
+play-order writes keep the current generation.
 
 ### Counts and new since last visit
 
