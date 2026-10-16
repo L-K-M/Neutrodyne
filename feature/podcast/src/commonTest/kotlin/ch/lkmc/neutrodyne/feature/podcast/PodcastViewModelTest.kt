@@ -27,6 +27,7 @@ import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
 import ch.lkmc.neutrodyne.core.testing.testFeedInfo
 import ch.lkmc.neutrodyne.core.testing.testPodcastDetail
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
+import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionAction
 import ch.lkmc.neutrodyne.core.ui.MarkPlayedOption
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
@@ -74,6 +75,21 @@ class PodcastViewModelTest : MainDispatcherTest() {
     private fun TestScope.collect(viewModel: PodcastViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
     }
+
+    @Test
+    fun episodeSelectionUsesTheSharedBulkPlayedService() =
+        runTest {
+            val model = viewModel()
+            model.onRowAction(EpisodeAction.Select(2))
+            model.episodeSelection.extend(4, listOf(1, 2, 3, 4))
+            model.episodeSelection.perform(EpisodeSelectionAction.MARK_UNPLAYED)
+            advanceUntilIdle()
+            assertEquals(listOf("setPlayed([2, 3, 4], false)"), episodes.calls)
+            assertTrue(
+                model.episodeSelection.ids.value
+                    .isEmpty(),
+            )
+        }
 
     @Test
     fun liveRowsFollowVisibleWindowAndKeepPagedPlayedState() =

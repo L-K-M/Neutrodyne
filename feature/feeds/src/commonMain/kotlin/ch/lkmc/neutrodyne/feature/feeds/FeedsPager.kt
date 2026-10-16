@@ -14,7 +14,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Tab
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,6 +46,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.PagingData
+import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
@@ -57,9 +60,12 @@ import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.FeedSourceRef
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
+import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionController
 import ch.lkmc.neutrodyne.core.ui.GroupTabLabel
 import ch.lkmc.neutrodyne.core.ui.LocalDrawnReporter
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
+import ch.lkmc.neutrodyne.core.ui.SelectionTopBar
+import ch.lkmc.neutrodyne.core.ui.episodeSelectionKeys
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_all
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_all_groups
@@ -97,7 +103,15 @@ internal fun FeedsScreen(
     onVisitStart: (FeedSource) -> Unit = {},
     onVisitEnd: (FeedSource) -> Unit = {},
     onAllGroups: () -> Unit = {},
+    selection: EpisodeSelectionController? = null,
 ) {
+    val selectedIds =
+        selection
+            ?.ids
+            ?.collectAsStateWithLifecycle()
+            ?.value
+            .orEmpty()
+    val loadedPages = remember { mutableMapOf<FeedSource, LazyPagingItems<FeedItem>>() }
     val tabs = state.tabs
     // A zero-page first measure would clamp restored pager selection before tabs arrive.
     if (tabs.isEmpty()) {
@@ -131,6 +145,7 @@ internal fun FeedsScreen(
             .distinctUntilChanged()
             .collect { ref ->
                 if (ref == null) return@collect
+                if (ref != settledRef) selection?.clear()
                 settledRef = ref
                 if (ref != state.selected) settledCallback(ref)
             }
@@ -165,9 +180,20 @@ internal fun FeedsScreen(
     val nextLabel = stringResource(Res.string.feeds_next_group)
     val previousLabel = stringResource(Res.string.feeds_previous_group)
     val drawnReporter = LocalDrawnReporter.current
+    val selectAll = {
+        selection?.selectAll(
+            loadedPages[selectedSource]
+                ?.itemSnapshotList
+                ?.items
+                .orEmpty()
+                .episodeIds(),
+        )
+        Unit
+    }
     Column(
         modifier
             .fillMaxSize()
+            .episodeSelectionKeys(selection, selectAll)
             .focusRequester(focusRequester)
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
@@ -188,19 +214,23 @@ internal fun FeedsScreen(
                 }
             }.focusable(),
     ) {
-        NdTopAppBar(
-            title = stringResource(Res.string.nav_feeds),
-            actions = {
-                if (LocalPlatformKind.current == PlatformKind.DESKTOP) {
-                    NdTooltipIconButton(
-                        onClick = { onRefresh(selectedSource) },
-                        icon = NdIcons.Refresh,
-                        tooltip = stringResource(Res.string.feeds_refresh),
-                    )
-                }
-                SettingsGearButton()
-            },
-        )
+        if (selectedIds.isNotEmpty() && selection != null) {
+            SelectionTopBar(selection, selectedIds.size, selectAll)
+        } else {
+            NdTopAppBar(
+                title = stringResource(Res.string.nav_feeds),
+                actions = {
+                    if (LocalPlatformKind.current == PlatformKind.DESKTOP) {
+                        NdTooltipIconButton(
+                            onClick = { onRefresh(selectedSource) },
+                            icon = NdIcons.Refresh,
+                            tooltip = stringResource(Res.string.feeds_refresh),
+                        )
+                    }
+                    SettingsGearButton()
+                },
+            )
+        }
         // The picker must remain reachable when every group is hidden from tabs.
         if (tabs.size > 1 || state.hasGroups) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -262,6 +292,10 @@ internal fun FeedsScreen(
                     val source = entry.tab.source
                     val flow = remember(source, pager.currentPage) { pagingFor(source) }
                     val items = flow.collectAsLazyPagingItems()
+                    SideEffect { loadedPages[source] = items }
+                    DisposableEffect(source, items) {
+                        onDispose { if (loadedPages[source] === items) loadedPages.remove(source) }
+                    }
                     val prefsFlow = remember(source) { prefsFor(source) }
                     val prefs by prefsFlow.collectAsStateWithLifecycle(FeedPrefs())
                     // A prefetched neighbour must not report the selected page as drawn.
@@ -270,6 +304,7 @@ internal fun FeedsScreen(
                     ) {
                         FeedPage(
                             state = state.copy(filters = prefs.filters.copy(minSortDate = null)),
+                            selection = selection,
                             modifier = Modifier.testTag("feed-page:${entry.ref.encode()}"),
                             items = items,
                             live = live,
