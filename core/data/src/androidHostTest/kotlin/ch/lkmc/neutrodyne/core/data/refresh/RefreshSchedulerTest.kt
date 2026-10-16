@@ -611,17 +611,25 @@ class RefreshSchedulerTest {
         }
 
     @Test
-    fun `an empty library cancels existing periodic work`() =
+    fun `an empty library keeps the global tick`() =
         runTest {
             val podcast = seedPodcast(db, "https://only.test/f", nextRefreshAt = FAR_FUTURE)
             val scheduler = scheduler()
+            db.scopeSettingsDao().upsertPodcast(
+                PodcastSettingsEntity(podcast, ScopeOverrides(refreshIntervalMinutes = 60)),
+            )
             scheduler.reschedulePeriodic()
-            assertThat(uniqueWork(WorkManagerRefreshScheduler.WORK_PERIODIC).state.isFinished).isFalse()
+            assertThat(settings.get(FeedsSettingKeys.SCHEDULED_TICK_MINUTES)).isEqualTo(60L)
 
             db.podcastDao().deleteCascade(podcast, clock.now())
+            settings.set(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES, 480)
             scheduler.reschedulePeriodic()
 
-            assertThat(uniqueWork(WorkManagerRefreshScheduler.WORK_PERIODIC).state).isEqualTo(WorkInfo.State.CANCELLED)
+            assertThat(uniqueWork(WorkManagerRefreshScheduler.WORK_PERIODIC).state.isFinished).isFalse()
+            assertThat(settings.get(FeedsSettingKeys.SCHEDULED_TICK_MINUTES)).isEqualTo(480L)
+
+            settings.set(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES, 0)
+            scheduler.reschedulePeriodic()
             assertThat(
                 settings.get(FeedsSettingKeys.SCHEDULED_TICK_MINUTES),
             ).isEqualTo(WorkManagerRefreshScheduler.NO_TICK)

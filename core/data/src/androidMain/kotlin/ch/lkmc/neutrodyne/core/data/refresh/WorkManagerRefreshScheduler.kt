@@ -44,8 +44,8 @@ import java.util.concurrent.TimeUnit
  * libraries, and the `refresh-periodic` tick whose interval and constraint set are stored in
  * `feeds.scheduled_tick_*` so re-enqueues only happen on a change.
  *
- * The tick is the minimum effective timed interval with a 60-min floor (03 Periodic tick).
- * An empty library or entirely Manual-only library cancels periodic work.
+ * The tick is the minimum effective timed interval with a 60-min floor (03 Periodic tick); an
+ * empty library uses the global interval. An entirely Manual-only library cancels periodic work.
  */
 @SingleIn(AppScope::class)
 @ContributesBinding(AppScope::class)
@@ -106,13 +106,15 @@ internal class WorkManagerRefreshScheduler
         // Scoped writes may finish together; stale cancellation must not overtake a newer tick.
         override suspend fun reschedulePeriodic() =
             periodicMutex.withLock {
+                val intervals = effectiveSettings.refreshIntervals()
+                // An empty library keeps the global interval (D45's last step): start-up installs
+                // the tick once, and the first subscribe needs no special case.
                 val intervalMinutes =
-                    effectiveSettings
-                        .refreshIntervals()
-                        .values
-                        .mapNotNull { it.value }
-                        .minOrNull()
-                        ?.toLong()
+                    if (intervals.isEmpty()) {
+                        RefreshPolicy.effectiveIntervalMinutes(settings.get(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES))
+                    } else {
+                        intervals.values.mapNotNull { it.value }.minOrNull()
+                    }?.toLong()
                 val wifiOnly = settings.get(FeedsSettingKeys.REFRESH_WIFI_ONLY)
                 val tick = intervalMinutes?.let { maxOf(MIN_TICK_MINUTES, it) } ?: NO_TICK
                 val unmetered = wifiOnly

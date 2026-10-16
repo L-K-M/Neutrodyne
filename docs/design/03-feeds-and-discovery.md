@@ -909,7 +909,8 @@ unsubscribe) or the next start, the desktop runner at the next start.
 run and passes each podcast's interval into parsed-body ingestion as well as
 batched outcome writes. The rebaser and Android tick use the same effective
 intervals. Android retains the specified 60-min tick floor, which also satisfies
-WorkManager's 15-min minimum; an empty library cancels periodic work. The desktop
+WorkManager's 15-min minimum; an empty library uses the global interval, so
+start-up installs the tick once and the first subscribe needs no special case. The desktop
 keeps its minute poll and 15-min slack, using the rebased per-podcast due times
 rather than adding an Android-style periodic timer. Manual-only success stores
 `NEVER`; explicit force marks and the failure/backoff exceptions in the policy
