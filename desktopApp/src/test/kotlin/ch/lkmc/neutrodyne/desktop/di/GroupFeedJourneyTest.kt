@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 
-package ch.lkmc.neutrodyne.core.data
+package ch.lkmc.neutrodyne.desktop.di
 
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -25,38 +24,28 @@ import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.v2.runComposeUiTest
+import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Clock
-import ch.lkmc.neutrodyne.core.common.Dispatcher
+import ch.lkmc.neutrodyne.core.common.CrashContext
+import ch.lkmc.neutrodyne.core.common.CrashReporter
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
-import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers.Default
 import ch.lkmc.neutrodyne.core.common.PlatformKind
-import ch.lkmc.neutrodyne.core.data.refresh.RefreshControllerImpl
-import ch.lkmc.neutrodyne.core.data.repo.PodcastMerger
-import ch.lkmc.neutrodyne.core.data.repo.PodcastRepositoryImpl
+import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
-import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.GroupRepository
-import ch.lkmc.neutrodyne.core.domain.NoGroupChannels
+import ch.lkmc.neutrodyne.core.domain.NewEpisodePoster
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
-import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.FeedPrefs
 import ch.lkmc.neutrodyne.core.model.Group
-import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
-import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
-import ch.lkmc.neutrodyne.core.navigation.LibraryKey
-import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
-import ch.lkmc.neutrodyne.core.navigation.UpNextKey
-import ch.lkmc.neutrodyne.core.network.DesktopNetworkMonitorBindings
-import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
+import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
-import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
@@ -76,30 +65,34 @@ import ch.lkmc.neutrodyne.core.ui.root.NeutrodyneRoot
 import ch.lkmc.neutrodyne.core.ui.root.RootActions
 import ch.lkmc.neutrodyne.core.ui.root.RootSlots
 import ch.lkmc.neutrodyne.core.ui.root.RootUiState
-import ch.lkmc.neutrodyne.feeds.jvm.html.JsoupShowNotesSanitizer
+import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
+import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
+import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
+import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
+import ch.lkmc.neutrodyne.desktop.youtube.DesktopYouTubeBindingsModule
+import dev.zacsweers.metro.BindingContainer
+import dev.zacsweers.metro.Binds
 import dev.zacsweers.metro.DependencyGraph
 import dev.zacsweers.metro.Provides
-import dev.zacsweers.metro.createGraphFactory
+import dev.zacsweers.metro.createDynamicGraphFactory
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
+import org.junit.Test
 import java.util.Locale
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
  * M2 AC14: production Feeds/editor/manager routes and ViewModels, with the real group, podcast,
  * feed, episode and live-state repositories over TestDb. Only platform services and portable
- * settings storage are replaced. No production app graph, network or refresh jobs are started.
+ * settings storage are replaced. The graph is resolved without running startup initializers.
  */
 @OptIn(ExperimentalTestApi::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class GroupFeedJourneyTest {
@@ -259,22 +252,13 @@ private class JourneyFixture {
     // A separate virtual scheduler keeps the undo expiry frozen until explicitly advanced.
     private val appScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher())
     private val settings = FakeSettingsRepository()
-    private val coordinator = FakeCredentialCommitCoordinator()
-    private val podcasts =
-        PodcastRepositoryImpl(
-            db,
-            newRefresher(db, emptyMap(), clock, settings),
-            FakeRefreshScheduler(),
-            JsoupShowNotesSanitizer(),
-            clock,
-            PodcastMerger(db, coordinator, clock),
-            unusedPreviewResolver,
-            FakeSecretStore(),
-            coordinator,
-            unusedProbeFetcher,
-            scratchTempFiles("m2-journey"),
-        )
-    val graph = createGraphFactory<M2JourneyGraph.Factory>().create(db, clock, appScope, settings, podcasts)
+    private val dirs = tempAppDirs("m2-journey").also { it.ensureCreated() }
+    private val buildInfo = BuildInfoLoader.load()
+    private val reporter = DesktopCrashReporter(dirs, buildInfo, clock, RecentLogBuffer())
+    val graph =
+        createDynamicGraphFactory<M2JourneyGraph.Factory>(
+            JourneyBindings(db, clock, appScope, settings),
+        ).create(dirs, buildInfo, reporter)
 
     init {
         runBlocking {
@@ -300,7 +284,7 @@ private class JourneyFixture {
     @Composable
     fun Content() {
         CompositionLocalProvider(
-            LocalMetroViewModelFactory provides graph.viewModels,
+            LocalMetroViewModelFactory provides graph.metroViewModelFactory,
             LocalPlatformKind provides PlatformKind.DESKTOP,
             LocalUiClock provides clock,
             LocalPlatformActions provides JourneyPlatformActions,
@@ -309,7 +293,7 @@ private class JourneyFixture {
                 state = RootUiState.READY,
                 actions = RootActions({}, {}, {}, {}, { false }),
                 slots = RootSlots(player = {}, userMessages = emptyFlow()),
-                installers = graph.installers + UnusedDestinations,
+                installers = graph.entryInstallers,
                 platform = BuildInfo.Platform.DESKTOP,
             )
         }
@@ -318,45 +302,89 @@ private class JourneyFixture {
     fun close() {
         appScope.cancel()
         db.close()
+        dirs.data.parent
+            .toFile()
+            .deleteRecursively()
     }
 }
 
-/** Metro needs an internal graph so generated test code can implement it. */
-@DependencyGraph(
-    AppScope::class,
-    excludes = [
-        DataStoreSettingsRepository::class, PodcastRepositoryImpl::class,
-        RefreshControllerImpl::class, DesktopNetworkMonitorBindings::class,
-    ],
-)
+/** Use the shell's graph contributions without exposing repository implementations. */
+@DependencyGraph(AppScope::class, bindingContainers = [DesktopYouTubeBindingsModule::class])
 internal interface M2JourneyGraph {
-    val installers: Set<EntryProviderInstaller>
-
-    val viewModels: MetroViewModelFactory
     val groups: GroupRepository
+    val entryInstallers: Set<EntryProviderInstaller>
+    val metroViewModelFactory: MetroViewModelFactory
+
+    @Binds val DesktopCrashReporter.asCrashReporter: CrashReporter
+
+    @Binds val DesktopCrashReporter.asCrashContext: CrashContext
+
+    @Provides fun database(opener: DatabaseOpener): NeutrodyneDatabase = opener.requireDatabase()
+
+    @Provides fun poster(): NewEpisodePoster = FakeNewEpisodePoster()
+
+    @DependencyGraph.Factory
+    fun interface Factory {
+        fun create(
+            @Provides dirs: AppDirs,
+            @Provides buildInfo: BuildInfo,
+            @Provides crashReporter: DesktopCrashReporter,
+        ): M2JourneyGraph
+    }
+}
+
+@BindingContainer
+private class JourneyBindings(
+    private val db: NeutrodyneDatabase,
+    private val clock: Clock,
+    private val appScope: CoroutineScope,
+    private val settings: SettingsRepository,
+) {
+    @Provides fun database(): NeutrodyneDatabase = db
+
+    @Provides fun clock(): Clock = clock
+
+    @Provides @ApplicationScope
+    fun scope(): CoroutineScope = appScope
+
+    @Provides fun settings(): SettingsRepository = settings
 
     @Provides fun refresh(): RefreshController = FakeRefreshController()
 
     @Provides fun network(): NetworkMonitor = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
 
-    @Provides fun channels(): GroupChannelSync = NoGroupChannels
+    @Provides fun orderKeys(): OrderKeys = JourneyOrderKeys
+}
 
-    @Provides fun orderKeys(): OrderKeys = TestOrderKeys
+/**
+ * Deterministic `OrderKeys` for tests: decimal midpoints inside (0, 1), no jitter; `after` walks
+ * `0.5, 0.75, 0.875, …`, `rewrite(n)` hands out `i / (n + 1)`. Equal bounds fail like the real port.
+ */
+private object JourneyOrderKeys : OrderKeys {
+    override fun after(last: String?): String = between(last, null)
 
-    @Provides
-    @Dispatcher(Default)
-    fun dispatcher(): CoroutineDispatcher = Dispatchers.Default
-
-    @DependencyGraph.Factory
-    fun interface Factory {
-        fun create(
-            @Provides db: NeutrodyneDatabase,
-            @Provides clock: Clock,
-            @Provides @ApplicationScope appScope: CoroutineScope,
-            @Provides settings: SettingsRepository,
-            @Provides podcasts: PodcastRepository,
-        ): M2JourneyGraph
+    override fun between(
+        previous: String?,
+        next: String?,
+    ): String {
+        val lower = previous?.toBigDecimal() ?: java.math.BigDecimal.ZERO
+        val upper = next?.toBigDecimal() ?: java.math.BigDecimal.ONE
+        require(lower < upper) { "unordered bounds: $previous !< $next" }
+        return lower
+            .add(upper)
+            .divide(java.math.BigDecimal("2"))
+            .stripTrailingZeros()
+            .toPlainString()
     }
+
+    override fun rewrite(count: Int): List<String> =
+        (1..count).map {
+            java.math
+                .BigDecimal(it)
+                .divide(java.math.BigDecimal(count + 1), java.math.MathContext(20))
+                .stripTrailingZeros()
+                .toPlainString()
+        }
 }
 
 private val JourneyPlatformActions =
@@ -376,11 +404,3 @@ private val JourneyPlatformActions =
         override val reveal = null
         override val notifications = null
     }
-
-// The journey stays on Feeds and group routes; the root still owns five destination stacks.
-private val UnusedDestinations: EntryProviderInstaller = {
-    entry<LibraryKey>(metadata = NdSceneMetadata.paneList()) { Text("Unused Library") }
-    entry<UpNextKey>(metadata = NdSceneMetadata.paneList()) { Text("Unused Up next") }
-    entry<DownloadsKey>(metadata = NdSceneMetadata.paneList()) { Text("Unused Downloads") }
-    entry<DiscoverKey>(metadata = NdSceneMetadata.paneList()) { Text("Unused Discover") }
-}
