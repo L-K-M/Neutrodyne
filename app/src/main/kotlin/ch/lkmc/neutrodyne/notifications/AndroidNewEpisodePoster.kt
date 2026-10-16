@@ -10,9 +10,9 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import androidx.core.net.toUri
 import ch.lkmc.neutrodyne.MainActivity
 import ch.lkmc.neutrodyne.R
 import ch.lkmc.neutrodyne.core.common.AppScope
@@ -212,7 +212,7 @@ internal class AndroidNewEpisodePoster(
                     addCategory(Intent.CATEGORY_LAUNCHER)
                 } else {
                     action = Intent.ACTION_VIEW
-                    data = Uri.parse("neutrodyne://open/$route")
+                    data = "neutrodyne://open/$route".toUri()
                 }
                 // Categories participate in PendingIntent identity even when channel hashes collide.
                 addCategory("ch.lkmc.neutrodyne.new_episodes.$channel")
