@@ -453,7 +453,7 @@ internal class FeedRefresher(
                 // Already committed ingests still notify after cancellation or a fetch-state flush failure.
                 try {
                     notifier.post(finalReport.newEpisodes)
-                } catch (error: Throwable) {
+                } catch (error: Exception) {
                     // A notifier's own cancellation must not interrupt run finalisation either.
                     Log.w(TAG, error) { "new-episode finalisation failed" }
                 }
