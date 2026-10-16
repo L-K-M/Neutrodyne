@@ -14,6 +14,8 @@ import ch.lkmc.neutrodyne.core.model.EpisodeType
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.downloadEntity
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
@@ -39,7 +41,7 @@ import kotlin.time.Duration.Companion.seconds
  * Room invalidation of the live flow and the order-writer routing.
  */
 class FeedRepositoryImplTest {
-    private fun repository(db: NeutrodyneDatabase) = FeedRepositoryImpl(db)
+    private fun repository(db: NeutrodyneDatabase) = FeedRepositoryImpl(db, FakeSettingsRepository(), TestClock())
 
     /** Full projection→model mapping: every UI-relevant column lands on the right `EpisodeRow` field. */
     @Test
