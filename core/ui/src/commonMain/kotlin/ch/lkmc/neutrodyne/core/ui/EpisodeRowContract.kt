@@ -3,10 +3,7 @@
 package ch.lkmc.neutrodyne.core.ui
 
 import androidx.compose.runtime.Immutable
-import ch.lkmc.neutrodyne.core.model.DownloadError
-import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.SwipeAction
-import ch.lkmc.neutrodyne.core.model.WaitReason
 
 /** Row layout variants (08 EpisodeRow); Downloads uses its own `DownloadEntryRow`. */
 public enum class EpisodeRowStyle {
@@ -42,33 +39,6 @@ public data class SwipeConfig(
     val startToEnd: SwipeAction,
     val endToStart: SwipeAction,
 )
-
-/**
- * The overlay a live row needs on top of the paged `EpisodeRow` (08 Live row state; the
- * `EpisodeLiveStateSource` arrives with M4's playback). All fields default to "nothing live".
- */
-@Immutable
-public data class RowLive(
-    val positionMs: Long? = null,
-    val durationMs: Long? = null,
-    val downloadState: DownloadState? = null,
-    val downloadedBytes: Long? = null,
-    val totalBytes: Long? = null,
-    val waitReason: WaitReason? = null,
-    val nextAttemptAt: Long? = null,
-    val lastError: DownloadError? = null,
-    /** In the player as the current item. */
-    val isNowPlaying: Boolean = false,
-    /** And currently advancing (vs paused). */
-    val isPlaying: Boolean = false,
-) {
-    /** Progress as 0..1, `null` when indeterminate or not downloading. */
-    public fun downloadProgress(): Float? =
-        downloadedBytes?.let { done ->
-            val total = totalBytes ?: return null
-            if (total <= 0) null else (done.toFloat() / total).coerceIn(0f, 1f)
-        }
-}
 
 /** Everything a row's tap targets dispatch (08 EpisodeRow). */
 public sealed interface EpisodeAction {
