@@ -42,6 +42,26 @@ interface GroupDao {
     @Query("SELECT podcastId FROM podcast_group_member WHERE groupId = :groupId ORDER BY orderKey, podcastId")
     fun observeMemberIds(groupId: Long): Flow<List<Long>>
 
+    /**
+     * Group mosaics (02 Library tiles and mosaics): each group's four newest-active members by
+     * `latestEpisodeAt` — `NULL`s (never published) sort last under DESC. `title` feeds the cell
+     * monogram fallback (implementation note 2026-10-16, M2: not in 02's reference SQL; the same
+     * `COALESCE(customTitle, title)` as `observeLibraryTiles`).
+     */
+    @Query(
+        "SELECT m.groupId, p.id AS podcastId, COALESCE(p.customTitle, p.title) AS title," +
+            " p.artworkKey, p.artworkUrl, COALESCE(a.version, 0) AS artworkVersion," +
+            " a.avgArgb AS artworkAvgArgb" +
+            " FROM podcast_group_member m JOIN podcast p ON p.id = m.podcastId" +
+            " LEFT JOIN artwork a ON a.key = p.artworkKey" +
+            " WHERE p.id IN (SELECT m2.podcastId FROM podcast_group_member m2" +
+            "  JOIN podcast p2 ON p2.id = m2.podcastId" +
+            "  WHERE m2.groupId = m.groupId" +
+            "  ORDER BY p2.latestEpisodeAt DESC, p2.id DESC LIMIT 4)" +
+            " ORDER BY m.groupId, p.latestEpisodeAt DESC, p.id DESC",
+    )
+    fun observeMosaics(): Flow<List<GroupMosaicRow>>
+
     @Query("SELECT * FROM podcast_group WHERE nameKey = :nameKey")
     suspend fun groupByNameKey(nameKey: String): PodcastGroupEntity?
 
@@ -138,6 +158,17 @@ interface GroupDao {
 data class GroupRow(
     @Embedded val group: PodcastGroupEntity,
     val memberCount: Int,
+)
+
+/** One row of [GroupDao.observeMosaics] — the group's newest-active members, ≤ 4 per group. */
+data class GroupMosaicRow(
+    val groupId: Long,
+    val podcastId: Long,
+    val title: String,
+    val artworkKey: String,
+    val artworkUrl: String?,
+    val artworkVersion: Int,
+    val artworkAvgArgb: Int?,
 )
 
 /** `podcast_settings` + `podcast_group_settings` (M2: resolution reads; deletes on all-null). */

@@ -21,6 +21,18 @@ data class Group(
     val memberCount: Int,
 )
 
+/**
+ * One mosaic cell source (02 `GroupDao.observeMosaics`): a group's newest-active member with the
+ * artwork reference `CoverArt` needs and the display title its monogram fallback needs.
+ */
+data class GroupMosaicMember(
+    val groupId: Long,
+    val podcastId: Long,
+    val displayTitle: String,
+    val artwork: ArtworkRef,
+    val artworkAvgArgb: Int?,
+)
+
 data class GroupDraft(
     val name: String,
     val colorArgb: Int? = null,
