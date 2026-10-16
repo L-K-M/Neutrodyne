@@ -424,4 +424,20 @@
     <string name="groups_manage_up">Move up</string>
     <string name="groups_manage_down">Move down</string>
     <string name="groups_manage_top">Move to top</string>
+    <!-- M2 effective settings and contextual notification permission. -->
+    <string name="section_notifications">Notifications</string>
+    <string name="section_refresh">Refresh</string>
+    <string name="new_episode_notifications">New episodes</string>
+    <string name="setting_inherit">Inherit</string>
+    <string name="setting_on">On</string>
+    <string name="setting_off">Off</string>
+    <string name="setting_podcast_override">Set for this podcast</string>
+    <string name="setting_app_default">App default</string>
+    <string name="setting_from_group">From group '%1$s'</string>
+    <string name="setting_from_two_groups">From groups '%1$s' and '%2$s'</string>
+    <string name="setting_from_groups">From %1$d groups</string>
+    <string name="setting_groups_title">Groups determining this value</string>
+    <string name="setting_invalid_value">Choose a supported value</string>
+    <string name="notifications_blocked">Notifications are blocked</string>
+    <string name="notifications_open_settings">Open settings</string>
 </resources>

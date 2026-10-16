@@ -72,7 +72,7 @@ interface FilePicker { suspend fun pickFile(mimeTypes: List<String>, extensions:
                        suspend fun pickFolder(): String? }                                                 // desktop only; null on Android
 fun interface FileSaver { suspend fun create(suggestedName: String, mimeType: String): String? }         // URI to write, or null (cancelled)
 fun interface RevealInFolder { fun reveal(path: String): Boolean }
-interface NotificationPermissionRequester { val granted: Boolean; fun request(onResult: (Boolean) -> Unit) }
+interface NotificationPermissionRequester { val granted: Boolean; fun request(onResult: (Boolean) -> Unit); fun openSettings() }
 val LocalPlatformActions = staticCompositionLocalOf<PlatformActions> { error("provided by the shell") }
 ```
 
@@ -83,7 +83,14 @@ val LocalPlatformActions = staticCompositionLocalOf<PlatformActions> { error("pr
 | `FilePicker` | `OpenDocument` (`pickFolder` → null; SAF folders are v1.x) | macOS `FileDialog`, Windows `JFileChooser`, Linux XDG portal `FileChooser` ([11 Download folders](11-desktop.md#download-folders)) |
 | `FileSaver` | `CreateDocument(mimeType)` | the same dialogs in save mode |
 | `RevealInFolder` | — | [11 Show in folder](11-desktop.md#show-in-folder) |
-| `NotificationPermissionRequester` | `RequestPermission(POST_NOTIFICATIONS)` on API 33+, `granted` true below | — (macOS asks at the first notification, [11 Notifications](11-desktop.md#notifications)) |
+| `NotificationPermissionRequester` | `RequestPermission(POST_NOTIFICATIONS)` on API 33+; null below; `openSettings()` → `ACTION_APP_NOTIFICATION_SETTINGS` | — (macOS asks at the first notification, [11 Notifications](11-desktop.md#notifications)) |
+
+**Implementation note (2026-10-16, M2):** D8a retains the existing null requester
+below API 33, matching the `PlatformActions` sample's Android-13-only member
+and hiding permission controls there. This replaces the table's former
+“granted true below” wording. The requester remembers a previous request on
+this device, so denial leads to Open settings rather than another system
+dialog; `granted` is refreshed when the activity resumes from settings.
 
 `NO_HANDLER` shows "No app can open this link" with "Copy link" everywhere ([Show notes renderer](#show-notes-renderer)).
 
@@ -537,6 +544,15 @@ Groups segment: a grid of [`GroupMosaic`](#groupmosaic-and-group-tab-label) tile
 | Feed (M1) | Feed address (`FeedInfo.redactedUrl`; the full `feedUrl` only after a tap, with "Copy feed address" and the private-URL warning when `isPrivate`), moves (`FeedInfo.moves`), last refresh and last error ([`FeedErrorText`](#feed-error-text)), Edit feed address ([dialog](#dialogs), RSS only), Username and password (`setCredentials`). There is no "remove password" in v1 (03 has no API for it) | 03 |
 
 Each override row opens a chooser whose first option is "Use default ({effective inherited value}, {source})" ([`AttributionText`](#attribution-text)); choosing it writes `null` through `updatePodcast { it.copy(field = null) }`. Data: 05's `ScopeSettingsRepository.observePodcast` (`ScopedSettingsView`: `own`, `effective`, `sources`, `groupHints`) and 03's `observeFeedInfo`; `observePodcast` emitting null pops the screen. Rows a YouTube channel cannot use in the current capability state (`SettingSource.NotSupported`, e.g. auto-download in external mode) are hidden, not disabled, and reappear when capabilities change (the screen observes them). Writes that return 01's `SettingsError.OutOfRange` show the field's inline error (cannot happen from the fixed choosers; defensive).
+
+**Implementation note (2026-10-16, M2):** D8a adds the podcast notification
+switch and the refresh/notification choosers, with “Inherit” as their first
+option. B3's M2 `ScopedSettingsView` exposes the current effective value and
+source but no inherited-value preview under an active override, so the chooser
+does not preview that value. Choosing Inherit clears only that field; the row
+then shows the newly resolved value and attribution. The switch toggles the
+notification wish directly; tapping its row also offers Inherit / On / Off.
+The group settings screen follows in D8b.
 
 ### Episode detail
 

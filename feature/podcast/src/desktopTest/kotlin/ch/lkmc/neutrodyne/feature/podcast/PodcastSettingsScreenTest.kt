@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.feature.podcast
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.SaveableStateRegistry
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -14,10 +15,14 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isSelectable
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.v2.runComposeUiTest
@@ -28,6 +33,10 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedOrder
+import ch.lkmc.neutrodyne.core.model.ScopedSettingsView
+import ch.lkmc.neutrodyne.core.model.SettingField
+import ch.lkmc.neutrodyne.core.model.SettingOverrides
+import ch.lkmc.neutrodyne.core.model.SettingSource
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -42,6 +51,7 @@ import ch.lkmc.neutrodyne.core.ui.platform.ExternalUrlOpener
 import ch.lkmc.neutrodyne.core.ui.platform.FilePicker
 import ch.lkmc.neutrodyne.core.ui.platform.FileSaver
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
+import ch.lkmc.neutrodyne.core.ui.platform.NotificationPermissionRequester
 import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
 import ch.lkmc.neutrodyne.core.ui.platform.PlatformActions
 import ch.lkmc.neutrodyne.core.ui.resources.Res
@@ -398,6 +408,103 @@ class PodcastSettingsScreenTest {
             onNodeWithText("Username and password").assertDoesNotExist()
         }
 
+    @Test
+    fun effectiveRowsShowEveryAttributionAndGroupManualOnly() {
+        val news = SettingSource.Group("n", "news")
+        val tech = SettingSource.Group("t", "tech")
+        val expected =
+            listOf(
+                SettingSource.PodcastOverride to "Set for this podcast",
+                SettingSource.AppDefault to "App default",
+                news to "From group 'news'",
+                SettingSource.Groups(listOf(news, tech)) to "From groups 'news' and 'tech'",
+            )
+        for ((source, text) in expected) {
+            runComposeUiTest {
+                setSettings(effectiveState(source))
+                onAllNodesWithText(text).onFirst().assertIsDisplayed()
+                onNodeWithText("Manual only").performScrollTo().assertIsDisplayed()
+                onNodeWithText("Notifications are blocked").assertDoesNotExist()
+                onNodeWithText("Open settings").assertDoesNotExist()
+            }
+        }
+    }
+
+    @Test
+    fun intervalChooserIncludesInheritAndWritesManualOnlyAsZero() =
+        runComposeUiTest {
+            var minutes: Int? = 999
+            setSettings(effectiveState(SettingSource.AppDefault), onRefreshInterval = { minutes = it })
+            onNodeWithText("Refresh interval").performScrollTo().performClick()
+            onNodeWithText("Inherit").performClick()
+            assertEquals(null, minutes)
+            onNodeWithText("Refresh interval").performClick()
+            onNode(hasText("Manual only") and isSelectable()).performSemanticsAction(SemanticsActions.OnClick)
+            assertEquals(0, minutes)
+        }
+
+    @Test
+    fun notificationChooserCanClearTheOverride() =
+        runComposeUiTest {
+            var notifications: Boolean? = false
+            setSettings(effectiveState(SettingSource.PodcastOverride), onNotifications = { notifications = it })
+            onNodeWithText("New episodes").performClick()
+            onNodeWithText("Inherit").performClick()
+            assertEquals(null, notifications)
+        }
+
+    @Test
+    fun threeGroupAttributionListsDecidingNames() =
+        runComposeUiTest {
+            setSettings(
+                effectiveState(
+                    SettingSource.Groups(
+                        listOf(
+                            SettingSource.Group("n", "news"),
+                            SettingSource.Group("t", "tech"),
+                            SettingSource.Group("s", "science"),
+                        ),
+                    ),
+                ),
+            )
+            onAllNodesWithText("From 3 groups").onFirst().performClick()
+            onNodeWithText("news").assertIsDisplayed()
+            onNodeWithText("tech").assertIsDisplayed()
+            onNodeWithText("science").assertIsDisplayed()
+        }
+
+    @Test
+    fun deniedPermissionShowsOpenSettingsAndKeepsSwitchOn() =
+        runComposeUiTest {
+            var opened = 0
+            val requester =
+                object : NotificationPermissionRequester {
+                    override val granted = false
+
+                    override fun request(onResult: (Boolean) -> Unit) = error("Rendering must not request permission")
+
+                    override fun openSettings() {
+                        opened++
+                    }
+                }
+            setSettings(effectiveState(SettingSource.PodcastOverride), requester = requester)
+            onNodeWithText("Notifications are blocked").performScrollTo().assertIsDisplayed()
+            onNodeWithText("Open settings").performClick()
+            assertEquals(1, opened)
+        }
+
+    private fun effectiveState(source: SettingSource) =
+        PodcastSettingsUiState(
+            detail = testPodcastDetail(7),
+            loaded = true,
+            scoped =
+                ScopedSettingsView(
+                    if (source == SettingSource.PodcastOverride) SettingOverrides(0, true) else SettingOverrides(),
+                    SettingOverrides(null, true),
+                    SettingField.entries.associateWith { source },
+                ),
+        )
+
     private fun ComposeUiTest.setSettings(
         state: PodcastSettingsUiState,
         onCustomTitle: (String?) -> Unit = {},
@@ -405,6 +512,9 @@ class PodcastSettingsScreenTest {
         onIncludeInAll: (Boolean) -> Unit = {},
         onEditFeedUrl: suspend (String) -> UiText? = { null },
         onCredentials: (BasicCredentials) -> Unit = {},
+        onRefreshInterval: (Int?) -> Unit = {},
+        onNotifications: (Boolean?) -> Unit = {},
+        requester: NotificationPermissionRequester? = null,
         registry: SaveableStateRegistry = SaveableStateRegistry(null) { true },
     ) {
         setContent {
@@ -413,7 +523,10 @@ class PodcastSettingsScreenTest {
                 LocalPlatformKind provides PlatformKind.DESKTOP,
                 LocalUiClock provides TestClock(),
                 LocalAppNavigator provides navigator,
-                LocalPlatformActions provides TestPlatformActions,
+                LocalPlatformActions provides
+                    object : PlatformActions by TestPlatformActions {
+                        override val notifications = requester
+                    },
             ) {
                 NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
                     PodcastSettingsScreen(
@@ -423,6 +536,8 @@ class PodcastSettingsScreenTest {
                         onIncludeInAll = onIncludeInAll,
                         onEditFeedUrl = onEditFeedUrl,
                         onCredentials = onCredentials,
+                        onRefreshInterval = onRefreshInterval,
+                        onNotifications = onNotifications,
                     )
                 }
             }
