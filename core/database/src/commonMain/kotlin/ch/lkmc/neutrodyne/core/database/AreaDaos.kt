@@ -3,10 +3,13 @@
 package ch.lkmc.neutrodyne.core.database
 
 import androidx.room3.Dao
+import androidx.room3.Embedded
 import androidx.room3.Insert
 import androidx.room3.Query
 import androidx.room3.Upsert
 import ch.lkmc.neutrodyne.core.model.FeedOrder
+import ch.lkmc.neutrodyne.core.model.MediaFilter
+import kotlinx.coroutines.flow.Flow
 
 // The remaining one-DAO-per-area surface (02 "New names introduced here"). M1a adds only the row
 // writers and lookups its own paths and fixtures need; each later milestone extends its DAO.
@@ -17,12 +20,119 @@ interface GroupDao {
     @Insert
     suspend fun insert(row: PodcastGroupEntity): Long
 
+    @Query(
+        "SELECT g.*, (SELECT COUNT(*) FROM podcast_group_member m WHERE m.groupId = g.id) AS memberCount" +
+            " FROM podcast_group g ORDER BY g.orderKey, g.id",
+    )
+    fun observeGroups(): Flow<List<GroupRow>>
+
+    @Query(
+        "SELECT g.*, (SELECT COUNT(*) FROM podcast_group_member m WHERE m.groupId = g.id) AS memberCount" +
+            " FROM podcast_group g WHERE g.id = :groupId",
+    )
+    fun observeGroup(groupId: Long): Flow<GroupRow?>
+
+    @Query(
+        "SELECT g.*, (SELECT COUNT(*) FROM podcast_group_member m WHERE m.groupId = g.id) AS memberCount" +
+            " FROM podcast_group g JOIN podcast_group_member own ON own.groupId = g.id" +
+            " WHERE own.podcastId = :podcastId ORDER BY g.orderKey, g.id",
+    )
+    fun observeGroupsOf(podcastId: Long): Flow<List<GroupRow>>
+
+    @Query("SELECT podcastId FROM podcast_group_member WHERE groupId = :groupId ORDER BY orderKey, podcastId")
+    fun observeMemberIds(groupId: Long): Flow<List<Long>>
+
+    /**
+     * Group mosaics (02 Library tiles and mosaics): each group's four newest-active members by
+     * `latestEpisodeAt` — `NULL`s (never published) sort last under DESC. `title` feeds the cell
+     * monogram fallback (implementation note 2026-10-16, M2: not in 02's reference SQL; the same
+     * `COALESCE(customTitle, title)` as `observeLibraryTiles`).
+     */
+    @Query(
+        "SELECT m.groupId, p.id AS podcastId, COALESCE(p.customTitle, p.title) AS title," +
+            " p.artworkKey, p.artworkUrl, COALESCE(a.version, 0) AS artworkVersion," +
+            " a.avgArgb AS artworkAvgArgb" +
+            " FROM podcast_group_member m JOIN podcast p ON p.id = m.podcastId" +
+            " LEFT JOIN artwork a ON a.key = p.artworkKey" +
+            " WHERE p.id IN (SELECT m2.podcastId FROM podcast_group_member m2" +
+            "  JOIN podcast p2 ON p2.id = m2.podcastId" +
+            "  WHERE m2.groupId = m.groupId" +
+            "  ORDER BY p2.latestEpisodeAt DESC, p2.id DESC LIMIT 4)" +
+            " ORDER BY m.groupId, p.latestEpisodeAt DESC, p.id DESC",
+    )
+    fun observeMosaics(): Flow<List<GroupMosaicRow>>
+
+    @Query("SELECT * FROM podcast_group WHERE nameKey = :nameKey")
+    suspend fun groupByNameKey(nameKey: String): PodcastGroupEntity?
+
+    @Query("SELECT orderKey FROM podcast_group ORDER BY orderKey DESC, id DESC LIMIT 1")
+    suspend fun lastGroupOrderKey(): String?
+
+    @Query("SELECT colorArgb FROM podcast_group")
+    suspend fun groupColors(): List<Int?>
+
+    @Query(
+        "UPDATE podcast_group SET name = :name, nameKey = :nameKey, updatedAt = :now WHERE id = :groupId" +
+            " AND (name <> :name OR nameKey <> :nameKey)",
+    )
+    suspend fun rename(
+        groupId: Long,
+        name: String,
+        nameKey: String,
+        now: Long,
+    )
+
+    @Query(
+        "UPDATE podcast_group SET colorArgb = :colorArgb, iconKey = :iconKey, updatedAt = :now WHERE id = :groupId" +
+            " AND (colorArgb IS NOT :colorArgb OR iconKey IS NOT :iconKey)",
+    )
+    suspend fun setLook(
+        groupId: Long,
+        colorArgb: Int?,
+        iconKey: String?,
+        now: Long,
+    )
+
+    @Query(
+        "UPDATE podcast_group SET feedOrder = :feedOrder, playOrder = :playOrder, updatedAt = :now" +
+            " WHERE id = :groupId" +
+            " AND (feedOrder <> :feedOrder OR playOrder <> :playOrder)",
+    )
+    suspend fun setOrders(
+        groupId: Long,
+        feedOrder: FeedOrder,
+        playOrder: FeedOrder,
+        now: Long,
+    )
+
+    @Query(
+        "UPDATE podcast_group SET filterFlags = :filterFlags, mediaFilter = :mediaFilter," +
+            " hideOlderThanDays = :hideOlderThanDays, updatedAt = :now WHERE id = :groupId" +
+            " AND (filterFlags <> :filterFlags OR mediaFilter <> :mediaFilter" +
+            " OR hideOlderThanDays IS NOT :hideOlderThanDays)",
+    )
+    suspend fun setView(
+        groupId: Long,
+        filterFlags: Int,
+        mediaFilter: MediaFilter,
+        hideOlderThanDays: Int?,
+        now: Long,
+    )
+
+    @Query("UPDATE podcast_group SET showAsTab = :show, updatedAt = :now WHERE id = :groupId AND showAsTab <> :show")
+    suspend fun setShowAsTab(
+        groupId: Long,
+        show: Boolean,
+        now: Long,
+    )
+
     /**
      * `orderKey` is supplied on every insert — `OrderKey.after(last)` in file/order (02).
-     * `INSERT OR IGNORE` because subscribe re-inserts an existing membership harmlessly (03).
+     * `INSERT OR IGNORE` because subscribe re-inserts an existing membership harmlessly (03);
+     * the row id is -1 on an ignored insert, which callers count as "no change".
      */
     @Insert(onConflict = androidx.room3.OnConflictStrategy.IGNORE)
-    suspend fun insertMember(row: PodcastGroupMemberEntity)
+    suspend fun insertMember(row: PodcastGroupMemberEntity): Long
 
     @Query("SELECT * FROM podcast_group WHERE id = :id")
     suspend fun groupById(id: Long): PodcastGroupEntity?
@@ -37,29 +147,109 @@ interface GroupDao {
     )
     suspend fun lastMemberOrderKey(groupId: Long): String?
 
+    @Query(
+        "SELECT EXISTS(SELECT 1 FROM podcast p WHERE NOT EXISTS" +
+            " (SELECT 1 FROM podcast_group_member m WHERE m.podcastId = p.id))",
+    )
+    fun observeHasUngroupedPodcasts(): Flow<Boolean>
+
+    @Query(
+        "UPDATE podcast_group SET filterFlags = :flags, mediaFilter = :media, updatedAt = :now" +
+            " WHERE id = :id AND (filterFlags <> :flags OR mediaFilter <> :media)",
+    )
+    suspend fun setFilters(
+        id: Long,
+        flags: Int,
+        media: MediaFilter,
+        now: Long,
+    )
+
+    @Query(
+        "UPDATE podcast_group SET hideOlderThanDays = :days, updatedAt = :now" +
+            " WHERE id = :id AND hideOlderThanDays IS NOT :days",
+    )
+    suspend fun setHideOlderThanDays(
+        id: Long,
+        days: Int?,
+        now: Long,
+    )
+
+    // Visits are device-local and must not change the group's edit timestamp or view columns.
+    @Query("UPDATE podcast_group SET lastViewedAt = :leftAt WHERE id = :id AND lastViewedAt IS NOT :leftAt")
+    suspend fun markVisited(
+        id: Long,
+        leftAt: Long,
+    )
+
     /** The group's feed order (05 `FeedRepository.setFeedOrder`, `FeedSource.Group`). */
-    @Query("UPDATE podcast_group SET feedOrder = :order WHERE id = :groupId")
+    @Query(
+        "UPDATE podcast_group SET feedOrder = :order, updatedAt = :now" +
+            " WHERE id = :groupId AND feedOrder <> :order",
+    )
     suspend fun setFeedOrder(
         groupId: Long,
         order: FeedOrder,
+        now: Long,
     )
+
+    /** Every row in list order — the reorder diff's input (02 "Group and member ordering"). */
+    @Query("SELECT * FROM podcast_group ORDER BY orderKey, id")
+    suspend fun groupsInOrder(): List<PodcastGroupEntity>
+
+    /** 02 "Reorder a group": one guarded row write per moved group; no-op writes do not stamp. */
+    @Query(
+        "UPDATE podcast_group SET orderKey = :orderKey, updatedAt = :now WHERE id = :groupId" +
+            " AND orderKey <> :orderKey",
+    )
+    suspend fun setGroupOrderKey(
+        groupId: Long,
+        orderKey: String,
+        now: Long,
+    )
+
+    @Query("SELECT id FROM podcast_group WHERE id IN (:ids)")
+    suspend fun existingIds(ids: Collection<Long>): List<Long>
+
+    /** 05 Membership: every membership write stamps the groups whose member rows changed. */
+    @Query("UPDATE podcast_group SET updatedAt = :now WHERE id IN (:groupIds)")
+    suspend fun touchUpdatedAt(
+        groupIds: Collection<Long>,
+        now: Long,
+    )
+
+    @Query("DELETE FROM podcast_group_member WHERE groupId = :groupId AND podcastId IN (:podcastIds)")
+    suspend fun deleteMembers(
+        groupId: Long,
+        podcastIds: Collection<Long>,
+    ): Int
+
+    /** 05 `observeMemberships()`: one flow over the whole join table, grouped in Kotlin. */
+    @Query("SELECT podcastId, groupId FROM podcast_group_member")
+    fun observeMembershipPairs(): Flow<List<MembershipPair>>
 }
 
-/** `podcast_settings` + `podcast_group_settings` (M2: resolution reads; deletes on all-null). */
-@Dao
-interface ScopeSettingsDao {
-    @Upsert
-    suspend fun upsertPodcast(row: PodcastSettingsEntity)
+/** The two-column projection of [GroupDao.observeMembershipPairs]. */
+data class MembershipPair(
+    val podcastId: Long,
+    val groupId: Long,
+)
 
-    @Upsert
-    suspend fun upsertGroup(row: PodcastGroupSettingsEntity)
+/** Group and membership count in one Room read, so edits and membership changes invalidate together. */
+data class GroupRow(
+    @Embedded val group: PodcastGroupEntity,
+    val memberCount: Int,
+)
 
-    @Query("SELECT * FROM podcast_settings WHERE podcastId = :podcastId")
-    suspend fun forPodcast(podcastId: Long): PodcastSettingsEntity?
-
-    @Query("SELECT * FROM podcast_group_settings WHERE groupId = :groupId")
-    suspend fun forGroup(groupId: Long): PodcastGroupSettingsEntity?
-}
+/** One row of [GroupDao.observeMosaics] — the group's newest-active members, ≤ 4 per group. */
+data class GroupMosaicRow(
+    val groupId: Long,
+    val podcastId: Long,
+    val title: String,
+    val artworkKey: String,
+    val artworkUrl: String?,
+    val artworkVersion: Int,
+    val artworkAvgArgb: Int?,
+)
 
 /** `episode_state` (M4: the user-state write chains of 02 User-state writes). */
 @Dao
@@ -114,6 +304,16 @@ interface EpisodeStateDao {
 
     @Query("SELECT * FROM episode_state WHERE episodeId = :episodeId")
     suspend fun byEpisode(episodeId: Long): EpisodeStateEntity?
+
+    /**
+     * 02 Live row state: the `episode_state` `IN` query behind `EpisodeLiveStateSource`; callers
+     * chunk at 200 ids. `playedAt`/`startedAt`/`isFavorite` travel along but stay paged fields.
+     */
+    @Query(
+        "SELECT episodeId, playedAt, startedAt, isFavorite, measuredDurationMs" +
+            " FROM episode_state WHERE episodeId IN (:ids)",
+    )
+    fun observeFor(ids: List<Long>): Flow<List<EpisodeStateLiveRow>>
 }
 
 /** `episode_position` (M4: position saves and `applyRemote`). */
@@ -131,6 +331,16 @@ interface PositionDao {
 
     @Query("SELECT * FROM episode_position WHERE episodeId = :episodeId")
     suspend fun byEpisode(episodeId: Long): EpisodePositionEntity?
+
+    /**
+     * 02 Live row state: the high-churn `episode_position` `IN` query; callers chunk at 200 ids.
+     * Observes only `episode_position`, so position saves never invalidate a paged feed.
+     */
+    @Query(
+        "SELECT episodeId, positionMs, durationMs, positionSource, updatedAt" +
+            " FROM episode_position WHERE episodeId IN (:ids)",
+    )
+    fun observeFor(ids: List<Long>): Flow<List<EpisodePositionEntity>>
 }
 
 /** `queue_entry` (M4: Up next ordering, adds and moves). */
@@ -165,6 +375,16 @@ interface DownloadDao {
             " WHERE e.podcastId IN (:podcastIds)",
     )
     suspend fun downloadedEpisodeIds(podcastIds: List<Long>): List<Long>
+
+    /**
+     * 02 Live row state: the `download` transition columns `RowLive` merges; callers chunk at
+     * 200 ids. `downloadedBytes` is persisted only on transitions (D17), never progress cadence.
+     */
+    @Query(
+        "SELECT episodeId, state, waitReason, downloadedBytes, totalBytes, estimatedBytes," +
+            " nextAttemptAt, lastError FROM download WHERE episodeId IN (:ids)",
+    )
+    fun observeLiveFor(ids: List<Long>): Flow<List<DownloadLiveRow>>
 }
 
 /** `artwork` (M4: references and garbage collection; `@Upsert`-able single-writer table). */

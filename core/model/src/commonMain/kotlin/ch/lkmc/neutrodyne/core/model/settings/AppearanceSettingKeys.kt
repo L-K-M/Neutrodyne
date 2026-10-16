@@ -40,5 +40,12 @@ public object AppearanceSettingKeys {
                 ),
         )
 
-    public val ALL: List<SettingKey<*>> = listOf(THEME, DYNAMIC_COLOR, LIBRARY_TITLES, LIBRARY_SORT)
+    /** Persisted selection identity (08 Group feed pager). */
+    val FEEDS_SELECTED_SOURCE = SettingKey.Text("ui.feeds_selected_source", "all", SettingsFile.DEVICE)
+
+    /** Empty means All; otherwise Ungrouped or a group UUID (08 Library). */
+    val LIBRARY_GROUP_FILTER = SettingKey.Text("ui.library_group_filter", "", SettingsFile.DEVICE)
+
+    public val ALL: List<SettingKey<*>> =
+        listOf(THEME, DYNAMIC_COLOR, LIBRARY_TITLES, LIBRARY_SORT, FEEDS_SELECTED_SOURCE, LIBRARY_GROUP_FILTER)
 }

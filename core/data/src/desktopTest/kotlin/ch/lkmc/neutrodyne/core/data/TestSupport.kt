@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.data.fetch.FeedTempFiles
 import ch.lkmc.neutrodyne.core.data.ingest.FeedIngestor
 import ch.lkmc.neutrodyne.core.data.ingest.FetchMeta
 import ch.lkmc.neutrodyne.core.data.ingest.IngestionEventBus
+import ch.lkmc.neutrodyne.core.data.notifications.NewEpisodeNotifier
 import ch.lkmc.neutrodyne.core.data.refresh.AdapterResult
 import ch.lkmc.neutrodyne.core.data.refresh.FeedMoveCommitter
 import ch.lkmc.neutrodyne.core.data.refresh.FeedRefresher
@@ -25,6 +26,7 @@ import ch.lkmc.neutrodyne.core.data.refresh.RssSourceAdapter
 import ch.lkmc.neutrodyne.core.data.refresh.SourceAdapter
 import ch.lkmc.neutrodyne.core.data.repo.PodcastMerger
 import ch.lkmc.neutrodyne.core.data.repo.PodcastRepositoryImpl
+import ch.lkmc.neutrodyne.core.data.settings.EffectiveSettingsResolverImpl
 import ch.lkmc.neutrodyne.core.database.DueFeed
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
@@ -42,6 +44,7 @@ import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
+import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -124,6 +127,37 @@ internal fun parsedFeed(
         warnings = warnings,
     )
 
+/**
+ * Deterministic `OrderKeys` for tests: decimal midpoints inside (0, 1), no jitter — `after` walks
+ * `0.5, 0.75, 0.875, …`, `rewrite(n)` hands out `i / (n + 1)`. Equal bounds fail like the real port.
+ */
+internal object TestOrderKeys : OrderKeys {
+    override fun after(last: String?): String = between(last, null)
+
+    override fun between(
+        previous: String?,
+        next: String?,
+    ): String {
+        val lower = previous?.toBigDecimal() ?: java.math.BigDecimal.ZERO
+        val upper = next?.toBigDecimal() ?: java.math.BigDecimal.ONE
+        require(lower < upper) { "unordered bounds: $previous !< $next" }
+        return lower
+            .add(upper)
+            .divide(java.math.BigDecimal("2"))
+            .stripTrailingZeros()
+            .toPlainString()
+    }
+
+    override fun rewrite(count: Int): List<String> =
+        (1..count).map {
+            java.math
+                .BigDecimal(it)
+                .divide(java.math.BigDecimal(count + 1), java.math.MathContext(20))
+                .stripTrailingZeros()
+                .toPlainString()
+        }
+}
+
 // --- Database / engine builders --------------------------------------------------------------------
 
 internal fun newDb(
@@ -165,6 +199,8 @@ internal fun newRefresher(
     secrets: SecretStore = FakeSecretStore(),
     coordinator: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
     moves: FeedMoveCommitter = newFeedMoves(db, clock, coordinator),
+    notifier: NewEpisodeNotifier =
+        NewEpisodeNotifier(db, EffectiveSettingsResolverImpl(db, settings), FakeNewEpisodePoster()),
 ): FeedRefresher =
     FeedRefresher(
         db,
@@ -182,6 +218,7 @@ internal fun newRefresher(
         { scheduler },
         secrets,
         coordinator,
+        notifier,
     )
 
 internal fun fetchMeta(
@@ -548,7 +585,7 @@ internal fun newSubscribe(
     secrets: SecretStore = FakeSecretStore(),
     coordinator: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
     eventBus: IngestionEventBus = IngestionEventBus(),
-    orderKeys: OrderKeys = OrderKeys { last -> if (last == null) "a" else "$last~" },
+    orderKeys: OrderKeys = TestOrderKeys,
 ): SubscribeBundle =
     SubscribeBundle(
         SubscribeUseCaseImpl(

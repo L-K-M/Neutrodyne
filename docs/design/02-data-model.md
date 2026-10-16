@@ -1400,6 +1400,19 @@ WHERE p.id = e.podcastId AND p.includeInAll = 1 AND e.sortDate >= :sinceMs
 
 `FeedDao.countUnplayed(query)` (M2) backs 05's `countUnplayed(source, sortDateBefore)` for the "Mark all as played" confirmation: `SELECT COUNT(*) FROM episode e JOIN podcast p … LEFT JOIN episode_state s … WHERE <source predicate> AND <VISIBLE> AND s.playedAt IS NULL [AND e.sortDate < :before]`, built by `FeedQueryBuilder.countUnplayed(source, before)` with the same source predicates as [Feed pages](#feed-pages) (one-shot, not observed). Its predicate set must equal the bulk mark-played statements in [User-state writes](#user-state-writes), so the confirmed number is the number marked.
 
+**Implementation note (2026-10-16, M2):** C2 uses
+`FeedDao.observeGroupCounts(query)` with `FeedQueryBuilder.groupCounts(sinceMs,
+nowMs)`. LEFT joins and conditional COUNTs fill empty groups with zeros in SQL,
+rather than a second repository read; the episode join retains the indexed
+`podcastId` and `sortDate` range. `observeVirtualCounts(query)` runs the separate
+All and Ungrouped aggregates. Count queries observe only the tables they read,
+never positions, downloads or artwork. The repository rounds the supplied lower
+bound down to the hour, slides it hourly while collected, and caps the badge
+window at 30 days. The group age bound uses that same rounded hour.
+`countUnplayed` and `unplayedIds` share a single selection builder with only
+the projection changed. Bulk selection follows VISIBLE and the strict optional
+cutoff, without badge windows, view filters or the badge-only AVAILABLE rule.
+
 Budget: all counts for 20 groups at the N5 scale in ≤ 50 ms (recorded, not gating). If missed, denormalise a per-podcast unplayed count maintained by the played-state and ingest transactions (a migration and a PLAN note).
 
 ### Library tiles and mosaics
@@ -1430,6 +1443,11 @@ WHERE p.id IN (SELECT m2.podcastId FROM podcast_group_member m2 JOIN podcast p2 
                WHERE m2.groupId = m.groupId ORDER BY p2.latestEpisodeAt DESC, p2.id DESC LIMIT 4)
 ORDER BY m.groupId, p.latestEpisodeAt DESC, p.id DESC
 ```
+
+Implementation note (2026-10-16, M2): the shipped query also selects
+`COALESCE(p.customTitle, p.title) AS title` — the same expression as
+`observeLibraryTiles` — because the mosaic cell monogram fallback needs the
+member's display title, which the reference projection did not carry.
 
 ### Play context
 
@@ -1577,6 +1595,15 @@ Column-scoped statements ([DAO rules](#dao-rules)); semantics owned by 06 (playe
 **Sync capture** (from MS0, while linked; [Sync capture triggers](#sync-capture-triggers)): none of these statements changes; the triggers capture their column changes, and the explicit mark-unplayed and position-reset chains add `SyncOutboxDao.captureIntent` calls (guard `enabled AND NOT applying`, [Kotlin-side captures](#kotlin-side-captures)) for intent the columns cannot show. The mark-played chain captures through the triggers, per episode and in its own transaction, `played` and `playCount`, the `pos` reset literal (only when a non-zero position existed) and `upnext.in = false` (only when the episode was queued), so the receiving devices see played, reset and removal with clocks from one transaction ([10 Episode-state rules](10-sync.md#episode-state-rules)); mark unplayed captures the false `played` pair and the `pos` reset with `captureIntent` after its statements, also when the effective columns were already unplayed and 0 (raw state may still hold a played mark or a non-zero position, [Trigger set](#trigger-set)); an explicit position reset (06) captures its zero reset the same way; a position save captures `pos` once per changed value; `markStarted` captures nothing (`startedAt` is derived on every device). `SyncApplier` writes remote state with column-scoped statements inside `withApplying`, never with the local chains (whose `playCount + 1` and Up next removal are local actions): `EpisodeStateDao.applyRemote(id, playedAt, startedAt, playCount, lastPlayedAt, isFavorite, measuredDurationMs, now)` = `ensure` + `UPDATE episode_state SET playedAt = :playedAt, startedAt = :startedAt, playCount = max(playCount, :playCount), lastPlayedAt = CASE WHEN lastPlayedAt IS NULL OR :lastPlayedAt > lastPlayedAt THEN :lastPlayedAt ELSE lastPlayedAt END, isFavorite = :isFavorite, measuredDurationMs = COALESCE(:measuredDurationMs, measuredDurationMs), updatedAt = :now WHERE episodeId = :id AND (<any value differs>)` with the values derived by 10's episode-state rules; a winning reset through `PositionDao.reset`; a winning non-zero position through `PositionDao.applyRemote(id, pos, dur, src, now)` = `insertIfAbsent` + `UPDATE episode_position SET positionMs = :pos, durationMs = COALESCE(:dur, durationMs), positionSource = :src, updatedAt = :now WHERE episodeId = :id AND :pos > 0 AND positionMs IS NOT :pos`. A 0 therefore never replaces a position without an explicit reset (N1), and a playing device's own newer saves win by clock (10).
 
 **Bulk "Mark all as played"** ([R2.6](../PLAN.md#21-functional-requirements), M2; 05's `markFeedPlayed(source, sortDateBefore)`): inside one write transaction, first `FeedDao.unplayedIds(query)` = the `countUnplayed` query of [Feed counts](#feed-counts) selecting `e.id` instead of `COUNT(*)` (any `FeedSource`, `VISIBLE`, optional `e.sortDate < :before`), then the mark-played chain over those IDs. The confirmation count and the number of rows marked are therefore the same predicate.
+
+**Implementation note (2026-10-16, M2):** The counted overload is
+`markFeedPlayed(source, sortDateBefore, expectedCount): MarkFeedPlayedResult`.
+It recounts inside the same write transaction before selecting IDs. A mismatch
+returns `SelectionChanged(actualCount)` without ensuring state rows, resetting
+positions or removing queue entries. A match runs the existing chunked chain
+and returns `Played(count)`. The caller freezes the cutoff between count and
+write and refreshes the confirmation after a mismatch. The two-argument overload
+remains explicitly unchecked for existing plain confirmation dialogs until D9.
 
 **"Treat existing episodes as played except the newest per podcast"** ([D66](../PLAN.md#3-key-decisions); 05 runs it in the transaction that sets the import item `SUBSCRIBED`, M3): IDs = `SELECT e.id FROM episode e WHERE e.podcastId = :podcastId AND e.isNew = 0 AND e.id <> (SELECT id FROM episode WHERE podcastId = :podcastId ORDER BY sortDate DESC, id DESC LIMIT 1)`, then the mark-played chain. `isNew = 0` keeps an episode that a later, non-initial refresh found meanwhile unplayed.
 

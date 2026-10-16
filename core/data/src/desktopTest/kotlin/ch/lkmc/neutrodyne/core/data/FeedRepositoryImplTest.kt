@@ -14,6 +14,8 @@ import ch.lkmc.neutrodyne.core.model.EpisodeType
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.downloadEntity
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
@@ -39,7 +41,10 @@ import kotlin.time.Duration.Companion.seconds
  * Room invalidation of the live flow and the order-writer routing.
  */
 class FeedRepositoryImplTest {
-    private fun repository(db: NeutrodyneDatabase) = FeedRepositoryImpl(db)
+    private fun repository(
+        db: NeutrodyneDatabase,
+        clock: TestClock = TestClock(),
+    ) = FeedRepositoryImpl(db, FakeSettingsRepository(), clock)
 
     /** Full projection→model mapping: every UI-relevant column lands on the right `EpisodeRow` field. */
     @Test
@@ -257,9 +262,20 @@ class FeedRepositoryImplTest {
         runTest {
             val db = newDb()
             try {
-                val group = db.groupDao().insert(groupEntity(orderKey = "a"))
-                repository(db).setFeedOrder(FeedSource.Group(group), FeedOrder.OLDEST_FIRST)
+                val clock = TestClock()
+                val group = db.groupDao().insert(groupEntity(name = "G1", orderKey = "a"))
+                val untouched = db.groupDao().insert(groupEntity(name = "G2", orderKey = "b"))
+                val groupStamp = db.groupDao().groupById(group)?.updatedAt
+                repository(db, clock).setFeedOrder(FeedSource.Group(group), FeedOrder.OLDEST_FIRST)
                 assertEquals(FeedOrder.OLDEST_FIRST, db.groupDao().groupById(group)?.feedOrder)
+                // Membership-write rule (05): the order write is a group write, so it stamps.
+                assertEquals(clock.now(), db.groupDao().groupById(group)?.updatedAt)
+                assertEquals(groupStamp, db.groupDao().groupById(untouched)?.updatedAt)
+
+                // The guarded update makes a repeat write a no-op: no new stamp.
+                clock.nowMs++
+                repository(db, clock).setFeedOrder(FeedSource.Group(group), FeedOrder.OLDEST_FIRST)
+                assertEquals(clock.now() - 1, db.groupDao().groupById(group)?.updatedAt)
             } finally {
                 db.close()
             }
