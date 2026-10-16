@@ -49,6 +49,7 @@ internal fun Project.configureModuleGraphAssert() {
                 ":sync:server -> :(sync:protocol|feeds)",
                 ":feature:[a-z]+ -> :core:(domain|model|common|designsystem|ui|navigation)",
                 ":feature:[a-z]+ -> :(playback|download|youtube|sync):api",
+                ":feature:groups -> :feeds", // 05: the editor reuses the pure GroupNames rules.
                 ":core:domain -> :core:(model|common)",
                 ":core:domain -> :(playback|download|youtube):api",
                 ":core:common -> :core:model", // 08: Monogram returns MonogramSpec (moved 2026-10-05)
