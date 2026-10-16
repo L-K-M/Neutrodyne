@@ -5,18 +5,21 @@ package ch.lkmc.neutrodyne.feature.library
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.TitleCollator
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
+import ch.lkmc.neutrodyne.core.domain.FeedRepository
 import ch.lkmc.neutrodyne.core.domain.GroupRepository
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
+import ch.lkmc.neutrodyne.core.domain.groupCountsWindowStart
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.FeedSourceRef
 import ch.lkmc.neutrodyne.core.model.Group
@@ -61,6 +64,8 @@ public class LibraryViewModel(
     private val collator: TitleCollator,
     network: NetworkMonitor,
     private val groups: GroupRepository,
+    feedRepository: FeedRepository,
+    clock: Clock,
 ) : ViewModel() {
     private val userMessages = UserMessages()
 
@@ -107,6 +112,8 @@ public class LibraryViewModel(
                 }
             }.combine(groups.observeMosaics()) { state, mosaics ->
                 state.copy(mosaics = mosaics.mapValues { it.value.toPersistentList() }.toPersistentMap())
+            }.combine(feedRepository.observeGroupCounts(groupCountsWindowStart(clock.now()))) { state, counts ->
+                state.copy(groupCounts = counts.toPersistentMap())
             }.combine(settings.observe(AppearanceSettingKeys.LIBRARY_SEGMENT)) { state, segment ->
                 state.copy(segment = segment)
             }

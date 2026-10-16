@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.feature.library
 
 import androidx.compose.runtime.Immutable
+import ch.lkmc.neutrodyne.core.model.FeedCounts
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.GroupMosaicMember
 import ch.lkmc.neutrodyne.core.model.LibraryTile
@@ -22,6 +23,7 @@ public data class LibraryUiState(
     val tiles: ImmutableList<LibraryTile> = persistentListOf(),
     val groups: ImmutableList<Group> = persistentListOf(),
     val mosaics: ImmutableMap<Long, ImmutableList<GroupMosaicMember>> = persistentMapOf(),
+    val groupCounts: ImmutableMap<Long, FeedCounts> = persistentMapOf(),
     val segment: LibrarySegment = LibrarySegment.PODCASTS,
     val groupFilter: String = "",
     val loaded: Boolean = false,

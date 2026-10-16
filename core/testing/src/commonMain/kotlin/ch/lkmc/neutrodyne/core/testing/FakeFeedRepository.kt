@@ -34,10 +34,14 @@ class FakeFeedRepository(
     val tabs = MutableStateFlow(listOf(FeedTab(FeedSource.All, "All", null, null, null)))
 
     val groupCounts = MutableStateFlow<Map<Long, FeedCounts>>(emptyMap())
+    val groupCountsSinceMs = mutableListOf<Long>()
     val virtualCounts = MutableStateFlow(VirtualCounts())
     val unplayedCounts = mutableMapOf<Pair<FeedSource, Long?>, Int>()
 
-    override fun observeGroupCounts(sinceMs: Long): Flow<Map<Long, FeedCounts>> = groupCounts
+    override fun observeGroupCounts(sinceMs: Long): Flow<Map<Long, FeedCounts>> {
+        groupCountsSinceMs += sinceMs
+        return groupCounts
+    }
 
     override fun observeVirtualCounts(sinceMs: Long): Flow<VirtualCounts> = virtualCounts
 

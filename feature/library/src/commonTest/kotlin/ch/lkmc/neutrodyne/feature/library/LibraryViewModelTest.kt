@@ -7,6 +7,8 @@ import ch.lkmc.neutrodyne.core.common.TitleCollator
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
+import ch.lkmc.neutrodyne.core.domain.groupCountsWindowStart
+import ch.lkmc.neutrodyne.core.model.FeedCounts
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.FeedSourceRef
 import ch.lkmc.neutrodyne.core.model.GroupDraft
@@ -14,6 +16,7 @@ import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.LibrarySegment
 import ch.lkmc.neutrodyne.core.model.settings.LibrarySort
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
+import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
 import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
@@ -44,6 +47,8 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalCoroutinesApi::class)
 class LibraryViewModelTest : MainDispatcherTest() {
     private val groups = FakeGroupRepository()
+    private val feeds = FakeFeedRepository()
+    private val clock = TestClock()
     private val podcasts = FakePodcastRepository()
     private val episodes = FakeEpisodeRepository()
     private val refreshController = FakeRefreshController()
@@ -69,6 +74,8 @@ class LibraryViewModelTest : MainDispatcherTest() {
             collator,
             network,
             groups,
+            feeds,
+            clock,
         )
 
     private fun TestScope.collect(viewModel: LibraryViewModel) {
@@ -407,6 +414,29 @@ class LibraryViewModelTest : MainDispatcherTest() {
             )
             assertEquals(listOf("downloadedEpisodeIds([2, 1])", "unsubscribe([2, 1])"), podcasts.calls)
             assertEquals(setOf(3L), podcasts.subscribedIds.value)
+        }
+
+    @Test fun groupTileCountsFollowTheFeedRepositoryWindowAndUpdates() =
+        runTest {
+            val tech = assertIs<Outcome.Success<Long>>(groups.create(GroupDraft("tech"))).value
+            val news = assertIs<Outcome.Success<Long>>(groups.create(GroupDraft("news"))).value
+            val initial = mapOf(news to FeedCounts(), tech to FeedCounts(14, 3))
+            feeds.groupCounts.value = initial
+            val vm = viewModel()
+            collect(vm)
+            advanceUntilIdle()
+
+            assertEquals(listOf(groupCountsWindowStart(clock.now())), feeds.groupCountsSinceMs)
+            assertEquals(initial, vm.uiState.value.groupCounts)
+
+            val updated = mapOf(tech to FeedCounts(9, 1), news to FeedCounts(5, 2))
+            feeds.groupCounts.value = updated
+            advanceUntilIdle()
+            assertEquals(updated, vm.uiState.value.groupCounts)
+
+            feeds.groupCounts.value = mapOf(tech to FeedCounts())
+            advanceUntilIdle()
+            assertEquals(mapOf(tech to FeedCounts()), vm.uiState.value.groupCounts)
         }
 
     @Test fun segmentIsPersistedAndObserved() =

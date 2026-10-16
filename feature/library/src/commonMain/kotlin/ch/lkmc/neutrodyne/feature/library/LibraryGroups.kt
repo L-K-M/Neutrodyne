@@ -163,9 +163,8 @@ internal fun LibraryGroupsGrid(
                 GroupMosaic(
                     group = group,
                     members = state.mosaics[group.id].orEmpty(),
-                    // shortcut: C2 supplies counts; unknown counts must not be announced as zero.
-                    unplayedCount = null,
-                    newCount = null,
+                    unplayedCount = state.groupCounts[group.id]?.unplayed,
+                    newCount = state.groupCounts[group.id]?.newSinceVisit,
                     modifier =
                         Modifier
                             .hoverable(interaction)

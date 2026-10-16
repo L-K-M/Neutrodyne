@@ -468,12 +468,13 @@ Groups segment: a grid of [`GroupMosaic`](#groupmosaic-and-group-tab-label) tile
 - States: loading → 12 skeleton tiles in `surfaceContainer`; empty library → onboarding empty state; filter chip with no members → "No podcasts in 'tech'" + "Add podcasts"; a selected group chip whose group was deleted → chip filter falls back to All silently; banners per [Banners and the startup gate](#banners-and-the-startup-gate) (restore running, held sync changes, foreign Android-backup snapshot, "Reconnect to {server}", import in progress, offline). Library needs no network: offline only adds the banner.
 
 Implementation note (2026-10-16, M2): D7 delivers the Library chips,
-persisted Podcasts/Groups segment, mosaic grid and selection actions. This
-branch has B4 mosaic reads but not C2 counts: group tiles show their mosaic
-and name without episode counts. The bulk mark-played confirmation names
-the selected podcast count; the unbounded episode count and age options
-still await `FeedRepository.countUnplayed` from C2. Group tile menus offer
-Edit (`GroupEditKey(id)`) and Manage groups (`GroupsManageKey`); the remaining
+persisted Podcasts/Groups segment, mosaic grid and selection actions. Group
+tile counts are wired to `FeedRepository.observeGroupCounts(sinceMs)`, using
+the shared domain helper for C2's hour-rounded 30-day badge window. The
+bulk mark-played confirmation names the selected podcast count; the unbounded
+episode count and age options still await D9's integration of C2's
+`FeedRepository.countUnplayed`. Group tile menus offer Edit
+(`GroupEditKey(id)`) and Manage groups (`GroupsManageKey`); the remaining
 group actions await their owning slices. The `ui.library_group_filter`
 value is a raw UUID, unlike `ui.feeds_selected_source`'s `group:` encoding.
 

@@ -53,6 +53,7 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
+import ch.lkmc.neutrodyne.core.model.FeedCounts
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.FeedSourceRef
 import ch.lkmc.neutrodyne.core.model.GroupDraft
@@ -67,6 +68,7 @@ import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
 import ch.lkmc.neutrodyne.core.navigation.GroupsManageKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
+import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
 import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
@@ -114,6 +116,7 @@ class LibraryScreenTest {
 
     // The route tests drive the real ViewModel so `episodes.calls` proves the write path.
     private val groups = FakeGroupRepository()
+    private val feeds = FakeFeedRepository()
     private val podcasts = FakePodcastRepository()
     private val episodes = FakeEpisodeRepository()
     private val refreshController = FakeRefreshController()
@@ -594,12 +597,15 @@ class LibraryScreenTest {
             assertEquals(RecordingAppNavigator.Call.Push(AddPodcastKey(null)), navigator.calls.last())
         }
 
-    @Test fun groupsSegmentShowsMosaicsAndSelectsFeedsRoot() =
+    @Test fun groupsSegmentShowsCountsAndSelectsFeedsRoot() =
         runComposeUiTest {
-            createGroup("tech")
+            val id = createGroup("tech")
+            runBlocking { groups.setMembers(id, setOf(1L, 2L)) }
+            feeds.groupCounts.value = mapOf(id to FeedCounts(unplayed = 14, newSinceVisit = 3))
             setLibraryRoute()
             onNodeWithText("Groups").performClick()
-            onNodeWithContentDescription("tech").assertIsDisplayed().performClick()
+            onNodeWithText("14 unplayed · 3 new").assertIsDisplayed()
+            onNodeWithContentDescription("tech, 2 podcasts, 14 unplayed, 3 new").assertIsDisplayed().performClick()
             waitForIdle()
             assertEquals(
                 listOf(
@@ -857,6 +863,8 @@ class LibraryScreenTest {
                 collator,
                 network,
                 groups,
+                feeds,
+                TestClock(),
             )
         setContent {
             // collectAsStateWithLifecycle (rule 10) needs a started owner; a bare compose
