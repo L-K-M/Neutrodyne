@@ -6,7 +6,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
@@ -35,6 +34,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
@@ -350,7 +350,7 @@ class GroupsManageScreenTest {
 
     private fun ComposeUiTest.setManager(
         content: @Composable () -> Unit = {
-            val state by vm.uiState.collectAsState()
+            val state by vm.uiState.collectAsStateWithLifecycle()
             GroupsManageScreen(
                 state,
                 vm::startDrag,
@@ -369,8 +369,17 @@ class GroupsManageScreenTest {
     ) {
         vm = GroupsManageViewModel(repository)
         store.put("manage", vm)
+        // collectAsStateWithLifecycle (rule 10) needs a started owner; a bare scene has none.
+        val resumed =
+            object : LifecycleOwner {
+                override val lifecycle =
+                    LifecycleRegistry.createUnsafe(this).apply { currentState = Lifecycle.State.RESUMED }
+            }
         setContent {
-            CompositionLocalProvider(LocalPlatformKind provides PlatformKind.DESKTOP) {
+            CompositionLocalProvider(
+                LocalPlatformKind provides PlatformKind.DESKTOP,
+                LocalLifecycleOwner provides resumed,
+            ) {
                 NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) { content() }
             }
         }

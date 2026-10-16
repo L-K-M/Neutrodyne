@@ -69,8 +69,10 @@ import ch.lkmc.neutrodyne.core.ui.resources.group_edit_color
 import ch.lkmc.neutrodyne.core.ui.resources.group_edit_custom
 import ch.lkmc.neutrodyne.core.ui.resources.group_edit_delete
 import ch.lkmc.neutrodyne.core.ui.resources.group_edit_icon
+import ch.lkmc.neutrodyne.core.ui.resources.group_edit_icon_value
 import ch.lkmc.neutrodyne.core.ui.resources.group_edit_members
 import ch.lkmc.neutrodyne.core.ui.resources.group_edit_name
+import ch.lkmc.neutrodyne.core.ui.resources.group_edit_name_count
 import ch.lkmc.neutrodyne.core.ui.resources.group_edit_name_empty
 import ch.lkmc.neutrodyne.core.ui.resources.group_edit_name_long
 import ch.lkmc.neutrodyne.core.ui.resources.group_edit_name_taken
@@ -158,7 +160,13 @@ internal fun GroupEditScreen(
                     supportingText = {
                         Column {
                             if (error != null) Text(error)
-                            Text("${codePointCount(draft.name)}/${GroupNames.MAX_CODE_POINTS}")
+                            Text(
+                                stringResource(
+                                    Res.string.group_edit_name_count,
+                                    codePointCount(draft.name),
+                                    GroupNames.MAX_CODE_POINTS,
+                                ),
+                            )
                         }
                     },
                     modifier = Modifier.fillMaxWidth().testTag("groupName"),
@@ -187,9 +195,10 @@ internal fun GroupEditScreen(
                 ) {
                     groupIcon(draft.iconKey)?.let { Icon(it, contentDescription = null) }
                     Text(
-                        "${stringResource(
-                            Res.string.group_edit_icon,
-                        )}: ${draft.iconKey ?: stringResource(Res.string.group_edit_none)}",
+                        stringResource(
+                            Res.string.group_edit_icon_value,
+                            draft.iconKey ?: stringResource(Res.string.group_edit_none),
+                        ),
                     )
                 }
             }
