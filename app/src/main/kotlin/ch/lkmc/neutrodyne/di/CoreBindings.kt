@@ -77,7 +77,17 @@ object CoreBindings {
     @SingleIn(AppScope::class)
     fun storagePaths(application: Application): StoragePaths = StoragePaths(application)
 
-    /** The subscribe transaction's fractional-index port (10 Ordered lists). */
+    /** The subscribe transaction's and group reorder's fractional-index port (10 Ordered lists). */
     @Provides
-    fun orderKeys(): OrderKeys = OrderKeys { last -> OrderKey.after(last) }
+    fun orderKeys(): OrderKeys =
+        object : OrderKeys {
+            override fun after(last: String?): String = OrderKey.after(last)
+
+            override fun between(
+                previous: String?,
+                next: String?,
+            ): String = OrderKey.between(previous, next)
+
+            override fun rewrite(count: Int): List<String> = OrderKey.rewrite(count)
+        }
 }

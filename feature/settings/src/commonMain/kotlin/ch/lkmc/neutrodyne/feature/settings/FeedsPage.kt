@@ -126,7 +126,7 @@ internal fun FeedsPage(
         FeedsChoiceDialog(
             icon = NdIcons.Schedule,
             title = stringResource(Res.string.feeds_refresh_interval),
-            options = REFRESH_INTERVAL_OPTIONS,
+            options = FeedsSettingKeys.REFRESH_INTERVAL_CHOICES,
             selected = state.intervalMinutes,
             label = { feedsIntervalText(it).asString() },
             onSelect = { minutes ->
@@ -151,18 +151,6 @@ internal fun FeedsPage(
         )
     }
 }
-
-/** The interval row's radio list (03 Settings: {0, 60, 120, 240, 480, 720, 1440} minutes). */
-private val REFRESH_INTERVAL_OPTIONS =
-    listOf(
-        FeedsSettingKeys.MANUAL_ONLY_MINUTES,
-        MINUTES_PER_HOUR,
-        2 * MINUTES_PER_HOUR,
-        FeedsSettingKeys.DEFAULT_REFRESH_INTERVAL_MINUTES,
-        8 * MINUTES_PER_HOUR,
-        12 * MINUTES_PER_HOUR,
-        24 * MINUTES_PER_HOUR,
-    )
 
 /** "Manual only" / "Every hour" / "Every N hours" — row summary, dialog label and home row. */
 internal fun feedsIntervalText(minutes: Int): UiText =

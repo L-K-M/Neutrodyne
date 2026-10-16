@@ -13,6 +13,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(project(":core:domain"))
+            implementation(project(":feeds"))
             implementation(project(":core:model"))
             implementation(project(":core:common"))
             implementation(project(":core:database"))

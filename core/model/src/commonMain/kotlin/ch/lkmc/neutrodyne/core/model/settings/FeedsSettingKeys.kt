@@ -13,14 +13,18 @@ import kotlinx.collections.immutable.persistentListOf
 object FeedsSettingKeys {
     /**
      * Settings › Feeds › refresh interval, in minutes; `0` is "Manual only" (PO-21). Allowed
-     * values {0, 60, 120, 240, 480, 720, 1440} are enforced by the UI — the key itself stores any
-     * Int32.
+     * values are [REFRESH_INTERVAL_CHOICES], enforced by the UI and the scoped-override writers —
+     * the key itself stores any Int32.
      */
     val REFRESH_INTERVAL_MINUTES: SettingKey.Int32 =
         SettingKey.Int32(
             name = "feeds.refresh_interval_minutes",
             default = DEFAULT_REFRESH_INTERVAL_MINUTES,
         )
+
+    /** Settings › Feeds › Notifications; device-local wishes, portable in backups (03/05). */
+    val NOTIFY_NEW_EPISODES: SettingKey.Bool =
+        SettingKey.Bool(name = "feeds.notify_new_episodes", default = false)
 
     /** Settings › Feeds › refresh only on unmetered networks (Android; unused on the desktop). */
     val REFRESH_WIFI_ONLY: SettingKey.Bool =
@@ -86,6 +90,7 @@ object FeedsSettingKeys {
     val ALL: List<SettingKey<*>> =
         listOf(
             REFRESH_INTERVAL_MINUTES,
+            NOTIFY_NEW_EPISODES,
             REFRESH_WIFI_ONLY,
             REFRESH_ON_APP_OPEN,
             BACKFILL_PAGED_FEEDS,
@@ -103,4 +108,8 @@ object FeedsSettingKeys {
 
     /** `0` in `feeds.refresh_interval_minutes` means "Manual only" (PO-21). */
     const val MANUAL_ONLY_MINUTES = 0
+
+    /** The refresh interval choices in minutes (03 Settings), shared by Settings and overrides (05). */
+    val REFRESH_INTERVAL_CHOICES: List<Int> =
+        listOf(MANUAL_ONLY_MINUTES, 60, 120, DEFAULT_REFRESH_INTERVAL_MINUTES, 480, 720, 1440)
 }
