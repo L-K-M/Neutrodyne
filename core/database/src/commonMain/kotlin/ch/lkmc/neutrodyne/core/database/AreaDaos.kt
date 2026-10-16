@@ -16,31 +16,31 @@ import kotlinx.coroutines.flow.Flow
 
 /** `podcast_group` + memberships (M2: lists, mosaics, ordering). */
 @Dao
-interface GroupDao {
+abstract class GroupDao {
     @Insert
-    suspend fun insert(row: PodcastGroupEntity): Long
+    abstract suspend fun insert(row: PodcastGroupEntity): Long
 
     @Query(
         "SELECT g.*, (SELECT COUNT(*) FROM podcast_group_member m WHERE m.groupId = g.id) AS memberCount" +
             " FROM podcast_group g ORDER BY g.orderKey, g.id",
     )
-    fun observeGroups(): Flow<List<GroupRow>>
+    abstract fun observeGroups(): Flow<List<GroupRow>>
 
     @Query(
         "SELECT g.*, (SELECT COUNT(*) FROM podcast_group_member m WHERE m.groupId = g.id) AS memberCount" +
             " FROM podcast_group g WHERE g.id = :groupId",
     )
-    fun observeGroup(groupId: Long): Flow<GroupRow?>
+    abstract fun observeGroup(groupId: Long): Flow<GroupRow?>
 
     @Query(
         "SELECT g.*, (SELECT COUNT(*) FROM podcast_group_member m WHERE m.groupId = g.id) AS memberCount" +
             " FROM podcast_group g JOIN podcast_group_member own ON own.groupId = g.id" +
             " WHERE own.podcastId = :podcastId ORDER BY g.orderKey, g.id",
     )
-    fun observeGroupsOf(podcastId: Long): Flow<List<GroupRow>>
+    abstract fun observeGroupsOf(podcastId: Long): Flow<List<GroupRow>>
 
     @Query("SELECT podcastId FROM podcast_group_member WHERE groupId = :groupId ORDER BY orderKey, podcastId")
-    fun observeMemberIds(groupId: Long): Flow<List<Long>>
+    abstract fun observeMemberIds(groupId: Long): Flow<List<Long>>
 
     /**
      * Group mosaics (02 Library tiles and mosaics): each group's four newest-active members by
@@ -60,22 +60,22 @@ interface GroupDao {
             "  ORDER BY p2.latestEpisodeAt DESC, p2.id DESC LIMIT 4)" +
             " ORDER BY m.groupId, p.latestEpisodeAt DESC, p.id DESC",
     )
-    fun observeMosaics(): Flow<List<GroupMosaicRow>>
+    abstract fun observeMosaics(): Flow<List<GroupMosaicRow>>
 
     @Query("SELECT * FROM podcast_group WHERE nameKey = :nameKey")
-    suspend fun groupByNameKey(nameKey: String): PodcastGroupEntity?
+    abstract suspend fun groupByNameKey(nameKey: String): PodcastGroupEntity?
 
     @Query("SELECT orderKey FROM podcast_group ORDER BY orderKey DESC, id DESC LIMIT 1")
-    suspend fun lastGroupOrderKey(): String?
+    abstract suspend fun lastGroupOrderKey(): String?
 
     @Query("SELECT colorArgb FROM podcast_group")
-    suspend fun groupColors(): List<Int?>
+    abstract suspend fun groupColors(): List<Int?>
 
     @Query(
         "UPDATE podcast_group SET name = :name, nameKey = :nameKey, updatedAt = :now WHERE id = :groupId" +
             " AND (name <> :name OR nameKey <> :nameKey)",
     )
-    suspend fun rename(
+    abstract suspend fun rename(
         groupId: Long,
         name: String,
         nameKey: String,
@@ -86,7 +86,7 @@ interface GroupDao {
         "UPDATE podcast_group SET colorArgb = :colorArgb, iconKey = :iconKey, updatedAt = :now WHERE id = :groupId" +
             " AND (colorArgb IS NOT :colorArgb OR iconKey IS NOT :iconKey)",
     )
-    suspend fun setLook(
+    abstract suspend fun setLook(
         groupId: Long,
         colorArgb: Int?,
         iconKey: String?,
@@ -98,7 +98,7 @@ interface GroupDao {
             " WHERE id = :groupId" +
             " AND (feedOrder <> :feedOrder OR playOrder <> :playOrder)",
     )
-    suspend fun setOrders(
+    abstract suspend fun setOrders(
         groupId: Long,
         feedOrder: FeedOrder,
         playOrder: FeedOrder,
@@ -111,7 +111,7 @@ interface GroupDao {
             " AND (filterFlags <> :filterFlags OR mediaFilter <> :mediaFilter" +
             " OR hideOlderThanDays IS NOT :hideOlderThanDays)",
     )
-    suspend fun setView(
+    abstract suspend fun setView(
         groupId: Long,
         filterFlags: Int,
         mediaFilter: MediaFilter,
@@ -120,7 +120,7 @@ interface GroupDao {
     )
 
     @Query("UPDATE podcast_group SET showAsTab = :show, updatedAt = :now WHERE id = :groupId AND showAsTab <> :show")
-    suspend fun setShowAsTab(
+    abstract suspend fun setShowAsTab(
         groupId: Long,
         show: Boolean,
         now: Long,
@@ -132,32 +132,32 @@ interface GroupDao {
      * the row id is -1 on an ignored insert, which callers count as "no change".
      */
     @Insert(onConflict = androidx.room3.OnConflictStrategy.IGNORE)
-    suspend fun insertMember(row: PodcastGroupMemberEntity): Long
+    abstract suspend fun insertMember(row: PodcastGroupMemberEntity): Long
 
     @Query("SELECT * FROM podcast_group WHERE id = :id")
-    suspend fun groupById(id: Long): PodcastGroupEntity?
+    abstract suspend fun groupById(id: Long): PodcastGroupEntity?
 
     @Query("SELECT * FROM podcast_group_member WHERE groupId = :groupId ORDER BY orderKey, podcastId")
-    suspend fun membersOf(groupId: Long): List<PodcastGroupMemberEntity>
+    abstract suspend fun membersOf(groupId: Long): List<PodcastGroupMemberEntity>
 
     /** The last member key of one group — `OrderKey.after(last)`'s input (03 Subscribe transaction). */
     @Query(
         "SELECT orderKey FROM podcast_group_member WHERE groupId = :groupId" +
             " ORDER BY orderKey DESC, podcastId DESC LIMIT 1",
     )
-    suspend fun lastMemberOrderKey(groupId: Long): String?
+    abstract suspend fun lastMemberOrderKey(groupId: Long): String?
 
     @Query(
         "SELECT EXISTS(SELECT 1 FROM podcast p WHERE NOT EXISTS" +
             " (SELECT 1 FROM podcast_group_member m WHERE m.podcastId = p.id))",
     )
-    fun observeHasUngroupedPodcasts(): Flow<Boolean>
+    abstract fun observeHasUngroupedPodcasts(): Flow<Boolean>
 
     @Query(
         "UPDATE podcast_group SET filterFlags = :flags, mediaFilter = :media, updatedAt = :now" +
             " WHERE id = :id AND (filterFlags <> :flags OR mediaFilter <> :media)",
     )
-    suspend fun setFilters(
+    abstract suspend fun setFilters(
         id: Long,
         flags: Int,
         media: MediaFilter,
@@ -168,7 +168,7 @@ interface GroupDao {
         "UPDATE podcast_group SET hideOlderThanDays = :days, updatedAt = :now" +
             " WHERE id = :id AND hideOlderThanDays IS NOT :days",
     )
-    suspend fun setHideOlderThanDays(
+    abstract suspend fun setHideOlderThanDays(
         id: Long,
         days: Int?,
         now: Long,
@@ -176,7 +176,7 @@ interface GroupDao {
 
     // Visits are device-local and must not change the group's edit timestamp or view columns.
     @Query("UPDATE podcast_group SET lastViewedAt = :leftAt WHERE id = :id AND lastViewedAt IS NOT :leftAt")
-    suspend fun markVisited(
+    abstract suspend fun markVisited(
         id: Long,
         leftAt: Long,
     )
@@ -186,7 +186,7 @@ interface GroupDao {
         "UPDATE podcast_group SET feedOrder = :order, updatedAt = :now" +
             " WHERE id = :groupId AND feedOrder <> :order",
     )
-    suspend fun setFeedOrder(
+    abstract suspend fun setFeedOrder(
         groupId: Long,
         order: FeedOrder,
         now: Long,
@@ -194,38 +194,59 @@ interface GroupDao {
 
     /** Every row in list order — the reorder diff's input (02 "Group and member ordering"). */
     @Query("SELECT * FROM podcast_group ORDER BY orderKey, id")
-    suspend fun groupsInOrder(): List<PodcastGroupEntity>
+    abstract suspend fun groupsInOrder(): List<PodcastGroupEntity>
 
     /** 02 "Reorder a group": one guarded row write per moved group; no-op writes do not stamp. */
     @Query(
         "UPDATE podcast_group SET orderKey = :orderKey, updatedAt = :now WHERE id = :groupId" +
             " AND orderKey <> :orderKey",
     )
-    suspend fun setGroupOrderKey(
+    abstract suspend fun setGroupOrderKey(
         groupId: Long,
         orderKey: String,
         now: Long,
     )
 
+    /** 02 Transactions and threading: every ID list is chunked; the caller owns the transaction. */
+    suspend fun existingIds(ids: Collection<Long>): List<Long> =
+        ids.distinct().chunked(BIND_CHUNK).flatMap { existingIdsChunk(it) }
+
     @Query("SELECT id FROM podcast_group WHERE id IN (:ids)")
-    suspend fun existingIds(ids: Collection<Long>): List<Long>
+    protected abstract suspend fun existingIdsChunk(ids: List<Long>): List<Long>
 
     /** 05 Membership: every membership write stamps the groups whose member rows changed. */
-    @Query("UPDATE podcast_group SET updatedAt = :now WHERE id IN (:groupIds)")
     suspend fun touchUpdatedAt(
         groupIds: Collection<Long>,
         now: Long,
+    ) {
+        groupIds.distinct().chunked(BIND_CHUNK).forEach { touchUpdatedAtChunk(it, now) }
+    }
+
+    @Query("UPDATE podcast_group SET updatedAt = :now WHERE id IN (:groupIds)")
+    protected abstract suspend fun touchUpdatedAtChunk(
+        groupIds: List<Long>,
+        now: Long,
     )
 
-    @Query("DELETE FROM podcast_group_member WHERE groupId = :groupId AND podcastId IN (:podcastIds)")
     suspend fun deleteMembers(
         groupId: Long,
         podcastIds: Collection<Long>,
+    ): Int = podcastIds.distinct().chunked(BIND_CHUNK).sumOf { deleteMembersChunk(groupId, it) }
+
+    @Query("DELETE FROM podcast_group_member WHERE groupId = :groupId AND podcastId IN (:podcastIds)")
+    protected abstract suspend fun deleteMembersChunk(
+        groupId: Long,
+        podcastIds: List<Long>,
     ): Int
 
     /** 05 `observeMemberships()`: one flow over the whole join table, grouped in Kotlin. */
     @Query("SELECT podcastId, groupId FROM podcast_group_member")
-    fun observeMembershipPairs(): Flow<List<MembershipPair>>
+    abstract fun observeMembershipPairs(): Flow<List<MembershipPair>>
+
+    private companion object {
+        /** 02 Transactions and threading: `IN (:ids)` lists are chunked at 500 bound variables. */
+        const val BIND_CHUNK = 500
+    }
 }
 
 /** The two-column projection of [GroupDao.observeMembershipPairs]. */
