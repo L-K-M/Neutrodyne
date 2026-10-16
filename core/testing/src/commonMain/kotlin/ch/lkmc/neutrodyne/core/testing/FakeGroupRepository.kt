@@ -6,6 +6,9 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.domain.GroupRepository
+import ch.lkmc.neutrodyne.core.domain.OrderKeys
+import ch.lkmc.neutrodyne.core.domain.OrderedRow
+import ch.lkmc.neutrodyne.core.domain.planOrderKeyWrites
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.GroupDraft
@@ -50,6 +53,15 @@ class FakeGroupRepository(
 
     override fun observeMemberIds(groupId: Long): Flow<Set<Long>> = members.map { it[groupId].orEmpty() }
 
+    override fun observeMemberships(): Flow<Map<Long, Set<Long>>> =
+        members.map { byGroup ->
+            val byPodcast = mutableMapOf<Long, MutableSet<Long>>()
+            for ((groupId, podcastIds) in byGroup) {
+                for (podcastId in podcastIds) byPodcast.getOrPut(podcastId) { mutableSetOf() } += groupId
+            }
+            byPodcast
+        }
+
     override suspend fun checkName(
         name: String,
         excludingGroupId: Long?,
@@ -77,7 +89,10 @@ class FakeGroupRepository(
             }
         }
 
-    override suspend fun create(draft: GroupDraft): Outcome<Long, GroupError> =
+    override suspend fun create(
+        draft: GroupDraft,
+        memberIds: Set<Long>,
+    ): Outcome<Long, GroupError> =
         mutex.withLock {
             val name =
                 when (val result = checkName(draft.name)) {
@@ -104,9 +119,10 @@ class FakeGroupRepository(
                     showAsTab = draft.showAsTab,
                     lastViewedAt = null,
                     createdAt = clock.now(),
-                    memberCount = 0,
+                    memberCount = memberIds.size,
                 )
             groups.value = rows + created
+            if (memberIds.isNotEmpty()) members.value = members.value + (id to memberIds)
             Outcome.Success(id)
         }
 
@@ -157,4 +173,64 @@ class FakeGroupRepository(
             groups.value = groups.value.map { if (it.id == groupId) updated else it }
             Outcome.Success(Unit)
         }
+
+    override suspend fun reorder(groupIdsInOrder: List<Long>): Outcome<Unit, GroupError> =
+        mutex.withLock {
+            val current = groups.value.sortedWith(compareBy<Group> { it.orderKey }.thenBy { it.id })
+            val writes =
+                planOrderKeyWrites(
+                    current.map { OrderedRow(it.id, it.orderKey) },
+                    groupIdsInOrder,
+                    ProtocolOrderKeys,
+                )
+                    ?: return@withLock Outcome.Failure(GroupError.NotFound)
+            groups.value =
+                groups.value.map { row -> row.copy(orderKey = writes[row.id] ?: row.orderKey) }
+            Outcome.Success(Unit)
+        }
+
+    override suspend fun setMembers(
+        groupId: Long,
+        podcastIds: Set<Long>,
+    ): Outcome<Unit, GroupError> =
+        mutex.withLock {
+            if (groups.value.none { it.id == groupId }) {
+                return@withLock Outcome.Failure(GroupError.NotFound)
+            }
+            members.value = members.value + (groupId to podcastIds)
+            Outcome.Success(Unit)
+        }
+
+    override suspend fun applyMembership(
+        podcastIds: Set<Long>,
+        add: Set<Long>,
+        remove: Set<Long>,
+    ): Outcome<Unit, GroupError> =
+        mutex.withLock {
+            val known = groups.value.mapTo(HashSet()) { it.id }
+            if ((add + remove).any { it !in known }) {
+                return@withLock Outcome.Failure(GroupError.NotFound)
+            }
+            val next = members.value.toMutableMap()
+            for (groupId in remove) {
+                next[groupId]?.let { next[groupId] = it - podcastIds }
+            }
+            for (groupId in add) {
+                next[groupId] = (next[groupId].orEmpty() + podcastIds)
+            }
+            members.value = next
+            Outcome.Success(Unit)
+        }
+}
+
+/** The fake binds the real `OrderKey` — `:core:testing` may see `:sync:protocol`. */
+private object ProtocolOrderKeys : OrderKeys {
+    override fun after(last: String?): String = OrderKey.after(last)
+
+    override fun between(
+        previous: String?,
+        next: String?,
+    ): String = OrderKey.between(previous, next)
+
+    override fun rewrite(count: Int): List<String> = OrderKey.rewrite(count)
 }

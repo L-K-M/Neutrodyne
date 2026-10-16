@@ -7,6 +7,7 @@ import androidx.paging.PagingConfig
 import androidx.paging.PagingData
 import androidx.paging.map
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.database.EpisodeRowProjection
 import ch.lkmc.neutrodyne.core.database.FeedQueryBuilder
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
@@ -36,6 +37,7 @@ import kotlinx.coroutines.flow.map
 @Inject
 internal class FeedRepositoryImpl(
     private val db: NeutrodyneDatabase,
+    private val clock: Clock,
 ) : FeedRepository {
     override fun pagedFeed(
         source: FeedSource,
@@ -56,7 +58,7 @@ internal class FeedRepositoryImpl(
             }
 
             is FeedSource.Group -> {
-                db.groupDao().setFeedOrder(source.groupId, order)
+                db.groupDao().setFeedOrder(source.groupId, order, clock.now())
             }
 
             FeedSource.All, FeedSource.Ungrouped -> {
