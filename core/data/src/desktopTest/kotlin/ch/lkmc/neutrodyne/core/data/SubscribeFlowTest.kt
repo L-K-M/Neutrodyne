@@ -359,7 +359,7 @@ class SubscribeFlowTest {
                             nameKey = "favourites",
                             orderKey = "a",
                             createdAt = NOW,
-                            updatedAt = NOW,
+                            updatedAt = NOW - 1,
                         ),
                     )
             val previewId = resolvePreview()
@@ -372,6 +372,8 @@ class SubscribeFlowTest {
             assertEquals(id, member.podcastId)
             assertEquals(NOW, member.addedAt)
             assertTrue(member.orderKey.isNotEmpty())
+            // 05 Membership: inserting the row stamps the group's updatedAt.
+            assertEquals(NOW, db.groupDao().groupById(groupId)?.updatedAt)
         }
 
     @Test

@@ -13,14 +13,19 @@ import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.GroupEdit
 import ch.lkmc.neutrodyne.core.model.GroupPalette
 import ch.lkmc.neutrodyne.core.model.MediaFilter
+import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
+import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.memberEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
@@ -36,10 +41,23 @@ import kotlin.test.assertTrue
 class GroupRepositoryTest {
     private val clock = TestClock()
     private val db = TestDb.inMemory(clock = clock)
-    private val orderKeys = OrderKeys { last -> if (last == null) "a" else "$last~" }
-    private val repo = GroupRepositoryImpl(db, clock, orderKeys)
+    private val orderKeys = TestOrderKeys
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val repo =
+        GroupRepositoryImpl(
+            db,
+            clock,
+            orderKeys,
+            FakeGroupChannelSync(),
+            FakeRefreshController(),
+            appScope,
+        )
 
-    @AfterTest fun close() = db.close()
+    @AfterTest fun close() {
+        // Undo-expiry jobs must not outlive the database they write to.
+        appScope.cancel()
+        db.close()
+    }
 
     @Test fun createNormalizesTheNameAndAssignsDefaultsInOrder() =
         runTest {
@@ -49,7 +67,7 @@ class GroupRepositoryTest {
                 val group = awaitItem().single()
                 assertEquals(first, group.id)
                 assertEquals("Café", group.name)
-                assertEquals("a", group.orderKey)
+                assertEquals("0.5", group.orderKey)
                 assertEquals(GroupPalette.COLORS.first(), group.colorArgb)
                 assertEquals(FeedOrder.NEWEST_FIRST, group.playOrder)
                 assertTrue(group.showAsTab)
@@ -59,7 +77,7 @@ class GroupRepositoryTest {
                 val next = created(GroupDraft("Next", playOrder = FeedOrder.OLDEST_FIRST, showAsTab = false))
                 val rows = awaitItem()
                 assertEquals(listOf(first, next), rows.map { it.id })
-                assertEquals("a~", rows.last().orderKey)
+                assertEquals("0.75", rows.last().orderKey)
                 assertEquals(GroupPalette.COLORS[1], rows.last().colorArgb)
                 assertEquals(FeedOrder.OLDEST_FIRST, rows.last().playOrder)
                 assertFalse(rows.last().showAsTab)
@@ -163,7 +181,15 @@ class GroupRepositoryTest {
             val results =
                 (0 until 8).map { index ->
                     async(Dispatchers.Default) {
-                        val independentRepo = GroupRepositoryImpl(db, clock, orderKeys)
+                        val independentRepo =
+                            GroupRepositoryImpl(
+                                db,
+                                clock,
+                                orderKeys,
+                                FakeGroupChannelSync(),
+                                FakeRefreshController(),
+                                appScope,
+                            )
                         start.await()
                         independentRepo.create(GroupDraft(if (index % 2 == 0) "Café" else "CAFE\u0301"))
                     }
@@ -184,7 +210,7 @@ class GroupRepositoryTest {
                     }.awaitAll()
             assertTrue(results.all { it is Outcome.Success })
             val groups = repo.observeGroups().first()
-            assertEquals(listOf("a", "a~", "a~~", "a~~~"), groups.map { it.orderKey })
+            assertEquals(listOf("0.5", "0.75", "0.875", "0.9375"), groups.map { it.orderKey })
             assertEquals(GroupPalette.COLORS.take(4), groups.map { it.colorArgb })
         }
 
@@ -246,6 +272,98 @@ class GroupRepositoryTest {
             assertEquals(emptySet(), repo.observeMemberIds(-1).first())
         }
 
+    @Test fun createSeedsInitialMembersWithIncreasingKeys() =
+        runTest {
+            val p1 = db.podcastDao().insertPodcast(podcastEntity())
+            val p2 = db.podcastDao().insertPodcast(podcastEntity())
+            val tech = created(GroupDraft("Tech"), setOf(p1, p2))
+            val members = db.groupDao().membersOf(tech)
+            assertEquals(setOf(p1, p2), members.mapTo(HashSet()) { it.podcastId })
+            assertEquals(listOf("0.5", "0.75"), members.map { it.orderKey }.sorted())
+            assertEquals(2, repo.observeGroup(tech).first()?.memberCount)
+            assertEquals(mapOf(p1 to setOf(tech), p2 to setOf(tech)), repo.observeMemberships().first())
+        }
+
+    @Test fun overlappingMembershipsAndSetMembersWritesOnlyChangedRows() =
+        runTest {
+            val p1 = db.podcastDao().insertPodcast(podcastEntity())
+            val p2 = db.podcastDao().insertPodcast(podcastEntity())
+            val p3 = db.podcastDao().insertPodcast(podcastEntity())
+            val tech = created(GroupDraft("Tech"), setOf(p1, p2))
+            val news = created(GroupDraft("News"), setOf(p2))
+            val memberships = repo.observeMemberships().first()
+            assertEquals(setOf(tech, news), memberships.getValue(p2))
+            assertEquals(setOf(tech), memberships.getValue(p1))
+
+            val kept = db.groupDao().membersOf(tech).single { it.podcastId == p2 }
+            val newsStamp = db.groupDao().groupById(news)?.updatedAt
+            clock.nowMs++
+            assertEquals(Outcome.Success(Unit), repo.setMembers(tech, setOf(p2, p3)))
+            val members = db.groupDao().membersOf(tech)
+            assertEquals(setOf(p2, p3), members.mapTo(HashSet()) { it.podcastId })
+            // The kept row was not rewritten and the new member appends after the last key.
+            assertEquals(kept, members.single { it.podcastId == p2 })
+            assertTrue(members.single { it.podcastId == p3 }.orderKey > kept.orderKey)
+            // Only the edited group is stamped.
+            assertEquals(clock.now(), db.groupDao().groupById(tech)?.updatedAt)
+            assertEquals(newsStamp, db.groupDao().groupById(news)?.updatedAt)
+        }
+
+    @Test fun membershipNoOpsAndUnknownIdsDoNotWrite() =
+        runTest {
+            val p1 = db.podcastDao().insertPodcast(podcastEntity())
+            val tech = created(GroupDraft("Tech"), setOf(p1))
+            val before = db.groupDao().groupById(tech)
+            clock.nowMs++
+            assertEquals(Outcome.Success(Unit), repo.setMembers(tech, setOf(p1)))
+            assertEquals(Outcome.Success(Unit), repo.applyMembership(setOf(p1), add = setOf(tech), remove = emptySet()))
+            assertEquals(before, db.groupDao().groupById(tech))
+            assertEquals(Outcome.Failure(GroupError.NotFound), repo.setMembers(-1, setOf(p1)))
+            assertEquals(Outcome.Failure(GroupError.NotFound), repo.setMembers(tech, setOf(-1)))
+            assertEquals(
+                Outcome.Failure(GroupError.NotFound),
+                repo.applyMembership(setOf(-1), add = emptySet(), remove = emptySet()),
+            )
+            assertEquals(
+                Outcome.Failure(GroupError.NotFound),
+                repo.applyMembership(setOf(p1), add = emptySet(), remove = setOf(99)),
+            )
+            assertEquals(Outcome.Failure(GroupError.NotFound), repo.create(GroupDraft("X"), setOf(-1)))
+        }
+
+    @Test fun applyMembershipRemovesThenAddsAndStampsOnlyChangedGroups() =
+        runTest {
+            val p1 = db.podcastDao().insertPodcast(podcastEntity())
+            val tech = created(GroupDraft("Tech"), setOf(p1))
+            val news = created(GroupDraft("News"))
+            val techStamp = db.groupDao().groupById(tech)?.updatedAt
+            val newsStamp = db.groupDao().groupById(news)?.updatedAt
+            clock.nowMs++
+            assertEquals(
+                Outcome.Success(Unit),
+                repo.applyMembership(setOf(p1), add = setOf(tech, news), remove = emptySet()),
+            )
+            assertEquals(setOf(tech, news), repo.observeMemberships().first().getValue(p1))
+            assertEquals(techStamp, db.groupDao().groupById(tech)?.updatedAt)
+            assertEquals(clock.now(), db.groupDao().groupById(news)?.updatedAt)
+            // A group in both sets is removed first, then re-added — the row is rewritten.
+            val before = db.groupDao().membersOf(news).single { it.podcastId == p1 }
+            clock.nowMs++
+            assertEquals(
+                Outcome.Success(Unit),
+                repo.applyMembership(setOf(p1), add = setOf(news), remove = setOf(news)),
+            )
+            val after = db.groupDao().membersOf(news).single { it.podcastId == p1 }
+            assertTrue(after.addedAt > before.addedAt)
+            // Removing the last membership makes the podcast ungrouped.
+            assertEquals(
+                Outcome.Success(Unit),
+                repo.applyMembership(setOf(p1), add = emptySet(), remove = setOf(tech, news)),
+            )
+            assertEquals(emptyMap(), repo.observeMemberships().first().filterValues { it.isNotEmpty() })
+            assertEquals(emptySet(), repo.observeMemberIds(tech).first())
+        }
+
     @Test fun repeatedEditsDoNotAdvanceUpdatedAt() =
         runTest {
             val id = created(GroupDraft("Name"))
@@ -279,5 +397,31 @@ class GroupRepositoryTest {
             assertEquals(1, repo.observeGroups().first().size)
         }
 
-    private suspend fun created(draft: GroupDraft): Long = assertIs<Outcome.Success<Long>>(repo.create(draft)).value
+    @Test fun mosaicsGroupMemberRowsByGroupIdInRecencyOrder() =
+        runTest {
+            val first = created(GroupDraft("First"))
+            val second = created(GroupDraft("Second"))
+            val newest =
+                db.podcastDao().insertPodcast(
+                    podcastEntity(title = "New", artworkKey = "u-art").copy(latestEpisodeAt = 2_000L),
+                )
+            val older = db.podcastDao().insertPodcast(podcastEntity(title = "Old").copy(latestEpisodeAt = 1_000L))
+            db.groupDao().insertMember(memberEntity(first, older, "a"))
+            db.groupDao().insertMember(memberEntity(first, newest, "b"))
+            db.groupDao().insertMember(memberEntity(second, older, "a"))
+
+            val mosaics = repo.observeMosaics().first()
+            assertEquals(listOf(newest, older), mosaics[first]?.map { it.podcastId })
+            assertEquals(listOf(older), mosaics[second]?.map { it.podcastId })
+            assertEquals("New", mosaics[first]?.first()?.displayTitle)
+            assertEquals("u-art", mosaics[first]?.first()?.artwork?.key)
+
+            db.groupDao().insertMember(memberEntity(second, newest, "b"))
+            assertEquals(listOf(newest, older), repo.observeMosaics().first()[second]?.map { it.podcastId })
+        }
+
+    private suspend fun created(
+        draft: GroupDraft,
+        memberIds: Set<Long> = emptySet(),
+    ): Long = assertIs<Outcome.Success<Long>>(repo.create(draft, memberIds)).value
 }

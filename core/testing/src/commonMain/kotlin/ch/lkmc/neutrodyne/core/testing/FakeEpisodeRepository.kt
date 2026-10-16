@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.testing
 
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
+import ch.lkmc.neutrodyne.core.domain.MarkFeedPlayedResult
 import ch.lkmc.neutrodyne.core.model.EpisodeDetail
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.ShowNotes
@@ -41,6 +42,25 @@ class FakeEpisodeRepository : EpisodeRepository {
     ) {
         writeError?.let { throw it }
         calls += "markFeedPlayed($source, $sortDateBefore)"
+    }
+
+    /** Fixture selection sizes, keyed by source and the frozen cutoff. */
+    val unplayedCounts = mutableMapOf<Pair<FeedSource, Long?>, Int>()
+
+    override suspend fun markFeedPlayed(
+        source: FeedSource,
+        sortDateBefore: Long?,
+        expectedCount: Int,
+    ): MarkFeedPlayedResult {
+        require(expectedCount >= 0) { "Expected count must be non-negative" }
+        writeError?.let { throw it }
+        val key = source to sortDateBefore
+        val actual = unplayedCounts[key] ?: 0
+        if (actual != expectedCount) return MarkFeedPlayedResult.SelectionChanged(actual)
+
+        calls += "markFeedPlayed($source, $sortDateBefore, $expectedCount)"
+        unplayedCounts[key] = 0
+        return MarkFeedPlayedResult.Played(actual)
     }
 
     override suspend fun setFavorite(

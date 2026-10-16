@@ -334,6 +334,19 @@ sequenceDiagram
 | Mosaic artwork `g-{uuid}` | unreferenced → collected |
 | Import history (`import_item.groupNamesJson`) | unaffected (names, not IDs) |
 
+**Implementation note (2026-10-16, M2)** — C1 lands the mechanism with two slices deferred to
+their owning milestones: `SnapshotScheduler.requestSoon()` does not run on delete yet because the
+port itself arrives with M3's backup work; the 10-second undo window runs as a `delay` job on the
+injected `@ApplicationScope` and `GroupChannelSync.onDeleted(uuid)` fires at its end — process
+death still finalizes the delete, and the start-up sweep spares exactly the uuids the repository
+reports through `GroupRepository.pendingUndoUuids()` (the "live undo tokens" the sweep rule above
+refers to). `NoGroupChannels` sits in `:core:domain` next to the port rather than
+`:core:data` `desktopMain`, so both shells bind the same interim no-op until C5's
+`GroupNotificationChannels` replaces it on Android. `GroupMerger` exists in `:core:data` with the
+transaction this document specifies — union memberships, keep the survivor's settings, move a
+GROUP play context, then `sync()` — but has no callers until the restore path (M3) and
+`SyncApplier` (M10) land.
+
 ### Notification channels
 
 Android only. Channel posting is 03's ([03 New-episode notifications](03-feeds-and-discovery.md#new-episode-notifications)); the lifecycle is here, in `GroupNotificationChannels` (`:core:data` `androidMain`), the Android implementation of the common port `GroupChannelSync` (`sync()`, `onUuidChanged(old, new)`, `onDeleted(uuid)`). The desktop has no channels: its `NoGroupChannels` does nothing, and `DesktopNotifier` applies the same per-group switches without a channel ([11 Notifications](11-desktop.md#notifications)).
@@ -454,6 +467,15 @@ propagate settings write failures as exceptions rather than reporting success.
 | Share as OPML (desktop: "Export group as OPML…") | per-group export; the desktop saves through a file dialog ([Destinations](#destinations)) | `ExportKey(groupId)` ([OPML export](#opml-export)) | M3 |
 | Import OPML into this group | picker; session created with this group as target | `ImportRepository.create(source, CreateImportOptions(targetGroupId = id))` | M3 |
 | Edit, Group settings, Delete | editor, settings screen, [Delete and undo](#delete-and-undo) | `GroupEditKey(id)`, `GroupSettingsKey(id)` | M2 |
+
+**Implementation note (2026-10-16, M2):** Count-aware callers freeze the
+chosen `sortDateBefore`, obtain `countUnplayed`, and pass both that cutoff and
+`expectedCount` to the guarded `EpisodeRepository.markFeedPlayed` overload.
+The repository revalidates the count inside its write transaction; a changed
+count returns `MarkFeedPlayedResult.SelectionChanged(actualCount)` and writes
+nothing. Show a refreshed confirmation before retrying. `Played(count)` reports
+the completed mark-played chain. Existing plain confirmation dialogs use the
+explicitly unchecked two-argument overload until the D9 dialog slice.
 
 `downloadAllEstimate` ([02 Download all candidates](02-data-model.md#download-all-candidates), M6): the feed's source predicate, its view filters and `hideOlderThanDays` bound (as [Playing a group](#playing-a-group) rules 1, 3 and 5, no anchor), unplayed, without a `download` row in `QUEUED`…`COMPLETED` (`FAILED` and `MISSING` rows count as candidates), without a tombstone (`downloadDismissedAt IS NULL`; the user deleted those deliberately), and downloadable (`enclosureUrl IS NOT NULL`, or YouTube when `YouTubeCapabilitiesSource.capabilities.value.downloads` at call time, [04 Capability matrix](04-youtube.md#capability-matrix)); newest first, **capped at 200** (`capped = true` → "200 newest of 1,234"). Unlike the context tail, Up next items and the current episode are **not** excluded: downloading them is wanted (answers 02's open question 7). Size per episode follows [07 Estimates](07-downloads.md#estimates): `enclosureLength` when ≥ 100 KB (smaller values are placeholders), else `durationMs × 16 000 B/s` (128 kbit/s) when known, else counted in `unknownSizeCount`; no invented numbers.
 

@@ -18,6 +18,7 @@ import ch.lkmc.neutrodyne.core.data.ingest.IngestMode
 import ch.lkmc.neutrodyne.core.data.ingest.IngestResult
 import ch.lkmc.neutrodyne.core.data.ingest.IngestValidators
 import ch.lkmc.neutrodyne.core.data.ingest.IngestionEventBus
+import ch.lkmc.neutrodyne.core.data.notifications.NewEpisodeNotifier
 import ch.lkmc.neutrodyne.core.database.DueFeed
 import ch.lkmc.neutrodyne.core.database.FetchStateBatcher
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
@@ -92,6 +93,7 @@ internal class FeedRefresher(
     private val scheduler: Provider<RefreshScheduler>,
     private val secrets: SecretStore,
     private val coordinator: CredentialCommitCoordinator,
+    private val notifier: NewEpisodeNotifier,
 ) {
     // Lock order, outermost first: the run [mutex] → [commitMutex] →
     // CredentialCommitCoordinator → the Room writer ([batcherLock] is a leaf guard).
@@ -451,6 +453,13 @@ internal class FeedRefresher(
                         remaining = due.size - outcomes.size,
                         stoppedByDeadline = timedOut || launched < due.size || !completed,
                     )
+                // Already committed ingests still notify after cancellation or a fetch-state flush failure.
+                try {
+                    notifier.post(finalReport.newEpisodes)
+                } catch (error: Throwable) {
+                    // A notifier's own cancellation must not interrupt run finalisation either.
+                    Log.w(TAG, error) { "new-episode finalisation failed" }
+                }
                 // A failed flush means the outcome rows never committed: no completion
                 // diagnostics (`lastAllRunFinishedAt` would suppress the foreground trigger's
                 // next refresh for a whole tick) and no report — the failure propagates once
