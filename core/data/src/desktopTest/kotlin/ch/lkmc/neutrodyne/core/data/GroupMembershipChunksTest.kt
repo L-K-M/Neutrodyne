@@ -12,10 +12,16 @@ import ch.lkmc.neutrodyne.core.data.repo.GroupRepositoryImpl
 import ch.lkmc.neutrodyne.core.database.SqliteDriverBindings
 import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.model.GroupDraft
+import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
+import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.groupEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import java.util.concurrent.CopyOnWriteArrayList
@@ -31,9 +37,14 @@ class GroupMembershipChunksTest {
     private val driver = MembershipTraceDriver()
     private val clock = TestClock()
     private val db = TestDb.inMemory(driver = driver, clock = clock)
-    private val repo = GroupRepositoryImpl(db, clock, TestOrderKeys)
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val repo =
+        GroupRepositoryImpl(db, clock, TestOrderKeys, FakeGroupChannelSync(), FakeRefreshController(), appScope)
 
-    @AfterTest fun close() = db.close()
+    @AfterTest fun close() {
+        appScope.cancel()
+        db.close()
+    }
 
     @Test fun createValidatesAndSeedsAll1201Members() =
         runTest {
