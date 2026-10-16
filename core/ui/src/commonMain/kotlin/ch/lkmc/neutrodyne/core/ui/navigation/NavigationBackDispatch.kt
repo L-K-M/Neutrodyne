@@ -145,3 +145,13 @@ internal fun EntryBackDispatch(entry: NavEntry<NavKey>, content: @Composable () 
 private class EntryDispatcherOwner(
     override val navigationEventDispatcher: NavigationEventDispatcher,
 ) : NavigationEventDispatcherOwner
+
+/**
+ * A live check, including during state saving: transient selection survives recreation,
+ * while Navigation's retained entries save no selection after leaving the screen.
+ */
+@Composable
+public fun rememberEntryIsCurrent(key: NavKey): () -> Boolean {
+    val dispatch = LocalEntryBackDispatch.current
+    return remember(dispatch, key) { { dispatch?.panes?.isCurrentKey(key) ?: true } }
+}

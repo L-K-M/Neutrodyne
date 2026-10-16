@@ -4,10 +4,15 @@ package ch.lkmc.neutrodyne.feature.library
 
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.SaveableStateRegistry
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -17,21 +22,31 @@ import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performMouseInput
+import androidx.compose.ui.test.performMultiModalInput
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.common.TitleCollator
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
@@ -39,12 +54,20 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
 import ch.lkmc.neutrodyne.core.model.FeedSource
+import ch.lkmc.neutrodyne.core.model.FeedSourceRef
+import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.LibraryTile
+import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.LibrarySort
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
+import ch.lkmc.neutrodyne.core.navigation.AddToGroupsKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
+import ch.lkmc.neutrodyne.core.navigation.FeedsKey
+import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
+import ch.lkmc.neutrodyne.core.navigation.GroupsManageKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
+import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
@@ -65,11 +88,14 @@ import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
 import ch.lkmc.neutrodyne.core.ui.platform.PlatformActions
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.runBlocking
 import java.util.Locale
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 /**
@@ -87,6 +113,7 @@ class LibraryScreenTest {
     private val navigator = RecordingAppNavigator()
 
     // The route tests drive the real ViewModel so `episodes.calls` proves the write path.
+    private val groups = FakeGroupRepository()
     private val podcasts = FakePodcastRepository()
     private val episodes = FakeEpisodeRepository()
     private val refreshController = FakeRefreshController()
@@ -303,7 +330,7 @@ class LibraryScreenTest {
                     .config[SemanticsActions.CustomActions]
                     .map { it.label }
             assertEquals(
-                listOf("Refresh", "Podcast settings", "Mark all as played…", "Unsubscribe"),
+                listOf("Select", "Add to groups", "Refresh", "Podcast settings", "Mark all as played…", "Unsubscribe"),
                 labels,
             )
         }
@@ -536,6 +563,235 @@ class LibraryScreenTest {
             onNodeWithText("You're offline — downloaded episodes still play").assertIsDisplayed()
         }
 
+    @Test fun chipsFilterGroupAndUngrouped() =
+        runComposeUiTest {
+            val id = createGroup("tech")
+            val a = testLibraryTile(1, "A")
+            val b = testLibraryTile(2, "B")
+            groups.members.value = mapOf(id to setOf(1L))
+            podcasts.tilesByGroup.value = mapOf(id to listOf(a))
+            setLibraryRoute(listOf(a, b))
+            onNodeWithText("All").assertIsSelected()
+            onNodeWithText("tech").performClick()
+            onNodeWithText("tech").assertIsSelected()
+            onNodeWithContentDescription("A").assertIsDisplayed()
+            onNodeWithContentDescription("B").assertDoesNotExist()
+            onNodeWithText("Ungrouped").performClick()
+            onNodeWithContentDescription("A").assertDoesNotExist()
+            onNodeWithContentDescription("B").assertIsDisplayed()
+            onNodeWithText("All").performClick()
+            onNodeWithContentDescription("A").assertIsDisplayed()
+            onNodeWithContentDescription("B").assertIsDisplayed()
+        }
+
+    @Test fun emptyGroupOffersAddPodcasts() =
+        runComposeUiTest {
+            createGroup("tech")
+            setLibraryRoute()
+            onNodeWithText("tech").performClick()
+            onNodeWithText("No podcasts in 'tech'").assertIsDisplayed()
+            onNodeWithText("Add podcasts").performClick()
+            assertEquals(RecordingAppNavigator.Call.Push(AddPodcastKey(null)), navigator.calls.last())
+        }
+
+    @Test fun groupsSegmentShowsMosaicsAndSelectsFeedsRoot() =
+        runComposeUiTest {
+            createGroup("tech")
+            setLibraryRoute()
+            onNodeWithText("Groups").performClick()
+            onNodeWithContentDescription("tech").assertIsDisplayed().performClick()
+            waitForIdle()
+            assertEquals(
+                listOf(
+                    RecordingAppNavigator.Call.ResetTab(FeedsKey),
+                    RecordingAppNavigator.Call.SelectTab(FeedsKey),
+                ),
+                navigator.calls,
+            )
+            assertEquals(
+                FeedSourceRef
+                    .Group(
+                        groups.groups.value
+                            .single()
+                            .uuid,
+                    ).encode(),
+                runBlocking { settings.get(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE) },
+            )
+        }
+
+    @Test fun groupMenusAndNewGroupUseExistingDestinations() =
+        runComposeUiTest {
+            val id = createGroup("tech")
+            setLibraryRoute()
+            onNodeWithText("Groups").performClick()
+            onNodeWithContentDescription("tech").performTouchInput { longClick() }
+            onNodeWithText("Edit group").performClick()
+            assertEquals(RecordingAppNavigator.Call.Push(GroupEditKey(id)), navigator.calls.last())
+            onNodeWithContentDescription("tech").performMouseInput {
+                click(button = androidx.compose.ui.test.MouseButton.Secondary)
+            }
+            onNodeWithText("Manage groups").performClick()
+            assertEquals(RecordingAppNavigator.Call.Push(GroupsManageKey), navigator.calls.last())
+            onNodeWithContentDescription("tech").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+            onNodeWithContentDescription("tech").performKeyInput { pressKey(Key.Menu) }
+            onNodeWithText("Edit group").performClick()
+            assertEquals(RecordingAppNavigator.Call.Push(GroupEditKey(id)), navigator.calls.last())
+            onNodeWithText("New group").performClick()
+            assertEquals(RecordingAppNavigator.Call.Push(GroupEditKey(null)), navigator.calls.last())
+        }
+
+    @Test fun longPressAndControlClickSelectThenAddToGroups() =
+        runComposeUiTest {
+            setLibraryRoute(listOf(testLibraryTile(1, "A"), testLibraryTile(2, "B")))
+            onNodeWithContentDescription("A").performCustomAccessibilityActionWithLabel("Add to groups")
+            assertEquals(RecordingAppNavigator.Call.Push(AddToGroupsKey(listOf(1L))), navigator.calls.last())
+            navigator.calls.clear()
+            onNodeWithContentDescription("A").performTouchInput { longClick() }
+            onNodeWithText("1 selected").assertIsDisplayed()
+            onNodeWithContentDescription("A").assertIsSelected()
+            onNodeWithContentDescription("B").assertIsNotSelected()
+            onNodeWithContentDescription("B").performMultiModalInput {
+                key { keyDown(Key.CtrlLeft) }
+                mouse { click() }
+                key { keyUp(Key.CtrlLeft) }
+            }
+            onNodeWithText("2 selected").assertIsDisplayed()
+            onNodeWithContentDescription("Add to group…").performClick()
+            assertEquals(RecordingAppNavigator.Call.Push(AddToGroupsKey(listOf(1L, 2L))), navigator.calls.single())
+            onNodeWithText("2 selected").assertDoesNotExist()
+        }
+
+    @Test fun shiftClickExtendsAndEscapeExitsSelection() =
+        runComposeUiTest {
+            setLibraryRoute((1L..4L).map { testLibraryTile(it, "Show $it") })
+            onNodeWithContentDescription("Show 1").performTouchInput { longClick() }
+            onNodeWithContentDescription("Show 3").performMultiModalInput {
+                key { keyDown(Key.ShiftLeft) }
+                mouse { click() }
+                key { keyUp(Key.ShiftLeft) }
+            }
+            onNodeWithText("3 selected").assertIsDisplayed()
+            onRoot().performKeyInput {
+                keyDown(Key.CtrlLeft)
+                pressKey(Key.A)
+                keyUp(Key.CtrlLeft)
+            }
+            onNodeWithText("4 selected").assertIsDisplayed()
+            onRoot().performKeyInput { pressKey(Key.Escape) }
+            onNodeWithText("4 selected").assertDoesNotExist()
+            onNodeWithText("Library").assertIsDisplayed()
+        }
+
+    @Test fun bulkUnsubscribeConfirmsPodcastAndDownloadCounts() =
+        runComposeUiTest {
+            podcasts.downloadedIds.value = mapOf(1L to listOf(10L), 2L to listOf(20L, 21L))
+            setLibraryRoute(listOf(testLibraryTile(1, "A"), testLibraryTile(2, "B")))
+            onNodeWithContentDescription("A").performTouchInput { longClick() }
+            onNodeWithContentDescription("B").performClick()
+            onRoot().performKeyInput { pressKey(Key.Delete) }
+            onNodeWithText("Unsubscribe from 2 podcasts?").assertIsDisplayed()
+            onNodeWithText("3 downloaded episodes will be deleted.").assertIsDisplayed()
+            assertEquals(listOf("downloadedEpisodeIds([1, 2])"), podcasts.calls)
+            onNodeWithText("Unsubscribe").performClick()
+            waitForIdle()
+            assertEquals("unsubscribe([1, 2])", podcasts.calls.last())
+        }
+
+    @Test fun bulkMarkPlayedWaitsForCountedConfirmationAndRefreshUsesSelection() =
+        runComposeUiTest {
+            setLibraryRoute(listOf(testLibraryTile(1, "A"), testLibraryTile(2, "B")))
+            onNodeWithContentDescription("A").performTouchInput { longClick() }
+            onNodeWithContentDescription("B").performClick()
+            onNodeWithContentDescription("Selection actions").performClick()
+            onNodeWithText("Mark all as played…").performClick()
+            onNodeWithText("Mark all episodes in 2 podcasts as played?").assertIsDisplayed()
+            assertTrue(episodes.calls.isEmpty())
+            onNodeWithText("Mark all as played").performClick()
+            waitForIdle()
+            assertEquals(
+                listOf(
+                    "markFeedPlayed(${FeedSource.Podcast(1)}, null)",
+                    "markFeedPlayed(${FeedSource.Podcast(2)}, null)",
+                ),
+                episodes.calls,
+            )
+            onNodeWithContentDescription("A").performTouchInput { longClick() }
+            onNodeWithContentDescription("Selection actions").performClick()
+            onNodeWithText("Refresh").performClick()
+            assertEquals(listOf("refreshNow(Podcasts(ids=[1]))"), refreshController.calls)
+        }
+
+    @Test fun selectionSurvivesRecreationAndPrunesRemovedTiles() =
+        runComposeUiTest {
+            var registry = SaveableStateRegistry(null) { true }
+            setLibraryRoute(registry = registry)
+            onNodeWithContentDescription("Tap Show").performTouchInput { longClick() }
+            var restored: Map<String, List<Any?>> = emptyMap()
+            onNodeWithText("1 selected").assertIsDisplayed()
+            runOnIdle { restored = registry.performSave() }
+            registry = SaveableStateRegistry(restored) { true }
+            setLibraryRoute(registry = registry)
+            onNodeWithText("1 selected").assertIsDisplayed()
+            runOnIdle { podcasts.tiles.value = emptyList() }
+            waitForIdle()
+            onNodeWithText("1 selected").assertDoesNotExist()
+        }
+
+    @Test fun modifierClickEntersSelectionWithoutOpeningPodcast() =
+        runComposeUiTest {
+            setLibraryRoute()
+            for (modifierKey in listOf(Key.CtrlLeft, Key.MetaLeft)) {
+                onNodeWithContentDescription("Tap Show").performMultiModalInput {
+                    key { keyDown(modifierKey) }
+                    mouse { click() }
+                    key { keyUp(modifierKey) }
+                }
+                onNodeWithText("1 selected").assertIsDisplayed()
+                assertTrue(navigator.calls.isEmpty())
+                onNodeWithContentDescription("Exit selection").performClick()
+            }
+        }
+
+    @Test fun leavingLibraryClearsSelectionAndCancelKeepsSubscriptions() =
+        runComposeUiTest {
+            var visible by mutableStateOf(true)
+            setLibraryRoute(showRoute = { visible })
+            onNodeWithContentDescription("Tap Show").performTouchInput { longClick() }
+            onNodeWithContentDescription("Unsubscribe").performClick()
+            onNodeWithText("Unsubscribe from 1 podcast?").assertIsDisplayed()
+            onNodeWithText("Cancel").performClick()
+            assertTrue(podcasts.calls.none { it.startsWith("unsubscribe(") })
+            onNodeWithText("1 selected").assertIsDisplayed()
+            runOnIdle { visible = false }
+            waitForIdle()
+            runOnIdle { visible = true }
+            waitForIdle()
+            onNodeWithText("1 selected").assertDoesNotExist()
+        }
+
+    @Test fun restoredBulkDialogConfirmsBeforeTilesLoad() =
+        runComposeUiTest {
+            var registry = SaveableStateRegistry(null) { true }
+            setLibraryRoute(registry = registry)
+            onNodeWithContentDescription("Tap Show").performTouchInput { longClick() }
+            onNodeWithContentDescription("Unsubscribe").performClick()
+            onNodeWithText("Unsubscribe from 1 podcast?").assertIsDisplayed()
+            var restored: Map<String, List<Any?>> = emptyMap()
+            runOnIdle { restored = registry.performSave() }
+            podcasts.libraryReadGate = CompletableDeferred()
+            registry = SaveableStateRegistry(restored) { true }
+            setLibraryRoute(registry = registry)
+            onNodeWithText("Unsubscribe").performClick()
+            waitForIdle()
+            assertEquals("unsubscribe([5])", podcasts.calls.last())
+            podcasts.libraryReadGate?.complete(Unit)
+        }
+
+    private fun createGroup(name: String): Long =
+        runBlocking {
+            assertIs<Outcome.Success<Long>>(groups.create(GroupDraft(name))).value
+        }
+
     private fun ComposeUiTest.setLibrary(
         state: LibraryUiState,
         pendingUnsubscribe: PendingUnsubscribe? = null,
@@ -588,6 +844,7 @@ class LibraryScreenTest {
         tiles: List<LibraryTile> = listOf(testLibraryTile(5, displayTitle = "Tap Show")),
         registry: SaveableStateRegistry = SaveableStateRegistry(null) { true },
         snackbarHost: SnackbarHostState = SnackbarHostState(),
+        showRoute: () -> Boolean = { true },
     ) {
         podcasts.tiles.value = tiles
         val viewModel =
@@ -599,6 +856,7 @@ class LibraryScreenTest {
                 settings,
                 collator,
                 network,
+                groups,
             )
         setContent {
             // collectAsStateWithLifecycle (rule 10) needs a started owner; a bare compose
@@ -613,7 +871,12 @@ class LibraryScreenTest {
                     LocalSaveableStateRegistry provides registry,
                 ) {
                     NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
-                        LibraryRoute(viewModel = viewModel)
+                        val holder = rememberSaveableStateHolder()
+                        if (showRoute()) {
+                            holder.SaveableStateProvider("library") {
+                                LibraryRoute(viewModel = viewModel, isCurrentEntry = showRoute)
+                            }
+                        }
                     }
                 }
             }

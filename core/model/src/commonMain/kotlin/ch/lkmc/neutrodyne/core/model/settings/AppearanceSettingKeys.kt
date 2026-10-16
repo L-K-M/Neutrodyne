@@ -43,9 +43,26 @@ public object AppearanceSettingKeys {
     /** Persisted selection identity (08 Group feed pager). */
     val FEEDS_SELECTED_SOURCE = SettingKey.Text("ui.feeds_selected_source", "all", SettingsFile.DEVICE)
 
+    /** Library's segmented view (08 Library), device-local. */
+    val LIBRARY_SEGMENT: SettingKey.Choice<LibrarySegment> =
+        SettingKey.Choice(
+            name = "ui.library_segment",
+            default = LibrarySegment.PODCASTS,
+            values = persistentListOf(LibrarySegment.PODCASTS, LibrarySegment.GROUPS),
+            file = SettingsFile.DEVICE,
+        )
+
     /** Empty means All; otherwise Ungrouped or a group UUID (08 Library). */
     val LIBRARY_GROUP_FILTER = SettingKey.Text("ui.library_group_filter", "", SettingsFile.DEVICE)
 
     public val ALL: List<SettingKey<*>> =
-        listOf(THEME, DYNAMIC_COLOR, LIBRARY_TITLES, LIBRARY_SORT, FEEDS_SELECTED_SOURCE, LIBRARY_GROUP_FILTER)
+        listOf(
+            THEME,
+            DYNAMIC_COLOR,
+            LIBRARY_TITLES,
+            LIBRARY_SORT,
+            FEEDS_SELECTED_SOURCE,
+            LIBRARY_GROUP_FILTER,
+            LIBRARY_SEGMENT,
+        )
 }

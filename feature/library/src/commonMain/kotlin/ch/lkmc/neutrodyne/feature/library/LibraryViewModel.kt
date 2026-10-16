@@ -11,13 +11,18 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.TitleCollator
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
+import ch.lkmc.neutrodyne.core.domain.GroupRepository
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.RefreshController
+import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
 import ch.lkmc.neutrodyne.core.model.FeedSource
+import ch.lkmc.neutrodyne.core.model.FeedSourceRef
+import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.LibraryTile
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.LibrarySegment
 import ch.lkmc.neutrodyne.core.model.settings.LibrarySort
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
@@ -30,20 +35,20 @@ import dev.zacsweers.metrox.viewmodel.ViewModelKey
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toPersistentList
+import kotlinx.collections.immutable.toPersistentMap
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-/**
- * The Library grid's ViewModel (08 Library): tiles from `observeLibraryTiles(null)` (M1a has no
- * group chips — M2), sorted by the `appearance.library_sort` setting (02 returns rows unsorted;
- * TITLE goes through [TitleCollator]), titles per `appearance.library_titles`, offline per
- * `NetworkMonitor`.
- */
+/** Library presentation and batch podcast actions (08 Library). */
+@OptIn(ExperimentalCoroutinesApi::class)
 @ViewModelKey(LibraryViewModel::class)
 @ContributesIntoMap(AppScope::class)
 @Inject
@@ -55,26 +60,113 @@ public class LibraryViewModel(
     private val settings: SettingsRepository,
     private val collator: TitleCollator,
     network: NetworkMonitor,
+    private val groups: GroupRepository,
 ) : ViewModel() {
     private val userMessages = UserMessages()
 
+    private data class GroupFilter(
+        val groups: List<Group>,
+        val memberships: Map<Long, Set<Long>>,
+        val value: String,
+    )
+
+    private val groupFilter =
+        combine(
+            groups.observeGroups(),
+            groups.observeMemberships(),
+            settings.observe(AppearanceSettingKeys.LIBRARY_GROUP_FILTER),
+        ) { rows, memberships, stored ->
+            GroupFilter(rows, memberships, stored)
+        }.distinctUntilChanged().onEach { filter ->
+            if (filter.value.isNotEmpty() && filter.value != UNGROUPED_FILTER &&
+                filter.groups.none { it.uuid == filter.value }
+            ) {
+                // Wait for both repository reads before treating a persisted UUID as deleted.
+                val result = settings.set(AppearanceSettingKeys.LIBRARY_GROUP_FILTER, "")
+                if (result !is Outcome.Success) reportWriteFailed(null)
+            }
+        }
+
+    private val content =
+        groupFilter
+            .flatMapLatest { filter ->
+                val group = filter.groups.firstOrNull { it.uuid == filter.value }
+                podcasts.observeLibraryTiles(group?.id).map { tiles ->
+                    val visible =
+                        if (filter.value == UNGROUPED_FILTER) {
+                            tiles.filter { filter.memberships[it.podcastId].isNullOrEmpty() }
+                        } else {
+                            tiles
+                        }
+                    LibraryUiState(
+                        tiles = visible.toPersistentList(),
+                        groups = filter.groups.toPersistentList(),
+                        groupFilter = group?.uuid ?: filter.value.takeIf { it == UNGROUPED_FILTER }.orEmpty(),
+                        loaded = true,
+                    )
+                }
+            }.combine(groups.observeMosaics()) { state, mosaics ->
+                state.copy(mosaics = mosaics.mapValues { it.value.toPersistentList() }.toPersistentMap())
+            }.combine(settings.observe(AppearanceSettingKeys.LIBRARY_SEGMENT)) { state, segment ->
+                state.copy(segment = segment)
+            }
+
     public val uiState: StateFlow<LibraryUiState> =
         combine(
-            podcasts.observeLibraryTiles(null),
+            content,
             settings.observe(AppearanceSettingKeys.LIBRARY_TITLES),
             settings.observe(AppearanceSettingKeys.LIBRARY_SORT),
             network.status.map { it.isConnected }.distinctUntilChanged(),
             userMessages.flow,
-        ) { tiles, showTitles, sort, online, messages ->
-            LibraryUiState(
-                tiles = sortTiles(tiles, sort).toPersistentList(),
-                loaded = true,
+        ) { content, showTitles, sort, online, messages ->
+            content.copy(
+                tiles = sortTiles(content.tiles, sort).toPersistentList(),
                 showTitles = showTitles,
                 sort = sort,
                 offline = !online,
                 messages = messages,
             )
         }.stateIn(viewModelScope, SHARING, LibraryUiState())
+
+    public fun setSegment(segment: LibrarySegment) {
+        writeSetting { settings.set(AppearanceSettingKeys.LIBRARY_SEGMENT, segment) }
+    }
+
+    /** Library storage uses the raw UUID, unlike the Feeds source encoding. */
+    public fun setGroupFilter(value: String) {
+        writeSetting { settings.set(AppearanceSettingKeys.LIBRARY_GROUP_FILTER, value) }
+    }
+
+    /** Navigate only after the device selection was written successfully. */
+    public suspend fun selectGroup(groupId: Long): Boolean {
+        val group = uiState.value.groups.firstOrNull { it.id == groupId } ?: return false
+        val result =
+            suspendRunCatching {
+                settings.set(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE, FeedSourceRef.Group(group.uuid).encode())
+            }
+        if (result.getOrNull() is Outcome.Success) return true
+
+        reportWriteFailed(result.exceptionOrNull())
+        return false
+    }
+
+    public fun refreshSelection(ids: List<Long>) {
+        if (ids.isEmpty()) return
+
+        refreshController.refreshNow(RefreshScope.Podcasts(ids.distinct()))
+    }
+
+    public fun markSelectionPlayed(ids: List<Long>) {
+        write { ids.distinct().forEach { episodes.markFeedPlayed(FeedSource.Podcast(it), null) } }
+    }
+
+    public suspend fun downloadedCount(ids: List<Long>): Int = podcasts.downloadedEpisodeIds(ids.distinct()).size
+
+    public fun unsubscribeSelection(ids: List<Long>) {
+        if (ids.isEmpty()) return
+
+        write { unsubscribeUseCase(ids.distinct()) }
+    }
 
     public fun setSort(sort: LibrarySort) {
         writeSetting { settings.set(AppearanceSettingKeys.LIBRARY_SORT, sort) }
