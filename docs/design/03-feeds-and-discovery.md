@@ -1623,6 +1623,16 @@ Serves R3.1 (links), R8.3, onboarding. Delivered in M7 (Android filters; M1 hand
 
 Serves R2.7. Delivered in M2 (common selection and the Android poster), MD2 (the desktop poster over 11's `DesktopNotifier`). Honours [D36](../PLAN.md#3-key-decisions), [D45](../PLAN.md#3-key-decisions), [D66](../PLAN.md#3-key-decisions), [D83](../PLAN.md#3-key-decisions), [D87](../PLAN.md#3-key-decisions). Channel IDs (Android): `new_episodes` (default) and `new_episodes_{groupUuid}` in channel group `grp_new_episodes`; their creation, renaming and deletion with groups is 05's. The desktop has no channels; the same effective settings decide what is announced ([11 Notifications](11-desktop.md#notifications)). Notification settings are device-local and never sync ([Settings](#settings), [10 Per-scope overrides](10-sync.md#per-scope-overrides)), so each device decides for itself.
 
+**Implementation note (2026-10-16, M2).** C4 adds common selection and run-finalisation
+wiring. `AndroidAppGraph` temporarily binds a no-op `NewEpisodePoster` until D3;
+C5 owns Android channel lifecycle. `DesktopAppGraph` binds a no-op poster until
+MD2. Neither binding displays notifications yet. Selection uses one run-level
+joined episode/podcast/membership DAO read and one batched call to B3's
+`EffectiveSettingsResolver.notifications`, with no per-podcast queries. Both
+reads internally use 500-ID SQL chunks for [02's SQLite 3.18 baseline](02-data-model.md#sql-dialect-baseline);
+episode ordering is restored across chunks. This qualifies step 2's "one query"
+wording: large runs use bounded set reads rather than exceeding bind limits.
+
 `NewEpisodeNotifier.post(batch: List<NewEpisodes>)` (`:core:data` `commonMain`) is called once per engine run with the run's `newEpisodes` (not via `IngestionEvents`, so one run yields at most one notification per channel on Android and one notification on the desktop, even across 300 feeds). Steps 1–4 are common; they produce `NewEpisodeNotice`s that the platform's `NewEpisodePoster` posts:
 
 ```kotlin
