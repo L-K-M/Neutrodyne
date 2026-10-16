@@ -47,12 +47,26 @@ public fun GroupTabLabel(
     selected: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val tones = groupTones(group.colorArgb)
-    val icon = groupIcon(group.iconKey)
+    GroupTabLabel(group.name, group.colorArgb, group.iconKey, unplayedCount, newCount, selected, modifier)
+}
+
+/** Feed tabs supply appearance metadata without manufacturing a persistent Group. */
+@Composable
+public fun GroupTabLabel(
+    name: String,
+    colorArgb: Int?,
+    iconKey: String?,
+    unplayedCount: Int,
+    newCount: Int,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val tones = groupTones(colorArgb)
+    val icon = groupIcon(iconKey)
     val description =
         stringResource(
             Res.string.group_tab_desc,
-            group.name,
+            name,
             stringResource(Res.string.group_unplayed_fmt, unplayedCount),
             stringResource(Res.string.group_new_fmt, newCount),
         )
@@ -86,7 +100,7 @@ public fun GroupTabLabel(
         }
 
         Text(
-            group.name,
+            name,
             style = MaterialTheme.typography.labelLarge,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,

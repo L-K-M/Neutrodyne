@@ -390,4 +390,9 @@
     <string name="write_failed">Couldn&apos;t save the change</string>
     <string name="feed_group_deleted">'%1$s' was deleted — showing All</string>
     <string name="feed_group_unknown">This group no longer exists. Showing All</string>
+    <string name="feeds_all">All</string>
+    <string name="feeds_ungrouped">Ungrouped</string>
+    <string name="feeds_all_groups">All groups</string>
+    <string name="feeds_next_group">Next group</string>
+    <string name="feeds_previous_group">Previous group</string>
 </resources>

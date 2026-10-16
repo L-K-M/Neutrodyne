@@ -368,4 +368,9 @@
     <string name="feeds_images_tap">Nur nach meinem Tippen</string>
     <string name="feeds_not_on_desktop">Wird auf Computern nicht verwendet</string>
     <string name="write_failed">Die Änderung konnte nicht gespeichert werden</string>
+    <string name="feeds_all">Alle</string>
+    <string name="feeds_ungrouped">Ohne Gruppe</string>
+    <string name="feeds_all_groups">Alle Gruppen</string>
+    <string name="feeds_next_group">Nächste Gruppe</string>
+    <string name="feeds_previous_group">Vorherige Gruppe</string>
 </resources>

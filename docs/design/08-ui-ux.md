@@ -1752,6 +1752,26 @@ stateDiagram-v2
 - Scroll memory per page: one `rememberSaveableStateHolder()` hoisted to the Feeds route (outside the pager); each page is wrapped in `holder.SaveableStateProvider(ref.encode())` and uses `rememberLazyListState()`, so a page keeps its position after being disposed by the pager, across tab switches and process death. When a group disappears from the tabs, `holder.removeState(ref.encode())` drops its state. A page composes its `LazyColumn` only once its `LazyPagingItems` has a non-empty snapshot or `loadState.refresh` is `NotLoading` (skeleton rows before), so a restored `LazyListState` index is not clamped to 0 by an empty first measure; with placeholders enabled (05's `PagingConfig`) the restored index then shows placeholders until Paging loads around it.
 - Lists: `items(count, key = itemKey { … }, contentType = itemContentType { … })` with keys `"d:{epochDay}"` for day headers and the episode `id` (`Long`) for rows, and content types Day 0, RSS row 1, YouTube row 2 (05 asks for distinct types for 16:9 thumbnails); placeholders render skeleton rows.
 
+**Implementation note (2026-10-16, M2):** D2 renders the shared pager and
+source-scoped chips/refresh, with the saveable-state holder owned by the route.
+Only current ± 1 pages collect paging flows, even if Compose retains extra
+pages during a fling; returning pages reacquire the ViewModel cache entry.
+The list state is independent of paging generations, including an hourly
+age-window replacement. The computed age cutoff stays out of chip filters,
+because only the separate age-limit action can clear it. Virtual tab names are localized by source, rather than
+using the repository's English metadata titles. The row-swipe key gates pager
+gestures here; row gesture actions and their settings UI remain D10, and counted
+bulk-action dialogs remain D9.
+
+**Implementation note (2026-10-16, M2):** Compose Desktop 1.12.1's
+`StateRestorationTester.emulateSaveAndRestore()` throws `NotImplementedError`
+in `platformEncodeDecode`. `FeedsScreenTest` therefore round-trips its
+`SaveableStateRegistry` with primitive values and String pager keys,
+including recreating the ViewModel over persisted selection. The Android host
+`FeedsRestorationHostTest` additionally runs the real `StateRestorationTester`
+Bundle round trip for selected-page and scroll restoration. Actual process
+termination and native desktop input checks remain device coverage.
+
 ### Header, chips and actions
 
 The first list item of every page is the header: `NdTonalButton` "Play" (subtitle "oldest first" when `playOrder = OLDEST_FIRST`), [`FeedFilterChips`](#filter-chips) and the page overflow ([Feeds](#feeds)). It scrolls away, so the pinned chrome is the top bar plus the tab row (112 dp). Play results are shown per [Issues, results and events](#issues-results-and-events).

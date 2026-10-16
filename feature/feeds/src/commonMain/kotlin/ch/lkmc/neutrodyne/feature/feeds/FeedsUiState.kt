@@ -34,6 +34,7 @@ public data class FeedsUiState(
     /** Frozen on each visit start, retained through visit writes until the next visit. */
     val visitBaselines: ImmutableMap<FeedSource, Long> = persistentMapOf(),
     val filters: FeedFilters = FeedFilters(),
+    val rowSwipe: Boolean = false,
     val offline: Boolean = false,
     val refreshing: Boolean = false,
     val hasSubscriptions: Boolean = true,

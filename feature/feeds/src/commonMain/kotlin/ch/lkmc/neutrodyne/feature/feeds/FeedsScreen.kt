@@ -32,19 +32,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.itemContentType
 import androidx.paging.compose.itemKey
-import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.NdBanner
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdPullToRefresh
-import ch.lkmc.neutrodyne.core.designsystem.components.NdTooltipIconButton
-import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.FeedFilters
@@ -56,7 +54,6 @@ import ch.lkmc.neutrodyne.core.ui.EpisodeRow
 import ch.lkmc.neutrodyne.core.ui.EpisodeRowStyle
 import ch.lkmc.neutrodyne.core.ui.FeedFilterChips
 import ch.lkmc.neutrodyne.core.ui.LocalDrawnReporter
-import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.ReportVisibleEpisodeIds
 import ch.lkmc.neutrodyne.core.ui.RowCaps
 import ch.lkmc.neutrodyne.core.ui.asString
@@ -74,8 +71,6 @@ import ch.lkmc.neutrodyne.core.ui.resources.feeds_onboarding_title
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_refresh
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_search
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_show_played
-import ch.lkmc.neutrodyne.core.ui.resources.nav_feeds
-import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
 import org.jetbrains.compose.resources.stringResource
 
 private const val SKELETON_ROWS = 6
@@ -83,20 +78,10 @@ private const val CONTENT_DAY = 0
 private const val CONTENT_RSS = 1
 private const val CONTENT_YOUTUBE = 2
 
-/**
- * The All feed (08 Feeds, M1a): one page — the tab row and pager arrive with M2's groups.
- * [FeedsScreen] stays free of ViewModel and navigator types so desktop UI tests can drive it
- * with fakes; [FeedsRoute] owns the Metro lookup and the action routing split (navigation and
- * URL opens at the route, repository writes in [FeedsViewModel]).
- *
- * The page header's "Play" button waits for M4's `PlaybackController` — deviation recorded in
- * 08 (2026-10-07).
- *
- * 08 Live row state defers map reads to each row to limit recomposition to its own slot.
- */
+/** One source's M1 list, with source-scoped chips, refresh and visit highlights. */
 @Suppress("ktlint:compose:state-param-check")
 @Composable
-internal fun FeedsScreen(
+internal fun FeedPage(
     state: FeedsUiState,
     items: LazyPagingItems<FeedItem>,
     onRefresh: () -> Unit,
@@ -108,25 +93,11 @@ internal fun FeedsScreen(
     modifier: Modifier = Modifier,
     live: State<Map<Long, RowLive>> = rememberUpdatedState(emptyMap()),
     onVisibleIds: (Set<Long>) -> Unit = {},
+    visitBaseline: Long? = null,
 ) {
     var confirmMarkAll by rememberSaveable { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize()) {
-        NdTopAppBar(
-            title = stringResource(Res.string.nav_feeds),
-            actions = {
-                // A mouse cannot pull (08 Pull to refresh): the desktop gets a Refresh button.
-                if (LocalPlatformKind.current == PlatformKind.DESKTOP) {
-                    NdTooltipIconButton(
-                        onClick = onRefresh,
-                        icon = NdIcons.Refresh,
-                        tooltip = stringResource(Res.string.feeds_refresh),
-                    )
-                }
-                SettingsGearButton()
-            },
-        )
-
         NdPullToRefresh(isRefreshing = state.refreshing, onRefresh = onRefresh) {
             if (!state.hasSubscriptions) {
                 EmptyState(
@@ -148,6 +119,7 @@ internal fun FeedsScreen(
                     onFiltersChange = onFiltersChange,
                     onAction = onAction,
                     onMarkAllPlayedClick = { confirmMarkAll = true },
+                    visitBaseline = visitBaseline,
                 )
             }
         }
@@ -181,6 +153,7 @@ private fun FeedList(
     onFiltersChange: (FeedFilters) -> Unit,
     onAction: (EpisodeAction) -> Unit,
     onMarkAllPlayedClick: () -> Unit,
+    visitBaseline: Long?,
 ) {
     val listState = rememberLazyListState()
     val refreshState = items.loadState.refresh
@@ -248,7 +221,7 @@ private fun FeedList(
         // failure has no footer at all, and keeping both surfaces duplicated the error at
         // the list end.
         LoadErrorBanner(items)
-        LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
+        LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth().testTag("feed-list")) {
             offlineBannerItem(state.offline)
             item(key = "header", contentType = "header") {
                 FeedHeader(state.filters, onFiltersChange, onRefresh, onMarkAllPlayedClick)
@@ -300,7 +273,8 @@ private fun FeedList(
                             live = rowLive,
                             style = EpisodeRowStyle.FEED,
                             caps = RowCaps.FULL.copy(offline = state.offline),
-                            highlightNew = true,
+                            highlightNew =
+                                item.row.isNew && visitBaseline != null && item.row.firstSeenAt > visitBaseline,
                             selected = null,
                             onAction = onAction,
                         )
