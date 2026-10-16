@@ -46,6 +46,7 @@ internal fun PodcastRoute(key: PodcastKey) {
         }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val items = viewModel.feed.collectAsLazyPagingItems()
+    val live = viewModel.live.collectAsStateWithLifecycle()
     val navigator = LocalAppNavigator.current
     val urls = LocalPlatformActions.current.urls
     val snackbar = LocalSnackbarHost.current
@@ -65,6 +66,8 @@ internal fun PodcastRoute(key: PodcastKey) {
     PodcastScreen(
         state = state,
         items = items,
+        live = live,
+        onVisibleIds = viewModel::onVisibleIds,
         pendingUnsubscribe = pending,
         onRefresh = viewModel::onRefresh,
         onOpenSettings = { navigator.pushDetail(PodcastSettingsKey(key.podcastId)) },

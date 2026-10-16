@@ -21,9 +21,12 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -45,6 +48,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.FeedFilters
+import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
@@ -53,6 +57,7 @@ import ch.lkmc.neutrodyne.core.ui.EpisodeRowStyle
 import ch.lkmc.neutrodyne.core.ui.FeedFilterChips
 import ch.lkmc.neutrodyne.core.ui.LocalDrawnReporter
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
+import ch.lkmc.neutrodyne.core.ui.ReportVisibleEpisodeIds
 import ch.lkmc.neutrodyne.core.ui.RowCaps
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.offlineBannerItem
@@ -86,7 +91,10 @@ private const val CONTENT_YOUTUBE = 2
  *
  * The page header's "Play" button waits for M4's `PlaybackController` — deviation recorded in
  * 08 (2026-10-07).
+ *
+ * 08 Live row state defers map reads to each row to limit recomposition to its own slot.
  */
+@Suppress("ktlint:compose:state-param-check")
 @Composable
 internal fun FeedsScreen(
     state: FeedsUiState,
@@ -98,6 +106,8 @@ internal fun FeedsScreen(
     onAddPodcast: () -> Unit,
     onSearch: () -> Unit,
     modifier: Modifier = Modifier,
+    live: State<Map<Long, RowLive>> = rememberUpdatedState(emptyMap()),
+    onVisibleIds: (Set<Long>) -> Unit = {},
 ) {
     var confirmMarkAll by rememberSaveable { mutableStateOf(false) }
 
@@ -132,6 +142,8 @@ internal fun FeedsScreen(
                 FeedList(
                     state = state,
                     items = items,
+                    live = live,
+                    onVisibleIds = onVisibleIds,
                     onRefresh = onRefresh,
                     onFiltersChange = onFiltersChange,
                     onAction = onAction,
@@ -157,8 +169,12 @@ internal fun FeedsScreen(
     }
 }
 
+// Keep the live map unread until the individual row (08 Live row state).
+@Suppress("ktlint:compose:state-param-check")
 @Composable
 private fun FeedList(
+    live: State<Map<Long, RowLive>>,
+    onVisibleIds: (Set<Long>) -> Unit,
     state: FeedsUiState,
     items: LazyPagingItems<FeedItem>,
     onRefresh: () -> Unit,
@@ -209,6 +225,21 @@ private fun FeedList(
         )
         return
     }
+
+    val episodeStart = if (state.offline) 2 else 1
+    ReportVisibleEpisodeIds(
+        listState = listState,
+        itemCount = { episodeStart + items.itemCount },
+        idAt = { index ->
+            val pagedIndex = index - episodeStart
+            if (pagedIndex in 0 until items.itemCount) {
+                (items.peek(pagedIndex) as? FeedItem.Episode)?.row?.id
+            } else {
+                null
+            }
+        },
+        onIds = onVisibleIds,
+    )
 
     Column(Modifier.fillMaxSize()) {
         // 08's paging-error rule (revised 2026-10-14): every load failure over a non-empty
@@ -263,9 +294,10 @@ private fun FeedList(
                     }
 
                     is FeedItem.Episode -> {
+                        val rowLive by remember(item.row.id, live) { derivedStateOf { live.value[item.row.id] } }
                         EpisodeRow(
                             row = item.row,
-                            live = null,
+                            live = rowLive,
                             style = EpisodeRowStyle.FEED,
                             caps = RowCaps.FULL.copy(offline = state.offline),
                             highlightNew = true,

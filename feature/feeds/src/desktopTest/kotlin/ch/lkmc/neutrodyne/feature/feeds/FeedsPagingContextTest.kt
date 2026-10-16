@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.feature.feeds
 
 import androidx.paging.testing.asSnapshot
+import ch.lkmc.neutrodyne.core.testing.FakeEpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
@@ -63,6 +64,7 @@ class FeedsPagingContextTest : MainDispatcherTest() {
                     FakeNetworkMonitor(FakeNetworkMonitor.ONLINE),
                     FakePodcastRepository(),
                     TestClock(),
+                    FakeEpisodeLiveStateSource(),
                     defaultDispatcher,
                 )
 
