@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.feature.feeds
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -28,7 +29,7 @@ import dev.zacsweers.metrox.viewmodel.metroViewModel
 @Composable
 internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val items = viewModel.feed.collectAsLazyPagingItems()
+    val items = remember(viewModel) { viewModel.pagingFor(FeedSource.All) }.collectAsLazyPagingItems()
     val live = viewModel.live.collectAsStateWithLifecycle()
     val navigator = LocalAppNavigator.current
     val urls = LocalPlatformActions.current.urls
@@ -39,7 +40,7 @@ internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
         items = items,
         live = live,
         onVisibleIds = { viewModel.onVisibleIds(FeedSource.All, it) },
-        onRefresh = viewModel::onRefresh,
+        onRefresh = { viewModel.onRefresh(FeedSource.All) },
         onFiltersChange = viewModel::onFiltersChange,
         onAction = { action ->
             when (dispatchEpisodeRoute(action, navigator, urls)) {

@@ -1705,6 +1705,23 @@ encoding without depending on a feature module. Canonical UUID references
 round-trip; malformed values decode to All. Resolving a valid but unknown UUID
 and the selection fallback remain D1/D2 UI work.
 
+**Implementation note (2026-10-16, M2):** D1 delivers pager state while the
+route continues to render All; tab/pager rendering and lifecycle visit calls
+arrive in D2. `FeedsUiState.prefs` describes the selected source, while its
+compatibility `filters` field describes the rendered All page. The source-keyed
+cache uses B2's `pagedFeed(source)` helper to observe and compare effective
+filters/order before replacing a pager. Per-entry child scopes own `cachedIn`.
+The ViewModel exposes both the union live map and `liveBySource` projections,
+and `visitBaselines` retains each page's visit-start highlight baseline.
+Each changed stored reference waits for fresh tab and group emissions, so a
+route immediately after creating or restoring a group cannot reject a valid
+UUID using a previous observer snapshot. A successful explicit re-settle also
+resolves unchanged stored values after a failed fallback. Visit baseline reads
+wait for that source's previous visit write; visible-ID disposal retains its
+last source mapping even after a transient tab disappears. An evicted paging
+flow is cancelled: D2 must reacquire `pagingFor` when its page returns,
+including pages retained by Compose during a fling.
+
 ### Selection persistence and fallback
 
 ```mermaid

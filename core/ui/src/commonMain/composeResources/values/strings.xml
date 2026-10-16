@@ -388,4 +388,6 @@
     <string name="feeds_images_tap">Only after I tap</string>
     <string name="feeds_not_on_desktop">Not used on computers</string>
     <string name="write_failed">Couldn&apos;t save the change</string>
+    <string name="feed_group_deleted">'%1$s' was deleted — showing All</string>
+    <string name="feed_group_unknown">This group no longer exists. Showing All</string>
 </resources>
