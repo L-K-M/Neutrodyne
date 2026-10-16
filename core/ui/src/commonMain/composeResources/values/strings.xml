@@ -380,4 +380,10 @@
     <string name="feeds_images_tap">Only after I tap</string>
     <string name="feeds_not_on_desktop">Not used on computers</string>
     <string name="write_failed">Couldn&apos;t save the change</string>
+    <plurals name="notification_new_episodes">
+        <item quantity="one">%1$d new episode</item>
+        <item quantity="other">%1$d new episodes</item>
+    </plurals>
+    <string name="notification_episode_line">%1$s — %2$s</string>
+    <string name="notification_other_podcasts">Other podcasts</string>
 </resources>

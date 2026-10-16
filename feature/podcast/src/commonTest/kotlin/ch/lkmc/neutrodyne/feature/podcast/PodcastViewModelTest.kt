@@ -19,6 +19,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeEpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
+import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
@@ -61,7 +62,7 @@ class PodcastViewModelTest : MainDispatcherTest() {
             feeds,
             episodes,
             refreshController,
-            UnsubscribeUseCase(podcasts),
+            UnsubscribeUseCase(podcasts, FakeNewEpisodePoster()),
             network,
             liveSource,
         )

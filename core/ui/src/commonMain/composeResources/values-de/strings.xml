@@ -360,4 +360,10 @@
     <string name="feeds_images_tap">Nur nach meinem Tippen</string>
     <string name="feeds_not_on_desktop">Wird auf Computern nicht verwendet</string>
     <string name="write_failed">Die Änderung konnte nicht gespeichert werden</string>
+    <plurals name="notification_new_episodes">
+        <item quantity="one">%1$d neue Episode</item>
+        <item quantity="other">%1$d neue Episoden</item>
+    </plurals>
+    <string name="notification_episode_line">%1$s — %2$s</string>
+    <string name="notification_other_podcasts">Andere Podcasts</string>
 </resources>

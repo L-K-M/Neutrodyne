@@ -33,6 +33,7 @@ import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.database.PodcastFetchState
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.domain.NewEpisodePoster
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SecretStore
@@ -584,6 +585,7 @@ internal fun newUnsubscribe(
     clock: TestClock,
     secrets: SecretStore = FakeSecretStore(),
     coordinator: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
+    poster: NewEpisodePoster = FakeNewEpisodePoster(),
     fetcher: Provider<FeedFetcher> = Provider { error("setCredentials is not wired in this fixture") },
     tempFiles: FeedTempFiles =
         FeedTempFiles(
@@ -611,6 +613,7 @@ internal fun newUnsubscribe(
             fetcher = fetcher,
             tempFiles = tempFiles,
         ),
+        poster,
     )
 
 private fun newFeedMoves(
