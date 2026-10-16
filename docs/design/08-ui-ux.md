@@ -436,6 +436,18 @@ Startup metric (Android): the Feeds route calls `ReportDrawnWhen { selectedPage.
 
 A three-column grid of [`GroupMosaic`](#groupmosaic-and-group-tab-label) tiles: section "Recent" (up to 4 groups by `lastViewedAt`) then "All groups" A–Z (`TitleCollator`), including groups with `showAsTab = false` (marked with `visibility_off`). Tap → select that group in Feeds (hidden groups become a [transient tab](#selection-persistence-and-fallback)) and close. Buttons: "New group" → `GroupEditKey(null)`, "Manage groups" → `GroupsManageKey`. Empty: "No groups yet" + "New group".
 
+**Implementation note (2026-10-16, M2):** D2b writes the UUID-based
+`ui.feeds_selected_source` through `SettingsRepository`, the same application
+API the pager uses. The sheet closes after a successful write; a failed write
+keeps it open and shows the shared write-error message inside the sheet.
+Recent includes groups with a visit time and breaks equal times by title.
+The picker remains reachable when every group is hidden: the All-only tab row
+stays visible while groups exist. With no groups and only All, that row is absent.
+The shared overlay supports a half-height initial detent for `AllGroupsKey`;
+short content uses Material's available anchors. Other sheet keys retain their
+fully expanded initial detent. The desktop sheet focuses New group on open;
+the window surface handles scrim dismissal and returns focus on close.
+
 ### Library
 
 `LibraryKey`, `:feature:library`, M1 (grid), M2 (groups, chips, selection), M10 (density, shared elements).

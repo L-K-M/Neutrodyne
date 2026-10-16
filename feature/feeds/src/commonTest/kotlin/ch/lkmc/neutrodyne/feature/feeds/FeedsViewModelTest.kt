@@ -66,6 +66,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotSame
 import kotlin.test.assertNull
@@ -597,6 +598,28 @@ class FeedsViewModelTest : MainDispatcherTest() {
                     .single()
                     .text,
             )
+        }
+
+    @Test
+    fun hiddenGroupCatalogKeepsPickerAvailableWithoutAddingTabs() =
+        viewModelTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            runCurrent()
+            assertFalse(viewModel.uiState.value.hasGroups)
+
+            group(showAsTab = false)
+            runCurrent()
+            assertTrue(viewModel.uiState.value.hasGroups)
+            assertEquals(
+                listOf(FeedSourceRef.All),
+                viewModel.uiState.value.tabs
+                    .map { it.ref },
+            )
+
+            groups.groups.value = emptyList()
+            runCurrent()
+            assertFalse(viewModel.uiState.value.hasGroups)
         }
 
     @Test

@@ -203,6 +203,7 @@ public class FeedsViewModel(
                     Selection(
                         tabs = if (selectedTab?.transient == true) visible + selectedTab else visible,
                         selected = resolved,
+                        hasGroups = allGroups.isNotEmpty(),
                     )
                 if (needsFallback) persistSelection(resolved)
 
@@ -274,6 +275,7 @@ public class FeedsViewModel(
                 rowSwipe = rowSwipe,
                 tabs = selected.tabs.toImmutableList(),
                 selected = selected.selected,
+                hasGroups = selected.hasGroups,
                 prefs = prefs.takeIf { selected.tabs.isNotEmpty() && prefsSource == selected.source },
                 visitBaselines = visits.toImmutableMap(),
             )
@@ -478,6 +480,7 @@ public class FeedsViewModel(
     private data class Selection(
         val tabs: List<FeedTabUi> = emptyList(),
         val selected: FeedSourceRef = FeedSourceRef.All,
+        val hasGroups: Boolean = false,
     ) {
         val source: FeedSource get() = tabs.find { it.ref == selected }?.tab?.source ?: FeedSource.All
     }

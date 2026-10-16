@@ -653,6 +653,7 @@ class FeedsScreenTest {
     fun oneTabHasNoTabRowAndEnglishVirtualNamesIgnoreRepositoryTitles() =
         runComposeUiTest {
             val fixture = PagerFixture()
+            fixture.groups.groups.value = emptyList()
             fixture.feeds.tabs.value = listOf(FeedTab(FeedSource.All, "Wrong All title", null, null, null))
             setContent { fixture.Content() }
             fixture.awaitSelected(this, 0)

@@ -201,7 +201,8 @@ internal fun FeedsScreen(
                 SettingsGearButton()
             },
         )
-        if (tabs.size > 1) {
+        // The picker must remain reachable when every group is hidden from tabs.
+        if (tabs.size > 1 || state.hasGroups) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 NdTabRow(pager.currentPage.coerceIn(tabs.indices), Modifier.weight(1f)) {
                     tabs.forEachIndexed { index, entry ->
