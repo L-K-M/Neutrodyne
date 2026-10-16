@@ -66,6 +66,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.group_edit_new
 import ch.lkmc.neutrodyne.core.ui.resources.group_edit_tab
 import ch.lkmc.neutrodyne.core.ui.resources.group_edit_title
 import ch.lkmc.neutrodyne.core.ui.resources.group_hidden
+import ch.lkmc.neutrodyne.core.ui.resources.group_settings_title
 import ch.lkmc.neutrodyne.core.ui.resources.groups_manage_down
 import ch.lkmc.neutrodyne.core.ui.resources.groups_manage_empty
 import ch.lkmc.neutrodyne.core.ui.resources.groups_manage_empty_body
@@ -96,6 +97,7 @@ internal fun GroupsManageScreen(
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
     topBarActions: @Composable () -> Unit = {},
+    onSettings: (Long) -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val reorderState = rememberReorderableLazyListState(listState) { _, to -> onDragOver(to.key as Long) }
@@ -179,6 +181,7 @@ internal fun GroupsManageScreen(
                                     onShowAsTab,
                                     onEdit,
                                     onDelete,
+                                    onSettings,
                                     handle = {
                                         Box(
                                             Modifier
@@ -225,6 +228,7 @@ private fun ManageRow(
     onShowAsTab: (Long, Boolean) -> Unit,
     onEdit: (Long) -> Unit,
     onDelete: (Long) -> Unit,
+    onSettings: (Long) -> Unit,
     handle: @Composable () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
@@ -313,6 +317,10 @@ private fun ManageRow(
                 DropdownMenuItem(text = { Text(stringResource(Res.string.group_edit_title)) }, onClick = {
                     menuOpen = false
                     onEdit(group.id)
+                })
+                DropdownMenuItem(text = { Text(stringResource(Res.string.group_settings_title)) }, onClick = {
+                    menuOpen = false
+                    onSettings(group.id)
                 })
                 DropdownMenuItem(text = { Text(tabLabel) }, onClick = {
                     menuOpen = false

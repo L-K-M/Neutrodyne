@@ -420,4 +420,9 @@
     <string name="setting_invalid_value">Wähle einen unterstützten Wert</string>
     <string name="notifications_blocked">Benachrichtigungen sind blockiert</string>
     <string name="notifications_open_settings">Einstellungen öffnen</string>
+
+    <!-- M2 group settings -->
+    <string name="group_settings_title">Gruppeneinstellungen</string>
+    <string name="group_settings_named_title">Gruppeneinstellungen · %1$s</string>
+    <string name="setting_use_default">Standard verwenden (%1$s, %2$s)</string>
 </resources>

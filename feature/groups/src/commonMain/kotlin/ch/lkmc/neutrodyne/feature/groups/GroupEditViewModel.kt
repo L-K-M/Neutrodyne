@@ -237,7 +237,7 @@ internal class GroupEditViewModel
                     }
                 } else {
                     // Rename first: a conflicting name must not write the look, flags or memberships.
-                    // Keep feed order owned by group settings, including changes made while this editor was open.
+                    // Keep feed order owned by Feeds, including changes made while this editor was open.
                     val current = groups.observeGroup(groupId).first()
                     if (current == null) {
                         reportError(GroupError.NotFound)
