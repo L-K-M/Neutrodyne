@@ -421,6 +421,10 @@ Paged properties (`items: Flow<PagingData<T>>`) are asserted with `paging-testin
   sets live in `:core:ui` (`recordRoborazziAndroidHostTest`,
   `recordRoborazziDesktop`); Android goldens use one `@Test` per capture
   because `AndroidComposeTestRule.setContent` runs once per test.
+  Desktop goldens avoid emoji and other glyphs that fall back to system fonts:
+  Skia uses the host's emoji font, so the runner and a dev machine render them
+  differently (seen on #131). Robolectric bundles its fonts, so the Android set
+  keeps the emoji cases.
 
 - **Tiers** (decides 08 open question 15): `ScreenshotTier.PR` captures every subject in light and dark at font scale 1.0, LTR, plus one stress variant per subject (dark, 2.0, `ar-XB`) — on the desktop at a 900 dp window. `ScreenshotTier.FULL` adds the remaining columns of [08's matrix](08-ui-ux.md#screenshot-matrix) (pure black, 1.5, 2.0 and RTL for every state; all widths and postures; desktop windows of 600 and 1400 dp, PLAN MD4 AC2). PR CI verifies `PR`; nightly verifies `FULL`. All reference PNGs (both tiers, both sets) are committed. Budget: ≤ 800 images and ≤ 30 MB for the Android set, ≤ 400 images and ≤ 15 MB for the desktop set; exceeding it requires dropping redundant variants, not Git LFS (keeps contributors' and Weblate's clones simple).
 

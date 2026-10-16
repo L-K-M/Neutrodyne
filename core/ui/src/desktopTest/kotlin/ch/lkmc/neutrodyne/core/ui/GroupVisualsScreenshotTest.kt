@@ -23,8 +23,10 @@ import kotlin.test.Test
 
 /**
  * Desktop golden set for the M2 group visuals (09 Compose UI and screenshot tests; 08's
- * screenshot matrix): `GroupMosaic` at 0–4 members in light and dark plus long/emoji names and
- * the hidden-group marker, and `GroupTabLabel` at counts 0 / 9 / 99+ with long/emoji names.
+ * screenshot matrix): `GroupMosaic` at 0–4 members in light and dark plus long names and the
+ * hidden-group marker, and `GroupTabLabel` at counts 0 / 9 / 99+ with long names. Emoji names are
+ * not captured here: desktop Skia falls back to the host's system emoji font, which differs between
+ * machines; the Android set (Robolectric's bundled fonts) and the semantics tests cover them.
  * Goldens live in `core/ui/screenshots/desktop/`; record via `recordRoborazziDesktop`.
  *
  * Determinism: fixed 1× density window, `NeutrodyneTheme` with `dynamicColor = false`, and
@@ -82,19 +84,11 @@ class GroupVisualsScreenshotTest {
     }
 
     @Test
-    fun mosaicLongAndEmojiNames() {
+    fun mosaicLongName() {
         installFakeImageLoader(mosaicImages())
         capture("groupmosaic_longname") {
             GroupMosaic(
                 group = groupFixture(name = "Sehr langer Gruppenname der nicht in die Zeile passt"),
-                members = mosaicMembers(4),
-                unplayedCount = 14,
-                newCount = 3,
-            )
-        }
-        capture("groupmosaic_emoji") {
-            GroupMosaic(
-                group = groupFixture(name = "🎧 Podcasts 🎙️🔥"),
                 members = mosaicMembers(4),
                 unplayedCount = 14,
                 newCount = 3,
@@ -142,14 +136,6 @@ class GroupVisualsScreenshotTest {
                 unplayedCount = 9,
                 newCount = 4,
                 selected = false,
-            )
-        }
-        capture("grouptab_emoji", height = 160) {
-            GroupTabLabel(
-                groupFixture(name = "🎧 Podcasts 🎙️🔥"),
-                unplayedCount = 9,
-                newCount = 4,
-                selected = true,
             )
         }
         capture("grouptab_dot", height = 160) {
