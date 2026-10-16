@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.feature.feeds
 
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -57,8 +58,10 @@ import ch.lkmc.neutrodyne.core.navigation.AllGroupsKey
 import ch.lkmc.neutrodyne.core.navigation.AppNavigator
 import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
 import ch.lkmc.neutrodyne.core.navigation.GroupsManageKey
+import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
+import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
@@ -71,6 +74,8 @@ import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.LocalUiClock
+import ch.lkmc.neutrodyne.core.ui.navigation.NavigationState
+import ch.lkmc.neutrodyne.core.ui.navigation.rememberNavigationState
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -139,7 +144,29 @@ class AllGroupsSheetTest {
             waitForIdle()
             assertSelection(6)
             onNodeWithTag("all-groups-sheet").assertDoesNotExist()
-            assertEquals(listOf<RecordingAppNavigator.Call>(RecordingAppNavigator.Call.Pop), fixture.recording.calls)
+            assertEquals(
+                listOf<RecordingAppNavigator.Call>(RecordingAppNavigator.Call.PopEntry(AllGroupsKey)),
+                fixture.recording.calls,
+            )
+        }
+
+    @Test
+    fun completionAndDismissDuringExitKeepUnderlyingPodcast() =
+        runComposeUiTest {
+            setContent { fixture.Content(SheetHost.RETAINED_EXIT) }
+            onNodeWithTag("recent:${allGroupsTestGroup(6).uuid}").performClick()
+            waitForIdle()
+            assertSelection(6)
+
+            // Keep the outgoing content composed, as an overlay can be during its exit.
+            onNodeWithTag("all-groups-sheet").performKeyInput { pressKey(Key.Escape) }
+            onNodeWithText("New group").performClick()
+            onNodeWithText("Manage groups").performClick()
+            waitForIdle()
+
+            assertEquals(listOf(LibraryKey, PodcastKey(7)), fixture.navigation.stack(LibraryKey).toList())
+            assertEquals(LibraryKey, fixture.navigation.selectedTab)
+            onNodeWithText("Underlying podcast").assertIsDisplayed()
         }
 
     @Test
@@ -190,7 +217,10 @@ class AllGroupsSheetTest {
             onNodeWithTag("recent-heading").assertDoesNotExist()
             onNodeWithText("New group").performClick()
             assertEquals(
-                listOf(RecordingAppNavigator.Call.Pop, RecordingAppNavigator.Call.Push(GroupEditKey(null))),
+                listOf(
+                    RecordingAppNavigator.Call.PopEntry(AllGroupsKey),
+                    RecordingAppNavigator.Call.Push(GroupEditKey(null)),
+                ),
                 fixture.recording.calls,
             )
         }
@@ -202,7 +232,10 @@ class AllGroupsSheetTest {
             onNodeWithText("New group").performClick()
             onNodeWithTag("all-groups-sheet").assertDoesNotExist()
             assertEquals(
-                listOf(RecordingAppNavigator.Call.Pop, RecordingAppNavigator.Call.Push(GroupEditKey(null))),
+                listOf(
+                    RecordingAppNavigator.Call.PopEntry(AllGroupsKey),
+                    RecordingAppNavigator.Call.Push(GroupEditKey(null)),
+                ),
                 fixture.recording.calls,
             )
         }
@@ -214,7 +247,10 @@ class AllGroupsSheetTest {
             onNodeWithText("Manage groups").performClick()
             onNodeWithTag("all-groups-sheet").assertDoesNotExist()
             assertEquals(
-                listOf(RecordingAppNavigator.Call.Pop, RecordingAppNavigator.Call.Push(GroupsManageKey)),
+                listOf(
+                    RecordingAppNavigator.Call.PopEntry(AllGroupsKey),
+                    RecordingAppNavigator.Call.Push(GroupsManageKey),
+                ),
                 fixture.recording.calls,
             )
         }
@@ -227,7 +263,10 @@ class AllGroupsSheetTest {
             onNodeWithTag("all-groups-sheet").performKeyInput { pressKey(Key.Escape) }
             onNodeWithTag("all-groups-sheet").assertDoesNotExist()
             onNodeWithText("Open groups").assertIsFocused()
-            assertEquals(listOf<RecordingAppNavigator.Call>(RecordingAppNavigator.Call.Pop), fixture.recording.calls)
+            assertEquals(
+                listOf<RecordingAppNavigator.Call>(RecordingAppNavigator.Call.PopEntry(AllGroupsKey)),
+                fixture.recording.calls,
+            )
             assertEquals("all", runBlocking { fixture.settings.get(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE) })
         }
 
@@ -255,7 +294,10 @@ class AllGroupsSheetTest {
             setSheet()
             onNodeWithContentDescription("Close sheet").performTouchInput { click(Offset(4f, 4f)) }
             onNodeWithTag("all-groups-sheet").assertDoesNotExist()
-            assertEquals(listOf<RecordingAppNavigator.Call>(RecordingAppNavigator.Call.Pop), fixture.recording.calls)
+            assertEquals(
+                listOf<RecordingAppNavigator.Call>(RecordingAppNavigator.Call.PopEntry(AllGroupsKey)),
+                fixture.recording.calls,
+            )
             assertEquals("all", runBlocking { fixture.settings.get(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE) })
         }
 
@@ -280,7 +322,7 @@ class AllGroupsSheetTest {
     }
 }
 
-private enum class SheetHost { OPENER, FEEDS }
+private enum class SheetHost { OPENER, FEEDS, RETAINED_EXIT }
 
 @OptIn(ExperimentalCoroutinesApi::class)
 private class AllGroupsSheetFixture {
@@ -291,6 +333,7 @@ private class AllGroupsSheetFixture {
         }
     val settings = FakeSettingsRepository()
     val recording = RecordingAppNavigator()
+    lateinit var navigation: NavigationState
     lateinit var feedModel: FeedsViewModel
     private val feeds = FakeFeedRepository()
     private val store = ViewModelStore()
@@ -298,9 +341,10 @@ private class AllGroupsSheetFixture {
     private var open by mutableStateOf(false)
     private val navigator =
         object : AppNavigator by recording {
-            override fun pop(): Boolean {
-                open = false
-                return recording.pop()
+            override fun pop(key: NavKey): Boolean {
+                val popped = recording.pop(key)
+                if (popped) open = false
+                return popped
             }
         }
 
@@ -344,15 +388,24 @@ private class AllGroupsSheetFixture {
                 Dispatchers.resetMain()
             }
         }
+        val nav = rememberNavigationState(LibraryKey)
+        remember(nav) {
+            nav.push(PodcastKey(7))
+            nav.push(AllGroupsKey)
+        }
+        navigation = nav
+        val routeNavigator = if (host == SheetHost.RETAINED_EXIT) nav else navigator
         val owner = remember { AllGroupsOwner() }
         CompositionLocalProvider(
-            LocalAppNavigator provides navigator,
+            LocalAppNavigator provides routeNavigator,
             LocalLifecycleOwner provides owner,
             LocalPlatformKind provides platform,
             LocalUiClock provides clock,
         ) {
             NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
-                if (host == SheetHost.FEEDS) {
+                if (host == SheetHost.RETAINED_EXIT) {
+                    if (nav.stack(LibraryKey).lastOrNull() == PodcastKey(7)) Text("Underlying podcast")
+                } else if (host == SheetHost.FEEDS) {
                     val state by pagerModel.uiState.collectAsStateWithLifecycle()
                     FeedsScreen(
                         state = state,
@@ -372,9 +425,9 @@ private class AllGroupsSheetFixture {
                     LaunchedEffect(Unit) { focus.requestFocus() }
                     NdTextButton("Open groups", { open = true }, Modifier.focusRequester(focus))
                 }
-                if (open) {
+                if (open || host == SheetHost.RETAINED_EXIT) {
                     NdModalBottomSheet(
-                        onDismissRequest = { navigator.pop() },
+                        onDismissRequest = { routeNavigator.pop(AllGroupsKey) },
                         initialExpansion = NdSheetExpansion.HALF,
                     ) {
                         AllGroupsRoute(model)

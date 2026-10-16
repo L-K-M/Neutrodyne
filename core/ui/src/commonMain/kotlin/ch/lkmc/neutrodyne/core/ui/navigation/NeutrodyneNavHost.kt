@@ -102,8 +102,12 @@ public fun NeutrodyneNavHost(
                 onBack = { state.pop() },
                 sceneStrategies =
                     listOf(
-                        rememberNdBottomSheetSceneStrategy(),
-                        rememberNdDialogSceneStrategy(),
+                        rememberNdBottomSheetSceneStrategy { entry ->
+                            state.pop(entry.metadata.getValue(PANE_NAV_KEY) as NavKey)
+                        },
+                        rememberNdDialogSceneStrategy { entry ->
+                            state.pop(entry.metadata.getValue(PANE_NAV_KEY) as NavKey)
+                        },
                         panes,
                     ),
                 transitionSpec = {

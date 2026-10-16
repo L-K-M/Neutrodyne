@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.ui.navigation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.rememberLifecycleOwner
@@ -70,7 +71,9 @@ private class NdSheetScene<T : Any>(
  * The strategy claiming entries whose metadata carries [NdSceneMetadata.bottomSheet]; always listed
  * before the pane strategies so a sheet overlays the underlying scene.
  */
-public class NdBottomSheetSceneStrategy<T : Any> : SceneStrategy<T> {
+public class NdBottomSheetSceneStrategy<T : Any>(
+    private val onDismiss: (NavEntry<T>) -> Unit,
+) : SceneStrategy<T> {
     override fun SceneStrategyScope<T>.calculateScene(entries: List<NavEntry<T>>): Scene<T>? {
         val lastEntry = entries.lastOrNull() ?: return null
         if (lastEntry.metadata[NdSceneMetadata.KEY_OVERLAY] != NdSceneMetadata.OVERLAY_SHEET) return null
@@ -79,14 +82,18 @@ public class NdBottomSheetSceneStrategy<T : Any> : SceneStrategy<T> {
             entry = lastEntry,
             previousEntries = entries.dropLast(1),
             overlaidEntries = entries.dropLast(1),
-            onBack = onBack,
+            onBack = { onDismiss(lastEntry) },
         )
     }
 }
 
 @Composable
-public fun <T : Any> rememberNdBottomSheetSceneStrategy(): NdBottomSheetSceneStrategy<T> =
-    remember { NdBottomSheetSceneStrategy() }
+public fun <T : Any> rememberNdBottomSheetSceneStrategy(
+    onDismiss: (NavEntry<T>) -> Unit,
+): NdBottomSheetSceneStrategy<T> {
+    val currentOnDismiss = rememberUpdatedState(onDismiss)
+    return remember { NdBottomSheetSceneStrategy { currentOnDismiss.value(it) } }
+}
 
 /**
  * An [OverlayScene] rendering [entry] in a `Dialog` (like Nav3's `DialogScene`) — [NdDialog] is a
@@ -128,7 +135,9 @@ private class NdDialogScene<T : Any>(
 }
 
 /** The strategy claiming entries whose metadata carries [NdSceneMetadata.dialog]. */
-public class NdDialogSceneStrategy<T : Any> : SceneStrategy<T> {
+public class NdDialogSceneStrategy<T : Any>(
+    private val onDismiss: (NavEntry<T>) -> Unit,
+) : SceneStrategy<T> {
     override fun SceneStrategyScope<T>.calculateScene(entries: List<NavEntry<T>>): Scene<T>? {
         val lastEntry = entries.lastOrNull() ?: return null
         if (lastEntry.metadata[NdSceneMetadata.KEY_OVERLAY] != NdSceneMetadata.OVERLAY_DIALOG) return null
@@ -137,10 +146,13 @@ public class NdDialogSceneStrategy<T : Any> : SceneStrategy<T> {
             entry = lastEntry,
             previousEntries = entries.dropLast(1),
             overlaidEntries = entries.dropLast(1),
-            onBack = onBack,
+            onBack = { onDismiss(lastEntry) },
         )
     }
 }
 
 @Composable
-public fun <T : Any> rememberNdDialogSceneStrategy(): NdDialogSceneStrategy<T> = remember { NdDialogSceneStrategy() }
+public fun <T : Any> rememberNdDialogSceneStrategy(onDismiss: (NavEntry<T>) -> Unit): NdDialogSceneStrategy<T> {
+    val currentOnDismiss = rememberUpdatedState(onDismiss)
+    return remember { NdDialogSceneStrategy { currentOnDismiss.value(it) } }
+}

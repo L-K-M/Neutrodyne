@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.lkmc.neutrodyne.core.navigation.AllGroupsKey
 import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
 import ch.lkmc.neutrodyne.core.navigation.GroupsManageKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
@@ -18,20 +19,18 @@ internal fun AllGroupsRoute(viewModel: AllGroupsViewModel = metroViewModel()) {
     val navigator = LocalAppNavigator.current
 
     LaunchedEffect(state.selected) {
-        if (viewModel.consumeSelection()) navigator.pop()
+        if (viewModel.consumeSelection()) navigator.pop(AllGroupsKey)
     }
 
     AllGroupsSheet(
         state = state,
         onSelectGroup = viewModel::selectGroup,
         onNewGroup = {
-            navigator.pop()
-            navigator.push(GroupEditKey(null))
+            if (navigator.pop(AllGroupsKey)) navigator.push(GroupEditKey(null))
         },
         onManageGroups = {
-            navigator.pop()
-            navigator.push(GroupsManageKey)
+            if (navigator.pop(AllGroupsKey)) navigator.push(GroupsManageKey)
         },
-        onDismiss = { navigator.pop() },
+        onDismiss = { navigator.pop(AllGroupsKey) },
     )
 }

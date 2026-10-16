@@ -22,6 +22,10 @@ public class RecordingAppNavigator : AppNavigator {
 
         public data object Pop : Call
 
+        public data class PopEntry(
+            val key: NavKey,
+        ) : Call
+
         public data class ResetTab(
             val key: TopLevelKey,
         ) : Call
@@ -38,7 +42,7 @@ public class RecordingAppNavigator : AppNavigator {
 
     public val calls: MutableList<Call> = mutableListOf()
 
-    /** Pops once per [Call.Pop] to mirror the real navigator's return value; tests may preset it. */
+    /** The result returned by both pop overloads; tests may preset it. */
     public var popResult: Boolean = true
 
     override fun push(key: NavKey) {
@@ -51,6 +55,11 @@ public class RecordingAppNavigator : AppNavigator {
 
     override fun pop(): Boolean {
         calls += Call.Pop
+        return popResult
+    }
+
+    override fun pop(key: NavKey): Boolean {
+        calls += Call.PopEntry(key)
         return popResult
     }
 
