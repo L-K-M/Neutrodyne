@@ -72,6 +72,44 @@ class FakeGroupRepositoryTest {
             }
         }
 
+    @Test fun fakeMembershipOpsMirrorTheRepositoryContract() =
+        runTest {
+            val repo = FakeGroupRepository()
+            val tech = assertIs<Outcome.Success<Long>>(repo.create(GroupDraft("Tech"), setOf(1L, 2L))).value
+            val news = assertIs<Outcome.Success<Long>>(repo.create(GroupDraft("News"))).value
+            assertEquals(setOf(1L, 2L), repo.observeMemberIds(tech).first())
+            assertEquals(2, repo.observeGroup(tech).first()?.memberCount)
+            assertEquals(setOf(tech), repo.observeMemberships().first().getValue(1L))
+
+            assertEquals(Outcome.Success(Unit), repo.setMembers(tech, setOf(2L, 3L)))
+            assertEquals(setOf(2L, 3L), repo.observeMemberIds(tech).first())
+            assertEquals(2, repo.observeGroup(tech).first()?.memberCount)
+            assertEquals(Outcome.Failure(GroupError.NotFound), repo.setMembers(999, emptySet()))
+
+            assertEquals(
+                Outcome.Success(Unit),
+                repo.applyMembership(setOf(2L), add = setOf(news), remove = setOf(tech)),
+            )
+            assertEquals(setOf(news), repo.observeMemberships().first().getValue(2L))
+            assertEquals(
+                Outcome.Failure(GroupError.NotFound),
+                repo.applyMembership(setOf(2L), add = setOf(999), remove = emptySet()),
+            )
+            assertEquals(setOf(news), repo.observeMemberships().first().getValue(2L))
+        }
+
+    @Test fun fakeReorderReordersAndRejectsNonPermutations() =
+        runTest {
+            val repo = FakeGroupRepository()
+            val ids = (1..3).map { assertIs<Outcome.Success<Long>>(repo.create(GroupDraft("G$it"))).value }
+            assertEquals(ids, repo.observeGroups().first().map { it.id })
+            assertEquals(Outcome.Success(Unit), repo.reorder(listOf(ids[2], ids[0], ids[1])))
+            assertEquals(listOf(ids[2], ids[0], ids[1]), repo.observeGroups().first().map { it.id })
+            assertEquals(Outcome.Failure(GroupError.NotFound), repo.reorder(listOf(ids[0], ids[1], 99L)))
+            assertEquals(Outcome.Failure(GroupError.NotFound), repo.reorder(ids.dropLast(1)))
+            assertEquals(listOf(ids[2], ids[0], ids[1]), repo.observeGroups().first().map { it.id })
+        }
+
     @Test fun mosaicsReadTheFixtureState() =
         runTest {
             val repo = FakeGroupRepository()

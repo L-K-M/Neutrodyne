@@ -128,10 +128,11 @@ interface GroupDao {
 
     /**
      * `orderKey` is supplied on every insert — `OrderKey.after(last)` in file/order (02).
-     * `INSERT OR IGNORE` because subscribe re-inserts an existing membership harmlessly (03).
+     * `INSERT OR IGNORE` because subscribe re-inserts an existing membership harmlessly (03);
+     * the row id is -1 on an ignored insert, which callers count as "no change".
      */
     @Insert(onConflict = androidx.room3.OnConflictStrategy.IGNORE)
-    suspend fun insertMember(row: PodcastGroupMemberEntity)
+    suspend fun insertMember(row: PodcastGroupMemberEntity): Long
 
     @Query("SELECT * FROM podcast_group WHERE id = :id")
     suspend fun groupById(id: Long): PodcastGroupEntity?
@@ -190,7 +191,48 @@ interface GroupDao {
         order: FeedOrder,
         now: Long,
     )
+
+    /** Every row in list order — the reorder diff's input (02 "Group and member ordering"). */
+    @Query("SELECT * FROM podcast_group ORDER BY orderKey, id")
+    suspend fun groupsInOrder(): List<PodcastGroupEntity>
+
+    /** 02 "Reorder a group": one guarded row write per moved group; no-op writes do not stamp. */
+    @Query(
+        "UPDATE podcast_group SET orderKey = :orderKey, updatedAt = :now WHERE id = :groupId" +
+            " AND orderKey <> :orderKey",
+    )
+    suspend fun setGroupOrderKey(
+        groupId: Long,
+        orderKey: String,
+        now: Long,
+    )
+
+    @Query("SELECT id FROM podcast_group WHERE id IN (:ids)")
+    suspend fun existingIds(ids: Collection<Long>): List<Long>
+
+    /** 05 Membership: every membership write stamps the groups whose member rows changed. */
+    @Query("UPDATE podcast_group SET updatedAt = :now WHERE id IN (:groupIds)")
+    suspend fun touchUpdatedAt(
+        groupIds: Collection<Long>,
+        now: Long,
+    )
+
+    @Query("DELETE FROM podcast_group_member WHERE groupId = :groupId AND podcastId IN (:podcastIds)")
+    suspend fun deleteMembers(
+        groupId: Long,
+        podcastIds: Collection<Long>,
+    ): Int
+
+    /** 05 `observeMemberships()`: one flow over the whole join table, grouped in Kotlin. */
+    @Query("SELECT podcastId, groupId FROM podcast_group_member")
+    fun observeMembershipPairs(): Flow<List<MembershipPair>>
 }
+
+/** The two-column projection of [GroupDao.observeMembershipPairs]. */
+data class MembershipPair(
+    val podcastId: Long,
+    val groupId: Long,
+)
 
 /** Group and membership count in one Room read, so edits and membership changes invalidate together. */
 data class GroupRow(
@@ -208,22 +250,6 @@ data class GroupMosaicRow(
     val artworkVersion: Int,
     val artworkAvgArgb: Int?,
 )
-
-/** `podcast_settings` + `podcast_group_settings` (M2: resolution reads; deletes on all-null). */
-@Dao
-interface ScopeSettingsDao {
-    @Upsert
-    suspend fun upsertPodcast(row: PodcastSettingsEntity)
-
-    @Upsert
-    suspend fun upsertGroup(row: PodcastGroupSettingsEntity)
-
-    @Query("SELECT * FROM podcast_settings WHERE podcastId = :podcastId")
-    suspend fun forPodcast(podcastId: Long): PodcastSettingsEntity?
-
-    @Query("SELECT * FROM podcast_group_settings WHERE groupId = :groupId")
-    suspend fun forGroup(groupId: Long): PodcastGroupSettingsEntity?
-}
 
 /** `episode_state` (M4: the user-state write chains of 02 User-state writes). */
 @Dao
