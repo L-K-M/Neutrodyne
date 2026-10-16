@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopRefreshScheduler
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopRunnerInitializer
 import ch.lkmc.neutrodyne.core.data.refresh.NextRefreshRebaser
+import ch.lkmc.neutrodyne.core.data.settings.EffectiveSettingsResolverImpl
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -60,7 +61,7 @@ class DesktopRunnerInitializerTest {
                 val scheduler =
                     DesktopRefreshScheduler(
                         db = db,
-                        rebaser = NextRefreshRebaser(db, FakeSettingsRepository()),
+                        rebaser = NextRefreshRebaser(db, EffectiveSettingsResolverImpl(db, FakeSettingsRepository())),
                         poker = Provider { JobLanePoker {} },
                         appScope = backgroundScope,
                     )
