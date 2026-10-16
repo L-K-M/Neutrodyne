@@ -3,29 +3,97 @@
 package ch.lkmc.neutrodyne.core.testing
 
 import androidx.paging.PagingData
+import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.domain.FeedRepository
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
+import ch.lkmc.neutrodyne.core.model.FeedPrefs
 import ch.lkmc.neutrodyne.core.model.FeedSource
+import ch.lkmc.neutrodyne.core.model.FeedTab
+import ch.lkmc.neutrodyne.core.model.isSupportedFeedAgeLimit
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.update
 
-/**
- * In-memory [FeedRepository] (09 `:core:testing` inventory): [rows] drives a single-shot
- * `PagingData.from` page (deterministic — the screens under test never page further) and
- * [orders] persists per-source order choices.
- */
-class FakeFeedRepository : FeedRepository {
+/** In-memory feeds with fixture tabs/rows and persisted per-source preferences. */
+class FakeFeedRepository(
+    private val clock: Clock = TestClock(),
+) : FeedRepository {
     val rows = MutableStateFlow<List<EpisodeRow>>(emptyList())
     val orders = MutableStateFlow<Map<FeedSource, FeedOrder>>(emptyMap())
+    val prefs = MutableStateFlow<Map<FeedSource, FeedPrefs>>(emptyMap())
+    val tabs = MutableStateFlow(listOf(FeedTab(FeedSource.All, "All", null, null, null)))
+
+    override fun observeTabs(): Flow<List<FeedTab>> = tabs
+
+    override fun observePrefs(source: FeedSource): Flow<FeedPrefs> =
+        combine(
+            prefs,
+            orders,
+            flow {
+                while (true) {
+                    val now = clock.now()
+                    emit(now)
+                    delay(FeedPrefs.HOUR_MS - now.mod(FeedPrefs.HOUR_MS))
+                }
+            },
+        ) { values, savedOrders, _ ->
+            val value = values[source] ?: FeedPrefs()
+            val order = savedOrders[source] ?: value.feedOrder
+            if (source is FeedSource.Podcast) {
+                FeedPrefs(feedOrder = order, playOrder = order)
+            } else {
+                value.copy(feedOrder = order).at(clock.now())
+            }
+        }.onStart {
+            if (source == FeedSource.All || source == FeedSource.Ungrouped) {
+                prefs.update { values ->
+                    val value = values[source] ?: FeedPrefs()
+                    values + (source to value.copy(lastViewedAt = value.lastViewedAt ?: clock.now()))
+                }
+            }
+        }.distinctUntilChanged()
+
+    override suspend fun setFilters(
+        source: FeedSource,
+        filters: FeedFilters,
+    ) {
+        require(source !is FeedSource.Podcast) { "Podcast filters are transient" }
+        writeError?.let { throw it }
+        prefs.update { it + (source to (it[source] ?: FeedPrefs()).copy(filters = filters.copy(minSortDate = null))) }
+    }
+
+    override suspend fun setHideOlderThanDays(
+        source: FeedSource,
+        days: Int?,
+    ) {
+        require(source !is FeedSource.Podcast) { "Podcast filters are transient" }
+        require(isSupportedFeedAgeLimit(days)) { "Unsupported feed age limit: $days" }
+        writeError?.let { throw it }
+        prefs.update { it + (source to (it[source] ?: FeedPrefs()).copy(hideOlderThanDays = days)) }
+    }
+
+    override suspend fun markVisited(
+        source: FeedSource,
+        leftAt: Long,
+    ) {
+        if (source is FeedSource.Podcast) return
+        writeError?.let { throw it }
+        prefs.update { it + (source to (it[source] ?: FeedPrefs()).copy(lastViewedAt = leftAt)) }
+    }
 
     /** Latest arguments — `pagedFeed` is keyed by (source, filters, order). */
     var lastRequest: Triple<FeedSource, FeedFilters, FeedOrder>? = null
         private set
 
-    /** When set, [setFeedOrder] throws it (the Room implementation's failure path). */
+    /** When set, preference writers throw it (the Room implementation's failure path). */
     var writeError: Throwable? = null
 
     override fun pagedFeed(
