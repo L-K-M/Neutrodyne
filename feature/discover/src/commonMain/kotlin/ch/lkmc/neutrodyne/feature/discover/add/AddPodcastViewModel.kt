@@ -7,15 +7,25 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.AddPodcastResolver
 import ch.lkmc.neutrodyne.core.domain.AddResolution
+import ch.lkmc.neutrodyne.core.domain.GroupError
+import ch.lkmc.neutrodyne.core.domain.GroupRepository
 import ch.lkmc.neutrodyne.core.domain.SubscribeError
 import ch.lkmc.neutrodyne.core.domain.SubscribeUseCase
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedCandidate
 import ch.lkmc.neutrodyne.core.model.FeedPreview
+import ch.lkmc.neutrodyne.core.model.Group
+import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.ui.UiText
+import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.membership_name_empty
+import ch.lkmc.neutrodyne.core.ui.resources.membership_name_taken
+import ch.lkmc.neutrodyne.core.ui.resources.membership_name_too_long
+import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metrox.viewmodel.ViewModelKey
@@ -35,6 +45,10 @@ import kotlinx.coroutines.launch
 public data class AddPodcastUiState(
     val step: AddSheetStep = AddSheetStep.Input(),
     val done: SubscribedPodcast? = null,
+    val groups: List<Group> = emptyList(),
+    val createdGroupId: Long? = null,
+    val creatingGroup: Boolean = false,
+    val groupError: UiText? = null,
     /**
      * The identity of the newest resolve/subscribe attempt (UI review round 2). Completions
      * tagged with an older generation are dropped; the route closes only while [done]'s
@@ -86,8 +100,7 @@ public sealed interface AddSheetStep {
  * the field text (`rememberSaveable`); this holds the resolution state and re-resolves on demand —
  * after process death the restored field fires [resolve] again (previews are memory-only, D24).
  *
- * Group chips arrive with M2's group feed; M1a subscribes with an empty `groupIds` set (deviation
- * recorded in 08, 2026-10-07).
+ * Chosen groups are saved by the sheet and passed into the subscribe transaction.
  */
 @ViewModelKey(AddPodcastViewModel::class)
 @ContributesIntoMap(AppScope::class)
@@ -95,9 +108,63 @@ public sealed interface AddSheetStep {
 public class AddPodcastViewModel(
     private val resolver: AddPodcastResolver,
     private val subscribeUseCase: SubscribeUseCase,
+    private val groups: GroupRepository,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(AddPodcastUiState())
     public val uiState: StateFlow<AddPodcastUiState> = mutableState.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            groups.observeGroups().collect { rows -> mutableState.update { it.copy(groups = rows) } }
+        }
+    }
+
+    public fun createGroup(name: String) {
+        if (mutableState.value.creatingGroup) return
+        mutableState.update { it.copy(creatingGroup = true, groupError = null) }
+        viewModelScope.launch {
+            suspendRunCatching {
+                when (val result = groups.create(GroupDraft(name))) {
+                    is Outcome.Success -> {
+                        mutableState.update { it.copy(createdGroupId = result.value) }
+                    }
+
+                    is Outcome.Failure -> {
+                        mutableState.update {
+                            it.copy(
+                                groupError =
+                                    when (val error = result.error) {
+                                        GroupError.NameEmpty -> {
+                                            UiText.Res(Res.string.membership_name_empty)
+                                        }
+
+                                        is GroupError.NameTooLong -> {
+                                            UiText.Res(
+                                                Res.string.membership_name_too_long,
+                                                listOf(error.max),
+                                            )
+                                        }
+
+                                        is GroupError.NameTaken -> {
+                                            UiText.Res(Res.string.membership_name_taken)
+                                        }
+
+                                        else -> {
+                                            UiText.Res(Res.string.write_failed)
+                                        }
+                                    },
+                            )
+                        }
+                    }
+                }
+            }.onFailure { mutableState.update { it.copy(groupError = UiText.Res(Res.string.write_failed)) } }
+            mutableState.update { it.copy(creatingGroup = false) }
+        }
+    }
+
+    public fun consumeCreatedGroup() {
+        mutableState.update { it.copy(createdGroupId = null) }
+    }
 
     private var resolveJob: Job? = null
 
@@ -180,13 +247,13 @@ public class AddPodcastViewModel(
      * newer operation is dropped rather than restoring the captured step over it or closing
      * the sheet under it.
      */
-    public fun subscribe() {
+    public fun subscribe(groupIds: Set<Long> = emptySet()) {
         val step = mutableState.value.step as? AddSheetStep.Preview ?: return
         if (step.subscribing || step.alreadySubscribedId != null) return
         val generation =
             nextGeneration { it.copy(step = step.copy(subscribing = true, subscribeError = null)) }
         viewModelScope.launch {
-            when (val outcome = subscribeUseCase(step.preview.previewId, emptySet())) {
+            when (val outcome = subscribeUseCase(step.preview.previewId, groupIds)) {
                 is Outcome.Success -> {
                     mutableState.update { state ->
                         if (state.operationGeneration != generation) return@update state

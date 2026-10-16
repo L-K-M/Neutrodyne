@@ -125,6 +125,7 @@
     <string name="episode_offline_row">Offline</string>
     <string name="episode_offline_toast">Offline — diese Folge ist nicht heruntergeladen</string>
     <string name="action_play">Abspielen</string>
+    <string name="action_undo">Rückgängig</string>
 
     <string name="summary_played">Gespielt</string>
     <string name="summary_new">Neu</string>
@@ -265,6 +266,9 @@
     <string name="podcast_copy_feed">Feed-Adresse kopieren</string>
     <string name="podcast_copy_feed_warning">Diese Feed-Adresse ist privat — jeder mit ihr kann den Feed lesen.</string>
     <string name="podcast_loading">Podcast wird geladen…</string>
+    <string name="podcast_add_group">+ Gruppe</string>
+    <string name="podcast_group_remove">Aus „%1$s“ entfernen</string>
+    <string name="podcast_removed_from_group">Aus „%1$s“ entfernt</string>
 
     <string name="section_general">Allgemein</string>
     <string name="section_feed">Feed</string>

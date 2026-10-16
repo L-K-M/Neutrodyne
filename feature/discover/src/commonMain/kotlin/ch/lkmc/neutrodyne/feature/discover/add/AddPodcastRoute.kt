@@ -71,6 +71,8 @@ internal fun AddPodcastRoute(
         onInputChange = viewModel::onInputChanged,
         onCandidate = viewModel::resolve,
         onSubscribe = viewModel::subscribe,
+        onCreateGroup = viewModel::createGroup,
+        onConsumeCreatedGroup = viewModel::consumeCreatedGroup,
         onOpenPodcast = { id ->
             navigator.pop()
             navigator.pushDetail(PodcastKey(id))

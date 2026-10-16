@@ -133,7 +133,12 @@ internal fun PodcastRoute(key: PodcastKey) {
             viewModel.unsubscribe()
         },
         onDismissUnsubscribe = { pending = null },
+        onRemoveGroup = viewModel::removeFromGroup,
     )
 
-    ShowUserMessages(state.messages, viewModel::onMessageShown)
+    ShowUserMessages(
+        state.messages,
+        viewModel::onMessageShown,
+        onMessageAction = viewModel::onMessageAction,
+    )
 }

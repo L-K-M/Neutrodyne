@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.feature.podcast
 import androidx.compose.runtime.Immutable
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
+import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.PodcastDetail
 import ch.lkmc.neutrodyne.core.model.ShowType
 import ch.lkmc.neutrodyne.core.ui.UserMessage
@@ -26,6 +27,8 @@ public data class PodcastUiState(
     val filters: FeedFilters = FeedFilters(),
     val offline: Boolean = false,
     val refreshing: Boolean = false,
+    /** The podcast's groups in repository order — the header's membership chips (M2, D6). */
+    val groups: ImmutableList<Group> = persistentListOf(),
     val messages: ImmutableList<UserMessage> = persistentListOf(),
 ) {
     public val gone: Boolean

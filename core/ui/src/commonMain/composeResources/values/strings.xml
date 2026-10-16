@@ -132,6 +132,7 @@
     <string name="episode_offline_row">Offline</string>
     <string name="episode_offline_toast">Offline — this episode isn&apos;t downloaded</string>
     <string name="action_play">Play</string>
+    <string name="action_undo">Undo</string>
 
     <!-- Row summary parts (08 Row summary). -->
     <string name="summary_played">Played</string>
@@ -280,6 +281,9 @@
     <string name="podcast_copy_feed">Copy feed address</string>
     <string name="podcast_copy_feed_warning">This feed address is private — anyone with it can read the feed.</string>
     <string name="podcast_loading">Loading podcast…</string>
+    <string name="podcast_add_group">+ Group</string>
+    <string name="podcast_group_remove">Remove from %1$s</string>
+    <string name="podcast_removed_from_group">Removed from %1$s</string>
 
     <!-- Podcast settings (08 Podcast settings: general and feed rows of M1). -->
     <string name="section_general">General</string>

@@ -12,6 +12,8 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
@@ -66,8 +68,11 @@ import kotlin.test.assertTrue
 class AddPodcastSheetTest {
     private lateinit var previousLocale: Locale
     private val resolver = FakeAddPodcastResolver()
+    private val groups =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeGroupRepository()
     private val subscribe = FakeSubscribeUseCase()
-    private val viewModel = AddPodcastViewModel(resolver, subscribe)
+    private val viewModel by lazy { AddPodcastViewModel(resolver, subscribe, groups) }
     private var openedPodcast: Long? = null
     private var dismissed = false
 
@@ -82,6 +87,55 @@ class AddPodcastSheetTest {
     fun tearDown() {
         Locale.setDefault(previousLocale)
     }
+
+    @Test
+    fun newGroupCanBeSubscribedBeforeGroupObserverCatchesUp() =
+        runComposeUiTest {
+            var chosen: Set<Long>? = null
+            setSheet(
+                initialInput = "https://example.com/feed",
+                stateOverride =
+                    AddPodcastUiState(
+                        step = AddSheetStep.Preview(testFeedPreview()),
+                        createdGroupId = 9L,
+                    ),
+                onSubscribe = { chosen = it },
+            )
+            onNodeWithText("Subscribe").performClick()
+            assertEquals(setOf(9L), chosen)
+        }
+
+    @Test
+    fun chosenGroupsSurviveRecreationAndNewGroupIsSelected() =
+        runComposeUiTest {
+            resolver.nextResolution = AddResolution.Feed(testFeedPreview())
+            var registry = SaveableStateRegistry(null) { true }
+            setSheet(initialInput = "https://example.com/feed", registry = registry)
+            onNodeWithText("+ New group").performClick()
+            onAllNodes(hasSetTextAction())[1].performTextInput("Tech")
+            onNodeWithText("Create group").performClick()
+            waitUntil { groups.groups.value.isNotEmpty() }
+            waitForIdle()
+            onNodeWithText("Tech").assertIsSelected()
+            onNodeWithText("Tech").performClick()
+            runOnIdle { registry = SaveableStateRegistry(registry.performSave()) { true } }
+            setSheet(registry = registry)
+            onNodeWithText("Tech").assertIsNotSelected()
+            onNodeWithText("Tech").performClick()
+            runOnIdle { registry = SaveableStateRegistry(registry.performSave()) { true } }
+            setSheet(registry = registry)
+            onNodeWithText("Tech").assertIsSelected()
+            onNodeWithText("Subscribe").performClick()
+            waitUntil { subscribe.subscribed.isNotEmpty() }
+            assertEquals(
+                setOf(
+                    groups.groups.value
+                        .single()
+                        .id,
+                ),
+                subscribe.subscribed.single().second,
+            )
+        }
 
     @Test
     fun inputResolvesToPreviewThenSubscribes() =
@@ -424,6 +478,8 @@ class AddPodcastSheetTest {
         initialInput: String? = null,
         registry: SaveableStateRegistry = SaveableStateRegistry(null) { true },
         onResolve: (String) -> Unit = viewModel::resolve,
+        stateOverride: AddPodcastUiState? = null,
+        onSubscribe: (Set<Long>) -> Unit = viewModel::subscribe,
     ) {
         setContent {
             // collectAsStateWithLifecycle (rule 10) needs a started owner; a bare
@@ -438,13 +494,15 @@ class AddPodcastSheetTest {
                     NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
                         AddPodcastSheet(
                             initialInput = initialInput,
-                            state = state,
+                            state = stateOverride ?: state,
                             onResolve = onResolve,
                             onCredentials = viewModel::resolveWithCredentials,
                             onCancelResolve = viewModel::cancelResolve,
                             onInputChange = viewModel::onInputChanged,
                             onCandidate = viewModel::resolve,
-                            onSubscribe = viewModel::subscribe,
+                            onSubscribe = onSubscribe,
+                            onCreateGroup = viewModel::createGroup,
+                            onConsumeCreatedGroup = viewModel::consumeCreatedGroup,
                             onOpenPodcast = { openedPodcast = it },
                             onDismiss = { dismissed = true },
                         )
