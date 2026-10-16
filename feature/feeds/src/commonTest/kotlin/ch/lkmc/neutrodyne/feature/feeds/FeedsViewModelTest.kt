@@ -972,6 +972,81 @@ class FeedsViewModelTest : MainDispatcherTest() {
             )
         }
 
+    @Test
+    fun hiddenPageDisposalReleasesIdsAfterItsTransientTabIsRemoved() =
+        viewModelTest {
+            val group = group(showAsTab = false)
+            val ref = FeedSourceRef.Group(group.uuid)
+            val viewModel = viewModel()
+            collect(viewModel)
+            backgroundScope.launch { viewModel.live.collect {} }
+            viewModel.onPageSettled(ref)
+            runCurrent()
+            viewModel.onVisibleIds(ref, setOf(42))
+            runCurrent()
+            assertEquals(setOf(42L), liveSource.lastVisibleIds.value)
+            viewModel.onPageSettled(FeedSourceRef.All)
+            runCurrent()
+            viewModel.onVisibleIds(ref, emptySet())
+            runCurrent()
+            assertEquals(emptySet(), liveSource.lastVisibleIds.value)
+        }
+
+    @Test
+    fun explicitResettleRetriesTheSameStoredRefAfterFailedFallbackAndUndo() =
+        viewModelTest {
+            val group = group()
+            val ref = FeedSourceRef.Group(group.uuid)
+            settings.set(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE, ref.encode())
+            val viewModel = viewModel()
+            collect(viewModel)
+            runCurrent()
+            settings.failNextSet = SettingsError.WriteFailed
+            groups.groups.value = emptyList()
+            feeds.tabs.value = listOf(allTab)
+            runCurrent()
+            assertEquals(FeedSourceRef.All, viewModel.uiState.value.selected)
+            assertEquals(ref.encode(), settings.get(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE))
+            groups.groups.value = listOf(group)
+            feeds.tabs.value = listOf(allTab, group.tab())
+            runCurrent()
+            viewModel.onPageSettled(ref)
+            runCurrent()
+            assertEquals(ref, viewModel.uiState.value.selected)
+        }
+
+    @Test
+    fun rapidRevisitWaitsForPreviousVisitWriteBeforeCapturingBaseline() =
+        viewModelTest {
+            val group = group()
+            val source = FeedSource.Group(group.id)
+            feeds.prefs.value = mapOf(source to FeedPrefs(lastViewedAt = 100))
+            val releaseWrite = CompletableDeferred<Unit>()
+            val delayedFeeds =
+                object : FeedRepository by feeds {
+                    override suspend fun markVisited(
+                        source: FeedSource,
+                        leftAt: Long,
+                    ) {
+                        releaseWrite.await()
+                        feeds.markVisited(source, leftAt)
+                    }
+                }
+            val viewModel = viewModel(repository = delayedFeeds)
+            collect(viewModel)
+            runCurrent()
+            viewModel.onVisitStart(source)
+            runCurrent()
+            clock.advanceBy(1.seconds)
+            val leftAt = clock.now()
+            viewModel.onVisitEnd(source)
+            viewModel.onVisitStart(source)
+            runCurrent()
+            releaseWrite.complete(Unit)
+            runCurrent()
+            assertEquals(leftAt, viewModel.uiState.value.visitBaselines[source])
+        }
+
     private companion object {
         val allTab = FeedTab(FeedSource.All, "All", null, null, null)
         const val HOUR = 3_600_000L

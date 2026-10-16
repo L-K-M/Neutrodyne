@@ -1715,7 +1715,12 @@ The ViewModel exposes both the union live map and `liveBySource` projections,
 and `visitBaselines` retains each page's visit-start highlight baseline.
 Each changed stored reference waits for fresh tab and group emissions, so a
 route immediately after creating or restoring a group cannot reject a valid
-UUID using a previous observer snapshot.
+UUID using a previous observer snapshot. A successful explicit re-settle also
+resolves unchanged stored values after a failed fallback. Visit baseline reads
+wait for that source's previous visit write; visible-ID disposal retains its
+last source mapping even after a transient tab disappears. An evicted paging
+flow is cancelled: D2 must reacquire `pagingFor` when its page returns,
+including pages retained by Compose during a fling.
 
 ### Selection persistence and fallback
 

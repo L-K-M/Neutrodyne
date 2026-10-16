@@ -88,8 +88,12 @@ public class FeedsViewModel(
     // Accessed from Main, like the ViewModel's callbacks and Compose pagingFor calls.
     private val pages = linkedMapOf<FeedSource, PageEntry>()
     private val selection = MutableStateFlow(Selection())
+    private val selectionReload = MutableStateFlow(0)
+    private var rejectedSelection: FeedSourceRef? = null
     private var knownGroups: List<Group> = emptyList()
     private val visits = mutableMapOf<FeedSource, Visit>()
+    private val visitWrites = mutableMapOf<FeedSource, Job>()
+    private val reportedSources = mutableMapOf<FeedSourceRef, FeedSource>()
     private val baselines = MutableStateFlow<Map<FeedSource, Long>>(emptyMap())
     private val userMessages = UserMessages()
     private val visiblePages = MutableStateFlow<Map<FeedSource, Set<Long>>>(emptyMap())
@@ -131,6 +135,7 @@ public class FeedsViewModel(
     private fun evict(source: FeedSource) {
         pages.remove(source)?.scope?.cancel()
         visiblePages.value -= source
+        reportedSources.entries.removeAll { it.value == source }
     }
 
     public val liveBySource: StateFlow<Map<FeedSource, Map<Long, RowLive>>> =
@@ -140,8 +145,10 @@ public class FeedsViewModel(
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private val selectionInputs =
-        settings
-            .observe(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE)
+        combine(
+            settings.observe(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE),
+            selectionReload,
+        ) { encoded, _ -> encoded }
             .flatMapLatest { encoded ->
                 // A route may follow a create/restore transaction before the old observers have
                 // delivered it. Resolve each new reference against fresh repository emissions.
@@ -154,13 +161,12 @@ public class FeedsViewModel(
         viewModelScope.launch {
             // No initial empty tabs/groups stand in for a repository emission: a saved UUID
             // must not be rejected while either repository is still loading.
-            var rejected: FeedSourceRef? = null
             selectionInputs.collect { (tabs, allGroups, requested) ->
                 knownGroups = allGroups
                 val visible = tabs.map { FeedTabUi(it, it.ref()) }
                 // Undo must not revive a rejected selection while its fallback write
-                // is still pending. Only a changed stored reference releases this latch.
-                val target = requested.takeUnless { it == rejected } ?: FeedSourceRef.All
+                // is still pending. An explicit settle may retry it; passive undo cannot.
+                val target = requested.takeUnless { it == rejectedSelection } ?: FeedSourceRef.All
                 val hidden =
                     (target as? FeedSourceRef.Group)?.let { ref ->
                         allGroups.find { it.uuid == ref.uuid }
@@ -181,7 +187,7 @@ public class FeedsViewModel(
                             )
                         }
                 val resolved = selectedTab?.ref ?: FeedSourceRef.All
-                if (requested is FeedSourceRef.Group && selectedTab == null && rejected != requested) {
+                if (requested is FeedSourceRef.Group && selectedTab == null && rejectedSelection != requested) {
                     val previous = selection.value.tabs.find { it.ref == requested }
                     userMessages.post(
                         if (previous != null) {
@@ -191,8 +197,8 @@ public class FeedsViewModel(
                         },
                     )
                 }
-                val needsFallback = requested != resolved && rejected != requested
-                rejected = requested.takeIf { it != resolved }
+                val needsFallback = requested != resolved && rejectedSelection != requested
+                rejectedSelection = requested.takeIf { it != resolved }
                 selection.value =
                     Selection(
                         tabs = if (selectedTab?.transient == true) visible + selectedTab else visible,
@@ -269,6 +275,7 @@ public class FeedsViewModel(
         }.stateIn(viewModelScope, SHARING, FeedsUiState())
 
     public fun onPageSettled(ref: FeedSourceRef) {
+        rejectedSelection = null
         persistSelection(ref)
     }
 
@@ -276,7 +283,9 @@ public class FeedsViewModel(
         write {
             when (val result = settings.set(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE, ref.encode())) {
                 is Outcome.Success -> {
-                    Unit
+                    // DataStore deduplicates equal values. A successful explicit re-settle
+                    // must still resolve a ref rejected before a failed fallback write.
+                    selectionReload.value++
                 }
 
                 is Outcome.Failure -> {
@@ -292,9 +301,29 @@ public class FeedsViewModel(
         page: FeedSourceRef,
         ids: Set<Long>,
     ) {
-        selection.value.tabs
-            .find { it.ref == page }
-            ?.let { onVisibleIds(it.tab.source, ids) }
+        val previous = reportedSources[page]
+        val source =
+            when (page) {
+                FeedSourceRef.All -> {
+                    FeedSource.All
+                }
+
+                FeedSourceRef.Ungrouped -> {
+                    FeedSource.Ungrouped
+                }
+
+                is FeedSourceRef.Group -> {
+                    selection.value.tabs
+                        .find { it.ref == page }
+                        ?.tab
+                        ?.source ?: previous ?: return
+                }
+            }
+        // Disposal can arrive after the transient tab disappeared. Keep its last source
+        // until that empty report so the live query releases every page's window.
+        if (previous != null && previous != source) onVisibleIds(previous, emptySet())
+        if (ids.isEmpty()) reportedSources.remove(page) else reportedSources[page] = source
+        onVisibleIds(source, ids)
     }
 
     /** The caller pairs lifecycle resume/pause and settled-page changes; duplicate starts are inert. */
@@ -304,8 +333,10 @@ public class FeedsViewModel(
         visits[source] = visit
         baselines.value -= source
         val initialBaseline = knownGroups.find { FeedSource.Group(it.id) == source }?.createdAt ?: clock.now()
+        val pendingWrite = visitWrites[source]
         visit.read =
             viewModelScope.launch {
+                pendingWrite?.join()
                 suspendRunCatching { feedRepository.observePrefs(source).first() }
                     .onSuccess { baselines.value += source to (it.lastViewedAt ?: initialBaseline) }
                     .onFailure(::reportWriteFailed)
@@ -317,7 +348,12 @@ public class FeedsViewModel(
         visit.read?.cancel()
         if (clock.elapsedRealtime() - visit.startedAt < MIN_VISIT_MS) return
         val leftAt = clock.now()
-        write { feedRepository.markVisited(source, leftAt) }
+        val pendingWrite = visitWrites[source]
+        visitWrites[source] =
+            write {
+                pendingWrite?.join()
+                feedRepository.markVisited(source, leftAt)
+            }
     }
 
     /** Repository-owned row actions (08 EpisodeRow); the route owns navigation and URL opens. */
@@ -396,11 +432,10 @@ public class FeedsViewModel(
     public fun consumeCopyLink(id: Long): String? = copyLinks.remove(id)
 
     /** A failed write is logged and surfaces as a snackbar — it never escapes the scope. */
-    private fun write(block: suspend () -> Unit) {
+    private fun write(block: suspend () -> Unit): Job =
         viewModelScope.launch {
             suspendRunCatching { block() }.onFailure(::reportWriteFailed)
         }
-    }
 
     private fun reportWriteFailed(t: Throwable) {
         Log.w(TAG, t) { "write failed" }
