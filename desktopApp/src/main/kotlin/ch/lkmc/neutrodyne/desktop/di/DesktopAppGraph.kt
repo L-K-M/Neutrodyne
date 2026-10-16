@@ -13,9 +13,11 @@ import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.domain.NewEpisodePoster
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.model.NewEpisodeNotice
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.youtube.DesktopYouTubeBindingsModule
@@ -101,6 +103,15 @@ interface DesktopAppGraph {
      */
     @Provides
     fun provideDatabase(opener: DatabaseOpener): NeutrodyneDatabase = opener.requireDatabase()
+
+    /** Temporary C4 binding; platform posting arrives in MD2. */
+    @Provides
+    fun provideNewEpisodePoster(): NewEpisodePoster =
+        object : NewEpisodePoster {
+            override suspend fun post(notices: List<NewEpisodeNotice>) = Unit
+
+            override suspend fun removePodcasts(podcastIds: List<Long>) = Unit
+        }
 
     @DependencyGraph.Factory
     fun interface Factory {

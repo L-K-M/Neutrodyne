@@ -10,9 +10,11 @@ import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.domain.NewEpisodePoster
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.model.NewEpisodeNotice
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.work.MetroWorkerFactory
 import ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule
@@ -75,6 +77,15 @@ interface AndroidAppGraph {
      */
     @Provides
     fun provideDatabase(opener: DatabaseOpener): NeutrodyneDatabase = opener.requireDatabase()
+
+    /** Temporary C4 binding; platform posting arrives in D3. */
+    @Provides
+    fun provideNewEpisodePoster(): NewEpisodePoster =
+        object : NewEpisodePoster {
+            override suspend fun post(notices: List<NewEpisodeNotice>) = Unit
+
+            override suspend fun removePodcasts(podcastIds: List<Long>) = Unit
+        }
 
     @DependencyGraph.Factory
     fun interface Factory {

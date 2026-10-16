@@ -245,6 +245,12 @@ Many-to-many ([R2.2](../PLAN.md#21-functional-requirements)); rows are `source =
 | Library multi-select "Add to group…" | `AddToGroupsKey(ids)` | `applyMembership` with tri-state chips: checked for all → `add`, cleared → `remove`, indeterminate untouched |
 | Subscribe and import | — | 03's `SubscribeUseCase(groupIds)`; [Commit](#6-commit) |
 
+**Implementation note (2026-10-16, M2):** C3 uses the existing
+`RefreshController.reschedulePeriodic()` hook for effective-interval rebasing on
+both platforms. `GroupRepository` calls it after a membership transaction that
+changed rows commits (`setMembers`, `applyMembership`, `create` with initial
+members; delete and undo already do); no-op writes and failures do not.
+
 Every membership write is one write transaction (`INSERT OR IGNORE` / `DELETE … WHERE groupId = ? AND podcastId IN (…)`), then: `RefreshController.reschedulePeriodic()` (the minimum refresh interval over groups may change, [03 Periodic tick](03-feeds-and-discovery.md#periodic-tick); on the desktop it re-reads the refresh lane's due times) and `SnapshotScheduler.requestSoon()` (Android; a no-op on the desktop, [Auto Backup](#auto-backup)). Auto-download and notification policies follow automatically through the resolver flows ([Effective settings resolution](#effective-settings-resolution)).
 
 ```kotlin
@@ -326,6 +332,19 @@ sequenceDiagram
 | Other devices (while linked) | the tombstone travels only after the 10-s undo window on both platforms ([10 Outbox and coalescing](10-sync.md#outbox-and-coalescing)); more than 3 group deletes in one pull are held by the mass-change guard |
 | Mosaic artwork `g-{uuid}` | unreferenced → collected |
 | Import history (`import_item.groupNamesJson`) | unaffected (names, not IDs) |
+
+**Implementation note (2026-10-16, M2)** — C1 lands the mechanism with two slices deferred to
+their owning milestones: `SnapshotScheduler.requestSoon()` does not run on delete yet because the
+port itself arrives with M3's backup work; the 10-second undo window runs as a `delay` job on the
+injected `@ApplicationScope` and `GroupChannelSync.onDeleted(uuid)` fires at its end — process
+death still finalizes the delete, and the start-up sweep spares exactly the uuids the repository
+reports through `GroupRepository.pendingUndoUuids()` (the "live undo tokens" the sweep rule above
+refers to). `NoGroupChannels` sits in `:core:domain` next to the port rather than
+`:core:data` `desktopMain`, so both shells bind the same interim no-op until C5's
+`GroupNotificationChannels` replaces it on Android. `GroupMerger` exists in `:core:data` with the
+transaction this document specifies — union memberships, keep the survivor's settings, move a
+GROUP play context, then `sync()` — but has no callers until the restore path (M3) and
+`SyncApplier` (M10) land.
 
 ### Notification channels
 
@@ -576,6 +595,14 @@ interface EffectiveSettingsResolver {
 | 03 `RefreshScheduler`, `FeedRefresher` and the desktop refresh lane ([03 Desktop refresh](03-feeds-and-discovery.md#desktop-refresh)) | tick computation; `nextRefreshAt` per feed | `refreshIntervals()` |
 | 03 `NewEpisodeNotifier` (Android channels; the desktop's `DesktopNotifier`) | once per engine run | `notifications(ids)`; channel choice is 03's (first notifying group by `orderKey`) |
 
+**Implementation note (2026-10-16, M2):** B3 exposes only refresh and
+notification resolution and scoped fields; playback, download fields and hints
+arrive in their owning milestones. Its sources use `PodcastOverride` for the
+podcast row and `Group(uuid, name)` / `Groups(List<Group>)` for stable group
+identity, rather than the numeric IDs in the API sample above. Attribution text
+remains as specified above and belongs to the later settings UI (D8). B3 adds
+observable refresh/notification batch reads alongside the snapshot methods.
+
 ### Writing overrides
 
 ```kotlin
@@ -607,6 +634,16 @@ interface ScopeSettingsRepository {
     suspend fun updateGroup(groupId: Long, change: (SettingOverrides) -> SettingOverrides): Outcome<Unit, SettingsError>
 }
 ```
+
+**Implementation note (2026-10-16, M2):** B3 writes only the two M2 fields,
+preserving every other override column even when both M2 fields inherit. Its
+read-modify-write callback runs inside the Room write transaction. Scheduling
+hooks below are implemented by C3 after the interval write commits, with a lazy
+`Provider<RefreshController>` to avoid a dependency cycle. Unchanged intervals,
+notification-only writes, invalid writes and missing scopes do not reschedule.
+A post-commit scheduling failure is logged; it does not turn a committed write
+into `SettingsError.WriteFailed`. Channel reconciliation arrives with C5, and
+snapshot requests with M3.
 
 - Writes are a read-modify-write inside one write transaction (`@Upsert` is allowed on these single-writer tables, [02 DAO rules](02-data-model.md#dao-rules)); a row whose fields are all `null` is deleted. Rule 1 (dependent fields) and validation run before the write; an invalid value returns 01's `SettingsError.OutOfRange(field name)` and writes nothing. A podcast or group that no longer exists makes the write a no-op returning success (the screen is closing anyway).
 - After a write: refresh interval changed → `RefreshController.reschedulePeriodic()`; `notifyNewEpisodes` changed → `GroupChannelSync.sync()` (Android; the screen requests `POST_NOTIFICATIONS` per 03's permission rule); always → `SnapshotScheduler.requestSoon()` (Android). 07 and 06 observe the resolver flows; nothing else is pushed. Sync needs no call: the triggers capture the synced columns (02).

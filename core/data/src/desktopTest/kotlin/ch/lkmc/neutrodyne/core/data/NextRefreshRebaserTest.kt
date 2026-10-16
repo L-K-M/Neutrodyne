@@ -4,9 +4,22 @@ package ch.lkmc.neutrodyne.core.data
 
 import ch.lkmc.neutrodyne.core.data.refresh.NextRefreshRebaser
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshPolicy
+import ch.lkmc.neutrodyne.core.data.settings.EffectiveSettingsResolverImpl
+import ch.lkmc.neutrodyne.core.database.PodcastGroupSettingsEntity
+import ch.lkmc.neutrodyne.core.database.PodcastSettingsEntity
+import ch.lkmc.neutrodyne.core.database.ScopeOverrides
+import ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver
+import ch.lkmc.neutrodyne.core.model.Effective
+import ch.lkmc.neutrodyne.core.model.SettingSource
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
+import ch.lkmc.neutrodyne.core.testing.FakeEffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.testing.database.groupEntity
+import ch.lkmc.neutrodyne.core.testing.database.memberEntity
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -163,7 +176,82 @@ class NextRefreshRebaserTest {
             assertEquals(SUBSCRIBED + 240 * 60_000L, db.podcastDao().byId(id)!!.nextRefreshAt)
         }
 
-    private fun rebaser() = NextRefreshRebaser(db, settings)
+    @Test
+    fun effectiveIntervalsRebaseEachPodcastAndLiftManualOnly() =
+        runTest {
+            settings.set(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES, 1440)
+            val inherited = seedPodcast(db, "https://global.example.com/f", nextRefreshAt = null, subscribedAt = NOW)
+            val grouped =
+                seedPodcast(db, "https://group.example.com/f", nextRefreshAt = RefreshPolicy.NEVER, subscribedAt = NOW)
+            val manual = seedPodcast(db, "https://manual.example.com/f", nextRefreshAt = NOW + 1, subscribedAt = NOW)
+            val group = db.groupDao().insert(groupEntity(orderKey = "a"))
+            val manualGroup = db.groupDao().insert(groupEntity(name = "manual", orderKey = "b"))
+            db.groupDao().insertMember(memberEntity(group, grouped, "a"))
+            db.groupDao().insertMember(memberEntity(manualGroup, grouped, "a"))
+            db.scopeSettingsDao().upsertGroup(
+                PodcastGroupSettingsEntity(group, ScopeOverrides(refreshIntervalMinutes = 60)),
+            )
+            db.scopeSettingsDao().upsertGroup(
+                PodcastGroupSettingsEntity(manualGroup, ScopeOverrides(refreshIntervalMinutes = 0)),
+            )
+            db.scopeSettingsDao().upsertPodcast(
+                PodcastSettingsEntity(manual, ScopeOverrides(refreshIntervalMinutes = 0)),
+            )
+
+            rebaser().rebase()
+
+            assertEquals(NOW + DAY, db.podcastDao().byId(inherited)!!.nextRefreshAt)
+            assertEquals(NOW + 60 * 60_000L, db.podcastDao().byId(grouped)!!.nextRefreshAt)
+            assertEquals(RefreshPolicy.NEVER, db.podcastDao().byId(manual)!!.nextRefreshAt)
+
+            db.scopeSettingsDao().upsertPodcast(
+                PodcastSettingsEntity(manual, ScopeOverrides(refreshIntervalMinutes = 120)),
+            )
+            db.scopeSettingsDao().upsertPodcast(
+                PodcastSettingsEntity(inherited, ScopeOverrides(refreshIntervalMinutes = 60)),
+            )
+            rebaser().rebase()
+
+            assertEquals(NOW + 120 * 60_000L, db.podcastDao().byId(manual)!!.nextRefreshAt)
+            assertEquals(NOW + 60 * 60_000L, db.podcastDao().byId(inherited)!!.nextRefreshAt)
+        }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test
+    fun concurrentRebasesApplyTheLatestInterval() =
+        runTest {
+            val id = seedPodcast(db, "https://race.example.com/f", nextRefreshAt = null, subscribedAt = NOW)
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            var interval: Int? = null
+            var reads = 0
+            val resolver =
+                object : EffectiveSettingsResolver by FakeEffectiveSettingsResolver() {
+                    override suspend fun refreshIntervals(): Map<Long, Effective<Int?>> {
+                        val snapshot = mapOf(id to Effective(interval, SettingSource.PodcastOverride))
+                        if (++reads == 1) {
+                            entered.complete(Unit)
+                            release.await()
+                        }
+                        return snapshot
+                    }
+                }
+            val rebaser = NextRefreshRebaser(db, resolver)
+            val older = async { rebaser.rebase() }
+            entered.await()
+            interval = 60
+            val newer = async { rebaser.rebase() }
+            runCurrent()
+            val readsBeforeRelease = reads
+            release.complete(Unit)
+            older.await()
+            newer.await()
+
+            assertEquals(1, readsBeforeRelease, "The older Manual-only snapshot must finish before the newer rebase")
+            assertEquals(NOW + 60 * 60_000L, db.podcastDao().byId(id)!!.nextRefreshAt)
+        }
+
+    private fun rebaser() = NextRefreshRebaser(db, EffectiveSettingsResolverImpl(db, settings))
 
     private companion object {
         const val NOW = TestClock.DEFAULT_NOW
