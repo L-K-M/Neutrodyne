@@ -4,6 +4,8 @@ package ch.lkmc.neutrodyne.feature.podcast
 
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
@@ -46,6 +48,7 @@ import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
+import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.ShowType
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -101,6 +104,25 @@ class PodcastScreenTest {
         runComposeUiTest {
             setPodcast(PodcastUiState())
             onNodeWithText("Loading podcast…").assertIsDisplayed()
+        }
+
+    @Test
+    fun visibleIdsSkipHeadersAndLiveOverlayReachesTheRow() =
+        runComposeUiTest {
+            val live = mutableStateOf(mapOf(1L to RowLive(isNowPlaying = true, isPlaying = true)))
+            var visible = emptySet<Long>()
+            setPodcast(
+                state = PodcastUiState(detail = testPodcastDetail(7), loaded = true, offline = true),
+                rows = listOf(testEpisodeRow(1, podcastId = 7)),
+                live = live,
+                onVisibleIds = { visible = it },
+            )
+            assertEquals(setOf(1L), visible)
+            onNodeWithContentDescription("Pause", useUnmergedTree = true).assertIsDisplayed()
+
+            runOnIdle { live.value = emptyMap() }
+            waitForIdle()
+            onNodeWithContentDescription("Play", useUnmergedTree = true).assertIsDisplayed()
         }
 
     @Test
@@ -659,6 +681,8 @@ class PodcastScreenTest {
     private fun ComposeUiTest.setPodcast(
         state: PodcastUiState,
         rows: List<EpisodeRow> = emptyList(),
+        live: State<Map<Long, RowLive>> = mutableStateOf(emptyMap()),
+        onVisibleIds: (Set<Long>) -> Unit = {},
         source: PagingSource<Int, EpisodeRow>? = null,
         // Invalidation needs a fresh instance — `Pager` rejects a re-used source.
         sourceFactory: (() -> PagingSource<Int, EpisodeRow>)? = null,
@@ -694,6 +718,8 @@ class PodcastScreenTest {
                 NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
                     PodcastScreen(
                         state = state,
+                        live = live,
+                        onVisibleIds = onVisibleIds,
                         items = feed.collectAsLazyPagingItems().also { pagingItems = it },
                         listState = listState,
                         pendingUnsubscribe = pendingUnsubscribe,

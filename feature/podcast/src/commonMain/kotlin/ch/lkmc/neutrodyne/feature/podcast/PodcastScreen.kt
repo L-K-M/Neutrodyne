@@ -22,11 +22,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -56,6 +58,7 @@ import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.PodcastDetail
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
+import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
@@ -67,6 +70,7 @@ import ch.lkmc.neutrodyne.core.ui.FeedFilterChips
 import ch.lkmc.neutrodyne.core.ui.LocalUiClock
 import ch.lkmc.neutrodyne.core.ui.NavBackButton
 import ch.lkmc.neutrodyne.core.ui.PodcastHeader
+import ch.lkmc.neutrodyne.core.ui.ReportVisibleEpisodeIds
 import ch.lkmc.neutrodyne.core.ui.RowCaps
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.offlineBannerItem
@@ -121,7 +125,10 @@ internal data class PendingUnsubscribe(
  * while the top bar stays (M1a keeps the bar in-flow rather than overlaid on the artwork tint —
  * the gradient and shared-element hand-off arrive with M10; deviation recorded in 08). The
  * feed-state banner sits between the header and the transient filter chips.
+ *
+ * 08 Live row state defers map reads to each row to limit recomposition to its own slot.
  */
+@Suppress("ktlint:compose:state-param-check")
 @Composable
 internal fun PodcastScreen(
     state: PodcastUiState,
@@ -140,6 +147,8 @@ internal fun PodcastScreen(
     onConfirmUnsubscribe: () -> Unit,
     onDismissUnsubscribe: () -> Unit,
     modifier: Modifier = Modifier,
+    live: State<Map<Long, RowLive>> = rememberUpdatedState(emptyMap()),
+    onVisibleIds: (Set<Long>) -> Unit = {},
     listState: LazyListState = rememberLazyListState(),
 ) {
     val detail = state.detail
@@ -222,6 +231,16 @@ internal fun PodcastScreen(
                 // prepend failure has no footer at all — every non-empty-list failure pins a
                 // banner under the app bar instead (revised 2026-10-14: the append footer row
                 // is gone; it duplicated the banner once the user scrolled to it).
+                val episodeStart = headerIndex + 1
+                ReportVisibleEpisodeIds(
+                    listState = listState,
+                    itemCount = { episodeStart + items.itemCount },
+                    idAt = { index ->
+                        val pagedIndex = index - episodeStart
+                        if (pagedIndex in 0 until items.itemCount) items.peek(pagedIndex)?.id else null
+                    },
+                    onIds = onVisibleIds,
+                )
                 LoadErrorBanner(items)
                 LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
                     offlineBannerItem(state.offline)
@@ -296,9 +315,10 @@ internal fun PodcastScreen(
                             // the loaded page slides back to wherever real rows fill the view.
                             EpisodeRowPlaceholder()
                         } else {
+                            val rowLive by remember(row.id, live) { derivedStateOf { live.value[row.id] } }
                             EpisodeRow(
                                 row = row,
-                                live = null,
+                                live = rowLive,
                                 style = EpisodeRowStyle.PODCAST,
                                 caps = RowCaps.FULL.copy(offline = state.offline),
                                 highlightNew = false,
