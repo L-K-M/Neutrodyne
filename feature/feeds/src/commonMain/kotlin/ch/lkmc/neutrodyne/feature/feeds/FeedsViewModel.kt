@@ -241,7 +241,10 @@ public class FeedsViewModel(
             feedRepository.observePrefs(source).map { source to it }
         }
 
-    // D1 still renders All. Keep its chips tied to All even when a route restores another source.
+    /** Each composed page observes its own chips, including prefetched neighbours. */
+    public fun prefsFor(source: FeedSource): Flow<FeedPrefs> = feedRepository.observePrefs(source)
+
+    // Retain the All filters field for existing consumers; pages use prefsFor(source).
     private val screenState =
         combine(
             feedRepository.observePrefs(FeedSource.All),
@@ -265,8 +268,10 @@ public class FeedsViewModel(
             tabsWithCounts,
             selectedPrefs,
             baselines,
-        ) { screen, selected, (prefsSource, prefs), visits ->
+            settings.observe(AppearanceSettingKeys.FEEDS_ROW_SWIPE),
+        ) { screen, selected, (prefsSource, prefs), visits, rowSwipe ->
             screen.copy(
+                rowSwipe = rowSwipe,
                 tabs = selected.tabs.toImmutableList(),
                 selected = selected.selected,
                 prefs = prefs.takeIf { selected.tabs.isNotEmpty() && prefsSource == selected.source },
@@ -391,9 +396,9 @@ public class FeedsViewModel(
         }
     }
 
-    /** The overflow's "Mark all as played": 02's chain over the whole All feed (R2.6). */
-    public fun markAllPlayed() {
-        write { episodes.markFeedPlayed(FeedSource.All, null) }
+    /** The page overflow's write; counted bulk confirmation is delivered by D9. */
+    public fun markAllPlayed(source: FeedSource = FeedSource.All) {
+        write { episodes.markFeedPlayed(source, null) }
     }
 
     /** Pull-to-refresh / the desktop's Refresh button (08: All → all feeds, 20 s cooldown). */
