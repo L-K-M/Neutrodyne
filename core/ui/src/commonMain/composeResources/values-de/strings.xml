@@ -48,6 +48,14 @@
         <item quantity="one">%1$d Gruppe</item>
         <item quantity="other">%1$d Gruppen</item>
     </plurals>
+
+    <!-- Group visuals (08 GroupMosaic and group tab label). -->
+    <string name="group_hidden">Nicht als Tab</string>
+    <string name="group_unplayed_fmt">%1$d ungespielt</string>
+    <string name="group_new_fmt">%1$d neu</string>
+    <string name="group_counts_join">%1$s · %2$s</string>
+    <string name="group_mosaic_desc">%1$s, %2$s, %3$s, %4$s</string>
+    <string name="group_tab_desc">%1$s, %2$s, %3$s</string>
     <string name="held_changes_message">%1$s hat %2$s und %3$s entfernt. Hier auch übernehmen?</string>
     <string name="held_changes_unknown_device">Ein anderes Gerät</string>
     <string name="review">Prüfen</string>

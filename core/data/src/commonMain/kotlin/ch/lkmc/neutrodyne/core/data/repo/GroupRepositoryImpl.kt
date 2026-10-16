@@ -7,16 +7,19 @@ import androidx.sqlite.SQLiteException
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.database.GroupMosaicRow
 import ch.lkmc.neutrodyne.core.database.GroupRow
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
 import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.domain.GroupRepository
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
+import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.GroupEdit
 import ch.lkmc.neutrodyne.core.model.GroupIcons
+import ch.lkmc.neutrodyne.core.model.GroupMosaicMember
 import ch.lkmc.neutrodyne.core.model.GroupPalette
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import dev.zacsweers.metro.ContributesBinding
@@ -44,6 +47,12 @@ internal class GroupRepositoryImpl(
         dao.observeGroupsOf(podcastId).map { rows -> rows.map { it.toModel() } }
 
     override fun observeMemberIds(groupId: Long): Flow<Set<Long>> = dao.observeMemberIds(groupId).map { it.toSet() }
+
+    override fun observeMosaics(): Flow<Map<Long, List<GroupMosaicMember>>> =
+        dao.observeMosaics().map { rows ->
+            // The SQL orders by groupId then member recency; groupBy keeps both.
+            rows.groupBy(GroupMosaicRow::groupId).mapValues { (_, members) -> members.map { it.toModel() } }
+        }
 
     override suspend fun checkName(
         name: String,
@@ -162,6 +171,15 @@ internal class GroupRepositoryImpl(
             val existing = dao.groupByNameKey(nameKey) ?: throw error
             Outcome.Failure(GroupError.NameTaken(existing.id))
         }
+
+    private fun GroupMosaicRow.toModel(): GroupMosaicMember =
+        GroupMosaicMember(
+            groupId = groupId,
+            podcastId = podcastId,
+            displayTitle = title,
+            artwork = ArtworkRef(key = artworkKey, url = artworkUrl, version = artworkVersion),
+            artworkAvgArgb = artworkAvgArgb,
+        )
 
     private fun GroupRow.toModel(): Group =
         with(group) {
