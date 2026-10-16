@@ -4,6 +4,8 @@ import com.android.build.api.dsl.KotlinMultiplatformAndroidLibraryTarget
 plugins {
     alias(libs.plugins.neutrodyne.kmp.compose)
     alias(libs.plugins.neutrodyne.metro)
+    // 09: each module with screenshot tests applies Roborazzi itself; goldens under screenshots/.
+    alias(libs.plugins.roborazzi)
 }
 
 kotlin {
@@ -57,6 +59,8 @@ kotlin {
             implementation(libs.cmp.ui.test)
             // Skiko natives so runComposeUiTest can render on this machine's OS.
             implementation(compose.desktop.currentOs)
+            // Desktop golden set (09: runDesktopComposeUiTest + captureRoboImage).
+            implementation(libs.roborazzi.compose.desktop)
         }
         findByName("androidHostTest")?.dependencies {
             // Robolectric host tests render the real Android NavDisplay (task `testAndroidHostTest`),
@@ -69,6 +73,16 @@ kotlin {
             // offline cache; the catalog pins resolve to the cached versions the app tests use.
             implementation(libs.androidx.test.ext.junit)
             implementation(libs.androidx.test.espresso.core)
+            // Android golden set (09): Robolectric + captureRoboImage.
+            implementation(libs.roborazzi)
+            implementation(libs.roborazzi.compose)
+            implementation(libs.roborazzi.junit.rule)
         }
     }
+}
+
+// 09: committed goldens live in screenshots/{android,desktop} — the capture call picks the
+// subdir; verify mode (-Proborazzi.test.verify=true) reads them back for CI.
+roborazzi {
+    outputDir.set(layout.projectDirectory.dir("screenshots"))
 }
