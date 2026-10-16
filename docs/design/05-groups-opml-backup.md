@@ -448,6 +448,15 @@ propagate settings write failures as exceptions rather than reporting success.
 | Import OPML into this group | picker; session created with this group as target | `ImportRepository.create(source, CreateImportOptions(targetGroupId = id))` | M3 |
 | Edit, Group settings, Delete | editor, settings screen, [Delete and undo](#delete-and-undo) | `GroupEditKey(id)`, `GroupSettingsKey(id)` | M2 |
 
+**Implementation note (2026-10-16, M2):** Count-aware callers freeze the
+chosen `sortDateBefore`, obtain `countUnplayed`, and pass both that cutoff and
+`expectedCount` to the guarded `EpisodeRepository.markFeedPlayed` overload.
+The repository revalidates the count inside its write transaction; a changed
+count returns `MarkFeedPlayedResult.SelectionChanged(actualCount)` and writes
+nothing. Show a refreshed confirmation before retrying. `Played(count)` reports
+the completed mark-played chain. Existing plain confirmation dialogs use the
+explicitly unchecked two-argument overload until the D9 dialog slice.
+
 `downloadAllEstimate` ([02 Download all candidates](02-data-model.md#download-all-candidates), M6): the feed's source predicate, its view filters and `hideOlderThanDays` bound (as [Playing a group](#playing-a-group) rules 1, 3 and 5, no anchor), unplayed, without a `download` row in `QUEUED`…`COMPLETED` (`FAILED` and `MISSING` rows count as candidates), without a tombstone (`downloadDismissedAt IS NULL`; the user deleted those deliberately), and downloadable (`enclosureUrl IS NOT NULL`, or YouTube when `YouTubeCapabilitiesSource.capabilities.value.downloads` at call time, [04 Capability matrix](04-youtube.md#capability-matrix)); newest first, **capped at 200** (`capped = true` → "200 newest of 1,234"). Unlike the context tail, Up next items and the current episode are **not** excluded: downloading them is wanted (answers 02's open question 7). Size per episode follows [07 Estimates](07-downloads.md#estimates): `enclosureLength` when ≥ 100 KB (smaller values are placeholders), else `durationMs × 16 000 B/s` (128 kbit/s) when known, else counted in `unknownSizeCount`; no invented numbers.
 
 ### Performance

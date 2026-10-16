@@ -16,23 +16,28 @@ import ch.lkmc.neutrodyne.core.domain.FeedRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
+import ch.lkmc.neutrodyne.core.model.FeedCounts
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedPrefs
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.FeedTab
+import ch.lkmc.neutrodyne.core.model.GroupCounts
 import ch.lkmc.neutrodyne.core.model.ShowType
+import ch.lkmc.neutrodyne.core.model.VirtualCounts
 import ch.lkmc.neutrodyne.core.model.isSupportedFeedAgeLimit
 import ch.lkmc.neutrodyne.core.model.settings.GroupsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
@@ -102,6 +107,51 @@ internal class FeedRepositoryImpl(
             }
         return combine(stored, hours()) { prefs, _ -> prefs.at(clock.now()) }.distinctUntilChanged()
     }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    override fun observeGroupCounts(sinceMs: Long): Flow<Map<Long, FeedCounts>> =
+        countWindows(sinceMs)
+            .flatMapLatest { (since, now) ->
+                db
+                    .feedDao()
+                    .observeGroupCounts(FeedQueryBuilder.groupCounts(since, now))
+                    .map { rows -> rows.associate { it.groupId to it.counts } }
+            }.distinctUntilChanged()
+
+    override fun observeVirtualCounts(sinceMs: Long): Flow<VirtualCounts> =
+        combine(
+            observeVirtualCounts(FeedSource.All, sinceMs),
+            observeVirtualCounts(FeedSource.Ungrouped, sinceMs),
+        ) { all, ungrouped -> VirtualCounts(all, ungrouped) }.distinctUntilChanged()
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun observeVirtualCounts(
+        source: FeedSource,
+        sinceMs: Long,
+    ): Flow<FeedCounts> =
+        combine(countWindows(sinceMs), observePrefs(source)) { (since, _), prefs ->
+            maxOf(since, prefs.filters.minSortDate ?: since) to requireNotNull(prefs.lastViewedAt)
+        }.distinctUntilChanged().flatMapLatest { (since, visit) ->
+            db.feedDao().observeVirtualCounts(FeedQueryBuilder.virtualCounts(source, since, visit))
+        }
+
+    override suspend fun countUnplayed(
+        source: FeedSource,
+        sortDateBefore: Long?,
+    ): Int = db.feedDao().countUnplayed(FeedQueryBuilder.countUnplayed(source, sortDateBefore))
+
+    private fun countWindows(sinceMs: Long): Flow<Pair<Long, Long>> =
+        flow {
+            val initialHour = clock.now().let { it - it.mod(FeedPrefs.HOUR_MS) }
+            val initialSince = sinceMs - sinceMs.mod(FeedPrefs.HOUR_MS)
+            emitAll(
+                hours().map { now ->
+                    val hour = now - now.mod(FeedPrefs.HOUR_MS)
+                    val windowStart = hour - GroupCounts.WINDOW_DAYS * GroupCounts.DAY_MS
+                    maxOf(initialSince + hour - initialHour, windowStart) to hour
+                },
+            )
+        }
 
     private fun hours(): Flow<Long> =
         flow {
