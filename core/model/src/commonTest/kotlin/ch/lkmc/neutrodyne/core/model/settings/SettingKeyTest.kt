@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.model.settings
 
+import ch.lkmc.neutrodyne.core.model.MediaFilter
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentSetOf
 import kotlin.test.Test
@@ -82,6 +83,42 @@ class SettingKeyTest {
         AllSettingKeys.list.filter { it.name == "sync.server_url" }.forEach { key ->
             assertEquals(SettingsFile.PORTABLE, key.file)
             assertTrue(!key.synced)
+        }
+    }
+
+    @Test fun groupKeysHaveDesignDefaultsAndSyncClassification() {
+        val groupKeys = GroupsSettingKeys.ALL
+        assertEquals(9, groupKeys.size)
+        assertTrue(AllSettingKeys.list.containsAll(groupKeys))
+        for (key in groupKeys) {
+            val visit = key.name.endsWith("last_viewed_at")
+            assertEquals(if (visit) SettingsFile.DEVICE else SettingsFile.PORTABLE, key.file)
+            assertEquals(!visit, key.synced)
+        }
+        assertEquals(false, GroupsSettingKeys.SHOW_UNGROUPED_TAB.default)
+        assertEquals(0, GroupsSettingKeys.ALL_FILTER_FLAGS.default)
+        assertEquals(0, GroupsSettingKeys.UNGROUPED_FILTER_FLAGS.default)
+        assertEquals(0, GroupsSettingKeys.ALL_HIDE_OLDER_THAN_DAYS.default)
+        assertEquals(0, GroupsSettingKeys.UNGROUPED_HIDE_OLDER_THAN_DAYS.default)
+        assertEquals(MediaFilter.ALL, GroupsSettingKeys.ALL_MEDIA_FILTER.default)
+        assertEquals(MediaFilter.ALL, GroupsSettingKeys.UNGROUPED_MEDIA_FILTER.default)
+        assertEquals(MediaFilter.entries.toList(), GroupsSettingKeys.ALL_MEDIA_FILTER.values)
+        assertEquals(MediaFilter.entries.toList(), GroupsSettingKeys.UNGROUPED_MEDIA_FILTER.values)
+        assertEquals(0L, GroupsSettingKeys.ALL_LAST_VIEWED_AT.default)
+        assertEquals(0L, GroupsSettingKeys.UNGROUPED_LAST_VIEWED_AT.default)
+    }
+
+    @Test fun selectionKeysAreRegisteredAndDeviceLocal() {
+        val feed = AppearanceSettingKeys.FEEDS_SELECTED_SOURCE
+        val library = AppearanceSettingKeys.LIBRARY_GROUP_FILTER
+        assertEquals("ui.feeds_selected_source", feed.name)
+        assertEquals("all", feed.default)
+        assertEquals("ui.library_group_filter", library.name)
+        assertEquals("", library.default)
+        for (key in listOf(feed, library)) {
+            assertTrue(key in AllSettingKeys.list)
+            assertEquals(SettingsFile.DEVICE, key.file)
+            assertEquals(false, key.synced)
         }
     }
 
