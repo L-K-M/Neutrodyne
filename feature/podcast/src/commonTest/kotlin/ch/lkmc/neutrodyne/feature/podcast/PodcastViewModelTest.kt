@@ -13,7 +13,9 @@ import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.NetError
+import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.ShowType
+import ch.lkmc.neutrodyne.core.testing.FakeEpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
@@ -48,15 +50,60 @@ class PodcastViewModelTest : MainDispatcherTest() {
     private val podcasts = FakePodcastRepository()
     private val feeds = FakeFeedRepository()
     private val episodes = FakeEpisodeRepository()
+    private val liveSource = FakeEpisodeLiveStateSource()
     private val refreshController = FakeRefreshController()
     private val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
 
     private fun viewModel(podcastId: Long = 7) =
-        PodcastViewModel(podcastId, podcasts, feeds, episodes, refreshController, UnsubscribeUseCase(podcasts), network)
+        PodcastViewModel(
+            podcastId,
+            podcasts,
+            feeds,
+            episodes,
+            refreshController,
+            UnsubscribeUseCase(podcasts),
+            network,
+            liveSource,
+        )
 
     private fun TestScope.collect(viewModel: PodcastViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
     }
+
+    @Test
+    fun liveRowsFollowVisibleWindowAndKeepPagedPlayedState() =
+        runTest {
+            val viewModel = viewModel()
+            val row = testEpisodeRow(1, playedAt = 123)
+            feeds.rows.value = listOf(row)
+            podcasts.detail.value = testPodcastDetail(7)
+            backgroundScope.launch { viewModel.live.collect {} }
+            val overlay = RowLive(positionMs = 500, durationMs = 1_000)
+            liveSource.live.value = mapOf(1L to overlay, 2L to RowLive(isNowPlaying = true))
+            viewModel.onVisibleIds(setOf(1))
+            advanceUntilIdle()
+            assertEquals(mapOf(1L to overlay), viewModel.live.value)
+            assertEquals(
+                row,
+                viewModel.feed
+                    .take(1)
+                    .asSnapshot()
+                    .single(),
+            )
+
+            viewModel.onVisibleIds(setOf(2))
+            advanceUntilIdle()
+            assertEquals(mapOf(2L to RowLive(isNowPlaying = true)), viewModel.live.value)
+            assertNull(viewModel.live.value[1])
+
+            liveSource.live.value = mapOf(2L to RowLive(isNowPlaying = true, isPlaying = true))
+            advanceUntilIdle()
+            assertEquals(true, viewModel.live.value[2]?.isPlaying)
+
+            viewModel.onVisibleIds(emptySet())
+            advanceUntilIdle()
+            assertEquals(emptyMap(), viewModel.live.value)
+        }
 
     @Test
     fun initialStateBeforeSubscription() =
