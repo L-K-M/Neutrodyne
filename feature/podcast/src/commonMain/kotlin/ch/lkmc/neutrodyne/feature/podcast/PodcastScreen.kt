@@ -394,7 +394,6 @@ private fun PodcastOverflow(
     onUnsubscribe: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
-    var confirmMarkAll by remember { mutableStateOf(false) }
     var confirmPrivateCopy by remember { mutableStateOf(false) }
     val actions = LocalPlatformActions.current
     val openUrl = rememberUrlOpener()
@@ -476,7 +475,7 @@ private fun PodcastOverflow(
                 text = { Text(stringResource(Res.string.podcast_mark_played)) },
                 onClick = {
                     open = false
-                    confirmMarkAll = true
+                    onMarkAllPlayedClick()
                 },
             )
             DropdownMenuItem(
@@ -489,21 +488,6 @@ private fun PodcastOverflow(
                 },
             )
         }
-    }
-
-    if (confirmMarkAll) {
-        NdDialog(
-            onDismissRequest = { confirmMarkAll = false },
-            icon = NdIcons.DoneAll,
-            title = stringResource(Res.string.podcast_mark_played),
-            confirm =
-                NdDialogAction(stringResource(Res.string.podcast_mark_played)) {
-                    confirmMarkAll = false
-                    onMarkAllPlayedClick()
-                },
-            dismiss =
-                NdDialogAction(stringResource(Res.string.action_cancel)) { confirmMarkAll = false },
-        )
     }
 
     // 03 Feed addresses: the private feed's URL grants read access — copy needs a warning first.

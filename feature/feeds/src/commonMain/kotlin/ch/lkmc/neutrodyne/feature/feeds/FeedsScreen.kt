@@ -39,7 +39,6 @@ import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.itemContentType
 import androidx.paging.compose.itemKey
 import ch.lkmc.neutrodyne.core.designsystem.components.NdBanner
-import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdPullToRefresh
@@ -59,7 +58,6 @@ import ch.lkmc.neutrodyne.core.ui.RowCaps
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.offlineBannerItem
 import ch.lkmc.neutrodyne.core.ui.resources.Res
-import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_more
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_add_url
@@ -95,8 +93,6 @@ internal fun FeedPage(
     onVisibleIds: (Set<Long>) -> Unit = {},
     visitBaseline: Long? = null,
 ) {
-    var confirmMarkAll by rememberSaveable { mutableStateOf(false) }
-
     Column(modifier = modifier.fillMaxSize()) {
         NdPullToRefresh(isRefreshing = state.refreshing, onRefresh = onRefresh) {
             if (!state.hasSubscriptions) {
@@ -118,26 +114,11 @@ internal fun FeedPage(
                     onRefresh = onRefresh,
                     onFiltersChange = onFiltersChange,
                     onAction = onAction,
-                    onMarkAllPlayedClick = { confirmMarkAll = true },
+                    onMarkAllPlayedClick = onMarkAllPlayedClick,
                     visitBaseline = visitBaseline,
                 )
             }
         }
-    }
-
-    if (confirmMarkAll) {
-        NdDialog(
-            onDismissRequest = { confirmMarkAll = false },
-            icon = NdIcons.DoneAll,
-            title = stringResource(Res.string.feeds_mark_all_played),
-            confirm =
-                NdDialogAction(stringResource(Res.string.feeds_mark_all_played)) {
-                    confirmMarkAll = false
-                    onMarkAllPlayedClick()
-                },
-            dismiss =
-                NdDialogAction(stringResource(Res.string.action_cancel)) { confirmMarkAll = false },
-        )
     }
 }
 

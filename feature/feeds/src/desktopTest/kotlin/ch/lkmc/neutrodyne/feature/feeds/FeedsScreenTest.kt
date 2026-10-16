@@ -23,6 +23,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -90,6 +91,7 @@ import ch.lkmc.neutrodyne.core.testing.testLibraryTile
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.LocalUiClock
+import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedDialog
 import ch.lkmc.neutrodyne.core.ui.platform.ExternalUrlOpener
 import ch.lkmc.neutrodyne.core.ui.platform.FilePicker
 import ch.lkmc.neutrodyne.core.ui.platform.FileSaver
@@ -268,55 +270,17 @@ class FeedsScreenTest {
         }
 
     @Test
-    fun overflowMarkAllConfirmsFirst() =
+    fun overflowOpensCountedConfirmation() =
         runComposeUiTest {
-            var confirmed = false
+            var opens = 0
             setFeeds(
                 state = FeedsUiState(hasSubscriptions = true),
                 rows = listOf(testEpisodeRow(1)),
-                onMarkAllPlayed = { confirmed = true },
+                onMarkAllPlayed = { opens++ },
             )
             onNodeWithContentDescription("More actions").performClick()
             onNodeWithText("Mark all as played…").performClick()
-            // The destructive action waits for the dialog's confirm (08's wording).
-            assertEquals(false, confirmed)
-            // The dialog's title and confirm share the string; the clickable node is the button.
-            onAllNodes(hasClickAction() and hasText("Mark all as played…")).onFirst().performClick()
-            assertEquals(true, confirmed)
-        }
-
-    @Test
-    fun markAllConfirmationSurvivesSaveAndRestore() =
-        runComposeUiTest {
-            var confirmations = 0
-            var registry by mutableStateOf<SaveableStateRegistry?>(SaveableStateRegistry(null) { true })
-            var saved: Map<String, List<Any?>> = emptyMap()
-            setFeeds(
-                state = FeedsUiState(hasSubscriptions = true),
-                rows = listOf(testEpisodeRow(1)),
-                onMarkAllPlayed = { confirmations++ },
-                wrapScreen = { screen ->
-                    registry?.let {
-                        CompositionLocalProvider(LocalSaveableStateRegistry provides it) { screen() }
-                    }
-                },
-            )
-            onNodeWithContentDescription("More actions").performClick()
-            onNodeWithText("Mark all as played…").performClick()
-            onNodeWithText("Cancel").assertIsDisplayed()
-            runOnIdle {
-                saved = registry!!.performSave()
-                registry = null
-            }
-            waitForIdle()
-            runOnIdle { registry = SaveableStateRegistry(saved) { true } }
-            waitForIdle()
-
-            onNodeWithText("Cancel").assertIsDisplayed()
-            assertEquals(0, confirmations)
-            onAllNodes(hasClickAction() and hasText("Mark all as played…")).onFirst().performClick()
-            assertEquals(1, confirmations)
-            onNodeWithText("Cancel").assertDoesNotExist()
+            assertEquals(1, opens)
         }
 
     @Test
@@ -562,6 +526,33 @@ class FeedsScreenTest {
             fixture.awaitSelected(this, 0)
             onNodeWithTag("feeds-pager").performTouchInput { swipeLeft() }
             fixture.awaitSelected(this, 1)
+            fixture.close()
+        }
+
+    @Test
+    fun pageOverflowCountsAndMarksItsGroupAfterReconfirmation() =
+        runComposeUiTest {
+            val fixture = PagerFixture()
+            val source = FeedSource.Group(2)
+            fixture.select(2)
+            fixture.feeds.unplayedCounts[source to null] = 2
+            fixture.episodes.unplayedCounts[source to null] = 3
+            setContent { fixture.Content() }
+            fixture.awaitSelected(this, 2)
+            onNode(
+                hasContentDescription("More actions") and
+                    hasAnyAncestor(hasTestTag("feed-page:${fixture.ref(2).encode()}")),
+                useUnmergedTree = true,
+            ).performClick()
+            onNodeWithText("Mark all as played…").performClick()
+            onNodeWithText("Mark 2 episodes in 'Group 2' as played?").assertIsDisplayed()
+            assertTrue(fixture.episodes.calls.isEmpty())
+            onNodeWithText("Mark as played").performClick()
+            onNodeWithText("Mark 3 episodes in 'Group 2' as played?").assertIsDisplayed()
+            assertTrue(fixture.episodes.calls.isEmpty())
+            onNodeWithText("Mark as played").performClick()
+            waitForIdle()
+            assertEquals(listOf("markFeedPlayed($source, null, 3)"), fixture.episodes.calls)
             fixture.close()
         }
 
@@ -888,6 +879,7 @@ private val TestPlatformActions =
 private class PagerFixture {
     val clock = TestClock()
     val feeds = FakeFeedRepository(clock)
+    val episodes = FakeEpisodeRepository()
     val groups = FakeGroupRepository(clock)
     val settings = FakeSettingsRepository()
     val refresh = FakeRefreshController()
@@ -973,7 +965,7 @@ private class PagerFixture {
                 Dispatchers.setMain(effectDispatcher)
                 FeedsViewModel(
                     feeds,
-                    FakeEpisodeRepository(),
+                    episodes,
                     refresh,
                     FakeNetworkMonitor(FakeNetworkMonitor.ONLINE),
                     FakePodcastRepository().apply { tiles.value = listOf(testLibraryTile(1)) },
@@ -1018,6 +1010,15 @@ private class PagerFixture {
                     onVisitEnd = viewModel::onVisitEnd,
                     onAllGroups = { allGroupsOpens++ },
                 )
+                val markPlayed by viewModel.markPlayed.state.collectAsStateWithLifecycle()
+                markPlayed?.let {
+                    MarkFeedPlayedDialog(
+                        it,
+                        viewModel.markPlayed::select,
+                        viewModel.markPlayed::confirm,
+                        viewModel.markPlayed::dismiss,
+                    )
+                }
                 ShowUserMessages(state.messages, viewModel::onMessageShown)
             }
         }
