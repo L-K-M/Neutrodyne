@@ -327,6 +327,19 @@ sequenceDiagram
 | Mosaic artwork `g-{uuid}` | unreferenced → collected |
 | Import history (`import_item.groupNamesJson`) | unaffected (names, not IDs) |
 
+**Implementation note (2026-10-16, M2)** — C1 lands the mechanism with two slices deferred to
+their owning milestones: `SnapshotScheduler.requestSoon()` does not run on delete yet because the
+port itself arrives with M3's backup work; the 10-second undo window runs as a `delay` job on the
+injected `@ApplicationScope` and `GroupChannelSync.onDeleted(uuid)` fires at its end — process
+death still finalizes the delete, and the start-up sweep spares exactly the uuids the repository
+reports through `GroupRepository.pendingUndoUuids()` (the "live undo tokens" the sweep rule above
+refers to). `NoGroupChannels` sits in `:core:domain` next to the port rather than
+`:core:data` `desktopMain`, so both shells bind the same interim no-op until C5's
+`GroupNotificationChannels` replaces it on Android. `GroupMerger` exists in `:core:data` with the
+transaction this document specifies — union memberships, keep the survivor's settings, move a
+GROUP play context, then `sync()` — but has no callers until the restore path (M3) and
+`SyncApplier` (M10) land.
+
 ### Notification channels
 
 Android only. Channel posting is 03's ([03 New-episode notifications](03-feeds-and-discovery.md#new-episode-notifications)); the lifecycle is here, in `GroupNotificationChannels` (`:core:data` `androidMain`), the Android implementation of the common port `GroupChannelSync` (`sync()`, `onUuidChanged(old, new)`, `onDeleted(uuid)`). The desktop has no channels: its `NoGroupChannels` does nothing, and `DesktopNotifier` applies the same per-group switches without a channel ([11 Notifications](11-desktop.md#notifications)).
@@ -448,6 +461,15 @@ propagate settings write failures as exceptions rather than reporting success.
 | Import OPML into this group | picker; session created with this group as target | `ImportRepository.create(source, CreateImportOptions(targetGroupId = id))` | M3 |
 | Edit, Group settings, Delete | editor, settings screen, [Delete and undo](#delete-and-undo) | `GroupEditKey(id)`, `GroupSettingsKey(id)` | M2 |
 
+**Implementation note (2026-10-16, M2):** Count-aware callers freeze the
+chosen `sortDateBefore`, obtain `countUnplayed`, and pass both that cutoff and
+`expectedCount` to the guarded `EpisodeRepository.markFeedPlayed` overload.
+The repository revalidates the count inside its write transaction; a changed
+count returns `MarkFeedPlayedResult.SelectionChanged(actualCount)` and writes
+nothing. Show a refreshed confirmation before retrying. `Played(count)` reports
+the completed mark-played chain. Existing plain confirmation dialogs use the
+explicitly unchecked two-argument overload until the D9 dialog slice.
+
 `downloadAllEstimate` ([02 Download all candidates](02-data-model.md#download-all-candidates), M6): the feed's source predicate, its view filters and `hideOlderThanDays` bound (as [Playing a group](#playing-a-group) rules 1, 3 and 5, no anchor), unplayed, without a `download` row in `QUEUED`…`COMPLETED` (`FAILED` and `MISSING` rows count as candidates), without a tombstone (`downloadDismissedAt IS NULL`; the user deleted those deliberately), and downloadable (`enclosureUrl IS NOT NULL`, or YouTube when `YouTubeCapabilitiesSource.capabilities.value.downloads` at call time, [04 Capability matrix](04-youtube.md#capability-matrix)); newest first, **capped at 200** (`capped = true` → "200 newest of 1,234"). Unlike the context tail, Up next items and the current episode are **not** excluded: downloading them is wanted (answers 02's open question 7). Size per episode follows [07 Estimates](07-downloads.md#estimates): `enclosureLength` when ≥ 100 KB (smaller values are placeholders), else `durationMs × 16 000 B/s` (128 kbit/s) when known, else counted in `unknownSizeCount`; no invented numbers.
 
 ### Performance
@@ -559,6 +581,14 @@ interface EffectiveSettingsResolver {
 | 03 `RefreshScheduler`, `FeedRefresher` and the desktop refresh lane ([03 Desktop refresh](03-feeds-and-discovery.md#desktop-refresh)) | tick computation; `nextRefreshAt` per feed | `refreshIntervals()` |
 | 03 `NewEpisodeNotifier` (Android channels; the desktop's `DesktopNotifier`) | once per engine run | `notifications(ids)`; channel choice is 03's (first notifying group by `orderKey`) |
 
+**Implementation note (2026-10-16, M2):** B3 exposes only refresh and
+notification resolution and scoped fields; playback, download fields and hints
+arrive in their owning milestones. Its sources use `PodcastOverride` for the
+podcast row and `Group(uuid, name)` / `Groups(List<Group>)` for stable group
+identity, rather than the numeric IDs in the API sample above. Attribution text
+remains as specified above and belongs to the later settings UI (D8). B3 adds
+observable refresh/notification batch reads alongside the snapshot methods.
+
 ### Writing overrides
 
 ```kotlin
@@ -590,6 +620,12 @@ interface ScopeSettingsRepository {
     suspend fun updateGroup(groupId: Long, change: (SettingOverrides) -> SettingOverrides): Outcome<Unit, SettingsError>
 }
 ```
+
+**Implementation note (2026-10-16, M2):** B3 writes only the two M2 fields,
+preserving every other override column even when both M2 fields inherit. Its
+read-modify-write callback runs inside the Room write transaction. Scheduling
+hooks below arrive with C3, channel reconciliation with C5, and snapshot requests
+with M3; B3 does not invoke those hooks or rewire refresh scheduling.
 
 - Writes are a read-modify-write inside one write transaction (`@Upsert` is allowed on these single-writer tables, [02 DAO rules](02-data-model.md#dao-rules)); a row whose fields are all `null` is deleted. Rule 1 (dependent fields) and validation run before the write; an invalid value returns 01's `SettingsError.OutOfRange(field name)` and writes nothing. A podcast or group that no longer exists makes the write a no-op returning success (the screen is closing anyway).
 - After a write: refresh interval changed → `RefreshController.reschedulePeriodic()`; `notifyNewEpisodes` changed → `GroupChannelSync.sync()` (Android; the screen requests `POST_NOTIFICATIONS` per 03's permission rule); always → `SnapshotScheduler.requestSoon()` (Android). 07 and 06 observe the resolver flows; nothing else is pushed. Sync needs no call: the triggers capture the synced columns (02).

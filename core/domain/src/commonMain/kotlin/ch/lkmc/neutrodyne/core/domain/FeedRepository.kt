@@ -4,11 +4,13 @@ package ch.lkmc.neutrodyne.core.domain
 
 import androidx.paging.PagingData
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
+import ch.lkmc.neutrodyne.core.model.FeedCounts
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedPrefs
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.FeedTab
+import ch.lkmc.neutrodyne.core.model.VirtualCounts
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -18,6 +20,17 @@ import kotlinx.coroutines.flow.map
 /** Feeds, persisted view preferences, ordered tabs and device visits (05 Group feeds). */
 interface FeedRepository {
     fun observeTabs(): Flow<List<FeedTab>>
+
+    /** Hour-rounded lower bound slides hourly while collected, capped at the 30-day badge window. */
+    fun observeGroupCounts(sinceMs: Long): Flow<Map<Long, FeedCounts>>
+
+    fun observeVirtualCounts(sinceMs: Long): Flow<VirtualCounts>
+
+    /** Unbounded by badge windows/view filters; freeze the cutoff until the guarded write returns. */
+    suspend fun countUnplayed(
+        source: FeedSource,
+        sortDateBefore: Long?,
+    ): Int
 
     fun observePrefs(source: FeedSource): Flow<FeedPrefs>
 

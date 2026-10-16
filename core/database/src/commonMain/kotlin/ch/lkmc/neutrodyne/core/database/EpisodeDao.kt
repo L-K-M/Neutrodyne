@@ -10,6 +10,8 @@ import androidx.room3.RoomRawQuery
 import ch.lkmc.neutrodyne.core.model.Availability
 import kotlinx.coroutines.flow.Flow
 
+private const val NOTIFICATION_BIND_CHUNK = 500
+
 /**
  * `episode` row access outside the ingest pipeline (02 Ingestion support): lookups by id and
  * identity key, the restore/stub insert path and `setAvailability` (the only `episode` write
@@ -43,6 +45,31 @@ interface EpisodeDao {
         availability: Availability,
     )
 
+    /** One run-level read, bounded for the SQLite 3.18 fallback's variable limit (02). */
+    suspend fun notificationRows(episodeIds: Collection<Long>): List<NewEpisodeRow> =
+        episodeIds
+            .distinct()
+            .chunked(NOTIFICATION_BIND_CHUNK)
+            .flatMap { notificationRowsChunk(it) }
+            .sortedWith(compareByDescending<NewEpisodeRow> { it.sortDate }.thenByDescending { it.episodeId })
+
+    /** Room primitive; use [notificationRows] to retain global ordering across bind-sized chunks. */
+    @Query(
+        "SELECT e.id AS episodeId, e.podcastId, e.sortDate, e.title AS episodeTitle," +
+            " COALESCE(p.customTitle, p.title) AS podcastTitle," +
+            " COALESCE(e.artworkKey, p.artworkKey) AS artworkKey," +
+            " g.id AS groupId, g.uuid AS groupUuid, g.name AS groupName, g.orderKey AS groupOrderKey," +
+            " gs.notifyNewEpisodes AS groupNotify" +
+            " FROM episode e JOIN podcast p ON p.id = e.podcastId" +
+            " LEFT JOIN episode_state s ON s.episodeId = e.id" +
+            " LEFT JOIN podcast_group_member m ON m.podcastId = p.id" +
+            " LEFT JOIN podcast_group g ON g.id = m.groupId" +
+            " LEFT JOIN podcast_group_settings gs ON gs.groupId = g.id" +
+            " WHERE e.id IN (:episodeIds) AND s.playedAt IS NULL AND " + FeedQueryBuilder.VISIBLE +
+            " ORDER BY e.sortDate DESC, e.id DESC, g.orderKey, g.id",
+    )
+    suspend fun notificationRowsChunk(episodeIds: Collection<Long>): List<NewEpisodeRow>
+
     // --- Episode detail and show notes (03, added 2026-10-07) -------------------------------------
 
     /** `EpisodeRepository.observeEpisode` (03): the episode detail screen's joined row. */
@@ -74,3 +101,18 @@ interface EpisodeDao {
     @RawQuery(observedEntities = [EpisodeEntity::class, PodcastEntity::class, EpisodeStateEntity::class])
     suspend fun unplayedIds(query: RoomRawQuery): List<Long>
 }
+
+/** One visible, unplayed episode per membership (or one null group for an ungrouped podcast). */
+data class NewEpisodeRow(
+    val episodeId: Long,
+    val podcastId: Long,
+    val sortDate: Long,
+    val episodeTitle: String,
+    val podcastTitle: String,
+    val artworkKey: String?,
+    val groupId: Long?,
+    val groupUuid: String?,
+    val groupName: String?,
+    val groupOrderKey: String?,
+    val groupNotify: Boolean?,
+)

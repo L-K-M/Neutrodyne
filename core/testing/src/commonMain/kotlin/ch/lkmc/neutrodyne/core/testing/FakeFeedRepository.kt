@@ -6,11 +6,13 @@ import androidx.paging.PagingData
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.domain.FeedRepository
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
+import ch.lkmc.neutrodyne.core.model.FeedCounts
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedPrefs
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.FeedTab
+import ch.lkmc.neutrodyne.core.model.VirtualCounts
 import ch.lkmc.neutrodyne.core.model.isSupportedFeedAgeLimit
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -30,6 +32,19 @@ class FakeFeedRepository(
     val orders = MutableStateFlow<Map<FeedSource, FeedOrder>>(emptyMap())
     val prefs = MutableStateFlow<Map<FeedSource, FeedPrefs>>(emptyMap())
     val tabs = MutableStateFlow(listOf(FeedTab(FeedSource.All, "All", null, null, null)))
+
+    val groupCounts = MutableStateFlow<Map<Long, FeedCounts>>(emptyMap())
+    val virtualCounts = MutableStateFlow(VirtualCounts())
+    val unplayedCounts = mutableMapOf<Pair<FeedSource, Long?>, Int>()
+
+    override fun observeGroupCounts(sinceMs: Long): Flow<Map<Long, FeedCounts>> = groupCounts
+
+    override fun observeVirtualCounts(sinceMs: Long): Flow<VirtualCounts> = virtualCounts
+
+    override suspend fun countUnplayed(
+        source: FeedSource,
+        sortDateBefore: Long?,
+    ): Int = unplayedCounts[source to sortDateBefore] ?: 0
 
     override fun observeTabs(): Flow<List<FeedTab>> = tabs
 

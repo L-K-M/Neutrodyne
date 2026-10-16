@@ -13,14 +13,19 @@ import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.GroupEdit
 import ch.lkmc.neutrodyne.core.model.GroupPalette
 import ch.lkmc.neutrodyne.core.model.MediaFilter
+import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
+import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.memberEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
@@ -37,9 +42,22 @@ class GroupRepositoryTest {
     private val clock = TestClock()
     private val db = TestDb.inMemory(clock = clock)
     private val orderKeys = TestOrderKeys
-    private val repo = GroupRepositoryImpl(db, clock, orderKeys)
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val repo =
+        GroupRepositoryImpl(
+            db,
+            clock,
+            orderKeys,
+            FakeGroupChannelSync(),
+            FakeRefreshController(),
+            appScope,
+        )
 
-    @AfterTest fun close() = db.close()
+    @AfterTest fun close() {
+        // Undo-expiry jobs must not outlive the database they write to.
+        appScope.cancel()
+        db.close()
+    }
 
     @Test fun createNormalizesTheNameAndAssignsDefaultsInOrder() =
         runTest {
@@ -163,7 +181,15 @@ class GroupRepositoryTest {
             val results =
                 (0 until 8).map { index ->
                     async(Dispatchers.Default) {
-                        val independentRepo = GroupRepositoryImpl(db, clock, orderKeys)
+                        val independentRepo =
+                            GroupRepositoryImpl(
+                                db,
+                                clock,
+                                orderKeys,
+                                FakeGroupChannelSync(),
+                                FakeRefreshController(),
+                                appScope,
+                            )
                         start.await()
                         independentRepo.create(GroupDraft(if (index % 2 == 0) "Café" else "CAFE\u0301"))
                     }
@@ -369,6 +395,29 @@ class GroupRepositoryTest {
             assertNotNull(thrown)
             assertTrue(thrown.message.orEmpty().contains("disk fault"))
             assertEquals(1, repo.observeGroups().first().size)
+        }
+
+    @Test fun mosaicsGroupMemberRowsByGroupIdInRecencyOrder() =
+        runTest {
+            val first = created(GroupDraft("First"))
+            val second = created(GroupDraft("Second"))
+            val newest =
+                db.podcastDao().insertPodcast(
+                    podcastEntity(title = "New", artworkKey = "u-art").copy(latestEpisodeAt = 2_000L),
+                )
+            val older = db.podcastDao().insertPodcast(podcastEntity(title = "Old").copy(latestEpisodeAt = 1_000L))
+            db.groupDao().insertMember(memberEntity(first, older, "a"))
+            db.groupDao().insertMember(memberEntity(first, newest, "b"))
+            db.groupDao().insertMember(memberEntity(second, older, "a"))
+
+            val mosaics = repo.observeMosaics().first()
+            assertEquals(listOf(newest, older), mosaics[first]?.map { it.podcastId })
+            assertEquals(listOf(older), mosaics[second]?.map { it.podcastId })
+            assertEquals("New", mosaics[first]?.first()?.displayTitle)
+            assertEquals("u-art", mosaics[first]?.first()?.artwork?.key)
+
+            db.groupDao().insertMember(memberEntity(second, newest, "b"))
+            assertEquals(listOf(newest, older), repo.observeMosaics().first()[second]?.map { it.podcastId })
         }
 
     private suspend fun created(

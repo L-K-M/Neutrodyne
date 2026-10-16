@@ -10,8 +10,14 @@ import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
 import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.model.GroupDraft
+import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
+import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
@@ -28,9 +34,22 @@ import kotlin.test.assertTrue
 class GroupOrderTest {
     private val clock = TestClock()
     private val db = TestDb.inMemory(clock = clock)
-    private val repo = GroupRepositoryImpl(db, clock, TestOrderKeys)
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val repo =
+        GroupRepositoryImpl(
+            db,
+            clock,
+            TestOrderKeys,
+            FakeGroupChannelSync(),
+            FakeRefreshController(),
+            appScope,
+        )
 
-    @AfterTest fun close() = db.close()
+    @AfterTest fun close() {
+        // Undo-expiry jobs must not outlive the database they write to.
+        appScope.cancel()
+        db.close()
+    }
 
     /** `TestOrderKeys` appends 0.5, 0.75, 0.875, 0.9375. */
     private suspend fun groups(count: Int): List<Long> =
@@ -128,7 +147,15 @@ class GroupOrderTest {
     @Test fun keysBeyondTheProtocolLimitTriggerARewrite() =
         runTest {
             val (g1, g2, g3) = groups(3).let { listOf(it[0], it[1], it[2]) }
-            val longKeys = GroupRepositoryImpl(db, clock, OverlongKeys)
+            val longKeys =
+                GroupRepositoryImpl(
+                    db,
+                    clock,
+                    OverlongKeys,
+                    FakeGroupChannelSync(),
+                    FakeRefreshController(),
+                    appScope,
+                )
             assertEquals(Outcome.Success(Unit), longKeys.reorder(listOf(g1, g3, g2)))
             val after = rows()
             assertEquals(listOf(g1, g3, g2), after.map { it.id })
