@@ -56,6 +56,7 @@ import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.ui.GroupMosaic
 import ch.lkmc.neutrodyne.core.ui.GroupMosaicLayout
+import ch.lkmc.neutrodyne.core.ui.SuggestedGroupsCard
 import ch.lkmc.neutrodyne.core.ui.onSecondaryClick
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_more
@@ -156,13 +157,16 @@ internal fun GroupsManageScreen(
                 }
 
                 state.groups.isEmpty() -> {
-                    NdEmptyState(
-                        icon = NdIcons.GridView,
-                        title = stringResource(Res.string.groups_manage_empty),
-                        body = stringResource(Res.string.groups_manage_empty_body),
-                        actionLabel = stringResource(Res.string.group_edit_new),
-                        onAction = onNew,
-                    )
+                    Column(Modifier.fillMaxSize()) {
+                        SuggestedGroupsCard(onClick = onNew)
+                        NdEmptyState(
+                            icon = NdIcons.GridView,
+                            title = stringResource(Res.string.groups_manage_empty),
+                            body = stringResource(Res.string.groups_manage_empty_body),
+                            actionLabel = stringResource(Res.string.group_edit_new),
+                            onAction = onNew,
+                        )
+                    }
                 }
 
                 else -> {

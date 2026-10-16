@@ -490,9 +490,9 @@ Implementation note (2026-10-16, M2): D7 delivers the Library chips,
 persisted Podcasts/Groups segment, mosaic grid and selection actions. Group
 tile counts are wired to `FeedRepository.observeGroupCounts(sinceMs)`, using
 the shared domain helper for C2's hour-rounded 30-day badge window. The
-bulk mark-played confirmation names the selected podcast count; the unbounded
-episode count and age options still await D9's integration of C2's
-`FeedRepository.countUnplayed`. Group tile menus offer Edit
+bulk mark-played confirmation names the selected podcast count; episode
+counts and age options remain deferred in Library. The counted dialog is
+integrated in Feeds and Podcast. Group tile menus offer Edit
 (`GroupEditKey(id)`) and Manage groups (`GroupsManageKey`); the remaining
 group actions await their owning slices. The `ui.library_group_filter`
 value is a raw UUID, unlike `ui.feeds_selected_source`'s `group:` encoding.
@@ -1480,6 +1480,10 @@ enum class CoverAspect { SQUARE, WIDE_16_9 }
 ### Filter chips
 
 `FeedFilterChips` (`:core:ui`) in a horizontally scrolling row: Unplayed, Downloaded (M6), In progress (M4) as toggle `NdFilterChip`s with a leading check when selected; Media as a dropdown chip (All / Audio only / Video only); Sort as a dropdown chip (Newest first / Oldest first; hidden for All and Ungrouped, whose order is fixed in v1, 05); "Last 30 days" dropdown chip shown only while `hideOlderThanDays` is set (set from the page overflow); "Clear" chip when anything is active. Each change calls 05's `FeedRepository.setFilters/setFeedOrder/setHideOlderThanDays` immediately. Chips filter only; they never choose the group ([D55](../PLAN.md#3-key-decisions)).
+
+Implementation note (2026-10-16, M2): the shared row currently exposes
+Downloaded and In progress before M6/M4 supply their producers. Their
+stored-state predicates work, but the controls are not yet milestone-gated.
 
 ### Banners, snackbars and undo
 

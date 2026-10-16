@@ -4,6 +4,9 @@ import com.android.build.api.dsl.KotlinMultiplatformAndroidLibraryTarget
 plugins {
     alias(libs.plugins.neutrodyne.kmp.library)
     alias(libs.plugins.neutrodyne.metro)
+    // Desktop journeys compose the production routes over this module's real repositories.
+    id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
@@ -16,6 +19,8 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
+            // The compiler also visits main sources; only desktopTest composes UI.
+            compileOnly(libs.cmp.runtime)
             implementation(project(":core:domain"))
             implementation(project(":core:model"))
             implementation(project(":core:common"))
@@ -63,6 +68,16 @@ kotlin {
         // Wiring DataStoreBindings' providers in desktopTest mentions the DataStore type
         // (implementation deps of :core:datastore are otherwise invisible here).
         desktopTest.dependencies {
+            implementation(project(":core:ui"))
+            implementation(project(":core:designsystem"))
+            implementation(project(":core:navigation"))
+            implementation(project(":feature:feeds"))
+            implementation(project(":feature:groups"))
+            implementation(libs.bundles.cmp.core)
+            implementation(libs.cmp.ui.test)
+            implementation(libs.metrox.viewmodel.compose)
+            implementation(libs.kotlinx.coroutines.swing)
+            implementation(compose.desktop.currentOs)
             implementation(libs.androidx.datastore.preferences.core)
             implementation(libs.androidx.paging.testing)
             implementation(libs.okhttp.mockwebserver3)
