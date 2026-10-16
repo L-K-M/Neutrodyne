@@ -18,6 +18,7 @@ import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
+import ch.lkmc.neutrodyne.notifications.AndroidGroupChannelSync
 import ch.lkmc.neutrodyne.notifications.AndroidNewEpisodePoster
 import com.google.common.truth.Truth.assertThat
 import dev.zacsweers.metro.createGraphFactory
@@ -96,6 +97,11 @@ class AndroidAppGraphTest {
                 .filterIsInstance<DatabaseOpenInitializer>()
                 .single()
                 .order
+        assertThat(orders.getValue("NewEpisodeChannelsInitializer")).isLessThan(dbOrder)
+        assertThat(dbOrder).isLessThan(orders.getValue("GroupChannelsInitializer"))
+        assertThat(
+            orders.getValue("GroupChannelsInitializer"),
+        ).isLessThan(orders.getValue("PeriodicRefreshInitializer"))
         assertThat(dbOrder).isLessThan(orders.getValue("CredentialLoadInitializer"))
         assertThat(orders.getValue("CredentialLoadInitializer"))
             .isLessThan(orders.getValue("PeriodicRefreshInitializer"))
@@ -123,6 +129,8 @@ class AndroidAppGraphTest {
         runBlocking {
             graph.databaseOpener.awaitOpen()
             try {
+                assertThat(graph.groupChannelSync).isInstanceOf(AndroidGroupChannelSync::class.java)
+                assertThat(graph.groupChannelSync).isSameInstanceAs(graph.groupChannelSync)
                 assertThat(graph.newEpisodePoster).isInstanceOf(AndroidNewEpisodePoster::class.java)
                 assertThat(graph.newEpisodePoster).isSameInstanceAs(graph.newEpisodePoster)
             } finally {
@@ -134,6 +142,8 @@ class AndroidAppGraphTest {
         val STARTUP_BANDS =
             mapOf(
                 "DebugToolsInitializer" to 0..99,
+                "NewEpisodeChannelsInitializer" to 10..10,
+                "GroupChannelsInitializer" to 140..140,
                 "DatabaseOpenInitializer" to 100..119,
                 // M1b's `credential-load` sits at 120: after the database, before refresh work.
                 "CredentialLoadInitializer" to 120..199,

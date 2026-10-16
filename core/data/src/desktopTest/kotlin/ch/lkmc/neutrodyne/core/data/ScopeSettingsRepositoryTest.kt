@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.core.model.SettingSource
 import ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
+import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.groupEntity
@@ -38,7 +39,7 @@ import kotlin.test.assertTrue
 class ScopeSettingsRepositoryTest {
     private val db = TestDb.inMemory()
     private val settings = FakeSettingsRepository()
-    private val repo = ScopeSettingsRepositoryImpl(db, settings)
+    private val repo = ScopeSettingsRepositoryImpl(db, settings, FakeGroupChannelSync())
     private val dao = db.scopeSettingsDao()
 
     @AfterTest fun close() = db.close()
@@ -156,7 +157,7 @@ class ScopeSettingsRepositoryTest {
                 val writes =
                     (0..3).map { field ->
                         async(Dispatchers.Default) {
-                            val independent = ScopeSettingsRepositoryImpl(db, settings)
+                            val independent = ScopeSettingsRepositoryImpl(db, settings, FakeGroupChannelSync())
                             start.await()
                             when (field) {
                                 0 -> independent.updatePodcast(podcast) { it.copy(refreshIntervalMinutes = 120) }

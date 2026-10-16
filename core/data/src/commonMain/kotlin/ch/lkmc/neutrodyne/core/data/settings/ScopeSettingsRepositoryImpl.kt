@@ -7,10 +7,12 @@ import androidx.sqlite.SQLiteException
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastGroupSettingsEntity
 import ch.lkmc.neutrodyne.core.database.PodcastSettingsEntity
 import ch.lkmc.neutrodyne.core.database.ScopeOverrides
+import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.ScopeSettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
@@ -29,6 +31,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 internal class ScopeSettingsRepositoryImpl(
     private val db: NeutrodyneDatabase,
     private val settings: SettingsRepository,
+    private val channelSync: GroupChannelSync,
 ) : ScopeSettingsRepository {
     private val dao get() = db.scopeSettingsDao()
 
@@ -76,6 +79,12 @@ internal class ScopeSettingsRepositoryImpl(
                 dao.upsertGroup(PodcastGroupSettingsEntity(groupId, stored))
             }
             Outcome.Success(Unit)
+        }.also { outcome ->
+            if (outcome is Outcome.Success) {
+                // Channels are reconciled after the settings commit, never under the Room writer.
+                suspendRunCatching { channelSync.sync() }
+                    .onFailure { Log.w("ScopeSettings", it) { "Group channel sweep failed after settings write" } }
+            }
         }
 
     private suspend fun write(block: suspend () -> Outcome<Unit, SettingsError>): Outcome<Unit, SettingsError> =

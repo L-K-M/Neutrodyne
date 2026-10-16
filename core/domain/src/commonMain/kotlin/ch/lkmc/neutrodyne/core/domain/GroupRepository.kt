@@ -23,6 +23,7 @@ interface GroupRepository {
 
     /** podcastId → groupIds; podcasts in no group are absent (05 Membership). */
     fun observeMemberships(): Flow<Map<Long, Set<Long>>>
+
     /** Each group's four newest-active members for `GroupMosaic`, keyed by `groupId` (02, 05). */
     fun observeMosaics(): Flow<Map<Long, List<GroupMosaicMember>>>
 

@@ -117,7 +117,7 @@ class GroupDeleteTest {
 
                 // The uuid stays live for the channel sweep; nothing deleted a channel yet.
                 assertEquals(setOf(techUuid), repo.pendingUndoUuids())
-                assertEquals(emptyList(), channelSync.calls)
+                assertEquals(emptyList(), channelSync.calls.filter { it.startsWith("onDeleted") })
                 assertEquals(listOf("reschedulePeriodic()"), refresh.calls)
 
                 // A second independent delete would hand back a distinct token (05 step 3).
@@ -140,15 +140,15 @@ class GroupDeleteTest {
 
                 assertIs<Outcome.Success<DeletedGroupToken>>(repo.delete(tech))
                 runCurrent()
-                assertEquals(emptyList(), channelSync.calls)
+                assertEquals(emptyList(), channelSync.calls.filter { it.startsWith("onDeleted") })
 
                 testScheduler.advanceTimeBy(GroupRepository.UNDO_WINDOW_MS - 1)
                 runCurrent()
-                assertEquals(emptyList(), channelSync.calls)
+                assertEquals(emptyList(), channelSync.calls.filter { it.startsWith("onDeleted") })
 
                 testScheduler.advanceTimeBy(1)
                 runCurrent()
-                assertEquals(listOf("onDeleted($uuid)"), channelSync.calls)
+                assertEquals(listOf("onDeleted($uuid)"), channelSync.calls.filter { it.startsWith("onDeleted") })
                 assertEquals(emptySet(), repo.pendingUndoUuids())
             } finally {
                 db.close()
@@ -200,7 +200,11 @@ class GroupDeleteTest {
                 assertEquals(50, session.contextAnchorSortDate)
                 assertEquals(5, session.generation, "clear and restore each bumped once off 3")
 
-                assertEquals(emptyList(), channelSync.calls, "undo cancels the channel delete")
+                assertEquals(
+                    emptyList(),
+                    channelSync.calls.filter { it.startsWith("onDeleted") },
+                    "undo cancels the channel delete",
+                )
                 assertEquals(Outcome.Failure(GroupError.UndoExpired), repo.undoDelete(token))
             } finally {
                 scope.cancel()
@@ -224,7 +228,7 @@ class GroupDeleteTest {
 
                 assertEquals(Outcome.Failure(GroupError.UndoExpired), repo.undoDelete(token))
                 assertNull(db.groupDao().groupById(tech))
-                assertEquals(listOf("onDeleted($uuid)"), channelSync.calls)
+                assertEquals(listOf("onDeleted($uuid)"), channelSync.calls.filter { it.startsWith("onDeleted") })
             } finally {
                 db.close()
             }

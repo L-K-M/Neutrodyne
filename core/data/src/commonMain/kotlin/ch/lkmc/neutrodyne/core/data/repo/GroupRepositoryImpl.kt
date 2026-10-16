@@ -24,8 +24,8 @@ import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.domain.OrderedRow
 import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.planOrderKeyWrites
-import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
+import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.GroupEdit
@@ -121,84 +121,90 @@ internal class GroupRepositoryImpl(
             }
         if (!GroupIcons.isValid(draft.iconKey)) return Outcome.Failure(GroupError.InvalidIconKey)
 
-        return db.withWriteTransaction {
-            if (!podcastsExist(memberIds)) return@withWriteTransaction Outcome.Failure(GroupError.NotFound)
-            val now = clock.now()
-            withNameConflict(name.nameKey) {
-                val groupId =
-                    dao.insert(
-                        PodcastGroupEntity(
-                            uuid = Uuid.random().toString(),
-                            name = name.name,
-                            nameKey = name.nameKey,
-                            orderKey = orderKeys.after(dao.lastGroupOrderKey()),
-                            colorArgb =
-                                draft.colorArgb?.let(GroupPalette::opaque)
-                                    ?: GroupPalette.nextColor(dao.groupColors()),
-                            iconKey = draft.iconKey,
-                            playOrder = draft.playOrder,
-                            showAsTab = draft.showAsTab,
-                            createdAt = now,
-                            updatedAt = now,
-                        ),
-                    )
-                var lastKey: String? = null
-                for (podcastId in memberIds) {
-                    lastKey = orderKeys.after(lastKey)
-                    dao.insertMember(memberRow(groupId, podcastId, lastKey, now))
+        val outcome =
+            db.withWriteTransaction {
+                if (!podcastsExist(memberIds)) return@withWriteTransaction Outcome.Failure(GroupError.NotFound)
+                val now = clock.now()
+                withNameConflict(name.nameKey) {
+                    val groupId =
+                        dao.insert(
+                            PodcastGroupEntity(
+                                uuid = Uuid.random().toString(),
+                                name = name.name,
+                                nameKey = name.nameKey,
+                                orderKey = orderKeys.after(dao.lastGroupOrderKey()),
+                                colorArgb =
+                                    draft.colorArgb?.let(GroupPalette::opaque)
+                                        ?: GroupPalette.nextColor(dao.groupColors()),
+                                iconKey = draft.iconKey,
+                                playOrder = draft.playOrder,
+                                showAsTab = draft.showAsTab,
+                                createdAt = now,
+                                updatedAt = now,
+                            ),
+                        )
+                    var lastKey: String? = null
+                    for (podcastId in memberIds) {
+                        lastKey = orderKeys.after(lastKey)
+                        dao.insertMember(memberRow(groupId, podcastId, lastKey, now))
+                    }
+                    groupId
                 }
-                groupId
             }
-        }
+        if (outcome is Outcome.Success) syncChannels()
+        return outcome
     }
 
     override suspend fun update(
         groupId: Long,
         edit: GroupEdit,
     ): Outcome<Unit, GroupError> =
-        db.withWriteTransaction {
-            if (dao.groupById(groupId) == null) return@withWriteTransaction Outcome.Failure(GroupError.NotFound)
+        db
+            .withWriteTransaction<Outcome<Unit, GroupError>> {
+                if (dao.groupById(groupId) == null) return@withWriteTransaction Outcome.Failure(GroupError.NotFound)
 
-            val now = clock.now()
-            when (edit) {
-                is GroupEdit.Rename -> {
-                    val name =
-                        when (val result = validatedName(edit.name)) {
-                            is Outcome.Failure -> return@withWriteTransaction result
-                            is Outcome.Success -> result.value
+                val now = clock.now()
+                when (edit) {
+                    is GroupEdit.Rename -> {
+                        val name =
+                            when (val result = validatedName(edit.name)) {
+                                is Outcome.Failure -> return@withWriteTransaction result
+                                is Outcome.Success -> result.value
+                            }
+                        return@withWriteTransaction withNameConflict(name.nameKey) {
+                            dao.rename(groupId, name.name, name.nameKey, now)
                         }
-                    return@withWriteTransaction withNameConflict(name.nameKey) {
-                        dao.rename(groupId, name.name, name.nameKey, now)
+                    }
+
+                    is GroupEdit.Look -> {
+                        if (!GroupIcons.isValid(
+                                edit.iconKey,
+                            )
+                        ) {
+                            return@withWriteTransaction Outcome.Failure(GroupError.InvalidIconKey)
+                        }
+                        dao.setLook(groupId, edit.colorArgb?.let(GroupPalette::opaque), edit.iconKey, now)
+                    }
+
+                    is GroupEdit.Orders -> {
+                        dao.setOrders(groupId, edit.feedOrder, edit.playOrder, now)
+                    }
+
+                    is GroupEdit.View -> {
+                        if (!edit.hasSupportedAgeLimit()) {
+                            return@withWriteTransaction Outcome.Failure(GroupError.InvalidHideOlderThanDays)
+                        }
+                        dao.setView(groupId, edit.filterFlags, edit.mediaFilter, edit.hideOlderThanDays, now)
+                    }
+
+                    is GroupEdit.ShowAsTab -> {
+                        dao.setShowAsTab(groupId, edit.show, now)
                     }
                 }
-
-                is GroupEdit.Look -> {
-                    if (!GroupIcons.isValid(
-                            edit.iconKey,
-                        )
-                    ) {
-                        return@withWriteTransaction Outcome.Failure(GroupError.InvalidIconKey)
-                    }
-                    dao.setLook(groupId, edit.colorArgb?.let(GroupPalette::opaque), edit.iconKey, now)
-                }
-
-                is GroupEdit.Orders -> {
-                    dao.setOrders(groupId, edit.feedOrder, edit.playOrder, now)
-                }
-
-                is GroupEdit.View -> {
-                    if (!edit.hasSupportedAgeLimit()) {
-                        return@withWriteTransaction Outcome.Failure(GroupError.InvalidHideOlderThanDays)
-                    }
-                    dao.setView(groupId, edit.filterFlags, edit.mediaFilter, edit.hideOlderThanDays, now)
-                }
-
-                is GroupEdit.ShowAsTab -> {
-                    dao.setShowAsTab(groupId, edit.show, now)
-                }
+                Outcome.Success(Unit)
+            }.also { outcome ->
+                if (outcome is Outcome.Success && edit is GroupEdit.Rename) syncChannels()
             }
-            Outcome.Success(Unit)
-        }
 
     override suspend fun reorder(groupIdsInOrder: List<Long>): Outcome<Unit, GroupError> =
         db.withWriteTransaction {
@@ -273,50 +279,54 @@ internal class GroupRepositoryImpl(
     override suspend fun delete(groupId: Long): Outcome<DeletedGroupToken, GroupError> {
         // Snapshot and delete inside the one write transaction (05 steps 1–2): the member and
         // settings rows die by FK cascade, so the reads must precede the DELETE under the writer.
-        val snapshot =
-            db.withWriteTransaction<DeletedGroupSnapshot?> {
-                val group = dao.groupById(groupId)
-                if (group == null) {
-                    null
-                } else {
-                    val session = db.playSessionDao().get()
-                    val sessionContext =
-                        if (session != null &&
-                            session.contextType == ContextType.GROUP &&
-                            session.contextId == groupId
-                        ) {
-                            SessionContextSnapshot(
-                                // The clear below bumps the generation once; undo restores the
-                                // context only while the session still sits at this value.
-                                expectedGeneration = session.generation + 1,
-                                anchorEpisodeId = session.contextAnchorEpisodeId,
-                                anchorSortDate = session.contextAnchorSortDate,
-                            )
-                        } else {
+        // Register the token under the same mutex a sweep uses to read it, before exposing the delete.
+        val token =
+            undoMutex.withLock {
+                val snapshot =
+                    db.withWriteTransaction<DeletedGroupSnapshot?> {
+                        val group = dao.groupById(groupId)
+                        if (group == null) {
                             null
+                        } else {
+                            val session = db.playSessionDao().get()
+                            val sessionContext =
+                                if (session != null &&
+                                    session.contextType == ContextType.GROUP &&
+                                    session.contextId == groupId
+                                ) {
+                                    SessionContextSnapshot(
+                                        // The clear below bumps the generation once; undo restores the
+                                        // context only while the session still sits at this value.
+                                        expectedGeneration = session.generation + 1,
+                                        anchorEpisodeId = session.contextAnchorEpisodeId,
+                                        anchorSortDate = session.contextAnchorSortDate,
+                                    )
+                                } else {
+                                    null
+                                }
+                            val snapshot =
+                                DeletedGroupSnapshot(
+                                    group = group,
+                                    settings = db.scopeSettingsDao().forGroup(groupId),
+                                    members = dao.membersOf(groupId),
+                                    sessionContext = sessionContext,
+                                )
+                            dao.clearGroupContext(groupId, clock.now())
+                            dao.deleteGroup(groupId)
+                            snapshot
                         }
-                    val snapshot =
-                        DeletedGroupSnapshot(
-                            group = group,
-                            settings = db.scopeSettingsDao().forGroup(groupId),
-                            members = dao.membersOf(groupId),
-                            sessionContext = sessionContext,
-                        )
-                    dao.clearGroupContext(groupId, clock.now())
-                    dao.deleteGroup(groupId)
-                    snapshot
-                }
+                    } ?: return@withLock null
+
+                val token = DeletedGroupToken(Uuid.random().toString())
+                pendingDeletes[token.value] =
+                    PendingDelete(
+                        snapshot = snapshot,
+                        expiry = appScope.launch { expireToken(token.value) },
+                    )
+                token
             } ?: return Outcome.Failure(GroupError.NotFound)
 
-        val token = DeletedGroupToken(Uuid.random().toString())
-        undoMutex.withLock {
-            pendingDeletes[token.value] =
-                PendingDelete(
-                    snapshot = snapshot,
-                    expiry = appScope.launch { expireToken(token.value) },
-                )
-        }
-
+        syncChannels()
         // 05 step 2: the least refresh interval over the remaining groups may rise; a failed
         // reschedule never turns a committed delete into a failure. SnapshotScheduler.requestSoon
         // joins it when M3 brings that port (see the 2026-10-16 note in 05).
@@ -326,41 +336,45 @@ internal class GroupRepositoryImpl(
     }
 
     override suspend fun undoDelete(token: DeletedGroupToken): Outcome<Long, GroupError> =
-        undoMutex.withLock {
-            val pending =
-                pendingDeletes[token.value]
-                    ?: return@withLock Outcome.Failure(GroupError.UndoExpired)
-            val snapshot = pending.snapshot
-            val outcome =
-                db.withWriteTransaction<Outcome<Long, GroupError>> {
-                    // A group created meanwhile may hold the nameKey: then the re-insert is not
-                    // attempted, nothing is written and the token stays live until expiry (05).
-                    dao.groupByNameKey(snapshot.group.nameKey)?.let {
-                        return@withWriteTransaction Outcome.Failure(GroupError.NameTaken(it.id))
+        undoMutex
+            .withLock {
+                val pending =
+                    pendingDeletes[token.value]
+                        ?: return@withLock Outcome.Failure(GroupError.UndoExpired)
+                val snapshot = pending.snapshot
+                val outcome =
+                    db.withWriteTransaction<Outcome<Long, GroupError>> {
+                        // A group created meanwhile may hold the nameKey: then the re-insert is not
+                        // attempted, nothing is written and the token stays live until expiry (05).
+                        dao.groupByNameKey(snapshot.group.nameKey)?.let {
+                            return@withWriteTransaction Outcome.Failure(GroupError.NameTaken(it.id))
+                        }
+                        dao.insert(snapshot.group)
+                        snapshot.settings?.let { db.scopeSettingsDao().upsertGroup(it) }
+                        val surviving = db.podcastDao().existingIds(snapshot.members.map { it.podcastId }).toSet()
+                        for (member in snapshot.members) {
+                            if (member.podcastId in surviving) dao.insertMember(member)
+                        }
+                        snapshot.sessionContext?.let {
+                            dao.restoreGroupContext(
+                                groupId = snapshot.group.id,
+                                anchorEpisodeId = it.anchorEpisodeId,
+                                anchorSortDate = it.anchorSortDate,
+                                expectedGeneration = it.expectedGeneration,
+                                now = clock.now(),
+                            )
+                        }
+                        Outcome.Success(snapshot.group.id)
                     }
-                    dao.insert(snapshot.group)
-                    snapshot.settings?.let { db.scopeSettingsDao().upsertGroup(it) }
-                    val surviving = db.podcastDao().existingIds(snapshot.members.map { it.podcastId }).toSet()
-                    for (member in snapshot.members) {
-                        if (member.podcastId in surviving) dao.insertMember(member)
-                    }
-                    snapshot.sessionContext?.let {
-                        dao.restoreGroupContext(
-                            groupId = snapshot.group.id,
-                            anchorEpisodeId = it.anchorEpisodeId,
-                            anchorSortDate = it.anchorSortDate,
-                            expectedGeneration = it.expectedGeneration,
-                            now = clock.now(),
-                        )
-                    }
-                    Outcome.Success(snapshot.group.id)
+                if (outcome is Outcome.Success) {
+                    pendingDeletes.remove(token.value)
+                    pending.expiry.cancel()
                 }
-            if (outcome is Outcome.Success) {
-                pendingDeletes.remove(token.value)
-                pending.expiry.cancel()
+                outcome
+            }.also { outcome ->
+                // The sweep reads pendingUndoUuids(), so it must run after releasing undoMutex.
+                if (outcome is Outcome.Success) syncChannels()
             }
-            outcome
-        }
 
     override suspend fun pendingUndoUuids(): Set<String> =
         undoMutex.withLock { pendingDeletes.values.mapTo(HashSet()) { it.snapshot.group.uuid } }
@@ -374,6 +388,12 @@ internal class GroupRepositoryImpl(
         val pending = undoMutex.withLock { pendingDeletes.remove(tokenValue) } ?: return
         suspendRunCatching { channelSync.onDeleted(pending.snapshot.group.uuid) }
             .onFailure { Log.w(TAG, it) { "Group channel delete failed for ${pending.snapshot.group.uuid}" } }
+    }
+
+    private suspend fun syncChannels() {
+        // Database writes are committed: a platform failure must not turn them into reported failures.
+        suspendRunCatching { channelSync.sync() }
+            .onFailure { Log.w(TAG, it) { "Group channel sweep failed after group write" } }
     }
 
     private class DeletedGroupSnapshot(

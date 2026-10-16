@@ -353,6 +353,24 @@ Android only. Channel posting is 03's ([03 New-episode notifications](03-feeds-a
 | A Replace restore or a sync merge changes a group's `uuid` (`onUuidChanged(old, new)`, called after the commit) | when the group's own setting is `true`: create `new_episodes_{new}` with the old channel's importance, sound and audio attributes, lights and vibration (pattern included) and badge flag, then delete `new_episodes_{old}`; lockscreen visibility and "bypass Do Not Disturb" cannot be set by an app and fall back to their defaults ([Platform constraints](#platform-constraints); answers [10 Open questions](10-sync.md#open-questions) 5) |
 | Start-up (`AppInitializer` order 140, after the database open; [01](01-foundation.md#application-start-up)), and `sync()` after settings writes, import commits, restores and sync pages that touched groups or group settings | create missing channels for groups whose own setting is `true`; delete every `new_episodes_*` channel whose UUID is not such a group (the safety net when `onUuidChanged` was missed, for example after process death: the old channel and its user settings go, a new one is created) |
 
+**Implementation note (2026-10-16, M2).** C5 binds `AndroidGroupChannelSync`
+in `:app` beside D3's poster, sharing channel IDs and `ensureChannels()` there
+rather than adding the Android adapter to `:core:data`. The static initializer
+runs at 10 and the lazy group initializer at 140. The sweep keeps channels for
+groups whose own setting is true **and UUIDs with live undo tokens**; it deletes
+disabled groups' channels per the table and orphans after the window or process
+death. Delete holds the undo mutex through the database commit and token
+registration, so a concurrent sweep cannot see a deleted group without its
+token. Create, rename, delete, successful undo, group settings writes and
+`GroupMerger` invoke the domain port after commit and outside that mutex.
+Channel failures are logged and retried by later sweeps; committed writes
+remain successful. Import commit, restore and sync-page callers do not exist
+on this branch and remain with their owning milestones. UUID transfer copies
+the app-settable settings in the table; Android retains user settings if the
+destination channel ID already exists. Host coverage lives in `:app`'s
+`AndroidGroupChannelSyncTest` (Robolectric) and `:core:data`'s
+`GroupChannelCallSitesTest` (common implementation on the desktop test target).
+
 The channel group `grp_new_episodes` and the default channel `new_episodes` are created by 03's `ensureChannels()`. The AOSP per-app limit of 5,000 channels is irrelevant at our scale ([PreferencesHelper](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/notification/PreferencesHelper.java)).
 
 ---

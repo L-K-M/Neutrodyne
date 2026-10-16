@@ -137,7 +137,7 @@ class FakeGroupRepositoryTest {
             assertEquals(original.copy(memberCount = 1), repo.observeGroup(tech).first())
             assertEquals(setOf(1L), repo.observeMemberIds(tech).first())
             assertEquals(setOf(1L), repo.observeMemberIds(news).first())
-            assertEquals(emptyList(), channels.calls)
+            assertEquals(emptyList(), channels.calls.filter { it.startsWith("onDeleted") })
             assertEquals(Outcome.Failure(GroupError.UndoExpired), repo.undoDelete(token))
 
             // Expiry is clock-driven: once the window passes, the token settles and fires onDeleted.
@@ -145,7 +145,7 @@ class FakeGroupRepositoryTest {
             val newsToken = assertIs<Outcome.Success<DeletedGroupToken>>(repo.delete(news)).value
             clock.nowMs += GroupRepository.UNDO_WINDOW_MS
             assertEquals(emptySet(), repo.pendingUndoUuids())
-            assertEquals(listOf("onDeleted($newsUuid)"), channels.calls)
+            assertEquals(listOf("onDeleted($newsUuid)"), channels.calls.filter { it.startsWith("onDeleted") })
             assertEquals(Outcome.Failure(GroupError.UndoExpired), repo.undoDelete(newsToken))
             assertEquals(Outcome.Failure(GroupError.NotFound), repo.delete(-1))
         }
