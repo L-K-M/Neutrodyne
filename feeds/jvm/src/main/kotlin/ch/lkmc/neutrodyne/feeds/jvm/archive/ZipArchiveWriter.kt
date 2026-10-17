@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: Unlicense
+package ch.lkmc.neutrodyne.feeds.jvm.archive
+
+import ch.lkmc.neutrodyne.feeds.backup.ArchiveWriter
+import ch.lkmc.neutrodyne.feeds.backup.ArchiveWriterFactory
+import okio.Buffer
+import okio.Path
+import okio.Sink
+import okio.Timeout
+import java.io.BufferedOutputStream
+import java.io.FileOutputStream
+import java.time.LocalDateTime
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+
+/**
+ * The backup ZIP writer (05 Writing): `java.util.zip.ZipOutputStream` writing DEFLATE entries to
+ * [FileSystem.SYSTEM] at the path the caller staged. Every entry carries the DOS epoch timestamp so
+ * a backup's bytes are reproducible from its content alone; the atomic move onto the final name is
+ * the caller's job, not this writer's.
+ */
+public class ZipArchiveWriter : ArchiveWriterFactory {
+    override fun create(
+        path: Path,
+        deflateLevel: Int,
+    ): ArchiveWriter =
+        Writer(
+            ZipOutputStream(BufferedOutputStream(FileOutputStream(path.toFile()))).apply {
+                setLevel(deflateLevel)
+            },
+        )
+
+    private class Writer(
+        private val out: ZipOutputStream,
+    ) : ArchiveWriter {
+        private var openEntry: EntrySink? = null
+        private var closed = false
+
+        override fun entry(name: String): Sink {
+            check(!closed) { "archive writer is closed" }
+            check(openEntry == null) { "an archive entry is still open; close it before the next" }
+            require(isSafeEntryName(name)) { "invalid archive entry name" }
+            val entry = ZipEntry(name)
+            entry.timeLocal = DOS_EPOCH
+            out.putNextEntry(entry)
+            return EntrySink().also { openEntry = it }
+        }
+
+        override fun close() {
+            if (closed) return
+            closed = true
+            openEntry?.close()
+            out.close()
+        }
+
+        /**
+         * Streams into the current entry without closing the archive: [close] ends the entry
+         * (`closeEntry`), so the writer stays usable for the next one. Writes go through a fixed
+         * scratch buffer, never a `byteCount`-sized allocation.
+         */
+        private inner class EntrySink : Sink {
+            private var open = true
+            private val scratch = ByteArray(SCRATCH_BYTES)
+
+            override fun write(
+                source: Buffer,
+                byteCount: Long,
+            ) {
+                check(open) { "entry sink is closed" }
+                var remaining = byteCount
+                while (remaining > 0) {
+                    val n = source.read(scratch, 0, minOf(scratch.size.toLong(), remaining).toInt())
+                    out.write(scratch, 0, n)
+                    remaining -= n
+                }
+            }
+
+            override fun flush() {
+                out.flush()
+            }
+
+            override fun timeout(): Timeout = Timeout.NONE
+
+            override fun close() {
+                if (!open) return
+                open = false
+                this@Writer.openEntry = null
+                out.closeEntry()
+            }
+        }
+    }
+
+    private companion object {
+        /**
+         * The ZIP format's zero timestamp: DOS time has no timezone, so writing the epoch keeps the
+         * archive's bytes identical for identical content (deterministic fixtures and goldens).
+         */
+        val DOS_EPOCH: LocalDateTime = LocalDateTime.of(1980, 1, 1, 0, 0)
+        const val SCRATCH_BYTES: Int = 8 * 1024
+    }
+}
