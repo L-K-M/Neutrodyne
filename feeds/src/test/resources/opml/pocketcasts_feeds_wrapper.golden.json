@@ -1,0 +1,26 @@
+{
+  "entries": [
+    {
+      "folderId": 0,
+      "htmlUrl": "https://a.example.com",
+      "ordinal": 0,
+      "text": "Show A",
+      "type": "rss",
+      "url": "https://a.example.com/rss"
+    },
+    {
+      "folderId": 0,
+      "ordinal": 1,
+      "text": "Show B",
+      "type": "rss",
+      "url": "https://b.example.com/rss"
+    }
+  ],
+  "folders": [
+    {
+      "id": 0,
+      "name": "feeds"
+    }
+  ],
+  "mode": "STRICT"
+}

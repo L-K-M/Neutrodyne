@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="1.0">
+  <head>
+    <title>FreshRSS export</title>
+  </head>
+  <body>
+    <outline text="Tech">
+      <outline text="Blogs">
+        <outline text="Blog" type="rss" xmlUrl="https://blog.example.com/feed" htmlUrl="https://blog.example.com"/>
+      </outline>
+      <outline text="Direct" type="rss" xmlUrl="https://direct.example.com/feed"/>
+    </outline>
+  </body>
+</opml>

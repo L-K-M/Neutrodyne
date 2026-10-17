@@ -25,21 +25,36 @@ object Goldens {
 
     /** The corpus tree: a plain data directory of `:feeds`, consumed through a test-resources srcDir. */
     val fixturesDir: File
-        get() =
-            File(
-                checkNotNull(System.getProperty("neutrodyne.rootDir")) {
-                    "neutrodyne.rootDir is unset; run tests through Gradle (TestConventions sets it)"
-                },
-                "feeds/src/test/resources/feeds",
-            )
+        get() = areaDir("feeds")
+
+    /** `feeds/src/test/resources/<area>` — the corpus area (feeds, opml, backup, …). */
+    fun areaDir(area: String): File =
+        File(
+            checkNotNull(System.getProperty("neutrodyne.rootDir")) {
+                "neutrodyne.rootDir is unset; run tests through Gradle (TestConventions sets it)"
+            },
+            "feeds/src/test/resources/$area",
+        )
 
     fun fixture(name: String): File = File(fixturesDir, name)
 
+    fun fixture(
+        area: String,
+        name: String,
+    ): File = File(areaDir(area), name)
+
     /** Every corpus fixture, sorted by name; fails when the corpus tree is missing or empty. */
-    fun fixtures(): List<File> {
-        val files = fixturesDir.listFiles { file -> file.name.endsWith(".xml") }
-        checkNotNull(files) { "golden corpus directory not found: ${fixturesDir.path}" }
-        check(files.isNotEmpty()) { "golden corpus is empty under ${fixturesDir.path}" }
+    fun fixtures(): List<File> = fixtures("feeds", ".xml")
+
+    /** Every `extension` file in the [area] corpus, sorted by name. */
+    fun fixtures(
+        area: String,
+        extension: String,
+    ): List<File> {
+        val dir = areaDir(area)
+        val files = dir.listFiles { file -> file.name.endsWith(extension) }
+        checkNotNull(files) { "golden corpus directory not found: ${dir.path}" }
+        check(files.isNotEmpty()) { "golden corpus is empty under ${dir.path}" }
         return files.sortedBy { it.name }
     }
 
@@ -50,13 +65,14 @@ object Goldens {
     /** Pretty-printed JSON with object keys sorted recursively and explicit nulls dropped. */
     fun canonicalJson(element: JsonElement): String = canonicalJson.encodeToString(sortKeys(dropNulls(element)))
 
-    /** Serialises [value] with the encoder the corpus uses and compares it with [name]. */
+    /** Serialises [value] with the encoder the corpus uses and compares it with [name] in [area]. */
     fun <T> assertMatches(
         name: String,
         value: T,
         serialize: (T) -> JsonElement,
+        area: String = "feeds",
     ) {
-        val goldenFile = fixture(name)
+        val goldenFile = fixture(area, name)
         val actual = canonicalJson(serialize(value)) + "\n"
         if (updateRequested()) {
             goldenFile.writeText(actual)

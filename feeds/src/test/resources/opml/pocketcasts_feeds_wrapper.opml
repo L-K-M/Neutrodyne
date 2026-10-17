@@ -1,0 +1,8 @@
+<opml version="1.0">
+  <body>
+    <outline text="feeds">
+      <outline text="Show A" type="rss" xmlUrl="https://a.example.com/rss" htmlUrl="https://a.example.com"/>
+      <outline text="Show B" type="rss" xmlUrl="https://b.example.com/rss"/>
+    </outline>
+  </body>
+</opml>

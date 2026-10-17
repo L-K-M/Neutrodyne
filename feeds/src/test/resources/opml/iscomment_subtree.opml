@@ -1,0 +1,8 @@
+<opml version="1.0">
+  <body>
+    <outline text="Archive" isComment="true">
+      <outline type="rss" text="Old Show" xmlUrl="https://old.example.com/rss"/>
+    </outline>
+    <outline type="rss" text="Live Show" xmlUrl="https://live.example.com/rss"/>
+  </body>
+</opml>
