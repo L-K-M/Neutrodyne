@@ -35,12 +35,15 @@ public data class ArchiveCaps(
                 maxTotalBytes = 256L * 1024 * 1024,
             )
 
-        /** Google Takeout ZIPs (05 Archive guard): many entries, each small. */
+        /**
+         * Google Takeout ZIPs (05 Archive guard): many entries, each small. The spec table's
+         * Takeout column gives decimal MB, unlike the Backup column's binary MiB.
+         */
         public val TAKEOUT: ArchiveCaps =
             ArchiveCaps(
                 maxEntries = 10_000,
-                maxEntryBytes = 5L * 1024 * 1024,
-                maxTotalBytes = 250L * 1024 * 1024,
+                maxEntryBytes = 5_000_000,
+                maxTotalBytes = 250_000_000,
             )
     }
 }

@@ -45,6 +45,28 @@ class HostileInputTest {
         assertRejects("zip_entries") { ZipGuard().open(path, ArchiveCaps.BACKUP).close() }
     }
 
+    /**
+     * A 176-byte ZIP64 END claiming 2³⁰ entries makes `ZipFile`'s constructor build an
+     * `int[centot * 3]` that overflows negative — `NegativeArraySizeException` on any heap.
+     * The guard must reject with [ArchiveException] before `ZipFile` is ever constructed.
+     */
+    @Test
+    fun zip64EndCountOverflowIsRejected() {
+        val path = ZipTestFiles.tempZip(ZipTestFiles.zip64EndBomb(centot64 = 0x4000_0000L))
+        assertRejects("zip_entries") { ZipGuard().open(path, ArchiveCaps.BACKUP).close() }
+    }
+
+    /**
+     * The same archive claiming 2²⁹ entries: `int[centot * 3]` is a valid ~6 GiB request that
+     * dies with `OutOfMemoryError` on this task's capped heap — again an [ArchiveException],
+     * never an `Error`.
+     */
+    @Test
+    fun zip64EndCountOomIsRejected() {
+        val path = ZipTestFiles.tempZip(ZipTestFiles.zip64EndBomb(centot64 = 0x2000_0000L))
+        assertRejects("zip_entries") { ZipGuard().open(path, ArchiveCaps.BACKUP).close() }
+    }
+
     private fun assertRejects(
         reason: String,
         block: () -> Unit,

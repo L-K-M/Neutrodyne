@@ -68,6 +68,46 @@ class ZipGuardTest {
     }
 
     @Test
+    fun directoryEntryDoesNotSatisfyExactName() {
+        // `ZipFile.getEntry` falls back to "name/" when "name" is absent: without the exact-name
+        // check, opening "manifest.json" would silently read the directory entry instead.
+        val path = ZipTestFiles.tempZip(ZipTestFiles.zipBytes(listOf("manifest.json/" to byteArrayOf())))
+        ZipGuard().open(path, ArchiveCaps.BACKUP).use { reader ->
+            assertEquals("zip", corruptOf { reader.open("manifest.json") })
+        }
+    }
+
+    @Test
+    fun declaredEntryCountOverCapIsHostile() {
+        // The END record itself claims more entries than the cap allows; the guard rejects it
+        // before `ZipFile` allocates from the claim.
+        val path =
+            ZipTestFiles.tempZip(
+                ZipTestFiles.endLyingZip(declaredEntries = ArchiveCaps.BACKUP.maxEntries + 1, declaredCenlen = 47),
+            )
+        assertEquals("zip_entries", hostileOf { guard.open(path, ArchiveCaps.BACKUP) })
+    }
+
+    @Test
+    fun centralDirectoryShorterThanDeclaredCountIsCorrupt() {
+        // Two declared entries cannot fit in 47 central-directory bytes (records are ≥ 46).
+        val path = ZipTestFiles.tempZip(ZipTestFiles.endLyingZip(declaredEntries = 2, declaredCenlen = 47))
+        assertEquals("zip", corruptOf { guard.open(path, ArchiveCaps.BACKUP) })
+    }
+
+    @Test
+    fun centralDirectoryBeyondCapRoomIsHostile() {
+        // A declared directory bigger than the cap's worst case only exists to force the
+        // constructor's `byte[cenlen]` allocation.
+        val caps = ArchiveCaps(maxEntries = 4, maxEntryBytes = 1024, maxTotalBytes = 4096)
+        val path =
+            ZipTestFiles.tempZip(
+                ZipTestFiles.endLyingZip(declaredEntries = 1, declaredCenlen = 4L * 196_651 + 1),
+            )
+        assertEquals("zip_entries", hostileOf { guard.open(path, caps) })
+    }
+
+    @Test
     fun entryCountOverflowIsHostile() {
         val entries = (1..ArchiveCaps.BACKUP.maxEntries + 1).map { "e$it" to byteArrayOf(0) }
         val path = ZipTestFiles.tempZip(ZipTestFiles.zipBytes(entries))
@@ -152,6 +192,38 @@ class ZipGuardTest {
             val sink = okio.Buffer()
             reader.open("zeros").buffer().readAll(sink)
             assertEquals(inflated, sink.size)
+        }
+    }
+
+    @Test
+    fun storedEntrySizeCapCountsRealBytes() {
+        // A STORED entry takes a different stream class than a DEFLATED one; the same counted
+        // caps must still hold.
+        val caps = ArchiveCaps(maxEntries = 4, maxEntryBytes = 8, maxTotalBytes = 1L shl 62)
+        val path =
+            ZipTestFiles.tempZip(
+                ZipTestFiles.storedZipBytes(listOf("big" to ByteArray(10_000) { it.toByte() })),
+            )
+        guard.open(path, caps).use { reader ->
+            assertEquals("zip_bomb", hostileOf { reader.open("big").buffer().readAll(blackholeSink()) })
+        }
+    }
+
+    @Test
+    fun storedSlipNameIsHostile() {
+        val path = ZipTestFiles.tempZip(ZipTestFiles.storedZipBytes(listOf("../x" to byteArrayOf(1))))
+        assertEquals("zip_path", hostileOf { guard.open(path, ArchiveCaps.BACKUP) })
+    }
+
+    @Test
+    fun corruptedCrcIsDeliveredUnchecked() {
+        // `ZipFile` never verifies the CRC: a wrong CEN crc still delivers the entry's bytes
+        // without error. Content integrity is the manifest SHA-256 check's job (05 Validation).
+        val content = ByteArray(1024) { (it * 7).toByte() }
+        val zip = ZipTestFiles.corruptCenCrc(ZipTestFiles.zipBytes(listOf("a" to content)))
+        val path = ZipTestFiles.tempZip(zip)
+        guard.open(path, ArchiveCaps.BACKUP).use { reader ->
+            assertContentEquals(content, reader.open("a").buffer().readByteArray())
         }
     }
 

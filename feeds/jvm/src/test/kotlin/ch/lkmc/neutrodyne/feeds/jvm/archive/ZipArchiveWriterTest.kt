@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.feeds.jvm.archive
 
+import okio.Buffer
 import okio.Path
 import okio.Path.Companion.toOkioPath
 import okio.buffer
+import org.junit.Assume.assumeTrue
+import java.io.IOException
 import java.nio.file.Files
+import java.util.Random
 import java.util.zip.ZipFile
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -83,6 +87,71 @@ class ZipArchiveWriterTest {
         val stored = write(listOf("z" to compressible), deflateLevel = 0)
         val compressed = write(listOf("z" to compressible), deflateLevel = 9)
         assertTrue(Files.size(stored.toFile().toPath()) > Files.size(compressed.toFile().toPath()))
+    }
+
+    @Test
+    fun unsafeEntryNamesAreRejected() {
+        val path = Files.createTempFile("zip-writer", ".zip").toOkioPath()
+        ZipArchiveWriter().create(path).use { writer ->
+            for (name in listOf("../x", "..", "a/../b", "/abs", "a\\b")) {
+                assertFailsWith<IllegalArgumentException>(name) { writer.entry(name) }
+            }
+        }
+    }
+
+    @Test
+    fun invalidLevelLeavesNoOpenFile() {
+        assumeTrue(
+            Files.isDirectory(
+                java.nio.file.Path
+                    .of(PROC_FD),
+            ),
+        )
+        val before = openFdCount()
+        repeat(8) {
+            assertFailsWith<IllegalArgumentException> {
+                ZipArchiveWriter().create(Files.createTempFile("zip-writer", ".zip").toOkioPath(), deflateLevel = -2)
+            }
+        }
+        assertEquals(before, openFdCount())
+    }
+
+    @Test
+    fun closeReleasesTheFileWhenTheEntryCloseFails() {
+        // /dev/full fails every write; an entry big enough to flush mid-write leaves
+        // closeEntry() failing too, which used to skip the stream's close entirely.
+        assumeTrue(
+            Files.isDirectory(
+                java.nio.file.Path
+                    .of(PROC_FD),
+            ),
+        )
+        val devFull =
+            java.nio.file.Path
+                .of("/dev/full")
+        assumeTrue(Files.isWritable(devFull))
+        val before = openFdCount()
+        repeat(4) {
+            val writer = ZipArchiveWriter().create(devFull.toOkioPath())
+            val sink = writer.entry("a")
+            val bytes = ByteArray(64 * 1024).also { Random(7).nextBytes(it) }
+            val payload = Buffer().write(bytes)
+            assertFailsWith<IOException> { sink.write(payload, payload.size) }
+            assertFailsWith<IOException> { writer.close() }
+        }
+        assertEquals(before, openFdCount())
+    }
+
+    private fun openFdCount(): Long =
+        Files
+            .list(
+                java.nio.file.Path
+                    .of(PROC_FD),
+            ).use { it.count() }
+
+    private companion object {
+        /** Linux fd directory; the leak tests skip where it is absent. */
+        const val PROC_FD = "/proc/self/fd"
     }
 
     private fun write(
