@@ -41,6 +41,8 @@ import ch.lkmc.neutrodyne.core.testing.testEpisodeDetail
 import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
 import ch.lkmc.neutrodyne.core.testing.testLibraryTile
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
+import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionAction
+import ch.lkmc.neutrodyne.core.ui.MarkPlayedOption
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_copy_link
@@ -127,6 +129,110 @@ class FeedsViewModelTest : MainDispatcherTest() {
     private fun TestScope.collect(viewModel: FeedsViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
     }
+
+    @Test
+    fun swipePlayedOffersUndoThroughTheExistingService() =
+        viewModelTest {
+            val model = viewModel()
+            collect(model)
+            model.onRowAction(EpisodeAction.SetPlayed(7, true, ch.lkmc.neutrodyne.core.ui.PlayedActionOrigin.SWIPE))
+            runCurrent()
+            val message =
+                model.uiState.value.messages
+                    .single()
+            model.undoSwipe(message.id)
+            runCurrent()
+            assertEquals(listOf("setPlayed([7], true)", "setPlayed([7], false)"), episodes.calls)
+            model.onMessageShown(message.id)
+            model.undoSwipe(message.id)
+            runCurrent()
+            assertEquals(2, episodes.calls.size)
+        }
+
+    @Test
+    fun episodeSelectionTogglesExtendsFromLastToggleAndClears() =
+        viewModelTest {
+            val model = viewModel()
+            model.onRowAction(EpisodeAction.Select(2))
+            assertEquals(setOf(2L), model.episodeSelection.ids.value)
+            model.episodeSelection.extend(4, listOf(1, 2, 3, 4, 5))
+            assertEquals(setOf(2L, 3L, 4L), model.episodeSelection.ids.value)
+            model.onRowAction(EpisodeAction.Select(3))
+            model.episodeSelection.extend(1, listOf(1, 2, 3, 4, 5))
+            assertEquals(setOf(1L, 2L, 3L, 4L), model.episodeSelection.ids.value)
+            model.episodeSelection.clear()
+            assertTrue(
+                model.episodeSelection.ids.value
+                    .isEmpty(),
+            )
+            model.episodeSelection.extend(5, listOf(1, 5))
+            assertEquals(setOf(5L), model.episodeSelection.ids.value)
+        }
+
+    @Test
+    fun bulkEpisodeActionsDispatchOnlySelectedIdsAndClearOnSuccess() =
+        viewModelTest {
+            val model = viewModel()
+            model.episodeSelection.selectAll(listOf(3, 1))
+            model.episodeSelection.perform(EpisodeSelectionAction.MARK_PLAYED)
+            runCurrent()
+            assertEquals(listOf("setPlayed([3, 1], true)"), episodes.calls)
+            assertTrue(
+                model.episodeSelection.ids.value
+                    .isEmpty(),
+            )
+            model.onRowAction(EpisodeAction.Select(2))
+            model.episodeSelection.perform(EpisodeSelectionAction.MARK_UNPLAYED)
+            runCurrent()
+            assertEquals("setPlayed([2], false)", episodes.calls.last())
+        }
+
+    @Test
+    fun failedBulkActionRetainsSelectionAndReportsWriteFailure() =
+        viewModelTest {
+            val model = viewModel()
+            collect(model)
+            episodes.writeError = IllegalStateException("disk full")
+            model.onRowAction(EpisodeAction.Select(9))
+            model.episodeSelection.perform(EpisodeSelectionAction.MARK_PLAYED)
+            runCurrent()
+            assertEquals(setOf(9L), model.episodeSelection.ids.value)
+            assertFalse(model.episodeSelection.busy.value)
+            assertEquals(
+                UiText.Res(Res.string.write_failed),
+                model.uiState.value.messages
+                    .single()
+                    .text,
+            )
+        }
+
+    @Test
+    fun swipePreferencesRetainDefaultsAndFollowChanges() =
+        viewModelTest {
+            val model = viewModel()
+            collect(model)
+            runCurrent()
+            assertNull(model.uiState.value.swipe)
+            settings.set(AppearanceSettingKeys.FEEDS_ROW_SWIPE, true)
+            runCurrent()
+            assertEquals(
+                ch.lkmc.neutrodyne.core.model.SwipeAction.ADD_UP_NEXT,
+                model.uiState.value.swipe
+                    ?.startToEnd,
+            )
+            assertEquals(
+                ch.lkmc.neutrodyne.core.model.SwipeAction.MARK_PLAYED,
+                model.uiState.value.swipe
+                    ?.endToStart,
+            )
+            settings.set(AppearanceSettingKeys.SWIPE_START_ACTION, ch.lkmc.neutrodyne.core.model.SwipeAction.NONE)
+            runCurrent()
+            assertEquals(
+                ch.lkmc.neutrodyne.core.model.SwipeAction.NONE,
+                model.uiState.value.swipe
+                    ?.startToEnd,
+            )
+        }
 
     @Test
     fun liveRowsUseUnionOfComposedPageWindowsAndReleaseDisposedPages() =
@@ -316,12 +422,76 @@ class FeedsViewModelTest : MainDispatcherTest() {
         }
 
     @Test
-    fun markAllPlayedCoversTheWholeFeed() =
+    fun countedMarkPlayedFreezesCutoffAndReconfirmsChangedSelection() =
         viewModelTest {
             val viewModel = viewModel()
-            viewModel.markAllPlayed()
+            collect(viewModel)
+            val group = group()
             runCurrent()
-            assertEquals(listOf("markFeedPlayed(All, null)"), episodes.calls)
+            val source = FeedSource.Group(group.id)
+            val before = clock.now() - 7.days.inWholeMilliseconds
+            feeds.unplayedCounts[source to before] = 2
+            episodes.unplayedCounts[source to before] = 3
+            viewModel.markAllPlayed(source)
+            viewModel.markPlayed.select(MarkPlayedOption.WEEK)
+            runCurrent()
+            assertEquals(
+                2,
+                viewModel.markPlayed.state.value
+                    ?.count,
+            )
+            assertEquals(
+                UiText.Raw("tech"),
+                viewModel.markPlayed.state.value
+                    ?.title,
+            )
+            assertTrue(episodes.calls.isEmpty())
+
+            clock.advanceBy(2.days)
+            viewModel.markPlayed.confirm()
+            runCurrent()
+            val changed = viewModel.markPlayed.state.value!!
+            assertEquals(before, changed.sortDateBefore)
+            assertEquals(3, changed.count)
+            assertTrue(changed.selectionChanged)
+            assertTrue(episodes.calls.isEmpty())
+
+            viewModel.markPlayed.confirm()
+            viewModel.markPlayed.confirm()
+            runCurrent()
+            assertNull(viewModel.markPlayed.state.value)
+            assertEquals(listOf("markFeedPlayed($source, $before, 3)"), episodes.calls)
+        }
+
+    @Test
+    fun countedMarkPlayedUsesEachVirtualSourceAndCancelWritesNothing() =
+        viewModelTest {
+            val viewModel = viewModel()
+            for (source in listOf(FeedSource.All, FeedSource.Ungrouped)) {
+                feeds.unplayedCounts[source to null] = 1
+                episodes.unplayedCounts[source to null] = 1
+                viewModel.markAllPlayed(source)
+                runCurrent()
+                assertEquals(
+                    source,
+                    viewModel.markPlayed.state.value
+                        ?.source,
+                )
+                assertEquals(
+                    1,
+                    viewModel.markPlayed.state.value
+                        ?.count,
+                )
+                viewModel.markPlayed.dismiss()
+                assertTrue(episodes.calls.isEmpty())
+                viewModel.markAllPlayed(source)
+                runCurrent()
+                viewModel.markPlayed.confirm()
+                runCurrent()
+                assertNull(viewModel.markPlayed.state.value)
+                assertEquals("markFeedPlayed($source, null, 1)", episodes.calls.last())
+                episodes.calls.clear()
+            }
         }
 
     @Test
@@ -458,20 +628,31 @@ class FeedsViewModelTest : MainDispatcherTest() {
         }
 
     @Test
-    fun markAllPlayedWriteFailurePostsAMessage() =
+    fun markAllPlayedWriteFailureKeepsCountForRetry() =
         viewModelTest {
             val viewModel = viewModel()
-            collect(viewModel)
+            feeds.unplayedCounts[FeedSource.All to null] = 1
+            episodes.unplayedCounts[FeedSource.All to null] = 1
             episodes.writeError = Exception("disk full")
-
             viewModel.markAllPlayed()
             runCurrent()
-
+            viewModel.markPlayed.confirm()
+            runCurrent()
             assertTrue(episodes.calls.isEmpty())
-            assertTrue(
-                viewModel.uiState.value.messages
-                    .isNotEmpty(),
+            assertEquals(
+                1,
+                viewModel.markPlayed.state.value
+                    ?.count,
             )
+            assertEquals(
+                UiText.Res(Res.string.write_failed),
+                viewModel.markPlayed.state.value
+                    ?.error,
+            )
+            episodes.writeError = null
+            viewModel.markPlayed.confirm()
+            runCurrent()
+            assertNull(viewModel.markPlayed.state.value)
         }
 
     private suspend fun group(showAsTab: Boolean = true): Group {

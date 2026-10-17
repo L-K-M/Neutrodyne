@@ -21,11 +21,14 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -35,6 +38,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performMultiModalInput
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
@@ -88,8 +92,10 @@ import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
 import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
 import ch.lkmc.neutrodyne.core.testing.testLibraryTile
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
+import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionController
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.LocalUiClock
+import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedDialog
 import ch.lkmc.neutrodyne.core.ui.platform.ExternalUrlOpener
 import ch.lkmc.neutrodyne.core.ui.platform.FilePicker
 import ch.lkmc.neutrodyne.core.ui.platform.FileSaver
@@ -100,6 +106,7 @@ import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -126,7 +133,7 @@ import kotlin.time.Duration.Companion.seconds
  * collects to the test scheduler — the deprecated v1 entry point leaves them racing on real
  * dispatchers).
  */
-@OptIn(ExperimentalTestApi::class)
+@OptIn(ExperimentalTestApi::class, ExperimentalCoroutinesApi::class)
 class FeedsScreenTest {
     private lateinit var previousLocale: Locale
     private val navigator = RecordingAppNavigator()
@@ -227,6 +234,43 @@ class FeedsScreenTest {
         }
 
     @Test
+    fun selectionBarRangesSelectAllBulkActionAndEscape() =
+        runComposeUiTest {
+            val writes = mutableListOf<List<Long>>()
+            val selection =
+                EpisodeSelectionController(
+                    CoroutineScope(Dispatchers.Unconfined),
+                    { ids, _ -> writes += ids },
+                    { throw it },
+                )
+            setFeeds(
+                state = FeedsUiState(),
+                rows = (1L..5L).map { testEpisodeRow(it, title = "Episode $it") },
+                selection = selection,
+            )
+            onNodeWithText("Episode 1").performTouchInput { longClick() }
+            assertEquals(setOf(1L), selection.ids.value)
+            onNodeWithText("1 selected").assertIsDisplayed()
+            onNodeWithText("Episode 3").performMultiModalInput {
+                key { keyDown(Key.ShiftLeft) }
+                mouse { click(centerLeft) }
+                key { keyUp(Key.ShiftLeft) }
+            }
+            onNodeWithText("3 selected").assertIsDisplayed()
+            onNodeWithText("Episode 3").performKeyInput {
+                keyDown(Key.CtrlLeft)
+                pressKey(Key.A)
+                keyUp(Key.CtrlLeft)
+            }
+            onNodeWithText("5 selected").assertIsDisplayed()
+            onNodeWithContentDescription("Mark played").performClick()
+            assertEquals(listOf(listOf(1L, 2L, 3L, 4L, 5L)), writes)
+            onNodeWithText("Episode 1").performTouchInput { longClick() }
+            onNodeWithText("Episode 1").performKeyInput { pressKey(Key.Escape) }
+            assertTrue(selection.ids.value.isEmpty())
+        }
+
+    @Test
     fun rowClickDispatchesOpen() =
         runComposeUiTest {
             val actions = mutableListOf<EpisodeAction>()
@@ -268,55 +312,17 @@ class FeedsScreenTest {
         }
 
     @Test
-    fun overflowMarkAllConfirmsFirst() =
+    fun overflowOpensCountedConfirmation() =
         runComposeUiTest {
-            var confirmed = false
+            var opens = 0
             setFeeds(
                 state = FeedsUiState(hasSubscriptions = true),
                 rows = listOf(testEpisodeRow(1)),
-                onMarkAllPlayed = { confirmed = true },
+                onMarkAllPlayed = { opens++ },
             )
             onNodeWithContentDescription("More actions").performClick()
             onNodeWithText("Mark all as played…").performClick()
-            // The destructive action waits for the dialog's confirm (08's wording).
-            assertEquals(false, confirmed)
-            // The dialog's title and confirm share the string; the clickable node is the button.
-            onAllNodes(hasClickAction() and hasText("Mark all as played…")).onFirst().performClick()
-            assertEquals(true, confirmed)
-        }
-
-    @Test
-    fun markAllConfirmationSurvivesSaveAndRestore() =
-        runComposeUiTest {
-            var confirmations = 0
-            var registry by mutableStateOf<SaveableStateRegistry?>(SaveableStateRegistry(null) { true })
-            var saved: Map<String, List<Any?>> = emptyMap()
-            setFeeds(
-                state = FeedsUiState(hasSubscriptions = true),
-                rows = listOf(testEpisodeRow(1)),
-                onMarkAllPlayed = { confirmations++ },
-                wrapScreen = { screen ->
-                    registry?.let {
-                        CompositionLocalProvider(LocalSaveableStateRegistry provides it) { screen() }
-                    }
-                },
-            )
-            onNodeWithContentDescription("More actions").performClick()
-            onNodeWithText("Mark all as played…").performClick()
-            onNodeWithText("Cancel").assertIsDisplayed()
-            runOnIdle {
-                saved = registry!!.performSave()
-                registry = null
-            }
-            waitForIdle()
-            runOnIdle { registry = SaveableStateRegistry(saved) { true } }
-            waitForIdle()
-
-            onNodeWithText("Cancel").assertIsDisplayed()
-            assertEquals(0, confirmations)
-            onAllNodes(hasClickAction() and hasText("Mark all as played…")).onFirst().performClick()
-            assertEquals(1, confirmations)
-            onNodeWithText("Cancel").assertDoesNotExist()
+            assertEquals(1, opens)
         }
 
     @Test
@@ -566,6 +572,33 @@ class FeedsScreenTest {
         }
 
     @Test
+    fun pageOverflowCountsAndMarksItsGroupAfterReconfirmation() =
+        runComposeUiTest {
+            val fixture = PagerFixture()
+            val source = FeedSource.Group(2)
+            fixture.select(2)
+            fixture.feeds.unplayedCounts[source to null] = 2
+            fixture.episodes.unplayedCounts[source to null] = 3
+            setContent { fixture.Content() }
+            fixture.awaitSelected(this, 2)
+            onNode(
+                hasContentDescription("More actions") and
+                    hasAnyAncestor(hasTestTag("feed-page:${fixture.ref(2).encode()}")),
+                useUnmergedTree = true,
+            ).performClick()
+            onNodeWithText("Mark all as played…").performClick()
+            onNodeWithText("Mark 2 episodes in 'Group 2' as played?").assertIsDisplayed()
+            assertTrue(fixture.episodes.calls.isEmpty())
+            onNodeWithText("Mark as played").performClick()
+            onNodeWithText("Mark 3 episodes in 'Group 2' as played?").assertIsDisplayed()
+            assertTrue(fixture.episodes.calls.isEmpty())
+            onNodeWithText("Mark as played").performClick()
+            waitForIdle()
+            assertEquals(listOf("markFeedPlayed($source, null, 3)"), fixture.episodes.calls)
+            fixture.close()
+        }
+
+    @Test
     fun refreshAndFiltersWriteToTheSelectedSource() =
         runComposeUiTest {
             val fixture = PagerFixture()
@@ -746,6 +779,7 @@ class FeedsScreenTest {
         onRefresh: () -> Unit = {},
         onFiltersChange: (FeedFilters) -> Unit = {},
         onAction: (EpisodeAction) -> Unit = {},
+        selection: EpisodeSelectionController? = null,
         onMarkAllPlayed: () -> Unit = {},
         onAddPodcast: () -> Unit = {},
         onSearch: () -> Unit = {},
@@ -757,8 +791,10 @@ class FeedsScreenTest {
                 source ?: PagedListSource(listOf(rows))
             }.flow
                 .withDayHeaders(TestClock(), Dispatchers.Unconfined)
+        val owner = ResumedFeedsOwner()
         setContent {
             CompositionLocalProvider(
+                LocalLifecycleOwner provides owner,
                 LocalPlatformKind provides PlatformKind.DESKTOP,
                 LocalUiClock provides TestClock(),
                 LocalAppNavigator provides navigator,
@@ -766,11 +802,18 @@ class FeedsScreenTest {
             ) {
                 NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
                     val scope = rememberCoroutineScope()
+                    if (selection != null) {
+                        remember {
+                            Dispatchers.setMain(scope.coroutineContext[ContinuationInterceptor] as CoroutineDispatcher)
+                        }
+                        DisposableEffect(Unit) { onDispose { Dispatchers.resetMain() } }
+                    }
                     val cachedFeed = remember { feed.cachedIn(scope) }
                     cachedFeed.collectAsLazyPagingItems().also { pagingItems = it }
                     wrapScreen {
                         FeedsScreen(
                             state = state.copy(tabs = persistentListOf(allTab())),
+                            selection = selection,
                             live = live,
                             onVisibleIds = { _, ids -> onVisibleIds(ids) },
                             pagingFor = { cachedFeed },
@@ -888,6 +931,7 @@ private val TestPlatformActions =
 private class PagerFixture {
     val clock = TestClock()
     val feeds = FakeFeedRepository(clock)
+    val episodes = FakeEpisodeRepository()
     val groups = FakeGroupRepository(clock)
     val settings = FakeSettingsRepository()
     val refresh = FakeRefreshController()
@@ -973,7 +1017,7 @@ private class PagerFixture {
                 Dispatchers.setMain(effectDispatcher)
                 FeedsViewModel(
                     feeds,
-                    FakeEpisodeRepository(),
+                    episodes,
                     refresh,
                     FakeNetworkMonitor(FakeNetworkMonitor.ONLINE),
                     FakePodcastRepository().apply { tiles.value = listOf(testLibraryTile(1)) },
@@ -1018,6 +1062,15 @@ private class PagerFixture {
                     onVisitEnd = viewModel::onVisitEnd,
                     onAllGroups = { allGroupsOpens++ },
                 )
+                val markPlayed by viewModel.markPlayed.state.collectAsStateWithLifecycle()
+                markPlayed?.let {
+                    MarkFeedPlayedDialog(
+                        it,
+                        viewModel.markPlayed::select,
+                        viewModel.markPlayed::confirm,
+                        viewModel.markPlayed::dismiss,
+                    )
+                }
                 ShowUserMessages(state.messages, viewModel::onMessageShown)
             }
         }

@@ -44,4 +44,10 @@
         <item quantity="other">%1$d libraries</item>
     </plurals>
     <string name="settings_save_failed">Couldn’t save the setting</string>
+    <string name="appearance_gestures">Gestures</string>
+    <string name="appearance_feeds_row_swipe">Swipe episodes in Feeds</string>
+    <string name="swipe_right">Swipe right</string>
+    <string name="swipe_left">Swipe left</string>
+    <string name="swipe_mark_played">Mark played / unplayed</string>
+    <string name="swipe_none">None</string>
 </resources>

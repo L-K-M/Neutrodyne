@@ -1601,7 +1601,10 @@ returns `SelectionChanged(actualCount)` without ensuring state rows, resetting
 positions or removing queue entries. A match runs the existing chunked chain
 and returns `Played(count)`. The caller freezes the cutoff between count and
 write and refreshes the confirmation after a mismatch. The two-argument overload
-remains explicitly unchecked for existing plain confirmation dialogs until D9.
+remains explicitly unchecked for the Library tile-menu confirmation, deferred
+beyond D9. **Implementation note (2026-10-16, M2):** D9 uses the guarded
+overload from the Feeds page and podcast overflow; both keep the cutoff frozen
+when displaying a changed count and awaiting another confirmation.
 
 **"Treat existing episodes as played except the newest per podcast"** ([D66](../PLAN.md#3-key-decisions); 05 runs it in the transaction that sets the import item `SUBSCRIBED`, M3): IDs = `SELECT e.id FROM episode e WHERE e.podcastId = :podcastId AND e.isNew = 0 AND e.id <> (SELECT id FROM episode WHERE podcastId = :podcastId ORDER BY sortDate DESC, id DESC LIMIT 1)`, then the mark-played chain. `isNew = 0` keeps an episode that a later, non-initial refresh found meanwhile unplayed.
 
