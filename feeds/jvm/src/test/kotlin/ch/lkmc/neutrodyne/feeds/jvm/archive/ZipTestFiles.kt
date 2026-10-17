@@ -109,7 +109,10 @@ internal object ZipTestFiles {
      * reject the claim before the file ever reaches `ZipFile`. Layout: LOC + CEN + ZIP64 END +
      * ZIP64 locator + classic END — 176 bytes for the one-byte name.
      */
-    fun zip64EndBomb(centot64: Long): ByteArray {
+    fun zip64EndBomb(
+        centot64: Long,
+        declaredCenlen: Long? = null,
+    ): ByteArray {
         val name = byteArrayOf('x'.code.toByte())
         val loc = ByteArray(LOCHDR + name.size)
         put32(loc, 0, LOCSIG)
@@ -129,7 +132,7 @@ internal object ZipTestFiles {
         put16(end64, 14, 45)
         put64(end64, ZIP64_END_TOT_DISK, centot64)
         put64(end64, ZIP64_ENDTOT, centot64)
-        put64(end64, ZIP64_ENDSIZ, cen.size.toLong())
+        put64(end64, ZIP64_ENDSIZ, declaredCenlen ?: cen.size.toLong())
         put64(end64, ZIP64_ENDOFF, loc.size.toLong())
         val loc64 = ByteArray(ZIP64_LOCHDR)
         put32(loc64, 0, ZIP64_LOCSIG)
@@ -156,6 +159,7 @@ internal object ZipTestFiles {
         val zip = zipBytes(listOf("a" to "x".encodeToByteArray()))
         val at = zip.size - ENDHDR
         check(u32(zip, at) == ENDSIG) { "fixture drift: the END record is not at the tail" }
+        put16(zip, at + END_TOT_DISK, declaredEntries)
         put16(zip, at + END_TOT, declaredEntries)
         put32(zip, at + END_SIZ, declaredCenlen)
         return zip
