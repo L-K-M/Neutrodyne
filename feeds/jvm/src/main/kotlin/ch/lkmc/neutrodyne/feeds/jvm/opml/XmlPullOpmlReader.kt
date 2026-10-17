@@ -70,8 +70,21 @@ public class XmlPullOpmlReader(
             } catch (e: OpmlCapExceeded) {
                 OpmlReadResult.Failed(e.failure)
             } catch (e: XmlPullParserException) {
-                // The cascade fall-through boundary: A4's relaxed pass retries these.
-                OpmlReadResult.Failed(OpmlFailure.MALFORMED)
+                // kxml2 wraps any failure pulled from the stream inside `setInput`'s encoding
+                // sniff into the exception's `detail`; a cap violation must keep its terminal
+                // reason, never degrade to the MALFORMED a relaxed pass falls through from.
+                when (val streamFailure = streamFailureIn(e)) {
+                    is HostileEntityDeclaration -> OpmlReadResult.Failed(OpmlFailure.ENTITY_DECLARED)
+
+                    is DepthLimitExceeded -> OpmlReadResult.Failed(OpmlFailure.TOO_DEEP)
+
+                    is MarkupBoundExceeded -> OpmlReadResult.Failed(OpmlFailure.TAG_TOO_LONG)
+
+                    is OpmlCapExceeded -> OpmlReadResult.Failed(streamFailure.failure)
+
+                    // The cascade fall-through boundary: A4's relaxed pass retries these.
+                    else -> OpmlReadResult.Failed(OpmlFailure.MALFORMED)
+                }
             } catch (e: StackOverflowError) {
                 OpmlReadResult.Failed(OpmlFailure.TOO_DEEP)
             } catch (e: IOException) {
@@ -86,6 +99,24 @@ public class XmlPullOpmlReader(
         /** The desktop binding: XmlPull discovery (kxml2 at run time, 05 OPML import). */
         public fun discovered(): OpmlReader = XmlPullOpmlReader(PullParserFactory.Discovered)
     }
+}
+
+/**
+ * The first stream-level failure chained under [e] — through `detail` (kxml2's wrap channel) or
+ * `cause` — or null when the exception is a plain parse error. Guard and session cap exceptions
+ * thrown while the parser pulls bytes surface wrapped; their own catch clauses only see direct
+ * throws.
+ */
+private fun streamFailureIn(e: XmlPullParserException): Throwable? {
+    var t: Throwable? = e.detail ?: e.cause
+    val seen = HashSet<Throwable>()
+    while (t != null && seen.add(t)) {
+        when (t) {
+            is HostileEntityDeclaration, is DepthLimitExceeded, is MarkupBoundExceeded, is OpmlCapExceeded -> return t
+        }
+        t = (t as? XmlPullParserException)?.detail ?: t.cause
+    }
+    return null
 }
 
 /** Thrown when a per-outline cap trips inside the document walk; carries the failure it maps to. */
@@ -127,6 +158,8 @@ private class ReadSession(
         if (event == XmlPullParser.END_DOCUMENT || !parser.name.equals(ROOT_ELEMENT, ignoreCase = true)) {
             return OpmlReadResult.Failed(OpmlFailure.NO_OUTLINES)
         }
+        // The root tag gets the same post-delivery bounds as every other start tag.
+        onStartTag()
         neutrodyne = attrs()["xmlns:nd"] == NEUTRODYNE_NS
 
         val rootDepth = parser.depth
@@ -436,10 +469,20 @@ private class ReadSession(
     ): Kind =
         when {
             xmlUrl != null -> Kind.FEED
+
             type == "podcast-episode" || type == "podcast-playlist" -> Kind.IGNORED_EPISODES
+
             type == "include" -> Kind.IGNORED_LISTS
+
             type == "link" && url != null && url.endsWith(OPML_SUFFIX, ignoreCase = true) -> Kind.IGNORED_LISTS
-            url != null && (type == "rss" || type == "link") -> Kind.FEED
+
+            url != null && (type == "rss" || type == "link") &&
+                !url.endsWith(
+                    OPML_SUFFIX,
+                    ignoreCase = true,
+                )
+            -> Kind.FEED
+
             else -> Kind.FOLDER
         }
 
