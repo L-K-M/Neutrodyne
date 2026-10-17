@@ -450,4 +450,13 @@
     <string name="group_edit_gone">This group no longer exists</string>
     <string name="group_edit_undo_expired">Too late to undo</string>
     <string name="group_edit_undo_name_taken">A group named '%1$s' already exists. Rename it, then tap Undo</string>
+
+    <!-- M2 manage groups -->
+    <string name="groups_manage_title">Manage groups</string>
+    <string name="groups_manage_empty">No groups yet</string>
+    <string name="groups_manage_empty_body">Create a group to organise your podcasts.</string>
+    <string name="groups_manage_changed">Groups changed, try again</string>
+    <string name="groups_manage_up">Move up</string>
+    <string name="groups_manage_down">Move down</string>
+    <string name="groups_manage_top">Move to top</string>
 </resources>

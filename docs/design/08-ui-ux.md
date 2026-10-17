@@ -635,6 +635,25 @@ waits for D8 to install `GroupSettingsKey`, avoiding navigation to an absent ent
 
 A reorderable list (`sh.calvin.reorderable` 3.1.0, multiplatform; mouse drags work the same on the desktop): drag handle, 48 dp mosaic, name, "14 unplayed · 3 new", "Hidden from Feeds" label when `showAsTab = false`, overflow (Edit, Group settings, Show in Feeds toggle, Delete). FAB "New group". Drop → `GroupRepository.reorder(idsInOrder)`; failure (`NotFound`, list changed meanwhile) → reload and snackbar "Groups changed, try again". Accessibility: custom actions "Move up", "Move down", "Move to top" ([Custom actions catalogue](#custom-actions-catalogue)), also in the row's context menu and as Alt+↑ / Alt+↓ on the focused row ([Keyboard and mouse](#keyboard-and-mouse)). A drop or move writes new `orderKey`s for the moved row only (05), so a concurrent sync reorder of another row merges. Empty: "No groups yet" + "New group" + the [suggested groups card](#suggested-groups-card) when it has suggestions.
 
+**Implementation note (2026-10-16, M2):** D5 installs the Manage groups list
+and editor navigation; the All groups sheet remains a separate PR. Rows show
+member counts, since the C2 unplayed/new counts source is not on this branch.
+Visibility reuses B4's “Not shown as tab” copy.
+The shared `GroupMosaic` has a thumbnail layout for the 48 dp row artwork.
+The list previews moves without writes and commits one permutation on release,
+rebasing the moved row onto the latest repository order. A changed ID set
+cancels the drag with “Groups changed, try again”. Alt+arrows, accessibility
+and context-menu moves share the drop path. Delete reuses D4's ten-second
+Undo handler without popping the list. Another Delete is disabled until the
+pending Undo snackbar finishes, preserving each deletion's Undo window.
+Group settings awaits D8's route;
+the suggested-groups card awaits D11, as in the milestone split.
+B1's permutation-only API cannot distinguish which row was dragged in an
+adjacent swap: its deterministic longest-increasing-subsequence tie-break
+may update the neighbour's key instead. D5 preserves that contract and the
+one-key-write guarantee; identifying the dragged row in every tie would
+require a separate repository API change.
+
 ### Group settings
 
 `GroupSettingsKey(groupId)`, `:feature:groups`, M2 (refresh, notifications), M4 (speed, skip silence), M6 (auto-download, delete after played). Layout as [Podcast settings](#podcast-settings) without General/Feed/YouTube; the view settings (filters, order, hide older than) are edited from the Feeds page, not here. Auto-download's dependent rows are disabled with "Turn on auto-download for this group first" until the group's own auto-download is on (05 rule 1). When the group contains YouTube channels and `capabilities.downloads` is false (external mode), the auto-download section adds the line "YouTube channels in this group aren't downloaded: {short external-reason text}" ([External reason texts](#external-reason-texts)); the resolver excludes those channels (`SettingSource.NotSupported`, 05). With the engine (from M9a) the section adds "YouTube channels keep {n} (YouTube default)" when the group does not set its own keep count (04 [Auto-download for YouTube](04-youtube.md#auto-download-for-youtube)).
@@ -2756,6 +2775,7 @@ Shared screens are written once against `:core:testing` fakes and run as `runCom
 | `InstallHelpScreenTest` (Android sections on Robolectric; desktop sections common with a desktop `PlatformInfo`) | Android: the BUILDS card shows its two statements (public key, possible reinstall) and nothing about debuggable builds, USB debugging data access or smoothness; the ADVANCED card ends with "Turn USB debugging off again afterwards."; the CHECK card shows the three commands and no certificate value; `InstallHelpKey("ALLOW")` opens the browser-install steps expanded (PLAN M11 acceptance 13). Desktop: only desktop sections; the running OS's section first and expanded; the macOS section says "after every update" and offers the `xattr` command; the Windows section names SmartScreen "Run anyway" and Smart App Control; `SCREEN_READERS` carries the Java Access Bridge fallback and 11's Linux statement verbatim (MD4 AC4) | M11a, MD5 |
 | `UpdateNoticesRootTest` (`FakeUpdateNotices`) | `FIRST_RUN_CHOICE` → first-run card on Feeds (OK dismisses, Turn off writes `updates.check_enabled = false` with Undo writing `true`); `VERIFICATION_ENFORCEMENT` → `VerificationNoticeKey` once, pre- and post-enforcement variant by the timeline's global date, both buttons dismiss, no date without one from the timeline; nothing while the startup gate is up or the player is expanded; at most one notice per process start | M11a |
 | `LibraryScreenTest` | density columns at 360 dp; chip filter including Ungrouped; selection → `AddToGroupsKey`; unsubscribe confirmation text | M1, M2 |
+| `GroupsManageScreenTest`, `GroupsManageViewModelTest` (`:feature:groups` desktop) | mouse drag previews without writes, one reorder call on drop; Alt+arrows and accessibility/context-menu moves; show-as-tab; editor/create navigation; delete/Undo; concurrent flow reconciliation and changed-list recovery | M2 |
 | `AddToGroupsSheetTest` | tri-state chips from memberships; only changed chips sent to `applyMembership`; inline group creation | M2 |
 | `PlayerSheetTest` | anchors from measured content bottom; expand/collapse by tap and fling; dismiss only while paused (the `Dismissed` anchor disappears when playback starts); suite hidden only after settle; back collapses the sheet before `NavDisplay` pops (fake `NavigationState`); saveable state; "Mark played and skip" calls only `setPlayed` (fake controller records no `skipToNext`); resizing across 840 dp switches between the side panel and the sheet without touching playback (desktop) | M4, MD1 |
 | `ExportAndBackupFlowTest` | `prepare` → private-links warning shown only when `privateLinks`/`passwords` > 0 → save via `FileSaver.create(export.fileName, export.mimeType)` (Android `CreateDocument`; desktop a fake save dialog) or, on Android, the share chooser; Cancel leaves no destination write; backup `preflight` → warning → `CreateDocument` → `createBackup`; `foreignPending` banner Restore/Discard | M3 |

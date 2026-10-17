@@ -22,7 +22,7 @@ import androidx.compose.ui.input.pointer.pointerInput
  * reads `buttons.isSecondaryPressed` on the press event, like the platform's context menu
  * detector does.
  */
-internal fun Modifier.onSecondaryClick(onSecondaryClick: () -> Unit): Modifier =
+public fun Modifier.onSecondaryClick(onSecondaryClick: () -> Unit): Modifier =
     pointerInput(onSecondaryClick) {
         awaitPointerEventScope {
             while (true) {

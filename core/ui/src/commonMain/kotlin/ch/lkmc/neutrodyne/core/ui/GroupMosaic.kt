@@ -46,6 +46,9 @@ import ch.lkmc.neutrodyne.core.ui.resources.podcast_count
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
+/** THUMBNAIL draws decorative artwork for a row that supplies its own name and counts. */
+public enum class GroupMosaicLayout { TILE, THUMBNAIL }
+
 /**
  * A group's library-tile mosaic (08 GroupMosaic): a 12 dp-cornered square holding the four
  * newest-active members' `CoverArt` (THUMB) in a 2 × 2 grid with 2 dp gaps. Empty cells take the
@@ -61,14 +64,22 @@ public fun GroupMosaic(
     unplayedCount: Int,
     newCount: Int,
     modifier: Modifier = Modifier,
+    layout: GroupMosaicLayout = GroupMosaicLayout.TILE,
 ) {
     val tones = groupTones(group.colorArgb)
     val icon = groupIcon(group.iconKey)
     val cells = members.take(MOSAIC_CELLS)
-    val description = mosaicDescription(group, unplayedCount, newCount)
+    val description = if (layout == GroupMosaicLayout.TILE) mosaicDescription(group, unplayedCount, newCount) else null
 
     Column(
-        modifier = modifier.semantics(mergeDescendants = true) { contentDescription = description },
+        modifier =
+            modifier.semantics(mergeDescendants = true) {
+                if (description !=
+                    null
+                ) {
+                    contentDescription = description
+                }
+            },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
@@ -140,6 +151,8 @@ public fun GroupMosaic(
                 )
             }
         }
+
+        if (layout == GroupMosaicLayout.THUMBNAIL) return@Column
 
         Text(
             group.name,
