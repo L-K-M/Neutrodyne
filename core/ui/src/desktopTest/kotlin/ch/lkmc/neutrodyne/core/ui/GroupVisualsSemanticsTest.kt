@@ -2,6 +2,9 @@
 
 package ch.lkmc.neutrodyne.core.ui
 
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -9,8 +12,10 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runDesktopComposeUiTest
+import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
@@ -49,6 +54,27 @@ class GroupVisualsSemanticsTest {
         }
 
     @Test
+    fun thumbnailHasNoFabricatedCountsOrTileCaption() =
+        runDesktopComposeUiTest(width = 360, height = 160) {
+            installFakeImageLoader()
+            setContent {
+                NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                    GroupMosaic(
+                        groupFixture(),
+                        mosaicMembers(2),
+                        0,
+                        0,
+                        modifier = Modifier.size(48.dp).testTag("groupThumbnail"),
+                        layout = GroupMosaicLayout.THUMBNAIL,
+                    )
+                }
+            }
+            onNodeWithTag("groupThumbnail").assertIsDisplayed()
+            onNode(hasContentDescription("Tech", substring = true)).assertDoesNotExist()
+            onNodeWithText("Tech", useUnmergedTree = true).assertDoesNotExist()
+        }
+
+    @Test
     fun mosaicHiddenGroupKeepsDescriptiveLabel() =
         runDesktopComposeUiTest(width = 360, height = 560) {
             installFakeImageLoader()
@@ -67,6 +93,26 @@ class GroupVisualsSemanticsTest {
             // Unknown well-formed icon keys must not yield a missing or misleading label.
             onNode(hasContentDescription("Tech", substring = true)).assertIsDisplayed()
         }
+
+    @Test
+    fun emptyMosaicUsesFirstGraphemeOfMultiwordName() = assertMosaicGrapheme("Morning News", "M")
+
+    @Test
+    fun emptyMosaicKeepsCompleteEmojiGrapheme() = assertMosaicGrapheme("👩🏽‍🚀 Space News", "👩🏽‍🚀")
+
+    private fun assertMosaicGrapheme(
+        name: String,
+        grapheme: String,
+    ) = runDesktopComposeUiTest(width = 360, height = 560) {
+        installFakeImageLoader()
+        setContent {
+            NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                GroupMosaic(groupFixture(name = name, iconKey = null, memberCount = 0), emptyList(), 0, 0)
+            }
+        }
+        waitForIdle()
+        onNodeWithText(grapheme, useUnmergedTree = true).assertExists()
+    }
 
     @Test
     fun tabLabelExposesTabRoleSelectedStateAndCounts() =

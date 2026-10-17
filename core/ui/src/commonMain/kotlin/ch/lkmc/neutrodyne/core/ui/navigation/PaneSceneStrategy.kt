@@ -82,6 +82,8 @@ internal class PaneSceneStrategy(
         repeat(live.size - target.size) { navigation.pop() }
     }
 
+    internal fun isCurrentKey(key: NavKey): Boolean = isCurrentEntry(entryProvider(key, currentTab).contentKey)
+
     internal fun isCurrentEntry(contentKey: Any): Boolean {
         val live = liveEntries()
         val scene = with(adaptive) { SceneStrategyScope<NavKey>().calculateScene(live) }

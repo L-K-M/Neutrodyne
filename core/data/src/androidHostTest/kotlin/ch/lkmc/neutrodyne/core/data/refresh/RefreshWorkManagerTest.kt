@@ -29,6 +29,7 @@ import ch.lkmc.neutrodyne.core.data.newRefresher
 import ch.lkmc.neutrodyne.core.data.parsedEpisode
 import ch.lkmc.neutrodyne.core.data.parsedFeed
 import ch.lkmc.neutrodyne.core.data.seedPodcast
+import ch.lkmc.neutrodyne.core.data.settings.EffectiveSettingsResolverImpl
 import ch.lkmc.neutrodyne.core.data.stubAdapter
 import ch.lkmc.neutrodyne.core.database.EpisodeEntity
 import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
@@ -254,7 +255,8 @@ class RefreshWorkManagerTest {
             application = app,
             db = db,
             settings = settings,
-            rebaser = NextRefreshRebaser(db, settings),
+            effectiveSettings = EffectiveSettingsResolverImpl(db, settings),
+            rebaser = NextRefreshRebaser(db, EffectiveSettingsResolverImpl(db, settings)),
             appScope = this,
         )
 

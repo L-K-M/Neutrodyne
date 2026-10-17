@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.Outcome
@@ -15,6 +16,9 @@ import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.EpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
 import ch.lkmc.neutrodyne.core.domain.FeedRepository
+import ch.lkmc.neutrodyne.core.domain.GroupError
+import ch.lkmc.neutrodyne.core.domain.GroupRepository
+import ch.lkmc.neutrodyne.core.domain.MarkFeedPlayedResult
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
@@ -25,12 +29,19 @@ import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
+import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
+import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionController
+import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedController
+import ch.lkmc.neutrodyne.core.ui.MarkPlayedOutcome
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.UserMessages
 import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.action_undo
+import ch.lkmc.neutrodyne.core.ui.resources.membership_changed
+import ch.lkmc.neutrodyne.core.ui.resources.podcast_removed_from_group
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import dev.zacsweers.metro.Assisted
 import dev.zacsweers.metro.AssistedFactory
@@ -38,6 +49,7 @@ import dev.zacsweers.metro.AssistedInject
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metrox.viewmodel.ManualViewModelAssistedFactory
 import dev.zacsweers.metrox.viewmodel.ManualViewModelAssistedFactoryKey
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -63,15 +75,20 @@ public class PodcastViewModel
         private val podcasts: PodcastRepository,
         private val feedRepository: FeedRepository,
         private val episodes: EpisodeRepository,
+        private val groups: GroupRepository,
         private val refreshController: RefreshController,
         private val unsubscribe: UnsubscribeUseCase,
         network: NetworkMonitor,
         liveStateSource: EpisodeLiveStateSource,
+        clock: Clock,
     ) : ViewModel() {
         private val filters = MutableStateFlow(FeedFilters())
         private val detail = podcasts.observePodcast(podcastId)
         private val userMessages = UserMessages()
         private val visibleIds = MutableStateFlow<Set<Long>>(emptySet())
+
+        /** Shown Undo snackbar's message id → the membership it may restore (05 Membership). */
+        private val membershipUndos = mutableMapOf<Long, Long>()
 
         public val live: StateFlow<Map<Long, RowLive>> =
             liveStateSource.observe(visibleIds).stateIn(viewModelScope, SHARING, emptyMap())
@@ -104,13 +121,22 @@ public class PodcastViewModel
                     offline = !online,
                     refreshing = refreshing,
                 )
+            }.combine(groups.observeGroupsOf(podcastId)) { state, memberships ->
+                state.copy(groups = memberships.toImmutableList())
             }.combine(userMessages.flow) { state, messages ->
                 state.copy(messages = messages)
             }.stateIn(viewModelScope, SHARING, PodcastUiState())
 
+        public val episodeSelection =
+            EpisodeSelectionController(viewModelScope, episodes::setPlayed, ::reportWriteFailed)
+
         /** Repository-owned row actions; the route owns navigation and external URLs. */
         public fun onRowAction(action: EpisodeAction) {
             when (action) {
+                is EpisodeAction.Select -> {
+                    episodeSelection.toggle(action.episodeId)
+                }
+
                 is EpisodeAction.SetPlayed -> {
                     write { episodes.setPlayed(listOf(action.episodeId), action.played) }
                 }
@@ -156,12 +182,85 @@ public class PodcastViewModel
             write { unsubscribe(listOf(podcastId)) }
         }
 
+        public val markPlayed: MarkFeedPlayedController =
+            MarkFeedPlayedController(viewModelScope, clock, feedRepository::countUnplayed) { source, before, count ->
+                when (val result = episodes.markFeedPlayed(source, before, count)) {
+                    is MarkFeedPlayedResult.Played -> {
+                        MarkPlayedOutcome.Played
+                    }
+
+                    is MarkFeedPlayedResult.SelectionChanged -> {
+                        MarkPlayedOutcome.SelectionChanged(result.actualCount)
+                    }
+                }
+            }
+
+        /** The overflow's "Mark all as played…" (08): opens the counted D9 confirmation. */
         public fun markAllPlayed() {
-            write { episodes.markFeedPlayed(FeedSource.Podcast(podcastId), null) }
+            markPlayed.open(
+                FeedSource.Podcast(podcastId),
+                UiText.Raw(uiState.value.detail?.displayTitle ?: return),
+            )
+        }
+
+        /**
+         * A membership chip's trailing "x" (M2, D6): drops this podcast from [group] through
+         * [GroupRepository.applyMembership] and offers an Undo snackbar bound to exactly that
+         * membership. A concurrent delete returns [GroupError.NotFound] — the requested end
+         * state then already holds (or can't be produced), the observed flow already reflects
+         * it, and nothing needs to surface.
+         */
+        public fun removeFromGroup(group: Group) {
+            viewModelScope.launch {
+                val outcome =
+                    suspendRunCatching {
+                        groups.applyMembership(setOf(podcastId), emptySet(), setOf(group.id))
+                    }.onFailure(::reportWriteFailed)
+                        .getOrNull() ?: return@launch
+                when (outcome) {
+                    is Outcome.Success -> {
+                        val message =
+                            userMessages.post(
+                                UiText.Res(
+                                    Res.string.podcast_removed_from_group,
+                                    listOf(group.name),
+                                ),
+                                action = UiText.Res(Res.string.action_undo),
+                            )
+                        membershipUndos[message.id] = group.id
+                    }
+
+                    is Outcome.Failure -> {
+                        if (outcome.error == GroupError.NotFound) {
+                            Log.i(TAG) { "membership remove lost the race" }
+                        } else {
+                            userMessages.post(UiText.Res(Res.string.write_failed))
+                        }
+                    }
+                }
+            }
+        }
+
+        /** A snackbar action tap: only a pending chip-removal Undo has one today. */
+        public fun onMessageAction(id: Long) {
+            val groupId = membershipUndos.remove(id) ?: return
+            viewModelScope.launch {
+                val outcome =
+                    suspendRunCatching {
+                        groups.applyMembership(setOf(podcastId), setOf(groupId), emptySet())
+                    }.onFailure(::reportWriteFailed)
+                        .getOrNull() ?: return@launch
+                // NotFound means the group itself is gone — the restore can't be produced.
+                if (outcome is Outcome.Failure) {
+                    userMessages.post(UiText.Res(Res.string.membership_changed))
+                }
+            }
         }
 
         /** The screen acks a shown snackbar so its [UserMessage] leaves the state. */
         public fun onMessageShown(id: Long) {
+            // A dismissed Undo snackbar can never fire its action; drop the stale mapping.
+            membershipUndos.remove(id)
             userMessages.shown(id)
         }
 

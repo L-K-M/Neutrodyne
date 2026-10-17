@@ -12,22 +12,30 @@ import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
+import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.ShowType
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
+import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
+import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
+import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
 import ch.lkmc.neutrodyne.core.testing.testFeedInfo
 import ch.lkmc.neutrodyne.core.testing.testPodcastDetail
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
+import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionAction
+import ch.lkmc.neutrodyne.core.ui.MarkPlayedOption
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.action_undo
+import ch.lkmc.neutrodyne.core.ui.resources.podcast_removed_from_group
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.take
@@ -40,6 +48,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.days
 
 /**
  * `PodcastViewModel` on the desktop JVM (09): detail/feed-info state, the episode page keyed by
@@ -50,9 +59,11 @@ class PodcastViewModelTest : MainDispatcherTest() {
     private val podcasts = FakePodcastRepository()
     private val feeds = FakeFeedRepository()
     private val episodes = FakeEpisodeRepository()
+    private val groups = FakeGroupRepository()
     private val liveSource = FakeEpisodeLiveStateSource()
     private val refreshController = FakeRefreshController()
     private val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
+    private val clock = TestClock()
 
     private fun viewModel(podcastId: Long = 7) =
         PodcastViewModel(
@@ -60,15 +71,35 @@ class PodcastViewModelTest : MainDispatcherTest() {
             podcasts,
             feeds,
             episodes,
+            groups,
             refreshController,
-            UnsubscribeUseCase(podcasts),
+            UnsubscribeUseCase(podcasts, FakeNewEpisodePoster()),
             network,
             liveSource,
+            clock,
         )
 
     private fun TestScope.collect(viewModel: PodcastViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
     }
+
+    private suspend fun FakeGroupRepository.createId(name: String): Long =
+        (create(GroupDraft(name)) as Outcome.Success).value
+
+    @Test
+    fun episodeSelectionUsesTheSharedBulkPlayedService() =
+        runTest {
+            val model = viewModel()
+            model.onRowAction(EpisodeAction.Select(2))
+            model.episodeSelection.extend(4, listOf(1, 2, 3, 4))
+            model.episodeSelection.perform(EpisodeSelectionAction.MARK_UNPLAYED)
+            advanceUntilIdle()
+            assertEquals(listOf("setPlayed([2, 3, 4], false)"), episodes.calls)
+            assertTrue(
+                model.episodeSelection.ids.value
+                    .isEmpty(),
+            )
+        }
 
     @Test
     fun liveRowsFollowVisibleWindowAndKeepPagedPlayedState() =
@@ -308,12 +339,83 @@ class PodcastViewModelTest : MainDispatcherTest() {
         }
 
     @Test
-    fun markAllPlayedCoversThePodcast() =
+    fun countedMarkPlayedOpensOnThePodcastSource() =
         runTest {
             val viewModel = viewModel()
+            podcasts.detail.value = testPodcastDetail(7, displayTitle = "Serial Box")
+            collect(viewModel)
+            advanceUntilIdle()
+            val source = FeedSource.Podcast(7)
+            feeds.unplayedCounts[source to null] = 4
+            episodes.unplayedCounts[source to null] = 4
+
             viewModel.markAllPlayed()
             advanceUntilIdle()
-            assertEquals(listOf("markFeedPlayed(${FeedSource.Podcast(7)}, null)"), episodes.calls)
+
+            val opened = viewModel.markPlayed.state.value!!
+            assertEquals(source, opened.source)
+            assertEquals(UiText.Raw("Serial Box"), opened.title)
+            assertEquals(MarkPlayedOption.ALL, opened.option)
+            assertEquals(4, opened.count)
+
+            viewModel.markPlayed.confirm()
+            advanceUntilIdle()
+            assertNull(viewModel.markPlayed.state.value)
+            assertEquals(listOf("markFeedPlayed($source, null, 4)"), episodes.calls)
+        }
+
+    @Test
+    fun countedMarkPlayedFreezesCutoffAndReconfirmsChangedSelection() =
+        runTest {
+            val viewModel = viewModel()
+            podcasts.detail.value = testPodcastDetail(7)
+            collect(viewModel)
+            advanceUntilIdle()
+            val source = FeedSource.Podcast(7)
+            val before = clock.now() - 7.days.inWholeMilliseconds
+            feeds.unplayedCounts[source to before] = 2
+            episodes.unplayedCounts[source to before] = 3
+
+            viewModel.markAllPlayed()
+            viewModel.markPlayed.select(MarkPlayedOption.WEEK)
+            advanceUntilIdle()
+            assertEquals(
+                2,
+                viewModel.markPlayed.state.value
+                    ?.count,
+            )
+            assertTrue(episodes.calls.isEmpty())
+
+            // The cutoff stays frozen at select() time even as the wall clock moves on.
+            clock.advanceBy(2.days)
+            viewModel.markPlayed.confirm()
+            advanceUntilIdle()
+            val changed = viewModel.markPlayed.state.value!!
+            assertEquals(before, changed.sortDateBefore)
+            assertEquals(3, changed.count)
+            assertTrue(changed.selectionChanged)
+            assertTrue(episodes.calls.isEmpty())
+
+            // A repeat confirm while WRITING is inert; the second real confirm lands.
+            viewModel.markPlayed.confirm()
+            viewModel.markPlayed.confirm()
+            advanceUntilIdle()
+            assertNull(viewModel.markPlayed.state.value)
+            assertEquals(listOf("markFeedPlayed($source, $before, 3)"), episodes.calls)
+        }
+
+    @Test
+    fun markAllPlayedWithoutDetailOpensNothing() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            advanceUntilIdle()
+
+            viewModel.markAllPlayed()
+            advanceUntilIdle()
+
+            assertNull(viewModel.markPlayed.state.value)
+            assertTrue(episodes.calls.isEmpty())
         }
 
     @Test
@@ -405,20 +507,148 @@ class PodcastViewModelTest : MainDispatcherTest() {
             )
         }
 
+    /** The header's membership chips follow `observeGroupsOf(podcastId)` (05 Membership). */
     @Test
-    fun markAllPlayedWriteFailurePostsAMessage() =
+    fun membershipsFlowIntoTheHeaderChips() =
         runTest {
             val viewModel = viewModel()
             collect(viewModel)
+            podcasts.detail.value = testPodcastDetail(7)
+            val tech = groups.createId("tech")
+            val news = groups.createId("news")
+            groups.members.value = mapOf(tech to setOf(7L), news to setOf(1L))
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf("tech"),
+                viewModel.uiState.value.groups
+                    .map { it.name },
+            )
+
+            groups.members.value = mapOf(tech to setOf(7L), news to setOf(1L, 7L))
+            advanceUntilIdle()
+            assertEquals(
+                listOf("tech", "news"),
+                viewModel.uiState.value.groups
+                    .map { it.name },
+            )
+        }
+
+    /** The chip's trailing "x" applies just that membership's removal and offers its Undo (D6). */
+    @Test
+    fun removeFromGroupDropsOnlyThatMembershipAndOffersUndo() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            val tech = groups.createId("tech")
+            val news = groups.createId("news")
+            groups.members.value = mapOf(tech to setOf(7L), news to setOf(7L))
+            advanceUntilIdle()
+
+            viewModel.removeFromGroup(groups.groups.value.first { it.id == tech })
+            advanceUntilIdle()
+
+            assertEquals(emptySet(), groups.members.value[tech])
+            assertEquals(setOf(7L), groups.members.value[news])
+            val message =
+                viewModel.uiState.value.messages
+                    .single()
+            val text = message.text as UiText.Res
+            assertEquals(Res.string.podcast_removed_from_group, text.id)
+            assertEquals(listOf("tech"), text.args)
+            assertEquals(Res.string.action_undo, (message.action as UiText.Res).id)
+        }
+
+    /** Undo re-adds exactly the membership the snackbar reported — nothing neighbouring. */
+    @Test
+    fun undoRestoresOnlyTheRemovedMembership() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            val tech = groups.createId("tech")
+            val news = groups.createId("news")
+            groups.members.value = mapOf(tech to setOf(7L), news to setOf(7L))
+            advanceUntilIdle()
+
+            viewModel.removeFromGroup(groups.groups.value.first { it.id == tech })
+            advanceUntilIdle()
+            val undoId =
+                viewModel.uiState.value.messages
+                    .single()
+                    .id
+
+            viewModel.onMessageAction(undoId)
+            advanceUntilIdle()
+            assertEquals(setOf(7L), groups.members.value[tech])
+            assertEquals(setOf(7L), groups.members.value[news])
+
+            // A spent Undo id is a no-op, as is one for a dismissed snackbar.
+            viewModel.onMessageAction(undoId)
+            viewModel.onMessageAction(undoId + 999)
+            advanceUntilIdle()
+            assertEquals(setOf(7L), groups.members.value[tech])
+        }
+
+    /**
+     * A group deleted between render and tap (05's NotFound race) needs no snackbar: the
+     * requested end state already holds and the observed flow has dropped the chip.
+     */
+    @Test
+    fun removeFromAGoneGroupStaysQuiet() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            advanceUntilIdle()
+            groups.createId("stale")
+            val stale = groups.groups.value.single()
+            groups.groups.value = emptyList()
+            viewModel.removeFromGroup(stale)
+            advanceUntilIdle()
+            assertTrue(
+                viewModel.uiState.value.messages
+                    .isEmpty(),
+            )
+        }
+
+    @Test
+    fun markAllPlayedWriteFailureStaysInlineInTheDialog() =
+        runTest {
+            val viewModel = viewModel()
+            podcasts.detail.value = testPodcastDetail(7)
+            collect(viewModel)
+            advanceUntilIdle()
+            val source = FeedSource.Podcast(7)
+            feeds.unplayedCounts[source to null] = 1
+            episodes.unplayedCounts[source to null] = 1
             episodes.writeError = Exception("disk full")
 
             viewModel.markAllPlayed()
             advanceUntilIdle()
+            viewModel.markPlayed.confirm()
+            advanceUntilIdle()
 
+            // The guarded write's failure reports inside the dialog — no snackbar — and
+            // keeps the count so a retry can land.
             assertTrue(episodes.calls.isEmpty())
             assertTrue(
                 viewModel.uiState.value.messages
-                    .isNotEmpty(),
+                    .isEmpty(),
             )
+            assertEquals(
+                1,
+                viewModel.markPlayed.state.value
+                    ?.count,
+            )
+            assertEquals(
+                UiText.Res(Res.string.write_failed),
+                viewModel.markPlayed.state.value
+                    ?.error,
+            )
+
+            episodes.writeError = null
+            viewModel.markPlayed.confirm()
+            advanceUntilIdle()
+            assertNull(viewModel.markPlayed.state.value)
+            assertEquals(listOf("markFeedPlayed($source, null, 1)"), episodes.calls)
         }
 }

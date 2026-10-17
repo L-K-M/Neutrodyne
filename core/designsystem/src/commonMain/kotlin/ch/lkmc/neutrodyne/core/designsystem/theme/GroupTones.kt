@@ -23,8 +23,8 @@ public data class GroupTones(
 
 /**
  * The tones for a group seed ARGB. `null` (the user picked "no colour") falls back to the theme's
- * primary roles, per 08. Reads the same OS-dark flag as [MonogramPainter]; a forced app theme
- * resolves through `MaterialTheme`, so the fallback roles stay right there.
+ * primary roles, per 08. Uses the resolved app theme because dots and stripes must contrast
+ * against its surface even when the appearance preference overrides the OS theme.
  */
 @Composable
 public fun groupTones(seedArgb: Int?): GroupTones {
@@ -37,7 +37,7 @@ public fun groupTones(seedArgb: Int?): GroupTones {
         )
     }
 
-    val dark = LocalSystemUiState.current.dark
+    val dark = LocalAppDarkTheme.current
     return if (dark) {
         GroupTones(
             dot = groupTone(seedArgb, DOT_DARK_L),

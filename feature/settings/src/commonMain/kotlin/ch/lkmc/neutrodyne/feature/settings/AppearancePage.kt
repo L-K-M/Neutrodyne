@@ -25,6 +25,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
@@ -32,6 +33,7 @@ import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
+import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.appearance_dynamic_color
@@ -56,6 +58,7 @@ import org.jetbrains.compose.resources.stringResource
 internal fun AppearancePage(
     settings: SettingsRepository,
     dynamicColorSupport: DynamicColorSupport,
+    platform: PlatformKind = LocalPlatformKind.current,
 ) {
     val theme by
         settings
@@ -92,6 +95,7 @@ internal fun AppearancePage(
                 summary = stringResource(themeLabel(theme)),
                 onClick = { showThemeDialog = true },
             )
+            if (platform == PlatformKind.ANDROID) GestureSettings(settings)
             if (dynamicColorSupport == DynamicColorSupport.AVAILABLE) {
                 SettingsSwitchRow(
                     title = stringResource(Res.string.appearance_dynamic_color),

@@ -69,8 +69,9 @@ internal class NewEpisodeNotifier(
 
         try {
             poster.post(notices)
-        } catch (error: Throwable) {
-            // Posting is best effort, including a platform's own cancellation or permission failure.
+        } catch (error: Exception) {
+            // Posting is best effort, including a platform's own cancellation or permission failure;
+            // VM-fatal Errors propagate.
             Log.w(TAG, error) { "new-episode posting failed" }
         }
     }

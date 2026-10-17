@@ -82,7 +82,13 @@ class PodcastHeaderTest {
     private fun androidx.compose.ui.test.ComposeUiTest.setHeader(detail: PodcastDetail) {
         setContent {
             NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
-                PodcastHeader(detail = detail, nowMs = TestClock.DEFAULT_NOW)
+                PodcastHeader(
+                    detail = detail,
+                    nowMs = TestClock.DEFAULT_NOW,
+                    groups = emptyList(),
+                    onRemoveGroup = {},
+                    onAddToGroups = {},
+                )
             }
         }
         waitForIdle()

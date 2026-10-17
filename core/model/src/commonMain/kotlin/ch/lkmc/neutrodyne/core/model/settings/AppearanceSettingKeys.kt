@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.model.settings
 
+import ch.lkmc.neutrodyne.core.model.SwipeAction
 import kotlinx.collections.immutable.persistentListOf
 
 /**
@@ -40,12 +41,50 @@ public object AppearanceSettingKeys {
                 ),
         )
 
+    /** Pager and row gestures are mutually exclusive (08 Group feed pager). */
+    val FEEDS_ROW_SWIPE = SettingKey.Bool("appearance.feeds_row_swipe", false)
+
+    /** Start-to-end defaults to Up next; undelivered actions stay inert until M4/M6. */
+    public val SWIPE_START_ACTION: SettingKey.Choice<SwipeAction> =
+        SettingKey.Choice(
+            "appearance.swipe_start_action",
+            SwipeAction.ADD_UP_NEXT,
+            persistentListOf(SwipeAction.ADD_UP_NEXT, SwipeAction.MARK_PLAYED, SwipeAction.DOWNLOAD, SwipeAction.NONE),
+        )
+
+    public val SWIPE_END_ACTION: SettingKey.Choice<SwipeAction> =
+        SettingKey.Choice(
+            "appearance.swipe_end_action",
+            SwipeAction.MARK_PLAYED,
+            persistentListOf(SwipeAction.ADD_UP_NEXT, SwipeAction.MARK_PLAYED, SwipeAction.DOWNLOAD, SwipeAction.NONE),
+        )
+
     /** Persisted selection identity (08 Group feed pager). */
     val FEEDS_SELECTED_SOURCE = SettingKey.Text("ui.feeds_selected_source", "all", SettingsFile.DEVICE)
+
+    /** Library's segmented view (08 Library), device-local. */
+    val LIBRARY_SEGMENT: SettingKey.Choice<LibrarySegment> =
+        SettingKey.Choice(
+            name = "ui.library_segment",
+            default = LibrarySegment.PODCASTS,
+            values = persistentListOf(LibrarySegment.PODCASTS, LibrarySegment.GROUPS),
+            file = SettingsFile.DEVICE,
+        )
 
     /** Empty means All; otherwise Ungrouped or a group UUID (08 Library). */
     val LIBRARY_GROUP_FILTER = SettingKey.Text("ui.library_group_filter", "", SettingsFile.DEVICE)
 
     public val ALL: List<SettingKey<*>> =
-        listOf(THEME, DYNAMIC_COLOR, LIBRARY_TITLES, LIBRARY_SORT, FEEDS_SELECTED_SOURCE, LIBRARY_GROUP_FILTER)
+        listOf(
+            THEME,
+            DYNAMIC_COLOR,
+            LIBRARY_TITLES,
+            LIBRARY_SORT,
+            FEEDS_ROW_SWIPE,
+            SWIPE_START_ACTION,
+            SWIPE_END_ACTION,
+            FEEDS_SELECTED_SOURCE,
+            LIBRARY_GROUP_FILTER,
+            LIBRARY_SEGMENT,
+        )
 }

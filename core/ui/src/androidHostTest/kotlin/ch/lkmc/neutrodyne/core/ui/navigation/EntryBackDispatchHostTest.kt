@@ -10,6 +10,7 @@ import androidx.navigationevent.compose.NavigationBackHandler
 import androidx.navigationevent.compose.rememberNavigationEventState
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
+import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
@@ -19,6 +20,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -48,6 +51,27 @@ internal class EntryBackDispatchHostTest : NdNavHostHarness() {
         settle()
         assertEquals(1, handled)
         assertEquals(before, navigation.stack(FeedsKey).toList())
+    }
+
+    @Test
+    fun entryCheckRemainsLiveAfterLeavingTheScreen() {
+        var isCurrent: (() -> Boolean)? = null
+        val installers =
+            setOf<EntryProviderInstaller>({
+                for (tab in TOP_LEVEL_TABS) {
+                    entry(tab, metadata = NdSceneMetadata.paneList()) {
+                        if (tab == LibraryKey) isCurrent = rememberEntryIsCurrent(LibraryKey)
+                        Text("root")
+                    }
+                }
+            })
+        setFixedHost(installers = installers, directive = TwoPaneDirective)
+        rule.runOnUiThread { navigation.selectTab(LibraryKey) }
+        settle()
+        rule.runOnUiThread { assertTrue(requireNotNull(isCurrent).invoke()) }
+        rule.runOnUiThread { navigation.selectTab(FeedsKey) }
+        settle()
+        rule.runOnUiThread { assertFalse(requireNotNull(isCurrent).invoke()) }
     }
 
     @Composable
