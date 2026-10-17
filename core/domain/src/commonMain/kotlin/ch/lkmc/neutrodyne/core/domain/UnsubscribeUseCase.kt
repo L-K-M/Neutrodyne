@@ -22,18 +22,18 @@ class UnsubscribeUseCase(
     private val poster: NewEpisodePoster,
 ) {
     /** Unsubscribes [podcastIds]; returns the ids that were actually removed. */
-    suspend operator fun invoke(podcastIds: List<Long>): List<Long> {
-        val removed = podcasts.unsubscribe(podcastIds)
-        if (removed.isEmpty()) return removed
-
-        // The cascade has committed; cancellation must not leave its notification lines behind.
+    suspend operator fun invoke(podcastIds: List<Long>): List<Long> =
+        // The cascade and the cleanup of its notification lines finish together: a caller
+        // cancelled once the cascade commits would otherwise never receive the removed ids.
         withContext(NonCancellable) {
-            try {
-                poster.removePodcasts(removed)
-            } catch (error: Exception) {
-                Log.w("Unsubscribe", error) { "new-episode notification cleanup failed" }
+            val removed = podcasts.unsubscribe(podcastIds)
+            if (removed.isNotEmpty()) {
+                try {
+                    poster.removePodcasts(removed)
+                } catch (error: Exception) {
+                    Log.w("Unsubscribe", error) { "new-episode notification cleanup failed" }
+                }
             }
+            removed
         }
-        return removed
-    }
 }

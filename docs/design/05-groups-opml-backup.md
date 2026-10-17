@@ -370,7 +370,12 @@ registration, so a concurrent sweep cannot see a deleted group without its
 token. Create, rename, delete, successful undo, group settings writes and
 `GroupMerger` invoke the domain port after commit and outside that mutex.
 Channel reconciliation runs `NonCancellable` after commit, like refresh
-rescheduling, so caller cancellation cannot skip either effect. Channel failures
+rescheduling, so caller cancellation cannot skip either effect. Since
+2026-10-17 each write and its effects run as one `NonCancellable` unit: Room
+re-checks cancellation as a transaction returns, so a caller cancelled at
+COMMIT would otherwise skip them. The sweep reads groups, then tokens, then
+groups again, so an undo's restore and token drop cannot both fall between
+its reads. Channel failures
 are logged and retried by later sweeps; committed writes remain successful. Import commit, restore and sync-page callers do not exist
 on this branch and remain with their owning milestones. UUID transfer copies
 the app-settable settings in the table; Android retains user settings if the
@@ -463,6 +468,17 @@ three-entry LRU. The existing `FeedRepository.pagedFeed(source)` helper owns
 the ViewModel adds day headers and caches in each entry's child scope.
 Changing filters replaces that source's pager inside its entry. Visit and
 play-order writes keep the current generation.
+
+**Implementation note (2026-10-16, M2):** D11 derives effective filters in the
+feature layer using the shared milestone capability set. Downloaded (M6) and
+In progress (M4) predicates and stored flags remain intact, but gated flags
+are ignored by page queries and chip state. Reads do not clear persisted or
+synced preferences; an explicit filter edit writes the effective selection.
+The Feeds ViewModel observes preferences and compares the resulting filters
+and order before calling `pagedFeed(source, filters, order)`, preserving the
+three-entry cache and avoiding pager replacement for gated-only changes.
+Podcast's transient filters use the same capability set. This qualifies the
+full filter table above until the corresponding producers ship.
 
 ### Counts and new since last visit
 
