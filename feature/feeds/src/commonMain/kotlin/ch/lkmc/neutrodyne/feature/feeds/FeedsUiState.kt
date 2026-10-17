@@ -9,29 +9,46 @@ import androidx.paging.map
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.FeedFilters
+import ch.lkmc.neutrodyne.core.model.FeedPrefs
+import ch.lkmc.neutrodyne.core.model.FeedSource
+import ch.lkmc.neutrodyne.core.model.FeedSourceRef
+import ch.lkmc.neutrodyne.core.model.FeedTab
 import ch.lkmc.neutrodyne.core.ui.FeedDates
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.ImmutableMap
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
-/**
- * The All feed's M1a state (08 Group feed pager → Data and state, trimmed to its one page): tab
- * state, selection persistence and banner plumbing arrive with M2's groups. [filters] are the
- * transient chip state; [hasSubscriptions] distinguishes "no subscriptions" onboarding from
- * "all caught up".
- */
+/** Pager metadata is shared by both clients; [filters] keeps the D1 All-page chips working. */
 @Immutable
 public data class FeedsUiState(
+    val tabs: ImmutableList<FeedTabUi> = persistentListOf(),
+    val selected: FeedSourceRef = FeedSourceRef.All,
+    val prefs: FeedPrefs? = null,
+    /** Frozen on each visit start, retained through visit writes until the next visit. */
+    val visitBaselines: ImmutableMap<FeedSource, Long> = persistentMapOf(),
     val filters: FeedFilters = FeedFilters(),
+    val rowSwipe: Boolean = false,
     val offline: Boolean = false,
     val refreshing: Boolean = false,
     val hasSubscriptions: Boolean = true,
+    val hasGroups: Boolean = false,
     val messages: ImmutableList<UserMessage> = persistentListOf(),
+)
+
+@Immutable
+public data class FeedTabUi(
+    val tab: FeedTab,
+    val ref: FeedSourceRef,
+    val unplayed: Int = 0,
+    val newCount: Int = 0,
+    val transient: Boolean = false,
 )
 
 /** One list entry of the feed: a day header or an episode row (08 `FeedItem`). */

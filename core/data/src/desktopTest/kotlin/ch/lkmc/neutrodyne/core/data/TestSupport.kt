@@ -33,6 +33,7 @@ import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.database.PodcastFetchState
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SecretStore
@@ -199,8 +200,8 @@ internal fun newRefresher(
     secrets: SecretStore = FakeSecretStore(),
     coordinator: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
     moves: FeedMoveCommitter = newFeedMoves(db, clock, coordinator),
-    notifier: NewEpisodeNotifier =
-        NewEpisodeNotifier(db, EffectiveSettingsResolverImpl(db, settings), FakeNewEpisodePoster()),
+    effectiveSettings: EffectiveSettingsResolver = EffectiveSettingsResolverImpl(db, settings),
+    notifier: NewEpisodeNotifier = NewEpisodeNotifier(db, effectiveSettings, FakeNewEpisodePoster()),
 ): FeedRefresher =
     FeedRefresher(
         db,
@@ -210,6 +211,7 @@ internal fun newRefresher(
         syncHook,
         tempFiles,
         settings,
+        effectiveSettings,
         clock,
         random,
         moves,

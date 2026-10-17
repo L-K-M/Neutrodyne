@@ -16,12 +16,14 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 
+public enum class NdSheetExpansion { EXPANDED, HALF }
+
 /**
  * `ModalBottomSheet` with the Neutrodyne sheet top corners (28 dp, `NeutrodyneShapes.Sheet`). On
  * desktop this is window-backed (Compose `Dialog`), so navigation-level sheets render above the
  * expanded player — that is what the shared `NdSheetSceneStrategy` relies on. The sheet state stays
  * inside: `SheetState` is an experimental Material 3 type, and `Nd*` wrappers never expose those
- * (08 Theming and colour); app sheets never use the partially expanded detent (08 Player sheet).
+ * (08 Theming and colour). The All groups picker can start half height; other sheets expand fully.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -32,12 +34,16 @@ public fun NdModalBottomSheet(
     containerColor: Color = BottomSheetDefaults.ContainerColor,
     sheetMaxWidth: Dp = BottomSheetDefaults.SheetMaxWidth,
     shouldDismissOnBackPress: Boolean = true,
+    initialExpansion: NdSheetExpansion = NdSheetExpansion.EXPANDED,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         modifier = modifier,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState =
+            rememberModalBottomSheetState(
+                skipPartiallyExpanded = initialExpansion == NdSheetExpansion.EXPANDED,
+            ),
         shape = shape,
         containerColor = containerColor,
         contentColor = contentColorFor(containerColor),

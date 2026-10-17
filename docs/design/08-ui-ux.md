@@ -436,6 +436,18 @@ Startup metric (Android): the Feeds route calls `ReportDrawnWhen { selectedPage.
 
 A three-column grid of [`GroupMosaic`](#groupmosaic-and-group-tab-label) tiles: section "Recent" (up to 4 groups by `lastViewedAt`) then "All groups" A–Z (`TitleCollator`), including groups with `showAsTab = false` (marked with `visibility_off`). Tap → select that group in Feeds (hidden groups become a [transient tab](#selection-persistence-and-fallback)) and close. Buttons: "New group" → `GroupEditKey(null)`, "Manage groups" → `GroupsManageKey`. Empty: "No groups yet" + "New group".
 
+**Implementation note (2026-10-16, M2):** D2b writes the UUID-based
+`ui.feeds_selected_source` through `SettingsRepository`, the same application
+API the pager uses. The sheet closes after a successful write; a failed write
+keeps it open and shows the shared write-error message inside the sheet.
+Recent includes groups with a visit time and breaks equal times by title.
+The picker remains reachable when every group is hidden: the All-only tab row
+stays visible while groups exist. With no groups and only All, that row is absent.
+The shared overlay supports a half-height initial detent for `AllGroupsKey`;
+short content uses Material's available anchors. Other sheet keys retain their
+fully expanded initial detent. The desktop sheet focuses New group on open;
+the window surface handles scrim dismissal and returns focus on close.
+
 ### Library
 
 `LibraryKey`, `:feature:library`, M1 (grid), M2 (groups, chips, selection), M10 (density, shared elements).
@@ -1717,6 +1729,23 @@ encoding without depending on a feature module. Canonical UUID references
 round-trip; malformed values decode to All. Resolving a valid but unknown UUID
 and the selection fallback remain D1/D2 UI work.
 
+**Implementation note (2026-10-16, M2):** D1 delivers pager state while the
+route continues to render All; tab/pager rendering and lifecycle visit calls
+arrive in D2. `FeedsUiState.prefs` describes the selected source, while its
+compatibility `filters` field describes the rendered All page. The source-keyed
+cache uses B2's `pagedFeed(source)` helper to observe and compare effective
+filters/order before replacing a pager. Per-entry child scopes own `cachedIn`.
+The ViewModel exposes both the union live map and `liveBySource` projections,
+and `visitBaselines` retains each page's visit-start highlight baseline.
+Each changed stored reference waits for fresh tab and group emissions, so a
+route immediately after creating or restoring a group cannot reject a valid
+UUID using a previous observer snapshot. A successful explicit re-settle also
+resolves unchanged stored values after a failed fallback. Visit baseline reads
+wait for that source's previous visit write; visible-ID disposal retains its
+last source mapping even after a transient tab disappears. An evicted paging
+flow is cancelled: D2 must reacquire `pagingFor` when its page returns,
+including pages retained by Compose during a fling.
+
 ### Selection persistence and fallback
 
 ```mermaid
@@ -1746,6 +1775,26 @@ stateDiagram-v2
 - Day headers: `insertSeparators` between rows whose local dates (from `sortDate`) differ; labels as the row dates ("Today", "Yesterday", weekday, date). Headers are ordinary items (`contentType = 0`), not sticky: `stickyHeader` would require declaring every header in the `LazyColumn` DSL, which with placeholders means looping over tens of thousands of items per composition.
 - Scroll memory per page: one `rememberSaveableStateHolder()` hoisted to the Feeds route (outside the pager); each page is wrapped in `holder.SaveableStateProvider(ref.encode())` and uses `rememberLazyListState()`, so a page keeps its position after being disposed by the pager, across tab switches and process death. When a group disappears from the tabs, `holder.removeState(ref.encode())` drops its state. A page composes its `LazyColumn` only once its `LazyPagingItems` has a non-empty snapshot or `loadState.refresh` is `NotLoading` (skeleton rows before), so a restored `LazyListState` index is not clamped to 0 by an empty first measure; with placeholders enabled (05's `PagingConfig`) the restored index then shows placeholders until Paging loads around it.
 - Lists: `items(count, key = itemKey { … }, contentType = itemContentType { … })` with keys `"d:{epochDay}"` for day headers and the episode `id` (`Long`) for rows, and content types Day 0, RSS row 1, YouTube row 2 (05 asks for distinct types for 16:9 thumbnails); placeholders render skeleton rows.
+
+**Implementation note (2026-10-16, M2):** D2 renders the shared pager and
+source-scoped chips/refresh, with the saveable-state holder owned by the route.
+Only current ± 1 pages collect paging flows, even if Compose retains extra
+pages during a fling; returning pages reacquire the ViewModel cache entry.
+The list state is independent of paging generations, including an hourly
+age-window replacement. The computed age cutoff stays out of chip filters,
+because only the separate age-limit action can clear it. Virtual tab names are localized by source, rather than
+using the repository's English metadata titles. The row-swipe key gates pager
+gestures here; row gesture actions and their settings UI remain D10, and counted
+bulk-action dialogs remain D9.
+
+**Implementation note (2026-10-16, M2):** Compose Desktop 1.12.1's
+`StateRestorationTester.emulateSaveAndRestore()` throws `NotImplementedError`
+in `platformEncodeDecode`. `FeedsScreenTest` therefore round-trips its
+`SaveableStateRegistry` with primitive values and String pager keys,
+including recreating the ViewModel over persisted selection. The Android host
+`FeedsRestorationHostTest` additionally runs the real `StateRestorationTester`
+Bundle round trip for selected-page and scroll restoration. Actual process
+termination and native desktop input checks remain device coverage.
 
 ### Header, chips and actions
 

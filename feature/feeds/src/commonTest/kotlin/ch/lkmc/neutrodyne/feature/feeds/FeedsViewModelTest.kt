@@ -2,20 +2,39 @@
 
 package ch.lkmc.neutrodyne.feature.feeds
 
+import androidx.lifecycle.ViewModelStore
 import androidx.paging.testing.asSnapshot
+import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.domain.FeedRepository
+import ch.lkmc.neutrodyne.core.domain.GroupRepository
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.RefreshStatus
+import ch.lkmc.neutrodyne.core.domain.SettingsError
+import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.DownloadState
+import ch.lkmc.neutrodyne.core.model.FeedCounts
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
+import ch.lkmc.neutrodyne.core.model.FeedPrefs
 import ch.lkmc.neutrodyne.core.model.FeedSource
+import ch.lkmc.neutrodyne.core.model.FeedSourceRef
+import ch.lkmc.neutrodyne.core.model.FeedTab
+import ch.lkmc.neutrodyne.core.model.Group
+import ch.lkmc.neutrodyne.core.model.GroupDraft
+import ch.lkmc.neutrodyne.core.model.GroupEdit
+import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.core.model.RowLive
+import ch.lkmc.neutrodyne.core.model.VirtualCounts
+import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
+import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.testEpisodeDetail
@@ -28,26 +47,39 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_copy_link
 import ch.lkmc.neutrodyne.core.ui.resources.date_today
 import ch.lkmc.neutrodyne.core.ui.resources.date_yesterday
 import ch.lkmc.neutrodyne.core.ui.resources.episode_offline_toast
+import ch.lkmc.neutrodyne.core.ui.resources.feed_group_deleted
+import ch.lkmc.neutrodyne.core.ui.resources.feed_group_unknown
 import ch.lkmc.neutrodyne.core.ui.resources.no_handler
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
-import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotSame
+import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.days
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * `FeedsViewModel` on the desktop JVM (09 Test matrix): feed paging against
- * [FakeFeedRepository]'s `PagingData.from` pages, the chips/offline/refresh state machine and the
- * row/mark-all actions — the repository calls asserted on the fakes' logs.
+ * [FakeFeedRepository]'s `PagingData.from` pages, persisted pager/selection state, visits and the
+ * row/mark-all actions, with repository calls asserted on the fakes' logs.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class FeedsViewModelTest : MainDispatcherTest() {
@@ -59,8 +91,38 @@ class FeedsViewModelTest : MainDispatcherTest() {
     private val podcasts = FakePodcastRepository()
     private val clock = TestClock()
 
-    private fun viewModel() =
-        FeedsViewModel(feeds, episodes, refreshController, network, podcasts, clock, liveSource, dispatcher)
+    private val groups = FakeGroupRepository()
+    private val settings = FakeSettingsRepository()
+    private val store = ViewModelStore()
+    private var vmNumber = 0
+
+    private fun viewModel(
+        repository: FeedRepository = feeds,
+        groupRepository: GroupRepository = groups,
+        settingsRepository: SettingsRepository = settings,
+    ) = FeedsViewModel(
+        repository,
+        episodes,
+        refreshController,
+        network,
+        podcasts,
+        clock,
+        liveSource,
+        groups = groupRepository,
+        settings = settingsRepository,
+        defaultDispatcher = dispatcher,
+    ).also { store.put("feeds${vmNumber++}", it) }
+
+    private fun viewModelTest(block: suspend TestScope.() -> Unit) =
+        runTest {
+            try {
+                block()
+            } finally {
+                // cachedIn keeps the hourly preferences flow alive beyond UI collection. Clear
+                // before runTest drains its scheduler, rather than in JUnit's later teardown.
+                store.clear()
+            }
+        }
 
     private fun TestScope.collect(viewModel: FeedsViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
@@ -68,47 +130,47 @@ class FeedsViewModelTest : MainDispatcherTest() {
 
     @Test
     fun liveRowsUseUnionOfComposedPageWindowsAndReleaseDisposedPages() =
-        runTest {
+        viewModelTest {
             val viewModel = viewModel()
             backgroundScope.launch { viewModel.live.collect {} }
             val overlay = RowLive(positionMs = 500, durationMs = 1_000)
             liveSource.live.value = mapOf(1L to overlay, 2L to RowLive(isNowPlaying = true), 3L to overlay)
             viewModel.onVisibleIds(FeedSource.All, setOf(1, 2))
             viewModel.onVisibleIds(FeedSource.Group(7), setOf(2, 3))
-            advanceUntilIdle()
+            runCurrent()
             assertEquals(setOf(1L, 2L, 3L), viewModel.live.value.keys)
             assertEquals(overlay, viewModel.live.value[1])
 
             // Removing All retains the shared ID still visible in the group page.
             viewModel.onVisibleIds(FeedSource.All, emptySet())
-            advanceUntilIdle()
+            runCurrent()
             assertEquals(setOf(2L, 3L), viewModel.live.value.keys)
 
             liveSource.live.value = mapOf(3L to RowLive(durationMs = 2_000))
-            advanceUntilIdle()
+            runCurrent()
             assertEquals(mapOf(3L to RowLive(durationMs = 2_000)), viewModel.live.value)
             assertEquals(null, viewModel.live.value[2])
 
             viewModel.onVisibleIds(FeedSource.Group(7), emptySet())
-            advanceUntilIdle()
+            runCurrent()
             assertEquals(emptyMap(), viewModel.live.value)
         }
 
     @Test
     fun initialStateBeforeSubscription() =
-        runTest {
+        viewModelTest {
             val viewModel = viewModel()
             assertEquals(FeedsUiState(), viewModel.uiState.value)
         }
 
     @Test
     fun feedPagesAllSourceNewestFirst() =
-        runTest {
+        viewModelTest {
             val viewModel = viewModel()
             feeds.rows.value = listOf(testEpisodeRow(1), testEpisodeRow(2))
 
-            val items = viewModel.feed.take(1).asSnapshot()
-            advanceUntilIdle()
+            val items = viewModel.pagingFor(FeedSource.All).take(1).asSnapshot()
+            runCurrent()
 
             assertEquals(
                 Triple(FeedSource.All, FeedFilters(), FeedOrder.NEWEST_FIRST),
@@ -123,19 +185,19 @@ class FeedsViewModelTest : MainDispatcherTest() {
 
     @Test
     fun filtersFlowIntoThePageRequest() =
-        runTest {
+        viewModelTest {
             val viewModel = viewModel()
             viewModel.onFiltersChange(FeedFilters(unplayedOnly = true))
 
-            viewModel.feed.take(1).asSnapshot()
-            advanceUntilIdle()
+            viewModel.pagingFor(FeedSource.All).take(1).asSnapshot()
+            runCurrent()
 
             assertEquals(FeedFilters(unplayedOnly = true), feeds.lastRequest?.second)
         }
 
     @Test
     fun feedInsertsOneHeaderPerDay() =
-        runTest {
+        viewModelTest {
             val viewModel = viewModel()
             feeds.rows.value =
                 listOf(
@@ -145,8 +207,8 @@ class FeedsViewModelTest : MainDispatcherTest() {
                     testEpisodeRow(3, sortDate = TestClock.DEFAULT_NOW - 36 * HOUR),
                 )
 
-            val items = viewModel.feed.take(1).asSnapshot()
-            advanceUntilIdle()
+            val items = viewModel.pagingFor(FeedSource.All).take(1).asSnapshot()
+            runCurrent()
 
             val days = items.filterIsInstance<FeedItem.Day>()
             assertEquals(2, days.size)
@@ -162,11 +224,12 @@ class FeedsViewModelTest : MainDispatcherTest() {
 
     @Test
     fun dayLabelsUseClockAtEachFeedEmission() =
-        runTest {
+        viewModelTest {
             val viewModel = viewModel()
             feeds.rows.value = listOf(testEpisodeRow(1, sortDate = clock.now()))
             val first =
-                viewModel.feed
+                viewModel
+                    .pagingFor(FeedSource.All)
                     .take(1)
                     .asSnapshot()
                     .filterIsInstance<FeedItem.Day>()
@@ -176,9 +239,10 @@ class FeedsViewModelTest : MainDispatcherTest() {
             clock.advanceBy(1.days)
             // A filter change requests a new generation in the same ViewModel after midnight.
             viewModel.onFiltersChange(FeedFilters(unplayedOnly = true))
-            advanceUntilIdle()
+            runCurrent()
             val next =
-                viewModel.feed
+                viewModel
+                    .pagingFor(FeedSource.All)
                     .take(1)
                     .asSnapshot()
                     .filterIsInstance<FeedItem.Day>()
@@ -188,45 +252,45 @@ class FeedsViewModelTest : MainDispatcherTest() {
 
     @Test
     fun uiStateReflectsFiltersAndConnectivity() =
-        runTest {
+        viewModelTest {
             val viewModel = viewModel()
             podcasts.tiles.value = listOf(testLibraryTile(1))
             backgroundScope.launch { viewModel.uiState.collect {} }
-            advanceUntilIdle()
+            runCurrent()
 
             assertEquals(
-                FeedsUiState(filters = FeedFilters(), offline = false, refreshing = false, hasSubscriptions = true),
-                viewModel.uiState.value,
+                FeedFilters(),
+                viewModel.uiState.value.filters,
             )
 
             network.setStatus(FakeNetworkMonitor.OFFLINE)
-            advanceUntilIdle()
+            runCurrent()
             assertTrue(viewModel.uiState.value.offline)
 
             val filtered = FeedFilters(unplayedOnly = true)
             viewModel.onFiltersChange(filtered)
-            advanceUntilIdle()
+            runCurrent()
             assertEquals(filtered, viewModel.uiState.value.filters)
         }
 
     @Test
     fun emptyLibraryDisablesSubscriptions() =
-        runTest {
+        viewModelTest {
             val viewModel = viewModel()
             backgroundScope.launch { viewModel.uiState.collect {} }
-            advanceUntilIdle()
+            runCurrent()
 
             // The fake has no tiles: the onboarding empty state is the visible outcome.
             assertTrue(!viewModel.uiState.value.hasSubscriptions)
 
             podcasts.tiles.value = listOf(testLibraryTile(7))
-            advanceUntilIdle()
+            runCurrent()
             assertTrue(viewModel.uiState.value.hasSubscriptions)
         }
 
     @Test
     fun refreshTracksRunningAndCapsAtThirtySeconds() =
-        runTest {
+        viewModelTest {
             val viewModel = viewModel()
             backgroundScope.launch { viewModel.uiState.collect {} }
             runCurrent()
@@ -245,7 +309,7 @@ class FeedsViewModelTest : MainDispatcherTest() {
 
     @Test
     fun onRefreshRequestsAllFeeds() =
-        runTest {
+        viewModelTest {
             val viewModel = viewModel()
             viewModel.onRefresh()
             assertEquals(listOf("refreshFeed(All)"), refreshController.calls)
@@ -253,30 +317,30 @@ class FeedsViewModelTest : MainDispatcherTest() {
 
     @Test
     fun markAllPlayedCoversTheWholeFeed() =
-        runTest {
+        viewModelTest {
             val viewModel = viewModel()
             viewModel.markAllPlayed()
-            advanceUntilIdle()
+            runCurrent()
             assertEquals(listOf("markFeedPlayed(All, null)"), episodes.calls)
         }
 
     @Test
     fun rowPlayedActionWritesToRepository() =
-        runTest {
+        viewModelTest {
             val viewModel = viewModel()
             viewModel.onRowAction(EpisodeAction.SetPlayed(42, played = true))
-            advanceUntilIdle()
+            runCurrent()
             assertEquals(listOf("setPlayed([42], true)"), episodes.calls)
         }
 
     @Test
     fun playerAndDownloadActionsAreInertAtM1a() =
-        runTest {
+        viewModelTest {
             val viewModel = viewModel()
             collect(viewModel)
             viewModel.onRowAction(EpisodeAction.PlayToggle(42))
             viewModel.onRowAction(EpisodeAction.DownloadToggle(42))
-            advanceUntilIdle()
+            runCurrent()
             assertTrue(episodes.calls.isEmpty())
             // Online, play taps are plain M4 silence — no offline toast.
             assertTrue(
@@ -288,14 +352,14 @@ class FeedsViewModelTest : MainDispatcherTest() {
     /** 08's row table: an offline, undownloaded row's play tap answers with the offline toast. */
     @Test
     fun offlinePlayTogglePostsTheOfflineToast() =
-        runTest {
+        viewModelTest {
             val viewModel = viewModel()
             collect(viewModel)
             network.setStatus(FakeNetworkMonitor.OFFLINE)
-            advanceUntilIdle()
+            runCurrent()
 
             viewModel.onRowAction(EpisodeAction.PlayToggle(42))
-            advanceUntilIdle()
+            runCurrent()
 
             val message =
                 viewModel.uiState.value.messages
@@ -310,14 +374,14 @@ class FeedsViewModelTest : MainDispatcherTest() {
      */
     @Test
     fun offlinePlayToggleBeforeUiStateEmissionPostsTheToast() =
-        runTest {
+        viewModelTest {
             val viewModel = viewModel()
             network.setStatus(FakeNetworkMonitor.OFFLINE)
 
             // Nothing collects uiState yet: its value is still the offline=false initial state.
             viewModel.onRowAction(EpisodeAction.PlayToggle(42))
             collect(viewModel)
-            advanceUntilIdle()
+            runCurrent()
 
             val message =
                 viewModel.uiState.value.messages
@@ -328,16 +392,16 @@ class FeedsViewModelTest : MainDispatcherTest() {
     /** A downloaded episode's offline tap would play under M4 — silent like every pre-M4 play. */
     @Test
     fun downloadedEpisodeStaysSilentOnOfflinePlayToggle() =
-        runTest {
+        viewModelTest {
             val viewModel = viewModel()
             collect(viewModel)
             episodes.episodes.value =
                 mapOf(42L to testEpisodeDetail(42, downloadState = DownloadState.COMPLETED))
             network.setStatus(FakeNetworkMonitor.OFFLINE)
-            advanceUntilIdle()
+            runCurrent()
 
             viewModel.onRowAction(EpisodeAction.PlayToggle(42))
-            advanceUntilIdle()
+            runCurrent()
 
             assertTrue(
                 viewModel.uiState.value.messages
@@ -348,12 +412,12 @@ class FeedsViewModelTest : MainDispatcherTest() {
     /** A NO_HANDLER open posts the copy-link snackbar; the action tap resolves by id (08). */
     @Test
     fun noHandlerPostsACopyLinkMessage() =
-        runTest {
+        viewModelTest {
             val viewModel = viewModel()
             collect(viewModel)
 
             viewModel.onNoHandler("https://www.youtube.com/watch?v=abc")
-            advanceUntilIdle()
+            runCurrent()
 
             val message =
                 viewModel.uiState.value.messages
@@ -371,13 +435,13 @@ class FeedsViewModelTest : MainDispatcherTest() {
     /** A throwing repository write becomes a snackbar message — not an uncaught exception (01). */
     @Test
     fun setPlayedWriteFailurePostsAMessage() =
-        runTest {
+        viewModelTest {
             val viewModel = viewModel()
             collect(viewModel)
             episodes.writeError = Exception("disk full")
 
             viewModel.onRowAction(EpisodeAction.SetPlayed(42, played = true))
-            advanceUntilIdle()
+            runCurrent()
 
             assertTrue(episodes.calls.isEmpty())
             val message =
@@ -386,7 +450,7 @@ class FeedsViewModelTest : MainDispatcherTest() {
             assertEquals(Res.string.write_failed, (message.text as UiText.Res).id)
 
             viewModel.onMessageShown(message.id)
-            advanceUntilIdle()
+            runCurrent()
             assertTrue(
                 viewModel.uiState.value.messages
                     .isEmpty(),
@@ -395,13 +459,13 @@ class FeedsViewModelTest : MainDispatcherTest() {
 
     @Test
     fun markAllPlayedWriteFailurePostsAMessage() =
-        runTest {
+        viewModelTest {
             val viewModel = viewModel()
             collect(viewModel)
             episodes.writeError = Exception("disk full")
 
             viewModel.markAllPlayed()
-            advanceUntilIdle()
+            runCurrent()
 
             assertTrue(episodes.calls.isEmpty())
             assertTrue(
@@ -410,7 +474,604 @@ class FeedsViewModelTest : MainDispatcherTest() {
             )
         }
 
+    private suspend fun group(showAsTab: Boolean = true): Group {
+        val id = (groups.create(GroupDraft("tech", showAsTab = showAsTab)) as Outcome.Success).value
+        val group = groups.groups.value.single { it.id == id }
+        feeds.tabs.value = listOf(allTab) + if (showAsTab) listOf(group.tab()) else emptyList()
+        return group
+    }
+
+    private fun Group.tab() = FeedTab(FeedSource.Group(id), name, colorArgb, iconKey, uuid)
+
+    @Test
+    fun selectionSurvivesNewViewModelOverPersistedSettings() =
+        viewModelTest {
+            val group = group()
+            val ref = FeedSourceRef.Group(group.uuid)
+            val first = viewModel()
+            collect(first)
+            runCurrent()
+            first.onPageSettled(ref)
+            runCurrent()
+            assertEquals(ref.encode(), settings.get(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE))
+            store.clear()
+
+            val recreated = viewModel()
+            collect(recreated)
+            runCurrent()
+            assertEquals(ref, recreated.uiState.value.selected)
+            assertEquals(
+                FeedSource.Group(group.id),
+                recreated.uiState.value.tabs
+                    .single { it.ref == ref }
+                    .tab.source,
+            )
+        }
+
+    @Test
+    fun restoreWaitsForBothTabsAndGroupsAndObservesExternalSelections() =
+        viewModelTest {
+            val group = group()
+            val ref = FeedSourceRef.Group(group.uuid)
+            settings.set(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE, ref.encode())
+            val delayedTabs = MutableStateFlow<List<FeedTab>?>(null)
+            val delayedGroups = MutableStateFlow<List<Group>?>(null)
+            val repository =
+                object : FeedRepository by feeds {
+                    override fun observeTabs() = delayedTabs.filterNotNull()
+                }
+            val groupRepository =
+                object : GroupRepository by groups {
+                    override fun observeGroups() = delayedGroups.filterNotNull()
+                }
+            val viewModel = viewModel(repository, groupRepository)
+            collect(viewModel)
+            runCurrent()
+            assertTrue(
+                viewModel.uiState.value.tabs
+                    .isEmpty(),
+            )
+            delayedTabs.value = feeds.tabs.value
+            runCurrent()
+            assertTrue(
+                viewModel.uiState.value.tabs
+                    .isEmpty(),
+            )
+            assertEquals(ref.encode(), settings.get(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE))
+
+            delayedGroups.value = listOf(group)
+            runCurrent()
+            assertEquals(ref, viewModel.uiState.value.selected)
+            assertTrue(
+                viewModel.uiState.value.messages
+                    .isEmpty(),
+            )
+            settings.set(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE, "all")
+            runCurrent()
+            assertEquals(FeedSourceRef.All, viewModel.uiState.value.selected)
+        }
+
+    @Test
+    fun deletedSelectedGroupFallsBackOnceAndUndoDoesNotReselect() =
+        viewModelTest {
+            val group = group()
+            val ref = FeedSourceRef.Group(group.uuid)
+            settings.set(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE, ref.encode())
+            val viewModel = viewModel()
+            collect(viewModel)
+            runCurrent()
+            viewModel.pagingFor(FeedSource.Group(group.id))
+            viewModel.onVisibleIds(FeedSource.Group(group.id), setOf(1))
+            groups.groups.value = emptyList()
+            feeds.tabs.value = listOf(allTab)
+            runCurrent()
+
+            assertEquals(FeedSourceRef.All, viewModel.uiState.value.selected)
+            assertEquals("all", settings.get(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE))
+            assertEquals(
+                UiText.Res(Res.string.feed_group_deleted, listOf("tech")),
+                viewModel.uiState.value.messages
+                    .single()
+                    .text,
+            )
+            groups.groups.value = listOf(group)
+            feeds.tabs.value = listOf(allTab, group.tab())
+            runCurrent()
+            assertEquals(FeedSourceRef.All, viewModel.uiState.value.selected)
+            assertEquals(1, viewModel.uiState.value.messages.size)
+        }
+
+    @Test
+    fun unknownRouteUuidFallsBackWithSnackbar() =
+        viewModelTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            runCurrent()
+            // D2's route consumer writes this same key; no root routing is needed for the state test.
+            settings.set(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE, "group:12345678-1234-1234-1234-123456789abc")
+            runCurrent()
+            assertEquals(FeedSourceRef.All, viewModel.uiState.value.selected)
+            assertEquals("all", settings.get(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE))
+            assertEquals(
+                UiText.Res(Res.string.feed_group_unknown),
+                viewModel.uiState.value.messages
+                    .single()
+                    .text,
+            )
+        }
+
+    @Test
+    fun hiddenGroupCatalogKeepsPickerAvailableWithoutAddingTabs() =
+        viewModelTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            runCurrent()
+            assertFalse(viewModel.uiState.value.hasGroups)
+
+            group(showAsTab = false)
+            runCurrent()
+            assertTrue(viewModel.uiState.value.hasGroups)
+            assertEquals(
+                listOf(FeedSourceRef.All),
+                viewModel.uiState.value.tabs
+                    .map { it.ref },
+            )
+
+            groups.groups.value = emptyList()
+            runCurrent()
+            assertFalse(viewModel.uiState.value.hasGroups)
+        }
+
+    @Test
+    fun hiddenGroupGetsTransientTabUntilAnotherPageSettles() =
+        viewModelTest {
+            val group = group(showAsTab = false)
+            val ref = FeedSourceRef.Group(group.uuid)
+            val viewModel = viewModel()
+            collect(viewModel)
+            runCurrent()
+            viewModel.onPageSettled(ref)
+            runCurrent()
+            assertEquals(ref, viewModel.uiState.value.selected)
+            val transient =
+                viewModel.uiState.value.tabs
+                    .last()
+            assertEquals(ref, transient.ref)
+            assertEquals(group.tab(), transient.tab)
+            assertTrue(transient.transient)
+            assertTrue(
+                viewModel.uiState.value.messages
+                    .isEmpty(),
+            )
+
+            viewModel.onPageSettled(FeedSourceRef.All)
+            runCurrent()
+            assertEquals(
+                listOf(FeedSourceRef.All),
+                viewModel.uiState.value.tabs
+                    .map { it.ref },
+            )
+        }
+
+    @Test
+    fun hidingSelectedGroupPreservesSelectionAndUngroupedDisappearanceIsSilent() =
+        viewModelTest {
+            val group = group()
+            val ref = FeedSourceRef.Group(group.uuid)
+            settings.set(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE, ref.encode())
+            val viewModel = viewModel()
+            collect(viewModel)
+            runCurrent()
+            groups.update(group.id, GroupEdit.ShowAsTab(false))
+            feeds.tabs.value = listOf(allTab)
+            runCurrent()
+            assertEquals(ref, viewModel.uiState.value.selected)
+            assertTrue(
+                viewModel.uiState.value.tabs
+                    .last()
+                    .transient,
+            )
+            feeds.tabs.value += FeedTab(FeedSource.Ungrouped, "Ungrouped", null, null, null)
+            viewModel.onPageSettled(FeedSourceRef.Ungrouped)
+            runCurrent()
+            feeds.tabs.value = listOf(allTab)
+            runCurrent()
+            assertEquals(FeedSourceRef.All, viewModel.uiState.value.selected)
+            assertTrue(
+                viewModel.uiState.value.messages
+                    .isEmpty(),
+            )
+        }
+
+    @Test
+    fun tabBadgesJoinGroupAndVirtualCountsAndDefaultMissingGroupsToZero() =
+        viewModelTest {
+            val group = group()
+            feeds.tabs.value += FeedTab(FeedSource.Ungrouped, "Ungrouped", null, null, null)
+            feeds.groupCounts.value = mapOf(group.id to FeedCounts(12, 3))
+            feeds.virtualCounts.value = VirtualCounts(FeedCounts(25, 6), FeedCounts(5, 1))
+            val viewModel = viewModel()
+            collect(viewModel)
+            runCurrent()
+            assertEquals(
+                listOf(25 to 6, 12 to 3, 5 to 1),
+                viewModel.uiState.value.tabs
+                    .map { it.unplayed to it.newCount },
+            )
+            feeds.groupCounts.value = emptyMap()
+            runCurrent()
+            assertEquals(
+                0,
+                viewModel.uiState.value.tabs[1]
+                    .unplayed,
+            )
+            assertEquals(
+                0,
+                viewModel.uiState.value.tabs[1]
+                    .newCount,
+            )
+        }
+
+    @Test
+    fun leastRecentlyUsedEntryCancelsPagingAndIsRecreatedOnReturn() =
+        viewModelTest {
+            val viewModel = viewModel()
+            runCurrent()
+            val all = viewModel.pagingFor(FeedSource.All)
+            val ungrouped = viewModel.pagingFor(FeedSource.Ungrouped)
+            val group = viewModel.pagingFor(FeedSource.Group(1))
+            for (page in listOf(all, ungrouped, group)) backgroundScope.launch { page.collect {} }
+            backgroundScope.launch { viewModel.live.collect {} }
+            runCurrent()
+            assertEquals(3, feeds.pagingRequests.size)
+            viewModel.onVisibleIds(FeedSource.Ungrouped, setOf(2))
+            assertSame(all, viewModel.pagingFor(FeedSource.All))
+            viewModel.pagingFor(FeedSource.Group(2))
+            runCurrent()
+            assertEquals(listOf(FeedSource.Ungrouped), feeds.cancelledPagingRequests.map { it.first })
+            assertEquals(emptySet(), liveSource.lastVisibleIds.value)
+            feeds.setFilters(FeedSource.Ungrouped, FeedFilters(unplayedOnly = true))
+            runCurrent()
+            assertEquals(1, feeds.pagingRequests.count { it.first == FeedSource.Ungrouped })
+
+            val returned = viewModel.pagingFor(FeedSource.Ungrouped)
+            assertNotSame(ungrouped, returned)
+            backgroundScope.launch { returned.collect {} }
+            runCurrent()
+            assertEquals(2, feeds.pagingRequests.count { it.first == FeedSource.Ungrouped })
+            assertEquals(FeedFilters(unplayedOnly = true), feeds.lastRequest?.second)
+            store.clear()
+            runCurrent()
+            assertEquals(0, feeds.prefs.subscriptionCount.value)
+        }
+
+    @Test
+    fun filtersReplaceOnlyTheirSourcePagerAndVisitsKeepTheGeneration() =
+        viewModelTest {
+            val group = group()
+            val source = FeedSource.Group(group.id)
+            val viewModel = viewModel()
+            collect(viewModel)
+            val all = viewModel.pagingFor(FeedSource.All)
+            val page = viewModel.pagingFor(source)
+            backgroundScope.launch { all.collect {} }
+            backgroundScope.launch { page.collect {} }
+            runCurrent()
+            viewModel.onPageSettled(FeedSourceRef.Group(group.uuid))
+            viewModel.onFilters(source, FeedFilters(unplayedOnly = true, media = MediaFilter.VIDEO))
+            runCurrent()
+            assertEquals(1, feeds.pagingRequests.count { it.first == FeedSource.All })
+            assertEquals(2, feeds.pagingRequests.count { it.first == source })
+            assertEquals(
+                FeedFilters(unplayedOnly = true, media = MediaFilter.VIDEO),
+                viewModel.uiState.value.prefs
+                    ?.filters,
+            )
+            assertEquals(FeedFilters(), viewModel.uiState.value.filters)
+            feeds.markVisited(source, clock.now())
+            feeds.prefs.value += source to
+                feeds.prefs.value
+                    .getValue(source)
+                    .copy(playOrder = FeedOrder.OLDEST_FIRST)
+            runCurrent()
+            assertEquals(2, feeds.pagingRequests.count { it.first == source })
+            assertSame(page, viewModel.pagingFor(source))
+        }
+
+    @Test
+    fun shortVisitDoesNotMarkAndLongVisitFreezesBaselineUntilNextStart() =
+        viewModelTest {
+            val group = group()
+            val source = FeedSource.Group(group.id)
+            feeds.prefs.value = mapOf(source to FeedPrefs(lastViewedAt = 100))
+            val viewModel = viewModel()
+            collect(viewModel)
+            runCurrent()
+            viewModel.onVisitStart(source)
+            runCurrent()
+            clock.advanceBy(999.milliseconds)
+            viewModel.onVisitEnd(source)
+            runCurrent()
+            assertEquals(100, feeds.prefs.value[source]?.lastViewedAt)
+            assertEquals(100, viewModel.uiState.value.visitBaselines[source])
+
+            viewModel.onVisitStart(source)
+            runCurrent()
+            clock.advanceBy(500.milliseconds)
+            viewModel.onVisitStart(source) // Lifecycle/page notifications can overlap.
+            clock.advanceBy(500.milliseconds)
+            val leftAt = clock.now()
+            viewModel.onVisitEnd(source)
+            viewModel.onVisitEnd(source)
+            runCurrent()
+            assertEquals(leftAt, feeds.prefs.value[source]?.lastViewedAt)
+            assertEquals(100, viewModel.uiState.value.visitBaselines[source])
+            viewModel.onVisitStart(source)
+            runCurrent()
+            assertEquals(leftAt, viewModel.uiState.value.visitBaselines[source])
+        }
+
+    @Test
+    fun firstGroupVisitUsesCreatedAtAndDurationUsesMonotonicClock() =
+        viewModelTest {
+            val group = group()
+            val source = FeedSource.Group(group.id)
+            val viewModel = viewModel()
+            collect(viewModel)
+            runCurrent()
+            viewModel.onVisitStart(source)
+            runCurrent()
+            assertEquals(group.createdAt, viewModel.uiState.value.visitBaselines[source])
+            clock.advanceBy(1.seconds)
+            clock.nowMs -= 10_000 // A wall-clock correction cannot turn a long visit into a short one.
+            viewModel.onVisitEnd(source)
+            runCurrent()
+            assertEquals(clock.now(), feeds.prefs.value[source]?.lastViewedAt)
+        }
+
+    @Test
+    fun liveMapsAreScopedToEachPagesIdsAndOverlapIsRetained() =
+        viewModelTest {
+            val viewModel = viewModel()
+            backgroundScope.launch { viewModel.liveBySource.collect {} }
+            liveSource.live.value = mapOf(1L to RowLive(positionMs = 100), 2L to RowLive(positionMs = 200))
+            viewModel.onVisibleIds(FeedSource.All, setOf(1, 2))
+            viewModel.onVisibleIds(FeedSource.Ungrouped, setOf(2))
+            runCurrent()
+            assertEquals(setOf(1L, 2L), liveSource.lastVisibleIds.value)
+            assertEquals(setOf(2L), viewModel.liveBySource.value[FeedSource.Ungrouped]?.keys)
+            viewModel.onVisibleIds(FeedSource.All, emptySet())
+            runCurrent()
+            assertEquals(setOf(2L), liveSource.lastVisibleIds.value)
+            assertNull(viewModel.liveBySource.value[FeedSource.All])
+        }
+
+    @Test
+    fun scopedRefreshAndPreferenceFailureUseExistingServicesAndMessages() =
+        viewModelTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            viewModel.onRefresh(FeedSource.Group(42))
+            assertEquals(listOf("refreshFeed(Group(groupId=42))"), refreshController.calls)
+            feeds.writeError = Exception("disk full")
+            viewModel.onFilters(FeedSource.All, FeedFilters(unplayedOnly = true))
+            runCurrent()
+            assertEquals(
+                UiText.Res(Res.string.write_failed),
+                viewModel.uiState.value.messages
+                    .single()
+                    .text,
+            )
+            assertEquals(FeedFilters(), viewModel.uiState.value.filters)
+        }
+
+    @Test
+    fun selectionAndTabsAlwaysDescribeTheSameSnapshot() =
+        viewModelTest {
+            val group = group(showAsTab = false)
+            val viewModel = viewModel()
+            val emissions = mutableListOf<FeedsUiState>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                viewModel.uiState.collect { emissions += it }
+            }
+            runCurrent()
+            viewModel.onPageSettled(FeedSourceRef.Group(group.uuid))
+            runCurrent()
+            viewModel.onPageSettled(FeedSourceRef.All)
+            runCurrent()
+            assertTrue(emissions.all { state -> state.tabs.isEmpty() || state.tabs.any { it.ref == state.selected } })
+        }
+
+    @Test
+    fun restoredHiddenGroupKeepsItsFiltersAndAllChipsRemainIndependent() =
+        viewModelTest {
+            val group = group(showAsTab = false)
+            val source = FeedSource.Group(group.id)
+            val ref = FeedSourceRef.Group(group.uuid)
+            feeds.setFilters(source, FeedFilters(media = MediaFilter.AUDIO))
+            feeds.setFilters(FeedSource.All, FeedFilters(unplayedOnly = true))
+            settings.set(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE, ref.encode())
+            val viewModel = viewModel()
+            collect(viewModel)
+            runCurrent()
+            assertEquals(ref, viewModel.uiState.value.selected)
+            assertTrue(
+                viewModel.uiState.value.tabs
+                    .last()
+                    .transient,
+            )
+            assertEquals(
+                FeedFilters(media = MediaFilter.AUDIO),
+                viewModel.uiState.value.prefs
+                    ?.filters,
+            )
+            assertEquals(FeedFilters(unplayedOnly = true), viewModel.uiState.value.filters)
+        }
+
+    @Test
+    fun failedSelectionWriteKeepsSelectionAndReportsFailure() =
+        viewModelTest {
+            val group = group()
+            val viewModel = viewModel()
+            collect(viewModel)
+            runCurrent()
+            settings.failNextSet = SettingsError.WriteFailed
+            viewModel.onPageSettled(FeedSourceRef.Group(group.uuid))
+            runCurrent()
+            assertEquals("all", settings.get(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE))
+            assertEquals(FeedSourceRef.All, viewModel.uiState.value.selected)
+            assertEquals(
+                UiText.Res(Res.string.write_failed),
+                viewModel.uiState.value.messages
+                    .single()
+                    .text,
+            )
+        }
+
+    @Test
+    fun undoWhileFallbackIsPersistingDoesNotReselectDeletedGroup() =
+        viewModelTest {
+            val group = group()
+            val ref = FeedSourceRef.Group(group.uuid)
+            settings.set(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE, ref.encode())
+            val releaseFallback = CompletableDeferred<Unit>()
+            val delayedSettings =
+                object : SettingsRepository by settings {
+                    override suspend fun <T : Any> set(
+                        key: SettingKey<T>,
+                        value: T,
+                    ): Outcome<Unit, SettingsError> {
+                        if (key == AppearanceSettingKeys.FEEDS_SELECTED_SOURCE && value == "all") {
+                            releaseFallback.await()
+                        }
+                        return settings.set(key, value)
+                    }
+                }
+            val viewModel = viewModel(settingsRepository = delayedSettings)
+            collect(viewModel)
+            runCurrent()
+            groups.groups.value = emptyList()
+            feeds.tabs.value = listOf(allTab)
+            runCurrent()
+            assertEquals(FeedSourceRef.All, viewModel.uiState.value.selected)
+            assertEquals(ref.encode(), settings.get(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE))
+
+            groups.groups.value = listOf(group)
+            feeds.tabs.value = listOf(allTab, group.tab())
+            runCurrent()
+            assertEquals(FeedSourceRef.All, viewModel.uiState.value.selected)
+            releaseFallback.complete(Unit)
+            runCurrent()
+            assertEquals("all", settings.get(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE))
+            assertEquals(1, viewModel.uiState.value.messages.size)
+        }
+
+    @Test
+    fun newlyCreatedHiddenGroupIsResolvedFromFreshDataAfterRouteSelection() =
+        viewModelTest {
+            var groupReads = 0
+            val laggingGroups =
+                object : GroupRepository by groups {
+                    override fun observeGroups(): Flow<List<Group>> =
+                        if (groupReads++ == 0) flowOf(emptyList()) else groups.observeGroups()
+                }
+            val viewModel = viewModel(groupRepository = laggingGroups)
+            collect(viewModel)
+            runCurrent()
+            val group = group(showAsTab = false)
+            val ref = FeedSourceRef.Group(group.uuid)
+            // The create transaction finished, but the old group observer has not delivered it.
+            settings.set(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE, ref.encode())
+            runCurrent()
+            assertEquals(ref, viewModel.uiState.value.selected)
+            assertTrue(
+                viewModel.uiState.value.tabs
+                    .last()
+                    .transient,
+            )
+            assertTrue(
+                viewModel.uiState.value.messages
+                    .isEmpty(),
+            )
+        }
+
+    @Test
+    fun hiddenPageDisposalReleasesIdsAfterItsTransientTabIsRemoved() =
+        viewModelTest {
+            val group = group(showAsTab = false)
+            val ref = FeedSourceRef.Group(group.uuid)
+            val viewModel = viewModel()
+            collect(viewModel)
+            backgroundScope.launch { viewModel.live.collect {} }
+            viewModel.onPageSettled(ref)
+            runCurrent()
+            viewModel.onVisibleIds(ref, setOf(42))
+            runCurrent()
+            assertEquals(setOf(42L), liveSource.lastVisibleIds.value)
+            viewModel.onPageSettled(FeedSourceRef.All)
+            runCurrent()
+            viewModel.onVisibleIds(ref, emptySet())
+            runCurrent()
+            assertEquals(emptySet(), liveSource.lastVisibleIds.value)
+        }
+
+    @Test
+    fun explicitResettleRetriesTheSameStoredRefAfterFailedFallbackAndUndo() =
+        viewModelTest {
+            val group = group()
+            val ref = FeedSourceRef.Group(group.uuid)
+            settings.set(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE, ref.encode())
+            val viewModel = viewModel()
+            collect(viewModel)
+            runCurrent()
+            settings.failNextSet = SettingsError.WriteFailed
+            groups.groups.value = emptyList()
+            feeds.tabs.value = listOf(allTab)
+            runCurrent()
+            assertEquals(FeedSourceRef.All, viewModel.uiState.value.selected)
+            assertEquals(ref.encode(), settings.get(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE))
+            groups.groups.value = listOf(group)
+            feeds.tabs.value = listOf(allTab, group.tab())
+            runCurrent()
+            viewModel.onPageSettled(ref)
+            runCurrent()
+            assertEquals(ref, viewModel.uiState.value.selected)
+        }
+
+    @Test
+    fun rapidRevisitWaitsForPreviousVisitWriteBeforeCapturingBaseline() =
+        viewModelTest {
+            val group = group()
+            val source = FeedSource.Group(group.id)
+            feeds.prefs.value = mapOf(source to FeedPrefs(lastViewedAt = 100))
+            val releaseWrite = CompletableDeferred<Unit>()
+            val delayedFeeds =
+                object : FeedRepository by feeds {
+                    override suspend fun markVisited(
+                        source: FeedSource,
+                        leftAt: Long,
+                    ) {
+                        releaseWrite.await()
+                        feeds.markVisited(source, leftAt)
+                    }
+                }
+            val viewModel = viewModel(repository = delayedFeeds)
+            collect(viewModel)
+            runCurrent()
+            viewModel.onVisitStart(source)
+            runCurrent()
+            clock.advanceBy(1.seconds)
+            val leftAt = clock.now()
+            viewModel.onVisitEnd(source)
+            viewModel.onVisitStart(source)
+            runCurrent()
+            releaseWrite.complete(Unit)
+            runCurrent()
+            assertEquals(leftAt, viewModel.uiState.value.visitBaselines[source])
+        }
+
     private companion object {
+        val allTab = FeedTab(FeedSource.All, "All", null, null, null)
         const val HOUR = 3_600_000L
     }
 }

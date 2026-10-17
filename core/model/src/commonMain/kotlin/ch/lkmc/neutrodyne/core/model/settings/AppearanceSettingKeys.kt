@@ -40,6 +40,9 @@ public object AppearanceSettingKeys {
                 ),
         )
 
+    /** Pager and row gestures are mutually exclusive (08 Group feed pager). */
+    val FEEDS_ROW_SWIPE = SettingKey.Bool("appearance.feeds_row_swipe", false)
+
     /** Persisted selection identity (08 Group feed pager). */
     val FEEDS_SELECTED_SOURCE = SettingKey.Text("ui.feeds_selected_source", "all", SettingsFile.DEVICE)
 
@@ -47,5 +50,13 @@ public object AppearanceSettingKeys {
     val LIBRARY_GROUP_FILTER = SettingKey.Text("ui.library_group_filter", "", SettingsFile.DEVICE)
 
     public val ALL: List<SettingKey<*>> =
-        listOf(THEME, DYNAMIC_COLOR, LIBRARY_TITLES, LIBRARY_SORT, FEEDS_SELECTED_SOURCE, LIBRARY_GROUP_FILTER)
+        listOf(
+            THEME,
+            DYNAMIC_COLOR,
+            LIBRARY_TITLES,
+            LIBRARY_SORT,
+            FEEDS_ROW_SWIPE,
+            FEEDS_SELECTED_SOURCE,
+            LIBRARY_GROUP_FILTER,
+        )
 }
