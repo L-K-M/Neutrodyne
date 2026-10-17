@@ -58,6 +58,16 @@ class BackupCodecTest {
     }
 
     @Test
+    fun minReaderVersionIsItsOwnConstantNotFormatVersion() {
+        // 05 Versioning: minReaderVersion is the oldest reader that restores the file
+        // correctly and stays 1 across compatible formatVersion bumps, so the wire
+        // default must not track FORMAT_VERSION — the next compatible bump would
+        // otherwise lock out every v1 reader.
+        assertEquals(1, BackupCodec.MIN_READER_VERSION)
+        assertEquals(BackupCodec.MIN_READER_VERSION, manifest().minReaderVersion)
+    }
+
+    @Test
     fun manifestChecksFormatBeforeDecoding() {
         val encoded = codec.encodeManifest(manifest())
         assertFailsWith<BackupCodecException.NotABackup> {

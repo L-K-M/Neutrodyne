@@ -25,7 +25,7 @@ public data class BackupManifest(
      */
     @EncodeDefault val format: String = BackupCodec.FORMAT,
     @EncodeDefault val formatVersion: Int = BackupCodec.FORMAT_VERSION,
-    @EncodeDefault val minReaderVersion: Int = BackupCodec.FORMAT_VERSION,
+    @EncodeDefault val minReaderVersion: Int = BackupCodec.MIN_READER_VERSION,
     val createdAt: String, // ISO-8601 UTC (for humans)
     val kind: BackupKind,
     val app: AppInfoV1,

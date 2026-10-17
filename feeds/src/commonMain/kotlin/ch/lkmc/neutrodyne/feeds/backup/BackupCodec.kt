@@ -70,7 +70,8 @@ public class BackupCodec(
         // Versioning). An absent or malformed field claims nothing — the full decode
         // then supplies the default or reports Corrupt.
         val minReaderVersion =
-            ((element as? JsonObject)?.get("minReaderVersion") as? JsonPrimitive)?.intOrNull ?: 1
+            ((element as? JsonObject)?.get("minReaderVersion") as? JsonPrimitive)?.intOrNull
+                ?: MIN_READER_VERSION
         if (minReaderVersion > FORMAT_VERSION) {
             throw BackupCodecException.NewerFormat(minReaderVersion)
         }
@@ -160,6 +161,13 @@ public class BackupCodec(
     public companion object {
         public const val FORMAT: String = "neutrodyne-backup"
         public const val FORMAT_VERSION: Int = 1
+
+        /**
+         * The oldest reader version that restores a written file correctly (05
+         * Versioning): it stays 1 across compatible `formatVersion` bumps, so it is its
+         * own constant — never an alias of [FORMAT_VERSION].
+         */
+        public const val MIN_READER_VERSION: Int = 1
 
         /** `manifest.json` cap (05 Validation and preview). */
         public const val MANIFEST_MAX_BYTES: Long = 1024L * 1024
