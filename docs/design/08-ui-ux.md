@@ -490,9 +490,9 @@ Implementation note (2026-10-16, M2): D7 delivers the Library chips,
 persisted Podcasts/Groups segment, mosaic grid and selection actions. Group
 tile counts are wired to `FeedRepository.observeGroupCounts(sinceMs)`, using
 the shared domain helper for C2's hour-rounded 30-day badge window. The
-bulk mark-played confirmation names the selected podcast count; the unbounded
-episode count and age options still await D9's integration of C2's
-`FeedRepository.countUnplayed`. Group tile menus offer Edit
+bulk mark-played confirmation names the selected podcast count; episode
+counts and age options remain deferred in Library. The counted dialog is
+integrated in Feeds and Podcast. Group tile menus offer Edit
 (`GroupEditKey(id)`) and Manage groups (`GroupsManageKey`); the remaining
 group actions await their owning slices. The `ui.library_group_filter`
 value is a raw UUID, unlike `ui.feeds_selected_source`'s `group:` encoding.
@@ -1481,6 +1481,24 @@ enum class CoverAspect { SQUARE, WIDE_16_9 }
 
 `FeedFilterChips` (`:core:ui`) in a horizontally scrolling row: Unplayed, Downloaded (M6), In progress (M4) as toggle `NdFilterChip`s with a leading check when selected; Media as a dropdown chip (All / Audio only / Video only); Sort as a dropdown chip (Newest first / Oldest first; hidden for All and Ungrouped, whose order is fixed in v1, 05); "Last 30 days" dropdown chip shown only while `hideOlderThanDays` is set (set from the page overflow); "Clear" chip when anything is active. Each change calls 05's `FeedRepository.setFilters/setFeedOrder/setHideOlderThanDays` immediately. Chips filter only; they never choose the group ([D55](../PLAN.md#3-key-decisions)).
 
+**Implementation note (2026-10-16, M2):** D11 gates Downloaded until M6 and
+In progress until M4. Feature callers pass the shared
+`AVAILABLE_FEED_FILTER_CAPABILITIES` enum set from `:core:model` to
+`FeedFilterChips`; the same set derives effective page filters. The YouTube
+capability bindings are still stubs and the earlier feed-account flag was
+removed in M1b, so this shared model value is the single milestone source for
+both features. Stored downloaded/in-progress flags are ignored in page queries
+and chip state while gated, without rewriting saved or synced preferences on
+read. Editing filters writes the effective selection, including clearing any
+gated flags. The predicates remain available to repository callers and tests
+([05 Filters](05-groups-opml-backup.md#filters-order-and-hide-older-than)).
+
+D11's deterministic create-with-members, counted-tab, filter, mark-played,
+reorder, delete-fallback and undo journey lives in `:desktopApp`'s test source
+set. The shell already owns the complete feature graph and JVM UI setup;
+dynamic test bindings keep the real Room repositories with a fixed clock and
+virtual undo expiry. Core modules therefore need no feature or UI test edges.
+
 ### Banners, snackbars and undo
 
 - `NdBanner` (`:core:designsystem`): a `surfaceContainerHigh` card at the top of a screen's list with icon, one or two lines and up to two text buttons; `liveRegion = Polite` when it appears due to a state change. Screens show at most two banners; [priorities](#banners-and-the-startup-gate).
@@ -1802,8 +1820,10 @@ and the selection fallback remain D1/D2 UI work.
 route continues to render All; tab/pager rendering and lifecycle visit calls
 arrive in D2. `FeedsUiState.prefs` describes the selected source, while its
 compatibility `filters` field describes the rendered All page. The source-keyed
-cache uses B2's `pagedFeed(source)` helper to observe and compare effective
-filters/order before replacing a pager. Per-entry child scopes own `cachedIn`.
+cache observes preferences and compares effective filters/order before
+replacing a pager. D11 applies the milestone capabilities in the ViewModel
+before the explicit repository query, keeping hidden flags out of the query.
+Per-entry child scopes own `cachedIn`.
 The ViewModel exposes both the union live map and `liveBySource` projections,
 and `visitBaselines` retains each page's visit-start highlight baseline.
 Each changed stored reference waits for fresh tab and group emissions, so a

@@ -296,6 +296,24 @@ class GroupsManageScreenTest {
             assertEquals(GroupEditKey(null), vm.consumeNavigation())
         }
 
+    @Test fun suggestedGroupsCardSitsAboveTheEmptyState() =
+        runComposeUiTest {
+            setManager()
+            val card = onNodeWithText("Create your first group").assertIsDisplayed()
+            val empty = onNodeWithText("No groups yet").assertIsDisplayed()
+            assertTrue(
+                card.fetchSemanticsNode().boundsInRoot.top <
+                    empty.fetchSemanticsNode().boundsInRoot.top,
+            )
+        }
+
+    @Test fun suggestedGroupsCardOpensTheNewGroupEditor() =
+        runComposeUiTest {
+            setManager()
+            onNodeWithText("Create your first group").performClick()
+            assertEquals(GroupEditKey(null), vm.consumeNavigation())
+        }
+
     @Test fun undoIsOfferedBeforeAnotherGroupCanBeDeleted() =
         runComposeUiTest {
             val (a, b) = seed()

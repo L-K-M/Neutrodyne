@@ -17,7 +17,9 @@ import ch.lkmc.neutrodyne.MainActivity
 import ch.lkmc.neutrodyne.R
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.Dispatcher
 import ch.lkmc.neutrodyne.core.common.Log
+import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.NewEpisodePoster
 import ch.lkmc.neutrodyne.core.model.NewEpisodeLine
@@ -33,8 +35,10 @@ import ch.lkmc.neutrodyne.notifications.NewEpisodeChannels.NOTIFICATION_ID
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.getPluralString
 import org.jetbrains.compose.resources.getString
 
@@ -46,13 +50,14 @@ internal class AndroidNewEpisodePoster(
     private val application: Application,
     private val db: NeutrodyneDatabase,
     private val clock: Clock,
+    @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
 ) : NewEpisodePoster {
     private val manager get() = application.getSystemService(NotificationManager::class.java)
     private val mutex = Mutex()
 
     override suspend fun post(notices: List<NewEpisodeNotice>) =
-        mutex.withLock {
-            if (notices.isEmpty()) return@withLock
+        locked {
+            if (notices.isEmpty()) return@locked
 
             NewEpisodeChannels.ensureChannels(application)
             val active = shown().associateBy { it.tag }
@@ -75,8 +80,8 @@ internal class AndroidNewEpisodePoster(
         }
 
     override suspend fun removePodcasts(podcastIds: List<Long>) =
-        mutex.withLock {
-            if (podcastIds.isEmpty()) return@withLock
+        locked {
+            if (podcastIds.isEmpty()) return@locked
 
             val removed = podcastIds.toSet()
             for (shown in shown()) {
@@ -101,6 +106,9 @@ internal class AndroidNewEpisodePoster(
                 }
             }
         }
+
+    // Unsubscribe calls in from a ViewModel on Main; NotificationManager calls are binder calls.
+    private suspend fun locked(block: suspend () -> Unit) = withContext(io) { mutex.withLock { block() } }
 
     private fun shown() =
         manager.activeNotifications.filter {

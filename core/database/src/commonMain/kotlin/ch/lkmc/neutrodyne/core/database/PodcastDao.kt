@@ -123,11 +123,13 @@ abstract class PodcastDao(
      * fresher fetch state — the write then skips rather than roll `nextRefreshAt` (or any other
      * column) back to the stale target. Returns the number of rows written.
      * Invariant: every other `nextRefreshAt` writer must stamp `lastAttemptAt` in the same
-     * statement/transaction, or this conditional write can clobber it.
+     * statement/transaction, or this conditional write can clobber it. The force mark
+     * (`nextRefreshAt = 0`) is the exception: it leaves `lastAttemptAt` alone, so the write
+     * skips forced rows itself.
      */
     @Query(
         "UPDATE podcast SET nextRefreshAt = :nextRefreshAt WHERE id = :id" +
-            " AND COALESCE(lastAttemptAt, -1) <= :sinceAttempt",
+            " AND COALESCE(lastAttemptAt, -1) <= :sinceAttempt AND nextRefreshAt IS NOT 0",
     )
     abstract suspend fun rebaseNextRefreshAt(
         id: Long,

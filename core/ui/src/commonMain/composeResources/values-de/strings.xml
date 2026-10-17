@@ -372,6 +372,8 @@
     <string name="feeds_images_tap">Nur nach meinem Tippen</string>
     <string name="feeds_not_on_desktop">Wird auf Computern nicht verwendet</string>
     <string name="write_failed">Die Änderung konnte nicht gespeichert werden</string>
+    <string name="feed_group_deleted">„%1$s“ wurde gelöscht – „Alle“ wird angezeigt</string>
+    <string name="feed_group_unknown">Diese Gruppe gibt es nicht mehr. „Alle“ wird angezeigt</string>
     <string name="feeds_all">Alle</string>
     <string name="feeds_ungrouped">Ohne Gruppe</string>
     <string name="feeds_all_groups">Alle Gruppen</string>
@@ -381,6 +383,7 @@
     <string name="groups_new">Neue Gruppe</string>
     <string name="groups_manage">Gruppen verwalten</string>
     <string name="groups_empty">Noch keine Gruppen</string>
+    <string name="suggested_groups_first">Erstelle deine erste Gruppe</string>
     <string name="mark_played_all">Alle</string>
     <string name="mark_played_week">Älter als 1 Woche</string>
     <string name="mark_played_month">Älter als 1 Monat</string>
