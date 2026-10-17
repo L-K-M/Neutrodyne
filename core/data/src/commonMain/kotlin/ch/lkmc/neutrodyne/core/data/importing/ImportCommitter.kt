@@ -192,21 +192,26 @@ internal class ImportCommitter(
         // splitUserInfo/origin on the raw wrapper URL never parse (a feed:/itpc: scheme is not
         // the bare http(s) they accept) and would silently drop the credentials.
         val puts = HashMap<Int, CredentialPut>()
-        for (work in plan.work) {
-            if (work !is Work.New) continue
-            val normalized =
-                AddInputNormalizer.normalize(work.item.originalUrl) as? NormalizedInput.Url
-                    ?: continue
-            val credentials = normalized.credentials ?: continue
-            val origin = UrlNormalizer.origin(normalized.url) ?: continue
-            puts[work.ordinal] =
-                CredentialPut(
-                    origin = origin,
-                    rowId = secrets.put(origin, credentials.username, credentials.password.toCharArray()),
-                )
-        }
-
         try {
+            for (work in plan.work) {
+                if (work !is Work.New) continue
+                val normalized =
+                    AddInputNormalizer.normalize(work.item.originalUrl) as? NormalizedInput.Url
+                        ?: continue
+                val credentials = normalized.credentials ?: continue
+                val origin = UrlNormalizer.origin(normalized.url) ?: continue
+                puts[work.ordinal] =
+                    CredentialPut(
+                        origin = origin,
+                        rowId =
+                            secrets.put(
+                                origin,
+                                credentials.username,
+                                credentials.password.toCharArray(),
+                            ),
+                    )
+            }
+
             val ctx = ChunkContext(resolveGroups(plan.options, plan.work), puts)
             // ≤ CHUNK items per write transaction (02); the empty plan still runs one
             // transaction so a deselect-everything confirm creates its proposed groups.
@@ -217,9 +222,11 @@ internal class ImportCommitter(
             }
             return Commit.READY_TO_FINISH
         } catch (t: Throwable) {
-            // A chunk's rollback already protected the rows it wrote; here the puts whose
-            // referencing insert never landed go back — unless a committed chunk (or another
-            // podcast on a shared origin) references the row (03's rule).
+            // The put loop is inside this try: a later put throwing (or cancellation landing
+            // mid-loop) must not strand the earlier ones — each collected put whose
+            // referencing insert never landed goes back, unless a committed chunk (or
+            // another podcast on a shared origin) references the row (03's rule). A chunk's
+            // own rollback already protected the rows it wrote.
             withContext(NonCancellable) {
                 for (put in puts.values) {
                     secrets.removeUnreferenced(db.credentialDao(), put.origin, put.rowId)

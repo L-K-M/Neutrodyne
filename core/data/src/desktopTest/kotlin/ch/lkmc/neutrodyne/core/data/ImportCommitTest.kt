@@ -676,6 +676,39 @@ class ImportCommitTest {
             )
         }
 
+    @Test
+    fun aFailingPutRollsBackTheEarlierUnreferencedPuts() =
+        runTest {
+            // The second item's put throws: the first one's credential row exists but no
+            // podcast references it — the failure cleanup must remove it (03's rule) while
+            // the commit reports the storage failure and never schedules.
+            val committer = newCommitter(store = FailingAfterPuts(secrets, successes = 1))
+            val sid =
+                seedSession(
+                    items =
+                        listOf(
+                            item(1, "https://u:s1@h1.example.com/f", normalizedUrl = "https://h1.example.com/f"),
+                            item(2, "https://u:s2@h2.example.com/f", normalizedUrl = "https://h2.example.com/f"),
+                        ),
+                )
+
+            assertEquals(
+                ImportError.Storage,
+                assertIs<Outcome.Failure<ImportError>>(committer.confirm(sid)).error,
+            )
+            assertTrue(db.podcastDao().allForExport().isEmpty(), "no podcast rows landed")
+            assertEquals(
+                0,
+                db.credentialDao().byOrigin("https://h1.example.com").size,
+                "the earlier put's row rolled back",
+            )
+            assertNull(secrets.get("https://h1.example.com"), "the earlier put rolled back")
+            assertNull(secrets.get("https://h2.example.com"))
+            assertEquals(ImportState.PREVIEW, db.importDao().sessionById(sid)?.state)
+            assertTrue(scheduler.sessions.isEmpty())
+            assertTrue(refresh.calls.isEmpty() && channels.calls.isEmpty())
+        }
+
     // --- Session/options gates ----------------------------------------------------------------------
 
     @Test
@@ -920,6 +953,24 @@ class ImportCommitTest {
             totalPuts++
             if (db.podcastDao().allForExport().all { it.credentialId == null }) putsBeforePodcastInsert++
             return id
+        }
+    }
+
+    /** Lets the first [successes] puts through, then throws — everything else delegates. */
+    private class FailingAfterPuts(
+        private val store: SecretStore,
+        private val successes: Int,
+    ) : SecretStore by store {
+        private var puts = 0
+
+        override suspend fun put(
+            origin: String,
+            username: String,
+            secret: CharArray,
+            attributes: Map<String, String>,
+        ): Long? {
+            if (puts++ >= successes) error("credential put failed")
+            return store.put(origin, username, secret, attributes)
         }
     }
 
