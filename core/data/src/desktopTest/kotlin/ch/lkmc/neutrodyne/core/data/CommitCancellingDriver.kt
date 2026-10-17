@@ -15,8 +15,6 @@ internal class CommitCancellingDriver : SQLiteDriver {
 
     @Volatile private var onCommit: (() -> Unit)? = null
 
-    @Volatile private var ranStatement = false
-
     @Volatile var cancellations = 0
         private set
 
@@ -24,13 +22,14 @@ internal class CommitCancellingDriver : SQLiteDriver {
         statement: String,
         onCommit: () -> Unit,
     ) {
-        ranStatement = false
         this.statement = statement
         this.onCommit = onCommit
     }
 
     override fun open(fileName: String): SQLiteConnection {
         val connection = delegate.open(fileName)
+        // Per connection: only the transaction that ran the armed statement may fire the hook.
+        var ranHere = false
         return object : SQLiteConnection by connection {
             override fun prepare(sql: String): SQLiteStatement {
                 val prepared = connection.prepare(sql)
@@ -38,8 +37,10 @@ internal class CommitCancellingDriver : SQLiteDriver {
                     override fun step(): Boolean {
                         val row = prepared.step()
                         val armed = statement ?: return row
-                        if (sql.startsWith(armed)) ranStatement = true
-                        if (ranStatement && (sql.startsWith("END TRANSACTION") || sql.startsWith("COMMIT"))) {
+                        if (sql.startsWith(armed)) ranHere = true
+                        if (sql.startsWith("ROLLBACK")) ranHere = false
+                        if (ranHere && (sql.startsWith("END TRANSACTION") || sql.startsWith("COMMIT"))) {
+                            ranHere = false
                             statement = null
                             cancellations++
                             onCommit?.invoke()
