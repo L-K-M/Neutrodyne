@@ -129,7 +129,7 @@ class RestoreMergerTest {
                         ),
                 )
 
-            val summary = merger.mergeLibrary(staged, MergePolicy.RESTORE_MERGE, ALL_CATEGORIES)
+            val summary = merger.mergeLibrary(staged, MergePolicy.RESTORE_MERGE, ALL_CATEGORIES).summary
 
             assertEquals(1, summary.podcastsAdded)
             assertEquals(0, summary.podcastsMatched)
@@ -178,7 +178,7 @@ class RestoreMergerTest {
                         ),
                 )
 
-            val summary = merger.mergeLibrary(staged, MergePolicy.RESTORE_MERGE, ALL_CATEGORIES)
+            val summary = merger.mergeLibrary(staged, MergePolicy.RESTORE_MERGE, ALL_CATEGORIES).summary
 
             assertEquals(0, summary.podcastsAdded)
             assertEquals(1, summary.podcastsMatched)
@@ -213,7 +213,7 @@ class RestoreMergerTest {
                         ),
                 )
 
-            val summary = merger.mergeLibrary(staged, MergePolicy.RESTORE_MERGE, ALL_CATEGORIES)
+            val summary = merger.mergeLibrary(staged, MergePolicy.RESTORE_MERGE, ALL_CATEGORIES).summary
 
             assertEquals(2, summary.podcastsMatched)
             assertEquals(0, summary.podcastsAdded)
@@ -311,7 +311,7 @@ class RestoreMergerTest {
                         ),
                 )
 
-            val summary = merger.mergeLibrary(staged, MergePolicy.RESTORE_MERGE, ALL_CATEGORIES)
+            val summary = merger.mergeLibrary(staged, MergePolicy.RESTORE_MERGE, ALL_CATEGORIES).summary
 
             assertEquals(1, summary.groupsMatched)
             assertEquals(1, summary.groupsAdded)
@@ -1244,7 +1244,7 @@ class RestoreMergerTest {
             merger.mergeLibrary(staged, MergePolicy.RESTORE_MERGE, ALL_CATEGORIES)
             val first = libraryShape()
 
-            val again = merger.mergeLibrary(staged, MergePolicy.RESTORE_MERGE, ALL_CATEGORIES)
+            val again = merger.mergeLibrary(staged, MergePolicy.RESTORE_MERGE, ALL_CATEGORIES).summary
 
             assertEquals(0, again.podcastsAdded)
             assertEquals(0, again.groupsAdded)

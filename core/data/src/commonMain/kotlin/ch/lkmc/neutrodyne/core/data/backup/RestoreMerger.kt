@@ -77,14 +77,17 @@ internal class RestoreMerger(
     /**
      * Writes [staged]'s library rows under [policy]'s Merge and Replace rules; [progress]
      * reports `(done, total)` once per staged podcast and canonical group. `LINK_*` policies
-     * are not supported in M3.
+     * are not supported in M3. Returns the [LibraryMergeResult] the episode phase must
+     * attach through — its `p`/group-`uuid` maps are the settled identities: the matches
+     * ran before any write, so live re-derivation cannot reproduce them once a later
+     * staged row commits.
      */
     suspend fun mergeLibrary(
         staged: StagedLibrary,
         policy: MergePolicy,
         categories: Set<RestoreCategory>,
         progress: (done: Int, total: Int) -> Unit = { _, _ -> },
-    ): MergeSummary {
+    ): LibraryMergeResult {
         require(policy == MergePolicy.RESTORE_MERGE || policy == MergePolicy.RESTORE_REPLACE) {
             "mergeLibrary supports RESTORE_MERGE and RESTORE_REPLACE; $policy lands with MS2"
         }
@@ -217,15 +220,33 @@ internal class RestoreMerger(
                 .onFailure { Log.w(TAG, it) { "Group channel delete failed" } }
         }
 
-        return MergeSummary(
-            podcastsAdded = podcastsAdded,
-            podcastsMatched = podcastsMatched,
-            groupsAdded = groupsAdded,
-            groupsMatched = groupsMatched,
-            episodeLines = 0,
-            stubs = 0,
-            unmatched = 0,
-            skippedLines = 0,
+        // Transaction A's settled staged-`uuid` → survivor map: canonical, folded and
+        // absorbed staged uuids all land on their root's resolved row (Merge's fresh
+        // inserts included — the staged uuid never exists locally there).
+        val groupIdByUuid = LinkedHashMap<String, Long>()
+        for (group in stagedGroups) {
+            val survivor =
+                checkNotNull(group.root().resolvedId) {
+                    "staged group '${group.primary.uuid}' left transaction A unresolved"
+                }
+            groupIdByUuid[group.primary.uuid] = survivor
+            for (absorbed in group.absorbed) groupIdByUuid[absorbed.uuid] = survivor
+        }
+
+        return LibraryMergeResult(
+            summary =
+                MergeSummary(
+                    podcastsAdded = podcastsAdded,
+                    podcastsMatched = podcastsMatched,
+                    groupsAdded = groupsAdded,
+                    groupsMatched = groupsMatched,
+                    episodeLines = 0,
+                    stubs = 0,
+                    unmatched = 0,
+                    skippedLines = 0,
+                ),
+            podcastIdByKey = podcastIdByKey.toMap(),
+            groupIdByUuid = groupIdByUuid,
         )
     }
 
@@ -743,6 +764,19 @@ internal class RestoreMerger(
         const val DEFAULT_YOUTUBE_VARIANTS = 1
     }
 }
+
+/**
+ * Transaction A's settled output for the episode phase (05): the library [MergeSummary]
+ * plus the identity maps the later transactions attach through — staged podcast `key`
+ * (and each alias it claimed first) → local id, a canonical key winning over another
+ * podcast's alias claim; and every staged group `uuid` → its survivor row, folded and
+ * absorbed staged uuids included.
+ */
+internal class LibraryMergeResult(
+    val summary: MergeSummary,
+    val podcastIdByKey: Map<String, Long>,
+    val groupIdByUuid: Map<String, Long>,
+)
 
 /**
  * One list's keys under Replace (05 "the backup's keys, else `OrderKey.rewrite(n)` in rank

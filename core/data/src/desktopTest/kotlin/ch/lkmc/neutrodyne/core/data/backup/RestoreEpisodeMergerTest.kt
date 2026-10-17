@@ -83,7 +83,6 @@ class RestoreEpisodeMergerTest {
     private val episodes =
         RestoreEpisodeMerger(
             db = db,
-            podcasts = PodcastMatcher(db),
             episodes = EpisodeMatcher(db),
             writes = RestoreWrites(db),
             orderKeys = TestOrderKeys,
@@ -353,8 +352,15 @@ class RestoreEpisodeMergerTest {
                     queue = QueueV1(upNext = listOf(UpNextRefV1("https://a/feed", "g:e"))),
                 )
 
+            val settled =
+                merger.mergeLibrary(staged, MergePolicy.RESTORE_MERGE, setOf(RestoreCategory.SETTINGS))
             val summary =
-                episodes.mergeEpisodes(staged, MergePolicy.RESTORE_MERGE, setOf(RestoreCategory.SETTINGS))
+                episodes.mergeEpisodes(
+                    staged,
+                    settled,
+                    MergePolicy.RESTORE_MERGE,
+                    setOf(RestoreCategory.SETTINGS),
+                )
 
             assertEquals(0, summary.episodeLines)
             assertNull(db.episodeStateDao().byEpisode(e))
@@ -686,7 +692,7 @@ class RestoreEpisodeMergerTest {
             val p = seedPodcast("https://a/feed")
             // The staged group's `uuid` does not exist locally: Merge inserts the group
             // under a fresh uuid, so the session's `contextGroupUuid` can only resolve
-            // through the staged uuid → nameKey → inserted row chain.
+            // through transaction A's staged uuid → survivor map.
             val staged =
                 staged(
                     podcasts = listOf(podcastV1("https://a/feed")),
@@ -741,6 +747,105 @@ class RestoreEpisodeMergerTest {
             assertNull(s.contextAnchorEpisodeId)
             assertEquals(777L, s.contextAnchorSortDate)
         }
+
+    @Test
+    fun sessionContextMapsAFoldedStagedUuidToTheSurvivor() =
+        runTest {
+            seedPodcast("https://a/feed")
+            val l1 = db.groupDao().insert(groupEntity(uuid = "u-l1", name = "Different", orderKey = "0.5"))
+            val staged =
+                staged(
+                    podcasts = listOf(podcastV1("https://a/feed")),
+                    groups =
+                        listOf(
+                            // Same nameKey: `u-fold` folds into `u-l1`, which claimed the
+                            // local row by uuid — Merge keeps the local name, so no live
+                            // uuid/nameKey lookup can find `u-fold`'s survivor again.
+                            groupV1(uuid = "u-l1", name = "Fold"),
+                            groupV1(uuid = "u-fold", name = "Fold"),
+                        ),
+                    queue =
+                        QueueV1(
+                            upNext = emptyList(),
+                            session = SessionV1(contextType = "GROUP", contextGroupUuid = "u-fold"),
+                        ),
+                )
+
+            restore(staged, MergePolicy.RESTORE_MERGE, ALL)
+
+            val s = assertNotNull(db.playSessionDao().get())
+            assertEquals(ContextType.GROUP, s.contextType)
+            assertEquals(l1, s.contextId)
+        }
+
+    // --- Settled library identities (05 transactions A → B/C) ----------------------------------------
+    //
+    // The episode phase attaches through transaction A's settled `p`/`uuid` → local-id
+    // maps. A matched before any write, so the live ladder can disagree once a later
+    // staged row commits — an inserted podcast's key or a written alias re-points the
+    // evidence.
+
+    @Test
+    fun collidingInsertKeepsSettledPodcastIdsStagedJFirst() =
+        runTest { collidingInsertKeepsSettledIds(jFirst = true) }
+
+    @Test
+    fun collidingInsertKeepsSettledPodcastIdsStagedIFirst() =
+        runTest { collidingInsertKeepsSettledIds(jFirst = false) }
+
+    /**
+     * The report's colliding-identity case: staged `j` claims local `rx` by real
+     * `podcastGuid` while `j`'s alias is staged `i`'s key — `i` matches nothing and
+     * inserts during transaction A. The settled map must keep `j → rx` even though the
+     * live ladder would now re-resolve `j`'s alias evidence to `i`'s fresh row.
+     */
+    private suspend fun collidingInsertKeepsSettledIds(jFirst: Boolean) {
+        val rx = db.podcastDao().insertPodcast(podcastEntity { copy(podcastGuid = "urn:uuid:G-J") })
+        val rxHist = seedEpisode(rx, "g:rx1")
+        val rxQueued = seedEpisode(rx, "g:rx2")
+        val j =
+            podcastV1(
+                "https://j/feed",
+                aliases = listOf("https://i/feed"),
+                podcastGuid = "urn:uuid:G-J",
+            )
+        val i = podcastV1("https://i/feed")
+        val staged =
+            staged(
+                podcasts = if (jFirst) listOf(j, i) else listOf(i, j),
+                episodeLines =
+                    listOf(
+                        line("https://j/feed", "g:rx1", pl = 500, ts = 700),
+                        line("https://j/feed", "g:stub", u = "https://cdn/s.mp3", d = 40_000),
+                        line("https://i/feed", "g:i1", u = "https://cdn/i.mp3", d = 40_000),
+                    ),
+                queue =
+                    QueueV1(
+                        upNext = listOf(UpNextRefV1("https://j/feed", "g:rx2")),
+                        session =
+                            SessionV1(
+                                current = EpisodeRefV1("https://j/feed", "g:rx2"),
+                                contextType = "PODCAST",
+                                contextPodcastKey = "https://j/feed",
+                            ),
+                    ),
+            )
+
+        restore(staged, MergePolicy.RESTORE_MERGE, ALL)
+
+        val ri = assertNotNull(db.podcastDao().byFeedKey("https://i/feed"))
+        // j's history landed on rx's episode and its stub went to rx — never to i's row.
+        assertEquals(500L, db.episodeStateDao().byEpisode(rxHist)?.playedAt)
+        assertNotNull(db.episodeDao().byIdentityKey(rx, "g:stub"))
+        assertNull(db.episodeDao().byIdentityKey(ri.id, "g:stub"))
+        assertNotNull(db.episodeDao().byIdentityKey(ri.id, "g:i1"))
+        // Queue, current and the podcast context all attach to rx.
+        assertEquals(listOf(rxQueued), db.queueDao().entries().map { it.episodeId })
+        val s = assertNotNull(db.playSessionDao().get())
+        assertEquals(rxQueued, s.currentEpisodeId)
+        assertEquals(ContextType.PODCAST, s.contextType)
+        assertEquals(rx, s.contextId)
+    }
 
     // --- Stubs, provenance, skipped lines -----------------------------------------------------------
 
@@ -956,8 +1061,8 @@ class RestoreEpisodeMergerTest {
         total: Int = 0,
         progress: (Int, Int) -> Unit = { _, _ -> },
     ): MergeSummary {
-        merger.mergeLibrary(staged, policy, categories)
-        return episodes.mergeEpisodes(staged, policy, categories, total, progress)
+        val settled = merger.mergeLibrary(staged, policy, categories)
+        return episodes.mergeEpisodes(staged, settled, policy, categories, total, progress)
     }
 
     /** A restore bound to the real `OrderKey` port — the Replace `ok` cases. */
@@ -991,7 +1096,6 @@ class RestoreEpisodeMergerTest {
     private fun realEpisodes(): RestoreEpisodeMerger =
         RestoreEpisodeMerger(
             db = db,
-            podcasts = PodcastMatcher(db),
             episodes = EpisodeMatcher(db),
             writes = RestoreWrites(db),
             orderKeys = ProtocolOrderKeys,

@@ -15,17 +15,14 @@ import ch.lkmc.neutrodyne.core.model.MergeSummary
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.feeds.backup.EpisodeLineV1
-import ch.lkmc.neutrodyne.feeds.backup.LibraryV1
 import ch.lkmc.neutrodyne.feeds.backup.QueueV1
 import ch.lkmc.neutrodyne.feeds.backup.SessionV1
 import ch.lkmc.neutrodyne.feeds.backup.UpNextRefV1
-import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import ch.lkmc.neutrodyne.feeds.identity.EpisodeKeys
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import dev.zacsweers.metro.Inject
 
 private const val NO_STATE_TS = 0L
-private const val DEFAULT_GROUP_NAME = "Group"
 
 /**
  * 05's `RestoreMerger` episode, Up next and session phases: steps 5–6 of the Restore
@@ -35,40 +32,40 @@ private const val DEFAULT_GROUP_NAME = "Group"
  * transaction C (Up next entries and the `play_session` singleton) of the Merge and
  * Replace rules table.
  *
- * The maps transaction A produced are re-derived rather than shared with `RestoreMerger`:
- * [podcasts] replays the same match ladder over the staged podcasts — committed rows
- * re-resolve identically — and staged group `uuid`s resolve through `uuid`-then-`nameKey`,
- * the same evidence A used, so a session context maps to the row a Merge insert, a
- * Replace adoption or a folded match landed on.
+ * Podcast and group identities attach through transaction A's settled maps — the
+ * [LibraryMergeResult] `mergeLibrary` returned — never a re-run of the match ladders: A
+ * matched before its writes, so a key, alias or `podcastGuid` a later staged row
+ * committed cannot re-point an already-settled `p`.
  *
- * Caller contract: run after `RestoreMerger.mergeLibrary` in the same restore with the
- * same [policy]/[categories]. A failure inside a chunk aborts only that transaction —
- * every earlier chunk is committed — and a re-run replays idempotently (max/OR state
- * merges, newer-`posAt`-wins positions, `INSERT OR IGNORE` stubs and queue entries).
+ * Caller contract: run after `RestoreMerger.mergeLibrary` in the same restore with that
+ * result and the same [policy]/[categories]. A failure inside a chunk aborts only that
+ * transaction — every earlier chunk is committed — and a re-run replays idempotently
+ * (max/OR state merges, newer-`posAt`-wins positions, `INSERT OR IGNORE` stubs and queue
+ * entries).
  */
 @Inject
 internal class RestoreEpisodeMerger(
     private val db: NeutrodyneDatabase,
-    private val podcasts: PodcastMatcher,
     private val episodes: EpisodeMatcher,
     private val writes: RestoreWrites,
     private val orderKeys: OrderKeys,
     private val clock: Clock,
 ) {
     private val backupDao get() = db.backupDao()
-    private val podcastDao get() = db.podcastDao()
-    private val groupDao get() = db.groupDao()
     private val queueDao get() = db.queueDao()
     private val sessionDao get() = db.playSessionDao()
 
     /**
      * Writes [staged]'s episode lines under [policy] in 1,000-line write transactions,
-     * then its `queue.json` under the Up next/session rules (05 transactions B and C).
-     * [progress] reports `(done, total)` once per committed chunk. Only the episode counts
-     * of the returned [MergeSummary] are filled — the library counts are `mergeLibrary`'s.
+     * then its `queue.json` under the Up next/session rules (05 transactions B and C);
+     * [settled] is transaction A's result — its `p`/group-`uuid` maps are the only
+     * identities this phase attaches through. [progress] reports `(done, total)` once per
+     * committed chunk. Only the episode counts of the returned [MergeSummary] are filled
+     * — the library counts are [settled]'s.
      */
     suspend fun mergeEpisodes(
         staged: StagedLibrary,
+        settled: LibraryMergeResult,
         policy: MergePolicy,
         categories: Set<RestoreCategory>,
         episodeTotal: Int = 0,
@@ -81,8 +78,7 @@ internal class RestoreEpisodeMerger(
         val upNext = RestoreCategory.UP_NEXT in categories
         if (!history && !upNext) return MergeSummary(0, 0, 0, 0, 0, 0, 0, 0)
         val now = clock.now()
-        val library = staged.library()
-        val podcastIdByKey = stagedPodcastIds(library)
+        val podcastIdByKey = settled.podcastIdByKey
         // `queue.json` is read before the stream: an unmatched line referenced by it stubs
         // even without HISTORY, and transaction C resolves refs through the `(p, k) → id`
         // map the chunk transactions record (05 step 5).
@@ -149,7 +145,15 @@ internal class RestoreEpisodeMerger(
         flushChunk()
 
         if (upNext) {
-            mergeQueueAndSession(staged, queue, policy, library, podcastIdByKey, refIds, now)
+            mergeQueueAndSession(
+                staged,
+                queue,
+                policy,
+                settled.groupIdByUuid,
+                podcastIdByKey,
+                refIds,
+                now,
+            )
         }
         return MergeSummary(
             podcastsAdded = 0,
@@ -166,40 +170,18 @@ internal class RestoreEpisodeMerger(
     // --- Transaction B helpers --------------------------------------------------------------
 
     /**
-     * Transaction A's `p` → podcastId map, re-derived by the same ladder over committed
-     * rows: an inserted staged podcast now answers its own `feedKey` step, a matched one
-     * re-matches by the same evidence.
+     * A line's or ref's `p` → the settled local podcast: transaction A's key/alias map
+     * only. An un-normalised spelling still resolves — 02's `feedKey` is
+     * `forIdentity(feedUrl)` — but no live lookup: A's committed map is the identity.
      */
-    private suspend fun stagedPodcastIds(library: LibraryV1): Map<String, Long> {
-        val map = HashMap<String, Long>()
-        for (podcast in library.podcasts.distinctBy { it.key }) {
-            val localId = podcasts.match(podcast.key, podcast.aliases, podcast.podcastGuid) ?: continue
-            map[podcast.key] = localId
-            for (alias in podcast.aliases) map.putIfAbsent(alias, localId)
-        }
-        return map
-    }
-
-    /**
-     * A line's or ref's `p` → a local podcast: the staged key/alias map first, then the
-     * live `feedKey`/alias lookups, then the canonicalised key — a backup spelling a URL
-     * un-normalised still finds its feed (02's `feedKey` is `forIdentity(feedUrl)`).
-     */
-    private suspend fun podcastIdOf(
+    private fun podcastIdOf(
         key: String,
         podcastIdByKey: Map<String, Long>,
-    ): Long? {
-        podcastIdByKey[key]?.let { return it }
-        podcastDao.byFeedKey(key)?.id?.let { return it }
-        podcastDao.aliasOwner(key)?.let { return it }
-        val canonical = UrlNormalizer.forIdentity(key) ?: return null
-        return podcastIdByKey[canonical] ?: podcastDao.byFeedKey(canonical)?.id
-    }
+    ): Long? = podcastIdByKey[key] ?: UrlNormalizer.forIdentity(key)?.let(podcastIdByKey::get)
 
     /**
      * A chunk grouped by resolved podcast, stream order preserved. Lines whose `p` is
-     * unknown (no staged key, live `feedKey` or alias) are skipped per 05 — [onSkipped]
-     * counts them.
+     * unknown to the settled map are skipped per 05 — [onSkipped] counts them.
      */
     private suspend fun linesByPodcast(
         lines: List<EpisodeLineV1>,
@@ -244,13 +226,11 @@ internal class RestoreEpisodeMerger(
         staged: StagedLibrary,
         queue: QueueV1?,
         policy: MergePolicy,
-        library: LibraryV1,
+        groupIdByUuid: Map<String, Long>,
         podcastIdByKey: Map<String, Long>,
         refIds: Map<EpisodeRefKey, Long>,
         now: Long,
     ) {
-        val groupIdByUuid =
-            if (queue?.session?.contextGroupUuid != null) stagedGroupUuids(library) else emptyMap()
         db.withWriteTransaction {
             if (policy == MergePolicy.RESTORE_MERGE) backupDao.deletePlayedQueueEntries()
             val played = backupDao.playedEpisodeIds().toHashSet()
@@ -334,10 +314,7 @@ internal class RestoreEpisodeMerger(
         var contextId: Long? = null
         when (contextType) {
             ContextType.GROUP -> {
-                contextId =
-                    session.contextGroupUuid?.let {
-                        groupIdByUuid[it] ?: backupDao.matchGroupByUuid(it)
-                    }
+                contextId = session.contextGroupUuid?.let(groupIdByUuid::get)
                 if (contextId == null) contextType = null
             }
 
@@ -367,24 +344,6 @@ internal class RestoreEpisodeMerger(
             onlyWhenIdle = policy == MergePolicy.RESTORE_MERGE,
             now = now,
         )
-    }
-
-    /**
-     * Transaction A's staged `uuid` → groupId map: the staged `uuid` hits its adopted or
-     * matched row (Replace), else the group's normalised `nameKey` — covering Merge's
-     * fresh-uuid inserts and folded staged groups alike (the fold shares one `nameKey`,
-     * so a folded `uuid` maps to its canonical's row).
-     */
-    private suspend fun stagedGroupUuids(library: LibraryV1): Map<String, Long> {
-        val map = HashMap<String, Long>()
-        for (group in library.groups) {
-            val valid = GroupNames.truncate(group.name) ?: GroupNames.truncate(DEFAULT_GROUP_NAME)!!
-            map[group.uuid] =
-                backupDao.matchGroupByUuid(group.uuid)
-                    ?: groupDao.groupByNameKey(valid.nameKey)?.id
-                    ?: continue
-        }
-        return map
     }
 
     /**
