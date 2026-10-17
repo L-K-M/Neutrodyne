@@ -369,15 +369,17 @@ interface BackupDao {
 
     /**
      * 05 transaction A, Replace: matched groups first park their `nameKey` as
-     * `'~restore~' || id`, so a pair of groups swapping names cannot hit the unique index
-     * mid-rewrite. Chunked at the bind limit like every ID list (02).
+     * `char(31) || '~restore~' || id`, so a pair of groups swapping names cannot hit the
+     * unique index mid-rewrite. The unit-separator character is a control character, which
+     * `GroupNames` never emits — no staged name can collide with a parked key. Chunked at
+     * the bind limit like every ID list (02).
      */
     suspend fun parkGroupNameKeys(groupIds: Collection<Long>) {
         groupIds.distinct().chunked(BIND_CHUNK).forEach { parkGroupNameKeysChunk(it) }
     }
 
     /** Room primitive behind [parkGroupNameKeys]; callers must chunk at the bind limit. */
-    @Query("UPDATE podcast_group SET nameKey = '~restore~' || id WHERE id IN (:ids)")
+    @Query("UPDATE podcast_group SET nameKey = char(31) || '~restore~' || id WHERE id IN (:ids)")
     suspend fun parkGroupNameKeysChunk(ids: List<Long>)
 
     /**

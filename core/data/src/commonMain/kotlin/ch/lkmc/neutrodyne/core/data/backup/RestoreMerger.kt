@@ -98,6 +98,16 @@ internal class RestoreMerger(
         val podcastMatches = matchStagedPodcasts(stagedPodcasts)
         val matchedGroupIds = matchStagedGroups(stagedGroups)
 
+        // Replace's order keys are settled before the destructive pre-step: every staged key
+        // is validated and the rewrite fallback chosen here, so a malformed `orderKey`/`ok`
+        // can neither persist nor abort the restore after the unsubscribes have run.
+        val orderKeyPlan =
+            if (policy == MergePolicy.RESTORE_REPLACE) {
+                planReplaceOrderKeys(stagedGroups)
+            } else {
+                ReplaceOrderKeys(emptyMap(), emptyMap())
+            }
+
         val deletedGroupUuids =
             if (policy == MergePolicy.RESTORE_REPLACE) {
                 replacePreStep(podcastMatches.values.filterNotNull().toSet(), matchedGroupIds, categories, now)
@@ -131,22 +141,16 @@ internal class RestoreMerger(
                     backupDao.clearGroupMembers()
                 }
 
-                val replaceGroupKeys =
-                    if (policy == MergePolicy.RESTORE_REPLACE) {
-                        fillOrderKeys(stagedGroups.map { it.primary.orderKey })
-                    } else {
-                        null
-                    }
                 // Merge appends new groups after the local ones in backup order (05).
                 var lastGroupKey: String? = groupDao.lastGroupOrderKey()
-                for ((index, group) in stagedGroups.withIndex()) {
+                for (group in stagedGroups) {
                     if (group.foldedInto != null) continue
                     val localId =
                         group.localId
                             ?: run {
                                 val orderKey =
                                     if (policy == MergePolicy.RESTORE_REPLACE) {
-                                        replaceGroupKeys!![index]
+                                        orderKeyPlan.groups.getValue(group)
                                     } else {
                                         orderKeys.after(lastGroupKey).also { lastGroupKey = it }
                                     }
@@ -157,7 +161,13 @@ internal class RestoreMerger(
                     if (group.localId != null) {
                         groupsMatched++
                         if (policy == MergePolicy.RESTORE_REPLACE) {
-                            replaceGroup(group, localId, replaceGroupKeys!![index], now, uuidChanges)
+                            replaceGroup(
+                                group,
+                                localId,
+                                orderKeyPlan.groups.getValue(group),
+                                now,
+                                uuidChanges,
+                            )
                         }
                     }
                     writeGroupSettings(localId, group.primary.settings, policy)
@@ -184,7 +194,7 @@ internal class RestoreMerger(
                     progress(++done, total)
                 }
 
-                writeMembers(stagedGroups, policy, staged.createdAtMs, podcastIdByKey, now)
+                writeMembers(stagedGroups, policy, staged.createdAtMs, podcastIdByKey, now, orderKeyPlan.members)
             }
         }
 
@@ -313,6 +323,12 @@ internal class RestoreMerger(
         fun root(): StagedGroup = foldedInto?.root() ?: this
     }
 
+    /** Replace's settled order keys: per canonical group, and per group's member list. */
+    private class ReplaceOrderKeys(
+        val groups: Map<StagedGroup, String>,
+        val members: Map<StagedGroup, List<String>>,
+    )
+
     private fun foldStagedGroups(staged: List<GroupV1>): List<StagedGroup> {
         val folded = LinkedHashMap<String, StagedGroup>()
         for (group in staged) {
@@ -346,7 +362,28 @@ internal class RestoreMerger(
     private suspend fun matchStagedGroups(groups: List<StagedGroup>): Set<Long> {
         val matched = HashSet<Long>()
         val claimed = HashMap<Long, StagedGroup>()
+        val uuidSeen = HashMap<String, StagedGroup>()
         for (group in groups) {
+            // A second staged group on one uuid folds into the first like a shared nameKey —
+            // members unite — because the file cannot restore two rows to one uuid (the
+            // unique index leaves a duplicate insert no way to land). Its nameKey can still
+            // claim a local row for the post-commit `GroupMerger` pass.
+            val earlier = uuidSeen[group.primary.uuid]?.root()
+            if (earlier != null) {
+                for (member in group.members.values) {
+                    earlier.members.putIfAbsent(member.podcastKey, member)
+                }
+                group.foldedInto = earlier
+                val localId = groupDao.groupByNameKey(group.nameKey)?.id
+                if (localId != null) {
+                    matched += localId
+                    if (claimed.putIfAbsent(localId, earlier) == null) {
+                        earlier.absorbedLocalIds += localId
+                    }
+                }
+                continue
+            }
+            uuidSeen[group.primary.uuid] = group
             var localId = backupDao.matchGroupByUuid(group.primary.uuid)
             var viaNameKey = false
             if (localId == null) {
@@ -612,8 +649,8 @@ internal class RestoreMerger(
     /**
      * Memberships (05): Merge unions with `OrderKey.after(last)` keys in backup order (the
      * table's orderKey row assigns staged keys to Replace writes only); Replace replays the
-     * staged list verbatim — `ok` where present, freshly generated keys where the file lacks
-     * them — against the join table the pre-transaction cleared.
+     * member list with [replaceMemberKeys]'s verbatim-or-rewrite keys against the join table
+     * the pre-transaction cleared.
      */
     private suspend fun writeMembers(
         groups: List<StagedGroup>,
@@ -621,6 +658,7 @@ internal class RestoreMerger(
         createdAtMs: Long,
         podcastIdByKey: Map<String, Long>,
         now: Long,
+        replaceMemberKeys: Map<StagedGroup, List<String>>,
     ) {
         val touched = HashSet<Long>()
         for (group in groups) {
@@ -648,8 +686,7 @@ internal class RestoreMerger(
                     }
                 }
             } else {
-                val keys = fillOrderKeys(group.members.values.map { it.orderKey })
-                for ((member, orderKey) in group.members.values.zip(keys)) {
+                for ((member, orderKey) in group.members.values.zip(replaceMemberKeys.getValue(group))) {
                     val podcastId = memberPodcastId(member.podcastKey, podcastIdByKey) ?: continue
                     groupDao.insertMember(
                         PodcastGroupMemberEntity(
@@ -673,33 +710,44 @@ internal class RestoreMerger(
     ): Long? = podcastIdByKey[podcastKey] ?: podcastDao.byFeedKey(podcastKey)?.id
 
     /**
-     * OrderKeys for a Replace-written list (05 "the backup's keys, else `OrderKey.rewrite(n)`
-     * in rank order"): present keys kept, missing keys generated between their keyed
-     * neighbours; a file carrying no keys at all gets the evenly spaced rewrite.
+     * Replace's order keys (05 "the backup's keys, else `OrderKey.rewrite(n)` in rank
+     * order"), planned before the pre-step destroys local state: group keys walk the
+     * canonical groups in `sortOrder` rank (list order breaks ties), member keys their
+     * file order. Computed after the match pass, so folded groups take no key.
      */
-    private fun fillOrderKeys(wanted: List<String?>): List<String> {
-        if (wanted.isEmpty()) return emptyList()
-        if (wanted.all { it == null }) return orderKeys.rewrite(wanted.size)
-        val filled = arrayOfNulls<String>(wanted.size)
-        var previous: String? = null
-        for (index in wanted.indices) {
-            val key = wanted[index]
-            if (key != null) {
-                filled[index] = key
-                previous = key
-                continue
-            }
-            val next = wanted.subList(index + 1, wanted.size).firstOrNull { it != null }
-            filled[index] =
-                if (previous != null && next != null && previous < next) {
-                    orderKeys.between(previous, next)
-                } else {
-                    orderKeys.after(previous)
-                }
-            previous = filled[index]
+    private fun planReplaceOrderKeys(groups: List<StagedGroup>): ReplaceOrderKeys {
+        val ranked =
+            groups
+                .filter { it.foldedInto == null }
+                .withIndex()
+                .sortedWith(compareBy({ it.value.primary.sortOrder }, { it.index }))
+                .map { it.value }
+        return ReplaceOrderKeys(
+            groups = ranked.zip(restoreOrderKeys(ranked.map { it.primary.orderKey })).toMap(),
+            members =
+                ranked.associateWith {
+                    restoreOrderKeys(it.members.values.map(MemberV1::orderKey))
+                },
+        )
+    }
+
+    /**
+     * One list's keys under Replace: the staged keys verbatim when every slot carries a
+     * valid `OrderKey` in strict ascending order; a missing, malformed, duplicated or
+     * unordered key rewrites the whole list instead — an invalid key neither persists nor
+     * feeds the generator as a bound. `after` runs the port's key validation on its bound,
+     * which doubles it as the validity probe without copying the grammar here.
+     */
+    private fun restoreOrderKeys(wanted: List<String?>): List<String> {
+        val keys = wanted.filterNotNull()
+        if (
+            keys.size == wanted.size &&
+            keys.zipWithNext().all { (a, b) -> a < b } &&
+            keys.all { runCatching { orderKeys.after(it) }.isSuccess }
+        ) {
+            return keys
         }
-        @Suppress("UNCHECKED_CAST")
-        return filled.asList() as List<String>
+        return orderKeys.rewrite(wanted.size)
     }
 
     private fun warnSmartGroup(group: GroupV1) {

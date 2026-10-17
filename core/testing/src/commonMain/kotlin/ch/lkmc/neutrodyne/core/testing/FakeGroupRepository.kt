@@ -348,7 +348,7 @@ class FakeGroupRepository(
 }
 
 /** The fake binds the real `OrderKey` — `:core:testing` may see `:sync:protocol`. */
-private object ProtocolOrderKeys : OrderKeys {
+object ProtocolOrderKeys : OrderKeys {
     override fun after(last: String?): String = OrderKey.after(last)
 
     override fun between(
