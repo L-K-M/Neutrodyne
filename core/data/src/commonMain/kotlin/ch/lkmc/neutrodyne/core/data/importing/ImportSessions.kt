@@ -40,7 +40,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okio.IOException
 import okio.Path
@@ -108,6 +110,12 @@ internal class ImportSessions(
         try {
             deferred.await()
         } catch (e: CancellationException) {
+            // A cancelled *caller* leaves the application job owning the staged copy — it
+            // either publishes it or sweeps it itself (05 §1 step 5). A cancelled *job*
+            // (teardown, or a cancel landing inside stage/persist) leaves it to no one, so
+            // sweep here. A committed session is safe either way: publish() already moved
+            // its payload off the staged path.
+            if (deferred.isCancelled) payloads.delete(staged.path)
             throw e
         } catch (_: Exception) {
             payloads.delete(staged.path)
@@ -259,6 +267,7 @@ internal class ImportSessions(
         val sessionOptions = sessionOptions(options, document, adopted)
         val warnings = sessionWarnings(document, classified)
         var publishedPath: String? = null
+        var insertedId: Long? = null
         return try {
             val sessionId =
                 db.withWriteTransaction {
@@ -274,6 +283,7 @@ internal class ImportSessions(
                                 warningsJson = warnings?.let(ImportWarningJson::encodeAll),
                             ),
                         )
+                    insertedId = id
                     publishedPath = payloads.publish(staged, id)
                     db.importDao().setPayloadPath(id, publishedPath)
                     if (classified != null) {
@@ -285,6 +295,23 @@ internal class ImportSessions(
                 }
             Outcome.Success(sessionId)
         } catch (e: CancellationException) {
+            // Room re-checks cancellation when the transaction block returns, so this catch
+            // sees both sides of COMMIT: cancellation delivered mid-transaction rolled the
+            // insert back and strands the staged temp plus any already-renamed payload;
+            // cancellation delivered after COMMIT means the session row owns them and they
+            // must stay (main's ingest fix, #153/#154). The row itself is the only reliable
+            // witness — probe it non-cancellably rather than guessing from the call site.
+            val id = insertedId
+            val committed =
+                id != null &&
+                    withContext(NonCancellable) {
+                        runCatching { db.importDao().sessionById(id) != null }
+                            .getOrDefault(true)
+                    }
+            if (!committed) {
+                payloads.delete(staged.path)
+                publishedPath?.let { payloads.delete(payloads.payloadFile(it)) }
+            }
             throw e
         } catch (_: Exception) {
             // The transaction rolled back — no session row. Sweep the temp and any file

@@ -342,8 +342,5 @@ internal class FeedFetcher(
 
         /** Error/redirect bodies are discarded after this many bytes (03 Response handling). */
         const val DISCARD_MAX_BYTES = 256L * 1024
-
-        /** The only 3xx codes the manual chain follows (03 Request rules). */
-        val FOLLOWABLE_STATUSES = setOf(301, 302, 303, 307, 308)
     }
 }

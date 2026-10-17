@@ -30,15 +30,18 @@ import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipArchiveWriter
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipGuard
 import ch.lkmc.neutrodyne.feeds.jvm.opml.XmlPullOpmlReader
 import ch.lkmc.neutrodyne.youtube.api.YouTubeUrlClassifier
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import okio.FileSystem
 import okio.Path.Companion.toPath
@@ -426,6 +429,160 @@ class ImportPipelineTest {
             assertEquals(ImportState.PREVIEW, session.state)
         }
 
+    @Test
+    fun obstructedImportCacheFailsCreateWithStorage() =
+        runTest {
+            payloads.register(URI, file = opmlFixture("antennapod_flat_atom"))
+            File(root, "cache").writeText("not a directory")
+
+            val failure = assertIs<Outcome.Failure<ImportError>>(createOutcome(URI))
+
+            assertEquals(ImportError.Storage, failure.error)
+            assertTrue(noSessions())
+        }
+
+    @Test
+    fun deadAppScopeSweepsTheStagedCopy() =
+        runTest {
+            // Teardown between acquire and the stage job's first step: the job never runs, so
+            // the staged copy belongs to no one and must not linger in the import cache.
+            val deadScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            deadScope.cancel()
+            val deadSessions = newSessions(db, deadScope, Dispatchers.Default)
+            payloads.register(URI, file = opmlFixture("antennapod_flat_atom"))
+
+            try {
+                deadSessions.create(ImportSource(URI, "a.opml"), CreateImportOptions())
+            } catch (_: CancellationException) {
+                // Expected: the dead scope's stage job surfaces as cancellation.
+            }
+
+            assertTrue(noSessions())
+            assertEquals(
+                emptyList(),
+                importDirFiles(),
+                "the never-started stage job leaves no staged copy behind",
+            )
+        }
+
+    @Test
+    fun stageJobCancelledBeforePersistSweepsTheStagedCopy() =
+        runTest {
+            // A single db thread parked behind a gate holds the stage job inside classify;
+            // cancelling the application scope there must still sweep the staged copy.
+            val gate = java.util.concurrent.CountDownLatch(1)
+            val dbExecutor =
+                java.util.concurrent.ThreadPoolExecutor(
+                    1,
+                    1,
+                    0L,
+                    java.util.concurrent.TimeUnit.MILLISECONDS,
+                    java.util.concurrent.LinkedBlockingQueue<Runnable>(),
+                )
+            val stageDb =
+                TestDb.inMemory(clock = clock, queryContext = dbExecutor.asCoroutineDispatcher())
+            val stageScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            val stageSessions = newSessions(stageDb, stageScope, Dispatchers.Default)
+            payloads.register(URI, file = opmlFixture("antennapod_flat_atom"))
+            dbExecutor.execute { gate.await() }
+
+            val caller =
+                launch {
+                    try {
+                        stageSessions.create(ImportSource(URI, "a.opml"), CreateImportOptions())
+                    } catch (_: CancellationException) {
+                        // Expected: the cancelled stage job surfaces as cancellation.
+                    }
+                }
+            // The job's first db dispatch queueing behind the gate proves it is parked
+            // inside stage() before any persistence; the poll runs in real time like the
+            // caller-cancellation test above (testScheduler would skip the wait).
+            kotlinx.coroutines.runBlocking {
+                withTimeoutOrNull(10_000) {
+                    while (dbExecutor.queue.isEmpty()) delay(10)
+                }
+            }
+            stageScope.cancel()
+            gate.countDown()
+            caller.join()
+
+            assertNull(stageDb.importDao().sessionById(1), "nothing could have committed")
+            assertEquals(
+                emptyList(),
+                importDirFiles(),
+                "a stage job cancelled before persistence must sweep the staged copy",
+            )
+            stageDb.close()
+            dbExecutor.shutdown()
+        }
+
+    @Test
+    fun stageJobCancelledAtCommitKeepsSessionAndPayload() =
+        runTest {
+            // Room re-checks cancellation when a write transaction returns: a teardown landing
+            // at COMMIT has already persisted the session — its payload must stay (main #153).
+            val driver = CommitCancellingDriver()
+            val stageDb = TestDb.inMemory(driver = driver, clock = clock)
+            val stageScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            val stageSessions = newSessions(stageDb, stageScope, Dispatchers.Default)
+            payloads.register(URI, file = opmlFixture("antennapod_flat_atom"))
+
+            driver.arm("INSERT OR ABORT INTO `import_session`") { stageScope.cancel() }
+            val caller =
+                launch {
+                    try {
+                        stageSessions.create(ImportSource(URI, "a.opml"), CreateImportOptions())
+                    } catch (_: CancellationException) {
+                        // Expected: the cancelled stage job surfaces as cancellation.
+                    }
+                }
+            caller.join()
+
+            assertEquals(1, driver.cancellations, "the commit hook fired")
+            val session = assertNotNull(stageDb.importDao().sessionById(1))
+            val payload = File(root, "cache").resolve(requireNotNull(session.payloadPath))
+            assertTrue(payload.exists(), "a committed session's payload must survive")
+            stageDb.close()
+        }
+
+    @Test
+    fun stageJobCancelledInsideTheTransactionLeavesFilesConsistentWithTheRow() =
+        runTest {
+            // Cancel mid-transaction (the insert has stepped, publish and the remaining writes
+            // have not run): whatever Room does with it — roll back or commit then throw — the
+            // files on disk must match the row. A roll-back strands both `incoming-*.tmp` and
+            // the already-renamed `import/{id}.bin`; a commit must keep the payload.
+            val driver = CommitCancellingDriver()
+            val stageDb = TestDb.inMemory(driver = driver, clock = clock)
+            val stageScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            val stageSessions = newSessions(stageDb, stageScope, Dispatchers.Default)
+            payloads.register(URI, file = opmlFixture("antennapod_flat_atom"))
+
+            driver.armOnStep("INSERT OR ABORT INTO `import_session`") { stageScope.cancel() }
+            val caller =
+                launch {
+                    try {
+                        stageSessions.create(ImportSource(URI, "a.opml"), CreateImportOptions())
+                    } catch (_: CancellationException) {
+                        // Expected: the cancelled stage job surfaces as cancellation.
+                    }
+                }
+            caller.join()
+
+            val session = stageDb.importDao().sessionById(1)
+            if (session == null) {
+                assertEquals(
+                    emptyList(),
+                    importDirFiles(),
+                    "a rolled-back insert leaves no staged or published payload",
+                )
+            } else {
+                val payload = File(root, "cache").resolve(requireNotNull(session.payloadPath))
+                assertTrue(payload.exists(), "a committed session keeps its payload")
+            }
+            stageDb.close()
+        }
+
     // --- Helpers ----------------------------------------------------------------------------------
 
     private fun newStore(io: kotlinx.coroutines.CoroutineDispatcher): PayloadStore =
@@ -501,6 +658,13 @@ class ImportPipelineTest {
             .observeOpenSessions()
             .first()
             .isEmpty()
+
+    /** Every file left under `<cache>/import/` — staged temps and published payloads alike. */
+    private fun importDirFiles(): List<String> =
+        FileSystem.SYSTEM
+            .listOrNull(File(root, "cache/import").absolutePath.toPath())
+            .orEmpty()
+            .map { it.name }
 
     private suspend fun assertNoLibraryRows() {
         assertTrue(db.podcastDao().allForExport().isEmpty(), "no podcast row before confirmation")
