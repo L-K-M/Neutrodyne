@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.data
 
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.data.fetch.MAX_REDIRECT_FOLLOWUPS
 import ch.lkmc.neutrodyne.core.data.importing.PayloadStore
 import ch.lkmc.neutrodyne.core.domain.ImportError
 import ch.lkmc.neutrodyne.core.model.ImportSource
@@ -10,6 +11,7 @@ import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
+import mockwebserver3.MockWebServer
 import mockwebserver3.junit4.MockWebServerRule
 import okio.FileSystem
 import okio.Path
@@ -130,7 +132,10 @@ class PayloadStoreTest {
             val snapshot = root.resolve("auto-snapshot.zip")
             snapshot.writeText("snapshot-bytes")
 
-            val staged = assertIs<Outcome.Success<PayloadStore.Staged>>(store.adopt(snapshot.absolutePath.toPath())).value
+            val staged =
+                assertIs<Outcome.Success<PayloadStore.Staged>>(
+                    store.adopt(snapshot.absolutePath.toPath()),
+                ).value
 
             assertEquals("auto-snapshot.zip", staged.displayName)
             assertEquals("snapshot-bytes", FileSystem.SYSTEM.read(staged.path) { readUtf8() })
@@ -143,7 +148,9 @@ class PayloadStoreTest {
         runTest {
             assertEquals(
                 ImportError.Unreadable,
-                assertIs<Outcome.Failure<ImportError>>(store.adopt(root.resolve("gone.bin").absolutePath.toPath())).error,
+                assertIs<Outcome.Failure<ImportError>>(
+                    store.adopt(root.resolve("gone.bin").absolutePath.toPath()),
+                ).error,
             )
             assertEquals(
                 ImportError.Unreadable,
@@ -193,6 +200,185 @@ class PayloadStoreTest {
 
             assertEquals(ImportError.Network(NetError.Other("http_404")), failure.error)
         }
+
+    // --- Acquire must report Storage when the import cache cannot be created (05's error table) ---
+
+    @Test
+    fun obstructedCacheFailsContentAcquireWithStorage() =
+        runTest {
+            payloads.register(CONTENT_URI, bytes = "payload".encodeToByteArray())
+            obstructCacheDir()
+
+            val failure = assertIs<Outcome.Failure<ImportError>>(acquire(CONTENT_URI))
+
+            assertEquals(ImportError.Storage, failure.error)
+        }
+
+    @Test
+    fun obstructedCacheFailsAdoptWithStorage() =
+        runTest {
+            val snapshot = root.resolve("auto-snapshot.zip").also { it.writeText("snapshot-bytes") }
+            obstructCacheDir()
+
+            val failure =
+                assertIs<Outcome.Failure<ImportError>>(store.adopt(snapshot.absolutePath.toPath()))
+
+            assertEquals(ImportError.Storage, failure.error)
+        }
+
+    @Test
+    fun obstructedCacheFailsUrlAcquireWithStorageBeforeAnyRequest() =
+        runTest {
+            obstructCacheDir()
+
+            val failure =
+                assertIs<Outcome.Failure<ImportError>>(
+                    store.acquire(ImportSource(server.url("/list.opml").toString(), "list.opml")),
+                )
+
+            assertEquals(ImportError.Storage, failure.error)
+            assertEquals(0, server.requestCount, "no request without a staging file")
+        }
+
+    // --- "Import from URL" follows a bounded redirect chain (05 §1.2) -------------------------------
+
+    @Test
+    fun relativeRedirectIsFollowedToTheFinalBody() =
+        runTest {
+            server.enqueue(mockResponse(code = 301, body = "", "Location" to "/real.opml"))
+            server.enqueue(mockResponse(body = "redirected-opml"))
+
+            val staged =
+                assertIs<Outcome.Success<PayloadStore.Staged>>(
+                    store.acquire(ImportSource(server.url("/list.opml").toString(), "list.opml")),
+                ).value
+
+            assertEquals("redirected-opml", FileSystem.SYSTEM.read(staged.path) { readUtf8() })
+            assertEquals("list.opml", staged.displayName)
+            assertEquals(2, server.requestCount)
+        }
+
+    @Test
+    fun crossOriginRedirectIsFollowed() =
+        runTest {
+            val second = MockWebServer()
+            try {
+                second.start()
+                server.enqueue(
+                    mockResponse(code = 302, body = "", "Location" to second.url("/moved.opml").toString()),
+                )
+                second.enqueue(mockResponse(body = "other-host-opml"))
+
+                val staged =
+                    assertIs<Outcome.Success<PayloadStore.Staged>>(
+                        store.acquire(ImportSource(server.url("/list.opml").toString(), null)),
+                    ).value
+
+                assertEquals("other-host-opml", FileSystem.SYSTEM.read(staged.path) { readUtf8() })
+                assertEquals(1, second.requestCount)
+            } finally {
+                second.close()
+            }
+        }
+
+    @Test
+    fun redirectBackToAVisitedUrlIsALoop() =
+        runTest {
+            server.enqueue(mockResponse(code = 302, body = "", "Location" to "/b"))
+            server.enqueue(mockResponse(code = 302, body = "", "Location" to "/a"))
+
+            val failure =
+                assertIs<Outcome.Failure<ImportError>>(
+                    store.acquire(ImportSource(server.url("/a").toString(), null)),
+                )
+
+            assertEquals(ImportError.Network(NetError.Other("redirect_loop")), failure.error)
+            assertEquals(2, server.requestCount)
+        }
+
+    @Test
+    fun moreThanTwentyFollowUpsIsALoop() =
+        runTest {
+            repeat(MAX_REDIRECT_FOLLOWUPS + 1) { hop ->
+                server.enqueue(mockResponse(code = 302, body = "", "Location" to "/hop${hop + 1}"))
+            }
+
+            val failure =
+                assertIs<Outcome.Failure<ImportError>>(
+                    store.acquire(ImportSource(server.url("/hop0").toString(), null)),
+                )
+
+            assertEquals(ImportError.Network(NetError.Other("redirect_loop")), failure.error)
+        }
+
+    @Test
+    fun redirectWithoutLocationIsTheFinalResponse() =
+        runTest {
+            server.enqueue(mockResponse(code = 302, body = ""))
+
+            val failure =
+                assertIs<Outcome.Failure<ImportError>>(
+                    store.acquire(ImportSource(server.url("/gone.opml").toString(), null)),
+                )
+
+            assertEquals(ImportError.Network(NetError.Other("http_302")), failure.error)
+            assertEquals(1, server.requestCount)
+        }
+
+    @Test
+    fun redirectToNonHttpIsTheFinalResponse() =
+        runTest {
+            server.enqueue(mockResponse(code = 302, body = "", "Location" to "ftp://example.com/x.opml"))
+
+            val failure =
+                assertIs<Outcome.Failure<ImportError>>(
+                    store.acquire(ImportSource(server.url("/x.opml").toString(), null)),
+                )
+
+            assertEquals(ImportError.Network(NetError.Other("http_302")), failure.error)
+            assertEquals(1, server.requestCount)
+        }
+
+    @Test
+    fun redirectToCredentialsUrlIsNotFollowed() =
+        runTest {
+            val second = MockWebServer()
+            try {
+                second.start()
+                val boobyTrapped =
+                    second.url("/x.opml").toString().replace("://", "://user:pass@")
+                server.enqueue(mockResponse(code = 302, body = "", "Location" to boobyTrapped))
+
+                val failure =
+                    assertIs<Outcome.Failure<ImportError>>(
+                        store.acquire(ImportSource(server.url("/x.opml").toString(), null)),
+                    )
+
+                assertEquals(ImportError.Network(NetError.Other("http_302")), failure.error)
+                assertEquals(0, second.requestCount, "the credential-bearing target is never requested")
+            } finally {
+                second.close()
+            }
+        }
+
+    @Test
+    fun httpErrorAfterRedirectStillMapsToNetwork() =
+        runTest {
+            server.enqueue(mockResponse(code = 301, body = "", "Location" to "/missing.opml"))
+            server.enqueue(mockResponse(code = 404, body = "nope"))
+
+            val failure =
+                assertIs<Outcome.Failure<ImportError>>(
+                    store.acquire(ImportSource(server.url("/list.opml").toString(), null)),
+                )
+
+            assertEquals(ImportError.Network(NetError.Other("http_404")), failure.error)
+            assertEquals(2, server.requestCount)
+        }
+
+    private fun obstructCacheDir() {
+        root.resolve("cache").writeText("not a directory")
+    }
 
     private suspend fun acquire(uri: String): Outcome<PayloadStore.Staged, ImportError> =
         store.acquire(ImportSource(uri, "from-test"))

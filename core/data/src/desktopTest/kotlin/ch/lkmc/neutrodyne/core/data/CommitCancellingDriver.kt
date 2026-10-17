@@ -15,6 +15,10 @@ internal class CommitCancellingDriver : SQLiteDriver {
 
     @Volatile private var onCommit: (() -> Unit)? = null
 
+    @Volatile private var stepStatement: String? = null
+
+    @Volatile private var onStep: (() -> Unit)? = null
+
     @Volatile var cancellations = 0
         private set
 
@@ -24,6 +28,15 @@ internal class CommitCancellingDriver : SQLiteDriver {
     ) {
         this.statement = statement
         this.onCommit = onCommit
+    }
+
+    /** Runs [onStep] once, inside the `step()` of the first statement matching [statement]. */
+    fun armOnStep(
+        statement: String,
+        onStep: () -> Unit,
+    ) {
+        this.stepStatement = statement
+        this.onStep = onStep
     }
 
     override fun open(fileName: String): SQLiteConnection {
@@ -36,6 +49,12 @@ internal class CommitCancellingDriver : SQLiteDriver {
                 return object : SQLiteStatement by prepared {
                     override fun step(): Boolean {
                         val row = prepared.step()
+                        stepStatement?.let { armed ->
+                            if (sql.startsWith(armed)) {
+                                stepStatement = null
+                                onStep?.invoke()
+                            }
+                        }
                         val armed = statement ?: return row
                         if (sql.startsWith(armed)) ranHere = true
                         if (sql.startsWith("ROLLBACK")) ranHere = false
