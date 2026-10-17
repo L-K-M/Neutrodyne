@@ -1944,6 +1944,14 @@ Serves N1, N9, N11. Infrastructure, runners, golden-update switch and CI wiring 
 
 Fixtures (`feeds/src/test/resources/opml/`): `antennapod_flat_atom.opml` (`type="atom"`), `pocketcasts_feeds_wrapper.opml` (OPML 1.0, `feeds` wrapper, no `title`), `overcast_basic.opml`, `overcast_extended.opml` (playlists, nested episodes, `subscribed="0"`), `gpodder_sections.opml` (Audio/Video sections, `text` = description, `url` fallback), `freshrss_nested.opml` (nested folders and `category`), `google_broken.opml` (raw `&`, missing `/>`, `&nbsp;` → salvage), `neutrodyne_hybrid.opml`, `neutrodyne_flat.opml`, `neutrodyne_group_share.opml`, `neutrodyne_percent_names.opml` (groups `a,b`, `c/d`, `100%` and the literal `a%2Cb`: export encodes, import decodes exactly once), `iscomment_subtree.opml`, `include_and_link.opml`; encodings `utf8_bom.opml`, `utf16le_bom.opml`, `iso8859_1_declared.opml`, `leading_newline.opml`, `cp1252_declared_utf8.opml` (replacement characters, no crash). `feeds/src/test/resources/backup/`: directories `v1_minimal/`, `v1_full/`, `v1_without_sync_fields/` (written before the scope revision), `v1_android/`, `v1_desktop/`, `future_minreader2/`, `sha_mismatch/` holding the archive entries as plain files; a test helper zips each at test time (no committed binary archives, so every fixture stays a reviewable text diff). YouTube format fixtures are 04's (`feeds/src/test/resources/import/`). Hostile inputs are generated, never committed.
 
+**Implementation note (2026-10-17, M3):** `OpmlWriterGoldenTest` runs in `:feeds:jvm`'s
+`test` source set rather than `:feeds` `commonTest`, where the table above places it: its
+goldens are files (`feeds/src/test/resources/opml/writer/`, read through the existing
+`Goldens` helper) and `commonTest` cannot read files portably. The writer itself is common
+code in `:feeds` (`ch.lkmc.neutrodyne.feeds.opml`), so both the apps and the sync server
+write identical bytes. The writer goldens stay separate from the reader fixtures
+(`neutrodyne_*.opml`) in the same corpus directory.
+
 ---
 
 ## Error handling and failure modes
