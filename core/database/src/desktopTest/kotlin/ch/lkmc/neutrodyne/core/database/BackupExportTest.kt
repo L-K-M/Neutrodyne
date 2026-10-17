@@ -95,6 +95,9 @@ class BackupExportTest {
                         copy(podcastGuid = "g-derived-b", podcastGuidDerived = true)
                     },
                 )
+            // Every grouped read gets a second parent: two aliases on pa (inserted out of url
+            // order) and one on pb, settings rows for both podcasts and both groups, two members
+            // per group and ambiguous GUIDs on both podcasts.
             db.podcastDao().insertAlias(
                 PodcastUrlAliasEntity(
                     url = "https://old/a.xml",
@@ -103,20 +106,55 @@ class BackupExportTest {
                     addedAt = 11,
                 ),
             )
+            db.podcastDao().insertAlias(
+                PodcastUrlAliasEntity(
+                    url = "https://aaa/a.xml",
+                    podcastId = pa,
+                    reason = AliasReason.NEW_FEED_URL,
+                    addedAt = 12,
+                ),
+            )
+            db.podcastDao().insertAlias(
+                PodcastUrlAliasEntity(
+                    url = "https://zzz/b.xml",
+                    podcastId = pb,
+                    reason = AliasReason.SUBSCRIBE_INPUT,
+                    addedAt = 13,
+                ),
+            )
             db.scopeSettingsDao().upsertPodcast(
                 PodcastSettingsEntity(pa, ScopeOverrides(playbackSpeed = 1.5f, autoDownload = true)),
             )
+            db.scopeSettingsDao().upsertPodcast(
+                PodcastSettingsEntity(pb, ScopeOverrides(autoDownloadKeepLatest = 5)),
+            )
             val g = db.groupDao().insert(groupEntity(uuid = "g-uuid", name = "News", orderKey = "a0"))
+            // Sorts ahead of "a0" despite the higher id: the groups list orders by orderKey.
+            val g2 = db.groupDao().insert(groupEntity(uuid = "h-uuid", name = "Tech", orderKey = "0z"))
             db.scopeSettingsDao().upsertGroup(
                 PodcastGroupSettingsEntity(g, ScopeOverrides(skipSilence = true)),
             )
-            db.groupDao().insertMember(memberEntity(g, pa, "a1", addedAt = 21))
-            db.groupDao().insertMember(memberEntity(g, pb, "a2", addedAt = 22))
+            db.scopeSettingsDao().upsertGroup(
+                PodcastGroupSettingsEntity(g2, ScopeOverrides(autoDownloadKeepLatest = 5)),
+            )
+            // Member orderKeys interleave across groups and run counter to the member PK
+            // (podcastId pa < pb) inside each: a dropped or scrambled ORDER BY prefix would
+            // interleave or invert the runs the writer consumes per group.
+            db.groupDao().insertMember(memberEntity(g, pb, "a1", addedAt = 21))
+            db.groupDao().insertMember(memberEntity(g2, pb, "a2", addedAt = 22))
+            db.groupDao().insertMember(memberEntity(g, pa, "a3", addedAt = 23))
+            db.groupDao().insertMember(memberEntity(g2, pa, "a4", addedAt = 24))
             db.ingestDao().recordGuidKnowledge(
                 pa,
-                ambiguous = setOf("amb-1"),
+                ambiguous = setOf("amb-9", "amb-1"),
                 independent = setOf("ind-1"),
                 observed = setOf("obs-1"),
+            )
+            db.ingestDao().recordGuidKnowledge(
+                pb,
+                ambiguous = setOf("amb-b"),
+                independent = emptySet(),
+                observed = setOf("obs-b"),
             )
 
             // One episode per qualification path: full state, queued, position-only, download-only
@@ -147,6 +185,12 @@ class BackupExportTest {
                         ),
                     )
             val (eFull, eQueued, ePos, eDl, eCurrent) = ids
+            // A queued episode on the second podcast: queue refs resolve feedKey per row.
+            val eQb =
+                db
+                    .ingestDao()
+                    .insertEpisodes(listOf(episodeEntity(podcastId = pb, identityKey = "e-qb")))
+                    .single()
 
             db.episodeStateDao().upsert(
                 EpisodeStateEntity(
@@ -165,6 +209,9 @@ class BackupExportTest {
                 EpisodePositionEntity(eFull, positionMs = 8_000, positionSource = PositionSource.STREAM, updatedAt = 9),
             )
             db.downloadDao().insert(downloadEntity(eFull))
+            // Queue rows insert in reverse orderKey order: the read must re-sort by orderKey.
+            db.queueDao().insert(queueEntryEntity(eFull, orderKey = "q9"))
+            db.queueDao().insert(queueEntryEntity(eQb, orderKey = "q5"))
             db.queueDao().insert(queueEntryEntity(eQueued, orderKey = "q0"))
             db.positionDao().upsert(
                 EpisodePositionEntity(
@@ -232,31 +279,64 @@ class BackupExportTest {
                     ),
                     libraryPodcasts(),
                 )
-                assertEquals(listOf(BackupAliasRow(pa, "https://old/a.xml")), libraryAliases())
+                // pa's alias run is contiguous and url-ordered (inserted "old" before "aaa").
+                assertEquals(
+                    listOf(
+                        BackupAliasRow(pa, "https://aaa/a.xml"),
+                        BackupAliasRow(pa, "https://old/a.xml"),
+                        BackupAliasRow(pb, "https://zzz/b.xml"),
+                    ),
+                    libraryAliases(),
+                )
                 assertEquals(
                     listOf(
                         PodcastSettingsEntity(pa, ScopeOverrides(playbackSpeed = 1.5f, autoDownload = true)),
+                        PodcastSettingsEntity(pb, ScopeOverrides(autoDownloadKeepLatest = 5)),
                     ),
                     libraryPodcastSettings(),
                 )
                 // Only KNOWN_AMBIGUOUS exports — independent/observed provenance never travels.
-                assertEquals(listOf(BackupAmbiguousGuidRow(pa, "amb-1")), libraryAmbiguousGuids())
+                // pa's pair proves the guid sort inside one podcast (inserted "amb-9" first).
                 assertEquals(
-                    listOf(groupEntity(uuid = "g-uuid", name = "News", orderKey = "a0").copy(id = g)),
-                    libraryGroups(),
-                )
-                assertEquals(
-                    listOf(PodcastGroupSettingsEntity(g, ScopeOverrides(skipSilence = true))),
-                    libraryGroupSettings(),
+                    listOf(
+                        BackupAmbiguousGuidRow(pa, "amb-1"),
+                        BackupAmbiguousGuidRow(pa, "amb-9"),
+                        BackupAmbiguousGuidRow(pb, "amb-b"),
+                    ),
+                    libraryAmbiguousGuids(),
                 )
                 assertEquals(
                     listOf(
-                        BackupMemberRow(groupId = g, orderKey = "a1", addedAt = 21, feedKey = "k-a"),
-                        BackupMemberRow(groupId = g, orderKey = "a2", addedAt = 22, feedKey = "k-b"),
+                        groupEntity(uuid = "h-uuid", name = "Tech", orderKey = "0z").copy(id = g2),
+                        groupEntity(uuid = "g-uuid", name = "News", orderKey = "a0").copy(id = g),
+                    ),
+                    libraryGroups(),
+                )
+                assertEquals(
+                    listOf(
+                        PodcastGroupSettingsEntity(g, ScopeOverrides(skipSilence = true)),
+                        PodcastGroupSettingsEntity(g2, ScopeOverrides(autoDownloadKeepLatest = 5)),
+                    ),
+                    libraryGroupSettings(),
+                )
+                // Contiguous groupId runs, orderKey-ordered inside each group.
+                assertEquals(
+                    listOf(
+                        BackupMemberRow(groupId = g, orderKey = "a1", addedAt = 21, feedKey = "k-b"),
+                        BackupMemberRow(groupId = g, orderKey = "a3", addedAt = 23, feedKey = "k-a"),
+                        BackupMemberRow(groupId = g2, orderKey = "a2", addedAt = 22, feedKey = "k-b"),
+                        BackupMemberRow(groupId = g2, orderKey = "a4", addedAt = 24, feedKey = "k-a"),
                     ),
                     libraryMemberships(),
                 )
-                assertEquals(listOf(BackupQueueRow("k-a", "e-queued", "q0")), queueRefs())
+                assertEquals(
+                    listOf(
+                        BackupQueueRow("k-a", "e-queued", "q0"),
+                        BackupQueueRow("k-b", "e-qb", "q5"),
+                        BackupQueueRow("k-a", "e-full", "q9"),
+                    ),
+                    queueRefs(),
+                )
                 assertEquals(
                     BackupSessionRow(
                         currentFeedKey = "k-a",
@@ -276,7 +356,7 @@ class BackupExportTest {
                 )
 
                 val lines = episodeChunk(0, BackupDao.EPISODE_CHUNK)
-                assertEquals(listOf(eFull, eQueued, ePos, eDl, eCurrent), lines.map { it.id })
+                assertEquals(listOf(eFull, eQueued, ePos, eDl, eCurrent, eQb), lines.map { it.id })
                 assertEquals(
                     BackupEpisodeRow(
                         feedKey = "k-a",
@@ -325,7 +405,56 @@ class BackupExportTest {
                 val current = lines.single { it.id == eCurrent }
                 assertNull(current.stateUpdatedAt)
                 assertNull(current.positionMs)
+                // Queued on the second podcast: the feedKey join resolves per row.
+                val qb = lines.single { it.id == eQb }
+                assertEquals("k-b", qb.feedKey)
+                assertNull(qb.stateUpdatedAt)
             }
+        }
+
+    /**
+     * The dominant real input (a fresh install): the `play_session` id = 0 singleton with every
+     * ref null and neutral context columns still exports as one `SessionV1` row.
+     */
+    @Test fun playSessionExportsTheDefaultSingleton() =
+        runTest {
+            assertEquals(DEFAULT_SESSION, dao.playSession())
+        }
+
+    /** PODCAST context resolves `contextId` through `podcast` — a separate join branch. */
+    @Test fun playSessionResolvesPodcastContextToFeedKey() =
+        runTest {
+            val p = db.podcastDao().insertPodcast(podcastEntity(feedKey = "k-ctx"))
+            db.useWriterConnection { conn ->
+                conn.exec(
+                    "UPDATE play_session SET contextType = 'PODCAST', contextId = $p," +
+                        " contextMinSortDate = 42 WHERE id = 0",
+                )
+            }
+            assertEquals(
+                DEFAULT_SESSION.copy(
+                    contextType = ContextType.PODCAST,
+                    contextPodcastKey = "k-ctx",
+                    contextMinSortDate = 42,
+                ),
+                dao.playSession(),
+            )
+        }
+
+    /**
+     * `contextAnchorEpisodeId` has no FK ("the anchor may be deleted", `PlaySessionEntity`): a
+     * dangling anchor still exports the live `anchorSortDate` with a null ref pair, never drops
+     * the session row.
+     */
+    @Test fun playSessionSurvivesADeletedContextAnchor() =
+        runTest {
+            db.useWriterConnection { conn ->
+                conn.exec(
+                    "UPDATE play_session SET contextAnchorEpisodeId = 4242," +
+                        " contextAnchorSortDate = 777 WHERE id = 0",
+                )
+            }
+            assertEquals(DEFAULT_SESSION.copy(anchorSortDate = 777), dao.playSession())
         }
 
     @Test fun episodeChunksPaginateByIdWithoutGapsOrDuplicates() =
@@ -430,9 +559,9 @@ class BackupExportTest {
 
     /**
      * 05 Auto Backup's library watcher: `observeLibraryShape` emits the initial shape, then one
-     * shape per subscribe/unsubscribe/membership change. Position saves and played marks write
-     * tables the query does not observe, so nothing emits; `distinctUntilChanged` in the watcher
-     * would drop equal shapes from `podcast` writes anyway.
+     * shape per subscribe/unsubscribe/membership change — plus an equal shape for any `podcast`
+     * column write, the re-emission the watcher's `distinctUntilChanged()` exists to drop.
+     * Position saves and played marks write tables the query does not observe, so nothing emits.
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
@@ -444,6 +573,12 @@ class BackupExportTest {
                     assertEquals(LibraryShape(0, 0), awaitItem())
 
                     val p = shapeDb.podcastDao().insertPodcast(podcastEntity(feedKey = "k-shape"))
+                    advanceUntilIdle()
+                    assertEquals(LibraryShape(1, 0), awaitItem())
+
+                    // A `podcast` column write re-emits an identical shape; the watcher's
+                    // `distinctUntilChanged()` drops it before any snapshot is requested.
+                    shapeDb.podcastDao().setCustomTitle(p, "Renamed")
                     advanceUntilIdle()
                     assertEquals(LibraryShape(1, 0), awaitItem())
 
@@ -484,5 +619,22 @@ class BackupExportTest {
     private companion object {
         /** The writer handshake deadline; a deadlock fails fast instead of hanging the suite. */
         const val HANDSHAKE_MS = 10_000L
+
+        /** The `play_session` id = 0 singleton's export shape straight after `onCreate`. */
+        val DEFAULT_SESSION =
+            BackupSessionRow(
+                currentFeedKey = null,
+                currentIdentityKey = null,
+                contextType = null,
+                contextGroupUuid = null,
+                contextPodcastKey = null,
+                contextOrder = FeedOrder.NEWEST_FIRST,
+                contextFilterFlags = 0,
+                contextMediaFilter = MediaFilter.ALL,
+                contextMinSortDate = null,
+                anchorFeedKey = null,
+                anchorIdentityKey = null,
+                anchorSortDate = null,
+            )
     }
 }
