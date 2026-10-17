@@ -14,7 +14,6 @@ import ch.lkmc.neutrodyne.core.domain.NewEpisodePoster
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
-import ch.lkmc.neutrodyne.core.model.NewEpisodeNotice
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.work.MetroWorkerFactory
 import ch.lkmc.neutrodyne.youtube.YouTubeBindingsModule
@@ -43,6 +42,8 @@ interface AndroidAppGraph {
 
     /** `MainActivity` collects `appearance.*` through it into `AppearancePrefs` (08 App scheme). */
     val settingsRepository: SettingsRepository
+
+    val newEpisodePoster: NewEpisodePoster
 
     /** Every feature's navigation entries (01 Feature entry installers). */
     val entryInstallers: Set<EntryProviderInstaller>
@@ -77,15 +78,6 @@ interface AndroidAppGraph {
      */
     @Provides
     fun provideDatabase(opener: DatabaseOpener): NeutrodyneDatabase = opener.requireDatabase()
-
-    /** Temporary C4 binding; platform posting arrives in D3. */
-    @Provides
-    fun provideNewEpisodePoster(): NewEpisodePoster =
-        object : NewEpisodePoster {
-            override suspend fun post(notices: List<NewEpisodeNotice>) = Unit
-
-            override suspend fun removePodcasts(podcastIds: List<Long>) = Unit
-        }
 
     @DependencyGraph.Factory
     fun interface Factory {

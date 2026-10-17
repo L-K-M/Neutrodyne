@@ -458,4 +458,10 @@
     <string name="group_settings_title">Gruppeneinstellungen</string>
     <string name="group_settings_named_title">Gruppeneinstellungen · %1$s</string>
     <string name="setting_use_default">Standard verwenden (%1$s, %2$s)</string>
+    <plurals name="notification_new_episodes">
+        <item quantity="one">%1$d neue Episode</item>
+        <item quantity="other">%1$d neue Episoden</item>
+    </plurals>
+    <string name="notification_episode_line">%1$s — %2$s</string>
+    <string name="notification_other_podcasts">Andere Podcasts</string>
 </resources>

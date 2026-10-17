@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<resources>
+  <string name="channel_group_new_episodes">Neue Episoden</string>
+  <string name="channel_new_episodes_default">Andere Podcasts</string>
+</resources>

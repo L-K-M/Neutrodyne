@@ -480,4 +480,10 @@
     <string name="group_settings_title">Group settings</string>
     <string name="group_settings_named_title">Group settings · %1$s</string>
     <string name="setting_use_default">Use default (%1$s, %2$s)</string>
+    <plurals name="notification_new_episodes">
+        <item quantity="one">%1$d new episode</item>
+        <item quantity="other">%1$d new episodes</item>
+    </plurals>
+    <string name="notification_episode_line">%1$s — %2$s</string>
+    <string name="notification_other_podcasts">Other podcasts</string>
 </resources>

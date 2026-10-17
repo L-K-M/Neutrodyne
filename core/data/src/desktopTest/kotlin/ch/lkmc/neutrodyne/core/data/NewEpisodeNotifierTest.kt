@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class NewEpisodeNotifierTest {
@@ -198,6 +199,15 @@ class NewEpisodeNotifierTest {
             poster.onPost = {}
             notifier.post(batch)
             assertEquals(2, poster.posts.size)
+        }
+
+    /** Best effort covers exceptions only: a VM-fatal Error must not be logged away. */
+    @Test fun fatalPosterErrorsPropagate() =
+        runTest {
+            settings.set(FeedsSettingKeys.NOTIFY_NEW_EPISODES, true)
+            val p = podcast()
+            poster.onPost = { throw OutOfMemoryError("poster") }
+            assertFailsWith<OutOfMemoryError> { notifier.post(listOf(NewEpisodes(p, episodes(p, 1), false))) }
         }
 
     @Test fun largeRunUsesBoundedReadsAndKeepsGlobalNewestFirstOrder() =
