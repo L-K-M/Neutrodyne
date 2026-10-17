@@ -4,17 +4,25 @@ package ch.lkmc.neutrodyne.feature.podcast
 
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
+import ch.lkmc.neutrodyne.core.domain.ScopeSettingsRepository
+import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.NetError
+import ch.lkmc.neutrodyne.core.model.ScopedSettingsView
+import ch.lkmc.neutrodyne.core.model.SettingField
+import ch.lkmc.neutrodyne.core.model.SettingOverrides
+import ch.lkmc.neutrodyne.core.model.SettingSource
 import ch.lkmc.neutrodyne.core.model.ShowType
 import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
 import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
+import ch.lkmc.neutrodyne.core.testing.FakeScopeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import ch.lkmc.neutrodyne.core.testing.testFeedInfo
 import ch.lkmc.neutrodyne.core.testing.testPodcastDetail
 import ch.lkmc.neutrodyne.core.ui.UiText
+import ch.lkmc.neutrodyne.core.ui.platform.NotificationPermissionRequester
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -37,11 +45,206 @@ class PodcastSettingsViewModelTest : MainDispatcherTest() {
     private val podcasts = FakePodcastRepository()
     private val feeds = FakeFeedRepository()
 
-    private fun viewModel(podcastId: Long = 7) = PodcastSettingsViewModel(podcastId, podcasts, feeds)
+    private val scopes = FakeScopeSettingsRepository().apply { seedPodcast(7) }
+
+    private fun viewModel(podcastId: Long = 7) = PodcastSettingsViewModel(podcastId, podcasts, feeds, scopes)
 
     private fun TestScope.collect(viewModel: PodcastSettingsViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
     }
+
+    @Test
+    fun effectiveSettingsObserveEveryAttributionAndManualOnlyGroup() =
+        runTest {
+            val vm = viewModel()
+            collect(vm)
+            val news = SettingSource.Group("news-id", "news")
+            val tech = SettingSource.Group("tech-id", "tech")
+            val sources = listOf(SettingSource.AppDefault, news, SettingSource.Groups(listOf(news, tech)))
+            for (source in sources) {
+                scopes.seedPodcast(
+                    7,
+                    ScopedSettingsView(
+                        SettingOverrides(),
+                        SettingOverrides(null, true),
+                        SettingField.entries.associateWith { source },
+                    ),
+                )
+                advanceUntilIdle()
+                val scoped = vm.uiState.value.scoped!!
+                assertNull(scoped.effective.refreshIntervalMinutes)
+                assertEquals(true, scoped.effective.notifyNewEpisodes)
+                assertEquals(source, scoped.sources.getValue(SettingField.REFRESH_INTERVAL_MINUTES))
+                assertEquals(source, scoped.sources.getValue(SettingField.NOTIFY_NEW_EPISODES))
+            }
+            vm.setRefreshIntervalMinutes(60)
+            vm.setNotifyNewEpisodes(false, null)
+            advanceUntilIdle()
+            assertEquals(
+                SettingOverrides(60, false),
+                vm.uiState.value.scoped!!
+                    .effective,
+            )
+            assertTrue(
+                vm.uiState.value.scoped!!
+                    .sources.values
+                    .all { it == SettingSource.PodcastOverride },
+            )
+        }
+
+    @Test
+    fun inheritClearsOnlyTheChosenOverrideAndRestoresGroupManualOnly() =
+        runTest {
+            val group = SettingSource.Group("news-id", "news")
+            scopes.seedPodcast(
+                7,
+                ScopedSettingsView(
+                    SettingOverrides(),
+                    SettingOverrides(null, true),
+                    SettingField.entries.associateWith { group },
+                ),
+            )
+            val vm = viewModel()
+            collect(vm)
+            vm.setRefreshIntervalMinutes(120)
+            vm.setNotifyNewEpisodes(false, null)
+            advanceUntilIdle()
+            vm.setRefreshIntervalMinutes(null)
+            advanceUntilIdle()
+            assertEquals(
+                SettingOverrides(null, false),
+                vm.uiState.value.scoped!!
+                    .own,
+            )
+            assertNull(
+                vm.uiState.value.scoped!!
+                    .effective.refreshIntervalMinutes,
+            )
+            assertEquals(
+                group,
+                vm.uiState.value.scoped!!
+                    .sources[SettingField.REFRESH_INTERVAL_MINUTES],
+            )
+            vm.setNotifyNewEpisodes(null, null)
+            advanceUntilIdle()
+            assertEquals(
+                SettingOverrides(),
+                vm.uiState.value.scoped!!
+                    .own,
+            )
+            assertEquals(
+                true,
+                vm.uiState.value.scoped!!
+                    .effective.notifyNewEpisodes,
+            )
+        }
+
+    @Test
+    fun manualOnlyWritesZeroAndInvalidIntervalStaysInline() =
+        runTest {
+            val vm = viewModel()
+            collect(vm)
+            vm.setRefreshIntervalMinutes(0)
+            advanceUntilIdle()
+            assertEquals(
+                0,
+                vm.uiState.value.scoped!!
+                    .own.refreshIntervalMinutes,
+            )
+            assertNull(
+                vm.uiState.value.scoped!!
+                    .effective.refreshIntervalMinutes,
+            )
+            vm.setRefreshIntervalMinutes(7)
+            advanceUntilIdle()
+            assertEquals(setOf(SettingField.REFRESH_INTERVAL_MINUTES), vm.uiState.value.invalidFields)
+            assertEquals(
+                0,
+                vm.uiState.value.scoped!!
+                    .own.refreshIntervalMinutes,
+            )
+            vm.setRefreshIntervalMinutes(null)
+            advanceUntilIdle()
+            assertTrue(
+                vm.uiState.value.invalidFields
+                    .isEmpty(),
+            )
+        }
+
+    @Test
+    fun contextualPermissionOnlyOnExplicitEnableAndDenialKeepsTheWish() =
+        runTest {
+            val requester = RecordingPermissionRequester()
+            val vm = viewModel()
+            collect(vm)
+            advanceUntilIdle()
+            assertEquals(0, requester.requests)
+            vm.setNotifyNewEpisodes(false, requester)
+            vm.setNotifyNewEpisodes(null, requester)
+            advanceUntilIdle()
+            assertEquals(0, requester.requests)
+            vm.setNotifyNewEpisodes(true, requester)
+            advanceUntilIdle()
+            assertEquals(1, requester.requests)
+            assertEquals(
+                true,
+                vm.uiState.value.scoped!!
+                    .own.notifyNewEpisodes,
+            )
+            assertTrue(vm.uiState.value.notificationsBlocked)
+        }
+
+    @Test
+    fun grantedAndAbsentRequestersNeverPrompt() =
+        runTest {
+            val requester = RecordingPermissionRequester(granted = true)
+            val vm = viewModel()
+            collect(vm)
+            vm.setNotifyNewEpisodes(true, requester)
+            advanceUntilIdle()
+            assertEquals(0, requester.requests)
+            assertEquals(false, vm.uiState.value.notificationsBlocked)
+            // PlatformActions is null on desktop and Android below API 33.
+            vm.setNotifyNewEpisodes(true, null)
+            advanceUntilIdle()
+            assertEquals(false, vm.uiState.value.notificationsBlocked)
+            val granting = RecordingPermissionRequester(result = true)
+            vm.setNotifyNewEpisodes(true, granting)
+            advanceUntilIdle()
+            assertEquals(1, granting.requests)
+            assertEquals(false, vm.uiState.value.notificationsBlocked)
+        }
+
+    @Test
+    fun failedScopedEnableReportsFailureWithoutRequestingPermission() =
+        runTest {
+            val failing =
+                object : ScopeSettingsRepository by scopes {
+                    override suspend fun updatePodcast(
+                        podcastId: Long,
+                        change: (SettingOverrides) -> SettingOverrides,
+                    ): Outcome<Unit, SettingsError> = Outcome.Failure(SettingsError.WriteFailed)
+                }
+            val vm = PodcastSettingsViewModel(7, podcasts, feeds, failing)
+            val requester = RecordingPermissionRequester()
+            collect(vm)
+            vm.setNotifyNewEpisodes(true, requester)
+            advanceUntilIdle()
+            assertEquals(0, requester.requests)
+            assertEquals(
+                false,
+                vm.uiState.value.scoped!!
+                    .effective.notifyNewEpisodes,
+            )
+            assertEquals(
+                Res.string.write_failed,
+                (
+                    vm.uiState.value.messages
+                        .single()
+                        .text as UiText.Res
+                ).id,
+            )
+        }
 
     @Test
     fun initialStateBeforeSubscription() =
@@ -239,4 +442,19 @@ class PodcastSettingsViewModelTest : MainDispatcherTest() {
                     .isNotEmpty(),
             )
         }
+}
+
+private class RecordingPermissionRequester(
+    override var granted: Boolean = false,
+    private val result: Boolean = false,
+) : NotificationPermissionRequester {
+    var requests = 0
+
+    override fun request(onResult: (Boolean) -> Unit) {
+        requests++
+        granted = result
+        onResult(result)
+    }
+
+    override fun openSettings() = Unit
 }

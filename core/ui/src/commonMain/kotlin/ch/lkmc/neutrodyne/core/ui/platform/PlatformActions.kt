@@ -85,7 +85,10 @@ public fun interface RevealInFolder {
 public interface NotificationPermissionRequester {
     public val granted: Boolean
 
+    /** After a denial, returns false without another system dialog. */
     public fun request(onResult: (Boolean) -> Unit)
+
+    public fun openSettings()
 }
 
 /** Provided by `NeutrodyneRoot` from the shell's platform implementation. */

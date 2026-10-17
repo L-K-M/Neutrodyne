@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.model.Effective
 import ch.lkmc.neutrodyne.core.model.SettingField
 import ch.lkmc.neutrodyne.core.model.SettingSource
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
+import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.groupEntity
@@ -29,7 +30,7 @@ class EffectiveSettingsResolverTest {
     private val db = TestDb.inMemory()
     private val settings = FakeSettingsRepository()
     private val resolver = EffectiveSettingsResolverImpl(db, settings)
-    private val scopes = ScopeSettingsRepositoryImpl(db, settings)
+    private val scopes = ScopeSettingsRepositoryImpl(db, settings, { FakeRefreshController() })
     private val dao = db.scopeSettingsDao()
 
     @AfterTest fun close() = db.close()

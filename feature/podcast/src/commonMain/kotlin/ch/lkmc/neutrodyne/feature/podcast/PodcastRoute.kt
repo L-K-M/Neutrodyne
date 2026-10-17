@@ -16,8 +16,10 @@ import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastSettingsKey
+import ch.lkmc.neutrodyne.core.ui.BindEpisodeSelection
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeRouteResult
+import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedDialog
 import ch.lkmc.neutrodyne.core.ui.YouTubeLinks
 import ch.lkmc.neutrodyne.core.ui.dispatchEpisodeRoute
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
@@ -45,6 +47,7 @@ internal fun PodcastRoute(key: PodcastKey) {
             create(key.podcastId)
         }
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val markPlayed by viewModel.markPlayed.state.collectAsStateWithLifecycle()
     val items = viewModel.feed.collectAsLazyPagingItems()
     val live = viewModel.live.collectAsStateWithLifecycle()
     val navigator = LocalAppNavigator.current
@@ -63,7 +66,10 @@ internal fun PodcastRoute(key: PodcastKey) {
         }
     }
 
+    BindEpisodeSelection(viewModel.episodeSelection)
+
     PodcastScreen(
+        selection = viewModel.episodeSelection,
         state = state,
         items = items,
         live = live,
@@ -74,6 +80,7 @@ internal fun PodcastRoute(key: PodcastKey) {
         onFiltersChange = viewModel::onFiltersChange,
         onOrderChange = viewModel::setOrder,
         onAction = { action ->
+            if (action is EpisodeAction.Open || action is EpisodeAction.OpenPodcast) viewModel.episodeSelection.clear()
             when (dispatchEpisodeRoute(action, navigator, urls)) {
                 EpisodeRouteResult.HANDLED -> {
                     Unit
@@ -134,6 +141,15 @@ internal fun PodcastRoute(key: PodcastKey) {
         },
         onDismissUnsubscribe = { pending = null },
     )
+
+    markPlayed?.let { dialog ->
+        MarkFeedPlayedDialog(
+            dialog,
+            viewModel.markPlayed::select,
+            viewModel.markPlayed::confirm,
+            viewModel.markPlayed::dismiss,
+        )
+    }
 
     ShowUserMessages(state.messages, viewModel::onMessageShown)
 }
