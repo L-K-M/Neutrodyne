@@ -87,6 +87,42 @@ class BackupCodecTest {
     }
 
     @Test
+    fun anUndecodableNewerManifestStillReportsNewerFormat() {
+        // 05 Versioning: "update the app" must win over "corrupt" exactly when a newer
+        // writer changed the v1 shape — here minReaderVersion 2 plus a BackupKind name
+        // and a missing required field that the v1 decode cannot survive.
+        val encoded = codec.encodeManifest(manifest())
+        val unknownKind =
+            assertFailsWith<BackupCodecException.NewerFormat> {
+                codec.decodeManifest(
+                    sourceOf(
+                        encoded
+                            .replace("\"minReaderVersion\":1", "\"minReaderVersion\":2")
+                            .replace("\"MANUAL\"", "\"WEEKLY\""),
+                    ),
+                )
+            }
+        assertEquals(2, unknownKind.minReaderVersion)
+        val missingField =
+            assertFailsWith<BackupCodecException.NewerFormat> {
+                codec.decodeManifest(
+                    sourceOf(
+                        encoded
+                            .replace("\"minReaderVersion\":1", "\"minReaderVersion\":7")
+                            .replace("\"kind\":\"MANUAL\",", ""),
+                    ),
+                )
+            }
+        assertEquals(7, missingField.minReaderVersion)
+        // A malformed minReaderVersion is no version claim at all: plain Corrupt.
+        assertFailsWith<BackupCodecException.Corrupt> {
+            codec.decodeManifest(
+                sourceOf(encoded.replace("\"minReaderVersion\":1", "\"minReaderVersion\":\"x\"")),
+            )
+        }
+    }
+
+    @Test
     fun manifestRejectsOversizeAndCorruptInput() {
         val padded = codec.encodeManifest(manifest()).padEnd(BackupCodec.MANIFEST_MAX_BYTES.toInt() + 1)
         assertFailsWith<BackupCodecException.TooLarge> { codec.decodeManifest(sourceOf(padded)) }

@@ -12,6 +12,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.intOrNull
 import okio.BufferedSink
 import okio.BufferedSource
 import okio.Source
@@ -64,11 +65,16 @@ public class BackupCodec(
         if (format?.isString != true || format.content != FORMAT) {
             throw BackupCodecException.NotABackup
         }
-        val manifest = decode<BackupManifest>(element)
-        if (manifest.minReaderVersion > FORMAT_VERSION) {
-            throw BackupCodecException.NewerFormat(manifest.minReaderVersion)
+        // The gate reads the raw field before the v1 decode: a newer manifest can change
+        // the v1 shape, and "update the app" must still win over "corrupt" (05
+        // Versioning). An absent or malformed field claims nothing — the full decode
+        // then supplies the default or reports Corrupt.
+        val minReaderVersion =
+            ((element as? JsonObject)?.get("minReaderVersion") as? JsonPrimitive)?.intOrNull ?: 1
+        if (minReaderVersion > FORMAT_VERSION) {
+            throw BackupCodecException.NewerFormat(minReaderVersion)
         }
-        return manifest
+        return decode(element)
     }
 
     /**
