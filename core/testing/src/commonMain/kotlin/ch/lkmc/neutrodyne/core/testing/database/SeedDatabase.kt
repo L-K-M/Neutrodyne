@@ -206,7 +206,7 @@ class SeedDatabase(
                 },
             medium = if (isYouTube) "video" else "podcast",
             artworkUrl = "https://seed.example.com/shows/$i/cover.jpg",
-            artworkKey = "u-%08x".format(i),
+            artworkKey = "u-${i.padded(8, HEX)}",
             customTitle = if (i % 9 == 0) "Pinned name $i" else null,
             includeInAll = i % EXCLUDED_EVERY != 1,
             episodeOrder = if (i % 5 == 0) FeedOrder.OLDEST_FIRST else null,
@@ -234,7 +234,7 @@ class SeedDatabase(
             uuid = uuid(rnd),
             name = "Seed group ${i + 1}",
             nameKey = "seed group ${i + 1}",
-            orderKey = "g%06d".format(i),
+            orderKey = "g${i.padded(6)}",
             colorArgb = if (i % 3 == 0) (0xFF000000L or (i * 7919L)).toInt() else null,
             feedOrder = if (i % 3 == 0) FeedOrder.OLDEST_FIRST else FeedOrder.NEWEST_FIRST,
             hideOlderThanDays = HIDE_OLDER_DAYS[i % HIDE_OLDER_DAYS.size],
@@ -272,7 +272,7 @@ class SeedDatabase(
 
         val sequence = IntArray(groups)
         return pairs.map { (group, podcast) ->
-            MemberSpec(group, podcast, "m%06d".format(sequence[group]++), BASE_NOW - rnd.nextLong(0, HISTORY_MS))
+            MemberSpec(group, podcast, "m${(sequence[group]++).padded(6)}", BASE_NOW - rnd.nextLong(0, HISTORY_MS))
         }
     }
 
@@ -350,7 +350,7 @@ class SeedDatabase(
             enclosureUrl = if (enclosure) enclosureUrl(p, j, o) else null,
             enclosureType = if (enclosure) (if (isVideo) "video/mp4" else "audio/mpeg") else null,
             enclosureLength = if (enclosure) 8_000_000L + (o % 90) * 1_000_000L else null,
-            externalMediaId = if (isYouTube) "ytv${"%02d".format(p)}$j" else null,
+            externalMediaId = if (isYouTube) "ytv${p.padded(2)}$j" else null,
             isVideo = isVideo,
             durationMs = if (o % 9 == 0) null else 300_000L + (o % 120) * 60_000L,
             season = if (!isYouTube && o % 5 == 0) 1 + o % 4 else null,
@@ -365,7 +365,7 @@ class SeedDatabase(
                 },
             explicit = o % 6 == 0,
             imageUrl = if (isYouTube || o % 10 == 0) "https://img.seed.example.com/e$p-$j.jpg" else null,
-            artworkKey = if (isYouTube || o % 10 == 0) "e-%06x-%04x".format(o, j) else null,
+            artworkKey = if (isYouTube || o % 10 == 0) "e-${o.padded(6, HEX)}-${j.padded(4, HEX)}" else null,
             link = "https://seed.example.com/shows/$p/episodes/$j",
             chaptersUrl = if (o % 23 == 0) "https://seed.example.com/chapters/$p/$j.json" else null,
             contentHash = rnd.nextLong(),
@@ -425,6 +425,11 @@ class SeedDatabase(
         while (favouriteIdx.size < favourites && cursor < shuffled.size) favouriteIdx += shuffled[cursor++]
         val downloadIdx = HashSet<Int>()
         while (downloadIdx.size < downloads && cursor < shuffled.size) downloadIdx += shuffled[cursor++]
+        // The slices share one draw: an oversized quota would silently starve the later ones.
+        check(inProgressIdx.size == inProgress && favouriteIdx.size == favourites && downloadIdx.size == downloads) {
+            "seed quotas exceed the episode pool: in-progress ${inProgressIdx.size}/$inProgress," +
+                " favourites ${favouriteIdx.size}/$favourites, downloads ${downloadIdx.size}/$downloads"
+        }
 
         val states = LinkedHashMap<Int, EpisodeStateEntity>()
         val downloadRows = LinkedHashMap<Int, DownloadEntity>()
@@ -541,6 +546,12 @@ class SeedDatabase(
 
     private fun uuid(rnd: Random): String = Uuid.fromLongs(rnd.nextLong(), rnd.nextLong()).toString()
 
+    /** Locale-free zero padding: `String.format` would render the default locale's digits. */
+    private fun Int.padded(
+        width: Int,
+        radix: Int = 10,
+    ): String = toString(radix).padStart(width, '0')
+
     /** `target` characters of seeded prose — deterministic length and content. */
     private fun prose(
         rnd: Random,
@@ -561,6 +572,8 @@ class SeedDatabase(
         const val BASE_NOW = TestClock.DEFAULT_NOW
 
         const val DAY_MS = 86_400_000L
+
+        const val HEX = 16
         const val HOUR_MS = 3_600_000L
 
         /** Episodes spread over ~800 days of feed history. */
@@ -625,7 +638,7 @@ class SeedDatabase(
                 DownloadState.MISSING,
             )
 
-        /** ~150 bytes of opaque `clocks` JSON per synced record, matching the N5 estimate. */
+        /** A few opaque `clocks`; with its `rid`, a row lands near 02's ≈ 150-byte N5 estimate. */
         val CLOCK_PAYLOAD =
             "{\"n\":\"5eed5eed5eed5eed\",\"t\":1760400000000,\"f\":{\"subscribed\":[1760400000000,0],\"title\":[1760400000000,0]}}"
 
