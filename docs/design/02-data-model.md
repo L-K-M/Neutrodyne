@@ -1999,7 +1999,8 @@ sequenceDiagram
 | `DownloadDao.observeEntries`, `observePlayedCompletedIds` | `Flow` | `download`, `episode`, `podcast`, `episode_state` (+ `artwork`) | Downloads screen; `download` changes on transitions only |
 | `PositionDao.observeFor`, `DownloadDao.observeLiveFor`, `EpisodeStateDao.observeFor` | `Flow`, `IN (:ids)` | one table each | High churn by design; ≤ 200 IDs |
 | `PlaySessionDao.observeCurrentEpisodeId`, `ArtworkDao.observe` | `Flow` | one table each | |
-| `ImportDao.observeProgress`, `ImportDao.pagedItems` | `Flow`, `PagingSource` | `import_item` | Medium churn only while an import runs |
+| `ImportDao.observeProgress`, `ImportDao.pagedItems`, `ImportDao.observeItemTallies` | `Flow`, `PagingSource` | `import_item` | Medium churn only while an import runs |
+| `ImportDao.observeSession`, `ImportDao.observeOpenSessions` | `Flow` | `import_session` | One row per session; written only on transitions and option edits |
 | 10's `SyncScheduler` outbox flow (`invalidationTracker.createFlow("sync_outbox")`, debounced 1–2 s) | `Flow` (tables only, no query) | `sync_outbox` | High churn while linked (every capture); used only to schedule pushes, then `hasPushWorthy()` one-shot |
 | `SyncHeldDao.observeAll` | `Flow` | `sync_held` | Low churn; the held-changes prompt |
 
