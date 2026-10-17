@@ -1141,6 +1141,8 @@ Neutrodyne exports: folder `nd:groupColor`/`nd:groupIcon` are applied to **newly
 
 ### 5. Preview contract
 
+**Implementation note (2026-10-17, M3):** `updateOptions` applies changes to the latest PREVIEW row in one transaction using `ImportOptions.withUserChanges`. Parser metadata and worker bookkeeping are preserved, and edits after a commit or restore request are ignored. Restore intent is written only by `BackupRepository.restore`, so a stale preview cannot reset or alter a queued operation.
+
 `ImportKey(sessionId)` (`:feature:importexport`, visuals: [08 Screens](08-ui-ux.md#screens)) renders these models; everything survives process death because it is in `import_session`/`import_item`.
 
 ```kotlin
