@@ -56,11 +56,14 @@ private const val FEED_FILE_SEGMENT = "videos.xml"
 private val VIDEO_PATH_SEGMENTS = setOf("shorts", "live", "embed", "v", "e")
 private val LEGACY_PATH_SEGMENTS = setOf("c", "user")
 
+/** The length cap 04 applies to handles, custom names and the legacy `c/`/`user/`/`user=` names. */
+private const val MAX_NAME_LENGTH = 100
+
 /** Bare `@handle` (04 step 2); also re-checked after percent-decoding, so a decoded space is rejected. */
-private val HANDLE = Regex("^@[^\\s/?#]{1,100}$")
+private val HANDLE = Regex("^@[^\\s/?#]{1,$MAX_NAME_LENGTH}$")
 
 /** A bare custom URL: a single path segment of letters, digits, dots, underscores and hyphens. */
-private val CUSTOM_NAME = Regex("^[A-Za-z0-9_.-]{1,100}$")
+private val CUSTOM_NAME = Regex("^[A-Za-z0-9_.-]{1,$MAX_NAME_LENGTH}$")
 
 private val RESERVED =
     setOf(
@@ -115,7 +118,7 @@ private const val VIEW_SOURCE_PREFIX = "view-source:"
  * like the full URL. Returns the text unchanged when it is not on a YouTube host.
  */
 private fun prependSchemeIfHost(value: String): String =
-    if (value.indexOf("://") < 0 && hostFromLeadingToken(value) in YOUTUBE_HOSTS) "https://$value" else value
+    if (hostFromLeadingToken(value) in YOUTUBE_HOSTS) "https://$value" else value
 
 private fun stripWrappers(value: String): String {
     var text = value
@@ -131,7 +134,12 @@ private fun stripWrappers(value: String): String {
 
 /** The lowercased host of a scheme-less `host[:port]/…` token, or "" when the first token is not a host. */
 private fun hostFromLeadingToken(text: String): String {
-    val authority = text.substringBefore('/').substringBefore('?').substringBefore('#')
+    val authority =
+        text
+            .substringBefore('/')
+            .substringBefore('\\')
+            .substringBefore('?')
+            .substringBefore('#')
     // A leading token containing '@' is userinfo, not a host: spoofing stays rejected.
     if (authority.contains('@')) return ""
     return authority.substringBefore(':').lowercase()
@@ -151,7 +159,8 @@ private fun parseUrl(url: String): ParsedUrl? {
     if (scheme != "http" && scheme != "https") return null
 
     val remainder = url.substring(schemeEnd + 3)
-    val authorityEnd = remainder.indexOfAny(charArrayOf('/', '?', '#')).let { if (it < 0) remainder.length else it }
+    val authorityEnd =
+        remainder.indexOfAny(charArrayOf('/', '?', '#', '\\')).let { if (it < 0) remainder.length else it }
     val host =
         remainder
             .substring(0, authorityEnd)
@@ -216,15 +225,15 @@ private fun classifyUrl(url: ParsedUrl): YtRef? {
         return id?.takeIf(YouTubeIds.VIDEO::matches)?.let { YtRef.Video(it) }
     }
 
+    if (first.startsWith('@')) return handleFromDecoded(first)
+
     if (url.host == SHORT_LINK_HOST) {
         val id = segments.first()
         return id.takeIf(YouTubeIds.VIDEO::matches)?.let { YtRef.Video(it) }
     }
 
-    if (first.startsWith('@')) return handleFromDecoded(first)
-
     if (first in LEGACY_PATH_SEGMENTS) {
-        val name = segments.getOrNull(1)?.takeIf { it.isNotEmpty() }
+        val name = segments.getOrNull(1)?.takeIf(::isValidLegacyName)
         return name?.let { YtRef.LegacyPath("$first/$it") }
     }
 
@@ -236,9 +245,12 @@ private fun classifyUrl(url: ParsedUrl): YtRef? {
 private fun classifyFeedQuery(query: Map<String, String>): YtRef? {
     query["channel_id"]?.takeIf(YouTubeIds.CHANNEL::matches)?.let { return YtRef.Channel(it) }
     query["playlist_id"]?.takeIf { it.isNotEmpty() }?.let { return playlistOrChannel(it) }
-    query["user"]?.takeIf { it.isNotEmpty() }?.let { return YtRef.LegacyPath("user/$it") }
+    query["user"]?.takeIf(::isValidLegacyName)?.let { return YtRef.LegacyPath("user/$it") }
     return null
 }
+
+/** A legacy `c/`/`user/`/`user=` name is non-empty and within the shared cap. */
+private fun isValidLegacyName(name: String): Boolean = name.isNotEmpty() && name.length <= MAX_NAME_LENGTH
 
 private fun playlistOrChannel(playlistId: String): YtRef {
     val uploads = YouTubeIds.uploadsToChannel(playlistId)
