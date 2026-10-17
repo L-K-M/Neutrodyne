@@ -133,11 +133,15 @@ abstract class ImportDao {
     @Query("SELECT COUNT(*) FROM import_item WHERE sessionId = :sessionId AND status = 'QUEUED'")
     abstract suspend fun queuedCount(sessionId: Long): Int
 
-    // Selection writes (05 §5: per-row toggles and "select all/none").
+    // Selection writes (05 §5: per-row toggles and "select all/none"). All three write only
+    // `PREVIEW` rows — 05's only selectable status — so `selected` shares [selectedItems]'
+    // domain and `observeItemTallies.selectedCount` stays the committable count even when a
+    // filter (or a group-resolved ordinal set) names non-selectable rows.
 
     @Query(
         "UPDATE import_item SET selected = :selected" +
-            " WHERE sessionId = :sessionId AND ordinal = :ordinal AND selected <> :selected",
+            " WHERE sessionId = :sessionId AND ordinal = :ordinal" +
+            " AND status = 'PREVIEW' AND selected <> :selected",
     )
     abstract suspend fun setSelected(
         sessionId: Long,
@@ -161,7 +165,8 @@ abstract class ImportDao {
 
     @Query(
         "UPDATE import_item SET selected = :selected" +
-            " WHERE sessionId = :sessionId AND ordinal IN (:ordinals) AND selected <> :selected",
+            " WHERE sessionId = :sessionId AND ordinal IN (:ordinals)" +
+            " AND status = 'PREVIEW' AND selected <> :selected",
     )
     protected abstract suspend fun setSelectedOrdinalsChunk(
         sessionId: Long,
@@ -170,12 +175,14 @@ abstract class ImportDao {
     ): Int
 
     /**
-     * "Select all/none" of a filter: every item in the given statuses. The preview's selectable
-     * set is `PREVIEW` only; the caller passes the statuses its filter shows.
+     * "Select all/none" of a filter: every `PREVIEW` item in the given statuses — the caller
+     * passes the statuses its filter shows, which may list non-selectable ones (05's ALL and
+     * NOT_IMPORTED do).
      */
     @Query(
         "UPDATE import_item SET selected = :selected" +
-            " WHERE sessionId = :sessionId AND status IN (:statuses) AND selected <> :selected",
+            " WHERE sessionId = :sessionId AND status IN (:statuses)" +
+            " AND status = 'PREVIEW' AND selected <> :selected",
     )
     abstract suspend fun setSelectedByStatus(
         sessionId: Long,

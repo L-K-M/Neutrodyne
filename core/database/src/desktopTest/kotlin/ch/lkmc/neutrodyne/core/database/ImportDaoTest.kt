@@ -226,6 +226,58 @@ class ImportDaoTest {
             )
         }
 
+    @Test fun selectAllUnderABroadFilterOnlyTouchesPreviewRows() =
+        runTest {
+            val session = dao.insertSession(importSessionEntity())
+            dao.insertItems(
+                listOf(
+                    importItemEntity(session, 0, selected = false),
+                    importItemEntity(session, 1, selected = false),
+                    // Non-selectable statuses per 05's "Selectable in preview" column.
+                    importItemEntity(
+                        session,
+                        2,
+                        status = ImportItemStatus.ALREADY_SUBSCRIBED,
+                        selected = false,
+                    ),
+                    importItemEntity(session, 3, status = ImportItemStatus.INVALID_URL, selected = false),
+                    importItemEntity(
+                        session,
+                        4,
+                        status = ImportItemStatus.DUPLICATE_IN_FILE,
+                        selected = false,
+                    ),
+                    importItemEntity(
+                        session,
+                        5,
+                        kind = ImportItemKind.YOUTUBE,
+                        status = ImportItemStatus.YOUTUBE_UNSUPPORTED_YET,
+                        selected = false,
+                    ),
+                ),
+            )
+
+            // "Select all" of a filter that lists non-selectable statuses (05's ALL or
+            // NOT_IMPORTED): only PREVIEW rows are committable, so only they may be marked —
+            // otherwise selectedCount stops being the committable count.
+            dao.setSelectedByStatus(session, ImportItemStatus.entries, selected = true)
+
+            assertEquals(
+                listOf(true, true, false, false, false, false),
+                dao.itemsOf(session).map { it.selected },
+            )
+            assertEquals(2, dao.observeItemTallies(session).first().selectedCount)
+            assertEquals(2, dao.selectedItems(session).size)
+
+            // The row and ordinal-set selection writes share the same selectable domain.
+            dao.setSelected(session, ordinal = 2, selected = true)
+            dao.setSelectedOrdinals(session, ordinals = listOf(3, 4), selected = true)
+            assertEquals(
+                listOf(true, true, false, false, false, false),
+                dao.itemsOf(session).map { it.selected },
+            )
+        }
+
     @Test fun itemStatusWrites() =
         runTest {
             val session = dao.insertSession(importSessionEntity())
