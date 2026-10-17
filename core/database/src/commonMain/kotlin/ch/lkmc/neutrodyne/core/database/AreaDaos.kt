@@ -507,10 +507,6 @@ interface ImportDao {
     suspend fun itemsOf(sessionId: Long): List<ImportItemEntity>
 }
 
-/** `BackupDao` (M3: `observeLibraryShape`, the backup export reads). */
-@Dao
-interface BackupDao
-
 /** `MaintenanceDao` (M11b: the `db-maintenance` lane's sweeps and `PRAGMA`s). */
 @Dao
 interface MaintenanceDao
