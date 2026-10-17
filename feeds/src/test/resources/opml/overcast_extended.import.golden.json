@@ -1,0 +1,25 @@
+{
+  "entries": [
+    {
+      "htmlUrl": "https://show.example.com",
+      "ordinal": 0,
+      "title": "Show",
+      "url": "https://show.example.com/rss"
+    },
+    {
+      "ordinal": 1,
+      "preselect": false,
+      "title": "Other",
+      "url": "https://other.example.com/rss"
+    }
+  ],
+  "format": "OPML",
+  "groups": [],
+  "ignoredOutlines": 5,
+  "warnings": [
+    {
+      "code": "IGNORED_OUTLINES",
+      "count": 5
+    }
+  ]
+}

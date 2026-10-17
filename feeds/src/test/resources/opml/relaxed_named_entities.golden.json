@@ -1,0 +1,18 @@
+{
+  "entries": [
+    {
+      "ordinal": 0,
+      "text": "Café & Tea Time",
+      "type": "rss",
+      "url": "https://e.example.com/rss"
+    },
+    {
+      "ordinal": 1,
+      "text": "Rocks &amp; hard",
+      "type": "rss",
+      "url": "https://r.example.com/rss"
+    }
+  ],
+  "folders": [],
+  "mode": "RELAXED"
+}

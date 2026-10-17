@@ -29,6 +29,12 @@ import java.io.File
  * `Xml.newPullParser()` (KXmlParser), so kxml2/AOSP divergences surface here: leading whitespace,
  * `<?xml` placement and DOCDECL handling are the ones that matter.
  *
+ * The shared goldens are not pass-independent: they pin which cascade pass answered and how that
+ * parser treats malformed input. Where the two parsers genuinely diverge a single file cannot
+ * hold both truths, so a fixture may carry a `<name>.android.golden.json` overlay this leg uses
+ * instead — `html_named_entities` is the first: kxml2's strict pass drops undeclared entities
+ * from attribute values while AOSP's keeps their literal spellings.
+ *
  * As in `AndroidParserGoldenTest`, the canonical-JSON comparison duplicates the `:feeds:jvm`-local
  * `Goldens` helper; the golden files stay single-sourced and this leg never writes them.
  */
@@ -64,7 +70,9 @@ class AndroidOpmlReaderGoldenTest {
         for (fixture in fixtures) {
             val name = fixture.name.removeSuffix(".opml")
             val result = reader.read({ Buffer().write(fixture.readBytes()) })
-            val goldenFile = File(FIXTURES_DIR, "$name.golden.json")
+            val goldenFile =
+                File(FIXTURES_DIR, "$name.android.golden.json").takeIf { it.isFile }
+                    ?: File(FIXTURES_DIR, "$name.golden.json")
             assertWithMessage("missing golden for $name").that(goldenFile.isFile).isTrue()
             assertWithMessage("golden mismatch for $name")
                 .that(canonicalJson(serializable(result)) + "\n")

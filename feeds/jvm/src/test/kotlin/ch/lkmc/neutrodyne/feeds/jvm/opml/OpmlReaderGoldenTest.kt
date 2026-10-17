@@ -14,10 +14,12 @@ import org.junit.Test
 
 /**
  * The OPML golden corpus (05 Testing): every fixture under `feeds/src/test/resources/opml/` reads
- * through the strict pass on kxml2 — the desktop's run-time parser, through
- * `PullParserFactory.Discovered` — and matches its `<name>.golden.json`. A4's relaxed and salvage
- * passes reuse the same corpus: `google_broken` already pins the strict leg's `MALFORMED`, and its
- * relaxed/salvage rows arrive with that PR.
+ * through the strict → relaxed → salvage cascade on kxml2 — the desktop's run-time parser, through
+ * `PullParserFactory.Discovered` — and matches its `<name>.golden.json`, pinning which pass
+ * answered (`mode`) alongside the decoded entries. Strict is far more tolerant than the spec's
+ * error list (EOF inside elements, control bytes, undeclared entities all pass — entities drop
+ * silently); relaxed adds bare `&`, unquoted/single-quoted attributes, HTML entities, in-tag `<`
+ * and mid-tag EOF; salvage takes what still throws (malformed numeric references among them).
  * `./gradlew :feeds:jvm:test -PupdateGoldens` rewrites the goldens locally (refused on CI).
  */
 class OpmlReaderGoldenTest {
