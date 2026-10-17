@@ -2,6 +2,8 @@
 
 package ch.lkmc.neutrodyne.core.data.backup
 
+import androidx.room3.useWriterConnection
+import ch.lkmc.neutrodyne.core.data.execSql
 import ch.lkmc.neutrodyne.core.database.DescriptionFormat
 import ch.lkmc.neutrodyne.core.database.EpisodeDescriptionCodec
 import ch.lkmc.neutrodyne.core.database.EpisodeEntity
@@ -112,6 +114,41 @@ class RestoreMatchingTest {
                 PodcastUrlAliasEntity("https://k/old", byAlias, AliasReason.REDIRECT, 1L),
             )
             assertEquals(byAlias, podcasts.match("https://none", listOf("https://k/old"), "urn:g"))
+        }
+
+    @Test
+    fun podcastMatchChunksAliasEvidenceAtBindLimit() =
+        runTest {
+            // A backup's alias list is unbounded: the `IN (:keys)` selects chunk at
+            // BIND_CHUNK (02 Transactions and threading) or the 600+ keys bound twice
+            // would pass SQLite's variable limit. The hits sit past the first chunk so
+            // a single unchunked query also fails here.
+            val byFeedKey = db.podcastDao().insertPodcast(podcastEntity(feedKey = "https://hit/feed"))
+            val byAlias = db.podcastDao().insertPodcast(podcastEntity(feedKey = "https://other/feed"))
+            db.podcastDao().insertAlias(
+                PodcastUrlAliasEntity("https://hit/alias", byAlias, AliasReason.REDIRECT, 1L),
+            )
+            val low = db.podcastDao().insertPodcast(podcastEntity(feedKey = "https://hit/low"))
+            val high = db.podcastDao().insertPodcast(podcastEntity(feedKey = "https://hit/high"))
+            val padding = (1..600).map { "https://none/$it" }
+
+            // Rank 1 (backup alias = local feedKey) in the second chunk beats rank 2 in the first.
+            assertEquals(
+                byFeedKey,
+                podcasts.match(
+                    "https://miss",
+                    listOf("https://hit/alias") + padding + "https://hit/feed",
+                    null,
+                ),
+            )
+            // Alias evidence alone resolves from the second chunk.
+            assertEquals(byAlias, podcasts.match("https://miss", padding + "https://hit/alias", null))
+            // Same-rank hits spanning chunks take the lowest id (low was inserted
+            // before high, whose hit lands in the first chunk), not the first chunk's hit.
+            assertEquals(
+                low,
+                podcasts.match("https://miss", listOf("https://hit/high") + padding + "https://hit/low", null),
+            )
         }
 
     @Test
@@ -271,6 +308,27 @@ class RestoreMatchingTest {
 
             // Ordinary v1 rows still match by stored key without a recomputation or a head.
             assertNotNull(index.match(EpisodeMatchHints(identityKey = "g:big-42", kv = 1)))
+        }
+
+    @Test
+    fun episodeForeignVersionKeyCollapseBlocksClaim() =
+        runTest {
+            val p = insertPodcast()
+            // Two v2-keyed rows recompute to the same v1 key — non-unique evidence
+            // claims nothing (02's collapse rule), exactly like a shared enclosure or
+            // GUID, and the line falls through to a stub.
+            insertEpisode(p, "2t:a") { copy(title = "Same", pubDate = 1000) }
+            insertEpisode(p, "2t:b") { copy(title = "Same", pubDate = 1000) }
+            val unique = insertEpisode(p, "2t:c") { copy(title = "Unique", pubDate = 2000) }
+            val index = episodes.index(p, setOf(1))
+
+            val sharedKey =
+                EpisodeKeys.keyFor(KeyInput(title = "Same", pubDate = 1000), EpisodeKeys.VERSION)
+            assertNull(index.match(EpisodeMatchHints(identityKey = sharedKey, kv = 1)))
+
+            val uniqueKey =
+                EpisodeKeys.keyFor(KeyInput(title = "Unique", pubDate = 2000), EpisodeKeys.VERSION)
+            assertEquals(unique, index.match(EpisodeMatchHints(identityKey = uniqueKey, kv = 1)))
         }
 
     @Test
@@ -570,6 +628,69 @@ class RestoreMatchingTest {
         }
 
     @Test
+    fun mergePositionTieKeepsLocal() =
+        runTest {
+            val p = insertPodcast()
+            val e = insertEpisode(p, "g:tie")
+            db.positionDao().upsert(
+                EpisodePositionEntity(
+                    e,
+                    positionMs = 100,
+                    durationMs = 900,
+                    positionSource = PositionSource.STREAM,
+                    updatedAt = 500,
+                ),
+            )
+
+            // posAt == local updatedAt: the strict `updatedAt < :posAt` guard keeps local.
+            writes.mergePosition(e, RestorePositionValues(200, 950, PositionSource.DOWNLOAD, 500))
+            val pos = db.positionDao().byEpisode(e)!!
+            assertEquals(100L, pos.positionMs)
+            assertEquals(900L, pos.durationMs)
+            assertEquals(PositionSource.STREAM, pos.positionSource)
+            assertEquals(500L, pos.updatedAt)
+        }
+
+    @Test
+    fun mergePositionZeroLineStillRunsPostRules() =
+        runTest {
+            val p = insertPodcast()
+            val e = insertEpisode(p, "g:pz")
+            // Local progress the backup's played mark post-dates: `mergeState` wins the
+            // played OR, then the pos-0 line must still run the post rules — a pos-0
+            // line writes no position (N1), but the played-reset and proxy derivations
+            // evaluate the merged result. The stored position (500 < playedAt 900)
+            // resets to 0 stamped playedAt (05 mark-played semantics).
+            db.positionDao().upsert(
+                EpisodePositionEntity(
+                    e,
+                    positionMs = 5000,
+                    durationMs = null,
+                    positionSource = PositionSource.STREAM,
+                    updatedAt = 500,
+                ),
+            )
+            writes.mergeState(
+                e,
+                RestoreStateValues(
+                    playedAt = 900,
+                    playCount = 1,
+                    startedAt = null,
+                    lastPlayedAt = null,
+                    isFavorite = false,
+                    downloadDismissedAt = null,
+                    measuredDurationMs = null,
+                    ts = 900,
+                ),
+            )
+            writes.mergePosition(e, RestorePositionValues(0, null, PositionSource.STREAM, 850))
+
+            val pos = db.positionDao().byEpisode(e)!!
+            assertEquals(0L, pos.positionMs)
+            assertEquals(900L, pos.updatedAt)
+        }
+
+    @Test
     fun mergePositionPlayedResetsStampedPlayedAt() =
         runTest {
             val p = insertPodcast()
@@ -655,6 +776,8 @@ class RestoreMatchingTest {
             assertEquals(100L, s.playedAt)
             assertEquals(1, s.playCount)
             assertFalse(s.isFavorite)
+            // The backup's startedAt = 40 wrote, then the played row's marker cleared.
+            assertNull(s.startedAt)
             assertEquals(300L, s.updatedAt) // ts verbatim, no max
             val pos = db.positionDao().byEpisode(e)!!
             assertEquals(50L, pos.positionMs)
@@ -713,6 +836,50 @@ class RestoreMatchingTest {
             assertEquals(listOf(e1, e2, e3), entries.map { it.episodeId })
             assertEquals(listOf(100L, 101L, 102L), entries.map { it.addedAt })
             assertEquals(setOf(e1, e2, e3), db.queueDao().queuedEpisodeIds().toSet())
+        }
+
+    // --- Replace pre-step clears (05 UP_NEXT and the session context) ----------------------------
+
+    @Test
+    fun queueClearRemovesEveryEntry() =
+        runTest {
+            val p = insertPodcast()
+            val e1 = insertEpisode(p, "g:c1")
+            val e2 = insertEpisode(p, "g:c2")
+            writes.insertQueueEntry(e1, "a0", 100)
+            writes.insertQueueEntry(e2, "a1", 101)
+
+            assertEquals(2, db.queueDao().clear())
+            assertTrue(db.queueDao().entries().isEmpty())
+            assertNull(db.queueDao().lastOrderKey())
+        }
+
+    @Test
+    fun sessionClearContextKeepsCurrentEpisodeAndBumpsGeneration() =
+        runTest {
+            val p = insertPodcast()
+            val e = insertEpisode(p, "g:s")
+            db.playSessionDao().ensureNow(10)
+            db.useWriterConnection {
+                it.execSql(
+                    "UPDATE play_session SET currentEpisodeId = $e, contextType = 'GROUP'," +
+                        " contextId = 7, contextAnchorEpisodeId = $e, contextAnchorSortDate = 42" +
+                        " WHERE id = 0",
+                )
+            }
+
+            // The scoped clear (05 Replace pre-step): the context fields null out and
+            // the generation bumps so a session write elsewhere is never clobbered;
+            // the playing episode is not context and stays.
+            assertEquals(1, db.playSessionDao().clearContext(500))
+            val session = db.playSessionDao().get()!!
+            assertNull(session.contextType)
+            assertNull(session.contextId)
+            assertNull(session.contextAnchorEpisodeId)
+            assertNull(session.contextAnchorSortDate)
+            assertEquals(e, session.currentEpisodeId)
+            assertEquals(1L, session.generation)
+            assertEquals(500L, session.updatedAt)
         }
 
     private suspend fun insertPodcast(): Long = db.podcastDao().insertPodcast(podcastEntity())

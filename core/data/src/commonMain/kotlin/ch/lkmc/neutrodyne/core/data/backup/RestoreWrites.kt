@@ -20,6 +20,12 @@ private const val SORT_DATE_MAX_FUTURE_MS = 86_400_000L
  * B/C apply per matched or stubbed line (05 Merge and Replace rules; B10/B11 call these).
  * Restore timestamps: every row written stores the backup's `ts`/`posAt` as `updatedAt`,
  * never the restore's `now`; a kept local value keeps its own `updatedAt`.
+ *
+ * Callers write state before position for a line (05 step 5's order) — the primitives rely
+ * on it: `replaceState` is `INSERT OR REPLACE` (delete-and-insert), so a position write
+ * first would lose the in-progress proxy row `finishPosition` derived when the verbatim
+ * state row lands; and the post rules read `episode_state.playedAt`, so a merge position
+ * write must see the merged state, not the pre-merge one.
  */
 @Inject
 internal class RestoreWrites(
@@ -62,34 +68,39 @@ internal class RestoreWrites(
     /**
      * 05 Position (Merge): `INSERT OR IGNORE` then the newer-`updatedAt`-wins UPDATE — a
      * backup 0 or null never replaces a local non-zero position (N1), so a non-positive
-     * [position] writes nothing at all. Then the shared post rules: the played-reset and the
-     * in-progress proxy.
+     * [position] writes no position at all. The post rules run on the merged result
+     * regardless: a pos-0 line over a row `mergeState` just marked played still resets
+     * its older stored position to `0@playedAt`, and an unplayed result whose local
+     * position survived still derives its in-progress proxy.
      */
     suspend fun mergePosition(
         episodeId: Long,
         position: RestorePositionValues,
     ) {
-        if (position.positionMs <= 0) return
-        backupDao.ensurePositionForMerge(
-            episodeId,
-            position.positionMs,
-            position.durationMs,
-            position.positionSource,
-            position.posAt,
-        )
-        backupDao.mergePosition(
-            episodeId,
-            position.positionMs,
-            position.durationMs,
-            position.positionSource,
-            position.posAt,
-        )
+        if (position.positionMs > 0) {
+            backupDao.ensurePositionForMerge(
+                episodeId,
+                position.positionMs,
+                position.durationMs,
+                position.positionSource,
+                position.posAt,
+            )
+            backupDao.mergePosition(
+                episodeId,
+                position.positionMs,
+                position.durationMs,
+                position.positionSource,
+                position.posAt,
+            )
+        }
         finishPosition(episodeId)
     }
 
     /**
      * 05 Played (Replace): the backup's state row verbatim — the Replace pre-step deleted the
-     * local one. A `ts = 0` line means unplayed: no state field written (05).
+     * local one. A `ts = 0` line means unplayed: no state field written (05). One column is
+     * not verbatim: `clearPlayedStart` nulls `startedAt` on a played result, so a played
+     * foreign row drops the in-progress marker it carried (played ⇒ no progress, 05).
      */
     suspend fun replaceState(
         episodeId: Long,

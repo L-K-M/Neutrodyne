@@ -150,21 +150,42 @@ interface BackupDao {
     /**
      * Podcast step 1 (02): the backup `feedKey` or any backup alias against local `feedKey`s
      * and `podcast_url_alias`es — a live `feedKey` beats alias evidence, ties by `id`.
-     * [keys] = `[key]` + the backup's aliases. (02 names the sort column `rank`; `rank` is a
-     * window-function keyword Room's parser rejects, so the column is `r` here. The outer
-     * select keeps the result single-column.)
+     * [keys] = `[key]` + the backup's aliases. The alias list is untrusted and unbounded, so
+     * the `IN` selects chunk at [BIND_CHUNK] (02 Transactions and threading) and the minimum
+     * (rank, id) is picked in Kotlin; the exact-`key` hit is its own single-bind select.
+     * (02 names the sort column `rank`; `rank` is a window-function keyword Room's parser
+     * rejects, so the column is `r` here.)
      */
-    @Query(
-        "SELECT id FROM (" +
-            "SELECT id, 0 AS r FROM podcast WHERE feedKey = :key" +
-            " UNION ALL SELECT id, 1 FROM podcast WHERE feedKey IN (:keys)" +
-            " UNION ALL SELECT podcastId, 2 FROM podcast_url_alias WHERE url IN (:keys)" +
-            " ORDER BY r, id LIMIT 1)",
-    )
     suspend fun matchPodcastByKeys(
         key: String,
         keys: List<String>,
-    ): Long?
+    ): Long? {
+        matchPodcastByFeedKey(key)?.let { return it }
+        var best: BackupPodcastMatchRow? = null
+        for (chunk in keys.distinct().chunked(BIND_CHUNK)) {
+            for (row in matchPodcastByKeysChunk(chunk)) {
+                if (best == null || row.r < best!!.r || (row.r == best!!.r && row.id < best!!.id)) {
+                    best = row
+                }
+            }
+        }
+        return best?.id
+    }
+
+    /** Rank 0 of [matchPodcastByKeys]: the backup's own `feedKey` outranks any alias evidence. */
+    @Query("SELECT id FROM podcast WHERE feedKey = :key")
+    suspend fun matchPodcastByFeedKey(key: String): Long?
+
+    /**
+     * Room primitive behind [matchPodcastByKeys]: one chunk's ranked candidates —
+     * rank 1 = backup key/alias hits a local `feedKey`, rank 2 = a local
+     * `podcast_url_alias`. Callers must chunk [keys] at the bind limit.
+     */
+    @Query(
+        "SELECT id, 1 AS r FROM podcast WHERE feedKey IN (:keys)" +
+            " UNION ALL SELECT podcastId AS id, 2 AS r FROM podcast_url_alias WHERE url IN (:keys)",
+    )
+    suspend fun matchPodcastByKeysChunk(keys: List<String>): List<BackupPodcastMatchRow>
 
     /**
      * Podcast step 2 (02): the real `podcast:guid` only — a derived GUID is never match
@@ -394,6 +415,12 @@ data class BackupPodcastRow(
     val syncId: String,
     /** `credential.origin` of `podcast.credentialId`; NULL = no credential. */
     val credentialOrigin: String?,
+)
+
+/** One ranked candidate of [BackupDao.matchPodcastByKeysChunk] (`r`: 1 = `feedKey`, 2 = alias). */
+data class BackupPodcastMatchRow(
+    val id: Long,
+    val r: Int,
 )
 
 /** One `podcast_url_alias` row as `PodcastV1.aliases` needs it. */
