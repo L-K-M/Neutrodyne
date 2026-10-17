@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.ui
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
@@ -83,6 +84,7 @@ public fun MarkFeedPlayedDialog(
                     Row(
                         Modifier
                             .fillMaxWidth()
+                            .heightIn(min = OPTION_MIN_HEIGHT)
                             .selectable(
                                 selected = state.option == option,
                                 enabled = state.phase != MarkPlayedPhase.WRITING,
@@ -116,3 +118,6 @@ public fun MarkFeedPlayedDialog(
         }
     }
 }
+
+/** Each whole row is the radio target, at least the 48 dp touch target (08). */
+private val OPTION_MIN_HEIGHT = 48.dp

@@ -29,7 +29,12 @@ internal class EffectiveSettingsResolverImpl(
     private val dao = db.scopeSettingsDao()
 
     override suspend fun notifications(podcastIds: Collection<Long>): Map<Long, Effective<Boolean>> =
-        dao.podcastScopes(podcastIds.toList()).resolve(settings.scopeDefaults()).mapValues { it.value.notification() }
+        podcastIds
+            .distinct()
+            .chunked(NOTIFICATION_BIND_CHUNK)
+            .flatMap { dao.podcastScopes(it) }
+            .resolve(settings.scopeDefaults())
+            .mapValues { it.value.notification() }
 
     override suspend fun refreshIntervals(): Map<Long, Effective<Int?>> =
         dao.allPodcastScopes().resolve(settings.scopeDefaults()).mapValues { it.value.refresh() }
@@ -54,6 +59,11 @@ internal class EffectiveSettingsResolverImpl(
 
     private fun ScopedSettingsView.notification(): Effective<Boolean> =
         Effective(requireNotNull(effective.notifyNewEpisodes), sources.getValue(SettingField.NOTIFY_NEW_EPISODES))
+
+    private companion object {
+        // The notifier resolves a whole run, which can exceed SQLite 3.18's variable limit.
+        const val NOTIFICATION_BIND_CHUNK = 500
+    }
 
     private fun ScopedSettingsView.refresh(): Effective<Int?> =
         Effective(effective.refreshIntervalMinutes, sources.getValue(SettingField.REFRESH_INTERVAL_MINUTES))

@@ -42,6 +42,10 @@ public data class AppearancePrefs(
 public val LocalSystemUiState: androidx.compose.runtime.ProvidableCompositionLocal<SystemUiState> =
     staticCompositionLocalOf { SystemUiState.DEFAULT }
 
+/** Resolved app-theme darkness, including an explicit light/dark appearance preference. */
+internal val LocalAppDarkTheme: androidx.compose.runtime.ProvidableCompositionLocal<Boolean> =
+    staticCompositionLocalOf { false }
+
 /** True when every animation spec must be a snap (08 Motion token). */
 public val LocalReducedMotion: androidx.compose.runtime.ProvidableCompositionLocal<Boolean> =
     staticCompositionLocalOf { false }

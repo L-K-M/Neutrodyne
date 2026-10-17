@@ -15,6 +15,8 @@ import ch.lkmc.neutrodyne.core.common.StoragePaths
 import ch.lkmc.neutrodyne.core.database.DatabaseFactory
 import ch.lkmc.neutrodyne.core.database.DesktopDatabaseFactory
 import ch.lkmc.neutrodyne.core.database.StrictMigrations
+import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
+import ch.lkmc.neutrodyne.core.domain.NoGroupChannels
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
@@ -129,6 +131,10 @@ object DesktopCoreBindings {
 
             override fun rewrite(count: Int): List<String> = OrderKey.rewrite(count)
         }
+
+    /** The desktop has no notification channels (05 Notification channels); this stays the binding. */
+    @Provides
+    fun groupChannelSync(): GroupChannelSync = NoGroupChannels
 }
 
 private object NoEventsPowerMonitor : PowerMonitor {

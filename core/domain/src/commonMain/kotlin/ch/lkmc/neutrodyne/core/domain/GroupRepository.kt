@@ -8,8 +8,9 @@ import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.GroupEdit
 import ch.lkmc.neutrodyne.core.model.GroupMosaicMember
 import kotlinx.coroutines.flow.Flow
+import kotlin.jvm.JvmInline
 
-/** Group lifecycle, membership and ordering (05); mosaics and delete/undo arrive separately. */
+/** Group lifecycle, membership, ordering and delete/undo (05); mosaics arrive separately. */
 interface GroupRepository {
     /** Every group list is ordered by (orderKey, id). */
     fun observeGroups(): Flow<List<Group>>
@@ -65,7 +66,42 @@ interface GroupRepository {
         add: Set<Long>,
         remove: Set<Long>,
     ): Outcome<Unit, GroupError>
+
+    /**
+     * 05 Delete and undo: the group row, its memberships and its settings leave in one write
+     * transaction (podcasts are never deleted) and a GROUP play context on it is cleared. The
+     * returned token keeps the snapshot undoable for [UNDO_WINDOW_MS]; at expiry
+     * `GroupChannelSync.onDeleted` deletes the channel.
+     */
+    suspend fun delete(groupId: Long): Outcome<DeletedGroupToken, GroupError>
+
+    /**
+     * Restores the snapshot under [token]: the row with its original `id`, `uuid` and `orderKey`,
+     * the settings row, the members whose podcasts still exist and — while `play_session`'s
+     * `generation` is still the post-delete value — the cleared GROUP context. A `nameKey` taken
+     * meanwhile fails [GroupError.NameTaken] without writing; after the window
+     * [GroupError.UndoExpired].
+     */
+    suspend fun undoDelete(token: DeletedGroupToken): Outcome<Long, GroupError>
+
+    /**
+     * The group uuids whose deletes are still inside the undo window — the channel sweep of
+     * `GroupChannelSync.sync` (05 Notification channels) must spare them: their channels stay
+     * until `onDeleted` or process death settles the token.
+     */
+    suspend fun pendingUndoUuids(): Set<String>
+
+    companion object {
+        /** 05 Delete and undo: how long a deleted group stays undoable, in milliseconds. */
+        const val UNDO_WINDOW_MS = 10_000L
+    }
 }
+
+/** The handle to a live undo window (05 Delete and undo); opaque, process-local, 10 s. */
+@JvmInline
+value class DeletedGroupToken(
+    val value: String,
+)
 
 sealed interface GroupError {
     data object NameEmpty : GroupError
