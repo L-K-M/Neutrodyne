@@ -50,7 +50,11 @@ public class ZipGuard : ArchiveReaderFactory {
         try {
             return Reader(zip, caps, validateNames(zip, caps))
         } catch (e: Throwable) {
-            zip.close()
+            try {
+                zip.close()
+            } catch (closeFailure: Throwable) {
+                e.addSuppressed(closeFailure)
+            }
             throw e
         }
     }
@@ -220,7 +224,10 @@ public class ZipGuard : ArchiveReaderFactory {
         private val totalInflated = AtomicLong()
 
         override fun open(name: String): Source {
-            val entry = zip.getEntry(name) ?: throw corrupt("zip")
+            // `getEntry` falls back to "name/" when the exact name is absent — only an exact
+            // match is a valid read.
+            val entry = zip.getEntry(name)
+            if (entry == null || entry.name != name) throw corrupt("zip")
             val stream =
                 try {
                     zip.getInputStream(entry)
@@ -258,7 +265,9 @@ public class ZipGuard : ArchiveReaderFactory {
                 try {
                     super.read(sink, byteCount)
                 } catch (e: ZipException) {
-                    // Bad CRC, damaged deflate data, inconsistent local header.
+                    // Damaged deflate data or a local header inconsistent with the central
+                    // directory. `ZipFile` never verifies the CRC — bad bytes arrive silently,
+                    // so content integrity is the manifest SHA-256 check's job (05 Validation).
                     throw corrupt("zip")
                 } catch (e: EOFException) {
                     // The entry's deflate stream runs out before its declared end: damage inside

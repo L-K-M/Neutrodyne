@@ -5,6 +5,7 @@ import okio.Path
 import okio.Path.Companion.toOkioPath
 import java.io.ByteArrayOutputStream
 import java.nio.file.Files
+import java.util.zip.CRC32
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -84,6 +85,23 @@ internal object ZipTestFiles {
         return zip
     }
 
+    /** A valid ZIP holding [entries] (name → content) in order, STORED (no inflater involved). */
+    fun storedZipBytes(entries: List<Pair<String, ByteArray>>): ByteArray {
+        val out = ByteArrayOutputStream()
+        ZipOutputStream(out).use { zip ->
+            for ((name, content) in entries) {
+                val entry = ZipEntry(name)
+                entry.method = ZipEntry.STORED
+                entry.size = content.size.toLong()
+                entry.crc = CRC32().also { it.update(content) }.value
+                zip.putNextEntry(entry)
+                zip.write(content)
+                zip.closeEntry()
+            }
+        }
+        return out.toByteArray()
+    }
+
     /**
      * A one-entry archive followed by a ZIP64 END declaring [centot64] entries: the classic END
      * carries the 0xFFFF/0xFFFFFFFF sentinels, so `java.util.zip.ZipFile` adopts the 64-bit count
@@ -140,6 +158,17 @@ internal object ZipTestFiles {
         check(u32(zip, at) == ENDSIG) { "fixture drift: the END record is not at the tail" }
         put16(zip, at + END_TOT, declaredEntries)
         put32(zip, at + END_SIZ, declaredCenlen)
+        return zip
+    }
+
+    /**
+     * [zip] with the central-directory CRC of its entry made wrong. `java.util.zip` never
+     * verifies it: the read delivers the bytes silently.
+     */
+    fun corruptCenCrc(zip: ByteArray): ByteArray {
+        var at = zip.size - CEN_NAME_LEN_OFFSET
+        while (u32(zip, at) != CENSIG) at--
+        zip[at + CEN_CRC_OFFSET] = (zip[at + CEN_CRC_OFFSET].toInt() xor 0xFF).toByte()
         return zip
     }
 
@@ -209,6 +238,7 @@ internal object ZipTestFiles {
     // Central-directory record: 46 fixed bytes before name, extra and comment.
     private const val CENHDR = 46
     private const val CENSIG = 0x02014B50L
+    private const val CEN_CRC_OFFSET = 16
     private const val CEN_NAME_LEN_OFFSET = 28
 
     // End-of-central-directory record: 22 fixed bytes, then the comment.
