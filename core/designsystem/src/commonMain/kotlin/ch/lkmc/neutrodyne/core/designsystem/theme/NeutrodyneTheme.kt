@@ -37,6 +37,7 @@ public fun NeutrodyneTheme(
         LocalArtworkTintEnabled provides prefs.artworkTint,
         LocalReducedMotion provides system.reducedMotion,
         LocalSystemUiState provides system,
+        LocalAppDarkTheme provides dark,
     ) {
         MaterialTheme(
             colorScheme = scheme,

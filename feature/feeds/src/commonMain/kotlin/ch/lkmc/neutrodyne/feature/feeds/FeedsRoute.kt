@@ -4,16 +4,18 @@ package ch.lkmc.neutrodyne.feature.feeds
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.paging.compose.collectAsLazyPagingItems
-import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
+import ch.lkmc.neutrodyne.core.navigation.AllGroupsKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
+import ch.lkmc.neutrodyne.core.ui.BindEpisodeSelection
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeRouteResult
+import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedDialog
 import ch.lkmc.neutrodyne.core.ui.YouTubeLinks
 import ch.lkmc.neutrodyne.core.ui.dispatchEpisodeRoute
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
@@ -28,20 +30,31 @@ import dev.zacsweers.metrox.viewmodel.metroViewModel
 @Composable
 internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val items = viewModel.feed.collectAsLazyPagingItems()
+    val markPlayed by viewModel.markPlayed.state.collectAsStateWithLifecycle()
+    val pageState = rememberSaveableStateHolder()
     val live = viewModel.live.collectAsStateWithLifecycle()
     val navigator = LocalAppNavigator.current
     val urls = LocalPlatformActions.current.urls
     val clipboard = LocalClipboardManager.current
 
+    BindEpisodeSelection(viewModel.episodeSelection)
+
     FeedsScreen(
+        selection = viewModel.episodeSelection,
         state = state,
-        items = items,
+        pagingFor = viewModel::pagingFor,
+        prefsFor = viewModel::prefsFor,
+        pageState = pageState,
+        onPageSettled = viewModel::onPageSettled,
+        onVisitStart = viewModel::onVisitStart,
+        onVisitEnd = viewModel::onVisitEnd,
+        onAllGroups = { navigator.push(AllGroupsKey) },
         live = live,
-        onVisibleIds = { viewModel.onVisibleIds(FeedSource.All, it) },
+        onVisibleIds = { ref, ids -> viewModel.onVisibleIds(ref, ids) },
         onRefresh = viewModel::onRefresh,
-        onFiltersChange = viewModel::onFiltersChange,
+        onFiltersChange = viewModel::onFilters,
         onAction = { action ->
+            if (action is EpisodeAction.Open || action is EpisodeAction.OpenPodcast) viewModel.episodeSelection.clear()
             when (dispatchEpisodeRoute(action, navigator, urls)) {
                 EpisodeRouteResult.HANDLED -> {}
 
@@ -63,12 +76,22 @@ internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
         onSearch = { navigator.selectTab(DiscoverKey) },
     )
 
+    markPlayed?.let { dialog ->
+        MarkFeedPlayedDialog(
+            dialog,
+            viewModel.markPlayed::select,
+            viewModel.markPlayed::confirm,
+            viewModel.markPlayed::dismiss,
+        )
+    }
+
     ShowUserMessages(
         messages = state.messages,
         onAcknowledgeMessage = viewModel::onMessageShown,
         // The "Copy link" tap reports back by message id (01's onMessageAction contract); the
         // clipboard is a composition concern the platform-free ViewModel never sees.
         onMessageAction = { id ->
+            viewModel.undoSwipe(id)
             viewModel.consumeCopyLink(id)?.let { clipboard.setText(AnnotatedString(it)) }
         },
     )

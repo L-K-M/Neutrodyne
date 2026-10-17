@@ -443,6 +443,18 @@ Startup metric (Android): the Feeds route calls `ReportDrawnWhen { selectedPage.
 
 A three-column grid of [`GroupMosaic`](#groupmosaic-and-group-tab-label) tiles: section "Recent" (up to 4 groups by `lastViewedAt`) then "All groups" A–Z (`TitleCollator`), including groups with `showAsTab = false` (marked with `visibility_off`). Tap → select that group in Feeds (hidden groups become a [transient tab](#selection-persistence-and-fallback)) and close. Buttons: "New group" → `GroupEditKey(null)`, "Manage groups" → `GroupsManageKey`. Empty: "No groups yet" + "New group".
 
+**Implementation note (2026-10-16, M2):** D2b writes the UUID-based
+`ui.feeds_selected_source` through `SettingsRepository`, the same application
+API the pager uses. The sheet closes after a successful write; a failed write
+keeps it open and shows the shared write-error message inside the sheet.
+Recent includes groups with a visit time and breaks equal times by title.
+The picker remains reachable when every group is hidden: the All-only tab row
+stays visible while groups exist. With no groups and only All, that row is absent.
+The shared overlay supports a half-height initial detent for `AllGroupsKey`;
+short content uses Material's available anchors. Other sheet keys retain their
+fully expanded initial detent. The desktop sheet focuses New group on open;
+the window surface handles scrim dismissal and returns focus on close.
+
 ### Library
 
 `LibraryKey`, `:feature:library`, M1 (grid), M2 (groups, chips, selection), M10 (density, shared elements).
@@ -1483,6 +1495,19 @@ Entered by long-press, Ctrl/Cmd-click or the "Select" overflow or context-menu a
 | Stop importing? | Cancel while FETCHING | Stop (→ `ImportRepository.cancel`) · Keep importing |
 | Discard Android backup? (Android) | `foreignPending` banner or Backup page | Discard (→ `discardAndroidBackup()`) · Cancel |
 
+**Implementation note (2026-10-16, M2):** D9's shared `MarkFeedPlayedDialog`
+and ViewModel-owned `MarkFeedPlayedController` live in `:core:ui`. Features pass
+count/write callbacks and map domain outcomes, preserving 01's rule that
+`:core:ui` does not depend on `:core:domain`. All uses a null cutoff. The other
+options freeze an instant when selected: seven calendar days, one calendar
+month or three calendar months before now in UTC, preserving the time of day
+and clamping month ends. Count and guarded write reuse that instant. While
+counting, confirmation is unavailable; a zero count also has no confirm action.
+A changed selection shows its new count and asks again without writing.
+Errors stay in the dialog for retry; dismissing never writes. Confirmation has
+no undo. The ViewModel retains state across composition recreation; process
+recreation closes the dialog and requires a fresh count.
+
 The sync dialogs (unlink, delete my data, share feed passwords, held changes, restore while linked, first-link confirmations, local-network rationale, insecure connection) are specified in [Sync screens](#sync-screens). All dialogs are `NdDialog` (window-based), keep their input in `rememberSaveable`, and close on back or Esc; on the desktop the default button answers Enter, and destructive actions are never the default. Destructive confirm buttons use the `error` colour role.
 
 ### String mappers
@@ -1762,6 +1787,23 @@ encoding without depending on a feature module. Canonical UUID references
 round-trip; malformed values decode to All. Resolving a valid but unknown UUID
 and the selection fallback remain D1/D2 UI work.
 
+**Implementation note (2026-10-16, M2):** D1 delivers pager state while the
+route continues to render All; tab/pager rendering and lifecycle visit calls
+arrive in D2. `FeedsUiState.prefs` describes the selected source, while its
+compatibility `filters` field describes the rendered All page. The source-keyed
+cache uses B2's `pagedFeed(source)` helper to observe and compare effective
+filters/order before replacing a pager. Per-entry child scopes own `cachedIn`.
+The ViewModel exposes both the union live map and `liveBySource` projections,
+and `visitBaselines` retains each page's visit-start highlight baseline.
+Each changed stored reference waits for fresh tab and group emissions, so a
+route immediately after creating or restoring a group cannot reject a valid
+UUID using a previous observer snapshot. A successful explicit re-settle also
+resolves unchanged stored values after a failed fallback. Visit baseline reads
+wait for that source's previous visit write; visible-ID disposal retains its
+last source mapping even after a transient tab disappears. An evicted paging
+flow is cancelled: D2 must reacquire `pagingFor` when its page returns,
+including pages retained by Compose during a fling.
+
 ### Selection persistence and fallback
 
 ```mermaid
@@ -1792,6 +1834,26 @@ stateDiagram-v2
 - Scroll memory per page: one `rememberSaveableStateHolder()` hoisted to the Feeds route (outside the pager); each page is wrapped in `holder.SaveableStateProvider(ref.encode())` and uses `rememberLazyListState()`, so a page keeps its position after being disposed by the pager, across tab switches and process death. When a group disappears from the tabs, `holder.removeState(ref.encode())` drops its state. A page composes its `LazyColumn` only once its `LazyPagingItems` has a non-empty snapshot or `loadState.refresh` is `NotLoading` (skeleton rows before), so a restored `LazyListState` index is not clamped to 0 by an empty first measure; with placeholders enabled (05's `PagingConfig`) the restored index then shows placeholders until Paging loads around it.
 - Lists: `items(count, key = itemKey { … }, contentType = itemContentType { … })` with keys `"d:{epochDay}"` for day headers and the episode `id` (`Long`) for rows, and content types Day 0, RSS row 1, YouTube row 2 (05 asks for distinct types for 16:9 thumbnails); placeholders render skeleton rows.
 
+**Implementation note (2026-10-16, M2):** D2 renders the shared pager and
+source-scoped chips/refresh, with the saveable-state holder owned by the route.
+Only current ± 1 pages collect paging flows, even if Compose retains extra
+pages during a fling; returning pages reacquire the ViewModel cache entry.
+The list state is independent of paging generations, including an hourly
+age-window replacement. The computed age cutoff stays out of chip filters,
+because only the separate age-limit action can clear it. Virtual tab names are localized by source, rather than
+using the repository's English metadata titles. The row-swipe key gates pager
+gestures here; row gesture actions and their settings UI remain D10, and counted
+bulk-action dialogs remain D9.
+
+**Implementation note (2026-10-16, M2):** Compose Desktop 1.12.1's
+`StateRestorationTester.emulateSaveAndRestore()` throws `NotImplementedError`
+in `platformEncodeDecode`. `FeedsScreenTest` therefore round-trips its
+`SaveableStateRegistry` with primitive values and String pager keys,
+including recreating the ViewModel over persisted selection. The Android host
+`FeedsRestorationHostTest` additionally runs the real `StateRestorationTester`
+Bundle round trip for selected-page and scroll restoration. Actual process
+termination and native desktop input checks remain device coverage.
+
 ### Header, chips and actions
 
 The first list item of every page is the header: `NdTonalButton` "Play" (subtitle "oldest first" when `playOrder = OLDEST_FIRST`), [`FeedFilterChips`](#filter-chips) and the page overflow ([Feeds](#feeds)). It scrolls away, so the pinned chrome is the top bar plus the tab row (112 dp). Play results are shown per [Issues, results and events](#issues-results-and-events).
@@ -1808,6 +1870,15 @@ Each page is wrapped in `NdPullToRefresh` (`PullToRefreshBox`); a pull calls `Re
 | on | off | on (actions from `appearance.swipe_start_action` / `swipe_end_action`) | same |
 
 Both gestures never coexist half-working (`SwipeToDismissBox` would capture horizontal drags inside pages, risk U1). The pager node exposes custom accessibility actions "Next group" and "Previous group" (M2 acceptance 8); with a hardware keyboard Ctrl+Tab / Ctrl+Shift+Tab switch pages (both apps). On the desktop rows never swipe (the setting is hidden), the pager follows a touchpad's horizontal two-finger scroll and Shift+wheel, and the tabs, the All groups sheet and Ctrl+Tab are the main ways to switch; a mouse drag does not page (Unverified default of the multiplatform `HorizontalPager` for mouse input; if it pages, `userScrollEnabled` stays as specified above).
+
+**Implementation note (2026-10-16, M2):** D10 adds Android row swipes and
+Appearance gesture controls. The stored start/end defaults remain `ADD_UP_NEXT`
+and `MARK_PLAYED`. Queue actions (M4) and download actions (M6) are hidden in
+the chooser and inert when stored; their effective setting reads "None"
+without rewriting the saved value. `MARK_PLAYED` toggles played/unplayed.
+Only its tertiary-container background is needed in M2; add/delete backgrounds
+arrive with their actions. Rows commit only on release past 40 % of their
+width, regardless of fling velocity. Desktop rows ignore `caps.swipe`.
 
 ### Visits and new episodes
 
@@ -2863,7 +2934,7 @@ Serves N1, N4, N6. Expected failures arrive as values (01 [Errors](01-foundation
 
 1. The Feeds destination is the single All page: the group tab row and pager, tab/selection persistence, visit tracking and the overflow's "Hide older than…" and group entries arrive with M2's groups. The page header's Play button waits for M4's `PlaybackController`, and the row's Play/Download actions dispatch but are inert until M4/M6 bind their controllers (the offline toast of note 7 aside).
 2. The spec's "paged lists show `LoadState.Error` as a footer row" is replaced by the pinned `NdBanner` under the top bar for every non-empty-list load error — append, prepend and refresh with rows on screen (revised 2026-10-14). With 05's placeholders the append footer can sit thousands of unloaded rows away and a prepend failure has no footer at all, and keeping the footer alongside the banner showed the same error twice at the list end. Retry replays every failed load through `items.retry()`; the empty first-page failure keeps the standalone `EmptyState` with Retry.
-3. The Feeds overflow's "Mark all as played…" is the plain confirm/cancel `NdDialog` of the Library note above (same reason: no `countUnplayed` or cutoff options until M2), covering the whole feed via `markFeedPlayed(FeedSource.All, null)`. Its open confirmation is saveable across composition recreation.
+3. The Feeds overflow originally used the Library note's plain confirm/cancel `NdDialog`. **Implementation note (2026-10-16, M2):** D9 replaces it with the shared counted dialog, using the page's `FeedSource` (including All and Ungrouped). The ViewModel retains the open confirmation across composition recreation; options freeze a cutoff and stale selections require confirmation of the updated count.
 4. Settings › Feeds is reachable through the Settings home row only, its summary the live refresh interval; the row order's remaining M1 entries arrive with their milestones. On the desktop the Wi-Fi-only row stays visible with the "Not used on computers" line ([Shared pages](#settings-screens), 11's Android-only-row rule for rows users may look for) while refresh-on-open — an Android foreground trigger with no desktop meaning — is hidden.
 5. Row taps push `EpisodeKey`, which resolved to an M1a placeholder in `:feature:episode` — the same rule the Library's pushed keys got in note 8 above (`paneExtra` metadata, matching the episode detail's pane role): the Feeds rows dispatched `EpisodeAction.Open` before the episode-detail slice landed, and nav3's provider crashes on a key no module contributes. The episode slice (#95) replaced the placeholder with the episode detail route, so the key now resolves to the real screen.
 6. A "Watch on YouTube" open whose `ExternalUrlOpener` answers `NO_HANDLER` posts "No app can open this link" with "Copy link" through the screen's `UserMessage` queue (`dispatchEpisodeRoute`'s `EpisodeRouteResult` contract). `FeedsViewModel` maps message id → URL; the route reports the action tap back through `ShowUserMessages.onMessageAction` and writes the clipboard, since the clipboard is a composition concern a platform-free ViewModel never sees.
@@ -2874,7 +2945,7 @@ Serves N1, N4, N6. Expected failures arrive as values (01 [Errors](01-foundation
 
 1. ~~The Podcast settings rows "Edit feed address" and "Username and password" and the podcast detail banner's "Enter password" action are hidden behind `FEED_ACCOUNT_CONTROLS_ENABLED` until M1b: `PodcastRepository.editFeedUrl`/`setCredentials`/`merge` are M1b semantics and their M1a implementations throw `UnsupportedOperationException`, so the controls must not be reachable. M1b flips the flag and restores the Feed-section rows and the banner action.~~ **Resolved 2026-10-14 (M1b):** the repository writes are live, the flag is removed, and all three controls are reachable. Both settings rows stay RSS-only — a YouTube channel has neither a feed URL to move nor a Basic-auth credential. The Edit-URL dialog shows a failed edit as the field's inline error and stays open; a failed `setCredentials` posts the error snackbar.
 2. "Show in All" reads `PodcastDetail.includeInAll` and writes `PodcastRepository.setIncludeInAll`; the scoped `ScopedSettingsView`/`ScopeSettingsRepository.observePodcast` this document names as the data source arrives with M5's effective-settings resolution, so the field rides the M1a `observePodcast` read model alongside custom title and episode order. `FeedInfo.pendingNewFeedUrl` gets no row of its own at M1a — the pending-move surface is the M1b edit flow's.
-3. The podcast overflow's "Mark all as played…" confirmation is the same plain confirm/cancel `NdDialog` as the Library tile menu's (item 7 above): the cutoff options and `countUnplayed` arrive with M2's group data, so confirming marks the whole feed via `markFeedPlayed(source, null)`.
+3. The podcast overflow originally used the Library tile menu's plain confirm/cancel `NdDialog` (item 7 above). **Implementation note (2026-10-16, M2):** D9 replaces it with the shared counted dialog for `FeedSource.Podcast`, with cutoff options and guarded confirmation. The Library tile-menu item remains deferred to its own PR.
 4. M1a keeps the podcast screen's top bar in-flow rather than 08's pinned transparent overlay: the artwork-scheme gradient, `dropShadow` and shared-element hand-off arrive with M10's artwork tint, and the header's group chips with M5 — `PodcastHeader` ships the cover, title, author, Subscribed chip, three-line description and meta line only. The bar's title and elevation appear once the header has scrolled off (`firstVisibleItemIndex > headerIndex`; the offline banner is a list item before the header, so `headerIndex` is 1 while it shows, 0 otherwise).
 5. The paged list applies 08's paging-error rule where the user is: an append/prepend `LoadState.Error` — or a refresh failure while rows are on screen — pins an `NdBanner` under the top bar instead of the spec's footer row, because with 05's placeholders the footer can sit hundreds of unloaded rows away and a prepend failure has no row at all (revised 2026-10-14: previously the banner came in addition to the footer, which showed the same error twice at the list end). Retry replays every failed load through `items.retry()`; the empty first page keeps the in-list Failed shape.
 6. Every row renders the play and download affordances of `RowCaps.FULL`, but `PodcastViewModel.onRowAction` writes only `SetPlayed` — `PlayToggle`/the queue actions wait for M4 and `DownloadToggle` for M6, the same milestone scoping the Feeds screen's rows carry. The row's trailing buttons and menu entries still offer their actions; one tap is answered — the offline row's `cloud_off` play affordance raises the "You're offline" snackbar per the row table (the route checks `DownloadState`, since `PodcastUiState` carries no per-episode download state and `FeedRepository` has no per-episode lookup) — and every other tap is a no-op.

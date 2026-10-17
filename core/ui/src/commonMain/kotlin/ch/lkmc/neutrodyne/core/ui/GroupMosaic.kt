@@ -26,7 +26,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import ch.lkmc.neutrodyne.core.common.art.Monogram
+import ch.lkmc.neutrodyne.core.common.art.Graphemes
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverTier
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
@@ -190,7 +190,7 @@ private fun EmptyCell(
             )
         } else if (name.isNotEmpty()) {
             Text(
-                Monogram.spec(name).initials,
+                Graphemes.first(name),
                 color = tones.onContainer,
                 style = MaterialTheme.typography.titleMedium,
                 maxLines = 1,

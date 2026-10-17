@@ -51,7 +51,13 @@ public object SettingsNavigation {
             entry<SettingsHomeKey>(
                 metadata =
                     NdSceneMetadata.paneList(
-                        detailPlaceholder = { AppearancePage(settingsRepository, dynamicColorSupport) },
+                        detailPlaceholder = {
+                            AppearancePage(
+                                settingsRepository,
+                                dynamicColorSupport,
+                                platformInfo.kind,
+                            )
+                        },
                     ),
             ) {
                 SettingsHomeRoute(settingsRepository)
