@@ -1286,6 +1286,13 @@ object ImportDocuments {                    // pure adapters; OPML applies the f
 | `URL_LIST` (M8) | `UrlListParser` (04) | none → "YouTube" pre-filled only if every item is YouTube | ≤ 1 MB, ≤ 5,000 lines |
 | `NEUTRODYNE_BACKUP` | `BackupCodec` | from the archive | creates a session without `import_item` rows (the restore adds them when it finishes) and routes to the restore preview ([Full backup and restore](#full-backup-and-restore)) |
 
+**Implementation note (2026-10-17, M3).** The M3 `ImportSessions` handles only `OPML` (this table's
+first row) and `NEUTRODYNE_BACKUP` (the session-without-items row). A payload the sniffer already
+recognises as `NEWPIPE_JSON`, `LIBRETUBE_JSON`, `TAKEOUT_CSV` or `URL_LIST` — formats whose parsers
+are M8 work — is answered with `ImportError.Unsupported(UnsupportedSource.UNKNOWN)`, the same
+taxonomy entry an unrecognised payload gets; the UI copy stays "This doesn't look like a podcast
+list", which is honest for M3 because no parser could consume it anyway.
+
 ### Archive guard
 
 The archive container is JVM code (`java.util.zip`), so it sits in the `:feeds:jvm` island behind small common interfaces in `:feeds`, which `:core:data`'s `androidMain` and `desktopMain` bind to the island's classes ([D81](../PLAN.md#3-key-decisions)):
