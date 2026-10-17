@@ -405,7 +405,7 @@ object YouTubeIds {
      *  UULV→4, UUMO/UUPS/UULP/UUPV→null hint. ("UULF…" with 24 chars is the plain uploads list of a channel
      *  "UCLF…".) Result = "UC" + rest; must match CHANNEL, else null. */
     fun uploadsToChannel(playlistId: String): Pair<String, Int?>?
-    fun channelFromFeedLevel(id: String): String = if (id.length == 22) "UC$id" else id  // feed-level yt:channelId lacks "UC"
+    fun channelFromFeedLevel(id: String): String  // feed-level yt:channelId lacks "UC": prepend it when 22 chars; result must match CHANNEL
 }
 ```
 

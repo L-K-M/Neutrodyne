@@ -63,6 +63,13 @@ object YouTubeIds {
         return channelId to hint
     }
 
-    /** A channel ID from a feed-level `yt:channelId`, which omits the "UC" prefix. */
-    fun channelFromFeedLevel(id: String): String = if (id.length == 22) "UC$id" else id
+    /**
+     * A channel ID from a feed-level `yt:channelId`, which omits the "UC" prefix. Corrupt feed data
+     * fails fast instead of minting a bogus ID.
+     */
+    fun channelFromFeedLevel(id: String): String {
+        val channel = if (id.length == 22) "UC$id" else id
+        check(CHANNEL.matches(channel)) { "Not a channel id: $id" }
+        return channel
+    }
 }
