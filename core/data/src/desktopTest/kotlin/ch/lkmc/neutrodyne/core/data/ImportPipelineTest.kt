@@ -381,7 +381,9 @@ class ImportPipelineTest {
             // single-thread db dispatcher parked behind a latch holds the stage job mid-flight,
             // so the cancel provably lands while the detached job is alive.
             val gate = java.util.concurrent.CountDownLatch(1)
-            val dbThread = java.util.concurrent.Executors.newSingleThreadExecutor()
+            val dbThread =
+                java.util.concurrent.Executors
+                    .newSingleThreadExecutor()
             val stageDb = TestDb.inMemory(clock = clock, queryContext = dbThread.asCoroutineDispatcher())
             val stageScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
             val detachedSessions =

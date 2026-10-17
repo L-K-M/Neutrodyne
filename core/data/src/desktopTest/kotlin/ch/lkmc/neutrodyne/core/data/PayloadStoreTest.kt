@@ -130,7 +130,10 @@ class PayloadStoreTest {
             val snapshot = root.resolve("auto-snapshot.zip")
             snapshot.writeText("snapshot-bytes")
 
-            val staged = assertIs<Outcome.Success<PayloadStore.Staged>>(store.adopt(snapshot.absolutePath.toPath())).value
+            val staged =
+                assertIs<Outcome.Success<PayloadStore.Staged>>(
+                    store.adopt(snapshot.absolutePath.toPath()),
+                ).value
 
             assertEquals("auto-snapshot.zip", staged.displayName)
             assertEquals("snapshot-bytes", FileSystem.SYSTEM.read(staged.path) { readUtf8() })
@@ -143,7 +146,9 @@ class PayloadStoreTest {
         runTest {
             assertEquals(
                 ImportError.Unreadable,
-                assertIs<Outcome.Failure<ImportError>>(store.adopt(root.resolve("gone.bin").absolutePath.toPath())).error,
+                assertIs<Outcome.Failure<ImportError>>(
+                    store.adopt(root.resolve("gone.bin").absolutePath.toPath()),
+                ).error,
             )
             assertEquals(
                 ImportError.Unreadable,

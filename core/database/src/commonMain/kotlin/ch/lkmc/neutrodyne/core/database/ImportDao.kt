@@ -213,6 +213,14 @@ abstract class ImportDao {
     ): Int
 
     /**
+     * 05 §7 runner entry: `COMMITTED` → `FETCHING`. The conditional write is the atomic side of
+     * the transition — a `cancel` that commits first (or an already `FETCHING` resume) leaves the
+     * row untouched, so the runner never resurrects a cancelled session.
+     */
+    @Query("UPDATE import_session SET state = 'FETCHING' WHERE id = :sessionId AND state = 'COMMITTED'")
+    abstract suspend fun markFetching(sessionId: Long): Int
+
+    /**
      * 05 §7 finish: `DONE` stamps `finishedAt`, which opens the 7-day cleanup window (02). Only
      * COMMITTED/FETCHING may complete — when a `cancel` commits first the write loses and the
      * 0 return tells the caller to skip the done notification.
