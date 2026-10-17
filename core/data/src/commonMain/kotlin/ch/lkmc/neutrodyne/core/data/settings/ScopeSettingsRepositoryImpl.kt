@@ -72,7 +72,7 @@ internal class ScopeSettingsRepositoryImpl(
         groupId: Long,
         change: (SettingOverrides) -> SettingOverrides,
     ): Outcome<Unit, SettingsError> =
-        write {
+        write(afterCommit = ::syncGroupChannels) {
             if (db.groupDao().groupById(groupId) == null) return@write Outcome.Success(false)
             val previous = dao.forGroup(groupId)?.o ?: ScopeOverrides()
             val next = change(previous.toModel())
@@ -84,40 +84,45 @@ internal class ScopeSettingsRepositoryImpl(
                 dao.upsertGroup(PodcastGroupSettingsEntity(groupId, stored))
             }
             Outcome.Success(previous.refreshIntervalMinutes != stored.refreshIntervalMinutes)
-        }.also { outcome ->
-            if (outcome is Outcome.Success) {
-                // Reconcile channels after committing and releasing the Room writer.
-                withContext(NonCancellable) {
-                    suspendRunCatching { channelSync.sync() }
-                        .onFailure { Log.w("ScopeSettings", it) { "Group channel sweep failed after settings write" } }
-                }
-            }
         }
 
-    private suspend fun write(block: suspend () -> Outcome<Boolean, SettingsError>): Outcome<Unit, SettingsError> {
-        val result: Outcome<Boolean, SettingsError> =
-            try {
-                db.withWriteTransaction { block() }
-            } catch (error: SQLiteException) {
-                Log.w("ScopeSettings", error) { "Scoped settings write failed" }
-                return Outcome.Failure(SettingsError.WriteFailed)
-            }
-
-        val intervalChanged =
-            when (result) {
-                is Outcome.Failure -> return result
-                is Outcome.Success -> result.value
-            }
-        if (!intervalChanged) return Outcome.Success(Unit)
-
-        // A committed interval change must reach the scheduler even if its screen closes.
-        withContext(NonCancellable) {
-            suspendRunCatching { refresh().reschedulePeriodic() }
-                .onFailure { Log.w("ScopeSettings", it) { "Post-write refresh reschedule failed" } }
-        }
-
-        return Outcome.Success(Unit)
+    // Reconcile channels after committing and releasing the Room writer.
+    private suspend fun syncGroupChannels() {
+        suspendRunCatching { channelSync.sync() }
+            .onFailure { Log.w("ScopeSettings", it) { "Group channel sweep failed after settings write" } }
     }
+
+    /**
+     * One write transaction, then the effects it owes: a reschedule when the interval changed and
+     * [afterCommit]. Both finish with the commit as one unit even if the screen closes: Room
+     * re-checks cancellation as a transaction returns, so a cancellable caller would drop them.
+     */
+    private suspend fun write(
+        afterCommit: suspend () -> Unit = {},
+        block: suspend () -> Outcome<Boolean, SettingsError>,
+    ): Outcome<Unit, SettingsError> =
+        withContext(NonCancellable) {
+            val result: Outcome<Boolean, SettingsError> =
+                try {
+                    db.withWriteTransaction { block() }
+                } catch (error: SQLiteException) {
+                    Log.w("ScopeSettings", error) { "Scoped settings write failed" }
+                    return@withContext Outcome.Failure(SettingsError.WriteFailed)
+                }
+
+            val intervalChanged =
+                when (result) {
+                    is Outcome.Failure -> return@withContext result
+                    is Outcome.Success -> result.value
+                }
+            if (intervalChanged) {
+                suspendRunCatching { refresh().reschedulePeriodic() }
+                    .onFailure { Log.w("ScopeSettings", it) { "Post-write refresh reschedule failed" } }
+            }
+            afterCommit()
+
+            Outcome.Success(Unit)
+        }
 
     private fun ScopeOverrides.toModel(): SettingOverrides = SettingOverrides(refreshIntervalMinutes, notifyNewEpisodes)
 
