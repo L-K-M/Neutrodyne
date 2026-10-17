@@ -1260,6 +1260,8 @@ Serves R2.9, N5. Delivered in M1 (all indices exist in version 1, the sync ones 
 | Group counts | `SEARCH e USING INDEX index_episode_podcastId_sortDate (podcastId=? AND sortDate>?)` per member | `SCAN e` |
 | Download claim | `SEARCH download USING INDEX index_download_state_lane_priority_requestedAt (state=? AND lane=?)` | `SCAN download` |
 
+**Implementation note (2026-10-16, M2):** `QueryPlanTest` asserts these plans structurally. Two planner choices pass: for `All` with the downloaded filter, SQLite drives from the `download` state index and sorts that small filtered set with a temp B-tree, which is not a sort of the scanned feed; and for `Group` on a small seed it may walk `index_episode_sortDate` with the membership subquery instead of the member-driven probes, which return at the 300/50k/20 seed. An unindexed `SCAN e` still fails.
+
 `PRAGMA optimize` keeps statistics current so the planner can choose between "scan `sortDate`" and "IN-list + sort": `optimize=0x10002` on every open, plain `optimize` daily in maintenance and after any migration that adds an index ([SQLite](https://www.sqlite.org/pragma.html#pragma_optimize)).
 
 ---

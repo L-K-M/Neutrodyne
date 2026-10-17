@@ -28,6 +28,9 @@ kotlin {
             api(libs.turbine)
             implementation(libs.kotlinx.collections.immutable)
             implementation(libs.androidx.paging.common)
+            // FeedQueryProbe re-binds RoomRawQuery and runs EXPLAIN QUERY PLAN over Room3's
+            // PooledConnection.
+            implementation(libs.androidx.room3.runtime)
             api(project.dependencies.platform(libs.coil.bom))
             // coil carries SingletonImageLoader; coil-test carries FakeImageLoaderEngine.
             implementation(libs.coil.core)
