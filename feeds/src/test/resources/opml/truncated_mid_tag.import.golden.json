@@ -1,0 +1,16 @@
+{
+  "entries": [
+    {
+      "ordinal": 0,
+      "title": "Whole",
+      "url": "https://w.example.com/rss"
+    },
+    {
+      "ordinal": 1,
+      "title": "Partial",
+      "url": "https://p.example.com/rss"
+    }
+  ],
+  "format": "OPML",
+  "groups": []
+}

@@ -1,0 +1,18 @@
+{
+  "entries": [
+    {
+      "htmlUrl": "https://upper.example.com",
+      "ordinal": 0,
+      "title": "Shouty",
+      "url": "https://upper.example.com/rss"
+    },
+    {
+      "ordinal": 1,
+      "preselect": false,
+      "title": "Mixed",
+      "url": "https://mixed.example.com/feed"
+    }
+  ],
+  "format": "OPML",
+  "groups": []
+}

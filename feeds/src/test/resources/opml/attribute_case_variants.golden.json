@@ -1,0 +1,20 @@
+{
+  "entries": [
+    {
+      "htmlUrl": "https://upper.example.com",
+      "ordinal": 0,
+      "text": "Shouty",
+      "type": "rss",
+      "url": "https://upper.example.com/rss"
+    },
+    {
+      "ordinal": 1,
+      "preselect": false,
+      "text": "Mixed",
+      "type": "link",
+      "url": "https://mixed.example.com/feed"
+    }
+  ],
+  "folders": [],
+  "mode": "STRICT"
+}

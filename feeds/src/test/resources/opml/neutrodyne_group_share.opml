@@ -9,7 +9,7 @@
                htmlUrl="https://atp.fm" category="tech" nd:source="rss"/>
       <outline type="rss" text="Channel" title="Channel"
                xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=UCBJycsmduvYEL83R_U4JriQ"
-               category="tech" nd:source="youtube" nd:ytVariants="a"/>
+               category="tech" nd:source="youtube" nd:ytVariants="UULF"/>
     </outline>
   </body>
 </opml>

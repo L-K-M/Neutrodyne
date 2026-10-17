@@ -3,9 +3,9 @@ package ch.lkmc.neutrodyne.feeds.jvm.opml
 
 import ch.lkmc.neutrodyne.feeds.jvm.parse.DepthLimitExceeded
 import ch.lkmc.neutrodyne.feeds.jvm.parse.HostileEntityDeclaration
+import ch.lkmc.neutrodyne.feeds.jvm.parse.HtmlEntities
 import ch.lkmc.neutrodyne.feeds.jvm.parse.PullParserFactory
 import ch.lkmc.neutrodyne.feeds.opml.FolderRef
-import ch.lkmc.neutrodyne.feeds.opml.OpmlCategories
 import ch.lkmc.neutrodyne.feeds.opml.OpmlDocument
 import ch.lkmc.neutrodyne.feeds.opml.OpmlEntry
 import ch.lkmc.neutrodyne.feeds.opml.OpmlFailure
@@ -20,20 +20,30 @@ import okio.buffer
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserException
 import java.io.IOException
+import java.nio.charset.Charset
 import java.util.Locale
 
 /**
- * The strict pass of the OPML read cascade (05 Sniff and parse): one streaming walk over
- * `XmlPullParser` events that maps outlines to feeds and folders. Reads through [open]'s source
- * without materialising the document — [MarkupGapGuard] wraps the stream so the markup gap, the
- * prolog `<!ENTITY` scan and the `<?xml` attribute bound hold before parser buffers grow. A4 adds
- * the relaxed and salvage passes behind the same [OpmlReader] signature: an `XmlPullParserException`
- * here is the `MALFORMED` result a relaxed pass falls through from.
+ * The OPML read cascade (05 Sniff and parse): **strict**, then **relaxed**, then **salvage**, each
+ * re-opening [open]. Every pull pass is one streaming walk over `XmlPullParser` events that maps
+ * outlines to feeds and folders — no document is materialised — with [MarkupGapGuard] wrapping the
+ * stream so the markup gap, the prolog `<!ENTITY` scan and the `<?xml` attribute bound hold before
+ * parser buffers grow.
  *
- * Parser setup mirrors `XmlPullFeedParser` minus namespaces (off — prefixed attributes keep raw
- * names such as `nd:source`) and minus the relaxed feature (strict pass). `setInput(stream, null)`
- * lets the parser detect BOMs and the declared encoding itself; a `Reader` would ignore
+ * Only `MALFORMED` (the parser failed on the document's syntax) falls through to the next pass; cap
+ * failures and `NO_OUTLINES` are terminal in every pass. The relaxed leg enables kxml2's
+ * `FEATURE_RELAXED` and predefines the HTML 4 named entities the feed parser already maps, so bare
+ * ampersands, unquoted or single-quoted attributes, `&nbsp;` and friends, unclosed outlines at EOF
+ * and damaged nesting parse. Parser setup mirrors `XmlPullFeedParser` minus namespaces (off —
+ * prefixed attributes keep raw names such as `nd:source`). `setInput(stream, null)` lets the
+ * parser detect BOMs and the declared encoding itself; a `Reader` would ignore
  * `encoding="ISO-8859-1"`.
+ *
+ * One addition the document model needs: a relaxed or salvage result decoded as UTF-8 whose fields
+ * carry more than 0.5 % U+FFFD replacement characters re-parses once as windows-1252 — the same
+ * heuristic 03's feed parser applies for misdeclared encodings — keeping whichever pass produced
+ * fewer replacement characters. Files detected as UTF-16/32 are never re-decoded: a single-byte
+ * re-read of a 16-bit stream is NUL-padded garbage, not mojibake repair.
  */
 public class XmlPullOpmlReader(
     private val parsers: PullParserFactory,
@@ -42,12 +52,59 @@ public class XmlPullOpmlReader(
         open: () -> Source,
         limits: OpmlLimits,
     ): OpmlReadResult {
+        val strict = pullPass(open, limits, ParseMode.STRICT).result
+        if (strict !is OpmlReadResult.Failed || strict.failure != OpmlFailure.MALFORMED) {
+            return strict
+        }
+
+        val relaxed = relaxedPass(open, limits)
+        if (relaxed !is OpmlReadResult.Failed || relaxed.failure != OpmlFailure.MALFORMED) {
+            return relaxed
+        }
+
+        return SalvageOpmlScanner(limits).scan(open)
+    }
+
+    /**
+     * The relaxed pass plus the encoding re-parse: when the pass decoded a UTF-8-family charset and
+     * the produced text is mojibake, one extra attempt decodes the raw bytes as windows-1252
+     * (`setInput` with an explicit encoding name — the declared `encoding="UTF-8"` inside the file
+     * is then inert). The attempt with fewer replacement characters wins.
+     */
+    private fun relaxedPass(
+        open: () -> Source,
+        limits: OpmlLimits,
+    ): OpmlReadResult {
+        val first = pullPass(open, limits, ParseMode.RELAXED)
+        val firstDoc = first.result as? OpmlReadResult.Ok ?: return first.result
+        if (!first.meter.mojibake() || !redecodable(first.detected)) return firstDoc
+
+        val second = pullPass(open, limits, ParseMode.RELAXED, encodingOverride = REPARSE_CHARSET)
+        val secondDoc = second.result as? OpmlReadResult.Ok ?: return firstDoc
+        if (second.meter.replacementChars >= first.meter.replacementChars) return firstDoc
+        return secondDoc
+    }
+
+    /**
+     * One pull pass over [open]'s stream. [encodingOverride] pins the decode charset (the mojibake
+     * re-parse leg); `null` leaves detection to `setInput`'s byte sniffing.
+     */
+    private fun pullPass(
+        open: () -> Source,
+        limits: OpmlLimits,
+        mode: ParseMode,
+        encodingOverride: Charset? = null,
+    ): PullOutcome {
         val parser = parsers.create()
         // I/O failures from open() or the stream are not malformed input: they propagate per the
         // OpmlReader contract, which deliberately has no OpmlFailure reason for them.
         return open().buffer().use { source ->
+            val detected = sniffedCharset(source)
             try {
                 parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
+                if (mode == ParseMode.RELAXED) {
+                    runCatching { parser.setFeature(RELAXED_FEATURE, true) }
+                }
                 if (runCatching { parser.getFeature(XmlPullParser.FEATURE_PROCESS_DOCDECL) }
                         .getOrDefault(false)
                 ) {
@@ -59,32 +116,53 @@ public class XmlPullOpmlReader(
                         limits.maxMarkupGapBytes,
                         limits.maxTagAttributes,
                     )
-                parser.setInput(stream, null)
-                ReadSession(parser, limits).run()
+                if (encodingOverride != null) {
+                    parser.setInput(stream, encodingOverride.name())
+                } else {
+                    parser.setInput(stream, null)
+                }
+                if (mode == ParseMode.RELAXED) {
+                    // After setInput, as kxml2 requires: the HTML 4 named entities resolve instead
+                    // of dropping silently (strict) or passing through raw (salvage).
+                    for ((name, value) in HtmlEntities.ALL) {
+                        parser.defineEntityReplacementText(name, value)
+                    }
+                }
+                val session = ReadSession(parser, limits, mode)
+                PullOutcome(session.run(), session.meter, detected)
             } catch (e: HostileEntityDeclaration) {
-                OpmlReadResult.Failed(OpmlFailure.ENTITY_DECLARED)
+                PullOutcome(OpmlReadResult.Failed(OpmlFailure.ENTITY_DECLARED), detected = detected)
             } catch (e: DepthLimitExceeded) {
-                OpmlReadResult.Failed(OpmlFailure.TOO_DEEP)
+                PullOutcome(OpmlReadResult.Failed(OpmlFailure.TOO_DEEP), detected = detected)
             } catch (e: MarkupBoundExceeded) {
-                OpmlReadResult.Failed(OpmlFailure.TAG_TOO_LONG)
+                PullOutcome(OpmlReadResult.Failed(OpmlFailure.TAG_TOO_LONG), detected = detected)
             } catch (e: OpmlCapExceeded) {
-                OpmlReadResult.Failed(e.failure)
+                PullOutcome(OpmlReadResult.Failed(e.failure), detected = detected)
             } catch (e: XmlPullParserException) {
-                // The cascade fall-through boundary: A4's relaxed pass retries these.
-                OpmlReadResult.Failed(OpmlFailure.MALFORMED)
+                // The cascade fall-through boundary.
+                PullOutcome(OpmlReadResult.Failed(OpmlFailure.MALFORMED), detected = detected)
             } catch (e: StackOverflowError) {
-                OpmlReadResult.Failed(OpmlFailure.TOO_DEEP)
+                PullOutcome(OpmlReadResult.Failed(OpmlFailure.TOO_DEEP), detected = detected)
             } catch (e: IOException) {
                 throw e
             } catch (e: Exception) {
-                OpmlReadResult.Failed(OpmlFailure.MALFORMED)
+                PullOutcome(OpmlReadResult.Failed(OpmlFailure.MALFORMED), detected = detected)
             }
         }
     }
 
+    /** A pass's result plus what the encoding re-parse needs: field-text stats and the charset. */
+    private class PullOutcome(
+        val result: OpmlReadResult,
+        val meter: ReplacementMeter = ReplacementMeter(),
+        val detected: Charset,
+    )
+
     public companion object {
         /** The desktop binding: XmlPull discovery (kxml2 at run time, 05 OPML import). */
         public fun discovered(): OpmlReader = XmlPullOpmlReader(PullParserFactory.Discovered)
+
+        private const val RELAXED_FEATURE = "http://xmlpull.org/v1/doc/features.html#relaxed"
     }
 }
 
@@ -96,12 +174,13 @@ internal class OpmlCapExceeded(
 
 /**
  * All mutable state of one read: the outline walk, the entry and folder lists, and the
- * warning/ignored bookkeeping. A fresh session per [read] keeps concurrent reads on one
+ * warning/ignored bookkeeping. A fresh session per pass keeps concurrent reads on one
  * `XmlPullOpmlReader` independent.
  */
 private class ReadSession(
     private val parser: XmlPullParser,
     private val limits: OpmlLimits,
+    private val mode: ParseMode,
 ) {
     private val entries = ArrayList<OpmlEntry>()
     private val folders = ArrayList<FolderRef>()
@@ -118,6 +197,9 @@ private class ReadSession(
     private var ignoredEpisodes = 0
     private var ignoredLists = 0
     private var droppedAttr = 0
+
+    /** Field-text volume and U+FFFD counts for the encoding re-parse heuristic. */
+    val meter = ReplacementMeter()
 
     fun run(): OpmlReadResult {
         var event = parser.eventType
@@ -185,7 +267,7 @@ private class ReadSession(
                 folders = folders,
                 headTitle = headTitle,
                 neutrodyne = neutrodyne,
-                mode = ParseMode.STRICT,
+                mode = mode,
                 ignoredOutlines = ignoredOutlines,
                 warnings = warnings(),
             ),
@@ -214,12 +296,14 @@ private class ReadSession(
         }
     }
 
-    /** Lowercased attribute-name map for the current element (05 walk rules). */
+    /** Lowercased attribute-name map for the current element; counts what the fields receive. */
     private fun attrs(): Map<String, String> {
         val map = HashMap<String, String>(parser.attributeCount * 2)
         for (i in 0 until parser.attributeCount) {
             val name = parser.getAttributeName(i) ?: continue
-            map[name.lowercase(Locale.ROOT)] = parser.getAttributeValue(i).orEmpty()
+            val value = parser.getAttributeValue(i).orEmpty()
+            meter.add(value)
+            map[name.lowercase(Locale.ROOT)] = value
         }
         return map
     }
@@ -263,7 +347,9 @@ private class ReadSession(
                 }
 
                 XmlPullParser.TEXT, XmlPullParser.CDSECT -> {
-                    sb.append(parser.text)
+                    val text = parser.text
+                    meter.add(text)
+                    sb.append(text)
                 }
 
                 XmlPullParser.START_TAG -> {
@@ -325,7 +411,7 @@ private class ReadSession(
                     onStartTag()
                     if (parser.name.equals(OUTLINE, ignoreCase = true)) {
                         countOutline()
-                        countIgnored(classify(attrs()))
+                        countIgnored(classifyOutline(attrs()))
                     }
                 }
             }
@@ -339,18 +425,15 @@ private class ReadSession(
     ) {
         countOutline()
         val attrs = attrs()
-        val type = attrs["type"]?.lowercase(Locale.ROOT)
-        val xmlUrl = attrs["xmlurl"]
-        val url = attrs["url"]
         val isComment = attrs["iscomment"]?.trim().equals("true", ignoreCase = true)
         val effectiveCommented = commented || isComment
-        val kind = classify(attrs, type, xmlUrl, url)
+        val kind = classifyOutline(attrs)
 
-        if (attrs.values.any { it.length > limits.maxAttrChars }) {
+        if (hasOversizedAttribute(attrs, limits)) {
             // An attribute over the cap drops the outline with a warning (05 caps). A folder's
             // children re-parent to the folder's own parent; anything else's subtree is ignored.
             droppedAttr++
-            if (kind == Kind.FOLDER) {
+            if (kind == OutlineKind.FOLDER) {
                 walkChildren(parentFolderId, effectiveCommented)
             } else {
                 ignoreSubtree()
@@ -359,46 +442,30 @@ private class ReadSession(
         }
 
         when (kind) {
-            Kind.FEED -> {
+            OutlineKind.FEED -> {
                 feedCount++
                 if (feedCount > limits.maxFeeds) {
                     throw OpmlCapExceeded(OpmlFailure.TOO_MANY_FEEDS, "over ${limits.maxFeeds} feeds")
                 }
-                entries +=
-                    OpmlEntry(
-                        ordinal = entries.size,
-                        url = xmlUrl ?: url.orEmpty(),
-                        text = attrs["text"],
-                        title = attrs["title"],
-                        htmlUrl = attrs["htmlurl"],
-                        type = type,
-                        folderId = parentFolderId,
-                        categories = OpmlCategories.decode(attrs["category"]),
-                        preselect =
-                            !effectiveCommented &&
-                                attrs["subscribed"]?.trim() != "0" &&
-                                type != "link",
-                        ndSource = attrs["nd:source"],
-                        ndYtVariants = attrs["nd:ytvariants"],
-                    )
+                entries += outlineEntry(entries.size, attrs, parentFolderId, effectiveCommented)
                 // Some writers nest episode outlines inside feeds; children are ignored (05).
                 ignoreSubtree()
             }
 
-            Kind.IGNORED_EPISODES, Kind.IGNORED_LISTS -> {
+            OutlineKind.IGNORED_EPISODES, OutlineKind.IGNORED_LISTS -> {
                 ignoredOutlines++
-                if (kind == Kind.IGNORED_EPISODES) ignoredEpisodes++ else ignoredLists++
+                if (kind == OutlineKind.IGNORED_EPISODES) ignoredEpisodes++ else ignoredLists++
                 ignoreSubtree()
             }
 
-            Kind.FOLDER -> {
+            OutlineKind.FOLDER -> {
                 val id = nextFolderId++
                 folders +=
                     FolderRef(
                         id = id,
                         name = (attrs["text"] ?: attrs["title"])?.trim().orEmpty(),
                         parentId = parentFolderId,
-                        colorArgb = parseColor(attrs["nd:groupcolor"]),
+                        colorArgb = parseGroupColor(attrs["nd:groupcolor"]),
                         iconKey = attrs["nd:groupicon"],
                     )
                 walkChildren(id, effectiveCommented)
@@ -413,35 +480,14 @@ private class ReadSession(
         }
     }
 
-    private fun countIgnored(kind: Kind) {
+    private fun countIgnored(kind: OutlineKind) {
         ignoredOutlines++
-        if (kind == Kind.IGNORED_EPISODES) {
+        if (kind == OutlineKind.IGNORED_EPISODES) {
             ignoredEpisodes++
-        } else if (kind == Kind.IGNORED_LISTS) {
+        } else if (kind == OutlineKind.IGNORED_LISTS) {
             ignoredLists++
         }
     }
-
-    /**
-     * The 05 classification: an outline with `xmlUrl` is a feed regardless of `type`; `url` is the
-     * gPodder fallback when `type` is `rss` or `link` and the URL does not end in `.opml`. Episode,
-     * playlist, include and `.opml`-link outlines are ignored with their subtree; anything else is
-     * a folder.
-     */
-    private fun classify(
-        attrs: Map<String, String>,
-        type: String? = attrs["type"]?.lowercase(Locale.ROOT),
-        xmlUrl: String? = attrs["xmlurl"],
-        url: String? = attrs["url"],
-    ): Kind =
-        when {
-            xmlUrl != null -> Kind.FEED
-            type == "podcast-episode" || type == "podcast-playlist" -> Kind.IGNORED_EPISODES
-            type == "include" -> Kind.IGNORED_LISTS
-            type == "link" && url != null && url.endsWith(OPML_SUFFIX, ignoreCase = true) -> Kind.IGNORED_LISTS
-            url != null && (type == "rss" || type == "link") -> Kind.FEED
-            else -> Kind.FOLDER
-        }
 
     private fun warnings(): List<OpmlWarning> =
         buildList {
@@ -450,32 +496,11 @@ private class ReadSession(
             if (ignoredLists > 0) add(OpmlWarning(OpmlWarningCode.LINKED_LISTS, ignoredLists))
         }
 
-    private fun parseColor(raw: String?): Int? {
-        if (raw == null) return null
-        val v = raw.trim()
-        if (!v.startsWith('#')) return null
-        val hex = v.substring(1)
-        val value = hex.toLongOrNull(16) ?: return null
-        return when (hex.length) {
-            6 -> (0xFF000000L or value).toInt()
-            8 -> value.toInt()
-            else -> null
-        }
-    }
-
-    private enum class Kind {
-        FEED,
-        IGNORED_EPISODES,
-        IGNORED_LISTS,
-        FOLDER,
-    }
-
     private companion object {
         const val ROOT_ELEMENT = "opml"
         const val HEAD = "head"
         const val BODY = "body"
         const val OUTLINE = "outline"
         const val NEUTRODYNE_NS = "urn:neutrodyne:opml:1"
-        const val OPML_SUFFIX = ".opml"
     }
 }

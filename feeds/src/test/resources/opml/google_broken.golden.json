@@ -1,3 +1,20 @@
 {
-  "failed": "MALFORMED"
+  "entries": [
+    {
+      "htmlUrl": "https://a.example.com",
+      "ordinal": 0,
+      "text": "Tom & Jerry",
+      "type": "rss",
+      "url": "https://a.example.com/rss"
+    },
+    {
+      "ordinal": 1,
+      "text": "Tom & Jerry",
+      "type": "rss",
+      "url": "https://b.example.com/rss"
+    }
+  ],
+  "folders": [],
+  "headTitle": "Google Reader subscriptions",
+  "mode": "RELAXED"
 }

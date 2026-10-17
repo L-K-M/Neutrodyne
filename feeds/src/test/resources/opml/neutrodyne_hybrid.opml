@@ -10,7 +10,7 @@
       <outline type="rss" text="Channel" title="Channel"
                xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=UCBJycsmduvYEL83R_U4JriQ"
                htmlUrl="https://www.youtube.com/channel/UCBJycsmduvYEL83R_U4JriQ" category="tech"
-               nd:source="youtube" nd:ytVariants="a,v"/>
+               nd:source="youtube" nd:ytVariants="UULF,UULV"/>
     </outline>
     <outline text="news" nd:groupColor="#0044CC" nd:groupIcon="news">
       <outline type="rss" text="The Daily" title="The Daily" xmlUrl="https://feeds.example.com/daily"
