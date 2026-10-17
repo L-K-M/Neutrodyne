@@ -65,6 +65,7 @@ import ch.lkmc.neutrodyne.core.ui.GroupTabLabel
 import ch.lkmc.neutrodyne.core.ui.LocalDrawnReporter
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.SelectionTopBar
+import ch.lkmc.neutrodyne.core.ui.SuggestedGroupsCard
 import ch.lkmc.neutrodyne.core.ui.episodeSelectionKeys
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_all
@@ -103,6 +104,7 @@ internal fun FeedsScreen(
     onVisitStart: (FeedSource) -> Unit = {},
     onVisitEnd: (FeedSource) -> Unit = {},
     onAllGroups: () -> Unit = {},
+    onCreateGroup: () -> Unit = {},
     selection: EpisodeSelectionController? = null,
 ) {
     val selectedIds =
@@ -269,6 +271,9 @@ internal fun FeedsScreen(
                     contentDescription = stringResource(Res.string.feeds_all_groups),
                 )
             }
+        }
+        if (state.hasSubscriptions && !state.hasGroups) {
+            SuggestedGroupsCard(onClick = onCreateGroup)
         }
         HorizontalPager(
             state = pager,

@@ -15,7 +15,8 @@ package ch.lkmc.neutrodyne.core.model.settings
  * - `sync.server_url` is [SettingsFile.PORTABLE] and never `synced`.
  */
 object AllSettingKeys {
-    val list: List<SettingKey<*>> = AppearanceSettingKeys.ALL + FeedsSettingKeys.ALL + GroupsSettingKeys.ALL
+    val list: List<SettingKey<*>> =
+        AppearanceSettingKeys.ALL + FeedsSettingKeys.ALL + GroupsSettingKeys.ALL + BackupSettingKeys.ALL
 }
 
 /** First segment of a key name — one per settings area plus the local/sync prefixes (01). */

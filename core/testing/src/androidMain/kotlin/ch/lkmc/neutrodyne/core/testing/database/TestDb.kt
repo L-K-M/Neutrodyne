@@ -15,6 +15,7 @@ import ch.lkmc.neutrodyne.core.database.migration.ALL_MIGRATIONS
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import kotlinx.coroutines.Dispatchers
 import java.io.File
+import kotlin.coroutines.CoroutineContext
 
 /**
  * Android database builders (02 Testing): `AndroidSQLiteDriver` is the default because host
@@ -26,12 +27,14 @@ object TestDb {
         context: Context,
         driver: SQLiteDriver = AndroidSQLiteDriver(),
         clock: Clock = TestClock(),
+        queryContext: CoroutineContext = Dispatchers.Default,
     ): NeutrodyneDatabase =
         Room
             .inMemoryDatabaseBuilder<NeutrodyneDatabase>(
                 context = context.applicationContext,
                 factory = NeutrodyneDatabaseConstructor::initialize,
             ).applyTestSettings(driver, clock)
+            .setQueryCoroutineContext(queryContext)
             .build()
 
     /** A file database at `dir/neutrodyne.db` — used by GMD migration and trigger tests. */

@@ -1260,6 +1260,8 @@ Serves R2.9, N5. Delivered in M1 (all indices exist in version 1, the sync ones 
 | Group counts | `SEARCH e USING INDEX index_episode_podcastId_sortDate (podcastId=? AND sortDate>?)` per member | `SCAN e` |
 | Download claim | `SEARCH download USING INDEX index_download_state_lane_priority_requestedAt (state=? AND lane=?)` | `SCAN download` |
 
+**Implementation note (2026-10-16, M2):** `QueryPlanTest` asserts these plans structurally. Two planner choices pass: for `All` with the downloaded filter, SQLite drives from the `download` state index and sorts that small filtered set with a temp B-tree, which is not a sort of the scanned feed; and for `Group` on a small seed it may walk `index_episode_sortDate` with the membership subquery instead of the member-driven probes, which return at the 300/50k/20 seed. An unindexed `SCAN e` still fails.
+
 `PRAGMA optimize` keeps statistics current so the planner can choose between "scan `sortDate`" and "IN-list + sort": `optimize=0x10002` on every open, plain `optimize` daily in maintenance and after any migration that adds an index ([SQLite](https://www.sqlite.org/pragma.html#pragma_optimize)).
 
 ---
@@ -2027,6 +2029,8 @@ sequenceDiagram
 3. Assert zero invalidations after the first save of each episode (that save creates the `episode_state` row and sets `startedAt`, one invalidation by design). Positive control: one mark-played transaction causes exactly one invalidation.
 4. `RefreshBatchingTest`: 300 simulated 304 outcomes through the batching writer cause ≤ 15 invalidations of an open All `PagingSource`.
 5. From MS0 (MS0 acceptance 3): steps 1–4 run a second time with the capture triggers installed and `sync_state.enabled = 1`; the invalidation counts must equal those of the first run, and a flow on `sync_outbox` must see the captures (positive control).
+
+**Implementation note (2026-10-16, M2):** B5 uses the existing `PositionDao.upsert` and ignored `EpisodeStateDao.ensure` with pre-seeded `startedAt` for the 100 position-only writes; the guarded position-save sequence belongs to M4 and is not implemented yet. A separate test creates the state row with `startedAt` in the first position transaction and permits exactly one invalidation, then none on subsequent saves. Session updates and queue reorders use test-only SQL because their M4 DAO writers are also absent. Both desktop and bundled-driver device legs drain Room tracking between writes and reload a fresh source after every invalidation, so notifications cannot coalesce into a false pass. The timing legs use the full 300/50,000/20 seed and file-backed WAL databases; GMD emits the samples and medians to stdout and the instrumentation stream collected with the existing `androidTest-results` reports. Timings are recorded only, with reference-device acceptance still manual.
 
 ---
 

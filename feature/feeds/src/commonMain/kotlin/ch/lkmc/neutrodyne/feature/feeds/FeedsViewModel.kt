@@ -22,6 +22,7 @@ import ch.lkmc.neutrodyne.core.domain.MarkFeedPlayedResult
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.model.AVAILABLE_FEED_FILTER_CAPABILITIES
 import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.FeedCounts
 import ch.lkmc.neutrodyne.core.model.FeedFilters
@@ -33,6 +34,7 @@ import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.GroupCounts
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
+import ch.lkmc.neutrodyne.core.model.withCapabilities
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionController
 import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedController
@@ -128,6 +130,7 @@ public class FeedsViewModel(
     private val swipeUndos = mutableMapOf<Long, EpisodeAction.SetPlayed>()
 
     /** Evicting an entry also stops cachedIn's upstream collector, even with no UI subscriber. */
+    @OptIn(ExperimentalCoroutinesApi::class)
     public fun pagingFor(source: FeedSource): Flow<PagingData<FeedItem>> {
         pages.remove(source)?.let { entry ->
             pages[source] = entry
@@ -137,9 +140,15 @@ public class FeedsViewModel(
         if (pages.size == PAGE_CACHE_SIZE) evict(pages.keys.first())
         val scope =
             CoroutineScope(viewModelScope.coroutineContext + SupervisorJob(viewModelScope.coroutineContext[Job]))
-        // The repository compares effective filters/order before flatMapLatest. Visits and
-        // play-order writes therefore keep this entry's generation and scroll position.
-        val flow = feedRepository.pagedFeed(source).withDayHeaders(clock, defaultDispatcher).cachedIn(scope)
+        // Compare only the available filters/order so gated flags, visits and play-order
+        // writes keep this entry's generation and scroll position.
+        val flow =
+            prefsFor(source)
+                .map { it.filters to it.feedOrder }
+                .distinctUntilChanged()
+                .flatMapLatest { (filters, order) -> feedRepository.pagedFeed(source, filters, order) }
+                .withDayHeaders(clock, defaultDispatcher)
+                .cachedIn(scope)
         pages[source] = PageEntry(scope, flow)
         return flow
     }
@@ -251,16 +260,19 @@ public class FeedsViewModel(
     @OptIn(ExperimentalCoroutinesApi::class)
     private val selectedPrefs =
         selection.map { it.source }.distinctUntilChanged().flatMapLatest { source ->
-            feedRepository.observePrefs(source).map { source to it }
+            prefsFor(source).map { source to it }
         }
 
     /** Each composed page observes its own chips, including prefetched neighbours. */
-    public fun prefsFor(source: FeedSource): Flow<FeedPrefs> = feedRepository.observePrefs(source)
+    public fun prefsFor(source: FeedSource): Flow<FeedPrefs> =
+        feedRepository.observePrefs(source).map { prefs ->
+            prefs.copy(filters = prefs.filters.withCapabilities(AVAILABLE_FEED_FILTER_CAPABILITIES))
+        }
 
     // Retain the All filters field for existing consumers; pages use prefsFor(source).
     private val screenState =
         combine(
-            feedRepository.observePrefs(FeedSource.All),
+            prefsFor(FeedSource.All),
             network.status.map { it.isConnected }.distinctUntilChanged(),
             refreshIndicator(),
             podcasts.observeLibraryTiles(null).map { it.isNotEmpty() },
