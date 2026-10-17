@@ -723,31 +723,12 @@ internal class RestoreMerger(
                 .sortedWith(compareBy({ it.value.primary.sortOrder }, { it.index }))
                 .map { it.value }
         return ReplaceOrderKeys(
-            groups = ranked.zip(restoreOrderKeys(ranked.map { it.primary.orderKey })).toMap(),
+            groups = ranked.zip(restoreOrderKeys(orderKeys, ranked.map { it.primary.orderKey })).toMap(),
             members =
                 ranked.associateWith {
-                    restoreOrderKeys(it.members.values.map(MemberV1::orderKey))
+                    restoreOrderKeys(orderKeys, it.members.values.map(MemberV1::orderKey))
                 },
         )
-    }
-
-    /**
-     * One list's keys under Replace: the staged keys verbatim when every slot carries a
-     * valid `OrderKey` in strict ascending order; a missing, malformed, duplicated or
-     * unordered key rewrites the whole list instead — an invalid key neither persists nor
-     * feeds the generator as a bound. `after` runs the port's key validation on its bound,
-     * which doubles it as the validity probe without copying the grammar here.
-     */
-    private fun restoreOrderKeys(wanted: List<String?>): List<String> {
-        val keys = wanted.filterNotNull()
-        if (
-            keys.size == wanted.size &&
-            keys.zipWithNext().all { (a, b) -> a < b } &&
-            keys.all { runCatching { orderKeys.after(it) }.isSuccess }
-        ) {
-            return keys
-        }
-        return orderKeys.rewrite(wanted.size)
     }
 
     private fun warnSmartGroup(group: GroupV1) {
@@ -761,6 +742,30 @@ internal class RestoreMerger(
         const val DEFAULT_GROUP_NAME = "Group"
         const val DEFAULT_YOUTUBE_VARIANTS = 1
     }
+}
+
+/**
+ * One list's keys under Replace (05 "the backup's keys, else `OrderKey.rewrite(n)` in rank
+ * order"), shared by the library, member and Up next planning: the staged keys verbatim
+ * when every slot carries a valid `OrderKey` in strict ascending order; a missing,
+ * malformed, duplicated or unordered key rewrites the whole list instead — an invalid key
+ * neither persists nor feeds the generator as a bound. `after` runs the port's key
+ * validation on its bound, which doubles it as the validity probe without copying the
+ * grammar here.
+ */
+internal fun restoreOrderKeys(
+    orderKeys: OrderKeys,
+    wanted: List<String?>,
+): List<String> {
+    val keys = wanted.filterNotNull()
+    if (
+        keys.size == wanted.size &&
+        keys.zipWithNext().all { (a, b) -> a < b } &&
+        keys.all { runCatching { orderKeys.after(it) }.isSuccess }
+    ) {
+        return keys
+    }
+    return orderKeys.rewrite(wanted.size)
 }
 
 /** An adopted backup uuid — the `onUuidChanged` channel carry-over's `(old, new)`. */

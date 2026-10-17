@@ -266,7 +266,9 @@ internal class RestoreEpisodeMerger(
                 accepted += ref to episodeId
             }
             if (policy == MergePolicy.RESTORE_REPLACE) {
-                val keys = fillOrderKeys(accepted.map { it.first.ok })
+                // The same all-valid-and-strictly-ordered-or-rewrite rule the library and
+                // member lists already share — no interpolation of untrusted `ok`s.
+                val keys = restoreOrderKeys(orderKeys, accepted.map { it.first.ok })
                 for ((entry, key) in accepted.zip(keys)) {
                     writes.insertQueueEntry(entry.second, key, staged.createdAtMs)
                 }
@@ -404,36 +406,6 @@ internal class RestoreEpisodeMerger(
         queue.session?.current?.let { add(it.p, it.k, it.kv) }
         queue.session?.anchor?.let { add(it.p, it.k, it.kv) }
         return refs
-    }
-
-    /**
-     * OrderKeys for a Replace-written list (05 "the backup's keys, else `OrderKey.rewrite(n)`
-     * in rank order"): present keys kept, missing keys generated between their keyed
-     * neighbours; a file carrying no keys at all gets the evenly spaced rewrite.
-     */
-    private fun fillOrderKeys(wanted: List<String?>): List<String> {
-        if (wanted.isEmpty()) return emptyList()
-        if (wanted.all { it == null }) return orderKeys.rewrite(wanted.size)
-        val filled = arrayOfNulls<String>(wanted.size)
-        var previous: String? = null
-        for (index in wanted.indices) {
-            val key = wanted[index]
-            if (key != null) {
-                filled[index] = key
-                previous = key
-                continue
-            }
-            val next = wanted.subList(index + 1, wanted.size).firstOrNull { it != null }
-            filled[index] =
-                if (previous != null && next != null && previous < next) {
-                    orderKeys.between(previous, next)
-                } else {
-                    orderKeys.after(previous)
-                }
-            previous = filled[index]
-        }
-        @Suppress("UNCHECKED_CAST")
-        return filled.asList() as List<String>
     }
 
     /** The match hints of one line (`yt` qualifies a stub only — never a match step). */

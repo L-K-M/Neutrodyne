@@ -24,6 +24,7 @@ import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
+import ch.lkmc.neutrodyne.core.testing.ProtocolOrderKeys
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.groupEntity
@@ -415,15 +416,23 @@ class RestoreEpisodeMergerTest {
             assertEquals(ARCHIVE_AT, entries[1].addedAt)
         }
 
+    // --- Up next Replace order keys (05 transaction C) ----------------------------------------
+    //
+    // These run on `ProtocolOrderKeys` like the library phase's Replace-key tests —
+    // `TestOrderKeys` accepts decimal strings a real archive's `ok` can never be. The queue
+    // shares the library phase's rule: a Replace-written list keeps staged keys only when
+    // every slot is a valid `OrderKey` in strict ascending order; a missing, malformed,
+    // duplicated or unordered key rewrites the whole accepted list in archive order.
+
     @Test
-    fun queueReplaceReplaysTheBackupsListKeepingOk() =
+    fun queueReplaceKeepsACompleteValidOkListVerbatim() =
         runTest {
             val p = seedPodcast("https://a/feed")
             val local = seedEpisode(p, "g:local")
             val e1 = seedEpisode(p, "g:e1")
             val e2 = seedEpisode(p, "g:e2")
             val e3 = seedEpisode(p, "g:e3")
-            db.queueDao().insert(queueEntryEntity(local, "0.9"))
+            db.queueDao().insert(queueEntryEntity(local, "a9"))
             val staged =
                 staged(
                     podcasts = listOf(podcastV1("https://a/feed")),
@@ -431,21 +440,111 @@ class RestoreEpisodeMergerTest {
                         QueueV1(
                             upNext =
                                 listOf(
-                                    UpNextRefV1("https://a/feed", "g:e1", ok = "0.1"),
-                                    UpNextRefV1("https://a/feed", "g:e2"), // no ok → generated
-                                    UpNextRefV1("https://a/feed", "g:e3", ok = "0.9"),
+                                    UpNextRefV1("https://a/feed", "g:e1", ok = "a0"),
+                                    UpNextRefV1("https://a/feed", "g:e2", ok = "a2"),
+                                    UpNextRefV1("https://a/feed", "g:e3", ok = "a5"),
                                 ),
                         ),
                 )
 
-            restore(staged, MergePolicy.RESTORE_REPLACE, ALL)
+            realRestore(staged, MergePolicy.RESTORE_REPLACE, ALL)
+
+            // The local queue is gone and every staged key lands verbatim — no rewrite.
+            val entries = db.queueDao().entries()
+            assertEquals(listOf(e1, e2, e3), entries.map { it.episodeId })
+            assertEquals(listOf("a0", "a2", "a5"), entries.map { it.orderKey })
+            assertEquals(List(3) { ARCHIVE_AT }, entries.map { it.addedAt })
+        }
+
+    @Test
+    fun queueReplaceRewritesTheAcceptedListWhenAnOkIsMissing() =
+        runTest {
+            val p = seedPodcast("https://a/feed")
+            val e1 = seedEpisode(p, "g:e1")
+            val e2 = seedEpisode(p, "g:e2")
+            val e3 = seedEpisode(p, "g:e3")
+            val staged =
+                staged(
+                    podcasts = listOf(podcastV1("https://a/feed")),
+                    queue =
+                        QueueV1(
+                            upNext =
+                                listOf(
+                                    UpNextRefV1("https://a/feed", "g:e1", ok = "a0"),
+                                    UpNextRefV1("https://a/feed", "g:e2"), // no ok
+                                    UpNextRefV1("https://a/feed", "g:e3", ok = "a2"),
+                                ),
+                        ),
+                )
+
+            realRestore(staged, MergePolicy.RESTORE_REPLACE, ALL)
+
+            // A missing key no longer interpolates between its neighbours — the whole
+            // accepted list takes `OrderKey.rewrite(3)` in archive order.
+            val entries = db.queueDao().entries()
+            assertEquals(listOf(e1, e2, e3), entries.map { it.episodeId })
+            assertEquals(ProtocolOrderKeys.rewrite(3), entries.map { it.orderKey })
+        }
+
+    @Test
+    fun queueReplaceRewritesMalformedAndForeignOksWithoutThrowing() =
+        runTest {
+            val p = seedPodcast("https://a/feed")
+            val e1 = seedEpisode(p, "g:e1")
+            val e2 = seedEpisode(p, "g:e2")
+            val e3 = seedEpisode(p, "g:e3")
+            // "!!!" fails the protocol grammar; "0.5" is a decimal spelling a real archive
+            // can never carry. Under the old interpolation the missing slot would have fed
+            // both to the generator and thrown mid-restore.
+            val staged =
+                staged(
+                    podcasts = listOf(podcastV1("https://a/feed")),
+                    queue =
+                        QueueV1(
+                            upNext =
+                                listOf(
+                                    UpNextRefV1("https://a/feed", "g:e1", ok = "!!!"),
+                                    UpNextRefV1("https://a/feed", "g:e2"),
+                                    UpNextRefV1("https://a/feed", "g:e3", ok = "0.5"),
+                                ),
+                        ),
+                )
+
+            realRestore(staged, MergePolicy.RESTORE_REPLACE, ALL)
 
             val entries = db.queueDao().entries()
             assertEquals(listOf(e1, e2, e3), entries.map { it.episodeId })
-            assertEquals("0.1", entries[0].orderKey)
-            assertEquals(TestOrderKeys.between("0.1", "0.9"), entries[1].orderKey)
-            assertEquals("0.9", entries[2].orderKey)
-            assertEquals(List(3) { ARCHIVE_AT }, entries.map { it.addedAt })
+            assertEquals(ProtocolOrderKeys.rewrite(3), entries.map { it.orderKey })
+        }
+
+    @Test
+    fun queueReplaceRewritesDescendingAndDuplicatedOks() =
+        runTest {
+            val p = seedPodcast("https://a/feed")
+            val e1 = seedEpisode(p, "g:e1")
+            val e2 = seedEpisode(p, "g:e2")
+            for (oks in listOf(listOf("a1", "a0"), listOf("a0", "a0"))) {
+                val staged =
+                    staged(
+                        podcasts = listOf(podcastV1("https://a/feed")),
+                        queue =
+                            QueueV1(
+                                upNext =
+                                    listOf(
+                                        UpNextRefV1("https://a/feed", "g:e1", ok = oks[0]),
+                                        UpNextRefV1("https://a/feed", "g:e2", ok = oks[1]),
+                                    ),
+                            ),
+                    )
+
+                realRestore(staged, MergePolicy.RESTORE_REPLACE, ALL)
+
+                // Descending or repeated keys cannot persist either — the archive's order
+                // stays (`ORDER BY orderKey` must not invert it) on fresh keys.
+                val entries = db.queueDao().entries()
+                assertEquals(listOf(e1, e2), entries.map { it.episodeId })
+                assertEquals(ProtocolOrderKeys.rewrite(2), entries.map { it.orderKey })
+            }
         }
 
     @Test
@@ -852,12 +951,52 @@ class RestoreEpisodeMergerTest {
         staged: StagedLibrary,
         policy: MergePolicy,
         categories: Set<RestoreCategory>,
+        merger: RestoreMerger = this.merger,
+        episodes: RestoreEpisodeMerger = this.episodes,
         total: Int = 0,
         progress: (Int, Int) -> Unit = { _, _ -> },
     ): MergeSummary {
         merger.mergeLibrary(staged, policy, categories)
         return episodes.mergeEpisodes(staged, policy, categories, total, progress)
     }
+
+    /** A restore bound to the real `OrderKey` port — the Replace `ok` cases. */
+    private suspend fun realRestore(
+        staged: StagedLibrary,
+        policy: MergePolicy,
+        categories: Set<RestoreCategory>,
+    ): MergeSummary =
+        restore(
+            staged,
+            policy,
+            categories,
+            merger = realMerger(),
+            episodes = realEpisodes(),
+        )
+
+    private fun realMerger(): RestoreMerger =
+        RestoreMerger(
+            db = db,
+            podcasts = PodcastMatcher(db),
+            writes = RestoreWrites(db),
+            groupMerger = GroupMerger(db, clock, channels),
+            unsubscribe = newUnsubscribe(db, scheduler, clock, secrets, coordinator),
+            secrets = secrets,
+            coordinator = coordinator,
+            channelSync = channels,
+            orderKeys = ProtocolOrderKeys,
+            clock = clock,
+        )
+
+    private fun realEpisodes(): RestoreEpisodeMerger =
+        RestoreEpisodeMerger(
+            db = db,
+            podcasts = PodcastMatcher(db),
+            episodes = EpisodeMatcher(db),
+            writes = RestoreWrites(db),
+            orderKeys = ProtocolOrderKeys,
+            clock = clock,
+        )
 
     private suspend fun snapshot(
         podcastId: Long,
