@@ -10,13 +10,14 @@ import okio.Timeout
 import java.io.BufferedOutputStream
 import java.io.FileOutputStream
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 /**
  * The backup ZIP writer (05 Writing): `java.util.zip.ZipOutputStream` writing DEFLATE entries to
- * [FileSystem.SYSTEM] at the path the caller staged. Every entry carries the DOS epoch timestamp so
- * a backup's bytes are reproducible from its content alone; the atomic move onto the final name is
+ * [FileSystem.SYSTEM] at the path the caller staged. Every entry carries a fixed DOS timestamp so
+ * bytes are reproducible for a fixed JVM/deflater build; the atomic move onto the final name is
  * the caller's job, not this writer's.
  */
 public class ZipArchiveWriter : ArchiveWriterFactory {
@@ -54,7 +55,8 @@ public class ZipArchiveWriter : ArchiveWriterFactory {
             check(openEntry == null) { "an archive entry is still open; close it before the next" }
             require(isSafeEntryName(name)) { "invalid archive entry name" }
             val entry = ZipEntry(name)
-            entry.timeLocal = DOS_EPOCH
+            // setTimeLocal is API 35+ on Android; the legacy setter is available at minSdk.
+            entry.time = DOS_TIMESTAMP.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
             out.putNextEntry(entry)
             return EntrySink().also { openEntry = it }
         }
@@ -111,10 +113,10 @@ public class ZipArchiveWriter : ArchiveWriterFactory {
 
     private companion object {
         /**
-         * The ZIP format's zero timestamp: DOS time has no timezone, so writing the epoch keeps the
-         * archive's bytes identical for identical content (deterministic fixtures and goldens).
+         * The exact DOS epoch is also the JDK's before-1980 sentinel, which adds a timezone-
+         * dependent extended timestamp. The next day is representable without that extra field.
          */
-        val DOS_EPOCH: LocalDateTime = LocalDateTime.of(1980, 1, 1, 0, 0)
+        val DOS_TIMESTAMP: LocalDateTime = LocalDateTime.of(1980, 1, 2, 0, 0)
         const val SCRATCH_BYTES: Int = 8 * 1024
     }
 }
