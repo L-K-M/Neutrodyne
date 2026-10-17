@@ -59,6 +59,10 @@ import kotlin.uuid.Uuid
  * - The gate is `PREVIEW` plus no restore intent (`NEUTRODYNE_BACKUP` sessions and a set
  *   `restoreRequestedAt` belong to the restore path, not this committer). A session already past
  *   `PREVIEW` makes confirm an idempotent no-op — the commit's writes all hold up on replay.
+ * - Each chunk re-checks session ownership inside its own transaction: a PREVIEW
+ *   cancel/delete or the expiry sweep between chunks would otherwise keep the loop writing
+ *   podcasts, groups and memberships no session tracks. The aborting chunk rolls back,
+ *   committed chunks stand and the put cleanup still runs.
  * - Credential `put`s run outside any Room transaction but inside
  *   [CredentialCommitCoordinator.withCredentialCommit], which stays held across every commit
  *   chunk (03's ordering): a thrown chunk rolls back only its own transaction, so puts whose
@@ -109,6 +113,8 @@ internal class ImportCommitter(
             }
         } catch (e: CancellationException) {
             throw e
+        } catch (_: SessionLostException) {
+            Outcome.Failure(ImportError.SessionGone)
         } catch (_: Exception) {
             Outcome.Failure(ImportError.Storage)
         }
@@ -222,6 +228,14 @@ internal class ImportCommitter(
         ctx: ChunkContext,
         work: List<Work>,
     ) {
+        // A PREVIEW cancel/delete (or the expired-session sweep) between chunks cascades the
+        // item rows this chunk would still write; [planLocked]'s snapshot cannot see it.
+        // Re-check ownership inside the chunk's own transaction — writers serialize, so a
+        // delete visible here already committed — rather than materialize podcasts, groups
+        // and memberships no session tracks.
+        if (db.importDao().sessionById(sessionId)?.state != ImportState.PREVIEW) {
+            throw SessionLostException()
+        }
         val now = clock.now()
         ctx.ensureGroups(now)
         val targetGroupId = ctx.targetGroupId(options)
@@ -601,6 +615,12 @@ internal class ImportCommitter(
         /** resolvedNameKey → ensured `podcast_group.id`, filled by the chunk transactions. */
         val ids: MutableMap<String, Long> = mutableMapOf(),
     )
+
+    /**
+     * The session left `PREVIEW` while chunks were still writing (a PREVIEW cancel/delete or
+     * the expiry sweep). The throwing chunk rolls back; earlier committed chunks stand.
+     */
+    private class SessionLostException : Exception()
 
     /**
      * [commitLocked]'s verdict: [GONE] has no committable session (missing, backup-format or

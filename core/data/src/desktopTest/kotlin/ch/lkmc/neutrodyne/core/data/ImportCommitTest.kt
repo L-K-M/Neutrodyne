@@ -502,6 +502,80 @@ class ImportCommitTest {
         }
 
     @Test
+    fun aSessionDeletedBetweenChunksLeavesOnlyCommittedWork() =
+        runTest {
+            val items =
+                (1..500).map { item(it, "https://h$it.example.com/f", groups = listOf("Tech")) }
+                    .toMutableList()
+            // A private feed inside the committed chunk (its put stays referenced) and one in
+            // the aborted chunk (its put rolls back) cover both cleanup halves.
+            items[0] =
+                item(
+                    1,
+                    "https://u1:p1@h1.example.com/f",
+                    normalizedUrl = "https://h1.example.com/f",
+                    groups = listOf("Tech"),
+                )
+            items +=
+                item(
+                    501,
+                    "https://u2:p2@h501.example.com/f",
+                    normalizedUrl = "https://h501.example.com/f",
+                    groups = listOf("Tech"),
+                )
+            val sid = seedSession(items = items)
+
+            // The delete lands after chunk one's transaction commits — a PREVIEW cancel and
+            // the expired-session sweep both run this same deleteSession (items cascade).
+            driver.arm("INSERT OR IGNORE INTO `podcast` ") {
+                driver.exec("DELETE FROM import_item WHERE sessionId = $sid")
+                driver.exec("DELETE FROM import_session WHERE id = $sid")
+            }
+            val outcome = committer.confirm(sid)
+
+            assertEquals(
+                ImportError.SessionGone,
+                assertIs<Outcome.Failure<ImportError>>(outcome).error,
+            )
+            assertNull(db.importDao().sessionById(sid))
+            assertEquals(500, db.podcastDao().allForExport().size, "committed chunks stand")
+            assertNull(db.podcastDao().byFeedKey("h501.example.com/f"), "the aborted chunk never landed")
+            val tech = assertNotNull(db.groupDao().groupByNameKey("tech"))
+            assertEquals(500, db.groupDao().membersOf(tech.id).size, "no later memberships")
+            assertNull(secrets.get("https://h501.example.com"), "unreferenced put rolled back")
+            assertNotNull(secrets.get("https://h1.example.com"), "referenced put stays")
+            assertTrue(scheduler.sessions.isEmpty(), "a deleted session is never scheduled")
+            assertTrue(refresh.calls.isEmpty() && channels.calls.isEmpty())
+        }
+
+    @Test
+    fun aSessionLeavingPreviewBetweenChunksSkipsTheRest() =
+        runTest {
+            val sid = seedSession(items = (1..501).map { item(it, "https://h$it.example.com/f") })
+
+            // A live row that left PREVIEW (a racing transition) is the same lost ownership —
+            // the remaining chunks must not write and the marker must not run.
+            driver.arm("INSERT OR IGNORE INTO `podcast` ") {
+                driver.exec("UPDATE import_session SET state = 'CANCELLED' WHERE id = $sid")
+            }
+            val outcome = committer.confirm(sid)
+
+            assertEquals(
+                ImportError.SessionGone,
+                assertIs<Outcome.Failure<ImportError>>(outcome).error,
+            )
+            assertEquals(ImportState.CANCELLED, db.importDao().sessionById(sid)?.state)
+            assertEquals(500, db.podcastDao().allForExport().size, "committed chunks stand")
+            assertNull(db.podcastDao().byFeedKey("h501.example.com/f"), "the aborted chunk never landed")
+            val items = db.importDao().itemsOf(sid)
+            assertEquals(501, items.size, "no cascade — the row moved on, it was not deleted")
+            assertEquals(ImportItemStatus.QUEUED, items.first().status)
+            assertEquals(ImportItemStatus.PREVIEW, items.last().status)
+            assertTrue(scheduler.sessions.isEmpty(), "a cancelled session is never scheduled")
+            assertTrue(refresh.calls.isEmpty() && channels.calls.isEmpty())
+        }
+
+    @Test
     fun aSchedulerFailureKeepsTheCommit() =
         runTest {
             scheduler.fail = true
