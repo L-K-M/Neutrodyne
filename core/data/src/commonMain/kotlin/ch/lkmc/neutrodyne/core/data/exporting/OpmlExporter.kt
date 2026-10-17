@@ -29,7 +29,8 @@ import kotlinx.datetime.toLocalDateTime
  * memberships in one read transaction — a point-in-time snapshot, WAL isolates readers from
  * concurrent writes — mapped to writer types on `@Dispatcher(Default)`. The pure `OpmlWriter`
  * consumes the result and never sees the database or `:core:model` types. `BackupWriter` reuses
- * [build] for the archive's `subscriptions.opml` (grouped, no passwords).
+ * [readSnapshot] and [document] for the archive's `subscriptions.opml` (grouped, no passwords)
+ * so it is the same point-in-time snapshot as the archive's own reads.
  *
  * Opted-in credentials resolve after the snapshot, outside the transaction: 05 keeps secret
  * I/O (Android Keystore, the desktop secrets file) out of Room transactions, so export pays
@@ -48,18 +49,34 @@ internal class OpmlExporter(
      * [ExportRequest.groupId] names a group that no longer exists (a delete raced the dialog).
      */
     suspend fun build(request: ExportRequest): BuiltExport? {
-        val snapshot =
-            db.withReadTransaction {
-                Snapshot(
-                    groups = db.groupDao().groupsInOrder(),
-                    podcasts = db.podcastDao().allForExport(),
-                    pairs = db.groupDao().membershipPairs(),
-                )
-            }
-        return withContext(defaultDispatcher) { document(request, snapshot) }
+        val snapshot = db.withReadTransaction { readSnapshot() }
+        return document(request, snapshot)
     }
 
-    private suspend fun document(
+    /**
+     * The rows [document] maps, read inside the caller's transaction. `BackupWriter` calls this
+     * from inside its one export read transaction, so the archive's `subscriptions.opml` is the
+     * same point-in-time snapshot as its `library.json` — 05 Writing's "from the in-memory
+     * library", not a second read that could disagree with it.
+     */
+    internal suspend fun readSnapshot(): Snapshot =
+        Snapshot(
+            groups = db.groupDao().groupsInOrder(),
+            podcasts = db.podcastDao().allForExport(),
+            pairs = db.groupDao().membershipPairs(),
+        )
+
+    /**
+     * [build]'s mapping over a snapshot the caller already read: the same document rules, with
+     * `includePasswords` secret reads still outside any transaction (a `SecretStore` call is
+     * never a Room operation). Runs on the Default dispatcher like [build]'s own mapping.
+     */
+    internal suspend fun document(
+        request: ExportRequest,
+        snapshot: Snapshot,
+    ): BuiltExport? = withContext(defaultDispatcher) { mapDocument(request, snapshot) }
+
+    private suspend fun mapDocument(
         request: ExportRequest,
         snapshot: Snapshot,
     ): BuiltExport? {
@@ -251,7 +268,8 @@ internal class OpmlExporter(
     private fun youtubeChannelLink(podcast: PodcastEntity): String? =
         podcast.youtubeChannelId?.let { "$YOUTUBE_CHANNEL_PREFIX$it" }
 
-    private class Snapshot(
+    /** The read behind [build]; `BackupWriter` snapshots the same rows in its own transaction. */
+    internal class Snapshot(
         val groups: List<PodcastGroupEntity>,
         val podcasts: List<PodcastEntity>,
         val pairs: List<MembershipPair>,
