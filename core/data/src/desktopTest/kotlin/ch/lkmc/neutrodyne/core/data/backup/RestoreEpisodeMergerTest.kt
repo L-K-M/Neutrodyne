@@ -687,6 +687,68 @@ class RestoreEpisodeMergerTest {
         }
 
     @Test
+    fun replaceWithoutQueueJsonClearsTheWholeSession() =
+        runTest {
+            val p = seedPodcast("https://a/feed")
+            val playing = seedEpisode(p, "g:playing")
+            val anchor = seedEpisode(p, "g:anchor")
+            val group = db.groupDao().insert(groupEntity(uuid = "u-g", name = "Ctx", orderKey = "0.5"))
+            seedSession(current = playing, contextType = ContextType.GROUP, contextId = group)
+            db.useWriterConnection { conn ->
+                conn.execSql(
+                    "UPDATE play_session SET contextAnchorEpisodeId = $anchor," +
+                        " contextAnchorSortDate = 42 WHERE id = 0",
+                )
+            }
+            // No queue.json at all — Replace still owns the whole session row.
+            val staged = staged(podcasts = listOf(podcastV1("https://a/feed")))
+
+            restore(staged, MergePolicy.RESTORE_REPLACE, ALL)
+
+            val s = assertNotNull(db.playSessionDao().get())
+            assertNull(s.currentEpisodeId)
+            assertNull(s.contextType)
+            assertNull(s.contextId)
+            assertNull(s.contextAnchorEpisodeId)
+            assertNull(s.contextAnchorSortDate)
+            // Owned increments over the seeded generation: the deleted group's context
+            // clear, the pre-step's clearContext, then the Replace session write.
+            assertEquals(8L, s.generation)
+        }
+
+    @Test
+    fun replaceWithASessionlessQueueClearsTheWholeSession() =
+        runTest {
+            val p = seedPodcast("https://a/feed")
+            val playing = seedEpisode(p, "g:playing")
+            val anchor = seedEpisode(p, "g:anchor")
+            val group = db.groupDao().insert(groupEntity(uuid = "u-g", name = "Ctx", orderKey = "0.5"))
+            seedSession(current = playing, contextType = ContextType.GROUP, contextId = group)
+            db.useWriterConnection { conn ->
+                conn.execSql(
+                    "UPDATE play_session SET contextAnchorEpisodeId = $anchor," +
+                        " contextAnchorSortDate = 42 WHERE id = 0",
+                )
+            }
+            // queue.json is present but carries `session = null` — same clear.
+            val staged =
+                staged(
+                    podcasts = listOf(podcastV1("https://a/feed")),
+                    queue = QueueV1(upNext = emptyList(), session = null),
+                )
+
+            restore(staged, MergePolicy.RESTORE_REPLACE, ALL)
+
+            val s = assertNotNull(db.playSessionDao().get())
+            assertNull(s.currentEpisodeId)
+            assertNull(s.contextType)
+            assertNull(s.contextId)
+            assertNull(s.contextAnchorEpisodeId)
+            assertNull(s.contextAnchorSortDate)
+            assertEquals(8L, s.generation)
+        }
+
+    @Test
     fun sessionContextMapsStagedGroupUuidToItsMergedRow() =
         runTest {
             val p = seedPodcast("https://a/feed")

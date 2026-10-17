@@ -220,7 +220,8 @@ internal class RestoreEpisodeMerger(
      * appends the backup's refs not already queued in archive order (`OrderKey.after(last)`);
      * Replace replays the backup's list minus played entries (`ok` verbatim, else
      * `OrderKey.rewrite(n)`), then the play session lands — Merge only while the local
-     * `currentEpisodeId` is free.
+     * `currentEpisodeId` is free, Replace always, an absent or null backup session meaning
+     * the local session row clears.
      */
     private suspend fun mergeQueueAndSession(
         staged: StagedLibrary,
@@ -261,8 +262,18 @@ internal class RestoreEpisodeMerger(
                 }
             }
 
-            queue?.session?.let {
-                restoreSession(it, policy, podcastIdByKey, groupIdByUuid, refIds, indexCache, now)
+            if (policy == MergePolicy.RESTORE_REPLACE || queue?.session != null) {
+                // A Replace archive without a session still owns the row: the empty
+                // SessionV1 clears `currentEpisodeId` with the context the pre-step cut.
+                restoreSession(
+                    queue?.session ?: SessionV1(),
+                    policy,
+                    podcastIdByKey,
+                    groupIdByUuid,
+                    refIds,
+                    indexCache,
+                    now,
+                )
             }
         }
     }
