@@ -99,6 +99,17 @@ class ImportSourceSnifferTest {
     }
 
     @Test
+    fun anEmptySubscriptionsArrayIsNewPipe() {
+        // 05 Sniffing: every object in the array carrying service_id is vacuously true
+        // for an empty array; the import pipeline then ends in Empty anyway.
+        assertEquals(SniffedFormat.NEWPIPE_JSON, recognized(sniffText("""{"subscriptions":[]}""")))
+        assertEquals(
+            SniffedFormat.NEWPIPE_JSON,
+            recognized(sniffText("""{"app_version":"x","subscriptions":[ ]}""")),
+        )
+    }
+
+    @Test
     fun csvAndUrlLists() {
         assertEquals(
             SniffedFormat.TAKEOUT_CSV,

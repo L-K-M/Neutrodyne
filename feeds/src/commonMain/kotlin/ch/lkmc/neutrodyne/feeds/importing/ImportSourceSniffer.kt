@@ -333,19 +333,18 @@ public object ImportSourceSniffer {
 
     /**
      * Every object seen inside the `[`-array at [start] must carry `service_id` — the NewPipe
-     * shape (04). A window-truncated tail counts as unseen: what was scanned decides.
+     * shape (04). An empty array satisfies the rule vacuously; a window-truncated tail counts
+     * as unseen: what was scanned decides.
      */
     private fun subscriptionsLookNewPipe(
         text: String,
         start: Int,
     ): Boolean {
-        var objects = 0
         var i = skipWs(text, start + 1)
         while (i < text.length && text[i] != ']') {
             if (text[i] != '{') return false
             val (keys, end) = objectKeys(text, i)
             if ("service_id" !in keys) return false
-            objects++
             if (end < 0) break
             i = skipWs(text, end)
             if (i < text.length && text[i] == ',') {
@@ -354,7 +353,7 @@ public object ImportSourceSniffer {
                 break
             }
         }
-        return objects > 0
+        return true
     }
 
     /**
