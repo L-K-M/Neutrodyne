@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.NewEpisodePoster
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
@@ -42,6 +43,8 @@ interface AndroidAppGraph {
 
     /** `MainActivity` collects `appearance.*` through it into `AppearancePrefs` (08 App scheme). */
     val settingsRepository: SettingsRepository
+
+    val groupChannelSync: GroupChannelSync
 
     val newEpisodePoster: NewEpisodePoster
 

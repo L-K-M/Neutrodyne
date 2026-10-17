@@ -3,7 +3,9 @@
 package ch.lkmc.neutrodyne.core.testing
 
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.DeletedGroupToken
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.GroupError
@@ -23,6 +25,7 @@ import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import ch.lkmc.neutrodyne.sync.protocol.OrderKey
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,6 +34,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlin.uuid.Uuid
 
 /**
@@ -126,86 +130,93 @@ class FakeGroupRepository(
         draft: GroupDraft,
         memberIds: Set<Long>,
     ): Outcome<Long, GroupError> =
-        mutex.withLock {
-            val name =
-                when (val result = checkName(draft.name)) {
-                    is Outcome.Failure -> return@withLock result
-                    is Outcome.Success -> result.value
-                }
-            if (!GroupIcons.isValid(draft.iconKey)) return@withLock Outcome.Failure(GroupError.InvalidIconKey)
-            val rows = groups.value
-            val id = (rows.maxOfOrNull { it.id } ?: 0L) + 1
-            val color = draft.colorArgb?.let(GroupPalette::opaque) ?: GroupPalette.nextColor(rows.map { it.colorArgb })
-            val created =
-                Group(
-                    id = id,
-                    uuid = Uuid.random().toString(),
-                    name = name,
-                    orderKey = OrderKey.after(rows.maxByOrNull { it.orderKey }?.orderKey),
-                    colorArgb = color,
-                    iconKey = draft.iconKey,
-                    feedOrder = FeedOrder.NEWEST_FIRST,
-                    playOrder = draft.playOrder,
-                    filterFlags = 0,
-                    mediaFilter = MediaFilter.ALL,
-                    hideOlderThanDays = null,
-                    showAsTab = draft.showAsTab,
-                    lastViewedAt = null,
-                    createdAt = clock.now(),
-                    memberCount = memberIds.size,
-                )
-            groups.value = rows + created
-            if (memberIds.isNotEmpty()) members.value = members.value + (id to memberIds)
-            Outcome.Success(id)
-        }
+        mutex
+            .withLock {
+                val name =
+                    when (val result = checkName(draft.name)) {
+                        is Outcome.Failure -> return@withLock result
+                        is Outcome.Success -> result.value
+                    }
+                if (!GroupIcons.isValid(draft.iconKey)) return@withLock Outcome.Failure(GroupError.InvalidIconKey)
+                val rows = groups.value
+                val id = (rows.maxOfOrNull { it.id } ?: 0L) + 1
+                val color =
+                    draft.colorArgb?.let(GroupPalette::opaque) ?: GroupPalette.nextColor(rows.map { it.colorArgb })
+                val created =
+                    Group(
+                        id = id,
+                        uuid = Uuid.random().toString(),
+                        name = name,
+                        orderKey = OrderKey.after(rows.maxByOrNull { it.orderKey }?.orderKey),
+                        colorArgb = color,
+                        iconKey = draft.iconKey,
+                        feedOrder = FeedOrder.NEWEST_FIRST,
+                        playOrder = draft.playOrder,
+                        filterFlags = 0,
+                        mediaFilter = MediaFilter.ALL,
+                        hideOlderThanDays = null,
+                        showAsTab = draft.showAsTab,
+                        lastViewedAt = null,
+                        createdAt = clock.now(),
+                        memberCount = memberIds.size,
+                    )
+                groups.value = rows + created
+                if (memberIds.isNotEmpty()) members.value = members.value + (id to memberIds)
+                Outcome.Success(id)
+            }.also { outcome ->
+                if (outcome is Outcome.Success) syncChannels()
+            }
 
     override suspend fun update(
         groupId: Long,
         edit: GroupEdit,
     ): Outcome<Unit, GroupError> =
-        mutex.withLock {
-            val group = groups.value.find { it.id == groupId }
-            if (group == null) return@withLock Outcome.Failure(GroupError.NotFound)
-            val updated =
-                when (edit) {
-                    is GroupEdit.Rename -> {
-                        val name =
-                            when (val result = checkName(edit.name, groupId)) {
-                                is Outcome.Failure -> return@withLock result
-                                is Outcome.Success -> result.value
+        mutex
+            .withLock {
+                val group = groups.value.find { it.id == groupId }
+                if (group == null) return@withLock Outcome.Failure(GroupError.NotFound)
+                val updated =
+                    when (edit) {
+                        is GroupEdit.Rename -> {
+                            val name =
+                                when (val result = checkName(edit.name, groupId)) {
+                                    is Outcome.Failure -> return@withLock result
+                                    is Outcome.Success -> result.value
+                                }
+                            group.copy(name = name)
+                        }
+
+                        is GroupEdit.Look -> {
+                            if (!GroupIcons.isValid(edit.iconKey)) {
+                                return@withLock Outcome.Failure(GroupError.InvalidIconKey)
                             }
-                        group.copy(name = name)
-                    }
-
-                    is GroupEdit.Look -> {
-                        if (!GroupIcons.isValid(edit.iconKey)) {
-                            return@withLock Outcome.Failure(GroupError.InvalidIconKey)
+                            group.copy(colorArgb = edit.colorArgb?.let(GroupPalette::opaque), iconKey = edit.iconKey)
                         }
-                        group.copy(colorArgb = edit.colorArgb?.let(GroupPalette::opaque), iconKey = edit.iconKey)
-                    }
 
-                    is GroupEdit.Orders -> {
-                        group.copy(feedOrder = edit.feedOrder, playOrder = edit.playOrder)
-                    }
-
-                    is GroupEdit.View -> {
-                        if (!edit.hasSupportedAgeLimit()) {
-                            return@withLock Outcome.Failure(GroupError.InvalidHideOlderThanDays)
+                        is GroupEdit.Orders -> {
+                            group.copy(feedOrder = edit.feedOrder, playOrder = edit.playOrder)
                         }
-                        group.copy(
-                            filterFlags = edit.filterFlags,
-                            mediaFilter = edit.mediaFilter,
-                            hideOlderThanDays = edit.hideOlderThanDays,
-                        )
-                    }
 
-                    is GroupEdit.ShowAsTab -> {
-                        group.copy(showAsTab = edit.show)
+                        is GroupEdit.View -> {
+                            if (!edit.hasSupportedAgeLimit()) {
+                                return@withLock Outcome.Failure(GroupError.InvalidHideOlderThanDays)
+                            }
+                            group.copy(
+                                filterFlags = edit.filterFlags,
+                                mediaFilter = edit.mediaFilter,
+                                hideOlderThanDays = edit.hideOlderThanDays,
+                            )
+                        }
+
+                        is GroupEdit.ShowAsTab -> {
+                            group.copy(showAsTab = edit.show)
+                        }
                     }
-                }
-            groups.value = groups.value.map { if (it.id == groupId) updated else it }
-            Outcome.Success(Unit)
-        }
+                groups.value = groups.value.map { if (it.id == groupId) updated else it }
+                Outcome.Success(Unit)
+            }.also { outcome ->
+                if (outcome is Outcome.Success && edit is GroupEdit.Rename) syncChannels()
+            }
 
     override suspend fun reorder(groupIdsInOrder: List<Long>): Outcome<Unit, GroupError> =
         mutex.withLock {
@@ -271,6 +282,8 @@ class FakeGroupRepository(
                 lockedThenNotify { expireLocked(token.value) }
             }
             Outcome.Success(token)
+        }.also { outcome ->
+            if (outcome is Outcome.Success) syncChannels()
         }
 
     override suspend fun undoDelete(token: DeletedGroupToken): Outcome<Long, GroupError> =
@@ -290,6 +303,8 @@ class FakeGroupRepository(
                 members.value + (entry.group.id to entry.memberIds.filterTo(HashSet(), podcastExists))
             pending.remove(token.value)
             Outcome.Success(entry.group.id)
+        }.also { outcome ->
+            if (outcome is Outcome.Success) syncChannels()
         }
 
     override suspend fun pendingUndoUuids(): Set<String> =
@@ -310,6 +325,13 @@ class FakeGroupRepository(
             }
         for (uuid in settledUuids) channelSync.onDeleted(uuid)
         return result
+    }
+
+    private suspend fun syncChannels() {
+        withContext(NonCancellable) {
+            suspendRunCatching { channelSync.sync() }
+                .onFailure { Log.w("Groups", it) { "Group channel sweep failed after group write" } }
+        }
     }
 
     /** Settles every token whose window has passed; the channel delete fires per expiry. */

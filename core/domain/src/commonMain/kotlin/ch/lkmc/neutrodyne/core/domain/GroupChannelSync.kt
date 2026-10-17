@@ -6,15 +6,14 @@ package ch.lkmc.neutrodyne.core.domain
  * The notification-channel lifecycle port of 05 Notification channels: Android keeps one
  * `new_episodes_{uuid}` channel per group whose own `notifyNewEpisodes` is `true`; the desktop
  * has no channels and binds [NoGroupChannels]. Moved here from `:core:data` (2026-10-05) so
- * `:sync:impl` never depends on `:core:data`. The Android implementation is C5's
- * `GroupNotificationChannels` (`:core:data` `androidMain`); both platforms bind [NoGroupChannels]
- * until then.
+ * `:sync:impl` never depends on `:core:data`. Android binds `AndroidGroupChannelSync` in
+ * `:app`; the desktop binds [NoGroupChannels].
  */
 interface GroupChannelSync {
     /**
      * Reconcile channels with the group table (05's start-up and post-write sweep): create a
      * channel for every group whose own `notifyNewEpisodes` is `true` and delete every
-     * `new_episodes_*` channel whose uuid is neither a live group nor a live undo token —
+     * `new_episodes_*` channel whose uuid belongs to neither an enabled group nor a live undo token —
      * implementations read [GroupRepository.pendingUndoUuids] for the spared set.
      */
     suspend fun sync()
@@ -34,8 +33,7 @@ interface GroupChannelSync {
 }
 
 /**
- * The no-op binding: the desktop's channel-free implementation permanently and Android's
- * interim one until C5 lands `GroupNotificationChannels`.
+ * The desktop's channel-free implementation.
  */
 object NoGroupChannels : GroupChannelSync {
     override suspend fun sync() = Unit
