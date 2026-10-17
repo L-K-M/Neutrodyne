@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.Outcome
@@ -17,6 +18,7 @@ import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
 import ch.lkmc.neutrodyne.core.domain.FeedRepository
 import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.domain.GroupRepository
+import ch.lkmc.neutrodyne.core.domain.MarkFeedPlayedResult
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
@@ -30,6 +32,9 @@ import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
+import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionController
+import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedController
+import ch.lkmc.neutrodyne.core.ui.MarkPlayedOutcome
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.UserMessages
@@ -75,6 +80,7 @@ public class PodcastViewModel
         private val unsubscribe: UnsubscribeUseCase,
         network: NetworkMonitor,
         liveStateSource: EpisodeLiveStateSource,
+        clock: Clock,
     ) : ViewModel() {
         private val filters = MutableStateFlow(FeedFilters())
         private val detail = podcasts.observePodcast(podcastId)
@@ -121,9 +127,16 @@ public class PodcastViewModel
                 state.copy(messages = messages)
             }.stateIn(viewModelScope, SHARING, PodcastUiState())
 
+        public val episodeSelection =
+            EpisodeSelectionController(viewModelScope, episodes::setPlayed, ::reportWriteFailed)
+
         /** Repository-owned row actions; the route owns navigation and external URLs. */
         public fun onRowAction(action: EpisodeAction) {
             when (action) {
+                is EpisodeAction.Select -> {
+                    episodeSelection.toggle(action.episodeId)
+                }
+
                 is EpisodeAction.SetPlayed -> {
                     write { episodes.setPlayed(listOf(action.episodeId), action.played) }
                 }
@@ -169,8 +182,25 @@ public class PodcastViewModel
             write { unsubscribe(listOf(podcastId)) }
         }
 
+        public val markPlayed: MarkFeedPlayedController =
+            MarkFeedPlayedController(viewModelScope, clock, feedRepository::countUnplayed) { source, before, count ->
+                when (val result = episodes.markFeedPlayed(source, before, count)) {
+                    is MarkFeedPlayedResult.Played -> {
+                        MarkPlayedOutcome.Played
+                    }
+
+                    is MarkFeedPlayedResult.SelectionChanged -> {
+                        MarkPlayedOutcome.SelectionChanged(result.actualCount)
+                    }
+                }
+            }
+
+        /** The overflow's "Mark all as played…" (08): opens the counted D9 confirmation. */
         public fun markAllPlayed() {
-            write { episodes.markFeedPlayed(FeedSource.Podcast(podcastId), null) }
+            markPlayed.open(
+                FeedSource.Podcast(podcastId),
+                UiText.Raw(uiState.value.detail?.displayTitle ?: return),
+            )
         }
 
         /**

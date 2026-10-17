@@ -38,4 +38,10 @@
         <item quantity="other">%1$d Bibliotheken</item>
     </plurals>
     <string name="settings_save_failed">Die Einstellung konnte nicht gespeichert werden</string>
+    <string name="appearance_gestures">Gesten</string>
+    <string name="appearance_feeds_row_swipe">Folgen in Feeds wischen</string>
+    <string name="swipe_right">Nach rechts wischen</string>
+    <string name="swipe_left">Nach links wischen</string>
+    <string name="swipe_mark_played">Als gespielt / ungespielt markieren</string>
+    <string name="swipe_none">Keine</string>
 </resources>

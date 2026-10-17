@@ -46,6 +46,7 @@ import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
+import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
@@ -595,7 +596,7 @@ class LibraryScreenTest {
                 podcasts,
                 episodes,
                 refreshController,
-                UnsubscribeUseCase(podcasts),
+                UnsubscribeUseCase(podcasts, FakeNewEpisodePoster()),
                 settings,
                 collator,
                 network,

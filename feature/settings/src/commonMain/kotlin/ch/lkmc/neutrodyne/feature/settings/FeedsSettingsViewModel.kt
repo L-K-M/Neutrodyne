@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.core.model.settings.ShowNotesImages
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.UserMessages
+import ch.lkmc.neutrodyne.core.ui.platform.NotificationPermissionRequester
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_save_failed
 import dev.zacsweers.metro.ContributesIntoMap
@@ -23,19 +24,22 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metrox.viewmodel.ViewModelKey
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-/** The five values Settings › Feeds renders (08 Settings › Feeds; defaults until first written). */
+/** The values Settings › Feeds renders (08 Settings › Feeds; defaults until first written). */
 public data class FeedsSettingsUiState(
     val intervalMinutes: Int = FeedsSettingKeys.REFRESH_INTERVAL_MINUTES.default,
     val wifiOnly: Boolean = FeedsSettingKeys.REFRESH_WIFI_ONLY.default,
     val refreshOnAppOpen: Boolean = FeedsSettingKeys.REFRESH_ON_APP_OPEN.default,
     val backfillPagedFeeds: Boolean = FeedsSettingKeys.BACKFILL_PAGED_FEEDS.default,
     val showNotesImages: ShowNotesImages = FeedsSettingKeys.SHOW_NOTES_IMAGES.default,
+    val notifyNewEpisodes: Boolean = FeedsSettingKeys.NOTIFY_NEW_EPISODES.default,
+    val notificationsBlocked: Boolean = false,
     val messages: ImmutableList<UserMessage> = persistentListOf(),
 )
 
@@ -53,6 +57,7 @@ public class FeedsSettingsViewModel(
     private val refreshController: RefreshController,
 ) : ViewModel() {
     private val userMessages = UserMessages()
+    private val notificationsBlocked = MutableStateFlow(false)
 
     public val uiState: StateFlow<FeedsSettingsUiState> =
         combine(
@@ -62,9 +67,30 @@ public class FeedsSettingsViewModel(
             settings.observe(FeedsSettingKeys.BACKFILL_PAGED_FEEDS),
             settings.observe(FeedsSettingKeys.SHOW_NOTES_IMAGES),
             ::FeedsSettingsUiState,
-        ).combine(userMessages.flow) { state, messages ->
+        ).combine(settings.observe(FeedsSettingKeys.NOTIFY_NEW_EPISODES)) { state, notify ->
+            state.copy(notifyNewEpisodes = notify)
+        }.combine(notificationsBlocked) { state, blocked ->
+            state.copy(notificationsBlocked = blocked)
+        }.combine(userMessages.flow) { state, messages ->
             state.copy(messages = messages)
         }.stateIn(viewModelScope, SHARING, FeedsSettingsUiState())
+
+    public fun setNotifyNewEpisodes(
+        enabled: Boolean,
+        requester: NotificationPermissionRequester?,
+    ) {
+        viewModelScope.launch {
+            val outcome = suspendRunCatching { settings.set(FeedsSettingKeys.NOTIFY_NEW_EPISODES, enabled) }.getOrNull()
+            if (outcome !is Outcome.Success) {
+                reportWriteFailed(null)
+                return@launch
+            }
+            notificationsBlocked.value = enabled && requester?.granted == false
+            if (enabled && requester != null && !requester.granted) {
+                requester.request { allowed -> notificationsBlocked.value = !allowed }
+            }
+        }
+    }
 
     /** The interval chooser's write; 03 rebases the periodic tick on success. */
     public fun setRefreshIntervalMinutes(minutes: Int) {

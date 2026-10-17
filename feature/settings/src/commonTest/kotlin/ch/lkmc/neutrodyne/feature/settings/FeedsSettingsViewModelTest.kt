@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import ch.lkmc.neutrodyne.core.ui.UiText
+import ch.lkmc.neutrodyne.core.ui.platform.NotificationPermissionRequester
 import ch.lkmc.neutrodyne.feature.settings.resources.Res
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_save_failed
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -38,6 +39,46 @@ class FeedsSettingsViewModelTest : MainDispatcherTest() {
     private fun TestScope.collect(viewModel: FeedsSettingsViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
     }
+
+    @Test
+    fun notificationPermissionOnlyFollowsSuccessfulEnable() =
+        runTest {
+            val vm = viewModel()
+            collect(vm)
+            var requests = 0
+            val requester =
+                object : NotificationPermissionRequester {
+                    override var granted = false
+
+                    override fun request(onResult: (Boolean) -> Unit) {
+                        requests++
+                        onResult(false)
+                    }
+
+                    override fun openSettings() = Unit
+                }
+            settings.failNextSet = SettingsError.WriteFailed
+            vm.setNotifyNewEpisodes(true, requester)
+            advanceUntilIdle()
+            assertEquals(0, requests)
+            assertEquals(false, settings.get(FeedsSettingKeys.NOTIFY_NEW_EPISODES))
+            assertTrue(
+                vm.uiState.value.messages
+                    .isNotEmpty(),
+            )
+            vm.setNotifyNewEpisodes(true, requester)
+            advanceUntilIdle()
+            assertEquals(1, requests)
+            assertTrue(vm.uiState.value.notifyNewEpisodes)
+            assertTrue(vm.uiState.value.notificationsBlocked)
+            requester.granted = true
+            vm.setNotifyNewEpisodes(true, requester)
+            vm.setNotifyNewEpisodes(false, requester)
+            advanceUntilIdle()
+            assertEquals(1, requests)
+            assertEquals(false, vm.uiState.value.notificationsBlocked)
+            assertTrue(refreshController.calls.isEmpty())
+        }
 
     @Test
     fun intervalChangePersistsThenReschedules() =

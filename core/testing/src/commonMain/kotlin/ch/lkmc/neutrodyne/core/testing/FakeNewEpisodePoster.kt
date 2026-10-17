@@ -9,6 +9,7 @@ class FakeNewEpisodePoster : NewEpisodePoster {
     val posts = mutableListOf<List<NewEpisodeNotice>>()
     val removals = mutableListOf<List<Long>>()
     var onPost: suspend (List<NewEpisodeNotice>) -> Unit = {}
+    var onRemove: suspend (List<Long>) -> Unit = {}
 
     override suspend fun post(notices: List<NewEpisodeNotice>) {
         posts += notices.toList()
@@ -17,5 +18,6 @@ class FakeNewEpisodePoster : NewEpisodePoster {
 
     override suspend fun removePodcasts(podcastIds: List<Long>) {
         removals += podcastIds.toList()
+        onRemove(podcastIds)
     }
 }
