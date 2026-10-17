@@ -1044,6 +1044,13 @@ Walk rules (strict and relaxed):
 - Caps: depth > 32 → `TOO_DEEP`; > 10,000 feeds → `TOO_MANY_FEEDS`; > 200,000 outlines → `TOO_MANY_OUTLINES`; an attribute longer than 8,192 chars drops that outline with a warning. Each failure rejects the file with a clear message (M3 acceptance 3). `neutrodyne = true` when the root has `xmlns:nd="urn:neutrodyne:opml:1"`.
 - `category` tokens: split on `,` first; trim; for a token containing a literal `/` keep the last non-empty segment (`/Harvard/Berkman` → `Berkman`, spec "slash-delimited category strings"); then decode exactly once in a single left-to-right pass, mapping only `%25` → `%`, `%2C` → `,` and `%2F` → `/` (hex case-insensitive). A decoded `,` never re-splits, a decoded `/` never re-segments, and `%25` never decodes twice (`a%252Cb` → `a%2Cb`, never `a,b`); `+` is never a space, and a `%` not followed by two hex digits stays literal.
 
+**Implementation note (2026-10-17, M3).** A3 ships the strict pass only, and the shipped shapes differ from the sketch above in named, additive ways:
+
+- `OpmlFailure` gains `MALFORMED` for "the document is not well-formed XML" — the sketch's enum has no reason a strict-pass `XmlPullParserException` can map to, and the fall-through rule needs one. A well-formed document whose root is not `<opml>` still reports `NO_OUTLINES`.
+- `OpmlDocument` gains `warnings: List<OpmlWarning>` (`code`, `count`; `OpmlWarningCode` = `ATTRIBUTE_TOO_LONG`, `IGNORED_OUTLINES`, `LINKED_LISTS`, `SALVAGED`), so the preview's "12 entries were ignored" warnings survive from the read without the classifier re-walking the file.
+- `OpmlLimits` gains `maxMarkupGapBytes` (the documented 1 MiB bound, as a limit) and `maxTagAttributes` (default 1,000).
+- `MarkupGapGuard` folds the `PrologGuard` prolog scan into the byte stream (a push-model transliteration of the same `PrologLexer` construct boundaries over encoding-aware units), because reading through an `okio.Source` without materialising the document means there is no decoded string for `PrologGuard` to scan. While the prolog walk is open it additionally bounds the `<?xml` declaration's attribute count — kxml2 grows its attribute array a few slots at a time per attribute, so a flooded declaration is a quadratic copy storm even under the gap bound (measured: a ~1 MiB tag of ~105,000 one-byte attributes costs 15–20 s inside kxml2). The same `maxTagAttributes` is checked post-delivery on every start tag (`parser.attributeCount`), which cannot preempt kxml2's in-tag growth — the gap bound still owns buffer size — but keeps an over-bound tag terminal instead of feeding the walk.
+
 ### 3. Classify
 
 `ImportClassifier` (`:core:data` `commonMain`, because it needs `:youtube:api`) turns each entry into an `import_item`:
