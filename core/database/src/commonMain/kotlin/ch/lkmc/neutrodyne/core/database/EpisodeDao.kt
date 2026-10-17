@@ -98,6 +98,19 @@ interface EpisodeDao {
     fun observeDescription(episodeId: Long): Flow<ByteArray?>
 
     /**
+     * 02 User-state writes' "played except newest" selection (D66; 05 §7 runs the mark-played
+     * chain over these IDs when the import option asks): every non-new episode of the podcast
+     * except its newest row. `isNew = 0` keeps an episode a non-initial refresh found meanwhile
+     * unplayed.
+     */
+    @Query(
+        "SELECT e.id FROM episode e WHERE e.podcastId = :podcastId AND e.isNew = 0" +
+            " AND e.id <> (SELECT id FROM episode WHERE podcastId = :podcastId" +
+            " ORDER BY sortDate DESC, id DESC LIMIT 1)",
+    )
+    suspend fun playedExceptNewestIds(podcastId: Long): List<Long>
+
+    /**
      * `markFeedPlayed`'s id selection (02 Bulk "Mark all as played"): one-shot query built by
      * `FeedQueryBuilder.unplayedIds` so confirmation count and marked rows share a predicate.
      */
