@@ -403,6 +403,7 @@
     <string name="groups_new">New group</string>
     <string name="groups_manage">Manage groups</string>
     <string name="groups_empty">No groups yet</string>
+    <string name="suggested_groups_first">Create your first group</string>
     <string name="mark_played_all">All</string>
     <string name="mark_played_week">Older than 1 week</string>
     <string name="mark_played_month">Older than 1 month</string>

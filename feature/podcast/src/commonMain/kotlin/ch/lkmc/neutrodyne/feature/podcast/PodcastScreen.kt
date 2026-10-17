@@ -53,6 +53,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdTooltipIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
+import ch.lkmc.neutrodyne.core.model.AVAILABLE_FEED_FILTER_CAPABILITIES
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.FeedFilters
@@ -667,6 +668,7 @@ private fun ChipsRow(
     var orderOpen by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
         FeedFilterChips(
+            availableFilters = AVAILABLE_FEED_FILTER_CAPABILITIES,
             filters = filters,
             onFiltersChange = onFiltersChange,
             modifier = Modifier.weight(1f),

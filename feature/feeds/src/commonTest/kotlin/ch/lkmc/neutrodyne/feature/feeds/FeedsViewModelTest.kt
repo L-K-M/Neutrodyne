@@ -58,6 +58,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
@@ -287,6 +288,44 @@ class FeedsViewModelTest : MainDispatcherTest() {
             assertIs<FeedItem.Day>(items[0])
             assertIs<FeedItem.Episode>(items[1])
             assertIs<FeedItem.Episode>(items[2])
+        }
+
+    @Test
+    fun gatedPersistedFiltersDoNotRestrictPagesOrChangeStorage() =
+        viewModelTest {
+            val group = group()
+            val stored = FeedFilters(downloadedOnly = true, inProgressOnly = true, unplayedOnly = true)
+            val model = viewModel()
+            collect(model)
+            for (source in listOf(FeedSource.All, FeedSource.Ungrouped, FeedSource.Group(group.id))) {
+                feeds.setFilters(source, stored)
+                model.pagingFor(source).take(1).asSnapshot()
+                runCurrent()
+                assertEquals(stored.copy(downloadedOnly = false, inProgressOnly = false), feeds.lastRequest?.second)
+                assertEquals(
+                    stored.copy(downloadedOnly = false, inProgressOnly = false),
+                    model.prefsFor(source).first().filters,
+                )
+                assertEquals(
+                    stored,
+                    feeds.prefs.value
+                        .getValue(source)
+                        .filters,
+                )
+            }
+            assertEquals(stored.copy(downloadedOnly = false, inProgressOnly = false), model.uiState.value.filters)
+        }
+
+    @Test
+    fun gatedOnlyPreferenceChangesKeepTheCurrentPager() =
+        viewModelTest {
+            val model = viewModel()
+            backgroundScope.launch { model.pagingFor(FeedSource.All).collect {} }
+            runCurrent()
+            feeds.setFilters(FeedSource.All, FeedFilters(downloadedOnly = true, inProgressOnly = true))
+            runCurrent()
+            assertEquals(1, feeds.pagingRequests.size)
+            assertEquals(FeedFilters(), feeds.lastRequest?.second)
         }
 
     @Test

@@ -469,6 +469,17 @@ the ViewModel adds day headers and caches in each entry's child scope.
 Changing filters replaces that source's pager inside its entry. Visit and
 play-order writes keep the current generation.
 
+**Implementation note (2026-10-16, M2):** D11 derives effective filters in the
+feature layer using the shared milestone capability set. Downloaded (M6) and
+In progress (M4) predicates and stored flags remain intact, but gated flags
+are ignored by page queries and chip state. Reads do not clear persisted or
+synced preferences; an explicit filter edit writes the effective selection.
+The Feeds ViewModel observes preferences and compares the resulting filters
+and order before calling `pagedFeed(source, filters, order)`, preserving the
+three-entry cache and avoiding pager replacement for gated-only changes.
+Podcast's transient filters use the same capability set. This qualifies the
+full filter table above until the corresponding producers ship.
+
 ### Counts and new since last visit
 
 [R2.8](../PLAN.md#21-functional-requirements). Counts are bounded by a window so an imported back catalogue cannot produce "12,000 unplayed".

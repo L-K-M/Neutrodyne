@@ -383,6 +383,7 @@
     <string name="groups_new">Neue Gruppe</string>
     <string name="groups_manage">Gruppen verwalten</string>
     <string name="groups_empty">Noch keine Gruppen</string>
+    <string name="suggested_groups_first">Erstelle deine erste Gruppe</string>
     <string name="mark_played_all">Alle</string>
     <string name="mark_played_week">Älter als 1 Woche</string>
     <string name="mark_played_month">Älter als 1 Monat</string>
