@@ -18,6 +18,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
@@ -65,7 +67,15 @@ internal fun PodcastEffectiveSettings(
                     SettingField.NOTIFY_NEW_EPISODES in state.invalidFields,
                 )
             },
-            trailingContent = { Switch(checked = notifications, onCheckedChange = onNotifications) },
+            trailingContent = {
+                // The headline is a sibling node; name the switch itself for screen readers.
+                val label = stringResource(Res.string.new_episode_notifications)
+                Switch(
+                    checked = notifications,
+                    onCheckedChange = onNotifications,
+                    modifier = Modifier.semantics { contentDescription = label },
+                )
+            },
             modifier = Modifier.clickable { notificationsDialog = true },
         )
         NotificationPermissionNotice(notifications, LocalPlatformActions.current.notifications)

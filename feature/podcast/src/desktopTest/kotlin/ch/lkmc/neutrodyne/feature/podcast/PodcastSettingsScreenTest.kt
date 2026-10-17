@@ -13,9 +13,11 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isSelectable
+import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -441,6 +443,16 @@ class PodcastSettingsScreenTest {
             onNodeWithText("Refresh interval").performClick()
             onNode(hasText("Manual only") and isSelectable()).performSemanticsAction(SemanticsActions.OnClick)
             assertEquals(0, minutes)
+        }
+
+    /** Screen readers name the switch itself; the row's headline is a separate node. */
+    @Test
+    fun notificationSwitchIsNamedForScreenReaders() =
+        runComposeUiTest {
+            var notifications: Boolean? = null
+            setSettings(effectiveState(SettingSource.AppDefault), onNotifications = { notifications = it })
+            onNode(hasContentDescription("New episodes") and isToggleable()).performScrollTo().performClick()
+            assertEquals(false, notifications)
         }
 
     @Test
