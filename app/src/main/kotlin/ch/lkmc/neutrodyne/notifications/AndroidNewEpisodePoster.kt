@@ -6,7 +6,6 @@ import android.Manifest
 import android.app.Application
 import android.app.Notification
 import android.app.NotificationChannel
-import android.app.NotificationChannelGroup
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
@@ -27,6 +26,10 @@ import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.notification_episode_line
 import ch.lkmc.neutrodyne.core.ui.resources.notification_new_episodes
 import ch.lkmc.neutrodyne.core.ui.resources.notification_other_podcasts
+import ch.lkmc.neutrodyne.notifications.NewEpisodeChannels.CHANNEL_GROUP
+import ch.lkmc.neutrodyne.notifications.NewEpisodeChannels.DEFAULT_CHANNEL
+import ch.lkmc.neutrodyne.notifications.NewEpisodeChannels.GROUP_CHANNEL_PREFIX
+import ch.lkmc.neutrodyne.notifications.NewEpisodeChannels.NOTIFICATION_ID
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
@@ -51,7 +54,7 @@ internal class AndroidNewEpisodePoster(
         mutex.withLock {
             if (notices.isEmpty()) return@withLock
 
-            ensureChannels()
+            NewEpisodeChannels.ensureChannels(application)
             val active = shown().associateBy { it.tag }
             for (notice in notices) {
                 if (notice.episodes.isEmpty()) continue
@@ -108,19 +111,6 @@ internal class AndroidNewEpisodePoster(
         db.episodeDao().notificationRows(ids).distinctBy { it.episodeId }.take(MAX_EPISODES).map {
             NewEpisodeLine(it.episodeId, it.podcastId, it.podcastTitle, it.episodeTitle, it.artworkKey)
         }
-
-    private fun ensureChannels() {
-        manager.createNotificationChannelGroup(
-            NotificationChannelGroup(CHANNEL_GROUP, application.getString(R.string.channel_group_new_episodes)),
-        )
-        manager.createNotificationChannel(
-            NotificationChannel(
-                DEFAULT_CHANNEL,
-                application.getString(R.string.channel_new_episodes_default),
-                NotificationManager.IMPORTANCE_DEFAULT,
-            ).apply { group = CHANNEL_GROUP },
-        )
-    }
 
     private fun ensureGroupChannel(notice: NewEpisodeNotice): String {
         val uuid = notice.groupUuid ?: return DEFAULT_CHANNEL
@@ -240,10 +230,6 @@ internal class AndroidNewEpisodePoster(
 
     private companion object {
         const val TAG = "NewEpisodePoster"
-        const val DEFAULT_CHANNEL = "new_episodes"
-        const val GROUP_CHANNEL_PREFIX = "new_episodes_"
-        const val CHANNEL_GROUP = "grp_new_episodes"
-        const val NOTIFICATION_ID = 5000
         const val EPISODE_IDS = "nd.episode_ids"
         const val GROUP_UUID = "nd.group_uuid"
         const val MAX_EPISODES = 50
