@@ -405,9 +405,11 @@ object YouTubeIds {
      *  UULV→4, UUMO/UUPS/UULP/UUPV→null hint. ("UULF…" with 24 chars is the plain uploads list of a channel
      *  "UCLF…".) Result = "UC" + rest; must match CHANNEL, else null. */
     fun uploadsToChannel(playlistId: String): Pair<String, Int?>?
-    fun channelFromFeedLevel(id: String): String = if (id.length == 22) "UC$id" else id  // feed-level yt:channelId lacks "UC"
+    fun channelFromFeedLevel(id: String): String  // feed-level yt:channelId lacks "UC": prepend it when 22 chars; result must match CHANNEL
 }
 ```
+
+Implementation note (2026-10-17, M3): `YouTubeIds` also carries `PLAYLIST`, a deliberate sanity bound on playlist IDs (`^[0-9A-Za-z_-]{13,64}$`, covering the shortest `RD…` mixes up to 41-char `OLAK5uy_…` albums). It is not a prefix whitelist, and `classify` does not gate on it: it follows the table above and keeps any non-uploads `list=`/`playlist_id=` value as `Playlist(p)`. `YouTubeUrlClassifier.classify`, `classifyOrQuery` and `isYouTubeHost` land in this milestone.
 
 Handles are kept Unicode (handles may contain dots, underscores, hyphens and non-ASCII letters) and percent-encoded as UTF-8 only when building a URL. A `Video` ref resolves to the video's channel, never to a single-video subscription.
 
