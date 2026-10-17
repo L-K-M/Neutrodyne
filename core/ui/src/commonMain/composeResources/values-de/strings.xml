@@ -372,4 +372,99 @@
     <string name="feeds_images_tap">Nur nach meinem Tippen</string>
     <string name="feeds_not_on_desktop">Wird auf Computern nicht verwendet</string>
     <string name="write_failed">Die Änderung konnte nicht gespeichert werden</string>
+    <string name="feeds_all">Alle</string>
+    <string name="feeds_ungrouped">Ohne Gruppe</string>
+    <string name="feeds_all_groups">Alle Gruppen</string>
+    <string name="feeds_next_group">Nächste Gruppe</string>
+    <string name="feeds_previous_group">Vorherige Gruppe</string>
+    <string name="groups_recent">Zuletzt angesehen</string>
+    <string name="groups_new">Neue Gruppe</string>
+    <string name="groups_manage">Gruppen verwalten</string>
+    <string name="groups_empty">Noch keine Gruppen</string>
+    <string name="mark_played_all">Alle</string>
+    <string name="mark_played_week">Älter als 1 Woche</string>
+    <string name="mark_played_month">Älter als 1 Monat</string>
+    <string name="mark_played_three_months">Älter als 3 Monate</string>
+    <string name="mark_played_confirm">Als gespielt markieren</string>
+    <string name="mark_played_counting">Folgen werden gezählt…</string>
+    <string name="mark_played_selection_changed">Die Auswahl hat sich geändert. Prüfe die neue Anzahl und bestätige erneut.</string>
+    <string name="mark_played_no_undo">Du kannst diese Aktion nicht rückgängig machen.</string>
+    <plurals name="mark_played_count">
+        <item quantity="one">%1$d Folge in '%2$s' als gespielt markieren?</item>
+        <item quantity="other">%1$d Folgen in '%2$s' als gespielt markieren?</item>
+    </plurals>
+    <string name="action_select">Auswählen</string>
+    <string name="selection_select_all">Alle auswählen</string>
+    <string name="selection_close">Auswahl schließen</string>
+    <plurals name="selection_count">
+        <item quantity="one">%1$d ausgewählt</item>
+        <item quantity="other">%1$d ausgewählt</item>
+    </plurals>
+    <string name="episode_marked_played">Als gespielt markiert</string>
+    <string name="episode_marked_unplayed">Als ungespielt markiert</string>
+
+    <!-- M2 group editor -->
+    <string name="group_edit_new">Neue Gruppe</string>
+    <string name="group_edit_title">Gruppe bearbeiten</string>
+    <string name="group_edit_close">Editor schließen</string>
+    <string name="group_edit_name">Name</string>
+    <string name="group_edit_name_count">%1$d/%2$d</string>
+    <string name="group_edit_name_empty">Gib einen Namen ein</string>
+    <string name="group_edit_name_long">Verwende höchstens %1$d Zeichen</string>
+    <string name="group_edit_name_taken">Eine Gruppe namens '%1$s' existiert bereits</string>
+    <string name="group_edit_color">Farbe</string>
+    <string name="group_edit_custom">Benutzerdefiniert</string>
+    <string name="group_edit_icon">Symbol</string>
+    <string name="group_edit_icon_value">Symbol: %1$s</string>
+    <string name="group_edit_none">Keines</string>
+    <string name="group_edit_order">Wiedergabereihenfolge</string>
+    <string name="group_edit_oldest_hint">Älteste zuerst abspielen?</string>
+    <string name="group_edit_tab">Als Tab in Feeds anzeigen</string>
+    <string name="group_edit_members">Mitglieder (%1$d)</string>
+    <string name="group_edit_search">Abonnierte Podcasts durchsuchen</string>
+    <string name="group_edit_no_members">Keine passenden Podcasts</string>
+    <string name="group_edit_delete">Gruppe löschen</string>
+    <string name="group_edit_deleted">Gruppe gelöscht</string>
+    <string name="group_edit_undo">Rückgängig</string>
+    <string name="group_edit_discard_prompt">Änderungen verwerfen?</string>
+    <string name="group_edit_discard">Verwerfen</string>
+    <string name="group_edit_gone">Diese Gruppe existiert nicht mehr</string>
+    <string name="group_edit_undo_expired">Zu spät zum Rückgängigmachen</string>
+    <string name="group_edit_undo_name_taken">Eine Gruppe namens '%1$s' existiert bereits. Benenne sie um und tippe auf Rückgängig</string>
+
+    <!-- M2 manage groups -->
+    <string name="groups_manage_title">Gruppen verwalten</string>
+    <string name="groups_manage_empty">Noch keine Gruppen</string>
+    <string name="groups_manage_empty_body">Erstelle eine Gruppe, um deine Podcasts zu ordnen.</string>
+    <string name="groups_manage_changed">Gruppen geändert. Versuche es erneut</string>
+    <string name="groups_manage_up">Nach oben verschieben</string>
+    <string name="groups_manage_down">Nach unten verschieben</string>
+    <string name="groups_manage_top">An den Anfang verschieben</string>
+    <!-- M2 effective settings and contextual notification permission. -->
+    <string name="section_notifications">Benachrichtigungen</string>
+    <string name="section_refresh">Aktualisierung</string>
+    <string name="new_episode_notifications">Neue Folgen</string>
+    <string name="setting_inherit">Übernehmen</string>
+    <string name="setting_on">Ein</string>
+    <string name="setting_off">Aus</string>
+    <string name="setting_podcast_override">Für diesen Podcast festgelegt</string>
+    <string name="setting_app_default">App-Standard</string>
+    <string name="setting_from_group">Aus Gruppe '%1$s'</string>
+    <string name="setting_from_two_groups">Aus den Gruppen '%1$s' und '%2$s'</string>
+    <string name="setting_from_groups">Aus %1$d Gruppen</string>
+    <string name="setting_groups_title">Gruppen, die diesen Wert bestimmen</string>
+    <string name="setting_invalid_value">Wähle einen unterstützten Wert</string>
+    <string name="notifications_blocked">Benachrichtigungen sind blockiert</string>
+    <string name="notifications_open_settings">Einstellungen öffnen</string>
+
+    <!-- M2 group settings -->
+    <string name="group_settings_title">Gruppeneinstellungen</string>
+    <string name="group_settings_named_title">Gruppeneinstellungen · %1$s</string>
+    <string name="setting_use_default">Standard verwenden (%1$s, %2$s)</string>
+    <plurals name="notification_new_episodes">
+        <item quantity="one">%1$d neue Episode</item>
+        <item quantity="other">%1$d neue Episoden</item>
+    </plurals>
+    <string name="notification_episode_line">%1$s — %2$s</string>
+    <string name="notification_other_podcasts">Andere Podcasts</string>
 </resources>

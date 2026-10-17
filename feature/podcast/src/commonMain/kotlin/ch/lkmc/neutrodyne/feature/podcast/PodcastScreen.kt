@@ -37,6 +37,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.itemKey
@@ -67,6 +68,7 @@ import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeRow
 import ch.lkmc.neutrodyne.core.ui.EpisodeRowStyle
+import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionController
 import ch.lkmc.neutrodyne.core.ui.FeedDates
 import ch.lkmc.neutrodyne.core.ui.FeedErrorText
 import ch.lkmc.neutrodyne.core.ui.FeedFilterChips
@@ -75,7 +77,9 @@ import ch.lkmc.neutrodyne.core.ui.NavBackButton
 import ch.lkmc.neutrodyne.core.ui.PodcastHeader
 import ch.lkmc.neutrodyne.core.ui.ReportVisibleEpisodeIds
 import ch.lkmc.neutrodyne.core.ui.RowCaps
+import ch.lkmc.neutrodyne.core.ui.SelectionTopBar
 import ch.lkmc.neutrodyne.core.ui.asString
+import ch.lkmc.neutrodyne.core.ui.episodeSelectionKeys
 import ch.lkmc.neutrodyne.core.ui.offlineBannerItem
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.resources.Res
@@ -154,7 +158,18 @@ internal fun PodcastScreen(
     live: State<Map<Long, RowLive>> = rememberUpdatedState(emptyMap()),
     onVisibleIds: (Set<Long>) -> Unit = {},
     listState: LazyListState = rememberLazyListState(),
+    selection: EpisodeSelectionController? = null,
 ) {
+    val selectedIds =
+        selection
+            ?.ids
+            ?.collectAsStateWithLifecycle()
+            ?.value
+            .orEmpty()
+    val selectAll = {
+        selection?.selectAll(items.itemSnapshotList.items.map { it.id })
+        Unit
+    }
     val detail = state.detail
     val navigator = LocalAppNavigator.current
     // The offline banner is a real list item before the header: the title only joins the
@@ -164,32 +179,36 @@ internal fun PodcastScreen(
         remember(headerIndex) { derivedStateOf { listState.firstVisibleItemIndex > headerIndex } }
     val nowMs = LocalUiClock.current.now()
 
-    Column(modifier = modifier.fillMaxSize()) {
-        NdTopAppBar(
-            title = if (headerGone) detail?.displayTitle.orEmpty() else "",
-            navigation = { NavBackButton() },
-            actions = {
-                NdTooltipIconButton(
-                    onClick = onRefresh,
-                    icon = NdIcons.Refresh,
-                    tooltip = stringResource(Res.string.feeds_refresh),
-                    enabled = !state.offline,
-                )
-                NdTooltipIconButton(
-                    onClick = onOpenSettings,
-                    icon = NdIcons.Settings,
-                    tooltip = stringResource(Res.string.podcast_settings),
-                )
-                PodcastOverflow(
-                    detail = detail,
-                    feedUrl = state.feedUrl,
-                    onOpenSettings = onOpenSettings,
-                    onMarkAllPlayedClick = onMarkAllPlayedClick,
-                    onUnsubscribe = onUnsubscribeRequest,
-                )
-            },
-            elevated = headerGone,
-        )
+    Column(modifier = modifier.fillMaxSize().episodeSelectionKeys(selection, selectAll)) {
+        if (selectedIds.isNotEmpty() && selection != null) {
+            SelectionTopBar(selection, selectedIds.size, selectAll)
+        } else {
+            NdTopAppBar(
+                title = if (headerGone) detail?.displayTitle.orEmpty() else "",
+                navigation = { NavBackButton() },
+                actions = {
+                    NdTooltipIconButton(
+                        onClick = onRefresh,
+                        icon = NdIcons.Refresh,
+                        tooltip = stringResource(Res.string.feeds_refresh),
+                        enabled = !state.offline,
+                    )
+                    NdTooltipIconButton(
+                        onClick = onOpenSettings,
+                        icon = NdIcons.Settings,
+                        tooltip = stringResource(Res.string.podcast_settings),
+                    )
+                    PodcastOverflow(
+                        detail = detail,
+                        feedUrl = state.feedUrl,
+                        onOpenSettings = onOpenSettings,
+                        onMarkAllPlayedClick = onMarkAllPlayedClick,
+                        onUnsubscribe = onUnsubscribeRequest,
+                    )
+                },
+                elevated = headerGone,
+            )
+        }
 
         when {
             !state.loaded -> {
@@ -341,8 +360,25 @@ internal fun PodcastScreen(
                                 style = EpisodeRowStyle.PODCAST,
                                 caps = RowCaps.FULL.copy(offline = state.offline),
                                 highlightNew = false,
-                                selected = null,
-                                onAction = onAction,
+                                selected = selectedIds.takeIf { it.isNotEmpty() }?.contains(row.id),
+                                onAction = { action ->
+                                    when {
+                                        action is EpisodeAction.ExtendSelection && selection != null -> {
+                                            selection.extend(
+                                                action.episodeId,
+                                                items.itemSnapshotList.items.map { it.id },
+                                            )
+                                        }
+
+                                        action is EpisodeAction.Select && selection != null -> {
+                                            selection.toggle(action.episodeId)
+                                        }
+
+                                        else -> {
+                                            onAction(action)
+                                        }
+                                    }
+                                },
                             )
                         }
                     }
@@ -413,7 +449,6 @@ private fun PodcastOverflow(
     onUnsubscribe: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
-    var confirmMarkAll by remember { mutableStateOf(false) }
     var confirmPrivateCopy by remember { mutableStateOf(false) }
     val actions = LocalPlatformActions.current
     val openUrl = rememberUrlOpener()
@@ -495,7 +530,7 @@ private fun PodcastOverflow(
                 text = { Text(stringResource(Res.string.podcast_mark_played)) },
                 onClick = {
                     open = false
-                    confirmMarkAll = true
+                    onMarkAllPlayedClick()
                 },
             )
             DropdownMenuItem(
@@ -508,21 +543,6 @@ private fun PodcastOverflow(
                 },
             )
         }
-    }
-
-    if (confirmMarkAll) {
-        NdDialog(
-            onDismissRequest = { confirmMarkAll = false },
-            icon = NdIcons.DoneAll,
-            title = stringResource(Res.string.podcast_mark_played),
-            confirm =
-                NdDialogAction(stringResource(Res.string.podcast_mark_played)) {
-                    confirmMarkAll = false
-                    onMarkAllPlayedClick()
-                },
-            dismiss =
-                NdDialogAction(stringResource(Res.string.action_cancel)) { confirmMarkAll = false },
-        )
     }
 
     // 03 Feed addresses: the private feed's URL grants read access — copy needs a warning first.

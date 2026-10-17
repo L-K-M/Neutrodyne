@@ -37,8 +37,11 @@ abstract class PodcastDao(
     @Query("SELECT * FROM podcast WHERE id = :id")
     abstract suspend fun byId(id: Long): PodcastEntity?
 
+    suspend fun existingIds(ids: Collection<Long>): List<Long> =
+        ids.distinct().chunked(BIND_CHUNK).flatMap { existingIdsChunk(it) }
+
     @Query("SELECT id FROM podcast WHERE id IN (:ids)")
-    abstract suspend fun existingIds(ids: Collection<Long>): List<Long>
+    protected abstract suspend fun existingIdsChunk(ids: List<Long>): List<Long>
 
     @Query("SELECT * FROM podcast WHERE feedKey = :feedKey")
     abstract suspend fun byFeedKey(feedKey: String): PodcastEntity?

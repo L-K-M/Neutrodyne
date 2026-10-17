@@ -30,11 +30,12 @@ internal fun AddToGroupsRoute(key: AddToGroupsKey) {
         val count = viewModel.consumeDone() ?: return@LaunchedEffect
         // Popping disposes this entry; the root snackbar must survive that disposal.
         withContext(NonCancellable) {
-            navigator.pop()
+            navigator.pop(key)
             snackbar.showSnackbar(getPluralString(Res.plurals.membership_updated, count, count))
         }
     }
     AddToGroupsSheet(state, viewModel::toggle, viewModel::editName, viewModel::createGroup, viewModel::done, {
-        navigator.pop()
+        // Entry-scoped (#152): completion and dismissal may both fire while the sheet animates out.
+        navigator.pop(key)
     })
 }

@@ -99,7 +99,7 @@ interface EpisodeRepository {
         played: Boolean,
     )
 
-    /** Unchecked compatibility overload for plain confirmation dialogs until M2 D9 replaces them. */
+    /** Unchecked compatibility overload for the Library tile-menu confirmation, deferred beyond M2 D9. */
     suspend fun markFeedPlayed(
         source: FeedSource,
         sortDateBefore: Long?,

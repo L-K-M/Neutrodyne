@@ -331,18 +331,19 @@ class PodcastScreenTest {
         }
 
     @Test
-    fun overflowMarkAllConfirmsFirst() =
+    fun overflowMarkAllDispatchesWithoutLocalConfirm() =
         runComposeUiTest {
-            var confirmed = false
+            var clicks = 0
             setPodcast(
                 PodcastUiState(detail = testPodcastDetail(7), loaded = true),
-                onMarkAllPlayedClick = { confirmed = true },
+                onMarkAllPlayedClick = { clicks++ },
             )
             onNodeWithContentDescription("More actions").performClick()
+            // One tap goes straight to the ViewModel's counted flow — the shared D9 dialog
+            // renders in the route, so the screen keeps no plain confirm of its own.
             onNodeWithText("Mark all as played").performClick()
-            assertEquals(false, confirmed)
-            onAllNodes(hasClickAction() and hasText("Mark all as played")).onFirst().performClick()
-            assertEquals(true, confirmed)
+            assertEquals(1, clicks)
+            onAllNodes(hasClickAction() and hasText("Mark all as played")).assertCountEquals(0)
         }
 
     @Test

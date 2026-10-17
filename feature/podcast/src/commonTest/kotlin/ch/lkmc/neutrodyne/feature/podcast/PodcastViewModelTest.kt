@@ -21,13 +21,17 @@ import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
 import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
+import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
+import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
 import ch.lkmc.neutrodyne.core.testing.testFeedInfo
 import ch.lkmc.neutrodyne.core.testing.testPodcastDetail
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
+import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionAction
+import ch.lkmc.neutrodyne.core.ui.MarkPlayedOption
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_undo
@@ -44,6 +48,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.days
 
 /**
  * `PodcastViewModel` on the desktop JVM (09): detail/feed-info state, the episode page keyed by
@@ -58,6 +63,7 @@ class PodcastViewModelTest : MainDispatcherTest() {
     private val liveSource = FakeEpisodeLiveStateSource()
     private val refreshController = FakeRefreshController()
     private val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
+    private val clock = TestClock()
 
     private fun viewModel(podcastId: Long = 7) =
         PodcastViewModel(
@@ -67,9 +73,10 @@ class PodcastViewModelTest : MainDispatcherTest() {
             episodes,
             groups,
             refreshController,
-            UnsubscribeUseCase(podcasts),
+            UnsubscribeUseCase(podcasts, FakeNewEpisodePoster()),
             network,
             liveSource,
+            clock,
         )
 
     private fun TestScope.collect(viewModel: PodcastViewModel) {
@@ -78,6 +85,21 @@ class PodcastViewModelTest : MainDispatcherTest() {
 
     private suspend fun FakeGroupRepository.createId(name: String): Long =
         (create(GroupDraft(name)) as Outcome.Success).value
+
+    @Test
+    fun episodeSelectionUsesTheSharedBulkPlayedService() =
+        runTest {
+            val model = viewModel()
+            model.onRowAction(EpisodeAction.Select(2))
+            model.episodeSelection.extend(4, listOf(1, 2, 3, 4))
+            model.episodeSelection.perform(EpisodeSelectionAction.MARK_UNPLAYED)
+            advanceUntilIdle()
+            assertEquals(listOf("setPlayed([2, 3, 4], false)"), episodes.calls)
+            assertTrue(
+                model.episodeSelection.ids.value
+                    .isEmpty(),
+            )
+        }
 
     @Test
     fun liveRowsFollowVisibleWindowAndKeepPagedPlayedState() =
@@ -317,12 +339,83 @@ class PodcastViewModelTest : MainDispatcherTest() {
         }
 
     @Test
-    fun markAllPlayedCoversThePodcast() =
+    fun countedMarkPlayedOpensOnThePodcastSource() =
         runTest {
             val viewModel = viewModel()
+            podcasts.detail.value = testPodcastDetail(7, displayTitle = "Serial Box")
+            collect(viewModel)
+            advanceUntilIdle()
+            val source = FeedSource.Podcast(7)
+            feeds.unplayedCounts[source to null] = 4
+            episodes.unplayedCounts[source to null] = 4
+
             viewModel.markAllPlayed()
             advanceUntilIdle()
-            assertEquals(listOf("markFeedPlayed(${FeedSource.Podcast(7)}, null)"), episodes.calls)
+
+            val opened = viewModel.markPlayed.state.value!!
+            assertEquals(source, opened.source)
+            assertEquals(UiText.Raw("Serial Box"), opened.title)
+            assertEquals(MarkPlayedOption.ALL, opened.option)
+            assertEquals(4, opened.count)
+
+            viewModel.markPlayed.confirm()
+            advanceUntilIdle()
+            assertNull(viewModel.markPlayed.state.value)
+            assertEquals(listOf("markFeedPlayed($source, null, 4)"), episodes.calls)
+        }
+
+    @Test
+    fun countedMarkPlayedFreezesCutoffAndReconfirmsChangedSelection() =
+        runTest {
+            val viewModel = viewModel()
+            podcasts.detail.value = testPodcastDetail(7)
+            collect(viewModel)
+            advanceUntilIdle()
+            val source = FeedSource.Podcast(7)
+            val before = clock.now() - 7.days.inWholeMilliseconds
+            feeds.unplayedCounts[source to before] = 2
+            episodes.unplayedCounts[source to before] = 3
+
+            viewModel.markAllPlayed()
+            viewModel.markPlayed.select(MarkPlayedOption.WEEK)
+            advanceUntilIdle()
+            assertEquals(
+                2,
+                viewModel.markPlayed.state.value
+                    ?.count,
+            )
+            assertTrue(episodes.calls.isEmpty())
+
+            // The cutoff stays frozen at select() time even as the wall clock moves on.
+            clock.advanceBy(2.days)
+            viewModel.markPlayed.confirm()
+            advanceUntilIdle()
+            val changed = viewModel.markPlayed.state.value!!
+            assertEquals(before, changed.sortDateBefore)
+            assertEquals(3, changed.count)
+            assertTrue(changed.selectionChanged)
+            assertTrue(episodes.calls.isEmpty())
+
+            // A repeat confirm while WRITING is inert; the second real confirm lands.
+            viewModel.markPlayed.confirm()
+            viewModel.markPlayed.confirm()
+            advanceUntilIdle()
+            assertNull(viewModel.markPlayed.state.value)
+            assertEquals(listOf("markFeedPlayed($source, $before, 3)"), episodes.calls)
+        }
+
+    @Test
+    fun markAllPlayedWithoutDetailOpensNothing() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            advanceUntilIdle()
+
+            viewModel.markAllPlayed()
+            advanceUntilIdle()
+
+            assertNull(viewModel.markPlayed.state.value)
+            assertTrue(episodes.calls.isEmpty())
         }
 
     @Test
@@ -518,19 +611,44 @@ class PodcastViewModelTest : MainDispatcherTest() {
         }
 
     @Test
-    fun markAllPlayedWriteFailurePostsAMessage() =
+    fun markAllPlayedWriteFailureStaysInlineInTheDialog() =
         runTest {
             val viewModel = viewModel()
+            podcasts.detail.value = testPodcastDetail(7)
             collect(viewModel)
+            advanceUntilIdle()
+            val source = FeedSource.Podcast(7)
+            feeds.unplayedCounts[source to null] = 1
+            episodes.unplayedCounts[source to null] = 1
             episodes.writeError = Exception("disk full")
 
             viewModel.markAllPlayed()
             advanceUntilIdle()
+            viewModel.markPlayed.confirm()
+            advanceUntilIdle()
 
+            // The guarded write's failure reports inside the dialog — no snackbar — and
+            // keeps the count so a retry can land.
             assertTrue(episodes.calls.isEmpty())
             assertTrue(
                 viewModel.uiState.value.messages
-                    .isNotEmpty(),
+                    .isEmpty(),
             )
+            assertEquals(
+                1,
+                viewModel.markPlayed.state.value
+                    ?.count,
+            )
+            assertEquals(
+                UiText.Res(Res.string.write_failed),
+                viewModel.markPlayed.state.value
+                    ?.error,
+            )
+
+            episodes.writeError = null
+            viewModel.markPlayed.confirm()
+            advanceUntilIdle()
+            assertNull(viewModel.markPlayed.state.value)
+            assertEquals(listOf("markFeedPlayed($source, null, 1)"), episodes.calls)
         }
 }

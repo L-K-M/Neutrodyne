@@ -28,6 +28,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
+import ch.lkmc.neutrodyne.core.ui.platform.NotificationPermissionRequester
 import kotlinx.coroutines.runBlocking
 import java.util.Locale
 import kotlin.test.AfterTest
@@ -79,7 +80,56 @@ class FeedsPageTest {
             )
         }
 
-    private fun ComposeUiTest.setFeeds(settings: FakeSettingsRepository) {
+    @Test
+    fun globalSwitchRequestsOnlyOnEnableAndDenialOffersSettings() =
+        runDesktopComposeUiTest {
+            val settings = FakeSettingsRepository()
+            var requests = 0
+            var opened = 0
+            val requester =
+                object : NotificationPermissionRequester {
+                    override val granted = false
+
+                    override fun request(onResult: (Boolean) -> Unit) {
+                        requests++
+                        onResult(false)
+                    }
+
+                    override fun openSettings() {
+                        opened++
+                    }
+                }
+            setFeeds(settings, requester)
+            assertEquals(0, requests)
+            onNodeWithText("New episodes").performScrollTo().performClick()
+            waitForIdle()
+            assertEquals(1, requests)
+            assertEquals(true, runBlocking { settings.get(FeedsSettingKeys.NOTIFY_NEW_EPISODES) })
+            onNodeWithText("Notifications are blocked").performScrollTo().assertIsDisplayed()
+            onNodeWithText("Open settings").performClick()
+            assertEquals(1, opened)
+            onNodeWithText("New episodes").performScrollTo().performClick()
+            waitForIdle()
+            assertEquals(1, requests)
+            onNodeWithText("Notifications are blocked").assertDoesNotExist()
+        }
+
+    @Test
+    fun desktopSwitchPersistsWithoutPermissionRows() =
+        runDesktopComposeUiTest {
+            val settings = FakeSettingsRepository()
+            setFeeds(settings)
+            onNodeWithText("New episodes").performScrollTo().performClick()
+            waitForIdle()
+            assertEquals(true, runBlocking { settings.get(FeedsSettingKeys.NOTIFY_NEW_EPISODES) })
+            onNodeWithText("Notifications are blocked").assertDoesNotExist()
+            onNodeWithText("Open settings").assertDoesNotExist()
+        }
+
+    private fun ComposeUiTest.setFeeds(
+        settings: FakeSettingsRepository,
+        requester: NotificationPermissionRequester? = null,
+    ) {
         val viewModel = FeedsSettingsViewModel(settings, FakeRefreshController())
         setContent {
             // collectAsStateWithLifecycle (rule 10) needs a started owner; a bare compose
@@ -90,7 +140,7 @@ class FeedsPageTest {
                 LocalPlatformKind provides PlatformKind.DESKTOP,
             ) {
                 NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
-                    FeedsPage(platform = PlatformKind.DESKTOP, viewModel = viewModel)
+                    FeedsPage(platform = PlatformKind.DESKTOP, viewModel = viewModel, notificationRequester = requester)
                 }
             }
         }

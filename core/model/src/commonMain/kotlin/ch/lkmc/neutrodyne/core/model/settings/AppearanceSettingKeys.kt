@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.model.settings
 
+import ch.lkmc.neutrodyne.core.model.SwipeAction
 import kotlinx.collections.immutable.persistentListOf
 
 /**
@@ -40,6 +41,24 @@ public object AppearanceSettingKeys {
                 ),
         )
 
+    /** Pager and row gestures are mutually exclusive (08 Group feed pager). */
+    val FEEDS_ROW_SWIPE = SettingKey.Bool("appearance.feeds_row_swipe", false)
+
+    /** Start-to-end defaults to Up next; undelivered actions stay inert until M4/M6. */
+    public val SWIPE_START_ACTION: SettingKey.Choice<SwipeAction> =
+        SettingKey.Choice(
+            "appearance.swipe_start_action",
+            SwipeAction.ADD_UP_NEXT,
+            persistentListOf(SwipeAction.ADD_UP_NEXT, SwipeAction.MARK_PLAYED, SwipeAction.DOWNLOAD, SwipeAction.NONE),
+        )
+
+    public val SWIPE_END_ACTION: SettingKey.Choice<SwipeAction> =
+        SettingKey.Choice(
+            "appearance.swipe_end_action",
+            SwipeAction.MARK_PLAYED,
+            persistentListOf(SwipeAction.ADD_UP_NEXT, SwipeAction.MARK_PLAYED, SwipeAction.DOWNLOAD, SwipeAction.NONE),
+        )
+
     /** Persisted selection identity (08 Group feed pager). */
     val FEEDS_SELECTED_SOURCE = SettingKey.Text("ui.feeds_selected_source", "all", SettingsFile.DEVICE)
 
@@ -61,6 +80,9 @@ public object AppearanceSettingKeys {
             DYNAMIC_COLOR,
             LIBRARY_TITLES,
             LIBRARY_SORT,
+            FEEDS_ROW_SWIPE,
+            SWIPE_START_ACTION,
+            SWIPE_END_ACTION,
             FEEDS_SELECTED_SOURCE,
             LIBRARY_GROUP_FILTER,
             LIBRARY_SEGMENT,

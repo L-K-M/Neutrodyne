@@ -45,7 +45,7 @@ internal fun AddPodcastRoute(
     LaunchedEffect(state.done) {
         val done = viewModel.consumeDone() ?: return@LaunchedEffect
         withContext(NonCancellable) {
-            navigator.pop()
+            navigator.pop(key)
             // Long, not the action-label default (Indefinite): the root host drains every
             // screen's messages through one mutex, so an ignored snackbar must release it
             // on its own (08's durations rule).
@@ -74,9 +74,8 @@ internal fun AddPodcastRoute(
         onCreateGroup = viewModel::createGroup,
         onConsumeCreatedGroup = viewModel::consumeCreatedGroup,
         onOpenPodcast = { id ->
-            navigator.pop()
-            navigator.pushDetail(PodcastKey(id))
+            if (navigator.pop(key)) navigator.pushDetail(PodcastKey(id))
         },
-        onDismiss = { navigator.pop() },
+        onDismiss = { navigator.pop(key) },
     )
 }

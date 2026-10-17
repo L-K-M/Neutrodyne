@@ -8,4 +8,6 @@
   <string name="crash_dialog_comment">What were you doing when it happened? (optional)</string>
   <string name="crash_mail_subject">Neutrodyne crash report</string>
   <string name="crash_mail_body">The crash report is attached. Add anything that helps reproduce the problem.</string>
+  <string name="channel_group_new_episodes">New episodes</string>
+  <string name="channel_new_episodes_default">Other podcasts</string>
 </resources>

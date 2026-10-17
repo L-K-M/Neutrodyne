@@ -2,13 +2,17 @@
 
 package ch.lkmc.neutrodyne.feature.feeds
 
+import androidx.lifecycle.ViewModelStore
 import androidx.paging.testing.asSnapshot
+import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
+import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
@@ -65,16 +69,23 @@ class FeedsPagingContextTest : MainDispatcherTest() {
                     FakePodcastRepository(),
                     TestClock(),
                     FakeEpisodeLiveStateSource(),
+                    FakeGroupRepository(),
+                    FakeSettingsRepository(),
                     defaultDispatcher,
                 )
 
-            val items = viewModel.feed.take(1).asSnapshot()
-            assertEquals(2, items.filterIsInstance<FeedItem.Episode>().size)
-            assertEquals(1, items.filterIsInstance<FeedItem.Day>().size)
-            for (callback in Callback.entries) {
-                val observed = contexts[callback].orEmpty()
-                assertTrue(observed.isNotEmpty(), "$callback must switch to Default inside its deferred callback")
-                observed.forEach { assertSame(defaultDispatcher, it[ContinuationInterceptor]) }
+            val store = ViewModelStore().apply { put("feeds", viewModel) }
+            try {
+                val items = viewModel.pagingFor(FeedSource.All).take(1).asSnapshot()
+                assertEquals(2, items.filterIsInstance<FeedItem.Episode>().size)
+                assertEquals(1, items.filterIsInstance<FeedItem.Day>().size)
+                for (callback in Callback.entries) {
+                    val observed = contexts[callback].orEmpty()
+                    assertTrue(observed.isNotEmpty(), "$callback must switch to Default inside its deferred callback")
+                    observed.forEach { assertSame(defaultDispatcher, it[ContinuationInterceptor]) }
+                }
+            } finally {
+                store.clear()
             }
         }
 
