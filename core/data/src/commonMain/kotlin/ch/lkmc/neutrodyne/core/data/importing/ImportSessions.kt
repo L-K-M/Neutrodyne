@@ -264,7 +264,7 @@ internal class ImportSessions(
         document: ImportDocument?,
         classified: ImportClassifier.Result?,
     ): Outcome<Long, ImportError> {
-        val sessionOptions = sessionOptions(options, document, adopted)
+        val sessionOptions = sessionOptions(options, document, classified, adopted)
         val warnings = sessionWarnings(document, classified)
         var publishedPath: String? = null
         var insertedId: Long? = null
@@ -327,10 +327,15 @@ internal class ImportSessions(
      * and clears `importGroups`; proposals excluded by default pre-fill `excludedGroupKeys`;
      * the ordered proposal list itself — looks, excluded reasons and all — lives in
      * `sourceGroups` because empty folders have no `import_item` row to carry them.
+     * `itemCustomTitles` rides the same session JSON — the parsed rename is parser metadata
+     * `import_item` cannot hold — keyed by item ordinal so it survives the file dedupe:
+     * a `DUPLICATE_IN_FILE` row keeps its own ordinal, the winner's entry keeps its own
+     * rename under its own.
      */
     private fun sessionOptions(
         options: CreateImportOptions,
         document: ImportDocument?,
+        classified: ImportClassifier.Result?,
         adopted: Boolean,
     ): ImportOptions {
         val sourceGroups = document?.groups?.mapNotNull(::sourceGroupOf).orEmpty()
@@ -344,6 +349,13 @@ internal class ImportSessions(
             targetGroupId = options.targetGroupId,
             fromAndroidBackup = adopted,
             sourceGroups = sourceGroups,
+            itemCustomTitles =
+                classified
+                    ?.items
+                    ?.mapNotNull { item ->
+                        item.customTitle?.let { item.ordinal to it }
+                    }?.toMap()
+                    .orEmpty(),
         )
     }
 

@@ -6,9 +6,12 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.credentials.CredentialCommitCoordinatorImpl
 import ch.lkmc.neutrodyne.core.data.credentials.DesktopSecretStore
 import ch.lkmc.neutrodyne.core.data.credentials.IdentitySecretProtection
+import ch.lkmc.neutrodyne.core.data.importing.ImportClassifier
 import ch.lkmc.neutrodyne.core.data.importing.ImportCommitter
 import ch.lkmc.neutrodyne.core.data.importing.ImportOptionsJson
+import ch.lkmc.neutrodyne.core.data.importing.ImportSessions
 import ch.lkmc.neutrodyne.core.data.importing.ImportWorkScheduler
+import ch.lkmc.neutrodyne.core.data.importing.PayloadStore
 import ch.lkmc.neutrodyne.core.database.ImportItemEntity
 import ch.lkmc.neutrodyne.core.database.ImportSessionEntity
 import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
@@ -16,19 +19,30 @@ import ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity
 import ch.lkmc.neutrodyne.core.domain.ImportError
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.model.AliasReason
+import ch.lkmc.neutrodyne.core.model.CreateImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportItemKind
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
 import ch.lkmc.neutrodyne.core.model.ImportOptions
+import ch.lkmc.neutrodyne.core.model.ImportSource
 import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceGroup
+import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
+import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipGuard
+import ch.lkmc.neutrodyne.feeds.jvm.opml.XmlPullOpmlReader
+import ch.lkmc.neutrodyne.feeds.opml.ExportDocument
+import ch.lkmc.neutrodyne.feeds.opml.ExportFeed
+import ch.lkmc.neutrodyne.feeds.opml.ExportGroup
+import ch.lkmc.neutrodyne.feeds.opml.OpmlLayout
+import ch.lkmc.neutrodyne.feeds.opml.OpmlWriter
+import ch.lkmc.neutrodyne.youtube.api.YouTubeUrlClassifier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -37,6 +51,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import okio.Buffer
+import okio.FileSystem
 import java.io.File
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -68,6 +84,8 @@ class ImportCommitTest {
     private lateinit var root: File
     private lateinit var secrets: DesktopSecretStore
     private lateinit var committer: ImportCommitter
+    private lateinit var payloads: FakePayloadSource
+    private lateinit var sessions: ImportSessions
 
     @BeforeTest
     fun setUp() {
@@ -85,6 +103,26 @@ class ImportCommitTest {
                 appScope,
             )
         committer = newCommitter()
+        payloads = FakePayloadSource()
+        sessions =
+            ImportSessions(
+                db = db,
+                payloads =
+                    PayloadStore(
+                        storagePaths = storagePathsFor(root),
+                        fileSystem = FileSystem.SYSTEM,
+                        payloads = payloads,
+                        httpClients = OkHttpNeutrodyneHttpClients(newNetworkClients(), testUserAgent()),
+                        netErrors = testClassifier,
+                        io = Dispatchers.Default,
+                    ),
+                classifier = ImportClassifier(db, YouTubeUrlClassifier()),
+                opmlReader = XmlPullOpmlReader.discovered(),
+                archives = ZipGuard(),
+                clock = clock,
+                appScope = appScope,
+                io = Dispatchers.Default,
+            )
     }
 
     @AfterTest
@@ -505,7 +543,8 @@ class ImportCommitTest {
     fun aSessionDeletedBetweenChunksLeavesOnlyCommittedWork() =
         runTest {
             val items =
-                (1..500).map { item(it, "https://h$it.example.com/f", groups = listOf("Tech")) }
+                (1..500)
+                    .map { item(it, "https://h$it.example.com/f", groups = listOf("Tech")) }
                     .toMutableList()
             // A private feed inside the committed chunk (its put stays referenced) and one in
             // the aborted chunk (its put rolls back) cover both cleanup halves.
@@ -669,7 +708,11 @@ class ImportCommitTest {
             val committedUrls =
                 db.importDao().itemsOf(sid).map { it.originalUrl } +
                     db.podcastDao().allForExport().map { it.feedUrl } +
-                    db.podcastDao().allForExport().flatMap { db.podcastDao().aliases(it.id) }.map { it.url }
+                    db
+                        .podcastDao()
+                        .allForExport()
+                        .flatMap { db.podcastDao().aliases(it.id) }
+                        .map { it.url }
             assertTrue(
                 committedUrls.none { url -> passwords.any(url::contains) },
                 "no password survives in committed URLs or aliases",
@@ -857,6 +900,109 @@ class ImportCommitTest {
             assertEquals(2, db.podcastDao().allForExport().size)
         }
 
+    // --- Custom titles: writer → reader → session → committer (05 §3.5 → §6.3) ---------------------
+
+    @Test
+    fun aGroupedExportRoundTripRestoresCustomTitles() =
+        runTest {
+            val sid = createSessionFromExport(OpmlLayout.GROUPED)
+
+            // The rename is parser metadata: it rides optionsJson keyed by item ordinal —
+            // import_item has no column for it (02's no-schema-change rule stands). The
+            // duplicate keeps its own ordinal's rename in the map; it never commits.
+            val session = assertNotNull(db.importDao().sessionById(sid))
+            val options = ImportOptionsJson.decode(assertNotNull(session.optionsJson))
+            assertEquals(
+                mapOf(0 to "My Rename", 2 to "Zz Dup Rename"),
+                options.itemCustomTitles,
+            )
+
+            assertIs<Outcome.Success<*>>(committer.confirm(sid))
+            assertCustomTitlesCommitted()
+        }
+
+    @Test
+    fun aFlatExportRoundTripRestoresCustomTitles() =
+        runTest {
+            val sid = createSessionFromExport(OpmlLayout.FLAT)
+
+            val session = assertNotNull(db.importDao().sessionById(sid))
+            val options = ImportOptionsJson.decode(assertNotNull(session.optionsJson))
+            assertEquals(
+                mapOf(0 to "My Rename", 2 to "Zz Dup Rename"),
+                options.itemCustomTitles,
+            )
+
+            assertIs<Outcome.Success<*>>(committer.confirm(sid))
+            assertCustomTitlesCommitted()
+        }
+
+    private suspend fun assertCustomTitlesCommitted() {
+        val renamed = assertNotNull(db.podcastDao().byFeedKey("a.example.com/f"))
+        assertEquals("Publisher Title", renamed.title, "the feed's own title stays title")
+        assertEquals("My Rename", renamed.customTitle)
+        val plain = assertNotNull(db.podcastDao().byFeedKey("b.example.com/f"))
+        assertEquals("Same Title", plain.title)
+        assertNull(plain.customTitle, "an unrenamed feed leaves customTitle null")
+        assertEquals(2, db.podcastDao().allForExport().size, "the duplicate never inserted")
+    }
+
+    /** Writes an `ExportDocument`, feeds it through `ImportSessions.create` — the real parse path. */
+    private suspend fun createSessionFromExport(layout: OpmlLayout): Long {
+        val out = Buffer()
+        OpmlWriter.write(out, renamedExport(), layout)
+        payloads.register(ROUND_TRIP_URI, bytes = out.readByteArray())
+        return assertIs<Outcome.Success<Long>>(
+            sessions.create(ImportSource(ROUND_TRIP_URI, "export.opml"), CreateImportOptions()),
+        ).value
+    }
+
+    /**
+     * Three entries: a rename (`text` ≠ `title`), an unrenamed feed, and a third repeating the
+     * first feed's URL with a different rename. `OpmlWriter` sorts feeds by `displayTitle` and
+     * the "Zz" prefix keeps the duplicate last in both layouts, so the file dedupe leaves it
+     * `DUPLICATE_IN_FILE` at ordinal 2 and ordinal 0's rename is the one that must land.
+     */
+    private fun renamedExport(): ExportDocument =
+        ExportDocument(
+            title = "Neutrodyne",
+            createdAt = clock.now(),
+            groups = listOf(ExportGroup("g1", "Tech", 0x112233, "code")),
+            feeds =
+                listOf(
+                    ExportFeed(
+                        displayTitle = "My Rename",
+                        feedTitle = "Publisher Title",
+                        xmlUrl = "https://a.example.com/f",
+                        htmlUrl = "https://a.example.com",
+                        language = null,
+                        groupKeys = listOf("g1"),
+                        youtube = false,
+                        ytVariants = null,
+                    ),
+                    ExportFeed(
+                        displayTitle = "Same Title",
+                        feedTitle = "Same Title",
+                        xmlUrl = "https://b.example.com/f",
+                        htmlUrl = null,
+                        language = null,
+                        groupKeys = listOf("g1"),
+                        youtube = false,
+                        ytVariants = null,
+                    ),
+                    ExportFeed(
+                        displayTitle = "Zz Dup Rename",
+                        feedTitle = "Zz Dup Title",
+                        xmlUrl = "https://a.example.com/f",
+                        htmlUrl = null,
+                        language = null,
+                        groupKeys = emptyList(),
+                        youtube = false,
+                        ytVariants = null,
+                    ),
+                ),
+        )
+
     // --- Helpers ----------------------------------------------------------------------------------
 
     private suspend fun assertCommitted(sid: Long) {
@@ -985,6 +1131,7 @@ class ImportCommitTest {
     }
 
     private companion object {
+        const val ROUND_TRIP_URI = "content://provider/export.opml"
         val UUID_V4 = Regex("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
     }
 }

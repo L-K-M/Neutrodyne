@@ -263,7 +263,14 @@ internal class ImportCommitter(
                     var podcastId = existingOwner(entry.feedKey)
                     val inserted = podcastId == null
                     if (podcastId == null) {
-                        podcastId = insertPending(item, entry.feedKey, ctx.puts, now)
+                        podcastId =
+                            insertPending(
+                                item,
+                                entry.feedKey,
+                                ctx.puts,
+                                customTitle = options.itemCustomTitles[item.ordinal],
+                                now,
+                            )
                     }
                     if (inserted) {
                         if (options.notifyNewEpisodes) {
@@ -314,10 +321,12 @@ internal class ImportCommitter(
         item: ImportItemEntity,
         feedKey: String,
         puts: Map<Int, CredentialPut>,
+        customTitle: String?,
         now: Long,
     ): Long {
         repeat(SYNC_ID_RETRIES) {
-            val rowId = db.podcastDao().insertPodcastOrIgnore(pendingRow(item, feedKey, puts, now))
+            val rowId =
+                db.podcastDao().insertPodcastOrIgnore(pendingRow(item, feedKey, puts, customTitle, now))
             if (rowId != -1L) return rowId
             existingOwner(feedKey)?.let { return it }
         }
@@ -328,6 +337,7 @@ internal class ImportCommitter(
         item: ImportItemEntity,
         feedKey: String,
         puts: Map<Int, CredentialPut>,
+        customTitle: String?,
         now: Long,
     ): PodcastEntity {
         val feedUrl = checkNotNull(item.normalizedUrl) { "selected item without normalizedUrl" }
@@ -337,6 +347,7 @@ internal class ImportCommitter(
             feedUrl = feedUrl,
             feedKey = feedKey,
             title = item.title ?: feedUrl,
+            customTitle = customTitle,
             artworkKey = ArtworkKeys.monogram(feedKey),
             status = PodcastStatus.PENDING_FIRST_FETCH,
             initialFetch = true,

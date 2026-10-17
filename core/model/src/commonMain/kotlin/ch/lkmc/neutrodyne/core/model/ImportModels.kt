@@ -52,6 +52,8 @@ data class ImportOptions(
     val laneAttempts: Int = 0,
     /** Groups found at parse time, in proposal order (05 Group mapping). */
     val sourceGroups: List<SourceGroup> = emptyList(),
+    /** ordinal → user rename parsed from a Neutrodyne file's `text` (05 §3.5, parser-owned). */
+    val itemCustomTitles: Map<Int, String> = emptyMap(),
     /** Worker bookkeeping: when commit ran and the fetch-attempt marker (05 6–7). */
     val committedAt: Long? = null,
     val attemptMarkerAt: Long? = null,
@@ -65,6 +67,7 @@ data class ImportOptions(
             restoreRequestedAt = restoreRequestedAt,
             laneAttempts = laneAttempts,
             sourceGroups = sourceGroups,
+            itemCustomTitles = itemCustomTitles,
             committedAt = committedAt,
             attemptMarkerAt = attemptMarkerAt,
         )
