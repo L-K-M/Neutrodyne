@@ -135,7 +135,9 @@ class FakeImportRepository(
         calls += "updateOptions($sessionId)"
         sessions.update { bySession ->
             val session = bySession[sessionId] ?: return@update bySession
-            bySession + (sessionId to session.copy(options = change(session.options)))
+            if (session.state != ImportState.PREVIEW) return@update bySession
+
+            bySession + (sessionId to session.copy(options = session.options.withUserChanges(change)))
         }
     }
 
