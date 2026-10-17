@@ -159,7 +159,10 @@ class ZipGuardTest {
     fun damagedEntryDataIsCorrupt() {
         // The deflate body is damaged while the central directory stays readable — the archive
         // opens, then the entry's own read reports the damage.
-        val zip = ZipTestFiles.deflateDamagedZip(ZipTestFiles.zipBytes(listOf("a" to ByteArray(4 * 1024) { it.toByte() })))
+        val zip =
+            ZipTestFiles.deflateDamagedZip(
+                ZipTestFiles.zipBytes(listOf("a" to ByteArray(4 * 1024) { it.toByte() })),
+            )
         val path = ZipTestFiles.tempZip(zip)
         guard.open(path, ArchiveCaps.BACKUP).use { reader ->
             assertEquals(
