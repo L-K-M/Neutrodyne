@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.feeds.opml.OpmlWarningCode
 import ch.lkmc.neutrodyne.feeds.opml.ParseMode
 import okio.Buffer
 import org.junit.Test
+import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
@@ -239,6 +240,22 @@ class XmlPullOpmlReaderTest {
             "<opml version=\"1.0\"><body><outline text=\"k\" xmlUrl=\"https://x/\" note=\"" +
                 "a".repeat(70 * 1024) + "&#xZZZZ;\"/></body></opml>"
         assertEquals(OpmlFailure.TAG_TOO_LONG, failure(xml))
+    }
+
+    /**
+     * `SalvageOpmlScanner` is the one Kotlin source that must never hold a literal NUL byte: its
+     * `findTagEnd` quote sentinel is the escaped `'\u0000'`, because a raw NUL makes git treat the
+     * file as binary and diffs stop working.
+     */
+    @Test
+    fun salvageScannerSourceIsPlainText() {
+        val source =
+            File(
+                checkNotNull(System.getProperty("neutrodyne.rootDir")),
+                "feeds/jvm/src/main/kotlin/ch/lkmc/neutrodyne/feeds/jvm/opml/SalvageOpmlScanner.kt",
+            )
+        assertTrue(source.isFile, "missing $source")
+        assertTrue(source.readBytes().none { it == 0.toByte() }, "NUL byte in $source")
     }
 
     /** The same cap fires when the scanner is driven directly (its own bound, not the gap's). */
