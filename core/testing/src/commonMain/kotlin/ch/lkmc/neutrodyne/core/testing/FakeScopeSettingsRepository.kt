@@ -14,12 +14,14 @@ import ch.lkmc.neutrodyne.core.model.SettingField
 import ch.lkmc.neutrodyne.core.model.SettingOverrides
 import ch.lkmc.neutrodyne.core.model.SettingSource
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /** In-memory writes over seeded inheritance; fixtures supply group/global resolutions. */
 class FakeScopeSettingsRepository(
@@ -99,8 +101,10 @@ class FakeScopeSettingsRepository(
     ): Outcome<Unit, SettingsError> =
         update(groups, groupId, change).also { outcome ->
             if (outcome is Outcome.Success) {
-                suspendRunCatching { channelSync.sync() }
-                    .onFailure { Log.w("ScopeSettings", it) { "Group channel sweep failed after settings write" } }
+                withContext(NonCancellable) {
+                    suspendRunCatching { channelSync.sync() }
+                        .onFailure { Log.w("ScopeSettings", it) { "Group channel sweep failed after settings write" } }
+                }
             }
         }
 

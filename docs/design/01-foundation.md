@@ -652,7 +652,7 @@ Kinds: **KMP** = `neutrodyne.kmp.*` with the targets `android` and `jvm("desktop
 | `:sync:impl` | `.kmp.library`, `.metro`, `kotlin.plugin.serialization` | common: `SyncEngine`, `SyncClient`, `SyncEventsClient`, `SyncApplier`, `FirstLinkMerger`, `MassChangeGuard`, `SessionAdopter`, `SyncTokenStore`, `SyncScheduler`, …; `androidMain`: `WorkManagerSyncScheduler`, `SyncWorker`, `LocalNetworkPermissionGate`; `desktopMain`: `DesktopSyncLane` ([10 Client sync engine](10-sync.md#client-sync-engine)) | `:sync:{api, protocol}`, `:core:{domain, model, common, database, datastore, network}`, `:feeds` | ktor-client-core, ktor-client-content-negotiation, ktor-serialization-kotlinx-json, kotlinx-serialization-json; `androidMain`: work-runtime | MS2 (MS3: SSE, handoff) |
 | `:feature:feeds` | `neutrodyne.kmp.feature` | common | + `:playback:api`, `:download:api`, `:youtube:api` | — | M1a (All), M2 |
 | `:feature:library` | feature | common | + `:playback:api`, `:download:api`, `:youtube:api` (group-tile actions: Play, Download all) | — | M1a |
-| `:feature:groups` | feature | common | + `:youtube:api` (`YouTubeCapabilities` in Group settings) | reorderable | M2 |
+| `:feature:groups` | feature | common | + `:youtube:api` (`YouTubeCapabilities` in Group settings), `:feeds` (`GroupNames` in the editor) | reorderable | M2 |
 | `:feature:podcast` | feature | common | + `:playback:api`, `:download:api`, `:youtube:api` | — | M1a |
 | `:feature:episode` | feature | common | + `:playback:api`, `:download:api`, `:youtube:api` | — | M1a |
 | `:feature:player` | feature | common | + `:playback:api`, `:download:api`, `:youtube:api` (Up next tab rows, download action, `RowCaps`) | none in v1.0: no Media3 type enters a feature ([06 UI boundary](06-playback.md#ui-boundary)); M14 adds an Android-only `PlayerSurface` through the qualifier pattern of [Components and scopes](#components-and-scopes) rule 4 | M4 |
@@ -720,6 +720,12 @@ Serves N11, N8. Delivered in M0a (enforced from the first commit; the desktop an
 | 16 | **`:sync:server`** → `:sync:protocol`, `:feeds` only; never Android, desktop, UI or other app modules. |
 | 17 | **Platform APIs** (checked per source set by [`checkBannedApis`](#checkbannedapis-rules), where the graph plugin cannot see): no `java.*`, `javax.*` or `android.*` in any `commonMain`; `:youtube:ytdlp` is the only module that applies Chaquopy, packages Python or runs code in `:ytx`; `:youtube:ytdlp-desktop` is the only module that starts a process; `:playback:native` and `:desktop:system` are the only modules with our own native code and FFM downcalls into it, and `:playback:engine` makes FFM downcalls into FFmpeg only; `java.awt.Desktop` only in desktop code of `:desktopApp`, `:desktop:system` and `:core:ui`. |
 | 18 | **Licences** per [D3](../PLAN.md#3-key-decisions): Licensee on the three shells, both Python locks, `native-components.lock`, the runtime lock, and the APK, desktop-image and server-image scans ([Licensing and dependency policy](#licensing-and-dependency-policy)). |
+
+**Implementation note (2026-10-16, M2):** Rule 2 has one additional allowed edge,
+`:feature:groups` → `:feeds`, for the editor's pure `GroupNames` length limit and
+oldest-first suggestion from 05. Name uniqueness and save validation still go
+through `GroupRepository.checkName`. This avoids duplicating the shared name
+rules or adding a forwarding service; no feed parser or I/O enters the feature.
 
 Consequences implementers must design for:
 

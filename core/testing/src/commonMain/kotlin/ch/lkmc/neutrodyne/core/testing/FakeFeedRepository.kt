@@ -6,12 +6,15 @@ import androidx.paging.PagingData
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.domain.FeedRepository
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
+import ch.lkmc.neutrodyne.core.model.FeedCounts
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedPrefs
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.FeedTab
+import ch.lkmc.neutrodyne.core.model.VirtualCounts
 import ch.lkmc.neutrodyne.core.model.isSupportedFeedAgeLimit
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,6 +22,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.update
 
@@ -30,6 +34,19 @@ class FakeFeedRepository(
     val orders = MutableStateFlow<Map<FeedSource, FeedOrder>>(emptyMap())
     val prefs = MutableStateFlow<Map<FeedSource, FeedPrefs>>(emptyMap())
     val tabs = MutableStateFlow(listOf(FeedTab(FeedSource.All, "All", null, null, null)))
+
+    val groupCounts = MutableStateFlow<Map<Long, FeedCounts>>(emptyMap())
+    val virtualCounts = MutableStateFlow(VirtualCounts())
+    val unplayedCounts = mutableMapOf<Pair<FeedSource, Long?>, Int>()
+
+    override fun observeGroupCounts(sinceMs: Long): Flow<Map<Long, FeedCounts>> = groupCounts
+
+    override fun observeVirtualCounts(sinceMs: Long): Flow<VirtualCounts> = virtualCounts
+
+    override suspend fun countUnplayed(
+        source: FeedSource,
+        sortDateBefore: Long?,
+    ): Int = unplayedCounts[source to sortDateBefore] ?: 0
 
     override fun observeTabs(): Flow<List<FeedTab>> = tabs
 
@@ -93,6 +110,10 @@ class FakeFeedRepository(
     var lastRequest: Triple<FeedSource, FeedFilters, FeedOrder>? = null
         private set
 
+    /** Paging generations and their cancellation, for cache-lifetime assertions. */
+    val pagingRequests = mutableListOf<Triple<FeedSource, FeedFilters, FeedOrder>>()
+    val cancelledPagingRequests = mutableListOf<Triple<FeedSource, FeedFilters, FeedOrder>>()
+
     /** When set, preference writers throw it (the Room implementation's failure path). */
     var writeError: Throwable? = null
 
@@ -101,8 +122,12 @@ class FakeFeedRepository(
         filters: FeedFilters,
         order: FeedOrder,
     ): Flow<PagingData<EpisodeRow>> {
-        lastRequest = Triple(source, filters, order)
-        return rows.map { PagingData.from(it) }
+        val request = Triple(source, filters, order)
+        lastRequest = request
+        pagingRequests += request
+        return rows.map { PagingData.from(it) }.onCompletion { cause ->
+            if (cause is CancellationException) cancelledPagingRequests += request
+        }
     }
 
     override suspend fun setFeedOrder(

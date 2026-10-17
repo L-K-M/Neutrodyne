@@ -73,9 +73,18 @@ internal class FeedIngestor(
         parsed: ParsedFeed,
         ctx: IngestContext,
     ): IngestResult {
-        // The settings read can suspend on DataStore — it resolves before the write lock.
         val intervalMinutes =
             RefreshPolicy.effectiveIntervalMinutes(settings.get(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES))
+        return ingest(podcast, parsed, ctx, intervalMinutes)
+    }
+
+    /** The engine supplies its batched interval snapshot, including null for Manual only. */
+    suspend fun ingest(
+        podcast: DueFeed,
+        parsed: ParsedFeed,
+        ctx: IngestContext,
+        intervalMinutes: Int?,
+    ): IngestResult {
         val prepared = withContext(defaultDispatcher) { prepare(parsed, ctx) }
         return db.withWriteTransaction { ingestPrepared(podcast, parsed, ctx, prepared, intervalMinutes) }
     }
@@ -90,15 +99,20 @@ internal class FeedIngestor(
         parsed: ParsedFeed,
         ctx: IngestContext,
     ): IngestResult =
-        ingestPrepared(
+        ingestInTransaction(
             podcast,
             parsed,
             ctx,
-            prepare(parsed, ctx),
-            RefreshPolicy.effectiveIntervalMinutes(
-                settings.get(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES),
-            ),
+            RefreshPolicy.effectiveIntervalMinutes(settings.get(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES)),
         )
+
+    /** URL edits also resolve their intervals before entering the write transaction. */
+    suspend fun ingestInTransaction(
+        podcast: DueFeed,
+        parsed: ParsedFeed,
+        ctx: IngestContext,
+        intervalMinutes: Int?,
+    ): IngestResult = ingestPrepared(podcast, parsed, ctx, prepare(parsed, ctx), intervalMinutes)
 
     /**
      * The diff's write phase. [prepared] carries everything the transaction needs so nothing

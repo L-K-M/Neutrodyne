@@ -3,12 +3,14 @@
 package ch.lkmc.neutrodyne.core.data
 
 import androidx.room3.useWriterConnection
+import androidx.sqlite.SQLiteException
 import app.cash.turbine.test
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.settings.ScopeSettingsRepositoryImpl
 import ch.lkmc.neutrodyne.core.database.PodcastGroupSettingsEntity
 import ch.lkmc.neutrodyne.core.database.PodcastSettingsEntity
 import ch.lkmc.neutrodyne.core.database.ScopeOverrides
+import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.model.SettingField
 import ch.lkmc.neutrodyne.core.model.SettingOverrides
@@ -17,12 +19,14 @@ import ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
+import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.groupEntity
 import ch.lkmc.neutrodyne.core.testing.database.memberEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -39,7 +43,8 @@ import kotlin.test.assertTrue
 class ScopeSettingsRepositoryTest {
     private val db = TestDb.inMemory()
     private val settings = FakeSettingsRepository()
-    private val repo = ScopeSettingsRepositoryImpl(db, settings, FakeGroupChannelSync())
+    private val refresh = FakeRefreshController()
+    private val repo = ScopeSettingsRepositoryImpl(db, settings, { refresh }, FakeGroupChannelSync())
     private val dao = db.scopeSettingsDao()
 
     @AfterTest fun close() = db.close()
@@ -157,7 +162,13 @@ class ScopeSettingsRepositoryTest {
                 val writes =
                     (0..3).map { field ->
                         async(Dispatchers.Default) {
-                            val independent = ScopeSettingsRepositoryImpl(db, settings, FakeGroupChannelSync())
+                            val independent =
+                                ScopeSettingsRepositoryImpl(
+                                    db,
+                                    settings,
+                                    { FakeRefreshController() },
+                                    FakeGroupChannelSync(),
+                                )
                             start.await()
                             when (field) {
                                 0 -> independent.updatePodcast(podcast) { it.copy(refreshIntervalMinutes = 120) }
@@ -238,6 +249,7 @@ class ScopeSettingsRepositoryTest {
             val podcast = podcast()
             repo.updatePodcast(podcast) { SettingOverrides(60, false) }
             val before = dao.forPodcast(podcast)
+            refresh.calls.clear()
             db.useWriterConnection {
                 it.execSql(
                     "CREATE TRIGGER fail_settings BEFORE UPDATE ON podcast_settings" +
@@ -254,6 +266,62 @@ class ScopeSettingsRepositoryTest {
                 },
             )
             assertEquals(before, dao.forPodcast(podcast))
+            assertTrue(refresh.calls.isEmpty())
+        }
+
+    @Test fun onlyCommittedIntervalChangesReschedule() =
+        runTest {
+            val podcast = podcast()
+            val group = group()
+            repo.updatePodcast(podcast) { SettingOverrides(60) }
+            repo.updateGroup(group) { SettingOverrides(0) }
+            assertEquals(List(2) { "reschedulePeriodic()" }, refresh.calls)
+
+            repo.updatePodcast(podcast) { it }
+            repo.updateGroup(group) { it.copy(notifyNewEpisodes = true) }
+            repo.updatePodcast(podcast) { it.copy(notifyNewEpisodes = false) }
+            repo.updatePodcast(podcast) { it.copy(refreshIntervalMinutes = 61) }
+            repo.updateGroup(group) { it.copy(refreshIntervalMinutes = -1) }
+            repo.updatePodcast(-1) { error("Missing podcast") }
+            repo.updateGroup(-1) { error("Missing group") }
+            assertEquals(2, refresh.calls.size)
+
+            repo.updatePodcast(podcast) { it.copy(refreshIntervalMinutes = null) }
+            repo.updateGroup(group) { it.copy(refreshIntervalMinutes = null) }
+            assertEquals(List(4) { "reschedulePeriodic()" }, refresh.calls)
+        }
+
+    @Test fun rescheduleSeesCommittedOverridesOutsideTheWriter() =
+        runTest {
+            val podcast = podcast()
+            var observed: Int? = null
+            val controller =
+                object : RefreshController by refresh {
+                    override suspend fun reschedulePeriodic() {
+                        // An independent reader would see the old value if this hook ran before commit.
+                        observed =
+                            CoroutineScope(Dispatchers.Default)
+                                .async {
+                                    dao.forPodcast(podcast)?.o?.refreshIntervalMinutes
+                                }.await()
+                    }
+                }
+            val hooked = ScopeSettingsRepositoryImpl(db, settings, { controller }, FakeGroupChannelSync())
+            assertEquals(Outcome.Success(Unit), hooked.updatePodcast(podcast) { SettingOverrides(120) })
+            assertEquals(120, observed)
+        }
+
+    @Test fun rescheduleFailureDoesNotMisreportTheCommittedWrite() =
+        runTest {
+            val podcast = podcast()
+            val controller =
+                object : RefreshController by refresh {
+                    override suspend fun reschedulePeriodic(): Unit =
+                        throw SQLiteException("Scheduler database unavailable")
+                }
+            val hooked = ScopeSettingsRepositoryImpl(db, settings, { controller }, FakeGroupChannelSync())
+            assertEquals(Outcome.Success(Unit), hooked.updatePodcast(podcast) { SettingOverrides(60) })
+            assertEquals(60, dao.forPodcast(podcast)?.o?.refreshIntervalMinutes)
         }
 
     @Test fun globalNotificationKeyIsRegisteredPortableAndNotSynced() {

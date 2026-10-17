@@ -99,14 +99,32 @@ interface EpisodeRepository {
         played: Boolean,
     )
 
-    /** R2.6's bulk "Mark all as played" (05's import option; SQL: 02 User-state writes). */
+    /** Unchecked compatibility overload for the Library tile-menu confirmation, deferred beyond M2 D9. */
     suspend fun markFeedPlayed(
         source: FeedSource,
         sortDateBefore: Long?,
     )
 
+    /** Recount inside the write transaction; SelectionChanged writes nothing. Keep the cutoff frozen. */
+    suspend fun markFeedPlayed(
+        source: FeedSource,
+        sortDateBefore: Long?,
+        expectedCount: Int,
+    ): MarkFeedPlayedResult
+
     suspend fun setFavorite(
         episodeId: Long,
         favorite: Boolean,
     )
+}
+
+/** A stale count must be shown again before the caller retries the bulk action. */
+sealed interface MarkFeedPlayedResult {
+    data class Played(
+        val count: Int,
+    ) : MarkFeedPlayedResult
+
+    data class SelectionChanged(
+        val actualCount: Int,
+    ) : MarkFeedPlayedResult
 }

@@ -17,6 +17,7 @@ import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
@@ -33,6 +34,7 @@ import kotlin.test.assertTrue
 class GroupOrderTest {
     private val clock = TestClock()
     private val db = TestDb.inMemory(clock = clock)
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val repo =
         GroupRepositoryImpl(
             db,
@@ -40,10 +42,14 @@ class GroupOrderTest {
             TestOrderKeys,
             FakeGroupChannelSync(),
             FakeRefreshController(),
-            CoroutineScope(SupervisorJob() + Dispatchers.Default),
+            appScope,
         )
 
-    @AfterTest fun close() = db.close()
+    @AfterTest fun close() {
+        // Undo-expiry jobs must not outlive the database they write to.
+        appScope.cancel()
+        db.close()
+    }
 
     /** `TestOrderKeys` appends 0.5, 0.75, 0.875, 0.9375. */
     private suspend fun groups(count: Int): List<Long> =
@@ -148,7 +154,7 @@ class GroupOrderTest {
                     OverlongKeys,
                     FakeGroupChannelSync(),
                     FakeRefreshController(),
-                    CoroutineScope(SupervisorJob() + Dispatchers.Default),
+                    appScope,
                 )
             assertEquals(Outcome.Success(Unit), longKeys.reorder(listOf(g1, g3, g2)))
             val after = rows()

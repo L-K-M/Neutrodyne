@@ -92,8 +92,7 @@ import org.jetbrains.compose.resources.stringResource
  * Podcast settings (08 Podcast settings — General and Feed of M1): a scroll list of rows; writes
  * are fire-and-forget repository calls while `setCredentials` surfaces its `AddPodcastError` as a
  * snackbar and `editFeedUrl`'s returns as the dialog's inline error (08's Edit-URL dialog keeps
- * the dialog open on failure). The playback/downloads/notifications/refresh sections arrive with
- * their milestones.
+ * the dialog open on failure). M2 adds effective notification and refresh settings before Feed.
  */
 @Composable
 internal fun PodcastSettingsScreen(
@@ -103,6 +102,8 @@ internal fun PodcastSettingsScreen(
     onIncludeInAll: (Boolean) -> Unit,
     onEditFeedUrl: suspend (String) -> UiText?,
     onCredentials: (BasicCredentials) -> Unit,
+    onRefreshInterval: (Int?) -> Unit,
+    onNotifications: (Boolean?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val detail = state.detail
@@ -130,6 +131,8 @@ internal fun PodcastSettingsScreen(
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             SectionHeader(stringResource(Res.string.section_general))
             GeneralSection(detail, state.effectiveOrder, onCustomTitle, onIncludeInAll, onOrderChange)
+
+            PodcastEffectiveSettings(state, onRefreshInterval, onNotifications)
 
             if (feedInfo != null) {
                 SectionHeader(stringResource(Res.string.section_feed))
@@ -414,7 +417,7 @@ private fun SettingsSwitchRow(
 }
 
 @Composable
-private fun SectionHeader(title: String) {
+internal fun SectionHeader(title: String) {
     Text(
         title,
         style = MaterialTheme.typography.labelLarge,

@@ -40,6 +40,8 @@ public data class SwipeConfig(
     val endToStart: SwipeAction,
 )
 
+public enum class PlayedActionOrigin { ROW, SWIPE }
+
 /** Everything a row's tap targets dispatch (08 EpisodeRow). */
 public sealed interface EpisodeAction {
     public val episodeId: Long
@@ -67,6 +69,7 @@ public sealed interface EpisodeAction {
     public data class SetPlayed(
         override val episodeId: Long,
         val played: Boolean,
+        val origin: PlayedActionOrigin = PlayedActionOrigin.ROW,
     ) : EpisodeAction
 
     public data class OpenPodcast(
@@ -81,6 +84,11 @@ public sealed interface EpisodeAction {
 
     /** Long-press / toggle in selection mode (M2). */
     public data class Select(
+        override val episodeId: Long,
+    ) : EpisodeAction
+
+    /** Shift-click extends from the selection's last toggled loaded row. */
+    public data class ExtendSelection(
         override val episodeId: Long,
     ) : EpisodeAction
 

@@ -10,7 +10,7 @@ import ch.lkmc.neutrodyne.core.model.GroupMosaicMember
 import kotlinx.coroutines.flow.Flow
 import kotlin.jvm.JvmInline
 
-/** Group lifecycle, membership, ordering, mosaics and delete/undo (05). */
+/** Group lifecycle, membership, mosaics, ordering and delete/undo (05). */
 interface GroupRepository {
     /** Every group list is ordered by (orderKey, id). */
     fun observeGroups(): Flow<List<Group>>

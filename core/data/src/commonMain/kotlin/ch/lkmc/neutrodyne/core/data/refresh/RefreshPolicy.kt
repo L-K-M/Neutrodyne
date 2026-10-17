@@ -7,8 +7,8 @@ import kotlin.random.Random
 /**
  * The `nextRefreshAt` policy of 03 (one table, applied by the ingest transaction for outcomes with
  * a body and by `FeedRefresher`'s batched fetch-state writes for the rest). `I` is the podcast's
- * effective interval — the global `feeds.refresh_interval_minutes` in M1a (05's resolver takes
- * over in M2).
+ * effective interval from 05's resolver; standalone first-subscribe ingestion uses the global
+ * `feeds.refresh_interval_minutes` before scoped settings exist.
  */
 internal object RefreshPolicy {
     /** `I == null` ("Manual only", a `0` in the setting) schedules here (03 nextRefreshAt policy). */

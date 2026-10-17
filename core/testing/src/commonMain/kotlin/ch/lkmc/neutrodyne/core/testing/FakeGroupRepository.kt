@@ -25,6 +25,7 @@ import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import ch.lkmc.neutrodyne.sync.protocol.OrderKey
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,6 +34,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlin.uuid.Uuid
 
 /**
@@ -65,6 +67,9 @@ class FakeGroupRepository(
     )
 
     private val pending = mutableMapOf<String, Pending>()
+
+    /** Group uuids settled under the lock whose channel delete has not fired yet. */
+    private val settled = mutableListOf<String>()
 
     override fun observeGroups(): Flow<List<Group>> =
         combine(groups, members) { rows, memberships ->
@@ -262,69 +267,83 @@ class FakeGroupRepository(
         }
 
     override suspend fun delete(groupId: Long): Outcome<DeletedGroupToken, GroupError> =
-        mutex
-            .withLock {
-                expireElapsedLocked()
-                val group =
-                    groups.value.find { it.id == groupId }
-                        ?: return@withLock Outcome.Failure(GroupError.NotFound)
-                groups.value = groups.value - group
-                val memberIds = members.value[groupId].orEmpty()
-                members.value = members.value - groupId
-                val token = DeletedGroupToken(Uuid.random().toString())
-                pending[token.value] = Pending(group, memberIds, clock.now())
-                appScope?.launch {
-                    delay(GroupRepository.UNDO_WINDOW_MS)
-                    mutex.withLock { expireLocked(token.value) }
-                }
-                Outcome.Success(token)
-            }.also { outcome ->
-                if (outcome is Outcome.Success) syncChannels()
+        lockedThenNotify {
+            expireElapsedLocked()
+            val group =
+                groups.value.find { it.id == groupId }
+                    ?: return@lockedThenNotify Outcome.Failure(GroupError.NotFound)
+            groups.value = groups.value - group
+            val memberIds = members.value[groupId].orEmpty()
+            members.value = members.value - groupId
+            val token = DeletedGroupToken(Uuid.random().toString())
+            pending[token.value] = Pending(group, memberIds, clock.now())
+            appScope?.launch {
+                delay(GroupRepository.UNDO_WINDOW_MS)
+                lockedThenNotify { expireLocked(token.value) }
             }
+            Outcome.Success(token)
+        }.also { outcome ->
+            if (outcome is Outcome.Success) syncChannels()
+        }
 
     override suspend fun undoDelete(token: DeletedGroupToken): Outcome<Long, GroupError> =
-        mutex
-            .withLock {
-                expireElapsedLocked()
-                val entry = pending[token.value] ?: return@withLock Outcome.Failure(GroupError.UndoExpired)
-                val nameKey =
-                    (GroupNames.validate(entry.group.name) as? GroupNames.Validation.Valid)?.nameKey
-                        ?: return@withLock Outcome.Failure(GroupError.NameEmpty)
-                val holder =
-                    groups.value.find {
-                        (GroupNames.validate(it.name) as? GroupNames.Validation.Valid)?.nameKey == nameKey
-                    }
-                if (holder != null) return@withLock Outcome.Failure(GroupError.NameTaken(holder.id))
-                groups.value = groups.value + entry.group
-                members.value =
-                    members.value + (entry.group.id to entry.memberIds.filterTo(HashSet(), podcastExists))
-                pending.remove(token.value)
-                Outcome.Success(entry.group.id)
-            }.also { outcome ->
-                if (outcome is Outcome.Success) syncChannels()
-            }
+        lockedThenNotify {
+            expireElapsedLocked()
+            val entry = pending[token.value] ?: return@lockedThenNotify Outcome.Failure(GroupError.UndoExpired)
+            val nameKey =
+                (GroupNames.validate(entry.group.name) as? GroupNames.Validation.Valid)?.nameKey
+                    ?: return@lockedThenNotify Outcome.Failure(GroupError.NameEmpty)
+            val holder =
+                groups.value.find {
+                    (GroupNames.validate(it.name) as? GroupNames.Validation.Valid)?.nameKey == nameKey
+                }
+            if (holder != null) return@lockedThenNotify Outcome.Failure(GroupError.NameTaken(holder.id))
+            groups.value = groups.value + entry.group
+            members.value =
+                members.value + (entry.group.id to entry.memberIds.filterTo(HashSet(), podcastExists))
+            pending.remove(token.value)
+            Outcome.Success(entry.group.id)
+        }.also { outcome ->
+            if (outcome is Outcome.Success) syncChannels()
+        }
 
     override suspend fun pendingUndoUuids(): Set<String> =
-        mutex.withLock {
+        lockedThenNotify {
             expireElapsedLocked()
             pending.values.mapTo(HashSet()) { it.group.uuid }
         }
 
+    /**
+     * Runs [block] under the lock, then fires the channel deletes it settled. Like the real
+     * repository, onDeleted runs outside the lock, so a channel sync may read this repository.
+     */
+    private suspend fun <T> lockedThenNotify(block: suspend () -> T): T {
+        val (result, settledUuids) =
+            mutex.withLock {
+                val value = block()
+                value to settled.toList().also { settled.clear() }
+            }
+        for (uuid in settledUuids) channelSync.onDeleted(uuid)
+        return result
+    }
+
     private suspend fun syncChannels() {
-        suspendRunCatching { channelSync.sync() }
-            .onFailure { Log.w("Groups", it) { "Group channel sweep failed after group write" } }
+        withContext(NonCancellable) {
+            suspendRunCatching { channelSync.sync() }
+                .onFailure { Log.w("Groups", it) { "Group channel sweep failed after group write" } }
+        }
     }
 
     /** Settles every token whose window has passed; the channel delete fires per expiry. */
-    private suspend fun expireElapsedLocked() {
+    private fun expireElapsedLocked() {
         val expired =
             pending.filterValues { clock.now() - it.deletedAt >= GroupRepository.UNDO_WINDOW_MS }
         for (token in expired.keys) expireLocked(token)
     }
 
-    private suspend fun expireLocked(token: String) {
+    private fun expireLocked(token: String) {
         val entry = pending.remove(token) ?: return
-        channelSync.onDeleted(entry.group.uuid)
+        settled += entry.group.uuid
     }
 }
 

@@ -39,12 +39,14 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlin.uuid.Uuid
 
 @SingleIn(AppScope::class)
@@ -151,6 +153,7 @@ internal class GroupRepositoryImpl(
                     groupId
                 }
             }
+        if (outcome is Outcome.Success && memberIds.isNotEmpty()) rescheduleAfterCommit("group create")
         if (outcome is Outcome.Success) syncChannels()
         return outcome
     }
@@ -224,57 +227,82 @@ internal class GroupRepositoryImpl(
     override suspend fun setMembers(
         groupId: Long,
         podcastIds: Set<Long>,
-    ): Outcome<Unit, GroupError> =
-        db.withWriteTransaction {
-            if (dao.groupById(groupId) == null || !podcastsExist(podcastIds)) {
-                return@withWriteTransaction Outcome.Failure(GroupError.NotFound)
-            }
+    ): Outcome<Unit, GroupError> {
+        var changed = false
+        val outcome =
+            db.withWriteTransaction {
+                if (dao.groupById(groupId) == null || !podcastsExist(podcastIds)) {
+                    return@withWriteTransaction Outcome.Failure(GroupError.NotFound)
+                }
 
-            val current = dao.membersOf(groupId).mapTo(HashSet()) { it.podcastId }
-            if (current == podcastIds) return@withWriteTransaction Outcome.Success(Unit)
+                val current = dao.membersOf(groupId).mapTo(HashSet()) { it.podcastId }
+                if (current == podcastIds) return@withWriteTransaction Outcome.Success(Unit)
 
-            val now = clock.now()
-            val removed = current - podcastIds
-            if (removed.isNotEmpty()) dao.deleteMembers(groupId, removed)
-            var lastKey = dao.lastMemberOrderKey(groupId)
-            for (podcastId in podcastIds - current) {
-                lastKey = orderKeys.after(lastKey)
-                dao.insertMember(memberRow(groupId, podcastId, lastKey, now))
+                val now = clock.now()
+                val removed = current - podcastIds
+                if (removed.isNotEmpty()) dao.deleteMembers(groupId, removed)
+                var lastKey = dao.lastMemberOrderKey(groupId)
+                for (podcastId in podcastIds - current) {
+                    lastKey = orderKeys.after(lastKey)
+                    dao.insertMember(memberRow(groupId, podcastId, lastKey, now))
+                }
+                dao.touchUpdatedAt(setOf(groupId), now)
+                changed = true
+                Outcome.Success(Unit)
             }
-            dao.touchUpdatedAt(setOf(groupId), now)
-            Outcome.Success(Unit)
-        }
+        if (changed) rescheduleAfterCommit("membership edit")
+        return outcome
+    }
 
     override suspend fun applyMembership(
         podcastIds: Set<Long>,
         add: Set<Long>,
         remove: Set<Long>,
-    ): Outcome<Unit, GroupError> =
-        db.withWriteTransaction {
-            val groups = add + remove
-            if (!podcastsExist(podcastIds) ||
-                dao.existingIds(groups.toList()).size != groups.size
-            ) {
-                return@withWriteTransaction Outcome.Failure(GroupError.NotFound)
-            }
-
-            val now = clock.now()
-            val changed = mutableSetOf<Long>()
-            for (groupId in remove) {
-                if (dao.deleteMembers(groupId, podcastIds) > 0) changed += groupId
-            }
-            for (groupId in add) {
-                var lastKey = dao.lastMemberOrderKey(groupId)
-                for (podcastId in podcastIds) {
-                    val orderKey = orderKeys.after(lastKey)
-                    if (dao.insertMember(memberRow(groupId, podcastId, orderKey, now)) == -1L) continue
-                    lastKey = orderKey
-                    changed += groupId
+    ): Outcome<Unit, GroupError> {
+        var changedAny = false
+        val outcome =
+            db.withWriteTransaction {
+                val groups = add + remove
+                if (!podcastsExist(podcastIds) ||
+                    dao.existingIds(groups.toList()).size != groups.size
+                ) {
+                    return@withWriteTransaction Outcome.Failure(GroupError.NotFound)
                 }
+
+                val now = clock.now()
+                val changed = mutableSetOf<Long>()
+                for (groupId in remove) {
+                    if (dao.deleteMembers(groupId, podcastIds) > 0) changed += groupId
+                }
+                for (groupId in add) {
+                    var lastKey = dao.lastMemberOrderKey(groupId)
+                    for (podcastId in podcastIds) {
+                        val orderKey = orderKeys.after(lastKey)
+                        if (dao.insertMember(memberRow(groupId, podcastId, orderKey, now)) == -1L) continue
+                        lastKey = orderKey
+                        changed += groupId
+                    }
+                }
+                if (changed.isNotEmpty()) dao.touchUpdatedAt(changed, now)
+                changedAny = changed.isNotEmpty()
+                Outcome.Success(Unit)
             }
-            if (changed.isNotEmpty()) dao.touchUpdatedAt(changed, now)
-            Outcome.Success(Unit)
+        if (changedAny) rescheduleAfterCommit("membership edit")
+        return outcome
+    }
+
+    /**
+     * 05: memberships and the group set decide each podcast's effective refresh interval (the
+     * least over its groups), so a committed change re-plans the periodic refresh. It runs
+     * NonCancellable like ScopeSettingsRepository's writes: a screen closing after the commit
+     * must not skip it. A failed reschedule never fails the committed write.
+     */
+    private suspend fun rescheduleAfterCommit(write: String) {
+        withContext(NonCancellable) {
+            suspendRunCatching { refreshController.reschedulePeriodic() }
+                .onFailure { Log.w(TAG, it) { "Refresh reschedule failed after $write" } }
         }
+    }
 
     override suspend fun delete(groupId: Long): Outcome<DeletedGroupToken, GroupError> {
         // Snapshot and delete inside the one write transaction (05 steps 1–2): the member and
@@ -330,51 +358,57 @@ internal class GroupRepositoryImpl(
         // 05 step 2: the least refresh interval over the remaining groups may rise; a failed
         // reschedule never turns a committed delete into a failure. SnapshotScheduler.requestSoon
         // joins it when M3 brings that port (see the 2026-10-16 note in 05).
-        suspendRunCatching { refreshController.reschedulePeriodic() }
-            .onFailure { Log.w(TAG, it) { "Refresh reschedule failed after group delete" } }
+        rescheduleAfterCommit("group delete")
         return Outcome.Success(token)
     }
 
-    override suspend fun undoDelete(token: DeletedGroupToken): Outcome<Long, GroupError> =
-        undoMutex
-            .withLock {
-                val pending =
-                    pendingDeletes[token.value]
-                        ?: return@withLock Outcome.Failure(GroupError.UndoExpired)
-                val snapshot = pending.snapshot
-                val outcome =
-                    db.withWriteTransaction<Outcome<Long, GroupError>> {
-                        // A group created meanwhile may hold the nameKey: then the re-insert is not
-                        // attempted, nothing is written and the token stays live until expiry (05).
-                        dao.groupByNameKey(snapshot.group.nameKey)?.let {
-                            return@withWriteTransaction Outcome.Failure(GroupError.NameTaken(it.id))
-                        }
-                        dao.insert(snapshot.group)
-                        snapshot.settings?.let { db.scopeSettingsDao().upsertGroup(it) }
-                        val surviving = db.podcastDao().existingIds(snapshot.members.map { it.podcastId }).toSet()
-                        for (member in snapshot.members) {
-                            if (member.podcastId in surviving) dao.insertMember(member)
-                        }
-                        snapshot.sessionContext?.let {
-                            dao.restoreGroupContext(
-                                groupId = snapshot.group.id,
-                                anchorEpisodeId = it.anchorEpisodeId,
-                                anchorSortDate = it.anchorSortDate,
-                                expectedGeneration = it.expectedGeneration,
-                                now = clock.now(),
-                            )
-                        }
-                        Outcome.Success(snapshot.group.id)
+    override suspend fun undoDelete(token: DeletedGroupToken): Outcome<Long, GroupError> {
+        val outcome = undoLocked(token)
+
+        // 05 step 2 in reverse: the restored group may lower the least refresh interval again.
+        if (outcome is Outcome.Success) {
+            rescheduleAfterCommit("group undo")
+            syncChannels()
+        }
+        return outcome
+    }
+
+    private suspend fun undoLocked(token: DeletedGroupToken): Outcome<Long, GroupError> =
+        undoMutex.withLock {
+            val pending =
+                pendingDeletes[token.value]
+                    ?: return@withLock Outcome.Failure(GroupError.UndoExpired)
+            val snapshot = pending.snapshot
+            val outcome =
+                db.withWriteTransaction<Outcome<Long, GroupError>> {
+                    // A group created meanwhile may hold the nameKey: then the re-insert is not
+                    // attempted, nothing is written and the token stays live until expiry (05).
+                    dao.groupByNameKey(snapshot.group.nameKey)?.let {
+                        return@withWriteTransaction Outcome.Failure(GroupError.NameTaken(it.id))
                     }
-                if (outcome is Outcome.Success) {
-                    pendingDeletes.remove(token.value)
-                    pending.expiry.cancel()
+                    dao.insert(snapshot.group)
+                    snapshot.settings?.let { db.scopeSettingsDao().upsertGroup(it) }
+                    val surviving = db.podcastDao().existingIds(snapshot.members.map { it.podcastId }).toSet()
+                    for (member in snapshot.members) {
+                        if (member.podcastId in surviving) dao.insertMember(member)
+                    }
+                    snapshot.sessionContext?.let {
+                        dao.restoreGroupContext(
+                            groupId = snapshot.group.id,
+                            anchorEpisodeId = it.anchorEpisodeId,
+                            anchorSortDate = it.anchorSortDate,
+                            expectedGeneration = it.expectedGeneration,
+                            now = clock.now(),
+                        )
+                    }
+                    Outcome.Success(snapshot.group.id)
                 }
-                outcome
-            }.also { outcome ->
-                // The sweep reads pendingUndoUuids(), so it must run after releasing undoMutex.
-                if (outcome is Outcome.Success) syncChannels()
+            if (outcome is Outcome.Success) {
+                pendingDeletes.remove(token.value)
+                pending.expiry.cancel()
             }
+            outcome
+        }
 
     override suspend fun pendingUndoUuids(): Set<String> =
         undoMutex.withLock { pendingDeletes.values.mapTo(HashSet()) { it.snapshot.group.uuid } }
@@ -391,9 +425,11 @@ internal class GroupRepositoryImpl(
     }
 
     private suspend fun syncChannels() {
-        // Database writes are committed: a platform failure must not turn them into reported failures.
-        suspendRunCatching { channelSync.sync() }
-            .onFailure { Log.w(TAG, it) { "Group channel sweep failed after group write" } }
+        // Like rescheduling, reconciliation must survive a screen closing after the commit.
+        withContext(NonCancellable) {
+            suspendRunCatching { channelSync.sync() }
+                .onFailure { Log.w(TAG, it) { "Group channel sweep failed after group write" } }
+        }
     }
 
     private class DeletedGroupSnapshot(

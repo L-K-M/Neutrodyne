@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.database.PodcastGroupSettingsEntity
 import ch.lkmc.neutrodyne.core.database.PodcastSettingsEntity
 import ch.lkmc.neutrodyne.core.database.ScopeOverrides
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
+import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.ScopeSettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
@@ -20,10 +21,13 @@ import ch.lkmc.neutrodyne.core.model.ScopedSettingsView
 import ch.lkmc.neutrodyne.core.model.SettingOverrides
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
+import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.SingleIn
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.withContext
 
 @Inject
 @SingleIn(AppScope::class)
@@ -31,6 +35,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 internal class ScopeSettingsRepositoryImpl(
     private val db: NeutrodyneDatabase,
     private val settings: SettingsRepository,
+    private val refresh: Provider<RefreshController>,
     private val channelSync: GroupChannelSync,
 ) : ScopeSettingsRepository {
     private val dao get() = db.scopeSettingsDao()
@@ -50,7 +55,7 @@ internal class ScopeSettingsRepositoryImpl(
         change: (SettingOverrides) -> SettingOverrides,
     ): Outcome<Unit, SettingsError> =
         write {
-            if (db.podcastDao().byId(podcastId) == null) return@write Outcome.Success(Unit)
+            if (db.podcastDao().byId(podcastId) == null) return@write Outcome.Success(false)
             val previous = dao.forPodcast(podcastId)?.o ?: ScopeOverrides()
             val next = change(previous.toModel())
             if (!next.hasSupportedRefreshInterval()) return@write invalidRefresh()
@@ -60,7 +65,7 @@ internal class ScopeSettingsRepositoryImpl(
             } else if (stored != previous) {
                 dao.upsertPodcast(PodcastSettingsEntity(podcastId, stored))
             }
-            Outcome.Success(Unit)
+            Outcome.Success(previous.refreshIntervalMinutes != stored.refreshIntervalMinutes)
         }
 
     override suspend fun updateGroup(
@@ -68,7 +73,7 @@ internal class ScopeSettingsRepositoryImpl(
         change: (SettingOverrides) -> SettingOverrides,
     ): Outcome<Unit, SettingsError> =
         write {
-            if (db.groupDao().groupById(groupId) == null) return@write Outcome.Success(Unit)
+            if (db.groupDao().groupById(groupId) == null) return@write Outcome.Success(false)
             val previous = dao.forGroup(groupId)?.o ?: ScopeOverrides()
             val next = change(previous.toModel())
             if (!next.hasSupportedRefreshInterval()) return@write invalidRefresh()
@@ -78,28 +83,47 @@ internal class ScopeSettingsRepositoryImpl(
             } else if (stored != previous) {
                 dao.upsertGroup(PodcastGroupSettingsEntity(groupId, stored))
             }
-            Outcome.Success(Unit)
+            Outcome.Success(previous.refreshIntervalMinutes != stored.refreshIntervalMinutes)
         }.also { outcome ->
             if (outcome is Outcome.Success) {
-                // Channels are reconciled after the settings commit, never under the Room writer.
-                suspendRunCatching { channelSync.sync() }
-                    .onFailure { Log.w("ScopeSettings", it) { "Group channel sweep failed after settings write" } }
+                // Reconcile channels after committing and releasing the Room writer.
+                withContext(NonCancellable) {
+                    suspendRunCatching { channelSync.sync() }
+                        .onFailure { Log.w("ScopeSettings", it) { "Group channel sweep failed after settings write" } }
+                }
             }
         }
 
-    private suspend fun write(block: suspend () -> Outcome<Unit, SettingsError>): Outcome<Unit, SettingsError> =
-        try {
-            db.withWriteTransaction { block() }
-        } catch (error: SQLiteException) {
-            Log.w("ScopeSettings", error) { "Scoped settings write failed" }
-            Outcome.Failure(SettingsError.WriteFailed)
+    private suspend fun write(block: suspend () -> Outcome<Boolean, SettingsError>): Outcome<Unit, SettingsError> {
+        val result: Outcome<Boolean, SettingsError> =
+            try {
+                db.withWriteTransaction { block() }
+            } catch (error: SQLiteException) {
+                Log.w("ScopeSettings", error) { "Scoped settings write failed" }
+                return Outcome.Failure(SettingsError.WriteFailed)
+            }
+
+        val intervalChanged =
+            when (result) {
+                is Outcome.Failure -> return result
+                is Outcome.Success -> result.value
+            }
+        if (!intervalChanged) return Outcome.Success(Unit)
+
+        // A committed interval change must reach the scheduler even if its screen closes.
+        withContext(NonCancellable) {
+            suspendRunCatching { refresh().reschedulePeriodic() }
+                .onFailure { Log.w("ScopeSettings", it) { "Post-write refresh reschedule failed" } }
         }
+
+        return Outcome.Success(Unit)
+    }
 
     private fun ScopeOverrides.toModel(): SettingOverrides = SettingOverrides(refreshIntervalMinutes, notifyNewEpisodes)
 
     private fun ScopeOverrides.withM2Fields(value: SettingOverrides): ScopeOverrides =
         copy(refreshIntervalMinutes = value.refreshIntervalMinutes, notifyNewEpisodes = value.notifyNewEpisodes)
 
-    private fun invalidRefresh(): Outcome<Unit, SettingsError> =
+    private fun invalidRefresh(): Outcome<Nothing, SettingsError> =
         Outcome.Failure(SettingsError.OutOfRange("refreshIntervalMinutes"))
 }
