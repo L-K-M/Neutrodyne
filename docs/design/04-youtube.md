@@ -409,6 +409,8 @@ object YouTubeIds {
 }
 ```
 
+Implementation note (2026-10-17, M3): `YouTubeIds` also carries `PLAYLIST`, a deliberate sanity bound on playlist IDs (`^[0-9A-Za-z_-]{13,64}$`, covering the shortest `RD…` mixes up to 41-char `OLAK5uy_…` albums). It is not a prefix whitelist, and `classify` does not gate on it: it follows the table above and keeps any non-uploads `list=`/`playlist_id=` value as `Playlist(p)`. `YouTubeUrlClassifier.classify`, `classifyOrQuery` and `isYouTubeHost` land in this milestone.
+
 Handles are kept Unicode (handles may contain dots, underscores, hyphens and non-ASCII letters) and percent-encoded as UTF-8 only when building a URL. A `Video` ref resolves to the video's channel, never to a single-video subscription.
 
 ### Resolution order
