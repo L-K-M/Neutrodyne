@@ -16,6 +16,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -71,10 +72,47 @@ class ImportDaoTest {
                     assertEquals(99, it?.finishedAt)
                 }
                 // A guarded write with the same value is a no-op (02 DAO rule 2).
-                dao.setState(session, ImportState.DONE)
+                dao.setSourceName(session, "feeds.opml")
+                expectNoEvents()
+                // DONE is terminal: markDone's state guard rejects the write silently too.
+                assertEquals(0, dao.markDone(session, finishedAt = 100))
                 expectNoEvents()
                 cancelAndIgnoreRemainingEvents()
             }
+        }
+
+    @Test fun markDoneLosesToAnEarlierCancel() =
+        runTest {
+            // A cancel committed before the runner's finish wins: the runner sees 0 changed
+            // rows and skips its done notification (05 §7's COMMITTED/FETCHING sources).
+            val cancelled = dao.insertSession(importSessionEntity(state = ImportState.COMMITTED))
+            dao.setState(cancelled, ImportState.CANCELLED)
+            assertEquals(0, dao.markDone(cancelled, finishedAt = 50))
+            assertNotNull(dao.sessionById(cancelled)).let {
+                assertEquals(ImportState.CANCELLED, it.state)
+                assertNull(it.finishedAt)
+            }
+
+            // Off-diagram sources lose too: PREVIEW (confirm must run first) and DONE, whose
+            // finishedAt stamp is not rewritten.
+            val preview = dao.insertSession(importSessionEntity())
+            assertEquals(0, dao.markDone(preview, finishedAt = 50))
+            assertEquals(ImportState.PREVIEW, dao.sessionById(preview)?.state)
+
+            val done = dao.insertSession(importSessionEntity(state = ImportState.COMMITTED))
+            assertEquals(1, dao.markDone(done, finishedAt = 60))
+            assertEquals(0, dao.markDone(done, finishedAt = 70))
+            assertEquals(60, dao.sessionById(done)?.finishedAt)
+        }
+
+    @Test fun setStateRejectsDone() =
+        runTest {
+            val session = dao.insertSession(importSessionEntity(state = ImportState.FETCHING))
+
+            // DONE without the finishedAt stamp would fall back to createdAt in
+            // expiredSessions' COALESCE — 05's diagram only reaches it through markDone.
+            assertFailsWith<IllegalArgumentException> { dao.setState(session, ImportState.DONE) }
+            assertEquals(ImportState.FETCHING, dao.sessionById(session)?.state)
         }
 
     @Test fun openAndActiveSessionsFollowState() =

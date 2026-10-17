@@ -192,15 +192,35 @@ abstract class ImportDao {
 
     // Session writes. Guards per 02 DAO rule 2: identical writes would still invalidate observers.
 
-    /** Non-terminal transitions: `confirm` → COMMITTED, runner → FETCHING, `cancel` → CANCELLED. */
+    /**
+     * Non-terminal transitions per 05's state diagram: `confirm` → COMMITTED, the runner →
+     * FETCHING, `cancel` → CANCELLED and the §8 fix-ups DONE → FETCHING. DONE is rejected —
+     * it must stamp `finishedAt`, which only [markDone] writes (without it `expiredSessions`
+     * falls back to `createdAt` and the cleanup window opens early).
+     */
+    suspend fun setState(
+        sessionId: Long,
+        state: ImportState,
+    ): Int {
+        require(state != ImportState.DONE) { "DONE stamps finishedAt — use markDone" }
+        return setStateGuarded(sessionId, state)
+    }
+
     @Query("UPDATE import_session SET state = :state WHERE id = :sessionId AND state <> :state")
-    abstract suspend fun setState(
+    protected abstract suspend fun setStateGuarded(
         sessionId: Long,
         state: ImportState,
     ): Int
 
-    /** 05 §7 finish: `DONE` stamps `finishedAt`, which opens the 7-day cleanup window (02). */
-    @Query("UPDATE import_session SET state = 'DONE', finishedAt = :finishedAt WHERE id = :sessionId")
+    /**
+     * 05 §7 finish: `DONE` stamps `finishedAt`, which opens the 7-day cleanup window (02). Only
+     * COMMITTED/FETCHING may complete — when a `cancel` commits first the write loses and the
+     * 0 return tells the caller to skip the done notification.
+     */
+    @Query(
+        "UPDATE import_session SET state = 'DONE', finishedAt = :finishedAt" +
+            " WHERE id = :sessionId AND state IN ('COMMITTED', 'FETCHING')",
+    )
     abstract suspend fun markDone(
         sessionId: Long,
         finishedAt: Long,
