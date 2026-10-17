@@ -103,6 +103,7 @@ public interface ArchiveWriter : AutoCloseable {
     /**
      * Opens the next entry's sink. Exactly one entry sink is open at a time — closing a sink ends
      * its entry, never the archive; [close] ends the archive itself.
+     * Entry names must be unique within the archive; implementations reject a duplicate.
      */
     public fun entry(name: String): Sink
 }
