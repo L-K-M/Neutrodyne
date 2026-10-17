@@ -55,7 +55,21 @@ data class ImportOptions(
     /** Worker bookkeeping: when commit ran and the fetch-attempt marker (05 6–7). */
     val committedAt: Long? = null,
     val attemptMarkerAt: Long? = null,
-)
+) {
+    /** Applies preview edits without letting a stale screen replace parser or worker state. */
+    fun withUserChanges(change: (ImportOptions) -> ImportOptions): ImportOptions {
+        if (committedAt != null || restoreRequestedAt != null) return this
+
+        return change(this).copy(
+            fromAndroidBackup = fromAndroidBackup,
+            restoreRequestedAt = restoreRequestedAt,
+            laneAttempts = laneAttempts,
+            sourceGroups = sourceGroups,
+            committedAt = committedAt,
+            attemptMarkerAt = attemptMarkerAt,
+        )
+    }
+}
 
 /** A group found in the source file; [excludedReason] pre-fills [ImportOptions.excludedGroupKeys]. */
 data class SourceGroup(
