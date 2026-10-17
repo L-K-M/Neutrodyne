@@ -78,6 +78,7 @@ import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.VirtualCounts
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
+import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
@@ -176,6 +177,51 @@ class FeedsScreenTest {
         runComposeUiTest {
             setFeeds(state = FeedsUiState(hasSubscriptions = true), source = PagedListSource(listOf(emptyList())))
             onNodeWithText("You're all caught up").assertIsDisplayed()
+        }
+
+    @Test
+    fun suggestedGroupCardShowsWithSubscriptionsAndNoGroups() =
+        runComposeUiTest {
+            setFeeds(state = FeedsUiState(hasSubscriptions = true))
+            onNodeWithText("Create your first group").assertIsDisplayed()
+        }
+
+    @Test
+    fun suggestedGroupCardHiddenWithoutSubscriptions() =
+        runComposeUiTest {
+            setFeeds(state = FeedsUiState(hasSubscriptions = false))
+            onNodeWithText("Create your first group").assertDoesNotExist()
+        }
+
+    @Test
+    fun hiddenGroupsStillHideTheSuggestedGroupCard() =
+        runComposeUiTest {
+            val fixture = PagerFixture()
+            // The card is gated on any group existing, not on a tab being visible.
+            fixture.groups.groups.value =
+                fixture.groups.groups.value
+                    .map { it.copy(showAsTab = false) }
+            fixture.feeds.tabs.value = listOf(FeedTab(FeedSource.All, "All", null, null, null))
+            setContent { fixture.Content() }
+            fixture.awaitSelected(this, 0)
+            onNodeWithText("Create your first group").assertDoesNotExist()
+            fixture.close()
+        }
+
+    @Test
+    fun suggestedGroupCardPushesGroupEditThroughTheRoute() =
+        runComposeUiTest {
+            val fixture = PagerFixture()
+            fixture.groups.groups.value = emptyList()
+            fixture.feeds.tabs.value = listOf(FeedTab(FeedSource.All, "All", null, null, null))
+            setContent { fixture.Content(FeedContent.ROUTE) }
+            fixture.awaitSelected(this, 0)
+            onNodeWithText("Create your first group").performClick()
+            assertEquals(
+                listOf<RecordingAppNavigator.Call>(RecordingAppNavigator.Call.Push(GroupEditKey(null))),
+                fixture.navigator.calls,
+            )
+            fixture.close()
         }
 
     @Test
@@ -926,6 +972,8 @@ private val TestPlatformActions =
         override val notifications = null
     }
 
+private enum class FeedContent { SCREEN, ROUTE }
+
 /** Real D1 state and cache with fake application services, shared by pager UI proofs. */
 @OptIn(ExperimentalTestApi::class, ExperimentalCoroutinesApi::class)
 private class PagerFixture {
@@ -940,6 +988,7 @@ private class PagerFixture {
     private val store = ViewModelStore()
     lateinit var model: FeedsViewModel
     var allGroupsOpens = 0
+    val navigator = RecordingAppNavigator()
 
     init {
         groups.groups.value =
@@ -1009,7 +1058,7 @@ private class PagerFixture {
     }
 
     @Composable
-    fun Content() {
+    fun Content(content: FeedContent = FeedContent.SCREEN) {
         val effectDispatcher = rememberCoroutineScope().coroutineContext[ContinuationInterceptor] as CoroutineDispatcher
         val viewModel =
             remember {
@@ -1041,37 +1090,41 @@ private class PagerFixture {
             LocalPlatformKind provides PlatformKind.DESKTOP,
             LocalUiClock provides clock,
             LocalLifecycleOwner provides owner,
-            LocalAppNavigator provides RecordingAppNavigator(),
+            LocalAppNavigator provides navigator,
             LocalPlatformActions provides TestPlatformActions,
             LocalSnackbarHost provides snackbar,
         ) {
             NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
-                val state by viewModel.uiState.collectAsStateWithLifecycle()
-                FeedsScreen(
-                    state = state,
-                    pagingFor = viewModel::pagingFor,
-                    prefsFor = viewModel::prefsFor,
-                    onRefresh = viewModel::onRefresh,
-                    onFiltersChange = viewModel::onFilters,
-                    onAction = {},
-                    onMarkAllPlayedClick = viewModel::markAllPlayed,
-                    onAddPodcast = {},
-                    onSearch = {},
-                    onPageSettled = viewModel::onPageSettled,
-                    onVisitStart = viewModel::onVisitStart,
-                    onVisitEnd = viewModel::onVisitEnd,
-                    onAllGroups = { allGroupsOpens++ },
-                )
-                val markPlayed by viewModel.markPlayed.state.collectAsStateWithLifecycle()
-                markPlayed?.let {
-                    MarkFeedPlayedDialog(
-                        it,
-                        viewModel.markPlayed::select,
-                        viewModel.markPlayed::confirm,
-                        viewModel.markPlayed::dismiss,
+                if (content == FeedContent.ROUTE) {
+                    FeedsRoute(viewModel)
+                } else {
+                    val state by viewModel.uiState.collectAsStateWithLifecycle()
+                    FeedsScreen(
+                        state = state,
+                        pagingFor = viewModel::pagingFor,
+                        prefsFor = viewModel::prefsFor,
+                        onRefresh = viewModel::onRefresh,
+                        onFiltersChange = viewModel::onFilters,
+                        onAction = {},
+                        onMarkAllPlayedClick = viewModel::markAllPlayed,
+                        onAddPodcast = {},
+                        onSearch = {},
+                        onPageSettled = viewModel::onPageSettled,
+                        onVisitStart = viewModel::onVisitStart,
+                        onVisitEnd = viewModel::onVisitEnd,
+                        onAllGroups = { allGroupsOpens++ },
                     )
+                    val markPlayed by viewModel.markPlayed.state.collectAsStateWithLifecycle()
+                    markPlayed?.let {
+                        MarkFeedPlayedDialog(
+                            it,
+                            viewModel.markPlayed::select,
+                            viewModel.markPlayed::confirm,
+                            viewModel.markPlayed::dismiss,
+                        )
+                    }
+                    ShowUserMessages(state.messages, viewModel::onMessageShown)
                 }
-                ShowUserMessages(state.messages, viewModel::onMessageShown)
             }
         }
     }

@@ -158,6 +158,31 @@ class NextRefreshRebaserTest {
         }
 
     @Test
+    fun aForceMarkAfterTheSnapshotBlocksTheStaleRebaseWrite() =
+        runTest {
+            settings.set(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES, 240)
+            val id =
+                seedPodcast(
+                    db,
+                    "https://a.example.com/f",
+                    lastSuccessAt = NOW - DAY,
+                    lastAttemptAt = NOW - DAY,
+                    nextRefreshAt = NOW + 60 * DAY,
+                )
+            val dao = db.podcastDao()
+            val snapshot = dao.rebaseCandidates().single { it.id == id }
+
+            // A force request marks the row between the candidate read and the write: `forceDue`
+            // leaves `lastAttemptAt` alone, so only the forced mark itself can block the write.
+            dao.forceDue(scopeAll = false, ids = listOf(id))
+
+            val target = (snapshot.lastSuccessAt ?: snapshot.subscribedAt) + 240 * 60_000L
+            val written = dao.rebaseNextRefreshAt(id, target, snapshot.lastAttemptAt ?: -1)
+            assertEquals(0, written)
+            assertEquals(0L, dao.byId(id)!!.nextRefreshAt)
+        }
+
+    @Test
     fun anUnattemptedRowStillRebases() =
         runTest {
             settings.set(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES, 240)
