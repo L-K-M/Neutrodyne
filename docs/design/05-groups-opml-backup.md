@@ -41,6 +41,18 @@ Since the scope revision ([D81](../PLAN.md#3-key-decisions)) all of it is common
 | `:app` (Android only) | `ExternalImportActivity`, its manifest entries, the shell-only `SnapshotNowReceiver` and its manifest entry ([Testing with bmgr](#testing-with-bmgr)), `res/xml/data_extraction_rules.xml`, `res/xml/backup_rules.xml`, `res/xml-v28/backup_rules.xml`, the `cache/export/` entry of `res/xml/file_paths.xml` |
 | `:desktopApp` | nothing of its own: OS hand-offs and drops reach the import pipeline through 11's `DesktopOpenHandler` and the shared `IntentRouter` ([Desktop inputs](#desktop-inputs)) |
 
+**Implementation note (2026-10-17, M3).** The A1 contract row lands the types above with
+three placement adjustments: `RestoreProgress` sits in `:core:domain` beside `BackupError`
+— its `Failed` case carries a `BackupError`, and `:core:model` cannot see domain types;
+`SnapshotScheduler` sits in `:core:domain` with the other repository ports rather than
+`:core:data` `commonMain` (the platform hosts `WorkManagerSnapshotScheduler` and
+`NoSnapshotScheduler` still live in `:core:data`); and `:playback:api` gets a minimal
+`PlaybackController` with only `pause()` plus the `NoPlaybackController` no-op binding —
+06's full surface arrives with M4.
+`ImportError.Unsupported` and `ImportError.Hostile` carry the enums `UnsupportedSource`
+and `HostileInput` instead of the reason strings of the `ImportError` sketch under OPML
+import, with the same values.
+
 ```mermaid
 flowchart LR
   subgraph FEAT["Feature modules (common)"]
@@ -1959,6 +1971,14 @@ Serves N1, N9, N11. Infrastructure, runners, golden-update switch and CI wiring 
 | `bmgr` procedure | 09's nightly `bmgr` job on the published release APK (`SnapshotNowReceiver` trigger) and by hand, 09 checklist | [Testing with bmgr](#testing-with-bmgr) (M3 acceptance 6; M6 acceptance 7 for `Podcasts/`); M11b: a second device set up from the first one's Google backup, then the published APK downloaded from the GitHub release page and installed, gets the library back at install (open question 17) | M3, M6, M11b |
 
 Fixtures (`feeds/src/test/resources/opml/`): `antennapod_flat_atom.opml` (`type="atom"`), `pocketcasts_feeds_wrapper.opml` (OPML 1.0, `feeds` wrapper, no `title`), `overcast_basic.opml`, `overcast_extended.opml` (playlists, nested episodes, `subscribed="0"`), `gpodder_sections.opml` (Audio/Video sections, `text` = description, `url` fallback), `freshrss_nested.opml` (nested folders and `category`), `google_broken.opml` (raw `&`, missing `/>`, `&nbsp;` → salvage), `neutrodyne_hybrid.opml`, `neutrodyne_flat.opml`, `neutrodyne_group_share.opml`, `neutrodyne_percent_names.opml` (groups `a,b`, `c/d`, `100%` and the literal `a%2Cb`: export encodes, import decodes exactly once), `iscomment_subtree.opml`, `include_and_link.opml`; encodings `utf8_bom.opml`, `utf16le_bom.opml`, `iso8859_1_declared.opml`, `leading_newline.opml`, `cp1252_declared_utf8.opml` (replacement characters, no crash). `feeds/src/test/resources/backup/`: directories `v1_minimal/`, `v1_full/`, `v1_without_sync_fields/` (written before the scope revision), `v1_android/`, `v1_desktop/`, `future_minreader2/`, `sha_mismatch/` holding the archive entries as plain files; a test helper zips each at test time (no committed binary archives, so every fixture stays a reviewable text diff). YouTube format fixtures are 04's (`feeds/src/test/resources/import/`). Hostile inputs are generated, never committed.
+
+**Implementation note (2026-10-17, M3):** `OpmlWriterGoldenTest` runs in `:feeds:jvm`'s
+`test` source set rather than `:feeds` `commonTest`, where the table above places it: its
+goldens are files (`feeds/src/test/resources/opml/writer/`, read through the existing
+`Goldens` helper) and `commonTest` cannot read files portably. The writer itself is common
+code in `:feeds` (`ch.lkmc.neutrodyne.feeds.opml`), so both the apps and the sync server
+write identical bytes. The writer goldens stay separate from the reader fixtures
+(`neutrodyne_*.opml`) in the same corpus directory.
 
 ---
 
