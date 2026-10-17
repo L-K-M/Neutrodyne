@@ -315,7 +315,8 @@ internal class GroupRepositoryImpl(
     /**
      * A write and the effects it owes (undo token, channel sweep, reschedule) finish as one unit.
      * Room re-checks cancellation as a transaction returns, so a screen closing right after COMMIT
-     * would otherwise drop the effects of a write that landed.
+     * would otherwise drop the effects of a write that landed. [rescheduleAfterCommit] and
+     * [syncChannels] rely on it: call them only inside this block.
      */
     private suspend fun <T> committing(write: suspend () -> T): T = withContext(NonCancellable) { write() }
 

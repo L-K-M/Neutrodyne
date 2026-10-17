@@ -805,8 +805,11 @@ internal class FeedRefresher(
             }
         }
 
-        target = db.podcastDao().dueFeedById(target.id) ?: target
-        rememberWarnings(target.id, ingest.warnings)
+        // The ingest committed: a cancellation in these reads must not skip its announcement.
+        target =
+            withContext(NonCancellable) {
+                (db.podcastDao().dueFeedById(target.id) ?: target).also { rememberWarnings(it.id, ingest.warnings) }
+            }
         // `vanished` means the podcast row was deleted mid-run — there is no row left to write a
         // fetch state onto, and the row being gone is itself the terminal state.
         if (ingest.vanished) return FeedOutcome.Failed(FeedErrorKind.UNKNOWN, null)
