@@ -72,7 +72,7 @@ interface FilePicker { suspend fun pickFile(mimeTypes: List<String>, extensions:
                        suspend fun pickFolder(): String? }                                                 // desktop only; null on Android
 fun interface FileSaver { suspend fun create(suggestedName: String, mimeType: String): String? }         // URI to write, or null (cancelled)
 fun interface RevealInFolder { fun reveal(path: String): Boolean }
-interface NotificationPermissionRequester { val granted: Boolean; fun request(onResult: (Boolean) -> Unit) }
+interface NotificationPermissionRequester { val granted: Boolean; fun request(onResult: (Boolean) -> Unit); fun openSettings() }
 val LocalPlatformActions = staticCompositionLocalOf<PlatformActions> { error("provided by the shell") }
 ```
 
@@ -83,7 +83,14 @@ val LocalPlatformActions = staticCompositionLocalOf<PlatformActions> { error("pr
 | `FilePicker` | `OpenDocument` (`pickFolder` → null; SAF folders are v1.x) | macOS `FileDialog`, Windows `JFileChooser`, Linux XDG portal `FileChooser` ([11 Download folders](11-desktop.md#download-folders)) |
 | `FileSaver` | `CreateDocument(mimeType)` | the same dialogs in save mode |
 | `RevealInFolder` | — | [11 Show in folder](11-desktop.md#show-in-folder) |
-| `NotificationPermissionRequester` | `RequestPermission(POST_NOTIFICATIONS)` on API 33+, `granted` true below | — (macOS asks at the first notification, [11 Notifications](11-desktop.md#notifications)) |
+| `NotificationPermissionRequester` | `RequestPermission(POST_NOTIFICATIONS)` on API 33+; null below; `openSettings()` → `ACTION_APP_NOTIFICATION_SETTINGS` | — (macOS asks at the first notification, [11 Notifications](11-desktop.md#notifications)) |
+
+**Implementation note (2026-10-16, M2):** D8a retains the existing null requester
+below API 33, matching the `PlatformActions` sample's Android-13-only member
+and hiding permission controls there. This replaces the table's former
+“granted true below” wording. The requester remembers a previous request on
+this device, so denial leads to Open settings rather than another system
+dialog; `granted` is refreshed when the activity resumes from settings.
 
 `NO_HANDLER` shows "No app can open this link" with "Copy link" everywhere ([Show notes renderer](#show-notes-renderer)).
 
@@ -550,6 +557,15 @@ Groups segment: a grid of [`GroupMosaic`](#groupmosaic-and-group-tab-label) tile
 
 Each override row opens a chooser whose first option is "Use default ({effective inherited value}, {source})" ([`AttributionText`](#attribution-text)); choosing it writes `null` through `updatePodcast { it.copy(field = null) }`. Data: 05's `ScopeSettingsRepository.observePodcast` (`ScopedSettingsView`: `own`, `effective`, `sources`, `groupHints`) and 03's `observeFeedInfo`; `observePodcast` emitting null pops the screen. Rows a YouTube channel cannot use in the current capability state (`SettingSource.NotSupported`, e.g. auto-download in external mode) are hidden, not disabled, and reappear when capabilities change (the screen observes them). Writes that return 01's `SettingsError.OutOfRange` show the field's inline error (cannot happen from the fixed choosers; defensive).
 
+**Implementation note (2026-10-16, M2):** D8a adds the podcast notification
+switch and the refresh/notification choosers, with “Inherit” as their first
+option. B3's M2 `ScopedSettingsView` exposes the current effective value and
+source but no inherited-value preview under an active override, so the chooser
+does not preview that value. Choosing Inherit clears only that field; the row
+then shows the newly resolved value and attribution. The switch toggles the
+notification wish directly; tapping its row also offers Inherit / On / Off.
+The group settings screen follows in D8b.
+
 ### Episode detail
 
 `EpisodeKey(episodeId)`, `:feature:episode`, M1 (M4 actions, M5 chapters and timestamp seeks, M6 downloads, M8 YouTube).
@@ -616,8 +632,8 @@ step leaves the draft open for retry, since the existing targeted repository
 writes are separate transactions. Per D4's requested copy, the delete confirmation
 is "Group deleted"; the name is retained for an Undo name-conflict message. One
 10-second deadline covers snackbar queueing and retries after the editor pops.
-The existing-group footer currently offers Delete only: the Group settings link
-waits for D8 to install `GroupSettingsKey`, avoiding navigation to an absent entry.
+D8b adds the existing-group footer’s Group settings link through
+`GroupSettingsKey`; the editor draft remains intact while settings is open.
 
 ### Manage groups
 
@@ -646,8 +662,8 @@ cancels the drag with “Groups changed, try again”. Alt+arrows, accessibility
 and context-menu moves share the drop path. Delete reuses D4's ten-second
 Undo handler without popping the list. Another Delete is disabled until the
 pending Undo snackbar finishes, preserving each deletion's Undo window.
-Group settings awaits D8's route;
-the suggested-groups card awaits D11, as in the milestone split.
+D8b wires Group settings in the row overflow and context menu.
+The suggested-groups card awaits D11, as in the milestone split.
 B1's permutation-only API cannot distinguish which row was dragged in an
 adjacent swap: its deterministic longest-increasing-subsequence tie-break
 may update the neighbour's key instead. D5 preserves that contract and the
@@ -657,6 +673,16 @@ require a separate repository API change.
 ### Group settings
 
 `GroupSettingsKey(groupId)`, `:feature:groups`, M2 (refresh, notifications), M4 (speed, skip silence), M6 (auto-download, delete after played). Layout as [Podcast settings](#podcast-settings) without General/Feed/YouTube; the view settings (filters, order, hide older than) are edited from the Feeds page, not here. Auto-download's dependent rows are disabled with "Turn on auto-download for this group first" until the group's own auto-download is on (05 rule 1). When the group contains YouTube channels and `capabilities.downloads` is false (external mode), the auto-download section adds the line "YouTube channels in this group aren't downloaded: {short external-reason text}" ([External reason texts](#external-reason-texts)); the resolver excludes those channels (`SettingSource.NotSupported`, 05). With the engine (from M9a) the section adds "YouTube channels keep {n} (YouTube default)" when the group does not set its own keep count (04 [Auto-download for YouTube](04-youtube.md#auto-download-for-youtube)).
+
+**Implementation note (2026-10-16, M2):** D8b installs `GroupSettingsKey`
+and both entry points: Manage groups overflow and the existing-group editor
+footer. It reuses D8a's attribution, interval labels, chooser and blocked
+notification notice. Only Refresh interval and New episodes are editable;
+all writes use `ScopeSettingsRepository.updateGroup`. The group’s source is
+`Group(self)` or `AppDefault`, as specified in 05. Unlike the podcast's merged
+inheritance, a group inherits only app defaults, so its “Use default” option
+previews the live default value and attribution even under an own override.
+Manual only writes 0; clearing writes null. Deleted groups pop the route.
 
 ### Add to groups sheet
 

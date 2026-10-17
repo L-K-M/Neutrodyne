@@ -25,6 +25,7 @@ import ch.lkmc.neutrodyne.core.domain.DeletedGroupToken
 import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.domain.GroupRepository
 import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
+import ch.lkmc.neutrodyne.core.navigation.GroupSettingsKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
@@ -48,11 +49,13 @@ import kotlin.time.Duration.Companion.milliseconds
 
 @Composable
 @Suppress("FunctionNaming") // Compose functions use PascalCase.
-internal fun GroupEditRoute(key: GroupEditKey) {
-    val viewModel =
+internal fun GroupEditRoute(
+    key: GroupEditKey,
+    viewModel: GroupEditViewModel =
         assistedMetroViewModel<GroupEditViewModel, GroupEditViewModel.Factory> { extras ->
             create(key.groupId, extras.createSavedStateHandle())
-        }
+        },
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val navigator = LocalAppNavigator.current
     val snackbar = LocalSnackbarHost.current
@@ -88,6 +91,7 @@ internal fun GroupEditRoute(key: GroupEditKey) {
         viewModel::delete,
         onClose = { close() },
         onRetry = viewModel::retry,
+        onSettings = { key.groupId?.let { navigator.pushDetail(GroupSettingsKey(it)) } },
     )
     if (discardPrompt) {
         NdDialog(

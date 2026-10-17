@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.lkmc.neutrodyne.core.navigation.GroupSettingsKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
@@ -49,6 +50,7 @@ internal fun GroupsManageRoute(viewModel: GroupsManageViewModel = metroViewModel
         { navigator.pop() },
         viewModel::retry,
         topBarActions = { SettingsGearButton() },
+        onSettings = { navigator.pushDetail(GroupSettingsKey(it)) },
     )
     ShowUserMessages(state.messages, viewModel::onMessageShown)
 }

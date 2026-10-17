@@ -84,6 +84,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.group_edit_order
 import ch.lkmc.neutrodyne.core.ui.resources.group_edit_search
 import ch.lkmc.neutrodyne.core.ui.resources.group_edit_tab
 import ch.lkmc.neutrodyne.core.ui.resources.group_edit_title
+import ch.lkmc.neutrodyne.core.ui.resources.group_settings_title
 import ch.lkmc.neutrodyne.core.ui.resources.order_newest
 import ch.lkmc.neutrodyne.core.ui.resources.order_oldest
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
@@ -100,8 +101,9 @@ internal fun GroupEditScreen(
     onSave: () -> Unit,
     onDelete: () -> Unit,
     onClose: () -> Unit,
-    onRetry: () -> Unit = {},
     modifier: Modifier = Modifier,
+    onRetry: () -> Unit = {},
+    onSettings: () -> Unit = {},
 ) {
     val draft = state.draft
     val enabled = state.loaded && !state.busy
@@ -280,12 +282,19 @@ internal fun GroupEditScreen(
             }
             if (groupId != null) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
-                    NdTextButton(
-                        label = stringResource(Res.string.group_edit_delete),
-                        onClick = onDelete,
-                        enabled = enabled,
-                        role = NdActionRole.DESTRUCTIVE,
-                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        NdTextButton(
+                            label = stringResource(Res.string.group_settings_title),
+                            onClick = onSettings,
+                            enabled = enabled,
+                        )
+                        NdTextButton(
+                            label = stringResource(Res.string.group_edit_delete),
+                            onClick = onDelete,
+                            enabled = enabled,
+                            role = NdActionRole.DESTRUCTIVE,
+                        )
+                    }
                 }
             }
         }
