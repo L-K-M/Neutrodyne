@@ -20,6 +20,8 @@ import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.compose.resources.ExperimentalResourceApi
 import org.jetbrains.compose.resources.setResourceReaderAndroidContext
@@ -32,6 +34,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.util.Locale
+import kotlin.coroutines.CoroutineContext
 
 @OptIn(ExperimentalResourceApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -54,7 +57,7 @@ class AndroidNewEpisodePosterTest {
         shadowOf(application).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
         shadowManager.setNotificationsEnabled(true)
         db = TestDb.inMemory(application, clock = clock)
-        poster = AndroidNewEpisodePoster(application, db, clock)
+        poster = AndroidNewEpisodePoster(application, db, clock, Dispatchers.Unconfined)
         Log.install(LogSink { _, _, message -> logs += message })
     }
 
@@ -175,7 +178,7 @@ class AndroidNewEpisodePosterTest {
         runBlocking<Unit> {
             val episodes = List(55) { line(sortDate = it.toLong()) }
             poster.post(listOf(notice(*episodes.takeLast(40).toTypedArray())))
-            val restarted = AndroidNewEpisodePoster(application, db, clock)
+            val restarted = AndroidNewEpisodePoster(application, db, clock, Dispatchers.Unconfined)
             restarted.post(listOf(notice(*episodes.take(30).toTypedArray())))
 
             val notification = notification(DEFAULT)
@@ -204,6 +207,21 @@ class AndroidNewEpisodePosterTest {
         }
 
     @Test
+    fun cleanupLeavesTheCallersDispatcherForNotificationManagerCalls() =
+        runBlocking<Unit> {
+            val a = line()
+            poster.post(listOf(notice(a)))
+            val io = CountingDispatcher()
+            poster = AndroidNewEpisodePoster(application, db, clock, io)
+
+            // Unsubscribe calls this from a ViewModel on Main; the binder calls must not run there.
+            poster.removePodcasts(listOf(a.podcastId))
+
+            assertThat(io.dispatches).isGreaterThan(0)
+            assertThat(shadowManager.size()).isEqualTo(0)
+        }
+
+    @Test
     fun removalUpdatesSilentlyThenCancelsAndLeavesOtherChannelsAlone() =
         runBlocking<Unit> {
             val a = line()
@@ -211,7 +229,7 @@ class AndroidNewEpisodePosterTest {
             val c = line()
             poster.post(listOf(notice(a, b), notice(c, uuid = "tech", name = "Tech")))
             val originalWhen = notification(DEFAULT).`when`
-            poster = AndroidNewEpisodePoster(application, db, clock)
+            poster = AndroidNewEpisodePoster(application, db, clock, Dispatchers.Unconfined)
             clock.nowMs += 1_000
             poster.removePodcasts(listOf(a.podcastId))
 
@@ -314,5 +332,19 @@ class AndroidNewEpisodePosterTest {
         const val CHANNEL_GROUP = "grp_new_episodes"
         const val IDS = "nd.episode_ids"
         const val NOTIFICATION_ID = 5000
+    }
+}
+
+/** Runs blocks inline but counts dispatches, proving a call left its caller's dispatcher. */
+private class CountingDispatcher : CoroutineDispatcher() {
+    var dispatches = 0
+        private set
+
+    override fun dispatch(
+        context: CoroutineContext,
+        block: Runnable,
+    ) {
+        dispatches++
+        block.run()
     }
 }

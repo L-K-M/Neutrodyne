@@ -40,9 +40,13 @@ internal class AndroidGroupChannelSync(
 
     private suspend fun reconcile() {
         NewEpisodeChannels.ensureChannels(application)
-        val enabled = db.scopeSettingsDao().groupScopes().filter { it.notifyNewEpisodes == true }
-        // Read groups before tokens: delete holds the undo mutex from its commit through token registration.
-        val retained = enabled.mapTo(HashSet()) { it.uuid } + groups().pendingUndoUuids()
+        // Groups, then tokens, then groups again. Delete and undo each hold the undo mutex across
+        // their commit and token change, so every group they touch shows up in one of the reads:
+        // delete removes the row then adds a token, undo restores the row then drops the token.
+        val deleting = enabledGroups().mapTo(HashSet()) { it.uuid }
+        val pending = groups().pendingUndoUuids()
+        val enabled = enabledGroups()
+        val retained = deleting + pending + enabled.map { it.uuid }
         for (group in enabled) {
             val id = GROUP_CHANNEL_PREFIX + group.uuid
             val channel =
@@ -58,6 +62,8 @@ internal class AndroidGroupChannelSync(
             deleteChannel(channel.id)
         }
     }
+
+    private suspend fun enabledGroups() = db.scopeSettingsDao().groupScopes().filter { it.notifyNewEpisodes == true }
 
     override suspend fun onUuidChanged(
         oldUuid: String,

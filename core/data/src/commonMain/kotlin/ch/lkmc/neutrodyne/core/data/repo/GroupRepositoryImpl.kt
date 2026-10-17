@@ -115,6 +115,11 @@ internal class GroupRepositoryImpl(
     override suspend fun create(
         draft: GroupDraft,
         memberIds: Set<Long>,
+    ): Outcome<Long, GroupError> = committing { insertGroup(draft, memberIds) }
+
+    private suspend fun insertGroup(
+        draft: GroupDraft,
+        memberIds: Set<Long>,
     ): Outcome<Long, GroupError> {
         val name =
             when (val result = validatedName(draft.name)) {
@@ -159,6 +164,11 @@ internal class GroupRepositoryImpl(
     }
 
     override suspend fun update(
+        groupId: Long,
+        edit: GroupEdit,
+    ): Outcome<Unit, GroupError> = committing { applyEdit(groupId, edit) }
+
+    private suspend fun applyEdit(
         groupId: Long,
         edit: GroupEdit,
     ): Outcome<Unit, GroupError> =
@@ -227,6 +237,11 @@ internal class GroupRepositoryImpl(
     override suspend fun setMembers(
         groupId: Long,
         podcastIds: Set<Long>,
+    ): Outcome<Unit, GroupError> = committing { replaceMembers(groupId, podcastIds) }
+
+    private suspend fun replaceMembers(
+        groupId: Long,
+        podcastIds: Set<Long>,
     ): Outcome<Unit, GroupError> {
         var changed = false
         val outcome =
@@ -255,6 +270,12 @@ internal class GroupRepositoryImpl(
     }
 
     override suspend fun applyMembership(
+        podcastIds: Set<Long>,
+        add: Set<Long>,
+        remove: Set<Long>,
+    ): Outcome<Unit, GroupError> = committing { editMemberships(podcastIds, add, remove) }
+
+    private suspend fun editMemberships(
         podcastIds: Set<Long>,
         add: Set<Long>,
         remove: Set<Long>,
@@ -292,19 +313,26 @@ internal class GroupRepositoryImpl(
     }
 
     /**
+     * A write and the effects it owes (undo token, channel sweep, reschedule) finish as one unit.
+     * Room re-checks cancellation as a transaction returns, so a screen closing right after COMMIT
+     * would otherwise drop the effects of a write that landed.
+     */
+    private suspend fun <T> committing(write: suspend () -> T): T = withContext(NonCancellable) { write() }
+
+    /**
      * 05: memberships and the group set decide each podcast's effective refresh interval (the
-     * least over its groups), so a committed change re-plans the periodic refresh. It runs
-     * NonCancellable like ScopeSettingsRepository's writes: a screen closing after the commit
-     * must not skip it. A failed reschedule never fails the committed write.
+     * least over its groups), so a committed change re-plans the periodic refresh. A failed
+     * reschedule never fails the committed write.
      */
     private suspend fun rescheduleAfterCommit(write: String) {
-        withContext(NonCancellable) {
-            suspendRunCatching { refreshController.reschedulePeriodic() }
-                .onFailure { Log.w(TAG, it) { "Refresh reschedule failed after $write" } }
-        }
+        suspendRunCatching { refreshController.reschedulePeriodic() }
+            .onFailure { Log.w(TAG, it) { "Refresh reschedule failed after $write" } }
     }
 
-    override suspend fun delete(groupId: Long): Outcome<DeletedGroupToken, GroupError> {
+    override suspend fun delete(groupId: Long): Outcome<DeletedGroupToken, GroupError> =
+        committing { deleteWithToken(groupId) }
+
+    private suspend fun deleteWithToken(groupId: Long): Outcome<DeletedGroupToken, GroupError> {
         // Snapshot and delete inside the one write transaction (05 steps 1–2): the member and
         // settings rows die by FK cascade, so the reads must precede the DELETE under the writer.
         // Register the token under the same mutex a sweep uses to read it, before exposing the delete.
@@ -362,7 +390,9 @@ internal class GroupRepositoryImpl(
         return Outcome.Success(token)
     }
 
-    override suspend fun undoDelete(token: DeletedGroupToken): Outcome<Long, GroupError> {
+    override suspend fun undoDelete(token: DeletedGroupToken): Outcome<Long, GroupError> = committing { undo(token) }
+
+    private suspend fun undo(token: DeletedGroupToken): Outcome<Long, GroupError> {
         val outcome = undoLocked(token)
 
         // 05 step 2 in reverse: the restored group may lower the least refresh interval again.
@@ -425,11 +455,8 @@ internal class GroupRepositoryImpl(
     }
 
     private suspend fun syncChannels() {
-        // Like rescheduling, reconciliation must survive a screen closing after the commit.
-        withContext(NonCancellable) {
-            suspendRunCatching { channelSync.sync() }
-                .onFailure { Log.w(TAG, it) { "Group channel sweep failed after group write" } }
-        }
+        suspendRunCatching { channelSync.sync() }
+            .onFailure { Log.w(TAG, it) { "Group channel sweep failed after group write" } }
     }
 
     private class DeletedGroupSnapshot(
