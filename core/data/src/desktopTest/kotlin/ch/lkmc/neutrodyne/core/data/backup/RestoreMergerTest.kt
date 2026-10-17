@@ -19,6 +19,7 @@ import ch.lkmc.neutrodyne.core.database.QueueEntryEntity
 import ch.lkmc.neutrodyne.core.database.ScopeOverrides
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.StoredSecret
 import ch.lkmc.neutrodyne.core.model.FeedOrder
@@ -29,6 +30,7 @@ import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
+import ch.lkmc.neutrodyne.core.testing.ProtocolOrderKeys
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.groupEntity
@@ -331,12 +333,14 @@ class RestoreMergerTest {
                 db.groupDao().insert(groupEntity(uuid = "u-1", name = "Tech", orderKey = "0.5"))
             val g2 =
                 db.groupDao().insert(groupEntity(uuid = "u-2", name = "News", orderKey = "0.25"))
-            merger.mergeLibrary(
+            realMerger().mergeLibrary(
                 stagedOf(
                     groups =
                         listOf(
-                            groupV1(uuid = "u-2", name = "News+", orderKey = "0.9"),
-                            groupV1(uuid = "u-1", name = "Tech+", orderKey = "0.3"),
+                            // The file's list order is scrambled against `sortOrder`; valid
+                            // ascending keys in rank order still land verbatim.
+                            groupV1(uuid = "u-2", name = "News+", sortOrder = 1, orderKey = "a1"),
+                            groupV1(uuid = "u-1", name = "Tech+", sortOrder = 0, orderKey = "a0"),
                         ),
                 ),
                 MergePolicy.RESTORE_REPLACE,
@@ -347,9 +351,9 @@ class RestoreMergerTest {
             val two = assertNotNull(db.groupDao().groupById(g2))
             assertEquals("Tech+", one.name)
             assertEquals("tech+", one.nameKey)
-            assertEquals("0.3", one.orderKey)
+            assertEquals("a0", one.orderKey)
             assertEquals("News+", two.name)
-            assertEquals("0.9", two.orderKey)
+            assertEquals("a1", two.orderKey)
             // The uuids matched — the rows keep them; no channel carry-over was needed.
             assertEquals("u-1", one.uuid)
             assertEquals(emptyList(), channels.calls)
@@ -360,8 +364,8 @@ class RestoreMergerTest {
         runTest {
             val local =
                 db.groupDao().insert(groupEntity(uuid = "u-local", name = "Tech", orderKey = "0.5"))
-            merger.mergeLibrary(
-                stagedOf(groups = listOf(groupV1(uuid = "u-backup", name = "tech ", orderKey = "0.4"))),
+            realMerger().mergeLibrary(
+                stagedOf(groups = listOf(groupV1(uuid = "u-backup", name = "tech ", orderKey = "a0"))),
                 MergePolicy.RESTORE_REPLACE,
                 ALL_CATEGORIES,
             )
@@ -379,12 +383,12 @@ class RestoreMergerTest {
                 db.groupDao().insert(groupEntity(uuid = "u-1", name = "Tech", orderKey = "0.25"))
             val news =
                 db.groupDao().insert(groupEntity(uuid = "u-2", name = "News", orderKey = "0.5"))
-            merger.mergeLibrary(
+            realMerger().mergeLibrary(
                 stagedOf(
                     groups =
                         listOf(
-                            groupV1(uuid = "u-1", name = "News", orderKey = "0.25"),
-                            groupV1(uuid = "u-2", name = "Tech", orderKey = "0.5"),
+                            groupV1(uuid = "u-1", name = "News", orderKey = "a0"),
+                            groupV1(uuid = "u-2", name = "Tech", orderKey = "a1"),
                         ),
                 ),
                 MergePolicy.RESTORE_REPLACE,
@@ -425,6 +429,117 @@ class RestoreMergerTest {
             assertEquals(listOf(p), db.groupDao().membersOf(groups.single().id).map { it.podcastId })
             assertNull(db.groupDao().groupById(local))
             assertEquals(listOf("sync()"), channels.calls)
+        }
+
+    @Test
+    fun stagedGroupsSharingOneUuidFoldIntoTheFirst() =
+        runTest {
+            merger.mergeLibrary(
+                stagedOf(
+                    podcasts = listOf(podcastV1("https://p1/feed"), podcastV1("https://p2/feed")),
+                    groups =
+                        listOf(
+                            groupV1(uuid = "u-dup", name = "News", members = listOf("https://p1/feed")),
+                            groupV1(uuid = "u-dup", name = "Other", members = listOf("https://p2/feed")),
+                        ),
+                ),
+                MergePolicy.RESTORE_REPLACE,
+                ALL_CATEGORIES,
+            )
+
+            // A second insert of `u-dup` cannot land on the unique index — the later group
+            // folds into the first exactly like a shared nameKey (05).
+            val groups = db.groupDao().groupsInOrder()
+            assertEquals(1, groups.size)
+            assertEquals("News", groups.single().name)
+            val memberIds =
+                db
+                    .groupDao()
+                    .membersOf(groups.single().id)
+                    .map { it.podcastId }
+                    .toSet()
+            assertEquals(
+                setOf(
+                    db.podcastDao().byFeedKey("https://p1/feed")!!.id,
+                    db.podcastDao().byFeedKey("https://p2/feed")!!.id,
+                ),
+                memberIds,
+            )
+        }
+
+    @Test
+    fun duplicateUuidStagedGroupClaimsALocalRowByNameKey() =
+        runTest {
+            val pLocal = db.podcastDao().insertPodcast(podcastEntity(feedKey = "https://pl/feed"))
+            val p1Local = db.podcastDao().insertPodcast(podcastEntity(feedKey = "https://p1/feed"))
+            val local =
+                db.groupDao().insert(groupEntity(uuid = "u-x", name = "Local", orderKey = "a0"))
+            db.groupDao().insertMember(memberEntity(local, pLocal, "a0"))
+
+            realMerger().mergeLibrary(
+                stagedOf(
+                    podcasts =
+                        listOf(podcastV1("https://p1/feed"), podcastV1("https://pl/feed")),
+                    groups =
+                        listOf(
+                            groupV1(
+                                uuid = "u-dup",
+                                name = "News",
+                                sortOrder = 0,
+                                members = listOf("https://p1/feed"),
+                            ),
+                            groupV1(
+                                uuid = "u-dup",
+                                name = "Local",
+                                sortOrder = 1,
+                                members = listOf("https://pl/feed"),
+                            ),
+                        ),
+                ),
+                MergePolicy.RESTORE_REPLACE,
+                ALL_CATEGORIES,
+            )
+
+            // The duplicate folds into the first; its nameKey still claims the local row,
+            // which merges into the survivor post-commit — one group, members united.
+            val groups = db.groupDao().groupsInOrder()
+            assertEquals(1, groups.size)
+            val survivor = groups.single()
+            assertEquals("News", survivor.name)
+            assertEquals("u-dup", survivor.uuid)
+            assertEquals(
+                setOf(p1Local, pLocal),
+                db
+                    .groupDao()
+                    .membersOf(survivor.id)
+                    .map { it.podcastId }
+                    .toSet(),
+            )
+            assertNull(db.groupDao().groupById(local))
+            assertEquals(listOf("sync()"), channels.calls)
+        }
+
+    @Test
+    fun stagedGroupNameCannotCollideWithAParkedNameKey() =
+        runTest {
+            val local =
+                db.groupDao().insert(groupEntity(uuid = "u-1", name = "Tech", orderKey = "a0"))
+            realMerger().mergeLibrary(
+                stagedOf(
+                    groups =
+                        listOf(
+                            // A legal staged name — `GroupNames` keeps the tildes — that lands
+                            // on the parked row's sentinel shape.
+                            groupV1(uuid = "u-9", name = "~restore~$local", sortOrder = 0),
+                            groupV1(uuid = "u-1", name = "News", sortOrder = 1),
+                        ),
+                ),
+                MergePolicy.RESTORE_REPLACE,
+                ALL_CATEGORIES,
+            )
+
+            val groups = db.groupDao().groupsInOrder()
+            assertEquals(listOf("~restore~$local", "News"), groups.map { it.name })
         }
 
     // --- Memberships ----------------------------------------------------------------------------
@@ -479,7 +594,7 @@ class RestoreMergerTest {
             db.groupDao().insertMember(memberEntity(g1, pLocal, "0.2"))
             db.groupDao().insertMember(memberEntity(g2, p1, "0.3"))
 
-            merger.mergeLibrary(
+            realMerger().mergeLibrary(
                 stagedOf(
                     podcasts = listOf(podcastV1("https://p1/feed"), podcastV1("https://p2/feed")),
                     groups =
@@ -488,14 +603,14 @@ class RestoreMergerTest {
                                 uuid = "u-1",
                                 name = "G1",
                                 sortOrder = 0,
-                                orderKey = "0.25",
+                                orderKey = "a0",
                                 members =
                                     listOf(
-                                        MemberV1("https://p2/feed", addedAt = 5L, orderKey = "ok2"),
-                                        MemberV1("https://p1/feed", addedAt = 3L, orderKey = "ok1"),
+                                        MemberV1("https://p1/feed", addedAt = 3L, orderKey = "a0"),
+                                        MemberV1("https://p2/feed", addedAt = 5L, orderKey = "a1"),
                                     ),
                             ),
-                            groupV1(uuid = "u-2", name = "G2", orderKey = "0.5"),
+                            groupV1(uuid = "u-2", name = "G2", sortOrder = 1, orderKey = "a1"),
                         ),
                 ),
                 MergePolicy.RESTORE_REPLACE,
@@ -507,10 +622,264 @@ class RestoreMergerTest {
             // G2 is empty, and the staged keys land verbatim.
             val m1 = db.groupDao().membersOf(g1).associateBy { it.podcastId }
             assertEquals(setOf(p1, p2), m1.keys)
-            assertEquals("ok1", m1.getValue(p1).orderKey)
-            assertEquals("ok2", m1.getValue(p2).orderKey)
+            assertEquals("a0", m1.getValue(p1).orderKey)
+            assertEquals("a1", m1.getValue(p2).orderKey)
             assertEquals(3L, m1.getValue(p1).addedAt)
             assertTrue(db.groupDao().membersOf(g2).isEmpty())
+        }
+
+    // --- Order keys on Replace (05 transaction A) ------------------------------------------------
+    //
+    // A foreign `orderKey`/`ok` must neither persist (it poisons every later `after`/`between`
+    // that reads it) nor reach the generator as a bound (it throws, aborting the restore).
+    // These run on `ProtocolOrderKeys` — `TestOrderKeys` accepts decimal strings a real
+    // archive can never carry.
+
+    @Test
+    fun replaceRewritesGroupKeysWhenAStagedKeyIsMalformed() =
+        runTest {
+            realMerger().mergeLibrary(
+                stagedOf(
+                    groups =
+                        listOf(
+                            groupV1(uuid = "u-a", name = "A", sortOrder = 0, orderKey = "a0"),
+                            groupV1(uuid = "u-b", name = "B", sortOrder = 1, orderKey = "!!!"),
+                            groupV1(uuid = "u-c", name = "C", sortOrder = 2, orderKey = "a1"),
+                        ),
+                ),
+                MergePolicy.RESTORE_REPLACE,
+                ALL_CATEGORIES,
+            )
+
+            // Every slot was non-null, so the malformed key would have persisted verbatim;
+            // instead the whole list rewrites in `sortOrder` rank (05).
+            val groups = db.groupDao().groupsInOrder()
+            assertEquals(listOf("A", "B", "C"), groups.map { it.name })
+            assertEquals(listOf("a0", "a1", "a2"), groups.map { it.orderKey })
+        }
+
+    @Test
+    fun replaceRewritesGroupKeysInsteadOfFeedingTheGeneratorAMalformedBound() =
+        runTest {
+            realMerger().mergeLibrary(
+                stagedOf(
+                    groups =
+                        listOf(
+                            groupV1(uuid = "u-a", name = "A", sortOrder = 0, orderKey = "!!!"),
+                            groupV1(uuid = "u-b", name = "B", sortOrder = 1),
+                        ),
+                ),
+                MergePolicy.RESTORE_REPLACE,
+                ALL_CATEGORIES,
+            )
+
+            // The old filler stored "!!!" then called `after("!!!")` for the missing slot —
+            // a throw inside the write transaction. Both rows land on fresh keys instead.
+            assertEquals(listOf("a0", "a1"), db.groupDao().groupsInOrder().map { it.orderKey })
+        }
+
+    @Test
+    fun replaceRewritesGroupKeysWhenStagedKeysDescendOrRepeat() =
+        runTest {
+            val merger = realMerger()
+            merger.mergeLibrary(
+                stagedOf(
+                    groups =
+                        listOf(
+                            groupV1(uuid = "u-a", name = "A", sortOrder = 0, orderKey = "a1"),
+                            groupV1(uuid = "u-b", name = "B", sortOrder = 1, orderKey = "a0"),
+                        ),
+                ),
+                MergePolicy.RESTORE_REPLACE,
+                ALL_CATEGORIES,
+            )
+
+            // Verbatim descending keys would have ordered the list B, A — not the backup's.
+            var groups = db.groupDao().groupsInOrder()
+            assertEquals(listOf("A", "B"), groups.map { it.name })
+            assertEquals(listOf("a0", "a1"), groups.map { it.orderKey })
+
+            merger.mergeLibrary(
+                stagedOf(
+                    groups =
+                        listOf(
+                            groupV1(uuid = "u-a", name = "A", sortOrder = 0, orderKey = "a0"),
+                            groupV1(uuid = "u-b", name = "B", sortOrder = 1, orderKey = "a0"),
+                        ),
+                ),
+                MergePolicy.RESTORE_REPLACE,
+                ALL_CATEGORIES,
+            )
+
+            // Equal keys cannot persist either — 10's equal-key rule is a rewrite trigger.
+            groups = db.groupDao().groupsInOrder()
+            assertEquals(2, groups.map { it.orderKey }.distinct().size)
+        }
+
+    @Test
+    fun replaceAssignsRewrittenGroupKeysInSortOrderRank() =
+        runTest {
+            // The file's list order is not its rank order; the rewrite still follows
+            // `sortOrder`, not the line order.
+            realMerger().mergeLibrary(
+                stagedOf(
+                    groups =
+                        listOf(
+                            groupV1(uuid = "u-b", name = "B", sortOrder = 1),
+                            groupV1(uuid = "u-a", name = "A", sortOrder = 0),
+                        ),
+                ),
+                MergePolicy.RESTORE_REPLACE,
+                ALL_CATEGORIES,
+            )
+
+            assertEquals(listOf("A", "B"), db.groupDao().groupsInOrder().map { it.name })
+        }
+
+    @Test
+    fun replaceRewritesMemberKeysWhenAStagedKeyIsMalformed() =
+        runTest {
+            realMerger().mergeLibrary(
+                stagedOf(
+                    podcasts =
+                        listOf(
+                            podcastV1("https://p1/feed"),
+                            podcastV1("https://p2/feed"),
+                            podcastV1("https://p3/feed"),
+                        ),
+                    groups =
+                        listOf(
+                            groupV1(
+                                uuid = "u-g",
+                                name = "G",
+                                members =
+                                    listOf("https://p1/feed", "https://p2/feed", "https://p3/feed"),
+                                memberKeys =
+                                    mapOf(
+                                        "https://p1/feed" to "a0",
+                                        "https://p2/feed" to "!!!",
+                                        "https://p3/feed" to "a1",
+                                    ),
+                            ),
+                        ),
+                ),
+                MergePolicy.RESTORE_REPLACE,
+                ALL_CATEGORIES,
+            )
+
+            val group = assertNotNull(db.groupDao().groupByNameKey("g"))
+            val keys =
+                db.groupDao().membersOf(group.id).associate {
+                    db.podcastDao().byId(it.podcastId)!!.feedKey to it.orderKey
+                }
+            // rewrite(3) in the members' file order — "!!!" never persisted.
+            assertEquals("a0", keys.getValue("https://p1/feed"))
+            assertEquals("a1", keys.getValue("https://p2/feed"))
+            assertEquals("a2", keys.getValue("https://p3/feed"))
+        }
+
+    @Test
+    fun replaceRewritesMemberKeysInsteadOfFeedingTheGeneratorAMalformedBound() =
+        runTest {
+            realMerger().mergeLibrary(
+                stagedOf(
+                    podcasts = listOf(podcastV1("https://p1/feed"), podcastV1("https://p2/feed")),
+                    groups =
+                        listOf(
+                            groupV1(
+                                uuid = "u-g",
+                                name = "G",
+                                members = listOf("https://p1/feed", "https://p2/feed"),
+                                memberKeys = mapOf("https://p1/feed" to "!!!"),
+                            ),
+                        ),
+                ),
+                MergePolicy.RESTORE_REPLACE,
+                ALL_CATEGORIES,
+            )
+
+            val group = assertNotNull(db.groupDao().groupByNameKey("g"))
+            assertEquals(
+                listOf("a0", "a1"),
+                db.groupDao().membersOf(group.id).map { it.orderKey },
+            )
+        }
+
+    @Test
+    fun replaceRewritesMemberKeysWhenSomeAreMissingOrUnordered() =
+        runTest {
+            realMerger().mergeLibrary(
+                stagedOf(
+                    podcasts = (1..4).map { podcastV1("https://p$it/feed") },
+                    groups =
+                        listOf(
+                            groupV1(
+                                uuid = "u-g1",
+                                name = "G1",
+                                members = listOf("https://p1/feed", "https://p2/feed"),
+                                memberKeys = mapOf("https://p1/feed" to "a5"),
+                            ),
+                            groupV1(
+                                uuid = "u-g2",
+                                name = "G2",
+                                members = listOf("https://p3/feed", "https://p4/feed"),
+                                memberKeys =
+                                    mapOf("https://p3/feed" to "a1", "https://p4/feed" to "a0"),
+                            ),
+                        ),
+                ),
+                MergePolicy.RESTORE_REPLACE,
+                ALL_CATEGORIES,
+            )
+
+            // Partially missing (G1) and descending (G2) both rewrite rather than filling
+            // between bad bounds or persisting the scramble.
+            for (name in listOf("g1", "g2")) {
+                val group = assertNotNull(db.groupDao().groupByNameKey(name))
+                assertEquals(
+                    listOf("a0", "a1"),
+                    db.groupDao().membersOf(group.id).map { it.orderKey },
+                )
+            }
+        }
+
+    @Test
+    fun rewrittenMemberKeysAcceptFollowUpGeneratorCalls() =
+        runTest {
+            val merger = realMerger()
+            merger.mergeLibrary(
+                stagedOf(
+                    podcasts = listOf(podcastV1("https://p1/feed")),
+                    groups =
+                        listOf(
+                            groupV1(
+                                uuid = "u-g",
+                                name = "G",
+                                members = listOf("https://p1/feed"),
+                                memberKeys = mapOf("https://p1/feed" to "!!!"),
+                            ),
+                        ),
+                ),
+                MergePolicy.RESTORE_REPLACE,
+                ALL_CATEGORIES,
+            )
+
+            // The stored key is valid, so Merge's `OrderKey.after(last)` works instead of
+            // crashing on a poisoned bound.
+            merger.mergeLibrary(
+                stagedOf(
+                    podcasts = listOf(podcastV1("https://p2/feed")),
+                    groups =
+                        listOf(
+                            groupV1(uuid = "u-g", name = "G", members = listOf("https://p2/feed")),
+                        ),
+                ),
+                MergePolicy.RESTORE_MERGE,
+                ALL_CATEGORIES,
+            )
+
+            val group = assertNotNull(db.groupDao().groupByNameKey("g"))
+            assertEquals(2, db.groupDao().membersOf(group.id).size)
         }
 
     // --- Replace pre-step ------------------------------------------------------------------------
@@ -968,17 +1337,19 @@ class RestoreMergerTest {
     private fun groupV1(
         uuid: String,
         name: String,
+        sortOrder: Int = 0,
         orderKey: String? = null,
         members: List<String> = emptyList(),
+        memberKeys: Map<String, String?> = emptyMap(),
         settings: OverridesV1? = null,
     ): GroupV1 =
         GroupV1(
             uuid = uuid,
             name = name,
-            sortOrder = 0,
+            sortOrder = sortOrder,
             orderKey = orderKey,
             settings = settings,
-            members = members.map { MemberV1(it, addedAt = 1L) },
+            members = members.map { MemberV1(it, addedAt = 1L, orderKey = memberKeys[it]) },
         )
 
     private fun stagedOf(
@@ -1003,6 +1374,7 @@ class RestoreMergerTest {
     private fun RestoreMerger.copy(
         secrets: SecretStore = this@RestoreMergerTest.secrets,
         coordinator: CredentialCommitCoordinator = this@RestoreMergerTest.coordinator,
+        orderKeys: OrderKeys = TestOrderKeys,
     ): RestoreMerger =
         RestoreMerger(
             db = db,
@@ -1013,9 +1385,16 @@ class RestoreMergerTest {
             secrets = secrets,
             coordinator = coordinator,
             channelSync = channels,
-            orderKeys = TestOrderKeys,
+            orderKeys = orderKeys,
             clock = clock,
         )
+
+    /**
+     * A merger bound to the real `OrderKey` port, for Replace order-key cases: `TestOrderKeys`
+     * accepts decimal strings a real archive can never carry, so key-validity regressions run
+     * against the production grammar.
+     */
+    private fun realMerger(): RestoreMerger = merger.copy(orderKeys = ProtocolOrderKeys)
 
     private companion object {
         const val ARCHIVE_AT = 1_650_000_000_000L
