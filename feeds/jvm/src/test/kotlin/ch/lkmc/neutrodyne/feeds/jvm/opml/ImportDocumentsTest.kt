@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.feeds.jvm.opml
 
+import ch.lkmc.neutrodyne.feeds.importing.ImportDocumentWarning
 import ch.lkmc.neutrodyne.feeds.importing.ImportDocuments
 import ch.lkmc.neutrodyne.feeds.importing.ImportGroup
 import ch.lkmc.neutrodyne.feeds.jvm.Goldens
@@ -134,6 +135,30 @@ class ImportDocumentsTest {
         assertEquals(
             listOf(ImportGroup("Audio", excludedReason = ImportGroup.EXCLUDED_GPODDER_SECTION)),
             import.groups,
+        )
+    }
+
+    /**
+     * A folder name over the 40-code-point cap is proposed truncated, the same rule the
+     * classifier applies to entry group names (05 Group mapping), so the member's truncated
+     * nameKey still resolves to a proposal instead of silently losing the folder's grouping.
+     * The surrogate pair past the cut point proves the prefix is code-point-safe.
+     */
+    @Test
+    fun overlongFolderNameIsProposedTruncated() {
+        val name = "🎧".repeat(20) + "a".repeat(21) // 41 code points
+        val doc =
+            OpmlDocument(
+                entries = listOf(entry(0, "https://a.example.com/rss", folderId = 0)),
+                folders = listOf(FolderRef(id = 0, name = name)),
+                mode = ParseMode.STRICT,
+            )
+        val import = ImportDocuments.fromOpml(doc)
+        assertEquals(listOf(ImportGroup("🎧".repeat(20) + "a".repeat(20))), import.groups)
+        assertEquals(listOf(name), import.entries[0].groupNames)
+        assertEquals(
+            listOf(ImportDocumentWarning(ImportDocumentWarning.TRUNCATED_NAMES, 1)),
+            import.warnings,
         )
     }
 

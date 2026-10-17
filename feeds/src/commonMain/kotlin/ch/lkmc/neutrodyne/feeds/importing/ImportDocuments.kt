@@ -59,12 +59,20 @@ public data class ImportDocument(
     val ignoredOutlines: Int = 0,
 )
 
-/** One carried-over read warning: the `OpmlWarningCode` name and its subtree count. */
+/**
+ * One carried-over read warning: the `OpmlWarningCode` name and its subtree count. The adapter
+ * adds its own [TRUNCATED_NAMES] when a proposed group name was cut to the code-point cap.
+ */
 @Serializable
 public data class ImportDocumentWarning(
     val code: String,
     val count: Int = 0,
-)
+) {
+    public companion object {
+        /** Preview warning (05 Group mapping) for names truncated at [GroupNames.MAX_CODE_POINTS]. */
+        public const val TRUNCATED_NAMES: String = "TRUNCATED_NAMES"
+    }
+}
 
 /** The OPML adapter (05 Adapters): applies the Group-mapping folder rules to an [OpmlDocument]. */
 public object ImportDocuments {
@@ -88,6 +96,7 @@ public object ImportDocuments {
 
         val groups = ArrayList<ImportGroup>()
         val seen = HashSet<String>()
+        var truncatedNames = 0
 
         fun propose(
             name: String,
@@ -95,9 +104,18 @@ public object ImportDocuments {
             iconKey: String?,
             reason: String?,
         ) {
-            val valid = GroupNames.validate(name) as? GroupNames.Validation.Valid ?: return
+            var valid = GroupNames.validate(name) as? GroupNames.Validation.Valid
+            var proposal = name
+            if (valid == null) {
+                // The classifier truncates entry group names over the cap (05 Group mapping),
+                // so the proposal takes the same prefix: a member's truncated nameKey then
+                // resolves to it instead of silently losing the folder's grouping.
+                valid = GroupNames.truncate(name) ?: return
+                proposal = valid.name
+                truncatedNames++
+            }
             if (!seen.add(valid.nameKey)) return
-            groups += ImportGroup(name, colorArgb, iconKey, reason)
+            groups += ImportGroup(proposal, colorArgb, iconKey, reason)
         }
 
         for (folder in doc.folders) {
@@ -155,7 +173,15 @@ public object ImportDocuments {
             entries = entries,
             groups = groups,
             salvaged = doc.mode == ParseMode.SALVAGE,
-            warnings = doc.warnings.map { ImportDocumentWarning(it.code.name, it.count) },
+            warnings =
+                doc.warnings.map { ImportDocumentWarning(it.code.name, it.count) } +
+                    listOfNotNull(
+                        if (truncatedNames > 0) {
+                            ImportDocumentWarning(ImportDocumentWarning.TRUNCATED_NAMES, truncatedNames)
+                        } else {
+                            null
+                        },
+                    ),
             ignoredOutlines = doc.ignoredOutlines,
         )
     }
