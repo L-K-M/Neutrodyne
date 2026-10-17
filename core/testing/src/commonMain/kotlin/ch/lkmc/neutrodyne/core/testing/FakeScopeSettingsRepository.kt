@@ -2,7 +2,11 @@
 
 package ch.lkmc.neutrodyne.core.testing
 
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
+import ch.lkmc.neutrodyne.core.domain.NoGroupChannels
 import ch.lkmc.neutrodyne.core.domain.ScopeSettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.model.ScopedSettingsView
@@ -10,15 +14,19 @@ import ch.lkmc.neutrodyne.core.model.SettingField
 import ch.lkmc.neutrodyne.core.model.SettingOverrides
 import ch.lkmc.neutrodyne.core.model.SettingSource
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /** In-memory writes over seeded inheritance; fixtures supply group/global resolutions. */
-class FakeScopeSettingsRepository : ScopeSettingsRepository {
+class FakeScopeSettingsRepository(
+    private val channelSync: GroupChannelSync = NoGroupChannels,
+) : ScopeSettingsRepository {
     private data class Scope(
         val inherited: ScopedSettingsView,
         val ownSource: SettingSource,
@@ -90,7 +98,15 @@ class FakeScopeSettingsRepository : ScopeSettingsRepository {
     override suspend fun updateGroup(
         groupId: Long,
         change: (SettingOverrides) -> SettingOverrides,
-    ): Outcome<Unit, SettingsError> = update(groups, groupId, change)
+    ): Outcome<Unit, SettingsError> =
+        update(groups, groupId, change).also { outcome ->
+            if (outcome is Outcome.Success) {
+                withContext(NonCancellable) {
+                    suspendRunCatching { channelSync.sync() }
+                        .onFailure { Log.w("ScopeSettings", it) { "Group channel sweep failed after settings write" } }
+                }
+            }
+        }
 
     private suspend fun update(
         rows: MutableStateFlow<Map<Long, Scope>>,

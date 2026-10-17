@@ -82,6 +82,13 @@ abstract class ScopeSettingsDao {
     )
     abstract fun observeGroupScope(groupId: Long): Flow<GroupScopeRow?>
 
+    /** Channel reconciliation includes empty groups and groups without an override row. */
+    @Query(
+        "SELECT g.uuid, g.name, gs.refreshIntervalMinutes, gs.notifyNewEpisodes" +
+            " FROM podcast_group g LEFT JOIN podcast_group_settings gs ON gs.groupId = g.id",
+    )
+    abstract suspend fun groupScopes(): List<GroupScopeRow>
+
     private companion object {
         /** 02 Transactions and threading: `IN (:ids)` lists are chunked at 500 bound variables. */
         const val BIND_CHUNK = 500

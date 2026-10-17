@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastGroupSettingsEntity
 import ch.lkmc.neutrodyne.core.database.PodcastSettingsEntity
 import ch.lkmc.neutrodyne.core.database.ScopeOverrides
+import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.ScopeSettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsError
@@ -35,6 +36,7 @@ internal class ScopeSettingsRepositoryImpl(
     private val db: NeutrodyneDatabase,
     private val settings: SettingsRepository,
     private val refresh: Provider<RefreshController>,
+    private val channelSync: GroupChannelSync,
 ) : ScopeSettingsRepository {
     private val dao get() = db.scopeSettingsDao()
 
@@ -82,6 +84,14 @@ internal class ScopeSettingsRepositoryImpl(
                 dao.upsertGroup(PodcastGroupSettingsEntity(groupId, stored))
             }
             Outcome.Success(previous.refreshIntervalMinutes != stored.refreshIntervalMinutes)
+        }.also { outcome ->
+            if (outcome is Outcome.Success) {
+                // Reconcile channels after committing and releasing the Room writer.
+                withContext(NonCancellable) {
+                    suspendRunCatching { channelSync.sync() }
+                        .onFailure { Log.w("ScopeSettings", it) { "Group channel sweep failed after settings write" } }
+                }
+            }
         }
 
     private suspend fun write(block: suspend () -> Outcome<Boolean, SettingsError>): Outcome<Unit, SettingsError> {

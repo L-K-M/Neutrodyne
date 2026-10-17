@@ -10,9 +10,11 @@ import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
  */
 class FakeGroupChannelSync : GroupChannelSync {
     val calls = mutableListOf<String>()
+    var onSync: suspend () -> Unit = {}
 
     override suspend fun sync() {
         calls += "sync()"
+        onSync()
     }
 
     override suspend fun onUuidChanged(

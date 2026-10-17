@@ -12,7 +12,6 @@ import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.MediaFilter
-import kotlin.math.max
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
@@ -100,7 +99,8 @@ object FeedQueryProbe {
         for (combo in matrix(seeded)) {
             val expected = seeded.feedRows(combo.source, combo.filters, combo.order)
             val query = FeedQueryBuilder.page(combo.source, combo.filters, combo.order)
-            val actual = loadRows(db, query, offset = 0, limit = max(1, expected.size))
+            // One row past the reference: a surplus row must fail the comparison, not hide past LIMIT.
+            val actual = loadRows(db, query, offset = 0, limit = expected.size + 1)
             assertEquals(expected.map { it.id }, actual.map { it.id }, "feed ids differ at $combo")
             val at = actual.indices.firstOrNull { actual[it] != expected[it] }
             assertTrue(
