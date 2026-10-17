@@ -1,0 +1,22 @@
+{
+  "entries": [
+    {
+      "htmlUrl": "https://atp.fm",
+      "ordinal": 0,
+      "text": "ATP",
+      "title": "Accidental Tech",
+      "type": "rss",
+      "url": "https://atp.fm/rss"
+    },
+    {
+      "ordinal": 1,
+      "preselect": false,
+      "text": "Some Show",
+      "type": "rss",
+      "url": "https://show.example.com/rss"
+    }
+  ],
+  "folders": [],
+  "headTitle": "Overcast Subscriptions",
+  "mode": "STRICT"
+}

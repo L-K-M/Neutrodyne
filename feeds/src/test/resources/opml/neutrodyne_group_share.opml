@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0" xmlns:nd="urn:neutrodyne:opml:1">
+  <head>
+    <title>tech</title>
+  </head>
+  <body>
+    <outline text="tech" nd:groupColor="#FFAA00" nd:groupIcon="code">
+      <outline type="rss" text="ATP" title="Accidental Tech Podcast" xmlUrl="https://atp.fm/rss"
+               htmlUrl="https://atp.fm" category="tech" nd:source="rss"/>
+      <outline type="rss" text="Channel" title="Channel"
+               xmlUrl="https://www.youtube.com/feeds/videos.xml?channel_id=UCBJycsmduvYEL83R_U4JriQ"
+               category="tech" nd:source="youtube" nd:ytVariants="UULF"/>
+    </outline>
+  </body>
+</opml>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0" xmlns:nd="urn:neutrodyne:opml:1">
+  <head>
+    <title>Neutrodyne</title>
+  </head>
+  <body>
+    <outline text="a,b" nd:groupColor="#111111" nd:groupIcon="comma">
+      <outline type="rss" text="Feed A" xmlUrl="https://a.example.com/rss" category="a%2Cb" nd:source="rss"/>
+    </outline>
+    <outline text="c/d" nd:groupColor="#222222" nd:groupIcon="slash">
+      <outline type="rss" text="Feed B" xmlUrl="https://b.example.com/rss" category="c%2Fd" nd:source="rss"/>
+    </outline>
+    <outline text="100%" nd:groupColor="#333333" nd:groupIcon="percent">
+      <outline type="rss" text="Feed C" xmlUrl="https://c.example.com/rss" category="100%25" nd:source="rss"/>
+    </outline>
+    <outline text="a%2Cb" nd:groupColor="#444444" nd:groupIcon="literal">
+      <outline type="rss" text="Feed D" xmlUrl="https://d.example.com/rss" category="a%252Cb" nd:source="rss"/>
+    </outline>
+  </body>
+</opml>

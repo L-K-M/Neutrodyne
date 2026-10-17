@@ -1,0 +1,24 @@
+{
+  "entries": [
+    {
+      "ordinal": 0,
+      "text": "Double",
+      "type": "rss",
+      "url": "https://d.example.com/rss"
+    },
+    {
+      "ordinal": 1,
+      "text": "Single",
+      "type": "rss",
+      "url": "https://s.example.com/rss"
+    },
+    {
+      "ordinal": 2,
+      "text": "Bare",
+      "type": "rss",
+      "url": "https://b.example.com/"
+    }
+  ],
+  "folders": [],
+  "mode": "RELAXED"
+}
