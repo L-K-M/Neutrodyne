@@ -22,6 +22,12 @@ public interface AppNavigator {
     /** Pops the selected tab's stack. Returns false when nothing was popped. */
     public fun pop(): Boolean
 
+    /**
+     * Removes [key] only when it is the selected stack's top entry above its root.
+     * Stale overlay callbacks return false without changing stacks or tabs.
+     */
+    public fun pop(key: NavKey): Boolean
+
     /** Pops the given tab's stack back to its root. */
     public fun resetTab(key: TopLevelKey)
 
