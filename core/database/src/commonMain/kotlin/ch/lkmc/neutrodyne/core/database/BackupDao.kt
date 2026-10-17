@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.database
 
 import androidx.room3.Dao
 import androidx.room3.Query
+import androidx.room3.Update
 import androidx.room3.withReadTransaction
 import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.FeedOrder
@@ -363,6 +364,54 @@ interface BackupDao {
 
     @Query("DELETE FROM episode_position WHERE episodeId IN (SELECT id FROM episode WHERE podcastId = :podcastId)")
     suspend fun deletePositionsOfPodcast(podcastId: Long): Int
+
+    // --- Restore library writes (05 transaction A) ---------------------------------------------
+
+    /**
+     * 05 transaction A, Replace: matched groups first park their `nameKey` as
+     * `'~restore~' || id`, so a pair of groups swapping names cannot hit the unique index
+     * mid-rewrite. Chunked at the bind limit like every ID list (02).
+     */
+    suspend fun parkGroupNameKeys(groupIds: Collection<Long>) {
+        groupIds.distinct().chunked(BIND_CHUNK).forEach { parkGroupNameKeysChunk(it) }
+    }
+
+    /** Room primitive behind [parkGroupNameKeys]; callers must chunk at the bind limit. */
+    @Query("UPDATE podcast_group SET nameKey = '~restore~' || id WHERE id IN (:ids)")
+    suspend fun parkGroupNameKeysChunk(ids: List<Long>)
+
+    /**
+     * 05 transaction A, Replace: a matched group row takes the backup's values verbatim —
+     * the caller supplies the stored entity's `copy`, so `lastViewedAt` (never backed up)
+     * survives and a `nameKey` match's adopted backup `uuid` rides along. Runs after
+     * [parkGroupNameKeys] freed every real nameKey.
+     */
+    @Update
+    suspend fun updateGroup(row: PodcastGroupEntity): Int
+
+    /**
+     * 05 transaction A, Replace's "exactly the backup's" membership rule: the join table is
+     * rebuilt from the staged groups, so every surviving member row goes first (local-only
+     * groups' rows already cascaded with the pre-step's deletes).
+     */
+    @Query("DELETE FROM podcast_group_member")
+    suspend fun clearGroupMembers(): Int
+
+    /**
+     * 05 transaction A, Replace's "backup wins" on the four user columns of a matched
+     * podcast; feed-derived and fetch-state columns stay local — the next refresh owns them.
+     */
+    @Query(
+        "UPDATE podcast SET customTitle = :customTitle, includeInAll = :includeInAll," +
+            " episodeOrder = :episodeOrder, youtubeVariants = :youtubeVariants WHERE id = :podcastId",
+    )
+    suspend fun replacePodcastUserFields(
+        podcastId: Long,
+        customTitle: String?,
+        includeInAll: Boolean,
+        episodeOrder: FeedOrder?,
+        youtubeVariants: Int,
+    )
 
     companion object {
         /** 02 Backup export: episodes stream in keyset chunks of 1,000. */
