@@ -41,6 +41,18 @@ Since the scope revision ([D81](../PLAN.md#3-key-decisions)) all of it is common
 | `:app` (Android only) | `ExternalImportActivity`, its manifest entries, the shell-only `SnapshotNowReceiver` and its manifest entry ([Testing with bmgr](#testing-with-bmgr)), `res/xml/data_extraction_rules.xml`, `res/xml/backup_rules.xml`, `res/xml-v28/backup_rules.xml`, the `cache/export/` entry of `res/xml/file_paths.xml` |
 | `:desktopApp` | nothing of its own: OS hand-offs and drops reach the import pipeline through 11's `DesktopOpenHandler` and the shared `IntentRouter` ([Desktop inputs](#desktop-inputs)) |
 
+**Implementation note (2026-10-17, M3).** The A1 contract row lands the types above with
+three placement adjustments: `RestoreProgress` sits in `:core:domain` beside `BackupError`
+— its `Failed` case carries a `BackupError`, and `:core:model` cannot see domain types;
+`SnapshotScheduler` sits in `:core:domain` with the other repository ports rather than
+`:core:data` `commonMain` (the platform hosts `WorkManagerSnapshotScheduler` and
+`NoSnapshotScheduler` still live in `:core:data`); and `:playback:api` gets a minimal
+`PlaybackController` with only `pause()` plus the `NoPlaybackController` no-op binding —
+06's full surface arrives with M4.
+`ImportError.Unsupported` and `ImportError.Hostile` carry the enums `UnsupportedSource`
+and `HostileInput` instead of the reason strings of the `ImportError` sketch under OPML
+import, with the same values.
+
 ```mermaid
 flowchart LR
   subgraph FEAT["Feature modules (common)"]
@@ -1109,6 +1121,8 @@ data class SourceGroup(val nameKey: String, val name: String, val colorArgb: Int
 Neutrodyne exports: folder `nd:groupColor`/`nd:groupIcon` are applied to **newly created** groups only (existing groups keep their look). Formats without groups (NewPipe, Takeout, URL list) pre-fill the target group per 04's rule ([04 Pipeline rules for YouTube items](04-youtube.md#pipeline-rules-for-youtube-items-05-implements)). "Import OPML into this group" sets `targetGroupId` and `importGroups = false`.
 
 ### 5. Preview contract
+
+**Implementation note (2026-10-17, M3):** `updateOptions` applies changes to the latest PREVIEW row in one transaction using `ImportOptions.withUserChanges`. Parser metadata and worker bookkeeping are preserved, and edits after a commit or restore request are ignored. Restore intent is written only by `BackupRepository.restore`, so a stale preview cannot reset or alter a queued operation.
 
 `ImportKey(sessionId)` (`:feature:importexport`, visuals: [08 Screens](08-ui-ux.md#screens)) renders these models; everything survives process death because it is in `import_session`/`import_item`.
 
