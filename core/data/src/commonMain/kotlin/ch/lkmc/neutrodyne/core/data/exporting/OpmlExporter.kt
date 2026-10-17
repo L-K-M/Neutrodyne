@@ -30,6 +30,11 @@ import kotlinx.datetime.toLocalDateTime
  * concurrent writes — mapped to writer types on `@Dispatcher(Default)`. The pure `OpmlWriter`
  * consumes the result and never sees the database or `:core:model` types. `BackupWriter` reuses
  * [build] for the archive's `subscriptions.opml` (grouped, no passwords).
+ *
+ * Opted-in credentials resolve after the snapshot, outside the transaction: 05 keeps secret
+ * I/O (Android Keystore, the desktop secrets file) out of Room transactions, so export pays
+ * one `SecretStore.forPodcast` lookup per feed. `AUTOINCREMENT` podcast ids bound the race —
+ * a mid-export write can at worst attach that podcast's newer credential, never another's.
  */
 @Inject
 internal class OpmlExporter(
@@ -139,7 +144,9 @@ internal class OpmlExporter(
 
     /**
      * `user:pass@` ahead of the authority (05 Attributes: `https://user:pass@host/…`), both
-     * percent-encoded per RFC 3986 userinfo rules. `null` when [feedUrl] has no authority.
+     * percent-encoded per RFC 3986 userinfo rules. `null` when [feedUrl] has no authority —
+     * the `://` must follow an anchored scheme, the same rule `splitUserInfo` applies, so a
+     * `://` mid-string (malformed legacy rows) counts as none.
      * Stored URLs arrive credential-free (03 strips userinfo on subscribe); splitting first
      * means a stray one would still be replaced by the stored credential, never doubled.
      */
@@ -149,9 +156,8 @@ internal class OpmlExporter(
         password: String,
     ): String? {
         val (clean, _) = UrlNormalizer.splitUserInfo(feedUrl)
-        val schemeEnd = clean.indexOf("://")
-        if (schemeEnd < 0) return null
-        val authority = schemeEnd + AUTHORITY_PREFIX_LENGTH
+        val scheme = SCHEME_WITH_AUTHORITY.find(clean) ?: return null
+        val authority = scheme.range.last + 1
         return buildString(clean.length + USERINFO_PADDING) {
             append(clean, 0, authority)
             append(encodeUserInfo(username))
@@ -257,8 +263,10 @@ internal class OpmlExporter(
         const val MAX_SLUG_CHARS = 40
         const val FALLBACK_SLUG = "group"
         const val ISO_DATE_LENGTH = 10
-        const val AUTHORITY_PREFIX_LENGTH = 3 // "://".length
         const val USERINFO_PADDING = 8
+
+        /** `scheme://` anchored at position 0 — the same notion of "URL" as `splitUserInfo`. */
+        val SCHEME_WITH_AUTHORITY = Regex("""^[A-Za-z][A-Za-z0-9+.\-]*://""")
         const val YOUTUBE_CHANNEL_PREFIX = "https://www.youtube.com/channel/"
         const val UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
         const val HEX_DIGITS = "0123456789ABCDEF"

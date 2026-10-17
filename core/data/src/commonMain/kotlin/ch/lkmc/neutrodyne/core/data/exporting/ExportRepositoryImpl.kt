@@ -85,8 +85,11 @@ internal class ExportRepositoryImpl(
         export: PreparedExport,
         destinationUri: String,
     ): Outcome<Unit, ExportError> {
-        val source = preparedFile(export.fileName) ?: return Outcome.Failure(ExportError.Io)
-        if (!fileSystem.exists(source)) return Outcome.Failure(ExportError.Io)
+        // Resolve and stat on IO like prepare's write: callers sit on the UI dispatcher.
+        val source =
+            withContext(io) {
+                preparedFile(export.fileName)?.takeIf { fileSystem.exists(it) }
+            } ?: return Outcome.Failure(ExportError.Io)
         // A throw from the platform seam (provider quirks beyond its own Outcome cases) still
         // reports "couldn't write" instead of crashing — cancellation still propagates.
         return suspendRunCatching { destination.save(source, destinationUri) }
