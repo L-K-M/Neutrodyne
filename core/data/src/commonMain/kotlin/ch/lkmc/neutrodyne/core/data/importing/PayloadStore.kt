@@ -423,7 +423,7 @@ internal class PayloadStore(
         const val DISCARD_MAX_BYTES = 256L * 1024
 
         /** 05 §1: the import payload cap — declared or counted, whichever trips first. */
-        const val MAX_PAYLOAD_BYTES = 50L * 1024 * 1024
+        const val MAX_PAYLOAD_BYTES = MAX_IMPORT_PAYLOAD_BYTES
     }
 }
 
