@@ -10,6 +10,8 @@ import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.Redactor
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.data.add.AddInputNormalizer
+import ch.lkmc.neutrodyne.core.data.add.NormalizedInput
 import ch.lkmc.neutrodyne.core.data.credentials.removeUnreferenced
 import ch.lkmc.neutrodyne.core.database.ImportItemEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
@@ -59,6 +61,10 @@ import kotlin.uuid.Uuid
  * - The gate is `PREVIEW` plus no restore intent (`NEUTRODYNE_BACKUP` sessions and a set
  *   `restoreRequestedAt` belong to the restore path, not this committer). A session already past
  *   `PREVIEW` makes confirm an idempotent no-op — the commit's writes all hold up on replay.
+ * - Each chunk re-checks session ownership inside its own transaction: a PREVIEW
+ *   cancel/delete or the expiry sweep between chunks would otherwise keep the loop writing
+ *   podcasts, groups and memberships no session tracks. The aborting chunk rolls back,
+ *   committed chunks stand and the put cleanup still runs.
  * - Credential `put`s run outside any Room transaction but inside
  *   [CredentialCommitCoordinator.withCredentialCommit], which stays held across every commit
  *   chunk (03's ordering): a thrown chunk rolls back only its own transaction, so puts whose
@@ -109,6 +115,8 @@ internal class ImportCommitter(
             }
         } catch (e: CancellationException) {
             throw e
+        } catch (_: SessionLostException) {
+            Outcome.Failure(ImportError.SessionGone)
         } catch (_: Exception) {
             Outcome.Failure(ImportError.Storage)
         }
@@ -179,19 +187,31 @@ internal class ImportCommitter(
         // 05 §6 step 1: outside any Room transaction, inside the coordinator — selected items
         // whose originalUrl carried userinfo get their credentials stored against the ORIGINAL
         // request's origin (the host they were sent to; 03's same rule in subscribe).
+        // AddInputNormalizer re-runs classify's unwrapping — feed:/pcast://podcast://itpc:// and
+        // the subscribe pages — so its clean URL and extracted credentials decide the put;
+        // splitUserInfo/origin on the raw wrapper URL never parse (a feed:/itpc: scheme is not
+        // the bare http(s) they accept) and would silently drop the credentials.
         val puts = HashMap<Int, CredentialPut>()
-        for (work in plan.work) {
-            if (work !is Work.New) continue
-            val userInfo = UrlNormalizer.splitUserInfo(work.item.originalUrl).second ?: continue
-            val origin = UrlNormalizer.origin(work.item.originalUrl) ?: continue
-            puts[work.ordinal] =
-                CredentialPut(
-                    origin = origin,
-                    rowId = secrets.put(origin, userInfo.username, userInfo.password.toCharArray()),
-                )
-        }
-
         try {
+            for (work in plan.work) {
+                if (work !is Work.New) continue
+                val normalized =
+                    AddInputNormalizer.normalize(work.item.originalUrl) as? NormalizedInput.Url
+                        ?: continue
+                val credentials = normalized.credentials ?: continue
+                val origin = UrlNormalizer.origin(normalized.url) ?: continue
+                puts[work.ordinal] =
+                    CredentialPut(
+                        origin = origin,
+                        rowId =
+                            secrets.put(
+                                origin,
+                                credentials.username,
+                                credentials.password.toCharArray(),
+                            ),
+                    )
+            }
+
             val ctx = ChunkContext(resolveGroups(plan.options, plan.work), puts)
             // ≤ CHUNK items per write transaction (02); the empty plan still runs one
             // transaction so a deselect-everything confirm creates its proposed groups.
@@ -202,9 +222,11 @@ internal class ImportCommitter(
             }
             return Commit.READY_TO_FINISH
         } catch (t: Throwable) {
-            // A chunk's rollback already protected the rows it wrote; here the puts whose
-            // referencing insert never landed go back — unless a committed chunk (or another
-            // podcast on a shared origin) references the row (03's rule).
+            // The put loop is inside this try: a later put throwing (or cancellation landing
+            // mid-loop) must not strand the earlier ones — each collected put whose
+            // referencing insert never landed goes back, unless a committed chunk (or
+            // another podcast on a shared origin) references the row (03's rule). A chunk's
+            // own rollback already protected the rows it wrote.
             withContext(NonCancellable) {
                 for (put in puts.values) {
                     secrets.removeUnreferenced(db.credentialDao(), put.origin, put.rowId)
@@ -222,6 +244,14 @@ internal class ImportCommitter(
         ctx: ChunkContext,
         work: List<Work>,
     ) {
+        // A PREVIEW cancel/delete (or the expired-session sweep) between chunks cascades the
+        // item rows this chunk would still write; [planLocked]'s snapshot cannot see it.
+        // Re-check ownership inside the chunk's own transaction — writers serialize, so a
+        // delete visible here already committed — rather than materialize podcasts, groups
+        // and memberships no session tracks.
+        if (db.importDao().sessionById(sessionId)?.state != ImportState.PREVIEW) {
+            throw SessionLostException()
+        }
         val now = clock.now()
         ctx.ensureGroups(now)
         val targetGroupId = ctx.targetGroupId(options)
@@ -233,7 +263,14 @@ internal class ImportCommitter(
                     var podcastId = existingOwner(entry.feedKey)
                     val inserted = podcastId == null
                     if (podcastId == null) {
-                        podcastId = insertPending(item, entry.feedKey, ctx.puts, now)
+                        podcastId =
+                            insertPending(
+                                item,
+                                entry.feedKey,
+                                ctx.puts,
+                                customTitle = options.itemCustomTitles[item.ordinal],
+                                now,
+                            )
                     }
                     if (inserted) {
                         if (options.notifyNewEpisodes) {
@@ -284,10 +321,12 @@ internal class ImportCommitter(
         item: ImportItemEntity,
         feedKey: String,
         puts: Map<Int, CredentialPut>,
+        customTitle: String?,
         now: Long,
     ): Long {
         repeat(SYNC_ID_RETRIES) {
-            val rowId = db.podcastDao().insertPodcastOrIgnore(pendingRow(item, feedKey, puts, now))
+            val rowId =
+                db.podcastDao().insertPodcastOrIgnore(pendingRow(item, feedKey, puts, customTitle, now))
             if (rowId != -1L) return rowId
             existingOwner(feedKey)?.let { return it }
         }
@@ -298,6 +337,7 @@ internal class ImportCommitter(
         item: ImportItemEntity,
         feedKey: String,
         puts: Map<Int, CredentialPut>,
+        customTitle: String?,
         now: Long,
     ): PodcastEntity {
         val feedUrl = checkNotNull(item.normalizedUrl) { "selected item without normalizedUrl" }
@@ -307,6 +347,7 @@ internal class ImportCommitter(
             feedUrl = feedUrl,
             feedKey = feedKey,
             title = item.title ?: feedUrl,
+            customTitle = customTitle,
             artworkKey = ArtworkKeys.monogram(feedKey),
             status = PodcastStatus.PENDING_FIRST_FETCH,
             initialFetch = true,
@@ -601,6 +642,12 @@ internal class ImportCommitter(
         /** resolvedNameKey → ensured `podcast_group.id`, filled by the chunk transactions. */
         val ids: MutableMap<String, Long> = mutableMapOf(),
     )
+
+    /**
+     * The session left `PREVIEW` while chunks were still writing (a PREVIEW cancel/delete or
+     * the expiry sweep). The throwing chunk rolls back; earlier committed chunks stand.
+     */
+    private class SessionLostException : Exception()
 
     /**
      * [commitLocked]'s verdict: [GONE] has no committable session (missing, backup-format or

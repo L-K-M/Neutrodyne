@@ -34,6 +34,12 @@ internal class ImportClassifier(
         val ordinal: Int,
         /** Display title — `title ?: customTitle ?: host`; null only when no host parses either. */
         val title: String?,
+        /**
+         * The parsed user rename of a Neutrodyne file (05 §3.5) — never the publisher title.
+         * `import_item` has no column for it; [ImportSessions] carries it in optionsJson as
+         * `itemCustomTitles[ordinal]` so commit can land it on the pending row.
+         */
+        val customTitle: String?,
         /** The file's URL verbatim — userinfo stays here until commit (05 §3 step 2). */
         val originalUrl: String,
         /** The normalized http(s) URL — never carries userinfo; null for unresolved YouTube refs. */
@@ -99,6 +105,7 @@ internal class ImportClassifier(
                 ClassifiedItem(
                     ordinal = entry.ordinal,
                     title = displayTitle(entry, ref, target.normalizedUrl),
+                    customTitle = entry.customTitle,
                     originalUrl = entry.url,
                     normalizedUrl = target.normalizedUrl,
                     kind = target.kind,

@@ -6,10 +6,13 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.credentials.CredentialCommitCoordinatorImpl
 import ch.lkmc.neutrodyne.core.data.credentials.DesktopSecretStore
 import ch.lkmc.neutrodyne.core.data.credentials.IdentitySecretProtection
+import ch.lkmc.neutrodyne.core.data.importing.ImportClassifier
 import ch.lkmc.neutrodyne.core.data.importing.ImportCommitter
 import ch.lkmc.neutrodyne.core.data.importing.ImportOptionsJson
+import ch.lkmc.neutrodyne.core.data.importing.ImportSessions
 import ch.lkmc.neutrodyne.core.data.importing.ImportWorkPolicy
 import ch.lkmc.neutrodyne.core.data.importing.ImportWorkScheduler
+import ch.lkmc.neutrodyne.core.data.importing.PayloadStore
 import ch.lkmc.neutrodyne.core.database.ImportItemEntity
 import ch.lkmc.neutrodyne.core.database.ImportSessionEntity
 import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
@@ -17,19 +20,30 @@ import ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity
 import ch.lkmc.neutrodyne.core.domain.ImportError
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.model.AliasReason
+import ch.lkmc.neutrodyne.core.model.CreateImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportItemKind
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
 import ch.lkmc.neutrodyne.core.model.ImportOptions
+import ch.lkmc.neutrodyne.core.model.ImportSource
 import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceGroup
+import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
+import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipGuard
+import ch.lkmc.neutrodyne.feeds.jvm.opml.XmlPullOpmlReader
+import ch.lkmc.neutrodyne.feeds.opml.ExportDocument
+import ch.lkmc.neutrodyne.feeds.opml.ExportFeed
+import ch.lkmc.neutrodyne.feeds.opml.ExportGroup
+import ch.lkmc.neutrodyne.feeds.opml.OpmlLayout
+import ch.lkmc.neutrodyne.feeds.opml.OpmlWriter
+import ch.lkmc.neutrodyne.youtube.api.YouTubeUrlClassifier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +52,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import okio.Buffer
+import okio.FileSystem
 import java.io.File
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -69,6 +85,8 @@ class ImportCommitTest {
     private lateinit var root: File
     private lateinit var secrets: DesktopSecretStore
     private lateinit var committer: ImportCommitter
+    private lateinit var payloads: FakePayloadSource
+    private lateinit var sessions: ImportSessions
 
     @BeforeTest
     fun setUp() {
@@ -86,6 +104,26 @@ class ImportCommitTest {
                 appScope,
             )
         committer = newCommitter()
+        payloads = FakePayloadSource()
+        sessions =
+            ImportSessions(
+                db = db,
+                payloads =
+                    PayloadStore(
+                        storagePaths = storagePathsFor(root),
+                        fileSystem = FileSystem.SYSTEM,
+                        payloads = payloads,
+                        httpClients = OkHttpNeutrodyneHttpClients(newNetworkClients(), testUserAgent()),
+                        netErrors = testClassifier,
+                        io = Dispatchers.Default,
+                    ),
+                classifier = ImportClassifier(db, YouTubeUrlClassifier()),
+                opmlReader = XmlPullOpmlReader.discovered(),
+                archives = ZipGuard(),
+                clock = clock,
+                appScope = appScope,
+                io = Dispatchers.Default,
+            )
     }
 
     @AfterTest
@@ -503,6 +541,81 @@ class ImportCommitTest {
         }
 
     @Test
+    fun aSessionDeletedBetweenChunksLeavesOnlyCommittedWork() =
+        runTest {
+            val items =
+                (1..500)
+                    .map { item(it, "https://h$it.example.com/f", groups = listOf("Tech")) }
+                    .toMutableList()
+            // A private feed inside the committed chunk (its put stays referenced) and one in
+            // the aborted chunk (its put rolls back) cover both cleanup halves.
+            items[0] =
+                item(
+                    1,
+                    "https://u1:p1@h1.example.com/f",
+                    normalizedUrl = "https://h1.example.com/f",
+                    groups = listOf("Tech"),
+                )
+            items +=
+                item(
+                    501,
+                    "https://u2:p2@h501.example.com/f",
+                    normalizedUrl = "https://h501.example.com/f",
+                    groups = listOf("Tech"),
+                )
+            val sid = seedSession(items = items)
+
+            // The delete lands after chunk one's transaction commits — a PREVIEW cancel and
+            // the expired-session sweep both run this same deleteSession (items cascade).
+            driver.arm("INSERT OR IGNORE INTO `podcast` ") {
+                driver.exec("DELETE FROM import_item WHERE sessionId = $sid")
+                driver.exec("DELETE FROM import_session WHERE id = $sid")
+            }
+            val outcome = committer.confirm(sid)
+
+            assertEquals(
+                ImportError.SessionGone,
+                assertIs<Outcome.Failure<ImportError>>(outcome).error,
+            )
+            assertNull(db.importDao().sessionById(sid))
+            assertEquals(500, db.podcastDao().allForExport().size, "committed chunks stand")
+            assertNull(db.podcastDao().byFeedKey("h501.example.com/f"), "the aborted chunk never landed")
+            val tech = assertNotNull(db.groupDao().groupByNameKey("tech"))
+            assertEquals(500, db.groupDao().membersOf(tech.id).size, "no later memberships")
+            assertNull(secrets.get("https://h501.example.com"), "unreferenced put rolled back")
+            assertNotNull(secrets.get("https://h1.example.com"), "referenced put stays")
+            assertTrue(scheduler.sessions.isEmpty(), "a deleted session is never scheduled")
+            assertTrue(refresh.calls.isEmpty() && channels.calls.isEmpty())
+        }
+
+    @Test
+    fun aSessionLeavingPreviewBetweenChunksSkipsTheRest() =
+        runTest {
+            val sid = seedSession(items = (1..501).map { item(it, "https://h$it.example.com/f") })
+
+            // A live row that left PREVIEW (a racing transition) is the same lost ownership —
+            // the remaining chunks must not write and the marker must not run.
+            driver.arm("INSERT OR IGNORE INTO `podcast` ") {
+                driver.exec("UPDATE import_session SET state = 'CANCELLED' WHERE id = $sid")
+            }
+            val outcome = committer.confirm(sid)
+
+            assertEquals(
+                ImportError.SessionGone,
+                assertIs<Outcome.Failure<ImportError>>(outcome).error,
+            )
+            assertEquals(ImportState.CANCELLED, db.importDao().sessionById(sid)?.state)
+            assertEquals(500, db.podcastDao().allForExport().size, "committed chunks stand")
+            assertNull(db.podcastDao().byFeedKey("h501.example.com/f"), "the aborted chunk never landed")
+            val items = db.importDao().itemsOf(sid)
+            assertEquals(501, items.size, "no cascade — the row moved on, it was not deleted")
+            assertEquals(ImportItemStatus.QUEUED, items.first().status)
+            assertEquals(ImportItemStatus.PREVIEW, items.last().status)
+            assertTrue(scheduler.sessions.isEmpty(), "a cancelled session is never scheduled")
+            assertTrue(refresh.calls.isEmpty() && channels.calls.isEmpty())
+        }
+
+    @Test
     fun aSchedulerFailureKeepsTheCommit() =
         runTest {
             scheduler.fail = true
@@ -554,6 +667,90 @@ class ImportCommitTest {
             val item = db.importDao().itemsOf(sid).single()
             assertTrue(!item.originalUrl.contains("s3cret"), "no password survives in import_item")
             assertTrue(item.originalUrl.contains("feeds.private.example.com"))
+        }
+
+    @Test
+    fun wrappedUrlsStoreCredentialsAgainstTheResolvedHttpOrigin() =
+        runTest {
+            val sid =
+                seedSession(
+                    items =
+                        listOf(
+                            item(1, "feed:https://u:s1@h1.example.com/f", normalizedUrl = "https://h1.example.com/f"),
+                            item(2, "feed://u:s2@h2.example.com/f", normalizedUrl = "https://h2.example.com/f"),
+                            item(3, "pcast://u:s3@h3.example.com/f", normalizedUrl = "https://h3.example.com/f"),
+                            item(4, "podcast://u:s4@h4.example.com/f", normalizedUrl = "https://h4.example.com/f"),
+                            item(5, "itpc://u:s5@h5.example.com/f", normalizedUrl = "https://h5.example.com/f"),
+                            item(
+                                6,
+                                "neutrodyne://subscribe?url=https%3A%2F%2Fu%3As6%40h6.example.com%2Ff",
+                                normalizedUrl = "https://h6.example.com/f",
+                            ),
+                            item(7, "https://u:s7@h7.example.com/f", normalizedUrl = "https://h7.example.com/f"),
+                        ),
+                )
+
+            assertIs<Outcome.Success<*>>(committer.confirm(sid))
+
+            for (n in 1..7) {
+                val stored =
+                    assertNotNull(
+                        secrets.get("https://h$n.example.com"),
+                        "credentials of item $n must reach the resolved http origin",
+                    )
+                assertEquals("u", stored.username)
+                assertEquals("s$n", stored.secret.concatToString())
+                assertNotNull(
+                    assertNotNull(db.podcastDao().byFeedKey("h$n.example.com/f")).credentialId,
+                    "podcast for item $n links its credential",
+                )
+            }
+            val passwords = (1..7).map { "s$it" }
+            val committedUrls =
+                db.importDao().itemsOf(sid).map { it.originalUrl } +
+                    db.podcastDao().allForExport().map { it.feedUrl } +
+                    db
+                        .podcastDao()
+                        .allForExport()
+                        .flatMap { db.podcastDao().aliases(it.id) }
+                        .map { it.url }
+            assertTrue(
+                committedUrls.none { url -> passwords.any(url::contains) },
+                "no password survives in committed URLs or aliases",
+            )
+        }
+
+    @Test
+    fun aFailingPutRollsBackTheEarlierUnreferencedPuts() =
+        runTest {
+            // The second item's put throws: the first one's credential row exists but no
+            // podcast references it — the failure cleanup must remove it (03's rule) while
+            // the commit reports the storage failure and never schedules.
+            val committer = newCommitter(store = FailingAfterPuts(secrets, successes = 1))
+            val sid =
+                seedSession(
+                    items =
+                        listOf(
+                            item(1, "https://u:s1@h1.example.com/f", normalizedUrl = "https://h1.example.com/f"),
+                            item(2, "https://u:s2@h2.example.com/f", normalizedUrl = "https://h2.example.com/f"),
+                        ),
+                )
+
+            assertEquals(
+                ImportError.Storage,
+                assertIs<Outcome.Failure<ImportError>>(committer.confirm(sid)).error,
+            )
+            assertTrue(db.podcastDao().allForExport().isEmpty(), "no podcast rows landed")
+            assertEquals(
+                0,
+                db.credentialDao().byOrigin("https://h1.example.com").size,
+                "the earlier put's row rolled back",
+            )
+            assertNull(secrets.get("https://h1.example.com"), "the earlier put rolled back")
+            assertNull(secrets.get("https://h2.example.com"))
+            assertEquals(ImportState.PREVIEW, db.importDao().sessionById(sid)?.state)
+            assertTrue(scheduler.sessions.isEmpty())
+            assertTrue(refresh.calls.isEmpty() && channels.calls.isEmpty())
         }
 
     // --- Session/options gates ----------------------------------------------------------------------
@@ -704,6 +901,109 @@ class ImportCommitTest {
             assertEquals(2, db.podcastDao().allForExport().size)
         }
 
+    // --- Custom titles: writer → reader → session → committer (05 §3.5 → §6.3) ---------------------
+
+    @Test
+    fun aGroupedExportRoundTripRestoresCustomTitles() =
+        runTest {
+            val sid = createSessionFromExport(OpmlLayout.GROUPED)
+
+            // The rename is parser metadata: it rides optionsJson keyed by item ordinal —
+            // import_item has no column for it (02's no-schema-change rule stands). The
+            // duplicate keeps its own ordinal's rename in the map; it never commits.
+            val session = assertNotNull(db.importDao().sessionById(sid))
+            val options = ImportOptionsJson.decode(assertNotNull(session.optionsJson))
+            assertEquals(
+                mapOf(0 to "My Rename", 2 to "Zz Dup Rename"),
+                options.itemCustomTitles,
+            )
+
+            assertIs<Outcome.Success<*>>(committer.confirm(sid))
+            assertCustomTitlesCommitted()
+        }
+
+    @Test
+    fun aFlatExportRoundTripRestoresCustomTitles() =
+        runTest {
+            val sid = createSessionFromExport(OpmlLayout.FLAT)
+
+            val session = assertNotNull(db.importDao().sessionById(sid))
+            val options = ImportOptionsJson.decode(assertNotNull(session.optionsJson))
+            assertEquals(
+                mapOf(0 to "My Rename", 2 to "Zz Dup Rename"),
+                options.itemCustomTitles,
+            )
+
+            assertIs<Outcome.Success<*>>(committer.confirm(sid))
+            assertCustomTitlesCommitted()
+        }
+
+    private suspend fun assertCustomTitlesCommitted() {
+        val renamed = assertNotNull(db.podcastDao().byFeedKey("a.example.com/f"))
+        assertEquals("Publisher Title", renamed.title, "the feed's own title stays title")
+        assertEquals("My Rename", renamed.customTitle)
+        val plain = assertNotNull(db.podcastDao().byFeedKey("b.example.com/f"))
+        assertEquals("Same Title", plain.title)
+        assertNull(plain.customTitle, "an unrenamed feed leaves customTitle null")
+        assertEquals(2, db.podcastDao().allForExport().size, "the duplicate never inserted")
+    }
+
+    /** Writes an `ExportDocument`, feeds it through `ImportSessions.create` — the real parse path. */
+    private suspend fun createSessionFromExport(layout: OpmlLayout): Long {
+        val out = Buffer()
+        OpmlWriter.write(out, renamedExport(), layout)
+        payloads.register(ROUND_TRIP_URI, bytes = out.readByteArray())
+        return assertIs<Outcome.Success<Long>>(
+            sessions.create(ImportSource(ROUND_TRIP_URI, "export.opml"), CreateImportOptions()),
+        ).value
+    }
+
+    /**
+     * Three entries: a rename (`text` ≠ `title`), an unrenamed feed, and a third repeating the
+     * first feed's URL with a different rename. `OpmlWriter` sorts feeds by `displayTitle` and
+     * the "Zz" prefix keeps the duplicate last in both layouts, so the file dedupe leaves it
+     * `DUPLICATE_IN_FILE` at ordinal 2 and ordinal 0's rename is the one that must land.
+     */
+    private fun renamedExport(): ExportDocument =
+        ExportDocument(
+            title = "Neutrodyne",
+            createdAt = clock.now(),
+            groups = listOf(ExportGroup("g1", "Tech", 0x112233, "code")),
+            feeds =
+                listOf(
+                    ExportFeed(
+                        displayTitle = "My Rename",
+                        feedTitle = "Publisher Title",
+                        xmlUrl = "https://a.example.com/f",
+                        htmlUrl = "https://a.example.com",
+                        language = null,
+                        groupKeys = listOf("g1"),
+                        youtube = false,
+                        ytVariants = null,
+                    ),
+                    ExportFeed(
+                        displayTitle = "Same Title",
+                        feedTitle = "Same Title",
+                        xmlUrl = "https://b.example.com/f",
+                        htmlUrl = null,
+                        language = null,
+                        groupKeys = listOf("g1"),
+                        youtube = false,
+                        ytVariants = null,
+                    ),
+                    ExportFeed(
+                        displayTitle = "Zz Dup Rename",
+                        feedTitle = "Zz Dup Title",
+                        xmlUrl = "https://a.example.com/f",
+                        htmlUrl = null,
+                        language = null,
+                        groupKeys = emptyList(),
+                        youtube = false,
+                        ytVariants = null,
+                    ),
+                ),
+        )
+
     // --- Helpers ----------------------------------------------------------------------------------
 
     private suspend fun assertCommitted(sid: Long) {
@@ -803,6 +1103,24 @@ class ImportCommitTest {
         }
     }
 
+    /** Lets the first [successes] puts through, then throws — everything else delegates. */
+    private class FailingAfterPuts(
+        private val store: SecretStore,
+        private val successes: Int,
+    ) : SecretStore by store {
+        private var puts = 0
+
+        override suspend fun put(
+            origin: String,
+            username: String,
+            secret: CharArray,
+            attributes: Map<String, String>,
+        ): Long? {
+            if (puts++ >= successes) error("credential put failed")
+            return store.put(origin, username, secret, attributes)
+        }
+    }
+
     private class FakeImportWorkScheduler : ImportWorkScheduler {
         val sessions = mutableListOf<Long>()
         val policies = mutableListOf<ImportWorkPolicy>()
@@ -825,6 +1143,7 @@ class ImportCommitTest {
     }
 
     private companion object {
+        const val ROUND_TRIP_URI = "content://provider/export.opml"
         val UUID_V4 = Regex("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
     }
 }

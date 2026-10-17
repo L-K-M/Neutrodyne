@@ -39,6 +39,7 @@ internal data class ImportOptionsJson(
     val linkedReach: String? = null,
     val laneAttempts: Int = 0,
     val sourceGroups: List<SourceGroupJson> = emptyList(),
+    val itemCustomTitles: Map<Int, String> = emptyMap(),
     val committedAt: Long? = null,
     val attemptMarkerAt: Long? = null,
 ) {
@@ -59,6 +60,7 @@ internal data class ImportOptionsJson(
             linkedReach = linkedReach?.let(::linkedRestoreReach),
             laneAttempts = laneAttempts,
             sourceGroups = sourceGroups.map(SourceGroupJson::toModel),
+            itemCustomTitles = itemCustomTitles,
             committedAt = committedAt,
             attemptMarkerAt = attemptMarkerAt,
         )
@@ -81,6 +83,7 @@ internal data class ImportOptionsJson(
                 linkedReach = options.linkedReach?.name,
                 laneAttempts = options.laneAttempts,
                 sourceGroups = options.sourceGroups.map(SourceGroupJson::fromModel),
+                itemCustomTitles = options.itemCustomTitles,
                 committedAt = options.committedAt,
                 attemptMarkerAt = options.attemptMarkerAt,
             )
