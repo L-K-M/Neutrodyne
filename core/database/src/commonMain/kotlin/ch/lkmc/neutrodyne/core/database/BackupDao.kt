@@ -365,6 +365,22 @@ interface BackupDao {
     @Query("DELETE FROM episode_position WHERE episodeId IN (SELECT id FROM episode WHERE podcastId = :podcastId)")
     suspend fun deletePositionsOfPodcast(podcastId: Long): Int
 
+    // --- Restore Up next/session writes (05 transaction C) -------------------------------------
+
+    /**
+     * The merged-played set transaction C consults (05 Up next): backup refs to a played
+     * episode are skipped, and Merge sweeps locally queued episodes that became played.
+     */
+    @Query("SELECT episodeId FROM episode_state WHERE playedAt IS NOT NULL")
+    suspend fun playedEpisodeIds(): List<Long>
+
+    /** 05 Up next (Merge): a locally queued episode that became played leaves the queue (06's invariant). */
+    @Query(
+        "DELETE FROM queue_entry WHERE episodeId IN" +
+            " (SELECT episodeId FROM episode_state WHERE playedAt IS NOT NULL)",
+    )
+    suspend fun deletePlayedQueueEntries(): Int
+
     // --- Restore library writes (05 transaction A) ---------------------------------------------
 
     /**
