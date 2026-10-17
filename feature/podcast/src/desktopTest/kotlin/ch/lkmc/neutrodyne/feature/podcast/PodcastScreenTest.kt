@@ -48,8 +48,11 @@ import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
+import ch.lkmc.neutrodyne.core.model.Group
+import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.ShowType
+import ch.lkmc.neutrodyne.core.navigation.AddToGroupsKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
@@ -66,6 +69,7 @@ import ch.lkmc.neutrodyne.core.ui.platform.FileSaver
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
 import ch.lkmc.neutrodyne.core.ui.platform.PlatformActions
+import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import java.util.Locale
@@ -679,6 +683,55 @@ class PodcastScreenTest {
             onNodeWithText("Show played episodes").assertDoesNotExist()
         }
 
+    @Test
+    fun groupChipRemoveReportsTheGroup() =
+        runComposeUiTest {
+            var removed: Group? = null
+            setPodcast(
+                PodcastUiState(
+                    detail = testPodcastDetail(7),
+                    loaded = true,
+                    groups = persistentListOf(testGroup(3, name = "tech")),
+                ),
+                onRemoveGroup = { removed = it },
+            )
+            onNodeWithText("tech").assertIsDisplayed()
+            // The chip's trailing "x" carries its own contentDescription; the tap must hit it,
+            // not the chip body (which opens the membership sheet).
+            onNodeWithContentDescription("Remove from tech", useUnmergedTree = true).performClick()
+            assertEquals(3L, removed?.id)
+            assertTrue(navigator.calls.isEmpty())
+        }
+
+    @Test
+    fun groupChipsAndAddButtonPushTheMembershipSheet() =
+        runComposeUiTest {
+            setPodcast(
+                PodcastUiState(
+                    detail = testPodcastDetail(7),
+                    loaded = true,
+                    groups = persistentListOf(testGroup(3, name = "tech")),
+                ),
+            )
+            // Both entry points open the same "Add to groups" sheet for this podcast.
+            onNodeWithText("+ Group").performClick()
+            onAllNodes(hasClickAction() and hasText("tech")).onFirst().performClick()
+            assertEquals(
+                listOf<RecordingAppNavigator.Call>(
+                    RecordingAppNavigator.Call.Push(AddToGroupsKey(listOf(7))),
+                    RecordingAppNavigator.Call.Push(AddToGroupsKey(listOf(7))),
+                ),
+                navigator.calls,
+            )
+        }
+
+    @Test
+    fun headerWithoutMembershipsStillOffersAddGroup() =
+        runComposeUiTest {
+            setPodcast(PodcastUiState(detail = testPodcastDetail(7), loaded = true))
+            onNodeWithText("+ Group").assertIsDisplayed()
+        }
+
     private fun ComposeUiTest.setPodcast(
         state: PodcastUiState,
         rows: List<EpisodeRow> = emptyList(),
@@ -703,6 +756,7 @@ class PodcastScreenTest {
         onUnsubscribeRequest: () -> Unit = {},
         onConfirmUnsubscribe: () -> Unit = {},
         onDismissUnsubscribe: () -> Unit = {},
+        onRemoveGroup: (Group) -> Unit = {},
     ): LazyPagingItems<EpisodeRow> {
         lateinit var pagingItems: LazyPagingItems<EpisodeRow>
         val feed: Flow<PagingData<EpisodeRow>> =
@@ -736,6 +790,7 @@ class PodcastScreenTest {
                         onUnsubscribeRequest = onUnsubscribeRequest,
                         onConfirmUnsubscribe = onConfirmUnsubscribe,
                         onDismissUnsubscribe = onDismissUnsubscribe,
+                        onRemoveGroup = onRemoveGroup,
                     )
                 }
             }
@@ -770,6 +825,28 @@ class PodcastScreenTest {
 
 /** The restore test's catalogue; index 100 lands among the placeholders past the 80 loaded rows. */
 private const val CATALOGUE_SIZE = 300
+
+/** A minimal [Group] row for the header's membership chips. */
+private fun testGroup(
+    id: Long,
+    name: String,
+) = Group(
+    id = id,
+    uuid = "group-$id",
+    name = name,
+    orderKey = "$id",
+    colorArgb = null,
+    iconKey = null,
+    feedOrder = FeedOrder.NEWEST_FIRST,
+    playOrder = FeedOrder.NEWEST_FIRST,
+    filterFlags = 0,
+    mediaFilter = MediaFilter.ALL,
+    hideOlderThanDays = null,
+    showAsTab = true,
+    lastViewedAt = null,
+    createdAt = 0,
+    memberCount = 1,
+)
 
 /**
  * Named pages served by [Pager] — one page's worth per `load`; [firstLoadGate] parks load 0

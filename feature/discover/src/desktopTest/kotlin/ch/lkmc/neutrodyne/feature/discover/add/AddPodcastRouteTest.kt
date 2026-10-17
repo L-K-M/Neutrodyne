@@ -53,8 +53,11 @@ import kotlin.test.assertEquals
 class AddPodcastRouteTest {
     private lateinit var previousLocale: Locale
     private val resolver = FakeAddPodcastResolver()
+    private val groups =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeGroupRepository()
     private val subscribe = FakeSubscribeUseCase()
-    private val viewModel = AddPodcastViewModel(resolver, subscribe)
+    private val viewModel by lazy { AddPodcastViewModel(resolver, subscribe, groups) }
     private val navigator = RecordingAppNavigator()
     private val host = SnackbarHostState()
 

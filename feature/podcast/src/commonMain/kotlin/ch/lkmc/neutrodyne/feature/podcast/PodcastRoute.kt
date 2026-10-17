@@ -140,6 +140,7 @@ internal fun PodcastRoute(key: PodcastKey) {
             viewModel.unsubscribe()
         },
         onDismissUnsubscribe = { pending = null },
+        onRemoveGroup = viewModel::removeFromGroup,
     )
 
     markPlayed?.let { dialog ->
@@ -151,5 +152,9 @@ internal fun PodcastRoute(key: PodcastKey) {
         )
     }
 
-    ShowUserMessages(state.messages, viewModel::onMessageShown)
+    ShowUserMessages(
+        state.messages,
+        viewModel::onMessageShown,
+        onMessageAction = viewModel::onMessageAction,
+    )
 }

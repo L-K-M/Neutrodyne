@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.feature.groups
 
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
+import ch.lkmc.neutrodyne.core.navigation.AddToGroupsKey
 import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
 import ch.lkmc.neutrodyne.core.navigation.GroupSettingsKey
 import ch.lkmc.neutrodyne.core.navigation.GroupsManageKey
@@ -12,6 +13,11 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class GroupsNavigationTest {
+    @Test fun membershipPickerIsRegisteredAsASheet() {
+        val provider = entryProvider<NavKey> { GroupsNavigation.entries().invoke(this) }
+        assertEquals(NdSceneMetadata.bottomSheet(), provider(AddToGroupsKey(listOf(7))).metadata)
+    }
+
     @Test fun manageIsRegisteredAsAListPane() {
         val provider = entryProvider<NavKey> { GroupsNavigation.entries().invoke(this) }
         assertEquals(NdSceneMetadata.paneList(), provider(GroupsManageKey).metadata)

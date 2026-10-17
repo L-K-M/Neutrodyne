@@ -57,10 +57,13 @@ import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
+import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.PodcastDetail
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.navigation.AddToGroupsKey
+import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeRow
@@ -150,6 +153,7 @@ internal fun PodcastScreen(
     onUnsubscribeRequest: () -> Unit,
     onConfirmUnsubscribe: () -> Unit,
     onDismissUnsubscribe: () -> Unit,
+    onRemoveGroup: (Group) -> Unit,
     modifier: Modifier = Modifier,
     live: State<Map<Long, RowLive>> = rememberUpdatedState(emptyMap()),
     onVisibleIds: (Set<Long>) -> Unit = {},
@@ -167,6 +171,7 @@ internal fun PodcastScreen(
         Unit
     }
     val detail = state.detail
+    val navigator = LocalAppNavigator.current
     // The offline banner is a real list item before the header: the title only joins the
     // top bar once the header itself scrolled off, so its index shifts when offline.
     val headerIndex = if (state.offline) 1 else 0
@@ -220,7 +225,13 @@ internal fun PodcastScreen(
             // LazyColumn stays unmounted until the first page settles.
             items.loadState.refresh is LoadState.Loading && items.itemCount == 0 -> {
                 Column(Modifier.fillMaxSize()) {
-                    PodcastHeader(detail = detail, nowMs = nowMs)
+                    PodcastHeader(
+                        detail = detail,
+                        nowMs = nowMs,
+                        groups = state.groups,
+                        onRemoveGroup = onRemoveGroup,
+                        onAddToGroups = { navigator.push(AddToGroupsKey(listOf(detail.id))) },
+                    )
                     FeedStateBanner(
                         detail = detail,
                         nowMs = nowMs,
@@ -265,7 +276,15 @@ internal fun PodcastScreen(
                     offlineBannerItem(state.offline)
                     item(key = "header", contentType = "header") {
                         Column {
-                            PodcastHeader(detail = detail, nowMs = nowMs)
+                            PodcastHeader(
+                                detail = detail,
+                                nowMs = nowMs,
+                                groups = state.groups,
+                                onRemoveGroup = onRemoveGroup,
+                                onAddToGroups = {
+                                    navigator.push(AddToGroupsKey(listOf(detail.id)))
+                                },
+                            )
                             FeedStateBanner(
                                 detail = detail,
                                 nowMs = nowMs,

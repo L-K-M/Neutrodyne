@@ -12,12 +12,14 @@ import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
+import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.ShowType
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
+import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
@@ -32,6 +34,8 @@ import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionAction
 import ch.lkmc.neutrodyne.core.ui.MarkPlayedOption
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.action_undo
+import ch.lkmc.neutrodyne.core.ui.resources.podcast_removed_from_group
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.take
@@ -55,6 +59,7 @@ class PodcastViewModelTest : MainDispatcherTest() {
     private val podcasts = FakePodcastRepository()
     private val feeds = FakeFeedRepository()
     private val episodes = FakeEpisodeRepository()
+    private val groups = FakeGroupRepository()
     private val liveSource = FakeEpisodeLiveStateSource()
     private val refreshController = FakeRefreshController()
     private val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
@@ -66,6 +71,7 @@ class PodcastViewModelTest : MainDispatcherTest() {
             podcasts,
             feeds,
             episodes,
+            groups,
             refreshController,
             UnsubscribeUseCase(podcasts, FakeNewEpisodePoster()),
             network,
@@ -76,6 +82,9 @@ class PodcastViewModelTest : MainDispatcherTest() {
     private fun TestScope.collect(viewModel: PodcastViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
     }
+
+    private suspend fun FakeGroupRepository.createId(name: String): Long =
+        (create(GroupDraft(name)) as Outcome.Success).value
 
     @Test
     fun episodeSelectionUsesTheSharedBulkPlayedService() =
@@ -495,6 +504,109 @@ class PodcastViewModelTest : MainDispatcherTest() {
             assertTrue(
                 viewModel.uiState.value.messages
                     .isNotEmpty(),
+            )
+        }
+
+    /** The header's membership chips follow `observeGroupsOf(podcastId)` (05 Membership). */
+    @Test
+    fun membershipsFlowIntoTheHeaderChips() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            podcasts.detail.value = testPodcastDetail(7)
+            val tech = groups.createId("tech")
+            val news = groups.createId("news")
+            groups.members.value = mapOf(tech to setOf(7L), news to setOf(1L))
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf("tech"),
+                viewModel.uiState.value.groups
+                    .map { it.name },
+            )
+
+            groups.members.value = mapOf(tech to setOf(7L), news to setOf(1L, 7L))
+            advanceUntilIdle()
+            assertEquals(
+                listOf("tech", "news"),
+                viewModel.uiState.value.groups
+                    .map { it.name },
+            )
+        }
+
+    /** The chip's trailing "x" applies just that membership's removal and offers its Undo (D6). */
+    @Test
+    fun removeFromGroupDropsOnlyThatMembershipAndOffersUndo() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            val tech = groups.createId("tech")
+            val news = groups.createId("news")
+            groups.members.value = mapOf(tech to setOf(7L), news to setOf(7L))
+            advanceUntilIdle()
+
+            viewModel.removeFromGroup(groups.groups.value.first { it.id == tech })
+            advanceUntilIdle()
+
+            assertEquals(emptySet(), groups.members.value[tech])
+            assertEquals(setOf(7L), groups.members.value[news])
+            val message =
+                viewModel.uiState.value.messages
+                    .single()
+            val text = message.text as UiText.Res
+            assertEquals(Res.string.podcast_removed_from_group, text.id)
+            assertEquals(listOf("tech"), text.args)
+            assertEquals(Res.string.action_undo, (message.action as UiText.Res).id)
+        }
+
+    /** Undo re-adds exactly the membership the snackbar reported — nothing neighbouring. */
+    @Test
+    fun undoRestoresOnlyTheRemovedMembership() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            val tech = groups.createId("tech")
+            val news = groups.createId("news")
+            groups.members.value = mapOf(tech to setOf(7L), news to setOf(7L))
+            advanceUntilIdle()
+
+            viewModel.removeFromGroup(groups.groups.value.first { it.id == tech })
+            advanceUntilIdle()
+            val undoId =
+                viewModel.uiState.value.messages
+                    .single()
+                    .id
+
+            viewModel.onMessageAction(undoId)
+            advanceUntilIdle()
+            assertEquals(setOf(7L), groups.members.value[tech])
+            assertEquals(setOf(7L), groups.members.value[news])
+
+            // A spent Undo id is a no-op, as is one for a dismissed snackbar.
+            viewModel.onMessageAction(undoId)
+            viewModel.onMessageAction(undoId + 999)
+            advanceUntilIdle()
+            assertEquals(setOf(7L), groups.members.value[tech])
+        }
+
+    /**
+     * A group deleted between render and tap (05's NotFound race) needs no snackbar: the
+     * requested end state already holds and the observed flow has dropped the chip.
+     */
+    @Test
+    fun removeFromAGoneGroupStaysQuiet() =
+        runTest {
+            val viewModel = viewModel()
+            collect(viewModel)
+            advanceUntilIdle()
+            groups.createId("stale")
+            val stale = groups.groups.value.single()
+            groups.groups.value = emptyList()
+            viewModel.removeFromGroup(stale)
+            advanceUntilIdle()
+            assertTrue(
+                viewModel.uiState.value.messages
+                    .isEmpty(),
             )
         }
 
