@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.FeedSourceRef
 import ch.lkmc.neutrodyne.core.model.FeedTab
 import ch.lkmc.neutrodyne.core.ui.FeedDates
+import ch.lkmc.neutrodyne.core.ui.SwipeConfig
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import kotlinx.collections.immutable.ImmutableList
@@ -35,6 +36,7 @@ public data class FeedsUiState(
     val visitBaselines: ImmutableMap<FeedSource, Long> = persistentMapOf(),
     val filters: FeedFilters = FeedFilters(),
     val rowSwipe: Boolean = false,
+    val swipe: SwipeConfig? = null,
     val offline: Boolean = false,
     val refreshing: Boolean = false,
     val hasSubscriptions: Boolean = true,

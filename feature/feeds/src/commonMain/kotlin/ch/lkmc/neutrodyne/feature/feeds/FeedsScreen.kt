@@ -34,12 +34,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.itemContentType
 import androidx.paging.compose.itemKey
 import ch.lkmc.neutrodyne.core.designsystem.components.NdBanner
-import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdPullToRefresh
@@ -52,6 +52,7 @@ import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeRow
 import ch.lkmc.neutrodyne.core.ui.EpisodeRowStyle
+import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionController
 import ch.lkmc.neutrodyne.core.ui.FeedFilterChips
 import ch.lkmc.neutrodyne.core.ui.LocalDrawnReporter
 import ch.lkmc.neutrodyne.core.ui.ReportVisibleEpisodeIds
@@ -59,7 +60,6 @@ import ch.lkmc.neutrodyne.core.ui.RowCaps
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.offlineBannerItem
 import ch.lkmc.neutrodyne.core.ui.resources.Res
-import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_more
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_add_url
@@ -94,9 +94,8 @@ internal fun FeedPage(
     live: State<Map<Long, RowLive>> = rememberUpdatedState(emptyMap()),
     onVisibleIds: (Set<Long>) -> Unit = {},
     visitBaseline: Long? = null,
+    selection: EpisodeSelectionController? = null,
 ) {
-    var confirmMarkAll by rememberSaveable { mutableStateOf(false) }
-
     Column(modifier = modifier.fillMaxSize()) {
         NdPullToRefresh(isRefreshing = state.refreshing, onRefresh = onRefresh) {
             if (!state.hasSubscriptions) {
@@ -112,32 +111,18 @@ internal fun FeedPage(
             } else {
                 FeedList(
                     state = state,
+                    selection = selection,
                     items = items,
                     live = live,
                     onVisibleIds = onVisibleIds,
                     onRefresh = onRefresh,
                     onFiltersChange = onFiltersChange,
                     onAction = onAction,
-                    onMarkAllPlayedClick = { confirmMarkAll = true },
+                    onMarkAllPlayedClick = onMarkAllPlayedClick,
                     visitBaseline = visitBaseline,
                 )
             }
         }
-    }
-
-    if (confirmMarkAll) {
-        NdDialog(
-            onDismissRequest = { confirmMarkAll = false },
-            icon = NdIcons.DoneAll,
-            title = stringResource(Res.string.feeds_mark_all_played),
-            confirm =
-                NdDialogAction(stringResource(Res.string.feeds_mark_all_played)) {
-                    confirmMarkAll = false
-                    onMarkAllPlayedClick()
-                },
-            dismiss =
-                NdDialogAction(stringResource(Res.string.action_cancel)) { confirmMarkAll = false },
-        )
     }
 }
 
@@ -154,7 +139,14 @@ private fun FeedList(
     onAction: (EpisodeAction) -> Unit,
     onMarkAllPlayedClick: () -> Unit,
     visitBaseline: Long?,
+    selection: EpisodeSelectionController?,
 ) {
+    val selectedIds =
+        selection
+            ?.ids
+            ?.collectAsStateWithLifecycle()
+            ?.value
+            .orEmpty()
     val listState = rememberLazyListState()
     val refreshState = items.loadState.refresh
 
@@ -272,11 +264,29 @@ private fun FeedList(
                             row = item.row,
                             live = rowLive,
                             style = EpisodeRowStyle.FEED,
-                            caps = RowCaps.FULL.copy(offline = state.offline),
+                            caps =
+                                RowCaps.FULL.copy(
+                                    offline = state.offline,
+                                    swipe = state.swipe.takeIf { selectedIds.isEmpty() },
+                                ),
                             highlightNew =
                                 item.row.isNew && visitBaseline != null && item.row.firstSeenAt > visitBaseline,
-                            selected = null,
-                            onAction = onAction,
+                            selected = selectedIds.takeIf { it.isNotEmpty() }?.contains(item.row.id),
+                            onAction = { action ->
+                                when {
+                                    action is EpisodeAction.ExtendSelection && selection != null -> {
+                                        selection.extend(action.episodeId, items.itemSnapshotList.items.episodeIds())
+                                    }
+
+                                    action is EpisodeAction.Select && selection != null -> {
+                                        selection.toggle(action.episodeId)
+                                    }
+
+                                    else -> {
+                                        onAction(action)
+                                    }
+                                }
+                            },
                         )
                     }
 
@@ -406,3 +416,5 @@ private val DAY_TOP = 16.dp
 private val DAY_BOTTOM = 4.dp
 private val FOOTER_PAD = 16.dp
 private val FOOTER_SPINNER = 32.dp
+
+internal fun List<FeedItem>.episodeIds(): List<Long> = filterIsInstance<FeedItem.Episode>().map { it.row.id }

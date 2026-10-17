@@ -399,4 +399,91 @@
     <string name="groups_new">New group</string>
     <string name="groups_manage">Manage groups</string>
     <string name="groups_empty">No groups yet</string>
+    <string name="mark_played_all">All</string>
+    <string name="mark_played_week">Older than 1 week</string>
+    <string name="mark_played_month">Older than 1 month</string>
+    <string name="mark_played_three_months">Older than 3 months</string>
+    <string name="mark_played_confirm">Mark as played</string>
+    <string name="mark_played_counting">Counting episodes…</string>
+    <string name="mark_played_selection_changed">The selection changed. Check the new count and confirm again.</string>
+    <string name="mark_played_no_undo">You cannot undo this action.</string>
+    <plurals name="mark_played_count">
+        <item quantity="one">Mark %1$d episode in '%2$s' as played?</item>
+        <item quantity="other">Mark %1$d episodes in '%2$s' as played?</item>
+    </plurals>
+    <string name="action_select">Select</string>
+    <string name="selection_select_all">Select all</string>
+    <string name="selection_close">Close selection</string>
+    <plurals name="selection_count">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
+    <string name="action_undo">Undo</string>
+    <string name="episode_marked_played">Marked played</string>
+    <string name="episode_marked_unplayed">Marked unplayed</string>
+
+    <!-- M2 group editor -->
+    <string name="group_edit_new">New group</string>
+    <string name="group_edit_title">Edit group</string>
+    <string name="group_edit_close">Close editor</string>
+    <string name="group_edit_name">Name</string>
+    <string name="group_edit_name_count">%1$d/%2$d</string>
+    <string name="group_edit_name_empty">Enter a name</string>
+    <string name="group_edit_name_long">Use at most %1$d characters</string>
+    <string name="group_edit_name_taken">A group named '%1$s' already exists</string>
+    <string name="group_edit_color">Colour</string>
+    <string name="group_edit_custom">Custom</string>
+    <string name="group_edit_icon">Icon</string>
+    <string name="group_edit_icon_value">Icon: %1$s</string>
+    <string name="group_edit_none">None</string>
+    <string name="group_edit_order">Play order</string>
+    <string name="group_edit_oldest_hint">Play oldest first?</string>
+    <string name="group_edit_tab">Show as a tab in Feeds</string>
+    <string name="group_edit_members">Members (%1$d)</string>
+    <string name="group_edit_search">Search subscribed podcasts</string>
+    <string name="group_edit_no_members">No matching podcasts</string>
+    <string name="group_edit_delete">Delete group</string>
+    <string name="group_edit_deleted">Group deleted</string>
+    <string name="group_edit_undo">Undo</string>
+    <string name="group_edit_discard_prompt">Discard changes?</string>
+    <string name="group_edit_discard">Discard</string>
+    <string name="group_edit_gone">This group no longer exists</string>
+    <string name="group_edit_undo_expired">Too late to undo</string>
+    <string name="group_edit_undo_name_taken">A group named '%1$s' already exists. Rename it, then tap Undo</string>
+
+    <!-- M2 manage groups -->
+    <string name="groups_manage_title">Manage groups</string>
+    <string name="groups_manage_empty">No groups yet</string>
+    <string name="groups_manage_empty_body">Create a group to organise your podcasts.</string>
+    <string name="groups_manage_changed">Groups changed, try again</string>
+    <string name="groups_manage_up">Move up</string>
+    <string name="groups_manage_down">Move down</string>
+    <string name="groups_manage_top">Move to top</string>
+    <!-- M2 effective settings and contextual notification permission. -->
+    <string name="section_notifications">Notifications</string>
+    <string name="section_refresh">Refresh</string>
+    <string name="new_episode_notifications">New episodes</string>
+    <string name="setting_inherit">Inherit</string>
+    <string name="setting_on">On</string>
+    <string name="setting_off">Off</string>
+    <string name="setting_podcast_override">Set for this podcast</string>
+    <string name="setting_app_default">App default</string>
+    <string name="setting_from_group">From group '%1$s'</string>
+    <string name="setting_from_two_groups">From groups '%1$s' and '%2$s'</string>
+    <string name="setting_from_groups">From %1$d groups</string>
+    <string name="setting_groups_title">Groups determining this value</string>
+    <string name="setting_invalid_value">Choose a supported value</string>
+    <string name="notifications_blocked">Notifications are blocked</string>
+    <string name="notifications_open_settings">Open settings</string>
+
+    <!-- M2 group settings -->
+    <string name="group_settings_title">Group settings</string>
+    <string name="group_settings_named_title">Group settings · %1$s</string>
+    <string name="setting_use_default">Use default (%1$s, %2$s)</string>
+    <plurals name="notification_new_episodes">
+        <item quantity="one">%1$d new episode</item>
+        <item quantity="other">%1$d new episodes</item>
+    </plurals>
+    <string name="notification_episode_line">%1$s — %2$s</string>
+    <string name="notification_other_podcasts">Other podcasts</string>
 </resources>

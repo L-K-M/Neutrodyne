@@ -10,6 +10,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.PodcastSettingsKey
 import ch.lkmc.neutrodyne.core.ui.UiText
+import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.resolve
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_removed
@@ -36,6 +37,7 @@ internal fun PodcastSettingsRoute(key: PodcastSettingsKey) {
     val navigator = LocalAppNavigator.current
     val snackbar = LocalSnackbarHost.current
     val scope = rememberCoroutineScope()
+    val notifications = LocalPlatformActions.current.notifications
 
     LaunchedEffect(state.gone) {
         if (state.gone) {
@@ -49,6 +51,8 @@ internal fun PodcastSettingsRoute(key: PodcastSettingsKey) {
         onCustomTitle = viewModel::setCustomTitle,
         onOrderChange = viewModel::setOrder,
         onIncludeInAll = viewModel::setIncludeInAll,
+        onRefreshInterval = viewModel::setRefreshIntervalMinutes,
+        onNotifications = { viewModel.setNotifyNewEpisodes(it, notifications) },
         // The edit-URL dialog shows this failure inline and stays open; `null` closes it.
         onEditFeedUrl = { input ->
             when (val outcome = viewModel.editFeedUrl(input)) {
