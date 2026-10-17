@@ -629,6 +629,53 @@ class ImportCommitTest {
             assertTrue(item.originalUrl.contains("feeds.private.example.com"))
         }
 
+    @Test
+    fun wrappedUrlsStoreCredentialsAgainstTheResolvedHttpOrigin() =
+        runTest {
+            val sid =
+                seedSession(
+                    items =
+                        listOf(
+                            item(1, "feed:https://u:s1@h1.example.com/f", normalizedUrl = "https://h1.example.com/f"),
+                            item(2, "feed://u:s2@h2.example.com/f", normalizedUrl = "https://h2.example.com/f"),
+                            item(3, "pcast://u:s3@h3.example.com/f", normalizedUrl = "https://h3.example.com/f"),
+                            item(4, "podcast://u:s4@h4.example.com/f", normalizedUrl = "https://h4.example.com/f"),
+                            item(5, "itpc://u:s5@h5.example.com/f", normalizedUrl = "https://h5.example.com/f"),
+                            item(
+                                6,
+                                "neutrodyne://subscribe?url=https%3A%2F%2Fu%3As6%40h6.example.com%2Ff",
+                                normalizedUrl = "https://h6.example.com/f",
+                            ),
+                            item(7, "https://u:s7@h7.example.com/f", normalizedUrl = "https://h7.example.com/f"),
+                        ),
+                )
+
+            assertIs<Outcome.Success<*>>(committer.confirm(sid))
+
+            for (n in 1..7) {
+                val stored =
+                    assertNotNull(
+                        secrets.get("https://h$n.example.com"),
+                        "credentials of item $n must reach the resolved http origin",
+                    )
+                assertEquals("u", stored.username)
+                assertEquals("s$n", stored.secret.concatToString())
+                assertNotNull(
+                    assertNotNull(db.podcastDao().byFeedKey("h$n.example.com/f")).credentialId,
+                    "podcast for item $n links its credential",
+                )
+            }
+            val passwords = (1..7).map { "s$it" }
+            val committedUrls =
+                db.importDao().itemsOf(sid).map { it.originalUrl } +
+                    db.podcastDao().allForExport().map { it.feedUrl } +
+                    db.podcastDao().allForExport().flatMap { db.podcastDao().aliases(it.id) }.map { it.url }
+            assertTrue(
+                committedUrls.none { url -> passwords.any(url::contains) },
+                "no password survives in committed URLs or aliases",
+            )
+        }
+
     // --- Session/options gates ----------------------------------------------------------------------
 
     @Test

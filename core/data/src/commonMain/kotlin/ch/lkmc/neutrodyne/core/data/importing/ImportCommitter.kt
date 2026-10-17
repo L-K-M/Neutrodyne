@@ -10,6 +10,8 @@ import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.Redactor
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.data.add.AddInputNormalizer
+import ch.lkmc.neutrodyne.core.data.add.NormalizedInput
 import ch.lkmc.neutrodyne.core.data.credentials.removeUnreferenced
 import ch.lkmc.neutrodyne.core.database.ImportItemEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
@@ -185,15 +187,22 @@ internal class ImportCommitter(
         // 05 §6 step 1: outside any Room transaction, inside the coordinator — selected items
         // whose originalUrl carried userinfo get their credentials stored against the ORIGINAL
         // request's origin (the host they were sent to; 03's same rule in subscribe).
+        // AddInputNormalizer re-runs classify's unwrapping — feed:/pcast://podcast://itpc:// and
+        // the subscribe pages — so its clean URL and extracted credentials decide the put;
+        // splitUserInfo/origin on the raw wrapper URL never parse (a feed:/itpc: scheme is not
+        // the bare http(s) they accept) and would silently drop the credentials.
         val puts = HashMap<Int, CredentialPut>()
         for (work in plan.work) {
             if (work !is Work.New) continue
-            val userInfo = UrlNormalizer.splitUserInfo(work.item.originalUrl).second ?: continue
-            val origin = UrlNormalizer.origin(work.item.originalUrl) ?: continue
+            val normalized =
+                AddInputNormalizer.normalize(work.item.originalUrl) as? NormalizedInput.Url
+                    ?: continue
+            val credentials = normalized.credentials ?: continue
+            val origin = UrlNormalizer.origin(normalized.url) ?: continue
             puts[work.ordinal] =
                 CredentialPut(
                     origin = origin,
-                    rowId = secrets.put(origin, userInfo.username, userInfo.password.toCharArray()),
+                    rowId = secrets.put(origin, credentials.username, credentials.password.toCharArray()),
                 )
         }
 
