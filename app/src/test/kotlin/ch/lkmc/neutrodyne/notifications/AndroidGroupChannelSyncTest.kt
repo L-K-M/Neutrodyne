@@ -42,9 +42,13 @@ class AndroidGroupChannelSyncTest {
     private val manager = application.getSystemService(NotificationManager::class.java)
     private val shadowManager = shadowOf(manager)
     private var pending = emptySet<String>()
+    private var beforeTokenRead: suspend () -> Unit = {}
     private val groups =
         object : GroupRepository by FakeGroupRepository() {
-            override suspend fun pendingUndoUuids(): Set<String> = pending
+            override suspend fun pendingUndoUuids(): Set<String> {
+                beforeTokenRead()
+                return pending
+            }
         }
     private lateinit var db: NeutrodyneDatabase
     private lateinit var channels: AndroidGroupChannelSync
@@ -161,6 +165,31 @@ class AndroidGroupChannelSyncTest {
             pending = emptySet()
             channels.sync()
             assertSettings(channel(), before)
+        }
+
+    @Test
+    fun aSweepOverlappingAnUndoKeepsTheRestoredGroupsNotification() =
+        runBlocking {
+            val row = groupEntity(uuid = UUID, name = "Tech", orderKey = "a")
+            val id = db.groupDao().insert(row)
+            setNotify(id, true)
+            channels.sync()
+            post(GROUP)
+            db.groupDao().deleteGroup(id)
+            pending = setOf(UUID)
+
+            // The sweep reads the groups while the row is deleted; undo then commits and drops its
+            // token before the sweep reads the tokens.
+            beforeTokenRead = {
+                beforeTokenRead = {}
+                db.groupDao().insert(row.copy(id = id))
+                setNotify(id, true)
+                pending = emptySet()
+            }
+            channels.sync()
+
+            assertThat(channel()).isNotNull()
+            assertThat(shadowManager.size()).isEqualTo(1)
         }
 
     @Test

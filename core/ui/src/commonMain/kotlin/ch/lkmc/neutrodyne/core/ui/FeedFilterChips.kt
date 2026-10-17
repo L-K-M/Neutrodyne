@@ -10,8 +10,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.NdFilterChip
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.model.FeedFilterCapability
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.MediaFilter
+import ch.lkmc.neutrodyne.core.model.withCapabilities
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_clear_filters
 import ch.lkmc.neutrodyne.core.ui.resources.filter_downloaded
@@ -20,21 +22,21 @@ import ch.lkmc.neutrodyne.core.ui.resources.filter_unplayed
 import org.jetbrains.compose.resources.stringResource
 
 /**
- * 08 "Filter chips": Unplayed / Downloaded / In progress toggles plus a "Clear" chip while any
- * filter is active. The media and sort dropdowns and the "Last 30 days" chip arrive with the
- * screens that set them (M2+); at M1a the All feed's order is fixed NEWEST_FIRST, so no sort chip
- * renders here. Chips only filter — they never choose the group (D55).
+ * 08 filter toggles and Clear, limited to the caller's available capabilities. Media, sort and
+ * age controls live beside this row in the owning screen. Chips never choose the group (D55).
  */
 @Composable
 public fun FeedFilterChips(
     filters: FeedFilters,
     onFiltersChange: (FeedFilters) -> Unit,
+    availableFilters: Set<FeedFilterCapability>,
     modifier: Modifier = Modifier,
 ) {
+    val effective = filters.withCapabilities(availableFilters)
     val anyActive =
-        filters.unplayedOnly || filters.downloadedOnly || filters.inProgressOnly ||
-            filters.media != MediaFilter.ALL ||
-            filters.minSortDate != null
+        effective.unplayedOnly || effective.downloadedOnly || effective.inProgressOnly ||
+            effective.media != MediaFilter.ALL ||
+            effective.minSortDate != null
 
     LazyRow(
         modifier = modifier,
@@ -43,27 +45,31 @@ public fun FeedFilterChips(
     ) {
         item(key = "unplayed") {
             NdFilterChip(
-                selected = filters.unplayedOnly,
-                onClick = { onFiltersChange(filters.copy(unplayedOnly = !filters.unplayedOnly)) },
+                selected = effective.unplayedOnly,
+                onClick = { onFiltersChange(effective.copy(unplayedOnly = !effective.unplayedOnly)) },
                 label = stringResource(Res.string.filter_unplayed),
-                leadingIcon = if (filters.unplayedOnly) NdIcons.Check else null,
+                leadingIcon = if (effective.unplayedOnly) NdIcons.Check else null,
             )
         }
-        item(key = "downloaded") {
-            NdFilterChip(
-                selected = filters.downloadedOnly,
-                onClick = { onFiltersChange(filters.copy(downloadedOnly = !filters.downloadedOnly)) },
-                label = stringResource(Res.string.filter_downloaded),
-                leadingIcon = if (filters.downloadedOnly) NdIcons.Check else null,
-            )
+        if (FeedFilterCapability.DOWNLOADED in availableFilters) {
+            item(key = "downloaded") {
+                NdFilterChip(
+                    selected = effective.downloadedOnly,
+                    onClick = { onFiltersChange(effective.copy(downloadedOnly = !effective.downloadedOnly)) },
+                    label = stringResource(Res.string.filter_downloaded),
+                    leadingIcon = if (effective.downloadedOnly) NdIcons.Check else null,
+                )
+            }
         }
-        item(key = "inProgress") {
-            NdFilterChip(
-                selected = filters.inProgressOnly,
-                onClick = { onFiltersChange(filters.copy(inProgressOnly = !filters.inProgressOnly)) },
-                label = stringResource(Res.string.filter_in_progress),
-                leadingIcon = if (filters.inProgressOnly) NdIcons.Check else null,
-            )
+        if (FeedFilterCapability.IN_PROGRESS in availableFilters) {
+            item(key = "inProgress") {
+                NdFilterChip(
+                    selected = effective.inProgressOnly,
+                    onClick = { onFiltersChange(effective.copy(inProgressOnly = !effective.inProgressOnly)) },
+                    label = stringResource(Res.string.filter_in_progress),
+                    leadingIcon = if (effective.inProgressOnly) NdIcons.Check else null,
+                )
+            }
         }
         if (anyActive) {
             item(key = "clear") {
