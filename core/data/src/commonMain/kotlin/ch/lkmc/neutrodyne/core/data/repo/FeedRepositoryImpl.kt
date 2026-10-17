@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.database.FeedQueryBuilder
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.FeedRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.domain.groupCountsWindowStart
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.FeedCounts
@@ -22,7 +23,6 @@ import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedPrefs
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.FeedTab
-import ch.lkmc.neutrodyne.core.model.GroupCounts
 import ch.lkmc.neutrodyne.core.model.ShowType
 import ch.lkmc.neutrodyne.core.model.VirtualCounts
 import ch.lkmc.neutrodyne.core.model.isSupportedFeedAgeLimit
@@ -147,7 +147,7 @@ internal class FeedRepositoryImpl(
             emitAll(
                 hours().map { now ->
                     val hour = now - now.mod(FeedPrefs.HOUR_MS)
-                    val windowStart = hour - GroupCounts.WINDOW_DAYS * GroupCounts.DAY_MS
+                    val windowStart = groupCountsWindowStart(hour)
                     maxOf(initialSince + hour - initialHour, windowStart) to hour
                 },
             )

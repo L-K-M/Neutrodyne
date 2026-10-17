@@ -3,4 +3,32 @@
 <resources>
     <!-- The count read before the unsubscribe dialog is a read, not a write (94-5). -->
     <string name="read_failed">Couldn&apos;t load the data</string>
+    <string name="podcasts">Podcasts</string>
+    <string name="groups">Groups</string>
+    <string name="all">All</string>
+    <string name="ungrouped">Ungrouped</string>
+    <string name="new_group_chip">+ New group</string>
+    <string name="new_group">New group</string>
+    <string name="edit_group">Edit group</string>
+    <string name="manage_groups">Manage groups</string>
+    <string name="selected_count">%1$d selected</string>
+    <string name="exit_selection">Exit selection</string>
+    <string name="add_to_group">Add to group…</string>
+    <string name="unsubscribe">Unsubscribe</string>
+    <string name="selection_actions">Selection actions</string>
+    <string name="refresh">Refresh</string>
+    <string name="mark_played">Mark all as played…</string>
+    <string name="select_all">Select all</string>
+    <string name="select">Select</string>
+    <string name="empty_group">No podcasts in &apos;%1$s&apos;</string>
+    <string name="add_podcasts">Add podcasts</string>
+    <plurals name="unsubscribe_many">
+        <item quantity="one">Unsubscribe from %1$d podcast?</item>
+        <item quantity="other">Unsubscribe from %1$d podcasts?</item>
+    </plurals>
+    <plurals name="mark_many">
+        <item quantity="one">Mark all episodes in %1$d podcast as played?</item>
+        <item quantity="other">Mark all episodes in %1$d podcasts as played?</item>
+    </plurals>
+    <string name="group_actions">Group actions</string>
 </resources>

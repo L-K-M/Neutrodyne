@@ -486,6 +486,17 @@ Groups segment: a grid of [`GroupMosaic`](#groupmosaic-and-group-tab-label) tile
 - Overflow: Grid size, Show titles, Manage groups, Import subscriptions… (`FilePicker`, 05; on the desktop also Ctrl/Cmd+O and dropping a file on the window), Export subscriptions… (`ExportKey(null)`), Backup and restore (`BackupKey`).
 - States: loading → 12 skeleton tiles in `surfaceContainer`; empty library → onboarding empty state; filter chip with no members → "No podcasts in 'tech'" + "Add podcasts"; a selected group chip whose group was deleted → chip filter falls back to All silently; banners per [Banners and the startup gate](#banners-and-the-startup-gate) (restore running, held sync changes, foreign Android-backup snapshot, "Reconnect to {server}", import in progress, offline). Library needs no network: offline only adds the banner.
 
+Implementation note (2026-10-16, M2): D7 delivers the Library chips,
+persisted Podcasts/Groups segment, mosaic grid and selection actions. Group
+tile counts are wired to `FeedRepository.observeGroupCounts(sinceMs)`, using
+the shared domain helper for C2's hour-rounded 30-day badge window. The
+bulk mark-played confirmation names the selected podcast count; the unbounded
+episode count and age options still await D9's integration of C2's
+`FeedRepository.countUnplayed`. Group tile menus offer Edit
+(`GroupEditKey(id)`) and Manage groups (`GroupsManageKey`); the remaining
+group actions await their owning slices. The `ui.library_group_filter`
+value is a raw UUID, unlike `ui.feeds_selected_source`'s `group:` encoding.
+
 ### Podcast detail
 
 `PodcastKey(podcastId)` (subscribed) and `PodcastPreviewKey(feedUrl)` (in-memory preview, 03), `:feature:podcast`, M1 (M7 preview, M8 YouTube banner, M10 tint and shared cover).

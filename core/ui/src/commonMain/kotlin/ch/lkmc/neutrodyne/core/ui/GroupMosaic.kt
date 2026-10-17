@@ -55,14 +55,15 @@ public enum class GroupMosaicLayout { TILE, THUMBNAIL }
  * group's container tone, the first one carrying the group icon (or the name's first grapheme
  * when no icon is mapped); zero members fill the whole square. A 4 dp dot-tone stripe runs along
  * the top edge, and groups hidden from the tab row carry a `visibility_off` marker. In grids the
- * name and "unplayed · new" counts sit below the square.
+ * name and "unplayed · new" counts sit below the square. Null counts omit both their label
+ * and their announcement while a caller has no counts API.
  */
 @Composable
 public fun GroupMosaic(
     group: Group,
     members: List<GroupMosaicMember>,
-    unplayedCount: Int,
-    newCount: Int,
+    unplayedCount: Int?,
+    newCount: Int?,
     modifier: Modifier = Modifier,
     layout: GroupMosaicLayout = GroupMosaicLayout.TILE,
 ) {
@@ -161,7 +162,7 @@ public fun GroupMosaic(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = NAME_GAP),
         )
-        if (unplayedCount > 0 || newCount > 0) {
+        if (unplayedCount != null && newCount != null && (unplayedCount > 0 || newCount > 0)) {
             Text(
                 groupCountsText(unplayedCount, newCount),
                 style = MaterialTheme.typography.bodySmall,
@@ -203,16 +204,20 @@ private fun EmptyCell(
 @Composable
 private fun mosaicDescription(
     group: Group,
-    unplayedCount: Int,
-    newCount: Int,
+    unplayedCount: Int?,
+    newCount: Int?,
 ): String =
-    stringResource(
-        Res.string.group_mosaic_desc,
-        group.name,
-        pluralStringResource(Res.plurals.podcast_count, group.memberCount, group.memberCount),
-        stringResource(Res.string.group_unplayed_fmt, unplayedCount),
-        stringResource(Res.string.group_new_fmt, newCount),
-    )
+    if (unplayedCount == null || newCount == null) {
+        group.name
+    } else {
+        stringResource(
+            Res.string.group_mosaic_desc,
+            group.name,
+            pluralStringResource(Res.plurals.podcast_count, group.memberCount, group.memberCount),
+            stringResource(Res.string.group_unplayed_fmt, unplayedCount),
+            stringResource(Res.string.group_new_fmt, newCount),
+        )
+    }
 
 /** "{u} unplayed · {k} new" with zero parts dropped (08's grid label). */
 @Composable
