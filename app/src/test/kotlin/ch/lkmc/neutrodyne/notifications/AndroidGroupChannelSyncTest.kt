@@ -24,6 +24,7 @@ import ch.lkmc.neutrodyne.notifications.NewEpisodeChannels.DEFAULT_CHANNEL
 import ch.lkmc.neutrodyne.notifications.NewEpisodeChannels.GROUP_CHANNEL_PREFIX
 import ch.lkmc.neutrodyne.notifications.NewEpisodeChannels.NOTIFICATION_ID
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Before
@@ -53,7 +54,7 @@ class AndroidGroupChannelSyncTest {
         shadowOf(application).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
         shadowManager.setNotificationsEnabled(true)
         db = TestDb.inMemory(application)
-        channels = AndroidGroupChannelSync(application, db) { groups }
+        channels = AndroidGroupChannelSync(application, db, { groups }, Dispatchers.Unconfined)
     }
 
     @After

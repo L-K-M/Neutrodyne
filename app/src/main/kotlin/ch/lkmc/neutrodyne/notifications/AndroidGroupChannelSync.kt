@@ -6,6 +6,8 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.common.Dispatcher
+import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.GroupRepository
@@ -15,8 +17,10 @@ import ch.lkmc.neutrodyne.notifications.NewEpisodeChannels.NOTIFICATION_ID
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 @SingleIn(AppScope::class)
 @ContributesBinding(AppScope::class)
@@ -26,11 +30,13 @@ internal class AndroidGroupChannelSync(
     private val db: NeutrodyneDatabase,
     // The repository calls this port after writes; resolve it only when a sweep needs undo tokens.
     private val groups: () -> GroupRepository,
+    // Group writes call the port from UI scopes; keep NotificationManager binder calls off Main.
+    @Dispatcher(NeutrodyneDispatchers.IO) private val io: CoroutineDispatcher,
 ) : GroupChannelSync {
     private val manager get() = application.getSystemService(NotificationManager::class.java)
     private val mutex = Mutex()
 
-    override suspend fun sync() = mutex.withLock { reconcile() }
+    override suspend fun sync() = withContext(io) { mutex.withLock { reconcile() } }
 
     private suspend fun reconcile() {
         NewEpisodeChannels.ensureChannels(application)
@@ -56,27 +62,31 @@ internal class AndroidGroupChannelSync(
     override suspend fun onUuidChanged(
         oldUuid: String,
         newUuid: String,
-    ) = mutex.withLock {
-        if (oldUuid == newUuid) return@withLock
+    ) {
+        if (oldUuid == newUuid) return
 
-        val group = db.scopeSettingsDao().groupScopes().find { it.uuid == newUuid }
-        val old = manager.getNotificationChannel(GROUP_CHANNEL_PREFIX + oldUuid)
-        if (group?.notifyNewEpisodes == true && old != null) {
-            NewEpisodeChannels.ensureChannels(application)
-            manager.createNotificationChannel(
-                NotificationChannel(GROUP_CHANNEL_PREFIX + newUuid, group.name, old.importance).apply {
-                    this.group = CHANNEL_GROUP
-                    setSound(old.sound, old.audioAttributes)
-                    lightColor = old.lightColor
-                    enableLights(old.shouldShowLights())
-                    vibrationPattern = old.vibrationPattern
-                    enableVibration(old.shouldVibrate())
-                    setShowBadge(old.canShowBadge())
-                },
-            )
+        withContext(io) {
+            mutex.withLock {
+                val group = db.scopeSettingsDao().groupScopes().find { it.uuid == newUuid }
+                val old = manager.getNotificationChannel(GROUP_CHANNEL_PREFIX + oldUuid)
+                if (group?.notifyNewEpisodes == true && old != null) {
+                    NewEpisodeChannels.ensureChannels(application)
+                    manager.createNotificationChannel(
+                        NotificationChannel(GROUP_CHANNEL_PREFIX + newUuid, group.name, old.importance).apply {
+                            this.group = CHANNEL_GROUP
+                            setSound(old.sound, old.audioAttributes)
+                            lightColor = old.lightColor
+                            enableLights(old.shouldShowLights())
+                            vibrationPattern = old.vibrationPattern
+                            enableVibration(old.shouldVibrate())
+                            setShowBadge(old.canShowBadge())
+                        },
+                    )
+                }
+                deleteChannel(GROUP_CHANNEL_PREFIX + oldUuid)
+                reconcile()
+            }
         }
-        deleteChannel(GROUP_CHANNEL_PREFIX + oldUuid)
-        reconcile()
     }
 
     // A sweep rechecks live groups and tokens before deleting and also covers missed expiry callbacks.
