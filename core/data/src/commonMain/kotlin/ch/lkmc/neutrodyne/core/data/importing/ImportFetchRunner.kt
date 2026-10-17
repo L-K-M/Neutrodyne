@@ -45,6 +45,15 @@ import kotlin.coroutines.cancellation.CancellationException
  * the feed first never fetches it twice. The finish is a single write transaction: an item
  * requeued by a concurrent fix-up is seen, and `markDone`'s conditional write loses to a
  * committed `CANCELLED` — the done notification is then skipped.
+ *
+ * Outcomes apply under the same rules in a second transaction: a §8 fix-up can requeue an
+ * item and bump the marker while a fetch is in flight, so the write re-reads the session's
+ * marker and each item's status. Only a still-`QUEUED` item takes an outcome, and an
+ * attempt-stamping outcome is ignored when the podcast's committed `lastAttemptAt` is older
+ * than the marker it was read against — the stale outcome cannot void the retry. A run the
+ * engine finished without an outcome for a presented feed (no installed adapter can select
+ * it) ends the item `NOT_ATTEMPTED` rather than deriving it forever; a deadline-stopped
+ * report instead leaves the item queued for the retry.
  */
 @SingleIn(AppScope::class)
 @Inject
@@ -159,7 +168,13 @@ internal class ImportFetchRunner(
                 seenLock
                     .withLock { seen.toMutableMap() }
                     .apply { putAll(report.outcomes) }
-            val offline = applyOutcomes(sessionId, pending, outcomes)
+            val offline =
+                applyOutcomes(
+                    sessionId,
+                    pending,
+                    outcomes,
+                    finalizeUnselected = !report.stoppedByDeadline,
+                )
             if (offline || report.stoppedByDeadline) return ImportFetchResult.RETRY
         }
     }
@@ -178,55 +193,73 @@ internal class ImportFetchRunner(
                 return@withWriteTransaction null
             }
             val options = session.optionsJson?.let(ImportOptionsJson::decode) ?: ImportOptions()
-            val marker = options.attemptMarkerAt ?: options.committedAt ?: 0L
-            val podcasts = db.podcastDao()
             val pending = ArrayList<ImportItemEntity>()
             for (item in dao.itemsByStatus(sessionId, QUEUED_ONLY)) {
-                val identity = item.normalizedUrl?.let(UrlNormalizer::forIdentity)
-                val podcast = item.podcastId?.let { podcasts.byId(it) }
-                if (identity != null &&
-                    (podcast == null || podcast.feedKey != identity) &&
-                    podcasts.mergeAliasOwner(identity) != null
-                ) {
-                    // 02's merge repoints podcastId to the winner and leaves the consumed
-                    // feed's identity as a MERGE alias — "merged with existing".
-                    dao.setItemStatus(sessionId, item.ordinal, ImportItemStatus.MERGED, null)
-                    continue
-                }
-                if (podcast == null) {
-                    // No feed is linked: an unresolved YouTube ref stays explicitly
-                    // unsupported until M8 — it is never claimed fetched. Anything else simply
-                    // never reached a fetch.
-                    val unsupported = item.kind == ImportItemKind.YOUTUBE
-                    dao.setItemStatus(
-                        sessionId,
-                        item.ordinal,
-                        if (unsupported) ImportItemStatus.YOUTUBE_UNSUPPORTED_YET else ImportItemStatus.FETCH_FAILED,
-                        if (unsupported) null else DETAIL_NOT_ATTEMPTED,
-                    )
-                    continue
-                }
-                val attemptedAt = podcast.lastAttemptAt
-                when {
-                    podcast.needsCredentials -> {
-                        dao.setItemStatus(sessionId, item.ordinal, ImportItemStatus.AUTH_REQUIRED, null)
-                    }
-
-                    podcast.gone -> {
-                        dao.setItemStatus(sessionId, item.ordinal, ImportItemStatus.GONE, null)
-                    }
-
-                    attemptedAt == null || attemptedAt < marker -> {
-                        pending += item
-                    }
-
-                    else -> {
-                        writeRowStatus(sessionId, item, podcast, options.treatExistingAsPlayed)
-                    }
+                if (finalizeItem(sessionId, item, options) == ItemVerdict.PENDING) {
+                    pending += item
                 }
             }
             pending
         }
+
+    /**
+     * One `QUEUED` row's verdict under the caller's write transaction — every terminal row of
+     * 05 §7's table (merge-alias repoint, missing link, blocked row, marker-passed podcast) or
+     * [ItemVerdict.PENDING] when the podcast has no attempt at/after [options]' marker. The
+     * outcome sweep reuses it so a feed the engine could never select still ends on a status.
+     */
+    private suspend fun finalizeItem(
+        sessionId: Long,
+        item: ImportItemEntity,
+        options: ImportOptions,
+    ): ItemVerdict {
+        val dao = db.importDao()
+        val podcasts = db.podcastDao()
+        val marker = options.attemptMarkerAt ?: options.committedAt ?: 0L
+        val identity = item.normalizedUrl?.let(UrlNormalizer::forIdentity)
+        val podcast = item.podcastId?.let { podcasts.byId(it) }
+        if (identity != null &&
+            (podcast == null || podcast.feedKey != identity) &&
+            podcasts.mergeAliasOwner(identity) != null
+        ) {
+            // 02's merge repoints podcastId to the winner and leaves the consumed
+            // feed's identity as a MERGE alias — "merged with existing".
+            dao.setItemStatus(sessionId, item.ordinal, ImportItemStatus.MERGED, null)
+            return ItemVerdict.FINALISED
+        }
+        if (podcast == null) {
+            // No feed is linked: an unresolved YouTube ref stays explicitly
+            // unsupported until M8 — it is never claimed fetched. Anything else simply
+            // never reached a fetch.
+            val unsupported = item.kind == ImportItemKind.YOUTUBE
+            dao.setItemStatus(
+                sessionId,
+                item.ordinal,
+                if (unsupported) ImportItemStatus.YOUTUBE_UNSUPPORTED_YET else ImportItemStatus.FETCH_FAILED,
+                if (unsupported) null else DETAIL_NOT_ATTEMPTED,
+            )
+            return ItemVerdict.FINALISED
+        }
+        val attemptedAt = podcast.lastAttemptAt
+        when {
+            podcast.needsCredentials -> {
+                dao.setItemStatus(sessionId, item.ordinal, ImportItemStatus.AUTH_REQUIRED, null)
+            }
+
+            podcast.gone -> {
+                dao.setItemStatus(sessionId, item.ordinal, ImportItemStatus.GONE, null)
+            }
+
+            attemptedAt == null || attemptedAt < marker -> {
+                return ItemVerdict.PENDING
+            }
+
+            else -> {
+                writeRowStatus(sessionId, item, podcast, options.treatExistingAsPlayed)
+            }
+        }
+        return ItemVerdict.FINALISED
+    }
 
     /** The marker-passed row's final status — the row column of 05 §7's outcome table. */
     private suspend fun writeRowStatus(
@@ -269,34 +302,66 @@ internal class ImportFetchRunner(
     /**
      * The run's outcomes — the report plus collected events — applied in one transaction.
      * `OFFLINE` is no outcome: the item stays QUEUED and the caller retries the run.
+     *
+     * The transaction re-reads what changed while the fetch was in flight: the session (a
+     * cancel or a §8 fix-up's bumped marker), each item's status (a fix-up's terminal write
+     * wins) and the podcast's committed attempt stamp. Only a still-`QUEUED` item takes an
+     * outcome, and only an outcome backed by `lastAttemptAt` at/after that marker can
+     * finalise it — a pre-marker outcome is stale and the item stays queued for the retry.
+     * `Merged` and `Deferred` are exempt: one deletes the podcast row it proves, the other
+     * never stamps an attempt.
+     *
+     * [finalizeUnselected] is the report's own fact — the run finished, so a presented feed
+     * with no outcome was never selectable (no installed adapter): the item finalises through
+     * [finalizeItem]'s table, `NOT_ATTEMPTED` when nothing else applies. `false` (a
+     * deadline-stopped or unowned report) leaves it queued for the retry instead.
      */
     private suspend fun applyOutcomes(
         sessionId: Long,
         pending: List<ImportItemEntity>,
         outcomes: Map<Long, FeedOutcome>,
+        finalizeUnselected: Boolean,
     ): Boolean {
-        if (outcomes.isEmpty()) return false
-        val byPodcast = HashMap<Long, ImportItemEntity>(pending.size)
-        for (item in pending) {
-            item.podcastId?.let { byPodcast[it] = item }
-        }
+        val unselected =
+            if (finalizeUnselected) {
+                pending.filterTo(HashSet()) { it.podcastId == null || it.podcastId !in outcomes }
+            } else {
+                emptySet()
+            }
+        if (outcomes.isEmpty() && unselected.isEmpty()) return false
         var sawOffline = false
         db.withWriteTransaction {
             val dao = db.importDao()
-            val treatAsPlayed =
-                dao
-                    .sessionById(sessionId)
-                    ?.optionsJson
-                    ?.let(ImportOptionsJson::decode)
-                    ?.treatExistingAsPlayed == true
+            // A deleted session leaves nothing to write against; a cancelled one still
+            // records what its committed fetches did (05 §7's cancel semantics).
+            val session = dao.sessionById(sessionId) ?: return@withWriteTransaction
+            val options = session.optionsJson?.let(ImportOptionsJson::decode) ?: ImportOptions()
+            val marker = options.attemptMarkerAt ?: options.committedAt ?: 0L
+            val podcasts = db.podcastDao()
+            val queued = dao.itemsByStatus(sessionId, QUEUED_ONLY).associateBy { it.ordinal }
+            val ordinalsByPodcast = HashMap<Long, Int>(pending.size)
+            for (item in pending) {
+                item.podcastId?.let { ordinalsByPodcast[it] = item.ordinal }
+            }
             for ((podcastId, outcome) in outcomes) {
-                val item = byPodcast[podcastId] ?: continue
+                val item = ordinalsByPodcast[podcastId]?.let { queued[it] } ?: continue
                 if (outcome is FeedOutcome.Failed && outcome.kind == FeedErrorKind.OFFLINE) {
                     sawOffline = true
                     continue
                 }
+                val attemptProven =
+                    outcome is FeedOutcome.Merged ||
+                        outcome is FeedOutcome.Deferred ||
+                        podcasts.byId(podcastId)?.lastAttemptAt?.let { it >= marker } == true
+                if (!attemptProven) continue
                 val derived = statusForOutcome(outcome, item.kind) ?: continue
-                writeStatus(sessionId, item, derived.first, derived.second, treatAsPlayed)
+                writeStatus(sessionId, item, derived.first, derived.second, options.treatExistingAsPlayed)
+            }
+            for (stale in unselected) {
+                val item = queued[stale.ordinal] ?: continue
+                if (finalizeItem(sessionId, item, options) == ItemVerdict.PENDING) {
+                    dao.setItemStatus(sessionId, item.ordinal, ImportItemStatus.FETCH_FAILED, DETAIL_NOT_ATTEMPTED)
+                }
             }
         }
         return sawOffline
@@ -452,6 +517,9 @@ internal class ImportFetchRunner(
 
     /** [finish]'s verdict inside its transaction. */
     private enum class Finish { DONE, STILL_QUEUED, NOT_ACTIVE }
+
+    /** [finalizeItem]'s verdict for one `QUEUED` row inside the caller's write transaction. */
+    private enum class ItemVerdict { PENDING, FINALISED }
 
     private companion object {
         const val TAG = "ImportFetchRunner"

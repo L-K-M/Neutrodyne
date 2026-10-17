@@ -9,8 +9,10 @@ import ch.lkmc.neutrodyne.core.data.importing.ImportOptionsJson
 import ch.lkmc.neutrodyne.core.data.notifications.NewEpisodeNotifier
 import ch.lkmc.neutrodyne.core.data.refresh.AdapterResult
 import ch.lkmc.neutrodyne.core.data.settings.EffectiveSettingsResolverImpl
+import ch.lkmc.neutrodyne.core.database.EpisodePositionEntity
 import ch.lkmc.neutrodyne.core.database.ImportItemEntity
 import ch.lkmc.neutrodyne.core.database.ImportSessionEntity
+import ch.lkmc.neutrodyne.core.model.AliasReason
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportItemKind
@@ -18,6 +20,7 @@ import ch.lkmc.neutrodyne.core.model.ImportItemStatus
 import ch.lkmc.neutrodyne.core.model.ImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
+import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeImportReportPoster
@@ -25,11 +28,17 @@ import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
+import ch.lkmc.neutrodyne.core.testing.database.queueEntryEntity
+import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -410,6 +419,63 @@ class ImportFetchRunnerTest {
             assertEquals(1, reports.posts.size)
         }
 
+    @Test
+    fun aMarkerBumpDuringTheFetchRefetchesTheItem() =
+        runTest {
+            // A §8 retry fix-up lands after the in-flight fetch's attempt stamp committed
+            // but before its outcome reached the runner: the pre-marker outcome must not
+            // finalise the item — the loop derives it pending again and refetches.
+            val a = pendingPodcast(FEED_A)
+            val sessionId = newSession()
+            queueItem(sessionId, ordinal = 0, url = FEED_A, podcastId = a)
+
+            var bumped = false
+            val fixupAdapter =
+                stubAdapter(
+                    results =
+                        mutableMapOf(
+                            FEED_A to
+                                adapterParsed(
+                                    parsedFeed(
+                                        items = listOf(parsedEpisode(0, guid = "a", pubDate = NOW)),
+                                    ),
+                                ),
+                        ),
+                    announce = { podcastId, _, ids ->
+                        if (podcastId == a && !bumped) {
+                            bumped = true
+                            db.withWriteTransaction {
+                                val dao = db.importDao()
+                                dao.requeueItems(sessionId, listOf(0))
+                                clock.nowMs += 1
+                                dao.setOptionsJson(
+                                    sessionId,
+                                    ImportOptionsJson.encode(
+                                        ImportOptions(
+                                            committedAt = MARKER,
+                                            attemptMarkerAt = clock.now(),
+                                        ),
+                                    ),
+                                )
+                                dao.setState(sessionId, ImportState.FETCHING)
+                            }
+                        }
+                        ids
+                    },
+                )
+            val fixupRunner = runnerFor(fixupAdapter)
+
+            assertEquals(ImportFetchResult.COMPLETED, fixupRunner.run(sessionId, attempt = 0))
+
+            assertEquals(
+                2,
+                fixupAdapter.calls.count { it.first == a },
+                "the bumped marker demands a fresh attempt, not the stale outcome",
+            )
+            assertItem(sessionId, 0, ImportItemStatus.SUBSCRIBED)
+            assertSessionDone(sessionId)
+        }
+
     // --- Unresolved YouTube rows ---------------------------------------------------------------------
 
     @Test
@@ -429,6 +495,184 @@ class ImportFetchRunnerTest {
 
             assertTrue(adapter.calls.isEmpty())
             assertItem(sessionId, 0, ImportItemStatus.YOUTUBE_UNSUPPORTED_YET)
+            assertSessionDone(sessionId)
+        }
+
+    @Test
+    fun aLinkedPodcastNoAdapterSelectsEndsNotAttempted() =
+        runTest {
+            // Restore (and later M8) can link a QUEUED item to a non-RSS podcast: no bound
+            // adapter can ever select it, so the run must finalise the item instead of
+            // deriving it forever. The bound time is wall-clock — without a termination
+            // path the loop spins.
+            val channel =
+                seedPodcast(
+                    db,
+                    feedUrl = "https://www.youtube.com/feeds/videos.xml?channel_id=UCx",
+                    status = PodcastStatus.PENDING_FIRST_FETCH,
+                    initialFetch = true,
+                    subscribedAt = MARKER - 1,
+                    block = { copy(sourceType = SourceType.YOUTUBE_CHANNEL) },
+                )
+            val sessionId = newSession()
+            queueItem(
+                sessionId,
+                ordinal = 0,
+                url = "https://www.youtube.com/channel/UCx",
+                podcastId = channel,
+                kind = ImportItemKind.YOUTUBE,
+            )
+
+            val result =
+                withContext(Dispatchers.Default) {
+                    withTimeoutOrNull(15_000) { runner.run(sessionId, attempt = 0) }
+                }
+
+            assertEquals(ImportFetchResult.COMPLETED, result)
+            assertTrue(adapter.calls.isEmpty(), "an unselectable feed is never fetched")
+            assertItem(sessionId, 0, ImportItemStatus.FETCH_FAILED, "NOT_ATTEMPTED")
+            assertSessionDone(sessionId)
+        }
+
+    // --- Outcome table ------------------------------------------------------------------------------
+
+    @Test
+    fun aMergedOutcomeMarksTheItemMerged() =
+        runTest {
+            // The fetched feed's permanent URL is already subscribed: 02's merge keeps the
+            // winner, deletes the loser and repoints the item — §7's outcome column reads
+            // MERGED.
+            val winner =
+                seedPodcast(
+                    db,
+                    feedUrl = FEED_A,
+                    status = PodcastStatus.ACTIVE,
+                    subscribedAt = MARKER - 1,
+                )
+            val loser = pendingPodcast(FEED_B)
+            val sessionId = newSession()
+            queueItem(sessionId, ordinal = 0, url = FEED_B, podcastId = loser)
+            adapter.results[FEED_B] =
+                adapterParsed(
+                    parsedFeed(items = listOf(parsedEpisode(0, guid = "b", pubDate = NOW))),
+                    meta = fetchMeta(finalUrl = FEED_B, requestedUrl = FEED_B, permanentUrl = FEED_A),
+                )
+
+            assertEquals(ImportFetchResult.COMPLETED, runner.run(sessionId, attempt = 0))
+
+            assertItem(sessionId, 0, ImportItemStatus.MERGED)
+            assertSessionDone(sessionId)
+            assertNull(db.podcastDao().byId(loser), "the merge deletes the consumed row")
+            val item = db.importDao().itemsOf(sessionId).single { it.ordinal == 0 }
+            assertEquals(winner, item.podcastId, "02's merge repoints the item at the winner")
+            assertTrue(
+                db.podcastDao().aliases(winner).any {
+                    it.url == UrlNormalizer.forIdentity(FEED_B) && it.reason == AliasReason.MERGE
+                },
+                "the consumed feed identity stays a MERGE alias of the winner",
+            )
+        }
+
+    @Test
+    fun aDeferredOutcomeFailsAsDeferredWithoutAnAttemptStamp() =
+        runTest {
+            // 04's "not attempted; retry later" outcome: §7 maps it to the DEFERRED bucket —
+            // terminal for this run, and it never stamps `lastAttemptAt`.
+            val podcastId = pendingPodcast(FEED_A)
+            val sessionId = newSession()
+            queueItem(sessionId, ordinal = 0, url = FEED_A, podcastId = podcastId)
+            adapter.results[FEED_A] = AdapterResult.Deferred(NOW + 60_000)
+
+            assertEquals(ImportFetchResult.COMPLETED, runner.run(sessionId, attempt = 0))
+
+            assertItem(sessionId, 0, ImportItemStatus.FETCH_FAILED, "DEFERRED")
+            assertNull(db.podcastDao().byId(podcastId)!!.lastAttemptAt)
+            assertSessionDone(sessionId)
+        }
+
+    @Test
+    fun blockedPodcastsFinaliseFromTheRowWithoutAFetch() =
+        runTest {
+            // The loop's termination for feeds the engine will not select: `gone` and
+            // `needsCredentials` rows derive their final status without a fetch.
+            val gonePodcast =
+                seedPodcast(
+                    db,
+                    feedUrl = FEED_A,
+                    status = PodcastStatus.ACTIVE,
+                    subscribedAt = MARKER - 1,
+                    gone = true,
+                )
+            val authPodcast =
+                seedPodcast(
+                    db,
+                    feedUrl = FEED_B,
+                    status = PodcastStatus.ACTIVE,
+                    subscribedAt = MARKER - 1,
+                    needsCredentials = true,
+                )
+            val sessionId = newSession()
+            queueItem(sessionId, ordinal = 0, url = FEED_A, podcastId = gonePodcast)
+            queueItem(sessionId, ordinal = 1, url = FEED_B, podcastId = authPodcast)
+
+            assertEquals(ImportFetchResult.COMPLETED, runner.run(sessionId, attempt = 0))
+
+            assertTrue(adapter.calls.isEmpty(), "blocked feeds are never fetched")
+            assertItem(sessionId, 0, ImportItemStatus.GONE)
+            assertItem(sessionId, 1, ImportItemStatus.AUTH_REQUIRED)
+            assertSessionDone(sessionId)
+        }
+
+    @Test
+    fun treatExistingAsPlayedMarksEveryNonNewEpisodeButTheNewest() =
+        runTest {
+            // D66: the `SUBSCRIBED` write and the mark-played chain share one transaction —
+            // every non-new episode except the newest is played, its position resets and
+            // its queue entry leaves Up next.
+            val podcastId =
+                seedPodcast(
+                    db,
+                    feedUrl = FEED_A,
+                    status = PodcastStatus.ACTIVE,
+                    subscribedAt = MARKER - 1,
+                )
+            val ids =
+                db.ingestDao().insertEpisodes(
+                    listOf(
+                        episodeEntity(podcastId = podcastId, identityKey = "e0", sortDate = NOW - 3_000),
+                        episodeEntity(podcastId = podcastId, identityKey = "e1", sortDate = NOW - 2_000),
+                        episodeEntity(podcastId = podcastId, identityKey = "e2", sortDate = NOW - 1_000),
+                    ),
+                )
+            db.positionDao().upsert(
+                EpisodePositionEntity(
+                    episodeId = ids[0],
+                    positionMs = 42_000,
+                    positionSource = PositionSource.STREAM,
+                    updatedAt = NOW,
+                ),
+            )
+            db.queueDao().insert(queueEntryEntity(episodeId = ids[0], orderKey = "q0"))
+            val sessionId =
+                newSession(
+                    options =
+                        ImportOptions(
+                            committedAt = MARKER,
+                            attemptMarkerAt = MARKER,
+                            treatExistingAsPlayed = true,
+                        ),
+                )
+            queueItem(sessionId, ordinal = 0, url = FEED_A, podcastId = podcastId)
+            adapter.results[FEED_A] = AdapterResult.Unchanged(meta = fetchMeta())
+
+            assertEquals(ImportFetchResult.COMPLETED, runner.run(sessionId, attempt = 0))
+
+            assertItem(sessionId, 0, ImportItemStatus.SUBSCRIBED)
+            assertNotNull(db.episodeStateDao().byEpisode(ids[0])?.playedAt)
+            assertNotNull(db.episodeStateDao().byEpisode(ids[1])?.playedAt)
+            assertNull(db.episodeStateDao().byEpisode(ids[2])?.playedAt, "the newest stays unplayed")
+            assertEquals(0L, db.positionDao().byEpisode(ids[0])?.positionMs)
+            assertTrue(db.queueDao().entries().isEmpty(), "played episodes leave Up next")
             assertSessionDone(sessionId)
         }
 
