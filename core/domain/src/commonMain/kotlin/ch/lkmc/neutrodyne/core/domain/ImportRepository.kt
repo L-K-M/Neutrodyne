@@ -45,6 +45,11 @@ interface ImportRepository {
         selected: Boolean,
     )
 
+    /**
+     * Edits PREVIEW options against the latest row in one transaction; later states are
+     * unchanged. Use [ImportOptions.withUserChanges] to preserve parser/worker fields and
+     * freeze a requested restore. Only [BackupRepository.restore] may request a restore.
+     */
     suspend fun updateOptions(
         sessionId: Long,
         change: (ImportOptions) -> ImportOptions,
