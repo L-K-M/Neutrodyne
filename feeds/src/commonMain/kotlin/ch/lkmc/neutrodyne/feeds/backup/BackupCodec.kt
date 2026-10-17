@@ -226,7 +226,7 @@ public class EpisodeLines internal constructor(
     AutoCloseable {
     private val input: BufferedSource = source.buffer()
 
-    /** Lines skipped so far for exceeding the line cap or failing to decode. */
+    /** Lines skipped so far for exceeding the line cap or being undecodable (UTF-8 or JSON). */
     public var skippedLines: Int = 0
         private set
 
@@ -269,12 +269,20 @@ public class EpisodeLines internal constructor(
                 }
 
                 is RawLine.Text -> {
-                    try {
-                        return json.decodeFromString<EpisodeLineV1>(line.text)
-                    } catch (e: SerializationException) {
+                    // Okio's UTF-8 decode replaces bad bytes with U+FFFD, so a line
+                    // containing it was undecodable: skip and count (05 Validation). A
+                    // literal U+FFFD in genuine content is sacrificed — the spec trades
+                    // that for "warning, not fatal".
+                    if ('\uFFFD' in line.text) {
                         skippedLines++
-                    } catch (e: IllegalArgumentException) {
-                        skippedLines++
+                    } else {
+                        try {
+                            return json.decodeFromString<EpisodeLineV1>(line.text)
+                        } catch (e: SerializationException) {
+                            skippedLines++
+                        } catch (e: IllegalArgumentException) {
+                            skippedLines++
+                        }
                     }
                 }
             }

@@ -338,6 +338,23 @@ class BackupCodecTest {
     }
 
     @Test
+    fun episodeLinesSkipMalformedUtf8() {
+        // Raw FF FE inside a string is undecodable UTF-8; 05 Validation counts the line
+        // as skipped rather than importing its replacement characters.
+        val payload =
+            Buffer()
+                .writeUtf8("{\"p\":\"a\",\"k\":\"b\",\"t\":\"")
+                .write(byteArrayOf(0xFF.toByte(), 0xFE.toByte()))
+                .writeUtf8("\",\"ts\":0}\n")
+                .writeUtf8("{\"p\":\"c\",\"k\":\"d\",\"ts\":5}\n")
+        val lines = codec.episodeLines(payload)
+        val decoded = mutableListOf<EpisodeLineV1>()
+        lines.use { l -> for (line in l) decoded += line }
+        assertEquals(listOf("d"), decoded.map { it.k })
+        assertEquals(1, lines.skippedLines)
+    }
+
+    @Test
     fun episodeLinesHandleMissingTerminatorCrlfAndBlankLines() {
         val payload = "{\"p\":\"a\",\"k\":\"b\",\"ts\":0}\r\n\r\n{\"p\":\"c\",\"k\":\"d\",\"ts\":5}"
         val lines = codec.episodeLines(sourceOf(payload))
