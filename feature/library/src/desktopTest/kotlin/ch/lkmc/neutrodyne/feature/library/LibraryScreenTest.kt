@@ -512,7 +512,8 @@ class LibraryScreenTest {
 
             onNodeWithContentDescription("Tap Show")
                 .performCustomAccessibilityActionWithLabel("Unsubscribe")
-            waitForIdle()
+            // The count read runs in the ViewModel's coroutine, which waitForIdle() does not track.
+            waitUntil { snackbarHost.currentSnackbarData != null }
 
             runOnIdle {
                 assertEquals(
