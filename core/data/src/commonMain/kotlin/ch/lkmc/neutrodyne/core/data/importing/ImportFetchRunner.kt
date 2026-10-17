@@ -130,9 +130,6 @@ internal class ImportFetchRunner(
             if (pending.isEmpty()) {
                 when (finish(sessionId)) {
                     Finish.DONE -> {
-                        // DONE committed: its effects run as one non-cancellable unit so a
-                        // host cancel landing now cannot leave a done session unannounced.
-                        withContext(NonCancellable) { announceDone(sessionId) }
                         return ImportFetchResult.COMPLETED
                     }
 
@@ -491,19 +488,24 @@ internal class ImportFetchRunner(
      * loses to a committed cancel (`NOT_ACTIVE`).
      */
     private suspend fun finish(sessionId: Long): Finish =
-        db.withWriteTransaction {
-            val dao = db.importDao()
-            when {
-                dao.queuedCount(sessionId) > 0 -> Finish.STILL_QUEUED
-                dao.markDone(sessionId, clock.now()) > 0 -> Finish.DONE
-                else -> Finish.NOT_ACTIVE
-            }
+        withContext(NonCancellable) {
+            // Room can commit DONE before delivering cancellation. Keep its marker and
+            // effects in one unit so no completed session loses its announcement.
+            val finished =
+                db.withWriteTransaction {
+                    val dao = db.importDao()
+                    when {
+                        dao.queuedCount(sessionId) > 0 -> Finish.STILL_QUEUED
+                        dao.markDone(sessionId, clock.now()) > 0 -> Finish.DONE
+                        else -> Finish.NOT_ACTIVE
+                    }
+                }
+            if (finished == Finish.DONE) announceDone(sessionId)
+            finished
         }
 
     private suspend fun finishOrDone(sessionId: Long): ImportFetchResult {
-        if (finish(sessionId) == Finish.DONE) {
-            withContext(NonCancellable) { announceDone(sessionId) }
-        }
+        finish(sessionId)
         return ImportFetchResult.COMPLETED
     }
 

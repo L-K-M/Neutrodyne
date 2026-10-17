@@ -28,10 +28,12 @@ import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.queueEntryEntity
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -56,7 +58,8 @@ import kotlin.test.assertTrue
  */
 class ImportFetchRunnerTest {
     private val clock = TestClock()
-    private val db = newDb(clock)
+    private val driver = CommitCancellingDriver()
+    private val db = TestDb.inMemory(clock = clock, driver = driver, queryContext = Dispatchers.Default)
     private val settings = FakeSettingsRepository()
     private val poster = FakeNewEpisodePoster()
     private val reports = FakeImportReportPoster()
@@ -71,6 +74,21 @@ class ImportFetchRunnerTest {
     }
 
     // --- Fetch and finish -------------------------------------------------------------------------
+
+    @Test
+    fun aCancelAtDoneCommitStillDeliversTheDoneEffects() =
+        runTest {
+            val sessionId = newSession()
+            val job = launch(Dispatchers.Default, start = CoroutineStart.LAZY) { runner.run(sessionId, attempt = 0) }
+            driver.arm("UPDATE import_session SET state = 'DONE'") { job.cancel() }
+            job.start()
+            job.join()
+
+            assertTrue(job.isCancelled)
+            assertSessionDone(sessionId)
+            assertEquals(sessionId, reports.posts.single().sessionId)
+            assertEquals(1, snapshots.requestSoonCalls)
+        }
 
     @Test
     fun anInitialImportFetchCreatesNoNewEpisodeEffects() =
