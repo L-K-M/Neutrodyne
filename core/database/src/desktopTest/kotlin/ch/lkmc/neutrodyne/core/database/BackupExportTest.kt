@@ -435,7 +435,8 @@ class BackupExportTest {
      * would drop equal shapes from `podcast` writes anyway.
      */
     @OptIn(ExperimentalCoroutinesApi::class)
-    @Test fun libraryShapeEmitsOnStructureButNotOnPositionOrPlayedWrites() =
+    @Test
+    fun libraryShapeEmitsOnStructureButNotOnPositionOrPlayedWrites() =
         runTest {
             val shapeDb = TestDb.inMemory(queryContext = StandardTestDispatcher(testScheduler))
             try {

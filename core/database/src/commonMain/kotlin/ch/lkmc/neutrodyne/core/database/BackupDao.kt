@@ -145,9 +145,210 @@ interface BackupDao {
         limit: Int,
     ): List<BackupEpisodeRow>
 
+    // --- Restore matching (02 Restore matching; merge rules owned by 05) -----------------------
+
+    /**
+     * Podcast step 1 (02): the backup `feedKey` or any backup alias against local `feedKey`s
+     * and `podcast_url_alias`es — a live `feedKey` beats alias evidence, ties by `id`.
+     * [keys] = `[key]` + the backup's aliases. (02 names the sort column `rank`; `rank` is a
+     * window-function keyword Room's parser rejects, so the column is `r` here. The outer
+     * select keeps the result single-column.)
+     */
+    @Query(
+        "SELECT id FROM (" +
+            "SELECT id, 0 AS r FROM podcast WHERE feedKey = :key" +
+            " UNION ALL SELECT id, 1 FROM podcast WHERE feedKey IN (:keys)" +
+            " UNION ALL SELECT podcastId, 2 FROM podcast_url_alias WHERE url IN (:keys)" +
+            " ORDER BY r, id LIMIT 1)",
+    )
+    suspend fun matchPodcastByKeys(
+        key: String,
+        keys: List<String>,
+    ): Long?
+
+    /**
+     * Podcast step 2 (02): the real `podcast:guid` only — a derived GUID is never match
+     * evidence (`podcastGuidDerived` rows can match on URL evidence or not at all).
+     */
+    @Query("SELECT id FROM podcast WHERE podcastGuid = :guid AND podcastGuidDerived = 0 ORDER BY id LIMIT 1")
+    suspend fun matchPodcastByRealGuid(guid: String): Long?
+
+    /** Group match, `uuid` step (02 Restore matching); the `nameKey` step is `GroupDao.groupByNameKey`. */
+    @Query("SELECT id FROM podcast_group WHERE uuid = :uuid")
+    suspend fun matchGroupByUuid(uuid: String): Long?
+
+    /**
+     * 02 Podcast syncId: a backup `syncId` is adopted for an inserted podcast only when no
+     * local row uses it — otherwise the caller supplies a fresh UUIDv4.
+     */
+    @Query("SELECT EXISTS(SELECT 1 FROM podcast WHERE syncId = :syncId)")
+    suspend fun syncIdInUse(syncId: String): Boolean
+
+    /**
+     * `EpisodeMatcher`'s first resolution (02 Reuse by sync): the podcast a record's `syncId`
+     * addresses. Redirects rewrite `syncId` in place, so even a stale record ID resolves.
+     */
+    @Query("SELECT id FROM podcast WHERE syncId = :syncId")
+    suspend fun podcastIdBySyncId(syncId: String): Long?
+
+    /**
+     * One podcast's episode-match candidates (02 Restore matching): the columns
+     * `EpisodeKeys.keyFor` needs when a line's `kv` differs from the stored version, plus
+     * `guid`/`enclosureUrl`/`identityKey` for the ladder itself.
+     */
+    @Query(
+        "SELECT id, identityKey, guid, enclosureUrl, title, pubDate, link" +
+            " FROM episode WHERE podcastId = :podcastId",
+    )
+    suspend fun restoreEpisodeCandidates(podcastId: Long): List<RestoreEpisodeCandidate>
+
+    /**
+     * `episode_description` blobs of `h:`-key candidates — loaded only on demand: a row needs
+     * its head only when some line's `kv` differs from the row's stored version AND the row's
+     * own columns fall through to the `h:` recipe (02). Chunked at the bind limit; use this,
+     * not the per-chunk primitive.
+     */
+    suspend fun descriptionBlobs(episodeIds: Collection<Long>): List<EpisodeDescriptionEntity> =
+        episodeIds.distinct().chunked(BIND_CHUNK).flatMap { descriptionBlobsChunk(it) }
+
+    /** Room primitive behind [descriptionBlobs]; callers must chunk ids at the bind limit. */
+    @Query("SELECT * FROM episode_description WHERE episodeId IN (:ids)")
+    suspend fun descriptionBlobsChunk(ids: List<Long>): List<EpisodeDescriptionEntity>
+
+    // --- Restore state and position writes (02: `BackupDao`'s own statements) ------------------
+
+    /**
+     * 05 Merge, state fields: played OR (`playedAt`/`lastPlayedAt`/`playCount` = max),
+     * favourite and download tombstone OR (tombstone time = max), `startedAt` = earliest
+     * non-null (the played-clear is the caller's `PodcastMergeDao.clearPlayedStart`),
+     * `measuredDurationMs` = local when non-null else the backup's. `updatedAt` moves to
+     * `MAX(updatedAt, :ts)` — but only when a state field actually changes, so a row whose
+     * local values all win keeps its own change time (02: a kept value leaves `updatedAt`
+     * alone) while a backup-won value stamps the line's `ts`, never now. Callers run this
+     * only for `ts != 0` lines and ensure the lazy state row first (`EpisodeStateDao.ensure`).
+     */
+    @Query(
+        "UPDATE episode_state SET" +
+            " startedAt = COALESCE(MIN(startedAt, :startedAt), startedAt, :startedAt)," +
+            " playedAt = COALESCE(MAX(playedAt, :playedAt), playedAt, :playedAt)," +
+            " playCount = MAX(playCount, :playCount)," +
+            " lastPlayedAt = COALESCE(MAX(lastPlayedAt, :lastPlayedAt), lastPlayedAt, :lastPlayedAt)," +
+            " isFavorite = MAX(isFavorite, :isFavorite)," +
+            " downloadDismissedAt = COALESCE(MAX(downloadDismissedAt, :downloadDismissedAt)," +
+            "  downloadDismissedAt, :downloadDismissedAt)," +
+            " measuredDurationMs = COALESCE(measuredDurationMs, :measuredDurationMs)," +
+            " updatedAt = MAX(updatedAt, :ts)" +
+            " WHERE episodeId = :episodeId AND (" +
+            " (:startedAt IS NOT NULL AND (startedAt IS NULL OR :startedAt < startedAt))" +
+            " OR (:playedAt IS NOT NULL AND (playedAt IS NULL OR playedAt < :playedAt))" +
+            " OR :playCount > playCount" +
+            " OR (:lastPlayedAt IS NOT NULL AND (lastPlayedAt IS NULL OR lastPlayedAt < :lastPlayedAt))" +
+            " OR :isFavorite > isFavorite" +
+            " OR (:downloadDismissedAt IS NOT NULL AND" +
+            "  (downloadDismissedAt IS NULL OR downloadDismissedAt < :downloadDismissedAt))" +
+            " OR (measuredDurationMs IS NULL AND :measuredDurationMs IS NOT NULL))",
+    )
+    suspend fun mergeState(
+        episodeId: Long,
+        startedAt: Long?,
+        playedAt: Long?,
+        playCount: Int,
+        lastPlayedAt: Long?,
+        isFavorite: Boolean,
+        downloadDismissedAt: Long?,
+        measuredDurationMs: Long?,
+        ts: Long,
+    ): Int
+
+    /**
+     * 05 Merge, position step 1 (`INSERT OR IGNORE`): an absent local row adopts the backup's
+     * position verbatim, `updatedAt = :posAt`.
+     */
+    @Query(
+        "INSERT OR IGNORE INTO episode_position(episodeId, positionMs, durationMs, positionSource, updatedAt)" +
+            " VALUES (:episodeId, :positionMs, :durationMs, :positionSource, :posAt)",
+    )
+    suspend fun ensurePositionForMerge(
+        episodeId: Long,
+        positionMs: Long,
+        durationMs: Long?,
+        positionSource: PositionSource,
+        posAt: Long,
+    ): Long
+
+    /**
+     * 05 Merge, position step 2: the newer of `posAt` and the local `updatedAt` wins — but a
+     * backup 0 or null never replaces a local non-zero position (N1), so the update fires only
+     * for a non-zero backup position against a strictly older local row (ties keep local).
+     * `durationMs`/`positionSource` travel with the winning position; the played-reset and
+     * in-progress proxy derivations are the caller's follow-up statements.
+     */
+    @Query(
+        "UPDATE episode_position SET positionMs = :positionMs, durationMs = :durationMs," +
+            " positionSource = :positionSource, updatedAt = :posAt" +
+            " WHERE episodeId = :episodeId AND :positionMs > 0 AND updatedAt < :posAt",
+    )
+    suspend fun mergePosition(
+        episodeId: Long,
+        positionMs: Long,
+        durationMs: Long?,
+        positionSource: PositionSource,
+        posAt: Long,
+    ): Int
+
+    /**
+     * 05 Replace: the backup's state row verbatim (`updatedAt = :ts`) — the Replace pre-step
+     * already deleted the matched podcasts' rows, so this normally inserts; OR REPLACE keeps a
+     * re-run idempotent. Callers run it only for `ts != 0` lines: a `ts = 0` line under Replace
+     * leaves the row absent (= unplayed).
+     */
+    @Query(
+        "INSERT OR REPLACE INTO episode_state(episodeId, startedAt, playedAt, playCount, lastPlayedAt," +
+            " isFavorite, downloadDismissedAt, measuredDurationMs, updatedAt)" +
+            " VALUES (:episodeId, :startedAt, :playedAt, :playCount, :lastPlayedAt, :isFavorite," +
+            " :downloadDismissedAt, :measuredDurationMs, :ts)",
+    )
+    suspend fun replaceState(
+        episodeId: Long,
+        startedAt: Long?,
+        playedAt: Long?,
+        playCount: Int,
+        lastPlayedAt: Long?,
+        isFavorite: Boolean,
+        downloadDismissedAt: Long?,
+        measuredDurationMs: Long?,
+        ts: Long,
+    ): Long
+
+    /** 05 Replace: the backup's position verbatim (`updatedAt = :posAt`); absent = none. */
+    @Query(
+        "INSERT OR REPLACE INTO episode_position(episodeId, positionMs, durationMs, positionSource, updatedAt)" +
+            " VALUES (:episodeId, :positionMs, :durationMs, :positionSource, :posAt)",
+    )
+    suspend fun replacePosition(
+        episodeId: Long,
+        positionMs: Long,
+        durationMs: Long?,
+        positionSource: PositionSource,
+        posAt: Long,
+    ): Long
+
+    /**
+     * 05 Replace pre-step (HISTORY, one transaction per podcast): the matched podcasts' local
+     * `episode_state`/`episode_position` rows go before the backup's rows are written.
+     */
+    @Query("DELETE FROM episode_state WHERE episodeId IN (SELECT id FROM episode WHERE podcastId = :podcastId)")
+    suspend fun deleteStateOfPodcast(podcastId: Long): Int
+
+    @Query("DELETE FROM episode_position WHERE episodeId IN (SELECT id FROM episode WHERE podcastId = :podcastId)")
+    suspend fun deletePositionsOfPodcast(podcastId: Long): Int
+
     companion object {
         /** 02 Backup export: episodes stream in keyset chunks of 1,000. */
         const val EPISODE_CHUNK = 1000
+
+        /** 02 Transactions and threading: `IN (:ids)` lists are chunked at 500 bound variables. */
+        private const val BIND_CHUNK = 500
     }
 }
 
@@ -271,4 +472,20 @@ data class BackupEpisodeRow(
     val positionSource: PositionSource?,
     val positionUpdatedAt: Long?,
     val downloaded: Boolean,
+)
+
+/**
+ * One stored episode as a restore-match candidate (02 Restore matching): `identityKey`,
+ * `guid` and `enclosureUrl` serve the ladder steps directly; `title`/`pubDate`/`link` feed
+ * `EpisodeKeys.keyFor` when a line's `kv` differs from the stored version (an `h:` row then
+ * also needs its `episode_description` head, loaded on demand by [BackupDao.descriptionBlobs]).
+ */
+data class RestoreEpisodeCandidate(
+    val id: Long,
+    val identityKey: String,
+    val guid: String?,
+    val enclosureUrl: String?,
+    val title: String,
+    val pubDate: Long?,
+    val link: String?,
 )
