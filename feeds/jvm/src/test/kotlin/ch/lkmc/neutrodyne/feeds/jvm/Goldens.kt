@@ -23,15 +23,21 @@ object Goldens {
             explicitNulls = false
         }
 
-    /** The corpus tree: a plain data directory of `:feeds`, consumed through a test-resources srcDir. */
-    val fixturesDir: File
+    private val rootDir: File
         get() =
             File(
                 checkNotNull(System.getProperty("neutrodyne.rootDir")) {
                     "neutrodyne.rootDir is unset; run tests through Gradle (TestConventions sets it)"
                 },
-                "feeds/src/test/resources/feeds",
             )
+
+    /** The corpus tree: a plain data directory of `:feeds`, consumed through a test-resources srcDir. */
+    val fixturesDir: File
+        get() = File(rootDir, "feeds/src/test/resources/feeds")
+
+    /** The OPML writer goldens under `feeds/src/test/resources/opml/writer/`. */
+    val opmlWriterDir: File
+        get() = File(rootDir, "feeds/src/test/resources/opml/writer")
 
     fun fixture(name: String): File = File(fixturesDir, name)
 
@@ -65,6 +71,27 @@ object Goldens {
         check(goldenFile.isFile) { "missing golden file ${goldenFile.path}; run with -PupdateGoldens" }
         // `actual` is generated LF-only; read back LF too (.gitattributes pins eol=lf, but a
         // checkout that overrode attributes locally must still compare equal).
+        val expected = goldenFile.readText().replace("\r\n", "\n")
+        check(actual == expected) {
+            "golden mismatch for $name\n--- expected ---\n$expected\n--- actual ---\n$actual"
+        }
+    }
+
+    /**
+     * Text (non-JSON) golden comparison for the OPML writer corpus, with [assertMatches]'s update and
+     * line-ending semantics. Reads back LF-only, like [assertMatches].
+     */
+    fun assertTextMatches(
+        name: String,
+        actual: String,
+    ) {
+        val goldenFile = File(opmlWriterDir, name)
+        if (updateRequested()) {
+            goldenFile.parentFile.mkdirs()
+            goldenFile.writeText(actual)
+            return
+        }
+        check(goldenFile.isFile) { "missing golden file ${goldenFile.path}; run with -PupdateGoldens" }
         val expected = goldenFile.readText().replace("\r\n", "\n")
         check(actual == expected) {
             "golden mismatch for $name\n--- expected ---\n$expected\n--- actual ---\n$actual"

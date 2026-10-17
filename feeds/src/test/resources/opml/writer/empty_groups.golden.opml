@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0" xmlns:nd="urn:neutrodyne:opml:1">
+  <head>
+    <title>Neutrodyne subscriptions</title>
+    <dateCreated>Sun, 04 Oct 2026 21:30:00 GMT</dateCreated>
+    <docs>http://opml.org/spec2.opml</docs>
+  </head>
+  <body>
+    <outline text="fiction" title="fiction" nd:groupColor="#673AB7" nd:groupIcon="auto_stories"/>
+    <outline text="plain" title="plain"/>
+  </body>
+</opml>
