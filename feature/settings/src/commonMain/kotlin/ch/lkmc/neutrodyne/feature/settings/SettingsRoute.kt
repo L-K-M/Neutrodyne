@@ -22,9 +22,9 @@ internal fun SettingsRoute(
     platform: PlatformKind,
 ) {
     when (key.page) {
-        SettingsPage.APPEARANCE -> AppearancePage(settings, dynamicColorSupport)
+        SettingsPage.APPEARANCE -> AppearancePage(settings, dynamicColorSupport, platform)
         SettingsPage.FEEDS -> FeedsPage(platform)
         SettingsPage.ABOUT -> AboutPage(buildInfo)
-        else -> AppearancePage(settings, dynamicColorSupport)
+        else -> AppearancePage(settings, dynamicColorSupport, platform)
     }
 }

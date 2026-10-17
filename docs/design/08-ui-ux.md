@@ -72,7 +72,7 @@ interface FilePicker { suspend fun pickFile(mimeTypes: List<String>, extensions:
                        suspend fun pickFolder(): String? }                                                 // desktop only; null on Android
 fun interface FileSaver { suspend fun create(suggestedName: String, mimeType: String): String? }         // URI to write, or null (cancelled)
 fun interface RevealInFolder { fun reveal(path: String): Boolean }
-interface NotificationPermissionRequester { val granted: Boolean; fun request(onResult: (Boolean) -> Unit) }
+interface NotificationPermissionRequester { val granted: Boolean; fun request(onResult: (Boolean) -> Unit); fun openSettings() }
 val LocalPlatformActions = staticCompositionLocalOf<PlatformActions> { error("provided by the shell") }
 ```
 
@@ -83,7 +83,14 @@ val LocalPlatformActions = staticCompositionLocalOf<PlatformActions> { error("pr
 | `FilePicker` | `OpenDocument` (`pickFolder` → null; SAF folders are v1.x) | macOS `FileDialog`, Windows `JFileChooser`, Linux XDG portal `FileChooser` ([11 Download folders](11-desktop.md#download-folders)) |
 | `FileSaver` | `CreateDocument(mimeType)` | the same dialogs in save mode |
 | `RevealInFolder` | — | [11 Show in folder](11-desktop.md#show-in-folder) |
-| `NotificationPermissionRequester` | `RequestPermission(POST_NOTIFICATIONS)` on API 33+, `granted` true below | — (macOS asks at the first notification, [11 Notifications](11-desktop.md#notifications)) |
+| `NotificationPermissionRequester` | `RequestPermission(POST_NOTIFICATIONS)` on API 33+; null below; `openSettings()` → `ACTION_APP_NOTIFICATION_SETTINGS` | — (macOS asks at the first notification, [11 Notifications](11-desktop.md#notifications)) |
+
+**Implementation note (2026-10-16, M2):** D8a retains the existing null requester
+below API 33, matching the `PlatformActions` sample's Android-13-only member
+and hiding permission controls there. This replaces the table's former
+“granted true below” wording. The requester remembers a previous request on
+this device, so denial leads to Open settings rather than another system
+dialog; `granted` is refreshed when the activity resumes from settings.
 
 `NO_HANDLER` shows "No app can open this link" with "Copy link" everywhere ([Show notes renderer](#show-notes-renderer)).
 
@@ -436,6 +443,18 @@ Startup metric (Android): the Feeds route calls `ReportDrawnWhen { selectedPage.
 
 A three-column grid of [`GroupMosaic`](#groupmosaic-and-group-tab-label) tiles: section "Recent" (up to 4 groups by `lastViewedAt`) then "All groups" A–Z (`TitleCollator`), including groups with `showAsTab = false` (marked with `visibility_off`). Tap → select that group in Feeds (hidden groups become a [transient tab](#selection-persistence-and-fallback)) and close. Buttons: "New group" → `GroupEditKey(null)`, "Manage groups" → `GroupsManageKey`. Empty: "No groups yet" + "New group".
 
+**Implementation note (2026-10-16, M2):** D2b writes the UUID-based
+`ui.feeds_selected_source` through `SettingsRepository`, the same application
+API the pager uses. The sheet closes after a successful write; a failed write
+keeps it open and shows the shared write-error message inside the sheet.
+Recent includes groups with a visit time and breaks equal times by title.
+The picker remains reachable when every group is hidden: the All-only tab row
+stays visible while groups exist. With no groups and only All, that row is absent.
+The shared overlay supports a half-height initial detent for `AllGroupsKey`;
+short content uses Material's available anchors. Other sheet keys retain their
+fully expanded initial detent. The desktop sheet focuses New group on open;
+the window surface handles scrim dismissal and returns focus on close.
+
 ### Library
 
 `LibraryKey`, `:feature:library`, M1 (grid), M2 (groups, chips, selection), M10 (density, shared elements).
@@ -466,6 +485,17 @@ Groups segment: a grid of [`GroupMosaic`](#groupmosaic-and-group-tab-label) tile
 - Selection mode actions: Add to group… (`AddToGroupsKey(ids)`), Unsubscribe (confirmation "Unsubscribe from 3 podcasts? 12 downloaded episodes will be deleted." → `UnsubscribeUseCase`), Refresh (`refreshNow(Podcasts(ids))`), Mark all played (per podcast `markFeedPlayed(Podcast(id), null)`, confirmation with count), Select all.
 - Overflow: Grid size, Show titles, Manage groups, Import subscriptions… (`FilePicker`, 05; on the desktop also Ctrl/Cmd+O and dropping a file on the window), Export subscriptions… (`ExportKey(null)`), Backup and restore (`BackupKey`).
 - States: loading → 12 skeleton tiles in `surfaceContainer`; empty library → onboarding empty state; filter chip with no members → "No podcasts in 'tech'" + "Add podcasts"; a selected group chip whose group was deleted → chip filter falls back to All silently; banners per [Banners and the startup gate](#banners-and-the-startup-gate) (restore running, held sync changes, foreign Android-backup snapshot, "Reconnect to {server}", import in progress, offline). Library needs no network: offline only adds the banner.
+
+Implementation note (2026-10-16, M2): D7 delivers the Library chips,
+persisted Podcasts/Groups segment, mosaic grid and selection actions. Group
+tile counts are wired to `FeedRepository.observeGroupCounts(sinceMs)`, using
+the shared domain helper for C2's hour-rounded 30-day badge window. The
+bulk mark-played confirmation names the selected podcast count; the unbounded
+episode count and age options still await D9's integration of C2's
+`FeedRepository.countUnplayed`. Group tile menus offer Edit
+(`GroupEditKey(id)`) and Manage groups (`GroupsManageKey`); the remaining
+group actions await their owning slices. The `ui.library_group_filter`
+value is a raw UUID, unlike `ui.feeds_selected_source`'s `group:` encoding.
 
 ### Podcast detail
 
@@ -538,6 +568,15 @@ Groups segment: a grid of [`GroupMosaic`](#groupmosaic-and-group-tab-label) tile
 
 Each override row opens a chooser whose first option is "Use default ({effective inherited value}, {source})" ([`AttributionText`](#attribution-text)); choosing it writes `null` through `updatePodcast { it.copy(field = null) }`. Data: 05's `ScopeSettingsRepository.observePodcast` (`ScopedSettingsView`: `own`, `effective`, `sources`, `groupHints`) and 03's `observeFeedInfo`; `observePodcast` emitting null pops the screen. Rows a YouTube channel cannot use in the current capability state (`SettingSource.NotSupported`, e.g. auto-download in external mode) are hidden, not disabled, and reappear when capabilities change (the screen observes them). Writes that return 01's `SettingsError.OutOfRange` show the field's inline error (cannot happen from the fixed choosers; defensive).
 
+**Implementation note (2026-10-16, M2):** D8a adds the podcast notification
+switch and the refresh/notification choosers, with “Inherit” as their first
+option. B3's M2 `ScopedSettingsView` exposes the current effective value and
+source but no inherited-value preview under an active override, so the chooser
+does not preview that value. Choosing Inherit clears only that field; the row
+then shows the newly resolved value and attribution. The switch toggles the
+notification wish directly; tapping its row also offers Inherit / On / Off.
+The group settings screen follows in D8b.
+
 ### Episode detail
 
 `EpisodeKey(episodeId)`, `:feature:episode`, M1 (M4 actions, M5 chapters and timestamp seeks, M6 downloads, M8 YouTube).
@@ -595,6 +634,18 @@ Each override row opens a chooser whose first option is "Use default ({effective
 - Save: `create(draft, memberIds)` or `update` + `setMembers`; result errors shown inline; success pops the screen.
 - Delete: `GroupRepository.delete` → pop, snackbar "Deleted 'tech'" with Undo for 10 s (`undoDelete(token)`), no confirmation dialog (undo instead, R2.1).
 
+**Implementation note (2026-10-16, M2):** D4 uses the entry's `SavedStateHandle`
+through the existing Metro assisted ViewModel factory and Navigation 3 store
+owner. The draft and its original baseline are saved as primitive string lists,
+so restored edits still trigger the discard prompt. Editing saves Rename, Look,
+Orders (preserving the current feed order), ShowAsTab, then `setMembers`; a failed
+step leaves the draft open for retry, since the existing targeted repository
+writes are separate transactions. Per D4's requested copy, the delete confirmation
+is "Group deleted"; the name is retained for an Undo name-conflict message. One
+10-second deadline covers snackbar queueing and retries after the editor pops.
+D8b adds the existing-group footer’s Group settings link through
+`GroupSettingsKey`; the editor draft remains intact while settings is open.
+
 ### Manage groups
 
 `GroupsManageKey`, `:feature:groups`, M2.
@@ -611,9 +662,38 @@ Each override row opens a chooser whose first option is "Use default ({effective
 
 A reorderable list (`sh.calvin.reorderable` 3.1.0, multiplatform; mouse drags work the same on the desktop): drag handle, 48 dp mosaic, name, "14 unplayed · 3 new", "Hidden from Feeds" label when `showAsTab = false`, overflow (Edit, Group settings, Show in Feeds toggle, Delete). FAB "New group". Drop → `GroupRepository.reorder(idsInOrder)`; failure (`NotFound`, list changed meanwhile) → reload and snackbar "Groups changed, try again". Accessibility: custom actions "Move up", "Move down", "Move to top" ([Custom actions catalogue](#custom-actions-catalogue)), also in the row's context menu and as Alt+↑ / Alt+↓ on the focused row ([Keyboard and mouse](#keyboard-and-mouse)). A drop or move writes new `orderKey`s for the moved row only (05), so a concurrent sync reorder of another row merges. Empty: "No groups yet" + "New group" + the [suggested groups card](#suggested-groups-card) when it has suggestions.
 
+**Implementation note (2026-10-16, M2):** D5 installs the Manage groups list
+and editor navigation; the All groups sheet remains a separate PR. Rows show
+member counts, since the C2 unplayed/new counts source is not on this branch.
+Visibility reuses B4's “Not shown as tab” copy.
+The shared `GroupMosaic` has a thumbnail layout for the 48 dp row artwork.
+The list previews moves without writes and commits one permutation on release,
+rebasing the moved row onto the latest repository order. A changed ID set
+cancels the drag with “Groups changed, try again”. Alt+arrows, accessibility
+and context-menu moves share the drop path. Delete reuses D4's ten-second
+Undo handler without popping the list. Another Delete is disabled until the
+pending Undo snackbar finishes, preserving each deletion's Undo window.
+D8b wires Group settings in the row overflow and context menu.
+The suggested-groups card awaits D11, as in the milestone split.
+B1's permutation-only API cannot distinguish which row was dragged in an
+adjacent swap: its deterministic longest-increasing-subsequence tie-break
+may update the neighbour's key instead. D5 preserves that contract and the
+one-key-write guarantee; identifying the dragged row in every tie would
+require a separate repository API change.
+
 ### Group settings
 
 `GroupSettingsKey(groupId)`, `:feature:groups`, M2 (refresh, notifications), M4 (speed, skip silence), M6 (auto-download, delete after played). Layout as [Podcast settings](#podcast-settings) without General/Feed/YouTube; the view settings (filters, order, hide older than) are edited from the Feeds page, not here. Auto-download's dependent rows are disabled with "Turn on auto-download for this group first" until the group's own auto-download is on (05 rule 1). When the group contains YouTube channels and `capabilities.downloads` is false (external mode), the auto-download section adds the line "YouTube channels in this group aren't downloaded: {short external-reason text}" ([External reason texts](#external-reason-texts)); the resolver excludes those channels (`SettingSource.NotSupported`, 05). With the engine (from M9a) the section adds "YouTube channels keep {n} (YouTube default)" when the group does not set its own keep count (04 [Auto-download for YouTube](04-youtube.md#auto-download-for-youtube)).
+
+**Implementation note (2026-10-16, M2):** D8b installs `GroupSettingsKey`
+and both entry points: Manage groups overflow and the existing-group editor
+footer. It reuses D8a's attribution, interval labels, chooser and blocked
+notification notice. Only Refresh interval and New episodes are editable;
+all writes use `ScopeSettingsRepository.updateGroup`. The group’s source is
+`Group(self)` or `AppDefault`, as specified in 05. Unlike the podcast's merged
+inheritance, a group inherits only app defaults, so its “Use default” option
+previews the live default value and attribution even under an own override.
+Manual only writes 0; clearing writes null. Deleted groups pop the route.
 
 ### Add to groups sheet
 
@@ -1426,6 +1506,19 @@ Entered by long-press, Ctrl/Cmd-click or the "Select" overflow or context-menu a
 | Stop importing? | Cancel while FETCHING | Stop (→ `ImportRepository.cancel`) · Keep importing |
 | Discard Android backup? (Android) | `foreignPending` banner or Backup page | Discard (→ `discardAndroidBackup()`) · Cancel |
 
+**Implementation note (2026-10-16, M2):** D9's shared `MarkFeedPlayedDialog`
+and ViewModel-owned `MarkFeedPlayedController` live in `:core:ui`. Features pass
+count/write callbacks and map domain outcomes, preserving 01's rule that
+`:core:ui` does not depend on `:core:domain`. All uses a null cutoff. The other
+options freeze an instant when selected: seven calendar days, one calendar
+month or three calendar months before now in UTC, preserving the time of day
+and clamping month ends. Count and guarded write reuse that instant. While
+counting, confirmation is unavailable; a zero count also has no confirm action.
+A changed selection shows its new count and asks again without writing.
+Errors stay in the dialog for retry; dismissing never writes. Confirmation has
+no undo. The ViewModel retains state across composition recreation; process
+recreation closes the dialog and requires a fresh count.
+
 The sync dialogs (unlink, delete my data, share feed passwords, held changes, restore while linked, first-link confirmations, local-network rationale, insecure connection) are specified in [Sync screens](#sync-screens). All dialogs are `NdDialog` (window-based), keep their input in `rememberSaveable`, and close on back or Esc; on the desktop the default button answers Enter, and destructive actions are never the default. Destructive confirm buttons use the `error` colour role.
 
 ### String mappers
@@ -1705,6 +1798,23 @@ encoding without depending on a feature module. Canonical UUID references
 round-trip; malformed values decode to All. Resolving a valid but unknown UUID
 and the selection fallback remain D1/D2 UI work.
 
+**Implementation note (2026-10-16, M2):** D1 delivers pager state while the
+route continues to render All; tab/pager rendering and lifecycle visit calls
+arrive in D2. `FeedsUiState.prefs` describes the selected source, while its
+compatibility `filters` field describes the rendered All page. The source-keyed
+cache uses B2's `pagedFeed(source)` helper to observe and compare effective
+filters/order before replacing a pager. Per-entry child scopes own `cachedIn`.
+The ViewModel exposes both the union live map and `liveBySource` projections,
+and `visitBaselines` retains each page's visit-start highlight baseline.
+Each changed stored reference waits for fresh tab and group emissions, so a
+route immediately after creating or restoring a group cannot reject a valid
+UUID using a previous observer snapshot. A successful explicit re-settle also
+resolves unchanged stored values after a failed fallback. Visit baseline reads
+wait for that source's previous visit write; visible-ID disposal retains its
+last source mapping even after a transient tab disappears. An evicted paging
+flow is cancelled: D2 must reacquire `pagingFor` when its page returns,
+including pages retained by Compose during a fling.
+
 ### Selection persistence and fallback
 
 ```mermaid
@@ -1735,6 +1845,26 @@ stateDiagram-v2
 - Scroll memory per page: one `rememberSaveableStateHolder()` hoisted to the Feeds route (outside the pager); each page is wrapped in `holder.SaveableStateProvider(ref.encode())` and uses `rememberLazyListState()`, so a page keeps its position after being disposed by the pager, across tab switches and process death. When a group disappears from the tabs, `holder.removeState(ref.encode())` drops its state. A page composes its `LazyColumn` only once its `LazyPagingItems` has a non-empty snapshot or `loadState.refresh` is `NotLoading` (skeleton rows before), so a restored `LazyListState` index is not clamped to 0 by an empty first measure; with placeholders enabled (05's `PagingConfig`) the restored index then shows placeholders until Paging loads around it.
 - Lists: `items(count, key = itemKey { … }, contentType = itemContentType { … })` with keys `"d:{epochDay}"` for day headers and the episode `id` (`Long`) for rows, and content types Day 0, RSS row 1, YouTube row 2 (05 asks for distinct types for 16:9 thumbnails); placeholders render skeleton rows.
 
+**Implementation note (2026-10-16, M2):** D2 renders the shared pager and
+source-scoped chips/refresh, with the saveable-state holder owned by the route.
+Only current ± 1 pages collect paging flows, even if Compose retains extra
+pages during a fling; returning pages reacquire the ViewModel cache entry.
+The list state is independent of paging generations, including an hourly
+age-window replacement. The computed age cutoff stays out of chip filters,
+because only the separate age-limit action can clear it. Virtual tab names are localized by source, rather than
+using the repository's English metadata titles. The row-swipe key gates pager
+gestures here; row gesture actions and their settings UI remain D10, and counted
+bulk-action dialogs remain D9.
+
+**Implementation note (2026-10-16, M2):** Compose Desktop 1.12.1's
+`StateRestorationTester.emulateSaveAndRestore()` throws `NotImplementedError`
+in `platformEncodeDecode`. `FeedsScreenTest` therefore round-trips its
+`SaveableStateRegistry` with primitive values and String pager keys,
+including recreating the ViewModel over persisted selection. The Android host
+`FeedsRestorationHostTest` additionally runs the real `StateRestorationTester`
+Bundle round trip for selected-page and scroll restoration. Actual process
+termination and native desktop input checks remain device coverage.
+
 ### Header, chips and actions
 
 The first list item of every page is the header: `NdTonalButton` "Play" (subtitle "oldest first" when `playOrder = OLDEST_FIRST`), [`FeedFilterChips`](#filter-chips) and the page overflow ([Feeds](#feeds)). It scrolls away, so the pinned chrome is the top bar plus the tab row (112 dp). Play results are shown per [Issues, results and events](#issues-results-and-events).
@@ -1751,6 +1881,15 @@ Each page is wrapped in `NdPullToRefresh` (`PullToRefreshBox`); a pull calls `Re
 | on | off | on (actions from `appearance.swipe_start_action` / `swipe_end_action`) | same |
 
 Both gestures never coexist half-working (`SwipeToDismissBox` would capture horizontal drags inside pages, risk U1). The pager node exposes custom accessibility actions "Next group" and "Previous group" (M2 acceptance 8); with a hardware keyboard Ctrl+Tab / Ctrl+Shift+Tab switch pages (both apps). On the desktop rows never swipe (the setting is hidden), the pager follows a touchpad's horizontal two-finger scroll and Shift+wheel, and the tabs, the All groups sheet and Ctrl+Tab are the main ways to switch; a mouse drag does not page (Unverified default of the multiplatform `HorizontalPager` for mouse input; if it pages, `userScrollEnabled` stays as specified above).
+
+**Implementation note (2026-10-16, M2):** D10 adds Android row swipes and
+Appearance gesture controls. The stored start/end defaults remain `ADD_UP_NEXT`
+and `MARK_PLAYED`. Queue actions (M4) and download actions (M6) are hidden in
+the chooser and inert when stored; their effective setting reads "None"
+without rewriting the saved value. `MARK_PLAYED` toggles played/unplayed.
+Only its tertiary-container background is needed in M2; add/delete backgrounds
+arrive with their actions. Rows commit only on release past 40 % of their
+width, regardless of fling velocity. Desktop rows ignore `caps.swipe`.
 
 ### Visits and new episodes
 
@@ -2673,6 +2812,7 @@ Shared screens are written once against `:core:testing` fakes and run as `runCom
 | `InstallHelpScreenTest` (Android sections on Robolectric; desktop sections common with a desktop `PlatformInfo`) | Android: the BUILDS card shows its two statements (public key, possible reinstall) and nothing about debuggable builds, USB debugging data access or smoothness; the ADVANCED card ends with "Turn USB debugging off again afterwards."; the CHECK card shows the three commands and no certificate value; `InstallHelpKey("ALLOW")` opens the browser-install steps expanded (PLAN M11 acceptance 13). Desktop: only desktop sections; the running OS's section first and expanded; the macOS section says "after every update" and offers the `xattr` command; the Windows section names SmartScreen "Run anyway" and Smart App Control; `SCREEN_READERS` carries the Java Access Bridge fallback and 11's Linux statement verbatim (MD4 AC4) | M11a, MD5 |
 | `UpdateNoticesRootTest` (`FakeUpdateNotices`) | `FIRST_RUN_CHOICE` → first-run card on Feeds (OK dismisses, Turn off writes `updates.check_enabled = false` with Undo writing `true`); `VERIFICATION_ENFORCEMENT` → `VerificationNoticeKey` once, pre- and post-enforcement variant by the timeline's global date, both buttons dismiss, no date without one from the timeline; nothing while the startup gate is up or the player is expanded; at most one notice per process start | M11a |
 | `LibraryScreenTest` | density columns at 360 dp; chip filter including Ungrouped; selection → `AddToGroupsKey`; unsubscribe confirmation text | M1, M2 |
+| `GroupsManageScreenTest`, `GroupsManageViewModelTest` (`:feature:groups` desktop) | mouse drag previews without writes, one reorder call on drop; Alt+arrows and accessibility/context-menu moves; show-as-tab; editor/create navigation; delete/Undo; concurrent flow reconciliation and changed-list recovery | M2 |
 | `AddToGroupsSheetTest` | tri-state chips from memberships; only changed chips sent to `applyMembership`; inline group creation | M2 |
 | `PlayerSheetTest` | anchors from measured content bottom; expand/collapse by tap and fling; dismiss only while paused (the `Dismissed` anchor disappears when playback starts); suite hidden only after settle; back collapses the sheet before `NavDisplay` pops (fake `NavigationState`); saveable state; "Mark played and skip" calls only `setPlayed` (fake controller records no `skipToNext`); resizing across 840 dp switches between the side panel and the sheet without touching playback (desktop) | M4, MD1 |
 | `ExportAndBackupFlowTest` | `prepare` → private-links warning shown only when `privateLinks`/`passwords` > 0 → save via `FileSaver.create(export.fileName, export.mimeType)` (Android `CreateDocument`; desktop a fake save dialog) or, on Android, the share chooser; Cancel leaves no destination write; backup `preflight` → warning → `CreateDocument` → `createBackup`; `foreignPending` banner Restore/Discard | M3 |
@@ -2805,7 +2945,7 @@ Serves N1, N4, N6. Expected failures arrive as values (01 [Errors](01-foundation
 
 1. The Feeds destination is the single All page: the group tab row and pager, tab/selection persistence, visit tracking and the overflow's "Hide older than…" and group entries arrive with M2's groups. The page header's Play button waits for M4's `PlaybackController`, and the row's Play/Download actions dispatch but are inert until M4/M6 bind their controllers (the offline toast of note 7 aside).
 2. The spec's "paged lists show `LoadState.Error` as a footer row" is replaced by the pinned `NdBanner` under the top bar for every non-empty-list load error — append, prepend and refresh with rows on screen (revised 2026-10-14). With 05's placeholders the append footer can sit thousands of unloaded rows away and a prepend failure has no footer at all, and keeping the footer alongside the banner showed the same error twice at the list end. Retry replays every failed load through `items.retry()`; the empty first-page failure keeps the standalone `EmptyState` with Retry.
-3. The Feeds overflow's "Mark all as played…" is the plain confirm/cancel `NdDialog` of the Library note above (same reason: no `countUnplayed` or cutoff options until M2), covering the whole feed via `markFeedPlayed(FeedSource.All, null)`. Its open confirmation is saveable across composition recreation.
+3. The Feeds overflow originally used the Library note's plain confirm/cancel `NdDialog`. **Implementation note (2026-10-16, M2):** D9 replaces it with the shared counted dialog, using the page's `FeedSource` (including All and Ungrouped). The ViewModel retains the open confirmation across composition recreation; options freeze a cutoff and stale selections require confirmation of the updated count.
 4. Settings › Feeds is reachable through the Settings home row only, its summary the live refresh interval; the row order's remaining M1 entries arrive with their milestones. On the desktop the Wi-Fi-only row stays visible with the "Not used on computers" line ([Shared pages](#settings-screens), 11's Android-only-row rule for rows users may look for) while refresh-on-open — an Android foreground trigger with no desktop meaning — is hidden.
 5. Row taps push `EpisodeKey`, which resolved to an M1a placeholder in `:feature:episode` — the same rule the Library's pushed keys got in note 8 above (`paneExtra` metadata, matching the episode detail's pane role): the Feeds rows dispatched `EpisodeAction.Open` before the episode-detail slice landed, and nav3's provider crashes on a key no module contributes. The episode slice (#95) replaced the placeholder with the episode detail route, so the key now resolves to the real screen.
 6. A "Watch on YouTube" open whose `ExternalUrlOpener` answers `NO_HANDLER` posts "No app can open this link" with "Copy link" through the screen's `UserMessage` queue (`dispatchEpisodeRoute`'s `EpisodeRouteResult` contract). `FeedsViewModel` maps message id → URL; the route reports the action tap back through `ShowUserMessages.onMessageAction` and writes the clipboard, since the clipboard is a composition concern a platform-free ViewModel never sees.
@@ -2816,8 +2956,8 @@ Serves N1, N4, N6. Expected failures arrive as values (01 [Errors](01-foundation
 
 1. ~~The Podcast settings rows "Edit feed address" and "Username and password" and the podcast detail banner's "Enter password" action are hidden behind `FEED_ACCOUNT_CONTROLS_ENABLED` until M1b: `PodcastRepository.editFeedUrl`/`setCredentials`/`merge` are M1b semantics and their M1a implementations throw `UnsupportedOperationException`, so the controls must not be reachable. M1b flips the flag and restores the Feed-section rows and the banner action.~~ **Resolved 2026-10-14 (M1b):** the repository writes are live, the flag is removed, and all three controls are reachable. Both settings rows stay RSS-only — a YouTube channel has neither a feed URL to move nor a Basic-auth credential. The Edit-URL dialog shows a failed edit as the field's inline error and stays open; a failed `setCredentials` posts the error snackbar.
 2. "Show in All" reads `PodcastDetail.includeInAll` and writes `PodcastRepository.setIncludeInAll`; the scoped `ScopedSettingsView`/`ScopeSettingsRepository.observePodcast` this document names as the data source arrives with M5's effective-settings resolution, so the field rides the M1a `observePodcast` read model alongside custom title and episode order. `FeedInfo.pendingNewFeedUrl` gets no row of its own at M1a — the pending-move surface is the M1b edit flow's.
-3. The podcast overflow's "Mark all as played…" confirmation is the same plain confirm/cancel `NdDialog` as the Library tile menu's (item 7 above): the cutoff options and `countUnplayed` arrive with M2's group data, so confirming marks the whole feed via `markFeedPlayed(source, null)`.
-4. M1a keeps the podcast screen's top bar in-flow rather than 08's pinned transparent overlay: the artwork-scheme gradient, `dropShadow` and shared-element hand-off arrive with M10's artwork tint, and the header's group chips with M5 — `PodcastHeader` ships the cover, title, author, Subscribed chip, three-line description and meta line only. The bar's title and elevation appear once the header has scrolled off (`firstVisibleItemIndex > headerIndex`; the offline banner is a list item before the header, so `headerIndex` is 1 while it shows, 0 otherwise).
+3. The podcast overflow originally used the Library tile menu's plain confirm/cancel `NdDialog` (item 7 above). **Implementation note (2026-10-16, M2):** D9 replaces it with the shared counted dialog for `FeedSource.Podcast`, with cutoff options and guarded confirmation. The Library tile-menu item remains deferred to its own PR.
+4. M1a keeps the podcast screen's top bar in-flow rather than 08's pinned transparent overlay: the artwork-scheme gradient, `dropShadow` and shared-element hand-off arrive with M10's artwork tint. `PodcastHeader` ships the cover, title, author, Subscribed chip, three-line description and meta line. Implementation note (2026-10-16, M2): membership chips and "+ Group" now ship under the M2 deliverable and row D6, superseding the earlier M5 deferral. The bar's title and elevation appear once the header has scrolled off (`firstVisibleItemIndex > headerIndex`; the offline banner is a list item before the header, so `headerIndex` is 1 while it shows, 0 otherwise).
 5. The paged list applies 08's paging-error rule where the user is: an append/prepend `LoadState.Error` — or a refresh failure while rows are on screen — pins an `NdBanner` under the top bar instead of the spec's footer row, because with 05's placeholders the footer can sit hundreds of unloaded rows away and a prepend failure has no row at all (revised 2026-10-14: previously the banner came in addition to the footer, which showed the same error twice at the list end). Retry replays every failed load through `items.retry()`; the empty first page keeps the in-list Failed shape.
 6. Every row renders the play and download affordances of `RowCaps.FULL`, but `PodcastViewModel.onRowAction` writes only `SetPlayed` — `PlayToggle`/the queue actions wait for M4 and `DownloadToggle` for M6, the same milestone scoping the Feeds screen's rows carry. The row's trailing buttons and menu entries still offer their actions; one tap is answered — the offline row's `cloud_off` play affordance raises the "You're offline" snackbar per the row table (the route checks `DownloadState`, since `PodcastUiState` carries no per-episode download state and `FeedRepository` has no per-episode lookup) — and every other tap is a no-op.
 7. `PodcastViewModel` and `PodcastSettingsViewModel` are the first `ManualViewModelAssistedFactory` consumers — `assistedMetroViewModel` resolves the `podcastId`-scoped instance through `ViewModelBindings`' manual-factory map; the Metro `ViewModelAssistedFactory` map stays `allowEmpty` as item 4 of the Library slice records.
@@ -2830,7 +2970,7 @@ Serves N1, N4, N6. Expected failures arrive as values (01 [Errors](01-foundation
 ### Implementation deviations (2026-10-12, M1a Episode and Add-podcast slice)
 
 1. Discover at M1a is the empty state plus "Add by URL". The search field, charts, import card and YouTube channel entry remain M7/M3/M8 work; this port preserves the verified UI package's entry point.
-2. The sheet's "Add to groups" chips remain M2 work. `SubscribeUseCase` receives `groupIds = emptySet()`; its reviewed transaction and the paged `FeedRepository` are unchanged.
+2. Implementation note (2026-10-16, M2): the sheet now saves the chosen group chips and passes their IDs to the existing `SubscribeUseCase` parameter. Inline creation selects the new group; the subscription transaction adds memberships on Subscribe.
 3. `NoMedia` from the resolver renders as the input field's error line with Retry, rather than a preview with a disabled Subscribe button: `AddResolution.Failure` carries no preview. The reviewed `SubscribeError.InvalidUrl`, absent from the verified UI package's contract, now renders the existing "That doesn't look like a feed address" text inline on the preview and clears the subscribing indicator. The other resolution and subscribe outcomes keep their verified handling.
 4. The sheet renders credentials and candidate selection when the resolver returns those outcomes; HTML autodiscovery and directory lookup remain M7. Credentials typed into the sheet remain in the transient preview cache until M1b's credential persistence, and subscribing does not pin artwork until M4, as recorded in [03's M1a data-half deviations](03-feeds-and-discovery.md#implementation-deviations-2026-10-07-m1a-data-half). The preview cover uses `ArtworkRef(key = url, url, version = 0)`, fetching the URL with a monogram placeholder and error fallback.
 5. Episode detail keeps the verified show-notes renderer, image policy, played/favourite writes, navigation and platform link/share actions. Play and queue actions await M4, timestamp seeks and chapters await M5, downloads await M6, and YouTube availability actions await M8; their controller dispatch remains inert at M1a.

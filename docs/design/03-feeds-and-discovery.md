@@ -905,6 +905,17 @@ repeated successful `awaitOpen()` calls do not repeat their installation. A held
 `refresh-periodic` at the next rebase trigger (a settings change, subscribe or
 unsubscribe) or the next start, the desktop runner at the next start.
 
+**Implementation note (2026-10-16, M2):** C3 reads the resolver once per engine
+run and passes each podcast's interval into parsed-body ingestion as well as
+batched outcome writes. The rebaser and Android tick use the same effective
+intervals. Android retains the specified 60-min tick floor, which also satisfies
+WorkManager's 15-min minimum; an empty library uses the global interval, so
+start-up installs the tick once and the first subscribe needs no special case. The desktop
+keeps its minute poll and 15-min slack, using the rebased per-podcast due times
+rather than adding an Android-style periodic timer. Manual-only success stores
+`NEVER`; explicit force marks and the failure/backoff exceptions in the policy
+table remain unchanged.
+
 ### Work requests
 
 | Unique name | Request | Constraints | Policy | Input |
@@ -1624,14 +1635,27 @@ Serves R3.1 (links), R8.3, onboarding. Delivered in M7 (Android filters; M1 hand
 Serves R2.7. Delivered in M2 (common selection and the Android poster), MD2 (the desktop poster over 11's `DesktopNotifier`). Honours [D36](../PLAN.md#3-key-decisions), [D45](../PLAN.md#3-key-decisions), [D66](../PLAN.md#3-key-decisions), [D83](../PLAN.md#3-key-decisions), [D87](../PLAN.md#3-key-decisions). Channel IDs (Android): `new_episodes` (default) and `new_episodes_{groupUuid}` in channel group `grp_new_episodes`; their creation, renaming and deletion with groups is 05's. The desktop has no channels; the same effective settings decide what is announced ([11 Notifications](11-desktop.md#notifications)). Notification settings are device-local and never sync ([Settings](#settings), [10 Per-scope overrides](10-sync.md#per-scope-overrides)), so each device decides for itself.
 
 **Implementation note (2026-10-16, M2).** C4 adds common selection and run-finalisation
-wiring. `AndroidAppGraph` temporarily binds a no-op `NewEpisodePoster` until D3;
-C5 owns Android channel lifecycle. `DesktopAppGraph` binds a no-op poster until
-MD2. Neither binding displays notifications yet. Selection uses one run-level
-joined episode/podcast/membership DAO read and one batched call to B3's
+wiring. D3 binds `AndroidNewEpisodePoster` in `AndroidAppGraph`; the adapter lives
+in `:app` so it can use `:core:ui`'s Compose resources, the generated notification
+icon and explicit `MainActivity` intents without violating [01's dependency rules](01-foundation.md#dependency-rules).
+It creates channels lazily; C5 owns group channel lifecycle. `DesktopAppGraph`
+keeps its no-op poster until MD2. Selection uses one run-level joined
+episode/podcast/membership DAO read and one batched call to B3's
 `EffectiveSettingsResolver.notifications`, with no per-podcast queries. Both
 reads internally use 500-ID SQL chunks for [02's SQLite 3.18 baseline](02-data-model.md#sql-dialect-baseline);
 episode ordering is restored across chunks. This qualifies step 2's "one query"
 wording: large runs use bounded set reads rather than exceeding bind limits.
+The Android poster reuses this read to reload active notification IDs, discarding
+vanished, hidden or played rows and sorting the merged set before retaining 50.
+Channel labels are Android resources ("New episodes" / "Other podcasts", en/de),
+as [01's resource rule](01-foundation.md#model-and-state-rules) requires; Android packages
+them according to `app/policy/locales.txt` (currently en-US only). Notification
+content uses suspend Compose resource access. Skips log one count and reason per
+notice; no notification diagnostics counter hook exists yet (M11). Unsubscribe
+calls `removePodcasts` after its cascade commits; cleanup silently updates the
+remainder or cancels it. Artwork stays M4+. Tap intents carry the documented
+routes; consuming them in the shell and Feeds pager remains the navigation slice
+(MainActivity currently has no intent-to-router hand-off).
 
 `NewEpisodeNotifier.post(batch: List<NewEpisodes>)` (`:core:data` `commonMain`) is called once per engine run with the run's `newEpisodes` (not via `IngestionEvents`, so one run yields at most one notification per channel on Android and one notification on the desktop, even across 300 feeds). Steps 1–4 are common; they produce `NewEpisodeNotice`s that the platform's `NewEpisodePoster` posts:
 

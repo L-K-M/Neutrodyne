@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="membership_title_many">Add %1$d podcasts to groups</string>
+    <string name="membership_title_one">Groups for %1$s</string>
+    <string name="membership_new">+ New group</string>
+    <string name="membership_name">Group name</string>
+    <string name="membership_create">Create group</string>
+    <string name="membership_done">Done</string>
+    <plurals name="membership_updated">
+        <item quantity="one">Updated groups for %1$d podcast</item>
+        <item quantity="other">Updated groups for %1$d podcasts</item>
+    </plurals>
+    <string name="membership_changed">Groups changed, try again</string>
+    <string name="membership_name_empty">Enter a group name</string>
+    <string name="membership_name_too_long">Use at most %1$d characters</string>
+    <string name="membership_name_taken">A group with this name already exists</string>
+    <string name="membership_add_to">Add to groups</string>
+</resources>

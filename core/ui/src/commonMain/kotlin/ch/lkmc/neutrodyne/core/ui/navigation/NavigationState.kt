@@ -98,6 +98,13 @@ public class NavigationState internal constructor(
         return false
     }
 
+    override fun pop(key: NavKey): Boolean {
+        val stack = stack(selectedTab)
+        if (stack.size <= 1 || stack.last() != key) return false
+
+        return pop()
+    }
+
     override fun resetTab(key: TopLevelKey) {
         lastChangeWasPop = false
         val stack = stack(key)

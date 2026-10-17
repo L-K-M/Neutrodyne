@@ -2,12 +2,10 @@
 
 package ch.lkmc.neutrodyne.core.ui.platform
 
-import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -16,7 +14,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
@@ -47,17 +46,22 @@ public fun rememberAndroidPlatformActions(): PlatformActions {
             notification.complete(it)
         }
 
-    return remember(context, openLauncher, createLauncher, notificationLauncher) {
-        AndroidPlatformActions(
-            context,
-            openFile,
-            createFile,
-            notification,
-            openLauncher,
-            createLauncher,
-            notificationLauncher,
-        )
+    val actions =
+        remember(context, openLauncher, createLauncher, notificationLauncher) {
+            AndroidPlatformActions(
+                context,
+                openFile,
+                createFile,
+                notification,
+                openLauncher,
+                createLauncher,
+                notificationLauncher,
+            )
+        }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        (actions.notifications as? AndroidNotificationPermissionRequester)?.refresh()
     }
+    return actions
 }
 
 private class AndroidPlatformActions(
@@ -146,18 +150,9 @@ private class AndroidPlatformActions(
         if (Build.VERSION.SDK_INT < NOTIFICATION_PERMISSION_SDK) {
             null
         } else {
-            object : NotificationPermissionRequester {
-                override val granted: Boolean
-                    get() =
-                        ContextCompat.checkSelfPermission(
-                            context,
-                            Manifest.permission.POST_NOTIFICATIONS,
-                        ) == PackageManager.PERMISSION_GRANTED
-
-                override fun request(onResult: (Boolean) -> Unit) {
-                    notification.start { granted -> onResult(granted) }
-                    notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                }
+            AndroidNotificationPermissionRequester(context) { onResult ->
+                notification.start(onResult)
+                notificationLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
             }
         }
 }

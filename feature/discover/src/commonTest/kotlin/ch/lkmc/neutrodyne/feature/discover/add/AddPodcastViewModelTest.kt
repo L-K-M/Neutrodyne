@@ -33,8 +33,46 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalCoroutinesApi::class)
 class AddPodcastViewModelTest : MainDispatcherTest() {
     private val resolver = FakeAddPodcastResolver()
+    private val groups =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeGroupRepository()
     private val subscribe = FakeSubscribeUseCase()
-    private val viewModel = AddPodcastViewModel(resolver, subscribe)
+    private val viewModel by lazy { AddPodcastViewModel(resolver, subscribe, groups) }
+
+    @Test
+    fun chosenGroupsArePassedToSubscribe() =
+        runTest {
+            resolver.nextResolution = AddResolution.Feed(Preview)
+            viewModel.resolve("https://example.com/feed")
+            advanceUntilIdle()
+            viewModel.subscribe(setOf(4, 8))
+            advanceUntilIdle()
+            assertEquals(setOf(4L, 8L), subscribe.subscribed.single().second)
+        }
+
+    @Test
+    fun inlineGroupCreationUsesCanonicalValidation() =
+        runTest {
+            viewModel.createGroup(" ")
+            advanceUntilIdle()
+            assertTrue(groups.groups.value.isEmpty())
+            assertTrue(viewModel.uiState.value.groupError != null)
+            viewModel.createGroup(" Tech ")
+            advanceUntilIdle()
+            assertEquals(
+                "Tech",
+                groups.groups.value
+                    .single()
+                    .name,
+            )
+            assertEquals(
+                groups.groups.value
+                    .single()
+                    .id,
+                viewModel.uiState.value.createdGroupId,
+            )
+            assertNull(viewModel.uiState.value.groupError)
+        }
 
     @Test
     fun resolveShowsPreviewOnFeed() =

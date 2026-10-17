@@ -2,12 +2,14 @@
 
 package ch.lkmc.neutrodyne.core.data
 
+import androidx.room3.useWriterConnection
 import ch.lkmc.neutrodyne.core.common.Origin
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.credentials.DesktopSecretStore
 import ch.lkmc.neutrodyne.core.data.credentials.IdentitySecretProtection
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
@@ -77,8 +79,17 @@ class UnsubscribeUseCaseTest {
         root.deleteRecursively()
     }
 
+    private val poster = FakeNewEpisodePoster()
+
     private fun unsubscribe() =
-        newUnsubscribe(db = db, scheduler = scheduler, clock = clock, secrets = store, coordinator = coordinator)
+        newUnsubscribe(
+            db = db,
+            scheduler = scheduler,
+            clock = clock,
+            secrets = store,
+            coordinator = coordinator,
+            poster = poster,
+        )
 
     private suspend fun awaitReal(check: suspend () -> Boolean) =
         withContext(Dispatchers.Default) {
@@ -201,6 +212,47 @@ class UnsubscribeUseCaseTest {
                     .id,
             )
             assertNull(db.podcastDao().byId(p1))
+        }
+
+    @Test
+    fun notificationCleanupSeesOnlyCommittedRemovals() =
+        runTest {
+            val id = seedPodcast(db, "https://cleanup.example.com/feed")
+            poster.onRemove = { ids ->
+                assertEquals(listOf(id), ids)
+                assertNull(db.podcastDao().byId(id))
+            }
+
+            assertEquals(listOf(id), unsubscribe()(listOf(id, Long.MAX_VALUE)))
+            assertEquals(listOf(listOf(id)), poster.removals)
+            unsubscribe()(listOf(id))
+            assertEquals(1, poster.removals.size)
+        }
+
+    @Test
+    fun failedUnsubscribeLeavesNotificationsAlone() =
+        runTest {
+            val id = seedPodcast(db, "https://cleanup.example.com/feed")
+            db.useWriterConnection {
+                it.execSql(
+                    "CREATE TRIGGER fail_cleanup BEFORE DELETE ON podcast " +
+                        "BEGIN SELECT RAISE(ABORT, 'unsub'); END",
+                )
+            }
+
+            assertTrue(runCatching { unsubscribe()(listOf(id)) }.isFailure)
+            assertTrue(poster.removals.isEmpty())
+            assertNotNull(db.podcastDao().byId(id))
+        }
+
+    @Test
+    fun notificationFailureDoesNotFailCommittedUnsubscribe() =
+        runTest {
+            val id = seedPodcast(db, "https://cleanup.example.com/feed")
+            poster.onRemove = { error("notification service unavailable") }
+
+            assertEquals(listOf(id), unsubscribe()(listOf(id)))
+            assertNull(db.podcastDao().byId(id))
         }
 
     private companion object {

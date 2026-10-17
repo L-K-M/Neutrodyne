@@ -14,17 +14,20 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runComposeUiTest
 import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdEmptyState
@@ -143,6 +146,17 @@ class NeutrodyneRootTest {
             setRootContent()
             onNodeWithText("open-sheet").performClick()
             onNodeWithText("add-podcast-sheet").assertIsDisplayed()
+            onNodeWithText("feeds-content").assertIsDisplayed()
+        }
+
+    @Test
+    fun sheetWindowDismissClosesOnlyOverlay() =
+        runComposeUiTest {
+            setRootContent()
+            onNodeWithText("open-sheet").performClick()
+            onAllNodesWithContentDescription("Close sheet").onFirst().performTouchInput { click(Offset(4f, 4f)) }
+            waitForIdle()
+            onNodeWithText("add-podcast-sheet").assertDoesNotExist()
             onNodeWithText("feeds-content").assertIsDisplayed()
         }
 

@@ -13,20 +13,32 @@ import androidx.work.impl.model.WorkSpec
 import androidx.work.testing.WorkManagerTestInitHelper
 import ch.lkmc.neutrodyne.core.data.newDb
 import ch.lkmc.neutrodyne.core.data.seedPodcast
+import ch.lkmc.neutrodyne.core.data.settings.EffectiveSettingsResolverImpl
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
 import ch.lkmc.neutrodyne.core.database.PodcastGroupMemberEntity
+import ch.lkmc.neutrodyne.core.database.PodcastGroupSettingsEntity
+import ch.lkmc.neutrodyne.core.database.PodcastSettingsEntity
+import ch.lkmc.neutrodyne.core.database.ScopeOverrides
+import ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
+import ch.lkmc.neutrodyne.core.model.Effective
+import ch.lkmc.neutrodyne.core.model.SettingSource
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
+import ch.lkmc.neutrodyne.core.testing.FakeEffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.testing.database.groupEntity
+import ch.lkmc.neutrodyne.core.testing.database.memberEntity
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import org.junit.After
@@ -101,6 +113,7 @@ class RefreshSchedulerTest {
     @Test
     fun `the periodic tick enqueues refresh-periodic with the interval`() =
         runTest {
+            seedPodcast(db, "https://scheduled.test/feed.xml", nextRefreshAt = FAR_FUTURE)
             val scheduler = scheduler()
             settings.set(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES, 240)
 
@@ -118,6 +131,7 @@ class RefreshSchedulerTest {
     @Test
     fun `the tick clamps to the sixty minute floor`() =
         runTest {
+            seedPodcast(db, "https://scheduled.test/feed.xml", nextRefreshAt = FAR_FUTURE)
             val scheduler = scheduler()
             settings.set(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES, 30)
 
@@ -131,6 +145,7 @@ class RefreshSchedulerTest {
     @Test
     fun `manual only cancels the periodic work`() =
         runTest {
+            seedPodcast(db, "https://scheduled.test/feed.xml", nextRefreshAt = FAR_FUTURE)
             val scheduler = scheduler()
             settings.set(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES, 240)
             scheduler.reschedulePeriodic()
@@ -146,6 +161,7 @@ class RefreshSchedulerTest {
     @Test
     fun `an unchanged spec does not re-enqueue`() =
         runTest {
+            seedPodcast(db, "https://scheduled.test/feed.xml", nextRefreshAt = FAR_FUTURE)
             val scheduler = scheduler()
             settings.set(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES, 240)
             scheduler.reschedulePeriodic()
@@ -160,6 +176,7 @@ class RefreshSchedulerTest {
     @Test
     fun `wifi only makes the tick unmetered`() =
         runTest {
+            seedPodcast(db, "https://scheduled.test/feed.xml", nextRefreshAt = FAR_FUTURE)
             val scheduler = scheduler()
             settings.set(FeedsSettingKeys.REFRESH_WIFI_ONLY, true)
 
@@ -451,6 +468,7 @@ class RefreshSchedulerTest {
     @Test
     fun `markers without live work are reconciled into an enqueue`() =
         runTest {
+            seedPodcast(db, "https://scheduled.test/feed.xml", nextRefreshAt = FAR_FUTURE)
             val scheduler = scheduler()
             settings.set(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES, 240)
             scheduler.reschedulePeriodic()
@@ -550,16 +568,121 @@ class RefreshSchedulerTest {
             assertThat(spec.expedited).isFalse()
         }
 
+    @Test
+    fun `effective timed minimum excludes manual podcasts and groups`() =
+        runTest {
+            settings.set(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES, 1440)
+            val grouped = seedPodcast(db, "https://grouped.test/f", nextRefreshAt = null)
+            val own = seedPodcast(db, "https://own.test/f", nextRefreshAt = null)
+            val manual = seedPodcast(db, "https://manual.test/f", nextRefreshAt = null)
+            val timedGroup = db.groupDao().insert(groupEntity(name = "timed", orderKey = "a"))
+            val manualGroup = db.groupDao().insert(groupEntity(name = "manual", orderKey = "b"))
+            db.groupDao().insertMember(memberEntity(timedGroup, grouped, "a"))
+            db.groupDao().insertMember(memberEntity(manualGroup, grouped, "a"))
+            val scopes = db.scopeSettingsDao()
+            scopes.upsertGroup(PodcastGroupSettingsEntity(timedGroup, ScopeOverrides(refreshIntervalMinutes = 60)))
+            scopes.upsertGroup(PodcastGroupSettingsEntity(manualGroup, ScopeOverrides(refreshIntervalMinutes = 0)))
+            scopes.upsertPodcast(PodcastSettingsEntity(own, ScopeOverrides(refreshIntervalMinutes = 120)))
+            scopes.upsertPodcast(PodcastSettingsEntity(manual, ScopeOverrides(refreshIntervalMinutes = 0)))
+            val scheduler = scheduler()
+
+            scheduler.reschedulePeriodic()
+            assertThat(uniqueWork(WorkManagerRefreshScheduler.WORK_PERIODIC).periodicityInfo?.repeatIntervalMillis)
+                .isEqualTo(60 * MINUTE_MS)
+            assertThat(db.podcastDao().byId(manual)!!.nextRefreshAt).isEqualTo(RefreshPolicy.NEVER)
+
+            scopes.deleteGroup(timedGroup)
+            scheduler.reschedulePeriodic()
+            assertThat(uniqueWork(WorkManagerRefreshScheduler.WORK_PERIODIC).periodicityInfo?.repeatIntervalMillis)
+                .isEqualTo(120 * MINUTE_MS)
+            assertThat(db.podcastDao().byId(grouped)!!.nextRefreshAt).isEqualTo(RefreshPolicy.NEVER)
+
+            scopes.upsertPodcast(PodcastSettingsEntity(own, ScopeOverrides(refreshIntervalMinutes = 0)))
+            scheduler.reschedulePeriodic()
+            assertThat(
+                workManager
+                    .getWorkInfosForUniqueWork(WorkManagerRefreshScheduler.WORK_PERIODIC)
+                    .get()
+                    .none { !it.state.isFinished },
+            ).isTrue()
+            assertThat(
+                settings.get(FeedsSettingKeys.SCHEDULED_TICK_MINUTES),
+            ).isEqualTo(WorkManagerRefreshScheduler.NO_TICK)
+        }
+
+    @Test
+    fun `an empty library keeps the global tick`() =
+        runTest {
+            val podcast = seedPodcast(db, "https://only.test/f", nextRefreshAt = FAR_FUTURE)
+            val scheduler = scheduler()
+            db.scopeSettingsDao().upsertPodcast(
+                PodcastSettingsEntity(podcast, ScopeOverrides(refreshIntervalMinutes = 60)),
+            )
+            scheduler.reschedulePeriodic()
+            assertThat(settings.get(FeedsSettingKeys.SCHEDULED_TICK_MINUTES)).isEqualTo(60L)
+
+            db.podcastDao().deleteCascade(podcast, clock.now())
+            settings.set(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES, 480)
+            scheduler.reschedulePeriodic()
+
+            assertThat(uniqueWork(WorkManagerRefreshScheduler.WORK_PERIODIC).state.isFinished).isFalse()
+            assertThat(settings.get(FeedsSettingKeys.SCHEDULED_TICK_MINUTES)).isEqualTo(480L)
+
+            settings.set(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES, 0)
+            scheduler.reschedulePeriodic()
+            assertThat(
+                settings.get(FeedsSettingKeys.SCHEDULED_TICK_MINUTES),
+            ).isEqualTo(WorkManagerRefreshScheduler.NO_TICK)
+        }
+
+    @Test
+    fun `concurrent reschedules cannot leave an older manual only tick`() =
+        runTest {
+            val id = seedPodcast(db, "https://race.test/f", nextRefreshAt = null)
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            var interval: Int? = null
+            var reads = 0
+            val resolver =
+                object : EffectiveSettingsResolver by FakeEffectiveSettingsResolver() {
+                    override suspend fun refreshIntervals(): Map<Long, Effective<Int?>> {
+                        val snapshot = mapOf(id to Effective(interval, SettingSource.PodcastOverride))
+                        if (++reads == 1) {
+                            entered.complete(Unit)
+                            release.await()
+                        }
+                        return snapshot
+                    }
+                }
+            val scheduler = scheduler(resolver)
+            val older = async { scheduler.reschedulePeriodic() }
+            entered.await()
+            interval = 60
+            val newer = async { scheduler.reschedulePeriodic() }
+            runCurrent()
+            val readsBeforeRelease = reads
+            release.complete(Unit)
+            older.await()
+            newer.await()
+
+            assertThat(readsBeforeRelease).isEqualTo(1)
+            assertThat(settings.get(FeedsSettingKeys.SCHEDULED_TICK_MINUTES)).isEqualTo(60L)
+            assertThat(uniqueWork(WorkManagerRefreshScheduler.WORK_PERIODIC).periodicityInfo?.repeatIntervalMillis)
+                .isEqualTo(60 * MINUTE_MS)
+        }
+
     // --- plumbing ---------------------------------------------------------------------------------
 
-    private fun TestScope.scheduler() =
-        WorkManagerRefreshScheduler(
-            application = app,
-            db = db,
-            settings = settings,
-            rebaser = NextRefreshRebaser(db, settings),
-            appScope = this,
-        )
+    private fun TestScope.scheduler(
+        effectiveSettings: EffectiveSettingsResolver = EffectiveSettingsResolverImpl(db, settings),
+    ) = WorkManagerRefreshScheduler(
+        application = app,
+        db = db,
+        settings = settings,
+        effectiveSettings = effectiveSettings,
+        rebaser = NextRefreshRebaser(db, effectiveSettings),
+        appScope = this,
+    )
 
     private fun uniqueWork(name: String): WorkInfo = workManager.getWorkInfosForUniqueWork(name).get().single()
 

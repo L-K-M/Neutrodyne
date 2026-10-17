@@ -245,6 +245,12 @@ Many-to-many ([R2.2](../PLAN.md#21-functional-requirements)); rows are `source =
 | Library multi-select "Add to group…" | `AddToGroupsKey(ids)` | `applyMembership` with tri-state chips: checked for all → `add`, cleared → `remove`, indeterminate untouched |
 | Subscribe and import | — | 03's `SubscribeUseCase(groupIds)`; [Commit](#6-commit) |
 
+**Implementation note (2026-10-16, M2):** C3 uses the existing
+`RefreshController.reschedulePeriodic()` hook for effective-interval rebasing on
+both platforms. `GroupRepository` calls it after a membership transaction that
+changed rows commits (`setMembers`, `applyMembership`, `create` with initial
+members; delete and undo already do); no-op writes and failures do not.
+
 Every membership write is one write transaction (`INSERT OR IGNORE` / `DELETE … WHERE groupId = ? AND podcastId IN (…)`), then: `RefreshController.reschedulePeriodic()` (the minimum refresh interval over groups may change, [03 Periodic tick](03-feeds-and-discovery.md#periodic-tick); on the desktop it re-reads the refresh lane's due times) and `SnapshotScheduler.requestSoon()` (Android; a no-op on the desktop, [Auto Backup](#auto-backup)). Auto-download and notification policies follow automatically through the resolver flows ([Effective settings resolution](#effective-settings-resolution)).
 
 ```kotlin
@@ -326,6 +332,19 @@ sequenceDiagram
 | Other devices (while linked) | the tombstone travels only after the 10-s undo window on both platforms ([10 Outbox and coalescing](10-sync.md#outbox-and-coalescing)); more than 3 group deletes in one pull are held by the mass-change guard |
 | Mosaic artwork `g-{uuid}` | unreferenced → collected |
 | Import history (`import_item.groupNamesJson`) | unaffected (names, not IDs) |
+
+**Implementation note (2026-10-16, M2)** — C1 lands the mechanism with two slices deferred to
+their owning milestones: `SnapshotScheduler.requestSoon()` does not run on delete yet because the
+port itself arrives with M3's backup work; the 10-second undo window runs as a `delay` job on the
+injected `@ApplicationScope` and `GroupChannelSync.onDeleted(uuid)` fires at its end — process
+death still finalizes the delete, and the start-up sweep spares exactly the uuids the repository
+reports through `GroupRepository.pendingUndoUuids()` (the "live undo tokens" the sweep rule above
+refers to). `NoGroupChannels` sits in `:core:domain` next to the port rather than
+`:core:data` `desktopMain`, so both shells bind the same interim no-op until C5's
+`GroupNotificationChannels` replaces it on Android. `GroupMerger` exists in `:core:data` with the
+transaction this document specifies — union memberships, keep the survivor's settings, move a
+GROUP play context, then `sync()` — but has no callers until the restore path (M3) and
+`SyncApplier` (M10) land.
 
 ### Notification channels
 
@@ -413,11 +432,18 @@ propagate settings write failures as exceptions rather than reporting success.
 
 ### Paging hand-off to 08
 
-- One `Pager` per **visible** page: the Feeds ViewModel keeps at most 3 cached flows (current page ± 1) keyed by `(source, filters, order)` in an LRU and never builds pagers for every tab.
-- `PagingConfig(pageSize = 40, prefetchDistance = 40, initialLoadSize = 80, enablePlaceholders = true, maxSize = 400)`; flows are built with `flatMapLatest` over `observePrefs(source)` and `.cachedIn(viewModelScope)` ([01 ViewModels and UI state](01-foundation.md#viewmodels-and-ui-state)).
+- One `Pager` per **visible** page: the Feeds ViewModel keeps at most 3 cached flows (current page ± 1) keyed by `FeedSource` in an LRU and never builds pagers for every tab.
+- `PagingConfig(pageSize = 40, prefetchDistance = 40, initialLoadSize = 80, enablePlaceholders = true, maxSize = 400)`; flows are built with `flatMapLatest` over `observePrefs(source)` and `.cachedIn(entryScope)` with a child scope cancelled on LRU eviction ([01 ViewModels and UI state](01-foundation.md#viewmodels-and-ui-state)).
 - Lists use `itemKey { it.id }` and `itemContentType { if (it.sourceType == SourceType.YOUTUBE_CHANNEL) 1 else 0 }` (16:9 thumbnails vs square covers, 08).
 - Positions, download progress and now-playing never come from the paged row ([D16](../PLAN.md#3-key-decisions)); rows overlay them from `EpisodeLiveStateSource` ([08 Live row state](08-ui-ux.md#live-row-state)).
 - Pull-to-refresh calls `RefreshController.refreshFeed(source)` ([03 Refresh scheduling](03-feeds-and-discovery.md#refresh-scheduling)).
+
+**Implementation note (2026-10-16, M2):** D1 follows 08's source-keyed
+three-entry LRU. The existing `FeedRepository.pagedFeed(source)` helper owns
+`observePrefs` and query-only `distinctUntilChanged` before `flatMapLatest`;
+the ViewModel adds day headers and caches in each entry's child scope.
+Changing filters replaces that source's pager inside its entry. Visit and
+play-order writes keep the current generation.
 
 ### Counts and new since last visit
 
@@ -442,7 +468,7 @@ propagate settings write failures as exceptions rather than reporting success.
 |---|---|---|---|
 | Refresh this group | only member podcasts, forced | `RefreshController.refreshNow(RefreshScope.Group(id))` | M2 |
 | Play | [Playing a group](#playing-a-group) | `PlaybackController.playFeed(Group(id), prefs.filters, prefs.playOrder, null)` | M4 |
-| Mark all as played | options: all, older than 1 week, 1 month, 3 months; confirmation shows `countUnplayed(source, before)` ("Mark 214 episodes in 'tech' as played?"); no undo | `EpisodeRepository.markFeedPlayed(source, sortDateBefore)` (03; SQL [02 User-state writes](02-data-model.md#user-state-writes)) | M2 |
+| Mark all as played | options: all, older than 1 week, 1 month, 3 months; confirmation shows `countUnplayed(source, before)` ("Mark 214 episodes in 'tech' as played?"); no undo | `EpisodeRepository.markFeedPlayed(source, sortDateBefore, expectedCount)` (03; SQL [02 User-state writes](02-data-model.md#user-state-writes)) | M2 |
 | Download all unplayed | confirmation "Download 37 episodes (about 1.9 GB, 3 sizes unknown)?"; metered prompt per 07 | `downloadAllEstimate(source)` → `DownloadController.request(ids, DownloadLane.MANUAL, allowMetered = null)` | M6 |
 | Share as OPML (desktop: "Export group as OPML…") | per-group export; the desktop saves through a file dialog ([Destinations](#destinations)) | `ExportKey(groupId)` ([OPML export](#opml-export)) | M3 |
 | Import OPML into this group | picker; session created with this group as target | `ImportRepository.create(source, CreateImportOptions(targetGroupId = id))` | M3 |
@@ -453,9 +479,10 @@ chosen `sortDateBefore`, obtain `countUnplayed`, and pass both that cutoff and
 `expectedCount` to the guarded `EpisodeRepository.markFeedPlayed` overload.
 The repository revalidates the count inside its write transaction; a changed
 count returns `MarkFeedPlayedResult.SelectionChanged(actualCount)` and writes
-nothing. Show a refreshed confirmation before retrying. `Played(count)` reports
-the completed mark-played chain. Existing plain confirmation dialogs use the
-explicitly unchecked two-argument overload until the D9 dialog slice.
+nothing. Show a refreshed confirmation with the same frozen cutoff before
+retrying. `Played(count)` reports the completed mark-played chain. D9's Feeds
+page and podcast overflow use the shared counted dialog; the Library tile-menu
+confirmation retains the unchecked two-argument overload until its own PR.
 
 `downloadAllEstimate` ([02 Download all candidates](02-data-model.md#download-all-candidates), M6): the feed's source predicate, its view filters and `hideOlderThanDays` bound (as [Playing a group](#playing-a-group) rules 1, 3 and 5, no anchor), unplayed, without a `download` row in `QUEUED`…`COMPLETED` (`FAILED` and `MISSING` rows count as candidates), without a tombstone (`downloadDismissedAt IS NULL`; the user deleted those deliberately), and downloadable (`enclosureUrl IS NOT NULL`, or YouTube when `YouTubeCapabilitiesSource.capabilities.value.downloads` at call time, [04 Capability matrix](04-youtube.md#capability-matrix)); newest first, **capped at 200** (`capped = true` → "200 newest of 1,234"). Unlike the context tail, Up next items and the current episode are **not** excluded: downloading them is wanted (answers 02's open question 7). Size per episode follows [07 Estimates](07-downloads.md#estimates): `enclosureLength` when ≥ 100 KB (smaller values are placeholders), else `durationMs × 16 000 B/s` (128 kbit/s) when known, else counted in `unknownSizeCount`; no invented numbers.
 
@@ -611,8 +638,12 @@ interface ScopeSettingsRepository {
 **Implementation note (2026-10-16, M2):** B3 writes only the two M2 fields,
 preserving every other override column even when both M2 fields inherit. Its
 read-modify-write callback runs inside the Room write transaction. Scheduling
-hooks below arrive with C3, channel reconciliation with C5, and snapshot requests
-with M3; B3 does not invoke those hooks or rewire refresh scheduling.
+hooks below are implemented by C3 after the interval write commits, with a lazy
+`Provider<RefreshController>` to avoid a dependency cycle. Unchanged intervals,
+notification-only writes, invalid writes and missing scopes do not reschedule.
+A post-commit scheduling failure is logged; it does not turn a committed write
+into `SettingsError.WriteFailed`. Channel reconciliation arrives with C5, and
+snapshot requests with M3.
 
 - Writes are a read-modify-write inside one write transaction (`@Upsert` is allowed on these single-writer tables, [02 DAO rules](02-data-model.md#dao-rules)); a row whose fields are all `null` is deleted. Rule 1 (dependent fields) and validation run before the write; an invalid value returns 01's `SettingsError.OutOfRange(field name)` and writes nothing. A podcast or group that no longer exists makes the write a no-op returning success (the screen is closing anyway).
 - After a write: refresh interval changed → `RefreshController.reschedulePeriodic()`; `notifyNewEpisodes` changed → `GroupChannelSync.sync()` (Android; the screen requests `POST_NOTIFICATIONS` per 03's permission rule); always → `SnapshotScheduler.requestSoon()` (Android). 07 and 06 observe the resolver flows; nothing else is pushed. Sync needs no call: the triggers capture the synced columns (02).

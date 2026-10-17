@@ -18,6 +18,7 @@ import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
+import ch.lkmc.neutrodyne.notifications.AndroidNewEpisodePoster
 import com.google.common.truth.Truth.assertThat
 import dev.zacsweers.metro.createGraphFactory
 import kotlinx.coroutines.runBlocking
@@ -116,6 +117,18 @@ class AndroidAppGraphTest {
             graph.databaseOpener.requireDatabase().close()
         }
     }
+
+    @Test
+    fun newEpisodePosterUsesTheAndroidAdapter() =
+        runBlocking {
+            graph.databaseOpener.awaitOpen()
+            try {
+                assertThat(graph.newEpisodePoster).isInstanceOf(AndroidNewEpisodePoster::class.java)
+                assertThat(graph.newEpisodePoster).isSameInstanceAs(graph.newEpisodePoster)
+            } finally {
+                graph.databaseOpener.requireDatabase().close()
+            }
+        }
 
     private companion object {
         val STARTUP_BANDS =

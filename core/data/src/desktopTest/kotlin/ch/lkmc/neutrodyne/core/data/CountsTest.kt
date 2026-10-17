@@ -297,6 +297,41 @@ class CountsTest {
             assertFailsWith<IllegalArgumentException> { episodes.markFeedPlayed(FeedSource.All, null, -1) }
         }
 
+    @Test fun markFeedPlayedChainsAcrossChunkBoundaries() =
+        runTest {
+            // IN lists chunk at 500 bound ids; 1001 forces three chunks through one transaction.
+            val p = podcast()
+            val ids = List(1001) { episode(p, now - 1 - it) }
+            val outside = episode(p, now)
+            for ((i, id) in ids.withIndex()) {
+                db.positionDao().upsert(
+                    EpisodePositionEntity(id, i + 1L, positionSource = PositionSource.STREAM, updatedAt = 1),
+                )
+                db.queueDao().insert(queueEntryEntity(id, i.toString()))
+            }
+            db.positionDao().upsert(
+                EpisodePositionEntity(outside, 7, positionSource = PositionSource.STREAM, updatedAt = 1),
+            )
+            db.queueDao().insert(queueEntryEntity(outside, "z"))
+
+            val source = FeedSource.Podcast(p)
+            val expected = feeds.countUnplayed(source, now)
+            assertEquals(ids.size, expected)
+            assertEquals(MarkFeedPlayedResult.Played(ids.size), episodes.markFeedPlayed(source, now, expected))
+
+            assertEquals(0, feeds.countUnplayed(source, now))
+            assertEquals(1, feeds.countUnplayed(source, null))
+            for (id in ids) {
+                val state = db.episodeStateDao().byEpisode(id)
+                assertEquals(now, state?.playedAt, "id $id")
+                assertEquals(1, state?.playCount, "id $id")
+                assertEquals(0L, db.positionDao().byEpisode(id)?.positionMs, "id $id")
+            }
+            assertNull(db.episodeStateDao().byEpisode(outside))
+            assertEquals(7L, db.positionDao().byEpisode(outside)?.positionMs)
+            assertEquals(listOf(outside), db.queueDao().entries().map { it.episodeId })
+        }
+
     @Test fun groupCountPlanSearchesPodcastDateIndex() =
         runTest {
             val g = group("G")

@@ -26,7 +26,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import ch.lkmc.neutrodyne.core.common.art.Monogram
+import ch.lkmc.neutrodyne.core.common.art.Graphemes
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverTier
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
@@ -46,29 +46,41 @@ import ch.lkmc.neutrodyne.core.ui.resources.podcast_count
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
+/** THUMBNAIL draws decorative artwork for a row that supplies its own name and counts. */
+public enum class GroupMosaicLayout { TILE, THUMBNAIL }
+
 /**
  * A group's library-tile mosaic (08 GroupMosaic): a 12 dp-cornered square holding the four
  * newest-active members' `CoverArt` (THUMB) in a 2 × 2 grid with 2 dp gaps. Empty cells take the
  * group's container tone, the first one carrying the group icon (or the name's first grapheme
  * when no icon is mapped); zero members fill the whole square. A 4 dp dot-tone stripe runs along
  * the top edge, and groups hidden from the tab row carry a `visibility_off` marker. In grids the
- * name and "unplayed · new" counts sit below the square.
+ * name and "unplayed · new" counts sit below the square. Null counts omit both their label
+ * and their announcement while a caller has no counts API.
  */
 @Composable
 public fun GroupMosaic(
     group: Group,
     members: List<GroupMosaicMember>,
-    unplayedCount: Int,
-    newCount: Int,
+    unplayedCount: Int?,
+    newCount: Int?,
     modifier: Modifier = Modifier,
+    layout: GroupMosaicLayout = GroupMosaicLayout.TILE,
 ) {
     val tones = groupTones(group.colorArgb)
     val icon = groupIcon(group.iconKey)
     val cells = members.take(MOSAIC_CELLS)
-    val description = mosaicDescription(group, unplayedCount, newCount)
+    val description = if (layout == GroupMosaicLayout.TILE) mosaicDescription(group, unplayedCount, newCount) else null
 
     Column(
-        modifier = modifier.semantics(mergeDescendants = true) { contentDescription = description },
+        modifier =
+            modifier.semantics(mergeDescendants = true) {
+                if (description !=
+                    null
+                ) {
+                    contentDescription = description
+                }
+            },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
@@ -141,6 +153,8 @@ public fun GroupMosaic(
             }
         }
 
+        if (layout == GroupMosaicLayout.THUMBNAIL) return@Column
+
         Text(
             group.name,
             style = MaterialTheme.typography.titleSmall,
@@ -148,7 +162,7 @@ public fun GroupMosaic(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = NAME_GAP),
         )
-        if (unplayedCount > 0 || newCount > 0) {
+        if (unplayedCount != null && newCount != null && (unplayedCount > 0 || newCount > 0)) {
             Text(
                 groupCountsText(unplayedCount, newCount),
                 style = MaterialTheme.typography.bodySmall,
@@ -177,7 +191,7 @@ private fun EmptyCell(
             )
         } else if (name.isNotEmpty()) {
             Text(
-                Monogram.spec(name).initials,
+                Graphemes.first(name),
                 color = tones.onContainer,
                 style = MaterialTheme.typography.titleMedium,
                 maxLines = 1,
@@ -190,16 +204,20 @@ private fun EmptyCell(
 @Composable
 private fun mosaicDescription(
     group: Group,
-    unplayedCount: Int,
-    newCount: Int,
+    unplayedCount: Int?,
+    newCount: Int?,
 ): String =
-    stringResource(
-        Res.string.group_mosaic_desc,
-        group.name,
-        pluralStringResource(Res.plurals.podcast_count, group.memberCount, group.memberCount),
-        stringResource(Res.string.group_unplayed_fmt, unplayedCount),
-        stringResource(Res.string.group_new_fmt, newCount),
-    )
+    if (unplayedCount == null || newCount == null) {
+        group.name
+    } else {
+        stringResource(
+            Res.string.group_mosaic_desc,
+            group.name,
+            pluralStringResource(Res.plurals.podcast_count, group.memberCount, group.memberCount),
+            stringResource(Res.string.group_unplayed_fmt, unplayedCount),
+            stringResource(Res.string.group_new_fmt, newCount),
+        )
+    }
 
 /** "{u} unplayed · {k} new" with zero parts dropped (08's grid label). */
 @Composable
