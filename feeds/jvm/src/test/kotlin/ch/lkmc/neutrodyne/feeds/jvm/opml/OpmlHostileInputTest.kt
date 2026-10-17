@@ -124,6 +124,119 @@ class OpmlHostileInputTest {
         assertEquals(OpmlFailure.TAG_TOO_LONG, failure(doc.encodeToByteArray()))
     }
 
+    /**
+     * A `<`-dense attribute value: kxml2 accepts `<` inside a quoted value and grows its text
+     * buffer per character, so the 1 MiB bound must treat those `<`s as token payload, not as
+     * markup that resets the gap.
+     */
+    @Test(timeout = HOSTILE_TIMEOUT_MS)
+    fun ltDenseAttributeValueIsRejected() {
+        val doc =
+            "<opml version=\"1.0\"><body><outline type=\"rss\" xmlUrl=\"https://x.example.com/\" text=\"" +
+                "<".repeat(GAP_FLOOD) + "\"/></body></opml>"
+        assertEquals(OpmlFailure.TAG_TOO_LONG, failure(doc.encodeToByteArray()))
+    }
+
+    /** The same flood as comment text — kxml2 buffers the comment body the same way. */
+    @Test(timeout = HOSTILE_TIMEOUT_MS)
+    fun ltDenseCommentIsRejected() {
+        val doc =
+            "<opml version=\"1.0\"><body><!--" + "<".repeat(GAP_FLOOD) + "--></body></opml>"
+        assertEquals(OpmlFailure.TAG_TOO_LONG, failure(doc.encodeToByteArray()))
+    }
+
+    /** And as CDATA payload — `<` inside `]]>`-terminated text is payload too. */
+    @Test(timeout = HOSTILE_TIMEOUT_MS)
+    fun ltDenseCdataIsRejected() {
+        val doc =
+            "<opml version=\"1.0\"><body><![CDATA[" + "<".repeat(GAP_FLOOD) + "]]></body></opml>"
+        assertEquals(OpmlFailure.TAG_TOO_LONG, failure(doc.encodeToByteArray()))
+    }
+
+    /**
+     * `<?xml` past the attribute bound: the guard trips inside `setInput`'s encoding sniff, where
+     * kxml2 wraps stream failures — the cap violation must surface as `TAG_TOO_LONG`, not degrade
+     * to the `MALFORMED` a relaxed pass would fall through from. The short names keep the decl
+     * under kxml2's 8 KiB `srcBuf` sniff window so the count trips before that buffer does.
+     */
+    @Test(timeout = HOSTILE_TIMEOUT_MS)
+    fun xmlDeclAttributeFloodIsRejected() {
+        val sb = StringBuilder("<?xml ")
+        repeat(OpmlLimits().maxTagAttributes + 1) { sb.append("a=\"v\" ") }
+        sb.append("?><opml version=\"1.0\"/>")
+        assertEquals(OpmlFailure.TAG_TOO_LONG, failure(sb.toString().encodeToByteArray()))
+    }
+
+    /** The root start tag gets the same attribute bound as any other tag. */
+    @Test(timeout = HOSTILE_TIMEOUT_MS)
+    fun rootAttributeFloodIsRejected() {
+        val sb = StringBuilder("<opml version=\"1.0\" ")
+        repeat(OpmlLimits().maxTagAttributes + 1) { sb.append("a$it=\"x\" ") }
+        sb.append("/>")
+        assertEquals(OpmlFailure.TAG_TOO_LONG, failure(sb.toString().encodeToByteArray()))
+    }
+
+    /** A non-root tag over `maxTagAttributes` is rejected too (post-delivery check). */
+    @Test(timeout = HOSTILE_TIMEOUT_MS)
+    fun tagAttributeFloodIsRejected() {
+        val sb = StringBuilder("<opml version=\"1.0\"><body ")
+        repeat(OpmlLimits().maxTagAttributes + 1) { sb.append("a$it=\"x\" ") }
+        sb.append("/></opml>")
+        assertEquals(OpmlFailure.TAG_TOO_LONG, failure(sb.toString().encodeToByteArray()))
+    }
+
+    /**
+     * `<!ENTITY` inside a comment is never flagged: the parser could not attribute it to a
+     * declaration either, so the read falls through to the ordinary `NO_OUTLINES` for a document
+     * that holds none.
+     */
+    @Test(timeout = HOSTILE_TIMEOUT_MS)
+    fun entityInCommentIsNotFlagged() {
+        val doc = "<!-- <!ENTITY x \"y\"> --><opml version=\"1.0\"/>"
+        assertEquals(OpmlFailure.NO_OUTLINES, failure(doc.encodeToByteArray()))
+    }
+
+    /** Same for a `<!ENTITY` inside a CDATA section — payload, not a declaration. */
+    @Test(timeout = HOSTILE_TIMEOUT_MS)
+    fun entityInCdataIsNotFlagged() {
+        val doc = "<opml version=\"1.0\"><body><![CDATA[<!ENTITY x \"y\">]]></body></opml>"
+        assertEquals(OpmlFailure.NO_OUTLINES, failure(doc.encodeToByteArray()))
+    }
+
+    /** Same for a `<!ENTITY` inside a processing instruction. */
+    @Test(timeout = HOSTILE_TIMEOUT_MS)
+    fun entityInProcessingInstructionIsNotFlagged() {
+        val doc = "<?pi <!ENTITY x \"y\"> ?><opml version=\"1.0\"/>"
+        assertEquals(OpmlFailure.NO_OUTLINES, failure(doc.encodeToByteArray()))
+    }
+
+    /** A lowercase `<!entity` marker inside the declaration is still flagged — the match folds case. */
+    @Test(timeout = HOSTILE_TIMEOUT_MS)
+    fun lowercaseEntityInDoctypeIsRejected() {
+        val doc = "<!DOCTYPE opml [<!entity x \"y\">]><opml version=\"1.0\"/>"
+        assertEquals(OpmlFailure.ENTITY_DECLARED, failure(doc.encodeToByteArray()))
+    }
+
+    /**
+     * A lowercase `<!doctype` keyword fails the strict leg at kxml2's required `DOCTYPE` literal
+     * (MALFORMED), but the relaxed leg pulls the declaration body through the guarded stream
+     * before failing the same way — the hidden `<!entity` trips `ENTITY_DECLARED` there, and
+     * would in salvage too. Terminal either way: the entity cannot expand.
+     */
+    @Test(timeout = HOSTILE_TIMEOUT_MS)
+    fun lowercaseDoctypeEntityIsRejected() {
+        val doc = "<!doctype opml [<!entity x \"y\">]><opml version=\"1.0\"/>"
+        assertEquals(OpmlFailure.ENTITY_DECLARED, failure(doc.encodeToByteArray()))
+    }
+
+    /** The entity scan sees through UTF-16 units, not only single-byte text. */
+    @Test(timeout = HOSTILE_TIMEOUT_MS)
+    fun entityInUtf16IsRejected() {
+        val doc = "<!DOCTYPE opml [<!ENTITY x \"y\">]><opml version=\"1.0\"/>"
+        val bytes = BOM_UTF16LE + doc.toByteArray(Charsets.UTF_16LE)
+        assertEquals(OpmlFailure.ENTITY_DECLARED, failure(bytes))
+    }
+
     private companion object {
         /** Generous wall-clock bound; the design targets < 2 s per case, timeouts only catch hangs. */
         const val HOSTILE_TIMEOUT_MS = 60_000L

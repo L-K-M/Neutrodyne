@@ -12,25 +12,34 @@ import java.io.InputStream
  *
  * Two checks run over the byte stream:
  *
- * - **Markup gap.** More than [maxGapBytes] bytes without a `<` trips `TAG_TOO_LONG`: XML forbids
- *   a literal `<` in attribute values and OPML has no long text nodes, so no legitimate file comes
- *   near the bound, and kxml2 — which builds each attribute value in memory — can never grow a
- *   value past about 1 MiB of characters. `<` is detected as byte `3C` in ASCII-compatible
- *   encodings (it never occurs inside a multi-byte sequence) and as the code unit `003C` at an
- *   aligned position in UTF-16, detected by BOM or by the first bytes `3C 00`/`00 3C`.
- * - **Entity declaration.** Until the root start-tag opens, the prolog is walked through the same
- *   constructs `PrologLexer` models for relaxed kxml2 — comments, CDATA sections, processing
- *   instructions, the `<?xml` declaration, markup declarations and `&` references — and any
- *   `<!ENTITY` inside a markup declaration throws [HostileEntityDeclaration] (`ENTITY_DECLARED`).
- *   The walk is a push-model transliteration of `PrologGuard.isHostileText`: byte-for-byte the
- *   same construct boundaries, so a `<!ENTITY` hidden inside a comment or swallowed by a `&x<`
- *   reference is never flagged — the parser could not attribute it to a declaration either. Once
- *   the root tag opens the walk ends; markup declarations in the body are covered by the reader's
- *   `DOCDECL` token check.
+ * - **Markup gap.** More than [maxGapBytes] bytes without a `<` that opens markup trips
+ *   `TAG_TOO_LONG`. The parsers do not enforce XML's `<`-in-values rule — kxml2 accepts a
+ *   literal `<` inside a quoted or unquoted attribute value, a comment, a CDATA section, a
+ *   processing instruction and a markup declaration, buffering each as token payload — so a `<`
+ *   the automaton consumes as payload cannot end the growing token and must not reset the count;
+ *   only a `<` dispatched in text does. OPML has no long text nodes and no legitimate file
+ *   writes giant values or comments, so no legitimate file comes near the bound, and kxml2 —
+ *   which builds each attribute value and comment in memory — can never grow a token past about
+ *   1 MiB of characters. `<` is detected as byte `3C` in ASCII-compatible encodings (it never
+ *   occurs inside a multi-byte sequence) and as the code unit `003C`/`0000003C` at an aligned
+ *   position in UTF-16/UTF-32, detected by the same four-byte signatures kxml2 sniffs.
+ * - **Entity declaration.** The document is walked through the same constructs `PrologLexer`
+ *   models for relaxed kxml2 — comments, CDATA sections, processing instructions, the `<?xml`
+ *   declaration, markup declarations and `&` references — and any `<!ENTITY` inside a markup
+ *   declaration throws [HostileEntityDeclaration] (`ENTITY_DECLARED`). The walk is a push-model
+ *   transliteration of `PrologGuard.isHostileText`: byte-for-byte the same construct boundaries,
+ *   so a `<!ENTITY` hidden inside a comment or swallowed by a `&x<` reference is never flagged —
+ *   the parser could not attribute it to a declaration either. The walk keeps running through the
+ *   body: the parser's view of payload `<`s and markup declarations is the same there, and the
+ *   reader's `DOCDECL` token check backstops parser views the byte lexer cannot mirror (a
+ *   declared `encoding=` shift, for one).
  *
- * The `<?xml` declaration's attribute walk also bounds attribute count at [maxTagAttributes]:
- * kxml2 grows its attribute array a few slots at a time per attribute, so a flooded declaration is
- * a quadratic copy storm even when the gap bound keeps the tag under 1 MiB.
+ * Every tag's attribute walk also bounds attribute count at [maxTagAttributes]: kxml2 grows its
+ * attribute array a few slots at a time per attribute, so a flooded tag or `<?xml` declaration
+ * is a quadratic copy storm even when the gap bound keeps the tag under 1 MiB. The reader
+ * repeats the count post-delivery (`parser.attributeCount`) on every start tag — it cannot
+ * preempt the in-tag growth, but keeps an over-bound tag terminal if the two lexers ever
+ * disagree.
  */
 internal class MarkupGapGuard(
     private val input: InputStream,
@@ -38,21 +47,27 @@ internal class MarkupGapGuard(
     private val maxTagAttributes: Int,
 ) : InputStream() {
     private enum class Mode {
-        /** First two bytes not yet seen; the BOM/`3C 00`/`00 3C` signature is undecided. */
+        /** First four bytes not yet seen; the BOM/padding signature is undecided. */
         PENDING,
 
         /** ASCII-compatible encodings: every byte is one unit. */
         BYTE,
 
-        /** UTF-16LE (and UTF-32LE, whose `<`/`?` units land on the same aligned pairs). */
+        /** UTF-16LE. */
         LE,
 
         /** UTF-16BE. */
         BE,
+
+        /** UTF-32LE: four bytes per unit, low byte first. */
+        LE32,
+
+        /** UTF-32BE: four bytes per unit, high byte first. */
+        BE32,
     }
 
     private enum class St {
-        /** Prolog dispatch: text, whitespace, `&` references and `<` openers. */
+        /** Text dispatch, prolog and body: content, whitespace, `&` references and `<` openers. */
         TEXT,
 
         /** Consumed `<`; the next unit picks the construct. */
@@ -78,6 +93,15 @@ internal class MarkupGapGuard(
         /** The `<?xml` attribute loop: whitespace, `?` ends (plus one char), else an attribute. */
         XLOOP,
 
+        /** A start-tag name (one unconditional char, then name chars), then TAGLOOP. */
+        TAGNAME,
+
+        /** The start-tag attribute loop: whitespace, `>` ends, `/` a degenerated tail, else an attribute. */
+        TAGLOOP,
+
+        /** A `/>` tail: tag whitespace, then the one char kxml2 consumes expecting `>`. */
+        TAGTAIL,
+
         /** An attribute name (one unconditional char, then name chars). */
         XATTR,
 
@@ -98,17 +122,15 @@ internal class MarkupGapGuard(
 
         /** `</`: a name (one unconditional char, then name chars), whitespace, one more char. */
         ENDTAG,
-
-        /** The root tag opened; the walk is off, only the gap counter still runs. */
-        DONE,
     }
 
     private var gapBytes = 0L
 
     private var mode = Mode.PENDING
-    private val head = IntArray(2)
+    private val head = IntArray(4)
     private var headLen = 0
-    private var holdByte = -1 // first byte of an unpaired UTF-16 unit
+    private val hold = IntArray(4) // buffered bytes of the multi-byte unit being assembled
+    private var holdLen = 0
     private val pending = ArrayDeque<Int>()
 
     private var st = St.TEXT
@@ -120,6 +142,7 @@ internal class MarkupGapGuard(
     private var matched = 0 // matched prefix length toward "<!entity"
     private var quote = 0
     private var attrCount = 0
+    private var attrLoop = St.XLOOP // the attribute loop the value states resume to
     private var etWs = false // an ENDTAG name is done and whitespace is being consumed
     private var refResume = St.TEXT
     private var atEof = false
@@ -159,7 +182,7 @@ internal class MarkupGapGuard(
             Mode.PENDING -> {
                 head[headLen++] = b
                 if (headLen == head.size) {
-                    mode = detectMode(head[0], head[1])
+                    mode = detectMode(head[0], head[1], head[2], head[3])
                     pushHead()
                 }
             }
@@ -169,48 +192,64 @@ internal class MarkupGapGuard(
             }
 
             Mode.LE -> {
-                if (holdByte < 0) {
-                    holdByte = b
-                } else {
-                    emitUnit(holdByte or (b shl 8))
-                    holdByte = -1
-                }
+                if (takeByte(b, 2)) emitUnit(hold[0] or (hold[1] shl 8))
             }
 
             Mode.BE -> {
-                if (holdByte < 0) {
-                    holdByte = b
-                } else {
-                    emitUnit((holdByte shl 8) or b)
-                    holdByte = -1
-                }
+                if (takeByte(b, 2)) emitUnit((hold[0] shl 8) or hold[1])
+            }
+
+            Mode.LE32 -> {
+                if (takeByte(b, 4)) emitUnit(hold[0] or (hold[1] shl 8) or (hold[2] shl 16) or (hold[3] shl 24))
+            }
+
+            Mode.BE32 -> {
+                if (takeByte(b, 4)) emitUnit((hold[0] shl 24) or (hold[1] shl 16) or (hold[2] shl 8) or hold[3])
             }
         }
+    }
+
+    /** Buffers a byte of a multi-byte unit; true once [width] bytes are in [hold]. */
+    private fun takeByte(
+        b: Int,
+        width: Int,
+    ): Boolean {
+        hold[holdLen++] = b
+        if (holdLen < width) return false
+        holdLen = 0
+        return true
     }
 
     private fun pushHead() {
         when (mode) {
             Mode.LE -> {
                 emitUnit(head[0] or (head[1] shl 8))
+                emitUnit(head[2] or (head[3] shl 8))
             }
 
             Mode.BE -> {
                 emitUnit((head[0] shl 8) or head[1])
+                emitUnit((head[2] shl 8) or head[3])
+            }
+
+            Mode.LE32 -> {
+                emitUnit(head[0] or (head[1] shl 8) or (head[2] shl 16) or (head[3] shl 24))
+            }
+
+            Mode.BE32 -> {
+                emitUnit((head[0] shl 24) or (head[1] shl 16) or (head[2] shl 8) or head[3])
             }
 
             else -> {
-                emitUnit(head[0])
-                emitUnit(head[1])
+                for (i in head.indices) emitUnit(head[i])
             }
         }
     }
 
-    /** One decoded unit: a `<` resets the gap; until DONE every unit feeds the prolog walk. */
+    /** One decoded unit: every unit feeds the construct walk, which runs the whole document. */
     private fun emitUnit(u: Int) {
-        if (u == LT) gapBytes = 0
-        if (st == St.DONE) return
         pending.addLast(u)
-        while (st != St.DONE && step()) {
+        while (step()) {
             // one automaton step per iteration; false means "needs a unit that has not arrived"
         }
     }
@@ -238,6 +277,10 @@ internal class MarkupGapGuard(
                     }
 
                     LT -> {
+                        // The only `<` that ends a token: one dispatched in text. Every `<`
+                        // consumed inside a construct is payload the parser buffers, so it
+                        // cannot reset the gap that bounds the buffer.
+                        gapBytes = 0
                         st = St.LT
                     }
 
@@ -274,9 +317,11 @@ internal class MarkupGapGuard(
                     }
 
                     else -> {
-                        // Any other char opens the root start tag: the prolog — and with it this
-                        // walk — ends here; the parser owns tag lexing from now on.
-                        st = St.DONE
+                        // Any other char opens a start tag (the first name char is unrestricted):
+                        // lex the tag's attribute walk so a `<` inside a value stays payload.
+                        st = St.TAGNAME
+                        blind = 1
+                        attrCount = 0
                     }
                 }
             }
@@ -496,10 +541,62 @@ internal class MarkupGapGuard(
                     else -> {
                         st = St.XATTR
                         blind = 1
+                        attrLoop = St.XLOOP
                         attrCount++
                         if (attrCount > maxTagAttributes) {
                             throw MarkupBoundExceeded("xml declaration over $maxTagAttributes attributes")
                         }
+                    }
+                }
+            }
+
+            St.TAGNAME -> {
+                if (!nameLoop()) return false
+                st = St.TAGLOOP
+            }
+
+            St.TAGLOOP -> {
+                while (pending.isNotEmpty() && pending.first() <= SPACE) take()
+                when (peekOrWait()) {
+                    WAIT -> {
+                        return false
+                    }
+
+                    EOF -> {
+                        return false
+                    }
+
+                    GT -> {
+                        take()
+                        st = St.TEXT
+                    }
+
+                    SLASH -> {
+                        take()
+                        st = St.TAGTAIL
+                    }
+
+                    else -> {
+                        st = St.XATTR
+                        blind = 1
+                        attrLoop = St.TAGLOOP
+                        attrCount++
+                        if (attrCount > maxTagAttributes) {
+                            throw MarkupBoundExceeded("tag over $maxTagAttributes attributes")
+                        }
+                    }
+                }
+            }
+
+            St.TAGTAIL -> {
+                while (pending.isNotEmpty() && pending.first() <= SPACE) take()
+                when (takeOrWait()) {
+                    WAIT -> {
+                        return false
+                    }
+
+                    else -> {
+                        st = St.TEXT
                     }
                 }
             }
@@ -526,7 +623,7 @@ internal class MarkupGapGuard(
                     }
 
                     else -> {
-                        st = St.XLOOP
+                        st = attrLoop
                     }
                 }
             }
@@ -571,7 +668,7 @@ internal class MarkupGapGuard(
 
                     else -> {
                         take()
-                        if (u == quote) st = St.XLOOP
+                        if (u == quote) st = attrLoop
                     }
                 }
             }
@@ -595,7 +692,7 @@ internal class MarkupGapGuard(
                         // kxml2's unquoted delimiter is ' ': whitespace or '>' ends the value and
                         // the delimiter itself is left for the attribute loop.
                         if (u <= SPACE || u == GT) {
-                            st = St.XLOOP
+                            st = attrLoop
                         } else {
                             take()
                         }
@@ -648,10 +745,6 @@ internal class MarkupGapGuard(
                         }
                     }
                 }
-            }
-
-            St.DONE -> {
-                return false
             }
         }
         return true
@@ -737,18 +830,18 @@ internal class MarkupGapGuard(
         pending.removeFirst()
     }
 
-    /** Source is exhausted: promote the undecided head and lone pair bytes, then drain. */
+    /** Source is exhausted: promote the undecided head and lone unit bytes, then drain. */
     private fun flush() {
         if (atEof) return
         if (mode == Mode.PENDING) {
             mode = Mode.BYTE
             for (i in 0 until headLen) emitUnit(head[i])
-        } else if (holdByte >= 0) {
-            emitUnit(holdByte)
-            holdByte = -1
+        } else if (holdLen > 0) {
+            for (i in 0 until holdLen) emitUnit(hold[i])
+            holdLen = 0
         }
         atEof = true
-        while (st != St.DONE && step()) {
+        while (step()) {
             // drain pending with EOF semantics
         }
     }
@@ -763,15 +856,28 @@ internal class MarkupGapGuard(
         u in 'a'.code..'z'.code || u in 'A'.code..'Z'.code || u in '0'.code..'9'.code ||
             u == '_'.code || u == '#'.code || u == '-'.code || u >= 0x80
 
+    /**
+     * kxml2's four-byte sniff table, mirrored one-to-one: UTF-32 BOMs and BOM-less `<` padding
+     * (before the UTF-16 prefixes they share), UTF-16 behind `<?`, the two UTF-16 BOMs, else byte
+     * units (UTF-8, declared and legacy encodings — the `encoding=` name itself belongs to the
+     * parser, which re-decodes past the declaration; the reader's `DOCDECL` check backstops the
+     * divergence).
+     */
     private fun detectMode(
         b0: Int,
         b1: Int,
+        b2: Int,
+        b3: Int,
     ): Mode =
         when {
-            b0 == 0xFF && b1 == 0xFE -> Mode.LE
+            b0 == 0x00 && b1 == 0x00 && b2 == 0xFE && b3 == 0xFF -> Mode.BE32
+            b0 == 0xFF && b1 == 0xFE && b2 == 0x00 && b3 == 0x00 -> Mode.LE32
+            b0 == 0x00 && b1 == 0x00 && b2 == 0x00 && b3 == LT -> Mode.BE32
+            b0 == LT && b1 == 0x00 && b2 == 0x00 && b3 == 0x00 -> Mode.LE32
+            b0 == 0x00 && b1 == LT && b2 == 0x00 && b3 == QM -> Mode.BE
+            b0 == LT && b1 == 0x00 && b2 == QM && b3 == 0x00 -> Mode.LE
             b0 == 0xFE && b1 == 0xFF -> Mode.BE
-            b0 == LT && b1 == 0x00 -> Mode.LE
-            b0 == 0x00 && b1 == LT -> Mode.BE
+            b0 == 0xFF && b1 == 0xFE -> Mode.LE
             else -> Mode.BYTE
         }
 

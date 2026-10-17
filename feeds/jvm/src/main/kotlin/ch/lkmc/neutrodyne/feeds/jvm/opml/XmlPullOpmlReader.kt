@@ -139,8 +139,31 @@ public class XmlPullOpmlReader(
             } catch (e: OpmlCapExceeded) {
                 PullOutcome(OpmlReadResult.Failed(e.failure), detected = detected)
             } catch (e: XmlPullParserException) {
-                // The cascade fall-through boundary.
-                PullOutcome(OpmlReadResult.Failed(OpmlFailure.MALFORMED), detected = detected)
+                // kxml2 wraps any failure pulled from the stream inside `setInput`'s encoding
+                // sniff into the exception's `detail`; a cap violation must keep its terminal
+                // reason, never degrade to the MALFORMED a relaxed pass falls through from.
+                when (val streamFailure = streamFailureIn(e)) {
+                    is HostileEntityDeclaration -> {
+                        PullOutcome(OpmlReadResult.Failed(OpmlFailure.ENTITY_DECLARED), detected = detected)
+                    }
+
+                    is DepthLimitExceeded -> {
+                        PullOutcome(OpmlReadResult.Failed(OpmlFailure.TOO_DEEP), detected = detected)
+                    }
+
+                    is MarkupBoundExceeded -> {
+                        PullOutcome(OpmlReadResult.Failed(OpmlFailure.TAG_TOO_LONG), detected = detected)
+                    }
+
+                    is OpmlCapExceeded -> {
+                        PullOutcome(OpmlReadResult.Failed(streamFailure.failure), detected = detected)
+                    }
+
+                    // The cascade fall-through boundary.
+                    else -> {
+                        PullOutcome(OpmlReadResult.Failed(OpmlFailure.MALFORMED), detected = detected)
+                    }
+                }
             } catch (e: StackOverflowError) {
                 PullOutcome(OpmlReadResult.Failed(OpmlFailure.TOO_DEEP), detected = detected)
             } catch (e: IOException) {
@@ -164,6 +187,24 @@ public class XmlPullOpmlReader(
 
         private const val RELAXED_FEATURE = "http://xmlpull.org/v1/doc/features.html#relaxed"
     }
+}
+
+/**
+ * The first stream-level failure chained under [e] — through `detail` (kxml2's wrap channel) or
+ * `cause` — or null when the exception is a plain parse error. Guard and session cap exceptions
+ * thrown while the parser pulls bytes surface wrapped; their own catch clauses only see direct
+ * throws.
+ */
+private fun streamFailureIn(e: XmlPullParserException): Throwable? {
+    var t: Throwable? = e.detail ?: e.cause
+    val seen = HashSet<Throwable>()
+    while (t != null && seen.add(t)) {
+        when (t) {
+            is HostileEntityDeclaration, is DepthLimitExceeded, is MarkupBoundExceeded, is OpmlCapExceeded -> return t
+        }
+        t = (t as? XmlPullParserException)?.detail ?: t.cause
+    }
+    return null
 }
 
 /** Thrown when a per-outline cap trips inside the document walk; carries the failure it maps to. */
@@ -209,6 +250,8 @@ private class ReadSession(
         if (event == XmlPullParser.END_DOCUMENT || !parser.name.equals(ROOT_ELEMENT, ignoreCase = true)) {
             return OpmlReadResult.Failed(OpmlFailure.NO_OUTLINES)
         }
+        // The root tag gets the same post-delivery bounds as every other start tag.
+        onStartTag()
         neutrodyne = attrs()["xmlns:nd"] == NEUTRODYNE_NS
 
         val rootDepth = parser.depth

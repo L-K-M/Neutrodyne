@@ -29,18 +29,35 @@ internal enum class OutlineKind {
  * The 05 classification: an outline with `xmlUrl` is a feed regardless of `type`; `url` is the
  * gPodder fallback when `type` is `rss` or `link` and the URL does not end in `.opml`. Episode,
  * playlist, include and `.opml`-link outlines are ignored with their subtree; anything else is
- * a folder.
+ * a folder — a `type="rss"` outline at another list among them.
  */
 internal fun classifyOutline(attrs: Map<String, String>): OutlineKind {
     val type = attrs["type"]?.lowercase(Locale.ROOT)
     val url = attrs["url"]
     return when {
-        attrs["xmlurl"] != null -> OutlineKind.FEED
-        type == "podcast-episode" || type == "podcast-playlist" -> OutlineKind.IGNORED_EPISODES
-        type == "include" -> OutlineKind.IGNORED_LISTS
-        type == "link" && url != null && url.endsWith(OPML_SUFFIX, ignoreCase = true) -> OutlineKind.IGNORED_LISTS
-        url != null && (type == "rss" || type == "link") -> OutlineKind.FEED
-        else -> OutlineKind.FOLDER
+        attrs["xmlurl"] != null -> {
+            OutlineKind.FEED
+        }
+
+        type == "podcast-episode" || type == "podcast-playlist" -> {
+            OutlineKind.IGNORED_EPISODES
+        }
+
+        type == "include" -> {
+            OutlineKind.IGNORED_LISTS
+        }
+
+        type == "link" && url != null && url.endsWith(OPML_SUFFIX, ignoreCase = true) -> {
+            OutlineKind.IGNORED_LISTS
+        }
+
+        url != null && (type == "rss" || type == "link") && !url.endsWith(OPML_SUFFIX, ignoreCase = true) -> {
+            OutlineKind.FEED
+        }
+
+        else -> {
+            OutlineKind.FOLDER
+        }
     }
 }
 

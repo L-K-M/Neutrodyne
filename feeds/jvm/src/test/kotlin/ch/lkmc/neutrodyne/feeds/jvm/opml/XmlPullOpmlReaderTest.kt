@@ -24,6 +24,9 @@ class XmlPullOpmlReaderTest {
 
     private fun failure(xml: String): OpmlFailure = (read(xml) as OpmlReadResult.Failed).failure
 
+    private fun failureBytes(bytes: ByteArray): OpmlFailure =
+        (reader.read({ Buffer().write(bytes) }) as OpmlReadResult.Failed).failure
+
     @Test
     fun emptyDocumentHasNoOutlines() {
         assertEquals(OpmlFailure.NO_OUTLINES, failure("<opml version=\"1.0\"/>"))
@@ -79,6 +82,47 @@ class XmlPullOpmlReaderTest {
             listOf(OpmlWarningCode.ATTRIBUTE_TOO_LONG),
             result.document.warnings.map { it.code },
         )
+    }
+
+    /**
+     * 05 walk rules: `url` is the feed fallback only when the URL does not end in `.opml` — a
+     * `type="rss"` outline pointing at another list is a folder, like any untyped outline.
+     */
+    @Test
+    fun rssOutlineWithOpmlUrlIsAFolder() {
+        val result =
+            read(
+                "<opml version=\"1.0\"><body>" +
+                    "<outline type=\"rss\" url=\"https://x.example.com/list.opml\" text=\"shared\"/>" +
+                    "</body></opml>",
+            )
+        assertIs<OpmlReadResult.Ok>(result)
+        assertEquals(emptyList(), result.document.entries)
+        assertEquals(listOf("shared"), result.document.folders.map { it.name })
+    }
+
+    /**
+     * `encoding="UTF-16"` shifts the parser's view of the body where the byte-level guard keeps
+     * its ASCII view — the `<!ENTITY` is invisible to the stream scan and is caught by the
+     * DOCDECL-token text check instead. The fallback is terminal: `ENTITY_DECLARED`.
+     */
+    @Test
+    fun entityAfterDeclaredCharsetShiftIsRejected() {
+        val head = "<?xml version=\"1.0\" encoding=\"UTF-16\"?>"
+        val body = "<!DOCTYPE opml [<!ENTITY x \"y\">]><opml version=\"1.0\"/>"
+        val bytes =
+            head.toByteArray(Charsets.US_ASCII) + body.toByteArray(Charsets.UTF_16)
+        assertEquals(OpmlFailure.ENTITY_DECLARED, failureBytes(bytes))
+    }
+
+    /** A declaration that lies about the body encoding fails fast — never a hang or a crash. */
+    @Test
+    fun misdeclaredEncodingFails() {
+        val head = "<?xml version=\"1.0\" encoding=\"UTF-16\"?>"
+        val bytes =
+            head.toByteArray(Charsets.US_ASCII) +
+                "<opml version=\"1.0\"/>".toByteArray(Charsets.US_ASCII)
+        assertIs<OpmlReadResult.Failed>(reader.read({ Buffer().write(bytes) }))
     }
 
     /** `open` is invoked exactly once per pass — a clean document costs the strict pass only. */
