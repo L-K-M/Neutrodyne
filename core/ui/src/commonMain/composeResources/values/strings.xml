@@ -399,4 +399,16 @@
     <string name="groups_new">New group</string>
     <string name="groups_manage">Manage groups</string>
     <string name="groups_empty">No groups yet</string>
+    <string name="mark_played_all">All</string>
+    <string name="mark_played_week">Older than 1 week</string>
+    <string name="mark_played_month">Older than 1 month</string>
+    <string name="mark_played_three_months">Older than 3 months</string>
+    <string name="mark_played_confirm">Mark as played</string>
+    <string name="mark_played_counting">Counting episodes…</string>
+    <string name="mark_played_selection_changed">The selection changed. Check the new count and confirm again.</string>
+    <string name="mark_played_no_undo">You cannot undo this action.</string>
+    <plurals name="mark_played_count">
+        <item quantity="one">Mark %1$d episode in '%2$s' as played?</item>
+        <item quantity="other">Mark %1$d episodes in '%2$s' as played?</item>
+    </plurals>
 </resources>

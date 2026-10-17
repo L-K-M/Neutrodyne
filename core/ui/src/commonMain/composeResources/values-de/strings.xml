@@ -377,4 +377,16 @@
     <string name="groups_new">Neue Gruppe</string>
     <string name="groups_manage">Gruppen verwalten</string>
     <string name="groups_empty">Noch keine Gruppen</string>
+    <string name="mark_played_all">Alle</string>
+    <string name="mark_played_week">Älter als 1 Woche</string>
+    <string name="mark_played_month">Älter als 1 Monat</string>
+    <string name="mark_played_three_months">Älter als 3 Monate</string>
+    <string name="mark_played_confirm">Als gespielt markieren</string>
+    <string name="mark_played_counting">Folgen werden gezählt…</string>
+    <string name="mark_played_selection_changed">Die Auswahl hat sich geändert. Prüfe die neue Anzahl und bestätige erneut.</string>
+    <string name="mark_played_no_undo">Du kannst diese Aktion nicht rückgängig machen.</string>
+    <plurals name="mark_played_count">
+        <item quantity="one">%1$d Folge in '%2$s' als gespielt markieren?</item>
+        <item quantity="other">%1$d Folgen in '%2$s' als gespielt markieren?</item>
+    </plurals>
 </resources>

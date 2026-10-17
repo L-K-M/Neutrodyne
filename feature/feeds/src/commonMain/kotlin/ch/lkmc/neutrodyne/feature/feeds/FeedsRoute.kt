@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeRouteResult
+import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedDialog
 import ch.lkmc.neutrodyne.core.ui.YouTubeLinks
 import ch.lkmc.neutrodyne.core.ui.dispatchEpisodeRoute
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
@@ -28,6 +29,7 @@ import dev.zacsweers.metrox.viewmodel.metroViewModel
 @Composable
 internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val markPlayed by viewModel.markPlayed.state.collectAsStateWithLifecycle()
     val pageState = rememberSaveableStateHolder()
     val live = viewModel.live.collectAsStateWithLifecycle()
     val navigator = LocalAppNavigator.current
@@ -68,6 +70,15 @@ internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
         onAddPodcast = { navigator.push(AddPodcastKey(null)) },
         onSearch = { navigator.selectTab(DiscoverKey) },
     )
+
+    markPlayed?.let { dialog ->
+        MarkFeedPlayedDialog(
+            dialog,
+            viewModel.markPlayed::select,
+            viewModel.markPlayed::confirm,
+            viewModel.markPlayed::dismiss,
+        )
+    }
 
     ShowUserMessages(
         messages = state.messages,

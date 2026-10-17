@@ -468,7 +468,7 @@ play-order writes keep the current generation.
 |---|---|---|---|
 | Refresh this group | only member podcasts, forced | `RefreshController.refreshNow(RefreshScope.Group(id))` | M2 |
 | Play | [Playing a group](#playing-a-group) | `PlaybackController.playFeed(Group(id), prefs.filters, prefs.playOrder, null)` | M4 |
-| Mark all as played | options: all, older than 1 week, 1 month, 3 months; confirmation shows `countUnplayed(source, before)` ("Mark 214 episodes in 'tech' as played?"); no undo | `EpisodeRepository.markFeedPlayed(source, sortDateBefore)` (03; SQL [02 User-state writes](02-data-model.md#user-state-writes)) | M2 |
+| Mark all as played | options: all, older than 1 week, 1 month, 3 months; confirmation shows `countUnplayed(source, before)` ("Mark 214 episodes in 'tech' as played?"); no undo | `EpisodeRepository.markFeedPlayed(source, sortDateBefore, expectedCount)` (03; SQL [02 User-state writes](02-data-model.md#user-state-writes)) | M2 |
 | Download all unplayed | confirmation "Download 37 episodes (about 1.9 GB, 3 sizes unknown)?"; metered prompt per 07 | `downloadAllEstimate(source)` → `DownloadController.request(ids, DownloadLane.MANUAL, allowMetered = null)` | M6 |
 | Share as OPML (desktop: "Export group as OPML…") | per-group export; the desktop saves through a file dialog ([Destinations](#destinations)) | `ExportKey(groupId)` ([OPML export](#opml-export)) | M3 |
 | Import OPML into this group | picker; session created with this group as target | `ImportRepository.create(source, CreateImportOptions(targetGroupId = id))` | M3 |
@@ -479,9 +479,10 @@ chosen `sortDateBefore`, obtain `countUnplayed`, and pass both that cutoff and
 `expectedCount` to the guarded `EpisodeRepository.markFeedPlayed` overload.
 The repository revalidates the count inside its write transaction; a changed
 count returns `MarkFeedPlayedResult.SelectionChanged(actualCount)` and writes
-nothing. Show a refreshed confirmation before retrying. `Played(count)` reports
-the completed mark-played chain. Existing plain confirmation dialogs use the
-explicitly unchecked two-argument overload until the D9 dialog slice.
+nothing. Show a refreshed confirmation with the same frozen cutoff before
+retrying. `Played(count)` reports the completed mark-played chain. D9's Feeds
+page and podcast overflow use the shared counted dialog; the Library tile-menu
+confirmation retains the unchecked two-argument overload until its own PR.
 
 `downloadAllEstimate` ([02 Download all candidates](02-data-model.md#download-all-candidates), M6): the feed's source predicate, its view filters and `hideOlderThanDays` bound (as [Playing a group](#playing-a-group) rules 1, 3 and 5, no anchor), unplayed, without a `download` row in `QUEUED`…`COMPLETED` (`FAILED` and `MISSING` rows count as candidates), without a tombstone (`downloadDismissedAt IS NULL`; the user deleted those deliberately), and downloadable (`enclosureUrl IS NOT NULL`, or YouTube when `YouTubeCapabilitiesSource.capabilities.value.downloads` at call time, [04 Capability matrix](04-youtube.md#capability-matrix)); newest first, **capped at 200** (`capped = true` → "200 newest of 1,234"). Unlike the context tail, Up next items and the current episode are **not** excluded: downloading them is wanted (answers 02's open question 7). Size per episode follows [07 Estimates](07-downloads.md#estimates): `enclosureLength` when ≥ 100 KB (smaller values are placeholders), else `durationMs × 16 000 B/s` (128 kbit/s) when known, else counted in `unknownSizeCount`; no invented numbers.
 

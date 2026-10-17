@@ -18,6 +18,7 @@ import ch.lkmc.neutrodyne.core.domain.EpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
 import ch.lkmc.neutrodyne.core.domain.FeedRepository
 import ch.lkmc.neutrodyne.core.domain.GroupRepository
+import ch.lkmc.neutrodyne.core.domain.MarkFeedPlayedResult
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
@@ -33,6 +34,8 @@ import ch.lkmc.neutrodyne.core.model.GroupCounts
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
+import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedController
+import ch.lkmc.neutrodyne.core.ui.MarkPlayedOutcome
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.UserMessages
@@ -41,6 +44,8 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_copy_link
 import ch.lkmc.neutrodyne.core.ui.resources.episode_offline_toast
 import ch.lkmc.neutrodyne.core.ui.resources.feed_group_deleted
 import ch.lkmc.neutrodyne.core.ui.resources.feed_group_unknown
+import ch.lkmc.neutrodyne.core.ui.resources.feeds_all
+import ch.lkmc.neutrodyne.core.ui.resources.feeds_ungrouped
 import ch.lkmc.neutrodyne.core.ui.resources.no_handler
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import dev.zacsweers.metro.ContributesIntoMap
@@ -398,9 +403,28 @@ public class FeedsViewModel(
         }
     }
 
-    /** The page overflow's write; counted bulk confirmation is delivered by D9. */
+    /**
+     * The counted "Mark all as played" confirmation. It lives in the ViewModel, so it survives
+     * configuration changes but not process death: a destructive confirmation is not restored.
+     */
+    public val markPlayed: MarkFeedPlayedController =
+        MarkFeedPlayedController(viewModelScope, clock, feedRepository::countUnplayed) { source, before, count ->
+            when (val result = episodes.markFeedPlayed(source, before, count)) {
+                is MarkFeedPlayedResult.Played -> MarkPlayedOutcome.Played
+                is MarkFeedPlayedResult.SelectionChanged -> MarkPlayedOutcome.SelectionChanged(result.actualCount)
+            }
+        }
+
+    /** Use the page that opened the overflow, including virtual feeds and hidden groups. */
     public fun markAllPlayed(source: FeedSource = FeedSource.All) {
-        write { episodes.markFeedPlayed(source, null) }
+        val title =
+            when (source) {
+                FeedSource.All -> UiText.Res(Res.string.feeds_all)
+                FeedSource.Ungrouped -> UiText.Res(Res.string.feeds_ungrouped)
+                is FeedSource.Group -> UiText.Raw(knownGroups.find { it.id == source.groupId }?.name ?: return)
+                is FeedSource.Podcast -> return
+            }
+        markPlayed.open(source, title)
     }
 
     /** Pull-to-refresh / the desktop's Refresh button (08: All → all feeds, 20 s cooldown). */
