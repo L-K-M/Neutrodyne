@@ -5,8 +5,10 @@ package ch.lkmc.neutrodyne.core.data.repo
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.Redactor
+import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.data.add.HostChecks
 import ch.lkmc.neutrodyne.core.data.add.PreviewEntryResolver
 import ch.lkmc.neutrodyne.core.data.credentials.removeUnreferenced
@@ -153,19 +155,27 @@ internal class PodcastRepositoryImpl(
         refresher.flushFetchStates()
         val removed = mutableListOf<Long>()
         val dao = db.podcastDao()
-        // One transaction for the whole list: a crash mid-loop must not leave a half-unsubscribed
-        // library with stale periodic scheduling (03 Unsubscribe).
-        coordinator.withCredentialCommit {
-            db.withWriteTransaction {
-                for (id in podcastIds) {
-                    if (dao.byId(id) == null) continue
-                    dao.deleteCascade(id, clock.now())
-                    removed += id
+        // The cascade and its reschedule finish as one unit: Room re-checks cancellation as the
+        // transaction returns, so a closing screen would otherwise skip the reschedule (and the
+        // caller's cleanup of the returned ids). A failed reschedule never fails the cascade.
+        return withContext(NonCancellable) {
+            // One transaction for the whole list: a crash mid-loop must not leave a half-unsubscribed
+            // library with stale periodic scheduling (03 Unsubscribe).
+            coordinator.withCredentialCommit {
+                db.withWriteTransaction {
+                    for (id in podcastIds) {
+                        if (dao.byId(id) == null) continue
+                        dao.deleteCascade(id, clock.now())
+                        removed += id
+                    }
                 }
             }
+            if (removed.isNotEmpty()) {
+                suspendRunCatching { scheduler.reschedulePeriodic() }
+                    .onFailure { Log.w(TAG, it) { "post-unsubscribe reschedule failed" } }
+            }
+            removed
         }
-        if (removed.isNotEmpty()) scheduler.reschedulePeriodic()
-        return removed
     }
 
     /** Steps 1–3 of 03's "Podcast dedupe and merge" — an M1b path. */
@@ -401,6 +411,7 @@ internal class PodcastRepositoryImpl(
         )
 
     private companion object {
+        const val TAG = "Podcasts"
         const val TILE_COUNTS_WINDOW_MS = 30L * 86_400_000
         const val DEAD_FAILURE_COUNT = 10
         const val DEAD_WINDOW_MS = 7L * 86_400_000

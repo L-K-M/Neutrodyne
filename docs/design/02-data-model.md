@@ -2030,6 +2030,8 @@ sequenceDiagram
 4. `RefreshBatchingTest`: 300 simulated 304 outcomes through the batching writer cause ≤ 15 invalidations of an open All `PagingSource`.
 5. From MS0 (MS0 acceptance 3): steps 1–4 run a second time with the capture triggers installed and `sync_state.enabled = 1`; the invalidation counts must equal those of the first run, and a flow on `sync_outbox` must see the captures (positive control).
 
+**Implementation note (2026-10-16, M2):** B5 uses the existing `PositionDao.upsert` and ignored `EpisodeStateDao.ensure` with pre-seeded `startedAt` for the 100 position-only writes; the guarded position-save sequence belongs to M4 and is not implemented yet. A separate test creates the state row with `startedAt` in the first position transaction and permits exactly one invalidation, then none on subsequent saves. Session updates and queue reorders use test-only SQL because their M4 DAO writers are also absent. Both desktop and bundled-driver device legs drain Room tracking between writes and reload a fresh source after every invalidation, so notifications cannot coalesce into a false pass. The timing legs use the full 300/50,000/20 seed and file-backed WAL databases; GMD emits the samples and medians to stdout and the instrumentation stream collected with the existing `androidTest-results` reports. Timings are recorded only, with reference-device acceptance still manual.
+
 ---
 
 ## Retention and maintenance
