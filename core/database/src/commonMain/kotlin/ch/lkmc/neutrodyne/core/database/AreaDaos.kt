@@ -20,6 +20,14 @@ abstract class GroupDao {
     @Insert
     abstract suspend fun insert(row: PodcastGroupEntity): Long
 
+    /**
+     * 02 Import commit: `INSERT OR IGNORE` — `-1` means the unique `nameKey` raced the insert;
+     * the caller re-reads [groupByNameKey] inside its transaction and reuses that group (a
+     * `uuid` collision instead is a bug it reports).
+     */
+    @Insert(onConflict = androidx.room3.OnConflictStrategy.IGNORE)
+    abstract suspend fun insertGroupOrIgnore(row: PodcastGroupEntity): Long
+
     @Query(
         "SELECT g.*, (SELECT COUNT(*) FROM podcast_group_member m WHERE m.groupId = g.id) AS memberCount" +
             " FROM podcast_group g ORDER BY g.orderKey, g.id",
