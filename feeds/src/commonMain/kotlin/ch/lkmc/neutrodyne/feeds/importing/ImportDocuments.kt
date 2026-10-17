@@ -144,9 +144,12 @@ public object ImportDocuments {
 
         val entries =
             doc.entries.map { entry ->
-                val title = entry.title ?: entry.text
+                // Neutrodyne files keep the writer's columns (05 Classify step 5): `text` is
+                // the custom title when it differs, never the title fallback, so a pending
+                // podcast exported with only a custom name round-trips title=null.
+                val title = if (doc.neutrodyne) entry.title else entry.title ?: entry.text
                 val customTitle =
-                    if (doc.neutrodyne && entry.text != null && entry.text != title) {
+                    if (doc.neutrodyne && entry.text != null && entry.text != entry.title) {
                         entry.text
                     } else {
                         null

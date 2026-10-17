@@ -1,35 +1,35 @@
 {
   "entries": [
     {
+      "customTitle": "Feed A",
       "groupNames": [
         "a,b"
       ],
       "ordinal": 0,
-      "title": "Feed A",
       "url": "https://a.example.com/rss"
     },
     {
+      "customTitle": "Feed B",
       "groupNames": [
         "c/d"
       ],
       "ordinal": 1,
-      "title": "Feed B",
       "url": "https://b.example.com/rss"
     },
     {
+      "customTitle": "Feed C",
       "groupNames": [
         "100%"
       ],
       "ordinal": 2,
-      "title": "Feed C",
       "url": "https://c.example.com/rss"
     },
     {
+      "customTitle": "Feed D",
       "groupNames": [
         "a%2Cb"
       ],
       "ordinal": 3,
-      "title": "Feed D",
       "url": "https://d.example.com/rss"
     }
   ],

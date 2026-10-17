@@ -162,6 +162,29 @@ class ImportDocumentsTest {
         )
     }
 
+    /**
+     * A Neutrodyne export of a pending podcast carries only `text` (05's writer emits
+     * `text = COALESCE(customTitle, title)`), so `text` is the custom title and `title`
+     * stays null. Foreign files keep the title-or-text fallback (gPodder descriptions).
+     */
+    @Test
+    fun neutrodyneTextWithoutTitleIsCustomTitle() {
+        val doc =
+            OpmlDocument(
+                entries = listOf(OpmlEntry(ordinal = 0, url = "https://a.example.com/rss", text = "ATP")),
+                folders = emptyList(),
+                neutrodyne = true,
+                mode = ParseMode.STRICT,
+            )
+        val ours = ImportDocuments.fromOpml(doc).entries.single()
+        assertEquals(null, ours.title)
+        assertEquals("ATP", ours.customTitle)
+
+        val foreign = ImportDocuments.fromOpml(doc.copy(neutrodyne = false)).entries.single()
+        assertEquals("ATP", foreign.title)
+        assertEquals(null, foreign.customTitle)
+    }
+
     /** Category-only names follow the folders, deduplicated on the normalized name key. */
     @Test
     fun categoryOnlyNamesFollowFoldersInOrder() {
