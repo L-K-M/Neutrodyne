@@ -274,8 +274,12 @@ internal class SalvageOpmlScanner(
                     i++
                     continue
                 }
-                val semi = value.indexOf(';', i + 1)
-                if (semi < 0 || semi - i > MAX_ENTITY_CHARS) {
+                // The `;` search stays inside the entity window: an unbounded indexOf would
+                // rescan the tail per `&`, quadratic CPU on a `&`-dense value inside the cap.
+                val end = minOf(i + 1 + MAX_ENTITY_CHARS, value.length)
+                var semi = i + 1
+                while (semi < end && value[semi] != ';') semi++
+                if (semi == end) {
                     out.append(c)
                     i++
                     continue
