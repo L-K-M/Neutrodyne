@@ -10,6 +10,7 @@ import okio.Timeout
 import java.io.BufferedOutputStream
 import java.io.FileOutputStream
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -54,7 +55,8 @@ public class ZipArchiveWriter : ArchiveWriterFactory {
             check(openEntry == null) { "an archive entry is still open; close it before the next" }
             require(isSafeEntryName(name)) { "invalid archive entry name" }
             val entry = ZipEntry(name)
-            entry.timeLocal = DOS_TIMESTAMP
+            // setTimeLocal is API 35+ on Android; the legacy setter is available at minSdk.
+            entry.time = DOS_TIMESTAMP.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
             out.putNextEntry(entry)
             return EntrySink().also { openEntry = it }
         }
