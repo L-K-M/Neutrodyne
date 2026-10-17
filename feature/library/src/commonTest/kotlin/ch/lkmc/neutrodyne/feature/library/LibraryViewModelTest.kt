@@ -2,13 +2,22 @@
 
 package ch.lkmc.neutrodyne.feature.library
 
+import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.TitleCollator
+import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
+import ch.lkmc.neutrodyne.core.domain.groupCountsWindowStart
+import ch.lkmc.neutrodyne.core.model.FeedCounts
 import ch.lkmc.neutrodyne.core.model.FeedSource
+import ch.lkmc.neutrodyne.core.model.FeedSourceRef
+import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.LibrarySegment
 import ch.lkmc.neutrodyne.core.model.settings.LibrarySort
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
+import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
+import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
@@ -27,6 +36,8 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 /**
@@ -36,6 +47,9 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class LibraryViewModelTest : MainDispatcherTest() {
+    private val groups = FakeGroupRepository()
+    private val feeds = FakeFeedRepository()
+    private val clock = TestClock()
     private val podcasts = FakePodcastRepository()
     private val episodes = FakeEpisodeRepository()
     private val refreshController = FakeRefreshController()
@@ -60,6 +74,9 @@ class LibraryViewModelTest : MainDispatcherTest() {
             settings,
             collator,
             network,
+            groups,
+            feeds,
+            clock,
         )
 
     private fun TestScope.collect(viewModel: LibraryViewModel) {
@@ -260,6 +277,188 @@ class LibraryViewModelTest : MainDispatcherTest() {
             )
             assertEquals(LibrarySort.TITLE, settings.get(AppearanceSettingKeys.LIBRARY_SORT))
         }
+
+    @Test fun groupAndUngroupedFiltersPersistAndTrackMemberships() =
+        runTest {
+            val tech = assertIs<Outcome.Success<Long>>(groups.create(GroupDraft("tech"), setOf(1L))).value
+            val news = assertIs<Outcome.Success<Long>>(groups.create(GroupDraft("news"), setOf(1L, 2L))).value
+            val uuid =
+                groups.groups.value
+                    .first { it.id == tech }
+                    .uuid
+            val a = testLibraryTile(1, "A")
+            podcasts.tiles.value = listOf(a, testLibraryTile(2, "B"), testLibraryTile(3, "C"))
+            podcasts.tilesByGroup.value = mapOf(tech to listOf(a))
+            settings.set(AppearanceSettingKeys.LIBRARY_GROUP_FILTER, uuid)
+            val vm = viewModel()
+            collect(vm)
+            advanceUntilIdle()
+            assertEquals(uuid, vm.uiState.value.groupFilter)
+            assertEquals(
+                listOf(1L),
+                vm.uiState.value.tiles
+                    .map { it.podcastId },
+            )
+            assertEquals(
+                listOf(tech, news),
+                vm.uiState.value.groups
+                    .map { it.id },
+            )
+
+            vm.setGroupFilter("ungrouped")
+            advanceUntilIdle()
+            assertEquals("ungrouped", settings.get(AppearanceSettingKeys.LIBRARY_GROUP_FILTER))
+            assertEquals(
+                listOf(3L),
+                vm.uiState.value.tiles
+                    .map { it.podcastId },
+            )
+            groups.setMembers(news, setOf(1L))
+            advanceUntilIdle()
+            assertEquals(
+                listOf(2L, 3L),
+                vm.uiState.value.tiles
+                    .map { it.podcastId },
+            )
+
+            vm.setGroupFilter("")
+            advanceUntilIdle()
+            assertEquals(
+                listOf(1L, 2L, 3L),
+                vm.uiState.value.tiles
+                    .map { it.podcastId },
+            )
+        }
+
+    @Test fun deletedSelectedGroupSilentlyFallsBackToAll() =
+        runTest {
+            val id = assertIs<Outcome.Success<Long>>(groups.create(GroupDraft("tech"))).value
+            val uuid =
+                groups.groups.value
+                    .single()
+                    .uuid
+            settings.set(AppearanceSettingKeys.LIBRARY_GROUP_FILTER, uuid)
+            podcasts.tiles.value = listOf(testLibraryTile(1))
+            val vm = viewModel()
+            collect(vm)
+            advanceUntilIdle()
+            assertEquals(uuid, vm.uiState.value.groupFilter)
+            assertTrue(
+                vm.uiState.value.tiles
+                    .isEmpty(),
+            )
+
+            groups.groups.value = emptyList()
+            advanceUntilIdle()
+            assertEquals("", settings.get(AppearanceSettingKeys.LIBRARY_GROUP_FILTER))
+            assertEquals("", vm.uiState.value.groupFilter)
+            assertEquals(
+                listOf(1L),
+                vm.uiState.value.tiles
+                    .map { it.podcastId },
+            )
+            assertTrue(
+                vm.uiState.value.messages
+                    .isEmpty(),
+            )
+            assertFalse(vm.selectGroup(id))
+        }
+
+    @Test fun invalidStoredFilterFallsBackToAll() =
+        runTest {
+            settings.set(AppearanceSettingKeys.LIBRARY_GROUP_FILTER, "group:obsolete")
+            val vm = viewModel()
+            collect(vm)
+            advanceUntilIdle()
+            assertEquals("", settings.get(AppearanceSettingKeys.LIBRARY_GROUP_FILTER))
+            assertEquals("", vm.uiState.value.groupFilter)
+        }
+
+    @Test fun groupTapWritesFeedsEncodingAndReportsFailedWrites() =
+        runTest {
+            val id = assertIs<Outcome.Success<Long>>(groups.create(GroupDraft("tech"))).value
+            val vm = viewModel()
+            collect(vm)
+            advanceUntilIdle()
+            settings.failNextSet = SettingsError.WriteFailed
+            assertFalse(vm.selectGroup(id))
+            assertEquals("all", settings.get(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE))
+            assertTrue(vm.selectGroup(id))
+            assertEquals(
+                FeedSourceRef
+                    .Group(
+                        groups.groups.value
+                            .single()
+                            .uuid,
+                    ).encode(),
+                settings.get(AppearanceSettingKeys.FEEDS_SELECTED_SOURCE),
+            )
+        }
+
+    @Test fun selectionActionsUseExactlyTheSelectedPodcasts() =
+        runTest {
+            podcasts.subscribedIds.value = setOf(1L, 2L, 3L)
+            podcasts.downloadedIds.value = mapOf(1L to listOf(10L), 2L to listOf(20L, 21L))
+            val vm = viewModel()
+            vm.refreshSelection(listOf(2L, 1L, 2L))
+            assertEquals(listOf("refreshNow(${RefreshScope.Podcasts(listOf(2L, 1L))})"), refreshController.calls)
+            assertEquals(3, vm.downloadedCount(listOf(2L, 1L)))
+            vm.markSelectionPlayed(listOf(2L, 1L, 2L))
+            vm.unsubscribeSelection(listOf(2L, 1L, 2L))
+            advanceUntilIdle()
+            assertEquals(
+                listOf(
+                    "markFeedPlayed(${FeedSource.Podcast(2)}, null)",
+                    "markFeedPlayed(${FeedSource.Podcast(1)}, null)",
+                ),
+                episodes.calls,
+            )
+            assertEquals(listOf("downloadedEpisodeIds([2, 1])", "unsubscribe([2, 1])"), podcasts.calls)
+            assertEquals(setOf(3L), podcasts.subscribedIds.value)
+        }
+
+    @Test fun groupTileCountsFollowTheFeedRepositoryWindowAndUpdates() =
+        runTest {
+            val tech = assertIs<Outcome.Success<Long>>(groups.create(GroupDraft("tech"))).value
+            val news = assertIs<Outcome.Success<Long>>(groups.create(GroupDraft("news"))).value
+            val initial = mapOf(news to FeedCounts(), tech to FeedCounts(14, 3))
+            feeds.groupCounts.value = initial
+            val vm = viewModel()
+            collect(vm)
+            advanceUntilIdle()
+
+            assertEquals(listOf(groupCountsWindowStart(clock.now())), feeds.groupCountsSinceMs)
+            assertEquals(initial, vm.uiState.value.groupCounts)
+
+            val updated = mapOf(tech to FeedCounts(9, 1), news to FeedCounts(5, 2))
+            feeds.groupCounts.value = updated
+            advanceUntilIdle()
+            assertEquals(updated, vm.uiState.value.groupCounts)
+
+            feeds.groupCounts.value = mapOf(tech to FeedCounts())
+            advanceUntilIdle()
+            assertEquals(mapOf(tech to FeedCounts()), vm.uiState.value.groupCounts)
+        }
+
+    @Test fun segmentIsPersistedAndObserved() =
+        runTest {
+            settings.set(AppearanceSettingKeys.LIBRARY_SEGMENT, LibrarySegment.GROUPS)
+            val vm = viewModel()
+            collect(vm)
+            advanceUntilIdle()
+            assertEquals(LibrarySegment.GROUPS, vm.uiState.value.segment)
+            vm.setSegment(LibrarySegment.PODCASTS)
+            advanceUntilIdle()
+            assertEquals(LibrarySegment.PODCASTS, settings.get(AppearanceSettingKeys.LIBRARY_SEGMENT))
+            assertEquals(LibrarySegment.PODCASTS, vm.uiState.value.segment)
+        }
+
+    @Test fun shiftSelectionExtendsInVisibleOrder() {
+        val visible = listOf(4L, 2L, 3L, 1L)
+        assertEquals(listOf(2L, 3L, 1L), extendSelection(listOf(2L), 2L, 1L, visible))
+        assertEquals(listOf(2L, 4L), extendSelection(listOf(2L), 2L, 4L, visible))
+        assertEquals(listOf(2L, 1L), extendSelection(listOf(2L), null, 1L, visible))
+    }
 
     private companion object {
         /** (sort key → expected tile-id order) covering every `LibrarySort` branch. */

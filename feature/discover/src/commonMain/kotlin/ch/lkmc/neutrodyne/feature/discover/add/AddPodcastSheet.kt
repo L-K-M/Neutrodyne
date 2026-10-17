@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.feature.discover.add
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -44,7 +45,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
+import ch.lkmc.neutrodyne.core.designsystem.components.NdAssistChip
 import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
+import ch.lkmc.neutrodyne.core.designsystem.components.NdFilterChip
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
@@ -79,6 +82,10 @@ import ch.lkmc.neutrodyne.core.ui.resources.add_private
 import ch.lkmc.neutrodyne.core.ui.resources.add_subscribe
 import ch.lkmc.neutrodyne.core.ui.resources.add_subscribing
 import ch.lkmc.neutrodyne.core.ui.resources.add_title
+import ch.lkmc.neutrodyne.core.ui.resources.membership_add_to
+import ch.lkmc.neutrodyne.core.ui.resources.membership_create
+import ch.lkmc.neutrodyne.core.ui.resources.membership_name
+import ch.lkmc.neutrodyne.core.ui.resources.membership_new
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
@@ -90,7 +97,7 @@ import org.jetbrains.compose.resources.stringResource
  * input, the preview id and the chosen groups, so a typed password never lands in the
  * saved-state bundle — a restore re-prompts for it instead (M1b owns persistence, N3).
  *
- * The "Add to groups" chips arrive with M2's group feed; the YouTube + suggest_rss card with M8
+ * The YouTube + suggest_rss card arrives with M8
  * (deviations recorded in 08, 2026-10-07).
  */
 @Composable
@@ -102,11 +109,23 @@ internal fun AddPodcastSheet(
     onCancelResolve: () -> Unit,
     onInputChange: (String) -> Unit,
     onCandidate: (String) -> Unit,
-    onSubscribe: () -> Unit,
+    onSubscribe: (Set<Long>) -> Unit,
+    onCreateGroup: (String) -> Unit = {},
+    onConsumeCreatedGroup: () -> Unit = {},
     onOpenPodcast: (Long) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var chosenGroups by rememberSaveable { mutableStateOf(emptyList<Long>()) }
+    var newGroupName by rememberSaveable { mutableStateOf<String?>(null) }
+    val currentOnConsumeCreatedGroup by rememberUpdatedState(onConsumeCreatedGroup)
+    LaunchedEffect(state.createdGroupId) {
+        state.createdGroupId?.let { id ->
+            chosenGroups = (chosenGroups + id).distinct()
+            newGroupName = null
+            currentOnConsumeCreatedGroup()
+        }
+    }
     var input by rememberSaveable { mutableStateOf(initialInput.orEmpty()) }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -128,6 +147,7 @@ internal fun AddPodcastSheet(
     // (08: "Enter runs Subscribe when it is enabled"). NoMedia previews are not subscribable.
     val canSubscribe =
         step is AddSheetStep.Preview &&
+            !state.creatingGroup &&
             !step.subscribing &&
             alreadyId == null &&
             (step.preview.emptyFeed || step.preview.episodeCount > 0)
@@ -137,6 +157,7 @@ internal fun AddPodcastSheet(
     // lists candidates only a candidate row advances — the field's value no longer leads.
     val submitEnabled =
         input.isNotBlank() &&
+            !state.creatingGroup &&
             step !is AddSheetStep.Resolving &&
             step !is AddSheetStep.Choosing &&
             (step as? AddSheetStep.Preview)?.subscribing != true
@@ -145,7 +166,7 @@ internal fun AddPodcastSheet(
     // otherwise resolve the field's input. Enter, the button and a failed state's Retry share it.
     fun submit() {
         when {
-            canSubscribe -> onSubscribe()
+            canSubscribe -> onSubscribe(chosenGroups.toSet())
             inputStep?.auth == true -> onCredentials(BasicCredentials(username, password))
             input.isNotBlank() -> onResolve(input)
         }
@@ -255,6 +276,41 @@ internal fun AddPodcastSheet(
 
             is AddSheetStep.Preview -> {
                 PreviewCard(step)
+                Text(stringResource(Res.string.membership_add_to))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.groups.forEach { group ->
+                        NdFilterChip(
+                            selected = group.id in chosenGroups,
+                            label = group.name,
+                            onClick = {
+                                chosenGroups =
+                                    if (group.id in chosenGroups) chosenGroups - group.id else chosenGroups + group.id
+                            },
+                            enabled = !step.subscribing,
+                        )
+                    }
+                    NdAssistChip(
+                        label = stringResource(Res.string.membership_new),
+                        onClick = { newGroupName = "" },
+                        enabled = !step.subscribing && !state.creatingGroup,
+                    )
+                }
+                newGroupName?.let { name ->
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { newGroupName = it },
+                        label = { Text(stringResource(Res.string.membership_name)) },
+                        singleLine = true,
+                        isError = state.groupError != null,
+                        supportingText = state.groupError?.let { { Text(it.asString()) } },
+                        enabled = !state.creatingGroup && !step.subscribing,
+                    )
+                    NdTextButton(
+                        label = stringResource(Res.string.membership_create),
+                        onClick = { onCreateGroup(name) },
+                        enabled = !state.creatingGroup && !step.subscribing,
+                    )
+                }
             }
         }
 

@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.feature.groups
 
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.navigation.AddToGroupsKey
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
 import ch.lkmc.neutrodyne.core.navigation.GroupSettingsKey
@@ -23,5 +24,6 @@ public object GroupsNavigation {
             entry<GroupsManageKey>(metadata = NdSceneMetadata.paneList()) { GroupsManageRoute() }
             entry<GroupSettingsKey>(metadata = NdSceneMetadata.paneDetail()) { key -> GroupSettingsRoute(key) }
             entry<GroupEditKey>(metadata = NdSceneMetadata.paneDetail()) { key -> GroupEditRoute(key) }
+            entry<AddToGroupsKey>(metadata = NdSceneMetadata.bottomSheet()) { AddToGroupsRoute(it) }
         }
 }

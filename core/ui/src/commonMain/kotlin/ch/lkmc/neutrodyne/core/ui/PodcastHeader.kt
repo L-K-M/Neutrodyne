@@ -2,14 +2,21 @@
 
 package ch.lkmc.neutrodyne.core.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -19,20 +26,30 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverTier
+import ch.lkmc.neutrodyne.core.designsystem.components.NdAssistChip
 import ch.lkmc.neutrodyne.core.designsystem.components.NdFilterChip
+import ch.lkmc.neutrodyne.core.designsystem.components.NdInputChip
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.theme.LocalSystemUiState
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
+import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.PodcastDetail
 import ch.lkmc.neutrodyne.core.model.ShowNoteBlock
 import ch.lkmc.neutrodyne.core.model.ShowNoteSpan
 import ch.lkmc.neutrodyne.core.model.ShowNotes
+import ch.lkmc.neutrodyne.core.model.art.ArtColors
 import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.podcast_add_group
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_episode_count
+import ch.lkmc.neutrodyne.core.ui.resources.podcast_group_remove
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_less
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_more
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_private
@@ -43,15 +60,20 @@ import org.jetbrains.compose.resources.stringResource
 
 /**
  * 08 "Podcast header" — the first item of the podcast screen's `LazyColumn` (it scrolls away; the
- * pinned transparent top bar is the screen's). At M1a the header has no artwork-scheme tint (M10)
- * and no group chips (M5): the deviation is recorded in 08. Cover 160 dp at 24 dp corners, the
- * title `headlineSmall` (2 lines), author, the "Subscribed" chip, three lines of plain description
- * with a "More"/"Less" toggle, and the meta line "{n} episodes · Updated {relative} · Private".
+ * pinned transparent top bar is the screen's). The header has no artwork-scheme tint (M10). Cover
+ * 160 dp at 24 dp corners, the title `headlineSmall` (2 lines), author, the "Subscribed" chip,
+ * three lines of plain description with a "More"/"Less" toggle, and the meta line
+ * "{n} episodes · Updated {relative} · Private". M2 adds the membership chips below the
+ * "Subscribed" row: one chip per [groups] entry with the group dot and a remove affordance,
+ * plus "+ Group" ([onAddToGroups]) which stays when [groups] is empty.
  */
 @Composable
 public fun PodcastHeader(
     detail: PodcastDetail,
     nowMs: Long,
+    groups: List<Group>,
+    onRemoveGroup: (Group) -> Unit,
+    onAddToGroups: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -94,9 +116,67 @@ public fun PodcastHeader(
                 enabled = false,
             )
         }
+        Spacer(Modifier.height(CHIP_GAP))
+        MembershipChips(groups, onRemoveGroup, onAddToGroups)
         detail.description?.let { Description(it) }
         Spacer(Modifier.height(META_GAP))
         MetaLine(detail, nowMs)
+    }
+}
+
+/**
+ * 08's header membership chips (M2, D6): one [NdInputChip] per group — the group dot, the name
+ * and a trailing remove affordance — plus the "+ Group" action chip that opens the
+ * membership sheet. A chip's body tap opens the same sheet; its trailing "x" removes just
+ * that membership ([onRemoveGroup]), and the ViewModel's snackbar carries the per-membership
+ * Undo.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MembershipChips(
+    groups: List<Group>,
+    onRemoveGroup: (Group) -> Unit,
+    onAddToGroups: () -> Unit,
+) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(CHIP_GAP)) {
+        groups.forEach { group ->
+            NdInputChip(
+                onClick = onAddToGroups,
+                label = group.name,
+                leadingIcon = { GroupDot(group.colorArgb) },
+                trailingIcon = {
+                    Icon(
+                        imageVector = NdIcons.Close,
+                        contentDescription =
+                            stringResource(Res.string.podcast_group_remove, group.name),
+                        modifier =
+                            Modifier
+                                .size(CLOSE_ICON_SIZE)
+                                .clickable(role = Role.Button) { onRemoveGroup(group) },
+                    )
+                },
+            )
+        }
+        NdAssistChip(
+            onClick = onAddToGroups,
+            label = stringResource(Res.string.podcast_add_group),
+        )
+    }
+}
+
+/**
+ * The group's colour dot (08 ArtColors: the palette seed is re-toned, never raw — L* 40 on light,
+ * 80 on dark; a `null` colour renders the theme's `primary`).
+ */
+@Composable
+private fun GroupDot(colorArgb: Int?) {
+    val dark = LocalSystemUiState.current.dark
+    val color =
+        colorArgb?.let { Color(ArtColors.tone(it, if (dark) DOT_TONE_DARK else DOT_TONE_LIGHT)) }
+            ?: MaterialTheme.colorScheme.primary
+    // The chip's leading slot is an uncentered icon-size box: center the smaller dot inside it.
+    Box(Modifier.size(ICON_SLOT_SIZE), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(DOT_SIZE).clip(CircleShape).background(color))
     }
 }
 
@@ -212,4 +292,9 @@ private val HERO_SIZE = 160.dp
 private val COVER_TITLE_GAP = 16.dp
 private val CHIP_GAP = 8.dp
 private val META_GAP = 12.dp
+private val DOT_SIZE = 12.dp
+private val ICON_SLOT_SIZE = 18.dp
+private val CLOSE_ICON_SIZE = 18.dp
+private const val DOT_TONE_LIGHT = 40.0
+private const val DOT_TONE_DARK = 80.0
 private const val DESCRIPTION_LINES = 3

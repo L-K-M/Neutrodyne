@@ -11,8 +11,11 @@ import ch.lkmc.neutrodyne.core.model.ChangeOrigin
 import ch.lkmc.neutrodyne.core.model.FeedInfo
 import ch.lkmc.neutrodyne.core.model.LibraryTile
 import ch.lkmc.neutrodyne.core.model.PodcastDetail
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 
 /**
  * In-memory [PodcastRepository] for ViewModel/UI tests (09 `:core:testing` inventory): drives
@@ -21,7 +24,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
  * and [feedInfo] flows themselves. `retry` is a recorded no-op.
  */
 class FakePodcastRepository : PodcastRepository {
+    /** Hold library emissions to test actions restored before data loads. */
+    var libraryReadGate: CompletableDeferred<Unit>? = null
     val tiles = MutableStateFlow<List<LibraryTile>>(emptyList())
+
+    /** Explicit fixtures for group-filtered library reads. */
+    val tilesByGroup = MutableStateFlow<Map<Long, List<LibraryTile>>>(emptyMap())
     val detail = MutableStateFlow<PodcastDetail?>(null)
     val feedInfo = MutableStateFlow<FeedInfo?>(null)
     val categoryCounts = MutableStateFlow<List<CategoryCount>>(emptyList())
@@ -38,7 +46,9 @@ class FakePodcastRepository : PodcastRepository {
     /** When set, every write throws it (the Room implementation's failure path). */
     var writeError: Throwable? = null
 
-    override fun observeLibraryTiles(groupId: Long?): Flow<List<LibraryTile>> = tiles
+    override fun observeLibraryTiles(groupId: Long?): Flow<List<LibraryTile>> =
+        (if (groupId == null) tiles else tilesByGroup.map { it[groupId].orEmpty() })
+            .onStart { libraryReadGate?.await() }
 
     override fun observePodcast(podcastId: Long): Flow<PodcastDetail?> = detail
 

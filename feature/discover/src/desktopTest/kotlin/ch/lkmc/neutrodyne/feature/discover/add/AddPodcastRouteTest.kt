@@ -24,6 +24,7 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.domain.AddResolution
+import ch.lkmc.neutrodyne.core.model.AlreadySubscribed
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.FakeAddPodcastResolver
@@ -52,8 +53,11 @@ import kotlin.test.assertEquals
 class AddPodcastRouteTest {
     private lateinit var previousLocale: Locale
     private val resolver = FakeAddPodcastResolver()
+    private val groups =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeGroupRepository()
     private val subscribe = FakeSubscribeUseCase()
-    private val viewModel = AddPodcastViewModel(resolver, subscribe)
+    private val viewModel by lazy { AddPodcastViewModel(resolver, subscribe, groups) }
     private val navigator = RecordingAppNavigator()
     private val host = SnackbarHostState()
 
@@ -84,10 +88,28 @@ class AddPodcastRouteTest {
 
             waitUntil(timeoutMillis = 5_000) { host.currentSnackbarData != null }
             assertEquals(
-                listOf<RecordingAppNavigator.Call>(RecordingAppNavigator.Call.Pop),
+                listOf<RecordingAppNavigator.Call>(RecordingAppNavigator.Call.PopEntry(AddPodcastKey(null))),
                 navigator.calls,
             )
             assertEquals(SnackbarDuration.Long, host.currentSnackbarData?.visuals?.duration)
+        }
+
+    @Test
+    fun staleOpenDoesNotPushPodcast() =
+        runComposeUiTest {
+            resolver.nextResolution =
+                AddResolution.Feed(testFeedPreview(alreadySubscribed = AlreadySubscribed(42L, exact = true)))
+            navigator.popResult = false
+            setRoute()
+
+            feedField().performTextInput("https://example.com/feed")
+            onNodeWithText("Subscribe").performClick()
+            onNodeWithText("Open").performClick()
+
+            assertEquals(
+                listOf<RecordingAppNavigator.Call>(RecordingAppNavigator.Call.PopEntry(AddPodcastKey(null))),
+                navigator.calls,
+            )
         }
 
     private fun ComposeUiTest.setRoute() {

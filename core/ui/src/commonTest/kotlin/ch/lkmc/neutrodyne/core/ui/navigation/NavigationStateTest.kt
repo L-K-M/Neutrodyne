@@ -65,6 +65,56 @@ class NavigationStateTest {
     }
 
     @Test
+    fun `scoped pop removes its entry only once`() {
+        val nav = state(LibraryKey)
+        val sheet = AddPodcastKey(null)
+        nav.push(PodcastKey(7))
+        nav.push(sheet)
+
+        assertTrue(nav.pop(sheet))
+        assertTrue(nav.lastChangeWasPop)
+        assertFalse(nav.pop(sheet))
+        assertEquals(listOf(LibraryKey, PodcastKey(7)), nav.stack(LibraryKey).toList())
+        assertEquals(LibraryKey, nav.selectedTab)
+    }
+
+    @Test
+    fun `scoped pop ignores a covered entry and preserves transition direction`() {
+        val nav = state()
+        val sheet = AddPodcastKey(null)
+        nav.push(sheet)
+        nav.push(SettingsHomeKey)
+
+        assertFalse(nav.pop(sheet))
+        assertFalse(nav.lastChangeWasPop)
+        assertEquals(listOf(FeedsKey, sheet, SettingsHomeKey), nav.stack(FeedsKey).toList())
+    }
+
+    @Test
+    fun `scoped pop ignores entries on another tab`() {
+        val nav = state(LibraryKey)
+        val sheet = AddPodcastKey(null)
+        nav.push(sheet)
+        nav.selectTab(DownloadsKey)
+        nav.push(PodcastKey(7))
+
+        assertFalse(nav.pop(sheet))
+        assertEquals(listOf(DownloadsKey, PodcastKey(7)), nav.stack(DownloadsKey).toList())
+        assertEquals(listOf(LibraryKey, sheet), nav.stack(LibraryKey).toList())
+        assertEquals(DownloadsKey, nav.selectedTab)
+    }
+
+    @Test
+    fun `scoped pop preserves tab roots without switching tabs`() {
+        val nav = state(DownloadsKey)
+
+        assertFalse(nav.pop(DownloadsKey))
+        assertFalse(nav.pop(AddPodcastKey(null)))
+        assertEquals(listOf(DownloadsKey), nav.stack(DownloadsKey).toList())
+        assertEquals(DownloadsKey, nav.selectedTab)
+    }
+
+    @Test
     fun `pop at a non-Feeds root returns to Feeds`() {
         val nav = state()
         nav.selectTab(DownloadsKey)

@@ -2,4 +2,32 @@
 <!-- SPDX-License-Identifier: Unlicense -->
 <resources>
     <string name="read_failed">Die Daten konnten nicht geladen werden</string>
+    <string name="podcasts">Podcasts</string>
+    <string name="groups">Gruppen</string>
+    <string name="all">Alle</string>
+    <string name="ungrouped">Ohne Gruppe</string>
+    <string name="new_group_chip">+ Neue Gruppe</string>
+    <string name="new_group">Neue Gruppe</string>
+    <string name="edit_group">Gruppe bearbeiten</string>
+    <string name="manage_groups">Gruppen verwalten</string>
+    <string name="selected_count">%1$d ausgewählt</string>
+    <string name="exit_selection">Auswahl beenden</string>
+    <string name="add_to_group">Zu Gruppe hinzufügen…</string>
+    <string name="unsubscribe">Abbestellen</string>
+    <string name="selection_actions">Auswahlaktionen</string>
+    <string name="refresh">Aktualisieren</string>
+    <string name="mark_played">Alle als gespielt markieren…</string>
+    <string name="select_all">Alle auswählen</string>
+    <string name="select">Auswählen</string>
+    <string name="empty_group">Keine Podcasts in „%1$s“</string>
+    <string name="add_podcasts">Podcasts hinzufügen</string>
+    <plurals name="unsubscribe_many">
+        <item quantity="one">%1$d Podcast abbestellen?</item>
+        <item quantity="other">%1$d Podcasts abbestellen?</item>
+    </plurals>
+    <plurals name="mark_many">
+        <item quantity="one">Alle Folgen in %1$d Podcast als gespielt markieren?</item>
+        <item quantity="other">Alle Folgen in %1$d Podcasts als gespielt markieren?</item>
+    </plurals>
+    <string name="group_actions">Gruppenaktionen</string>
 </resources>
