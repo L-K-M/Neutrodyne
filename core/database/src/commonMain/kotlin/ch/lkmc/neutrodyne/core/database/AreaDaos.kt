@@ -435,6 +435,14 @@ interface QueueDao {
     @Query("SELECT * FROM queue_entry ORDER BY orderKey, id")
     suspend fun entries(): List<QueueEntryEntity>
 
+    /** The episodeIds already queued — the restore merge's "not already queued" check set. */
+    @Query("SELECT episodeId FROM queue_entry")
+    suspend fun queuedEpisodeIds(): List<Long>
+
+    /** 05 Replace pre-step (UP_NEXT): the whole queue goes before the backup's is written. */
+    @Query("DELETE FROM queue_entry")
+    suspend fun clear(): Int
+
     @Query("SELECT orderKey FROM queue_entry ORDER BY orderKey DESC, id DESC LIMIT 1")
     suspend fun lastOrderKey(): String?
 

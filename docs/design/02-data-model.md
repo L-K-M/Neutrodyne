@@ -1877,6 +1877,9 @@ SELECT id, 0 AS rank FROM podcast WHERE feedKey = :key
 UNION ALL SELECT id, 1 FROM podcast WHERE feedKey IN (:keys)
 UNION ALL SELECT podcastId, 2 FROM podcast_url_alias WHERE url IN (:keys)
 ORDER BY rank, id LIMIT 1;
+-- Implementation note (2026-10-17, M3): Room's query parser treats `rank` as a
+-- window-function keyword, so `BackupDao.matchPodcastByKeys` names the column `r`
+-- and wraps the union in a single-column outer select. Same ordering, same result.
 -- 2. real podcast:guid
 SELECT id FROM podcast WHERE podcastGuid = :guid AND podcastGuidDerived = 0 ORDER BY id LIMIT 1;
 -- 3. otherwise insert as in Import commit (status PENDING_FIRST_FETCH, initialFetch = 1) plus the backup's artworkUrl,
