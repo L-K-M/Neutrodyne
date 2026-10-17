@@ -848,12 +848,10 @@ class RestoreEpisodeMergerTest {
     // evidence.
 
     @Test
-    fun collidingInsertKeepsSettledPodcastIdsStagedJFirst() =
-        runTest { collidingInsertKeepsSettledIds(jFirst = true) }
+    fun collidingInsertKeepsSettledPodcastIdsStagedJFirst() = runTest { collidingInsertKeepsSettledIds(jFirst = true) }
 
     @Test
-    fun collidingInsertKeepsSettledPodcastIdsStagedIFirst() =
-        runTest { collidingInsertKeepsSettledIds(jFirst = false) }
+    fun collidingInsertKeepsSettledPodcastIdsStagedIFirst() = runTest { collidingInsertKeepsSettledIds(jFirst = false) }
 
     /**
      * The report's colliding-identity case: staged `j` claims local `rx` by real
