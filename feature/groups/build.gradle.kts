@@ -5,8 +5,14 @@ plugins {
 
 kotlin {
     sourceSets {
+        desktopTest.dependencies {
+            implementation(libs.cmp.ui.test)
+            implementation(compose.desktop.currentOs)
+        }
         commonMain.dependencies {
             implementation(project(":youtube:api"))
+            implementation(project(":feeds"))
+            implementation(libs.lifecycle.viewmodel.savedstate)
         }
     }
 }

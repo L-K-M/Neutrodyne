@@ -421,4 +421,33 @@
     <string name="action_undo">Undo</string>
     <string name="episode_marked_played">Marked played</string>
     <string name="episode_marked_unplayed">Marked unplayed</string>
+
+    <!-- M2 group editor -->
+    <string name="group_edit_new">New group</string>
+    <string name="group_edit_title">Edit group</string>
+    <string name="group_edit_close">Close editor</string>
+    <string name="group_edit_name">Name</string>
+    <string name="group_edit_name_count">%1$d/%2$d</string>
+    <string name="group_edit_name_empty">Enter a name</string>
+    <string name="group_edit_name_long">Use at most %1$d characters</string>
+    <string name="group_edit_name_taken">A group named '%1$s' already exists</string>
+    <string name="group_edit_color">Colour</string>
+    <string name="group_edit_custom">Custom</string>
+    <string name="group_edit_icon">Icon</string>
+    <string name="group_edit_icon_value">Icon: %1$s</string>
+    <string name="group_edit_none">None</string>
+    <string name="group_edit_order">Play order</string>
+    <string name="group_edit_oldest_hint">Play oldest first?</string>
+    <string name="group_edit_tab">Show as a tab in Feeds</string>
+    <string name="group_edit_members">Members (%1$d)</string>
+    <string name="group_edit_search">Search subscribed podcasts</string>
+    <string name="group_edit_no_members">No matching podcasts</string>
+    <string name="group_edit_delete">Delete group</string>
+    <string name="group_edit_deleted">Group deleted</string>
+    <string name="group_edit_undo">Undo</string>
+    <string name="group_edit_discard_prompt">Discard changes?</string>
+    <string name="group_edit_discard">Discard</string>
+    <string name="group_edit_gone">This group no longer exists</string>
+    <string name="group_edit_undo_expired">Too late to undo</string>
+    <string name="group_edit_undo_name_taken">A group named '%1$s' already exists. Rename it, then tap Undo</string>
 </resources>

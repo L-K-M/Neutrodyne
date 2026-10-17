@@ -399,4 +399,33 @@
     <string name="action_undo">Rückgängig</string>
     <string name="episode_marked_played">Als gespielt markiert</string>
     <string name="episode_marked_unplayed">Als ungespielt markiert</string>
+
+    <!-- M2 group editor -->
+    <string name="group_edit_new">Neue Gruppe</string>
+    <string name="group_edit_title">Gruppe bearbeiten</string>
+    <string name="group_edit_close">Editor schließen</string>
+    <string name="group_edit_name">Name</string>
+    <string name="group_edit_name_count">%1$d/%2$d</string>
+    <string name="group_edit_name_empty">Gib einen Namen ein</string>
+    <string name="group_edit_name_long">Verwende höchstens %1$d Zeichen</string>
+    <string name="group_edit_name_taken">Eine Gruppe namens '%1$s' existiert bereits</string>
+    <string name="group_edit_color">Farbe</string>
+    <string name="group_edit_custom">Benutzerdefiniert</string>
+    <string name="group_edit_icon">Symbol</string>
+    <string name="group_edit_icon_value">Symbol: %1$s</string>
+    <string name="group_edit_none">Keines</string>
+    <string name="group_edit_order">Wiedergabereihenfolge</string>
+    <string name="group_edit_oldest_hint">Älteste zuerst abspielen?</string>
+    <string name="group_edit_tab">Als Tab in Feeds anzeigen</string>
+    <string name="group_edit_members">Mitglieder (%1$d)</string>
+    <string name="group_edit_search">Abonnierte Podcasts durchsuchen</string>
+    <string name="group_edit_no_members">Keine passenden Podcasts</string>
+    <string name="group_edit_delete">Gruppe löschen</string>
+    <string name="group_edit_deleted">Gruppe gelöscht</string>
+    <string name="group_edit_undo">Rückgängig</string>
+    <string name="group_edit_discard_prompt">Änderungen verwerfen?</string>
+    <string name="group_edit_discard">Verwerfen</string>
+    <string name="group_edit_gone">Diese Gruppe existiert nicht mehr</string>
+    <string name="group_edit_undo_expired">Zu spät zum Rückgängigmachen</string>
+    <string name="group_edit_undo_name_taken">Eine Gruppe namens '%1$s' existiert bereits. Benenne sie um und tippe auf Rückgängig</string>
 </resources>

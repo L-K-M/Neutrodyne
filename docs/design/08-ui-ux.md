@@ -607,6 +607,18 @@ Each override row opens a chooser whose first option is "Use default ({effective
 - Save: `create(draft, memberIds)` or `update` + `setMembers`; result errors shown inline; success pops the screen.
 - Delete: `GroupRepository.delete` → pop, snackbar "Deleted 'tech'" with Undo for 10 s (`undoDelete(token)`), no confirmation dialog (undo instead, R2.1).
 
+**Implementation note (2026-10-16, M2):** D4 uses the entry's `SavedStateHandle`
+through the existing Metro assisted ViewModel factory and Navigation 3 store
+owner. The draft and its original baseline are saved as primitive string lists,
+so restored edits still trigger the discard prompt. Editing saves Rename, Look,
+Orders (preserving the current feed order), ShowAsTab, then `setMembers`; a failed
+step leaves the draft open for retry, since the existing targeted repository
+writes are separate transactions. Per D4's requested copy, the delete confirmation
+is "Group deleted"; the name is retained for an Undo name-conflict message. One
+10-second deadline covers snackbar queueing and retries after the editor pops.
+The existing-group footer currently offers Delete only: the Group settings link
+waits for D8 to install `GroupSettingsKey`, avoiding navigation to an absent entry.
+
 ### Manage groups
 
 `GroupsManageKey`, `:feature:groups`, M2.
