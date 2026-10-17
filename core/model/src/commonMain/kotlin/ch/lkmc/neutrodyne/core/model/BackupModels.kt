@@ -74,6 +74,7 @@ data class SnapshotStatus(
     val enabled: Boolean,
     val lastWrittenAt: Long?,
     val bytes: Long?,
+    /** 05's drop level, 0–3: full, slim old history, drop old history, active lines only. */
     val level: Int,
     val lastError: String?,
     /** A snapshot from another installation waits (05 First-launch restore). */

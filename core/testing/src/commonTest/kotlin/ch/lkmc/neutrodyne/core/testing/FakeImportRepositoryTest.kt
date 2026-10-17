@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.model.ImportItemView
 import ch.lkmc.neutrodyne.core.model.ImportSessionView
 import ch.lkmc.neutrodyne.core.model.ImportSource
 import ch.lkmc.neutrodyne.core.model.ImportState
+import ch.lkmc.neutrodyne.core.model.SourceGroup
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
@@ -159,6 +160,90 @@ class FakeImportRepositoryTest {
                     ImportItemStatus.YOUTUBE_UNSUPPORTED_YET,
                 ),
                 ordinals(ImportItemFilter.NOT_IMPORTED),
+            )
+        }
+
+    @Test fun stalePreviewChangesPreserveWorkerProgressAndParseMetadata() =
+        runTest {
+            val repo = FakeImportRepository()
+            val id = repo.createWith(item(0, ImportItemStatus.PREVIEW, selected = true))
+            val previewOptions = repo.observeSession(id).first()!!.options
+
+            repo.confirm(id)
+            val committed = repo.sessions.value.getValue(id)
+            val workerOptions =
+                committed.options.copy(
+                    fromAndroidBackup = true,
+                    restoreRequestedAt = 123L,
+                    laneAttempts = 2,
+                    sourceGroups = listOf(SourceGroup("news", "News", null, null, null)),
+                    attemptMarkerAt = 456L,
+                )
+            repo.sessions.value = mapOf(id to committed.copy(options = workerOptions))
+
+            // A stale screen must not roll back a commit or clear a queued restore.
+            repo.updateOptions(id) { previewOptions.copy(importGroups = false) }
+
+            assertEquals(
+                workerOptions,
+                repo.observeSession(id).first()!!.options,
+            )
+        }
+
+    @Test fun previewChangesPreserveParsedGroupsAndSnapshotOrigin() =
+        runTest {
+            val repo = FakeImportRepository()
+            val id = repo.createWith(item(0, ImportItemStatus.PREVIEW))
+            val preview = repo.sessions.value.getValue(id)
+            val options =
+                preview.options.copy(
+                    fromAndroidBackup = true,
+                    sourceGroups = listOf(SourceGroup("news", "News", null, null, null)),
+                )
+            repo.sessions.value = mapOf(id to preview.copy(options = options))
+
+            repo.updateOptions(id) { preview.options.copy(importGroups = false) }
+
+            assertEquals(
+                options.copy(importGroups = false),
+                repo.observeSession(id).first()!!.options,
+            )
+        }
+
+    @Test fun requestedRestoreCannotBeChangedByPreviewOptions() =
+        runTest {
+            val repo = FakeImportRepository()
+            val id = repo.createWith(item(0, ImportItemStatus.PREVIEW))
+            val preview = repo.sessions.value.getValue(id)
+            val requested = preview.options.copy(restoreRequestedAt = 123L)
+            repo.sessions.value = mapOf(id to preview.copy(options = requested))
+
+            repo.updateOptions(id) { preview.options.copy(notifyNewEpisodes = true) }
+
+            assertEquals(requested, repo.observeSession(id).first()!!.options)
+        }
+
+    @Test fun previewChangesCannotForgeWorkerProgress() =
+        runTest {
+            val repo = FakeImportRepository()
+            val id = repo.createWith(item(0, ImportItemStatus.PREVIEW))
+            val options = repo.observeSession(id).first()!!.options
+
+            repo.updateOptions(id) {
+                it.copy(
+                    notifyNewEpisodes = true,
+                    fromAndroidBackup = true,
+                    restoreRequestedAt = 123L,
+                    laneAttempts = 2,
+                    sourceGroups = listOf(SourceGroup("news", "News", null, null, null)),
+                    committedAt = 456L,
+                    attemptMarkerAt = 789L,
+                )
+            }
+
+            assertEquals(
+                options.copy(notifyNewEpisodes = true),
+                repo.observeSession(id).first()!!.options,
             )
         }
 
