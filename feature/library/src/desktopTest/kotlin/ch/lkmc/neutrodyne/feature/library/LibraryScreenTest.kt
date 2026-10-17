@@ -701,8 +701,8 @@ class LibraryScreenTest {
             onNodeWithText("3 downloaded episodes will be deleted.").assertIsDisplayed()
             assertEquals(listOf("downloadedEpisodeIds([1, 2])"), podcasts.calls)
             onNodeWithText("Unsubscribe").performClick()
-            waitForIdle()
-            assertEquals("unsubscribe([1, 2])", podcasts.calls.last())
+            // Writes run in the ViewModel's coroutine, which waitForIdle() does not track.
+            waitUntil { podcasts.calls.last() == "unsubscribe([1, 2])" }
         }
 
     @Test fun bulkMarkPlayedWaitsForCountedConfirmationAndRefreshUsesSelection() =
@@ -715,7 +715,7 @@ class LibraryScreenTest {
             onNodeWithText("Mark all episodes in 2 podcasts as played?").assertIsDisplayed()
             assertTrue(episodes.calls.isEmpty())
             onNodeWithText("Mark all as played").performClick()
-            waitForIdle()
+            waitUntil { episodes.calls.size == 2 }
             assertEquals(
                 listOf(
                     "markFeedPlayed(${FeedSource.Podcast(1)}, null)",
