@@ -368,6 +368,15 @@ class ImportDaoTest {
             assertEquals(count, dao.queuedCount(session))
             assertEquals(count, dao.itemsByStatus(session, listOf(ImportItemStatus.QUEUED)).size)
 
+            // The chunked read: a dropped chunk would come back short.
+            assertEquals(count, dao.itemsByOrdinals(session, (0 until count).toList()).size)
+            // Chunks are ordinal-sorted locally, not globally — reversed input proves the
+            // documented ordering instead of assuming a global sort.
+            assertEquals(
+                (600 until count) + (100 until 600) + (0 until 100),
+                dao.itemsByOrdinals(session, (count - 1 downTo 0).toList()).map { it.ordinal },
+            )
+
             dao.deleteItems(session, (0 until count - 50).toList())
             assertEquals(50, dao.itemsOf(session).size)
         }
