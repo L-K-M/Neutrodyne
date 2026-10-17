@@ -10,6 +10,7 @@ import okio.Buffer
 import okio.Path
 import okio.Path.Companion.toPath
 import okio.Source
+import okio.Timeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -110,6 +111,16 @@ class ImportSourceSnifferTest {
     }
 
     @Test
+    fun theWindowStopsAt64KiBHoweverTheSourceReads() {
+        // request() refills in segment-sized pulls, so a short-reading source leaves
+        // more than 64 KiB buffered; a marker past the cap must not decide (05).
+        val marker = "\",\"localSubscriptions\":[]}"
+        val payload = "{\"pad\":\"" + "x".repeat(64 * 1024) + marker
+        val chunked = ChunkedSource(Buffer().write(payload.encodeToByteArray()), 100)
+        assertUnsupported("json", ImportSourceSniffer.sniff({ chunked }, "payload".toPath()))
+    }
+
+    @Test
     fun csvAndUrlLists() {
         assertEquals(
             SniffedFormat.TAKEOUT_CSV,
@@ -189,6 +200,21 @@ class ImportSourceSnifferTest {
         result: SniffResult,
     ) {
         assertEquals(SniffResult.Unsupported(reason), result)
+    }
+
+    /** A source that answers every read with at most [chunk] bytes. */
+    private class ChunkedSource(
+        private val delegate: Source,
+        private val chunk: Long,
+    ) : Source {
+        override fun read(
+            sink: Buffer,
+            byteCount: Long,
+        ): Long = delegate.read(sink, minOf(byteCount, chunk))
+
+        override fun timeout(): Timeout = delegate.timeout()
+
+        override fun close() = delegate.close()
     }
 
     /** In-memory [ArchiveReaderFactory]; :feeds cannot see :core:testing's fakes. */

@@ -244,7 +244,10 @@ public object ImportSourceSniffer {
         open().use { source ->
             val buffered = source.buffer()
             buffered.request(SNIFF_BYTES)
-            buffered.buffer.readByteArray()
+            // request() only promises at least SNIFF_BYTES: a refill crossing the
+            // boundary leaves more buffered. 05 allows at most the first 64 KiB, so
+            // never look past it even when the buffer overshot.
+            buffered.buffer.readByteArray(minOf(buffered.buffer.size, SNIFF_BYTES))
         }
 
     private fun decodeHead(head: ByteArray): Probe =
