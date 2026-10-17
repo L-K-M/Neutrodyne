@@ -68,6 +68,36 @@ class ZipGuardTest {
     }
 
     @Test
+    fun declaredEntryCountOverCapIsHostile() {
+        // The END record itself claims more entries than the cap allows; the guard rejects it
+        // before `ZipFile` allocates from the claim.
+        val path =
+            ZipTestFiles.tempZip(
+                ZipTestFiles.endLyingZip(declaredEntries = ArchiveCaps.BACKUP.maxEntries + 1, declaredCenlen = 47),
+            )
+        assertEquals("zip_entries", hostileOf { guard.open(path, ArchiveCaps.BACKUP) })
+    }
+
+    @Test
+    fun centralDirectoryShorterThanDeclaredCountIsCorrupt() {
+        // Two declared entries cannot fit in 47 central-directory bytes (records are ≥ 46).
+        val path = ZipTestFiles.tempZip(ZipTestFiles.endLyingZip(declaredEntries = 2, declaredCenlen = 47))
+        assertEquals("zip", corruptOf { guard.open(path, ArchiveCaps.BACKUP) })
+    }
+
+    @Test
+    fun centralDirectoryBeyondCapRoomIsHostile() {
+        // A declared directory bigger than the cap's worst case only exists to force the
+        // constructor's `byte[cenlen]` allocation.
+        val caps = ArchiveCaps(maxEntries = 4, maxEntryBytes = 1024, maxTotalBytes = 4096)
+        val path =
+            ZipTestFiles.tempZip(
+                ZipTestFiles.endLyingZip(declaredEntries = 1, declaredCenlen = 4L * 196_651 + 1),
+            )
+        assertEquals("zip_entries", hostileOf { guard.open(path, caps) })
+    }
+
+    @Test
     fun entryCountOverflowIsHostile() {
         val entries = (1..ArchiveCaps.BACKUP.maxEntries + 1).map { "e$it" to byteArrayOf(0) }
         val path = ZipTestFiles.tempZip(ZipTestFiles.zipBytes(entries))
@@ -159,7 +189,10 @@ class ZipGuardTest {
     fun damagedEntryDataIsCorrupt() {
         // The deflate body is damaged while the central directory stays readable — the archive
         // opens, then the entry's own read reports the damage.
-        val zip = ZipTestFiles.deflateDamagedZip(ZipTestFiles.zipBytes(listOf("a" to ByteArray(4 * 1024) { it.toByte() })))
+        val zip =
+            ZipTestFiles.deflateDamagedZip(
+                ZipTestFiles.zipBytes(listOf("a" to ByteArray(4 * 1024) { it.toByte() })),
+            )
         val path = ZipTestFiles.tempZip(zip)
         guard.open(path, ArchiveCaps.BACKUP).use { reader ->
             assertEquals(
