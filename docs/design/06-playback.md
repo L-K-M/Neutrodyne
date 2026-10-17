@@ -89,6 +89,10 @@ sealed interface SleepTimerMode {
 }
 ```
 
+**Implementation note (2026-10-17, M3).** `PlaybackController` lands in `:playback:api`
+with only `pause()` — 05's restore-Replace confirmation is its first caller — plus
+`NoPlaybackController`, the no-op binding until M4 implements the rest of this interface.
+
 ```kotlin
 // :playback:api — state (implemented by PlaybackStateHub on Android, DesktopPlaybackController on the desktop; all flows are main-safe)
 interface PlaybackStateSource {

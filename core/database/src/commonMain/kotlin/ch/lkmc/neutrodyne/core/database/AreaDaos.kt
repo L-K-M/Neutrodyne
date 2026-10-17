@@ -243,6 +243,10 @@ abstract class GroupDao {
     @Query("SELECT podcastId, groupId FROM podcast_group_member")
     abstract fun observeMembershipPairs(): Flow<List<MembershipPair>>
 
+    /** The suspend variant of [observeMembershipPairs] for one-transaction export reads (05). */
+    @Query("SELECT podcastId, groupId FROM podcast_group_member")
+    abstract suspend fun membershipPairs(): List<MembershipPair>
+
     /** 05 Delete and undo: the row delete; memberships and settings rows cascade (02 FK). */
     @Query("DELETE FROM podcast_group WHERE id = :groupId")
     abstract suspend fun deleteGroup(groupId: Long): Int
@@ -435,6 +439,14 @@ interface QueueDao {
     @Query("SELECT * FROM queue_entry ORDER BY orderKey, id")
     suspend fun entries(): List<QueueEntryEntity>
 
+    /** The episodeIds already queued — the restore merge's "not already queued" check set. */
+    @Query("SELECT episodeId FROM queue_entry")
+    suspend fun queuedEpisodeIds(): List<Long>
+
+    /** 05 Replace pre-step (UP_NEXT): the whole queue goes before the backup's is written. */
+    @Query("DELETE FROM queue_entry")
+    suspend fun clear(): Int
+
     @Query("SELECT orderKey FROM queue_entry ORDER BY orderKey DESC, id DESC LIMIT 1")
     suspend fun lastOrderKey(): String?
 
@@ -493,23 +505,6 @@ data class ArtworkPinRow(
     val key: String,
     val localPath: String,
 )
-
-/** `import_session`/`import_item` (M3: the OPML import pipeline). */
-@Dao
-interface ImportDao {
-    @Insert
-    suspend fun insertSession(row: ImportSessionEntity): Long
-
-    @Insert
-    suspend fun insertItems(rows: List<ImportItemEntity>)
-
-    @Query("SELECT * FROM import_item WHERE sessionId = :sessionId ORDER BY ordinal")
-    suspend fun itemsOf(sessionId: Long): List<ImportItemEntity>
-}
-
-/** `BackupDao` (M3: `observeLibraryShape`, the backup export reads). */
-@Dao
-interface BackupDao
 
 /** `MaintenanceDao` (M11b: the `db-maintenance` lane's sweeps and `PRAGMA`s). */
 @Dao

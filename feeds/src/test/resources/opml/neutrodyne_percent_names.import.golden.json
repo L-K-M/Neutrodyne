@@ -1,0 +1,59 @@
+{
+  "entries": [
+    {
+      "customTitle": "Feed A",
+      "groupNames": [
+        "a,b"
+      ],
+      "ordinal": 0,
+      "url": "https://a.example.com/rss"
+    },
+    {
+      "customTitle": "Feed B",
+      "groupNames": [
+        "c/d"
+      ],
+      "ordinal": 1,
+      "url": "https://b.example.com/rss"
+    },
+    {
+      "customTitle": "Feed C",
+      "groupNames": [
+        "100%"
+      ],
+      "ordinal": 2,
+      "url": "https://c.example.com/rss"
+    },
+    {
+      "customTitle": "Feed D",
+      "groupNames": [
+        "a%2Cb"
+      ],
+      "ordinal": 3,
+      "url": "https://d.example.com/rss"
+    }
+  ],
+  "format": "OPML",
+  "groups": [
+    {
+      "colorArgb": -15658735,
+      "iconKey": "comma",
+      "name": "a,b"
+    },
+    {
+      "colorArgb": -14540254,
+      "iconKey": "slash",
+      "name": "c/d"
+    },
+    {
+      "colorArgb": -13421773,
+      "iconKey": "percent",
+      "name": "100%"
+    },
+    {
+      "colorArgb": -12303292,
+      "iconKey": "literal",
+      "name": "a%2Cb"
+    }
+  ]
+}

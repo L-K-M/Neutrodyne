@@ -41,6 +41,18 @@ Since the scope revision ([D81](../PLAN.md#3-key-decisions)) all of it is common
 | `:app` (Android only) | `ExternalImportActivity`, its manifest entries, the shell-only `SnapshotNowReceiver` and its manifest entry ([Testing with bmgr](#testing-with-bmgr)), `res/xml/data_extraction_rules.xml`, `res/xml/backup_rules.xml`, `res/xml-v28/backup_rules.xml`, the `cache/export/` entry of `res/xml/file_paths.xml` |
 | `:desktopApp` | nothing of its own: OS hand-offs and drops reach the import pipeline through 11's `DesktopOpenHandler` and the shared `IntentRouter` ([Desktop inputs](#desktop-inputs)) |
 
+**Implementation note (2026-10-17, M3).** The A1 contract row lands the types above with
+three placement adjustments: `RestoreProgress` sits in `:core:domain` beside `BackupError`
+— its `Failed` case carries a `BackupError`, and `:core:model` cannot see domain types;
+`SnapshotScheduler` sits in `:core:domain` with the other repository ports rather than
+`:core:data` `commonMain` (the platform hosts `WorkManagerSnapshotScheduler` and
+`NoSnapshotScheduler` still live in `:core:data`); and `:playback:api` gets a minimal
+`PlaybackController` with only `pause()` plus the `NoPlaybackController` no-op binding —
+06's full surface arrives with M4.
+`ImportError.Unsupported` and `ImportError.Hostile` carry the enums `UnsupportedSource`
+and `HostileInput` instead of the reason strings of the `ImportError` sketch under OPML
+import, with the same values.
+
 ```mermaid
 flowchart LR
   subgraph FEAT["Feature modules (common)"]
@@ -1042,7 +1054,9 @@ interface OpmlReader { fun read(open: () -> okio.Source, limits: OpmlLimits = Op
 class XmlPullOpmlReader(private val parsers: PullParserFactory) : OpmlReader   // 03's factory: platform parser or kxml2
 ```
 
-Parser setup (03's `PullParserFactory` and `PrologGuard` in the same island, [03 Parser](03-feeds-and-discovery.md#parser)): namespace processing **off** (prefixed attributes keep raw names such as `nd:source`), `FEATURE_PROCESS_DOCDECL` off, `setInput(source.buffer().inputStream(), null)` so KXml detects BOMs and the declared encoding (never a `Reader`, which would ignore `encoding="ISO-8859-1"`), leading ASCII whitespace skipped while preserving a BOM ([KXmlParser](https://android.googlesource.com/platform/libcore/+/refs/heads/main/xml/src/main/java/com/android/org/kxml2/io/KXmlParser.java)). `PrologGuard` rejects any `<!ENTITY` in the prolog (`ENTITY_DECLARED`): no XXE, no billion laughs. `MarkupGapGuard` wraps the stream of every pass and fails with `TAG_TOO_LONG` after more than 1 MiB without a `<` character (byte `3C` in ASCII-compatible encodings, where it never occurs inside a multi-byte sequence; the code unit `003C` at an aligned position in UTF-16, detected by BOM or by the first bytes `3C 00`/`00 3C`). XML forbids a literal `<` in attribute values and OPML has no long text nodes, so no legitimate file comes near this, and no parser buffer (KXml builds each attribute value in memory) can grow past about 1 MiB of characters.
+Parser setup (03's `PullParserFactory` and `PrologGuard` in the same island, [03 Parser](03-feeds-and-discovery.md#parser)): namespace processing **off** (prefixed attributes keep raw names such as `nd:source`), `FEATURE_PROCESS_DOCDECL` off, `setInput(source.buffer().inputStream(), null)` so KXml detects BOMs and the declared encoding (never a `Reader`, which would ignore `encoding="ISO-8859-1"`), leading ASCII whitespace skipped while preserving a BOM ([KXmlParser](https://android.googlesource.com/platform/libcore/+/refs/heads/main/xml/src/main/java/com/android/org/kxml2/io/KXmlParser.java)). `PrologGuard` rejects any `<!ENTITY` in the prolog (`ENTITY_DECLARED`): no XXE, no billion laughs. `MarkupGapGuard` wraps the stream of every pass and fails with `TAG_TOO_LONG` after more than 1 MiB without a `<` that opens markup (byte `3C` in ASCII-compatible encodings, where it never occurs inside a multi-byte sequence; the code unit `003C`/`0000003C` at an aligned position in UTF-16/UTF-32, detected by the same four-byte signatures kxml2 sniffs). XML forbids a literal `<` in attribute values and OPML has no long text nodes, so no legitimate file comes near this, and no parser buffer (KXml builds each attribute value in memory) can grow past about 1 MiB of characters.
+
+**Implementation note (2026-10-17, M3).** The premise holds on legitimacy, not on enforcement: kxml2 accepts a literal `<` inside quoted and unquoted attribute values, comments, CDATA sections, processing instructions and markup declarations, buffering each as token payload. `MarkupGapGuard` therefore resets the gap only on a `<` dispatched in text — a `<` the automaton consumes as payload inside those constructs cannot end the growing token and never resets the count — and keeps a reduced tag/attribute-value lexer running through the document body rather than ending the scan at the root start tag.
 
 Cap failures (`ENTITY_DECLARED`, `TAG_TOO_LONG`, `TOO_DEEP`, `TOO_MANY_FEEDS`, `TOO_MANY_OUTLINES`) are final in every pass; only `XmlPullParserException` falls through:
 
@@ -1059,6 +1073,21 @@ Walk rules (strict and relaxed):
 - `isComment="true"` marks the subtree `preselect = false` (not dropped); Overcast `subscribed="0"` and `type="link"` entries are `preselect = false`.
 - Caps: depth > 32 → `TOO_DEEP`; > 10,000 feeds → `TOO_MANY_FEEDS`; > 200,000 outlines → `TOO_MANY_OUTLINES`; an attribute longer than 8,192 chars drops that outline with a warning. Each failure rejects the file with a clear message (M3 acceptance 3). `neutrodyne = true` when the root has `xmlns:nd="urn:neutrodyne:opml:1"`.
 - `category` tokens: split on `,` first; trim; for a token containing a literal `/` keep the last non-empty segment (`/Harvard/Berkman` → `Berkman`, spec "slash-delimited category strings"); then decode exactly once in a single left-to-right pass, mapping only `%25` → `%`, `%2C` → `,` and `%2F` → `/` (hex case-insensitive). A decoded `,` never re-splits, a decoded `/` never re-segments, and `%25` never decodes twice (`a%252Cb` → `a%2Cb`, never `a,b`); `+` is never a space, and a `%` not followed by two hex digits stays literal.
+
+**Implementation note (2026-10-17, M3).** A3 ships the strict pass only, and the shipped shapes differ from the sketch above in named, additive ways:
+
+- `OpmlFailure` gains `MALFORMED` for "the document is not well-formed XML" — the sketch's enum has no reason a strict-pass `XmlPullParserException` can map to, and the fall-through rule needs one. A well-formed document whose root is not `<opml>` still reports `NO_OUTLINES`.
+- `OpmlDocument` gains `warnings: List<OpmlWarning>` (`code`, `count`; `OpmlWarningCode` = `ATTRIBUTE_TOO_LONG`, `IGNORED_OUTLINES`, `LINKED_LISTS`, `SALVAGED`), so the preview's "12 entries were ignored" warnings survive from the read without the classifier re-walking the file.
+- `OpmlLimits` gains `maxMarkupGapBytes` (the documented 1 MiB bound, as a limit) and `maxTagAttributes` (default 1,000).
+- `MarkupGapGuard` folds the `PrologGuard` prolog scan into the byte stream (a push-model transliteration of the same `PrologLexer` construct boundaries over encoding-aware units), because reading through an `okio.Source` without materialising the document means there is no decoded string for `PrologGuard` to scan. While the prolog walk is open it additionally bounds the `<?xml` declaration's attribute count — kxml2 grows its attribute array a few slots at a time per attribute, so a flooded declaration is a quadratic copy storm even under the gap bound (measured: a ~1 MiB tag of ~105,000 one-byte attributes costs 15–20 s inside kxml2). The same `maxTagAttributes` is checked post-delivery on every start tag (`parser.attributeCount`), which cannot preempt kxml2's in-tag growth — the gap bound still owns buffer size — but keeps an over-bound tag terminal instead of feeding the walk.
+
+**Implementation note (2026-10-17, M3).** A4 ships the relaxed and salvage legs plus `ImportDocuments.fromOpml`, and the shipped behavior differs from the text above in named, additive ways:
+
+- The strict pass tolerates far more than the relaxed bullet implies — unclosed elements and EOF inside a start tag, control bytes in attribute values, stray `<` in quoted values and mid-document `<?xml` all parse strict. Undeclared entities are *dropped silently* from attribute values (`html_named_entities` pins this), so the relaxed leg's predefined HTML-4 table only earns its keep once strict has failed for another reason (a bare `&`). `mode` on the document reports which pass answered.
+- What actually reaches salvage: failures outside kxml2's relaxed error channel — the corpus uses malformed numeric references (`&#xZZZZ;`, `&#;`), which throw unconditionally. The scanner then keeps such references literal and lifts every outline tag (folder tags count toward `ignoredOutlines`; nothing is nested, so `folders` is always empty and `category` attributes carry the surviving group hints).
+- The misdeclared-encoding repair (a re-parse as windows-1252 when the decoded field text exceeds 0.5 % U+FFFD, keeping whichever attempt has fewer) applies to the relaxed and salvage legs — a *successful* strict result is kept as decoded (`cp1252_declared_utf8` pins this), matching "re-opened per pass" with the repair as a property of the tolerant legs.
+- `ImportDocument` carries `warnings: List<ImportDocumentWarning>` (`code`, `count`) instead of bare strings, and gains `ignoredOutlines` — the preview's "12 entries were ignored" and the wrapper/section exclusion reasons need the counts the sketch's `List<String>` could not carry. `ImportGroup.excludedReason` is `"wrapper"`/`"gpodder_section"`, computed here because the folder tree is gone once `import_item` rows exist.
+- A3's corpus spelled the YouTube variants attribute `a,v`; the fixtures now use the 04 token set (`nd:ytVariants="UULF,UULV"`, `UU`-family names OR'd to bits: UULF = 1, UUSH = 2, UULV = 4), matching the A2 writer.
 
 ### 3. Classify
 
@@ -1217,6 +1246,8 @@ Serves R1.6, R1.7, R8.1. Delivered in [M3](../PLAN.md#m3-import-export-and-backu
 
 `ImportSourceSniffer.sniff(open: () -> okio.Source, archives: ArchiveReaderFactory): SniffResult` (`:feeds`, common) checks the magic bytes first, then reads at most the first 64 KiB as text: a UTF-8 BOM is skipped; a UTF-16 BOM, or first bytes `3C 00`/`00 3C` without BOM, decode the text as UTF-16 LE/BE (only XML is accepted in UTF-16); leading whitespace is skipped and the first non-whitespace character decides. ZIPs are inspected through their central directory by the bound `ArchiveReaderFactory` ([Archive guard](#archive-guard)):
 
+Implementation note (2026-10-17, M3): the signature is `sniff(open: () -> okio.Source, archivePath: okio.Path, archives: ArchiveReaderFactory? = null)` — `ArchiveReaderFactory` opens `okio.Path`s (ZIP needs random access), so the payload's path rides along and is used only when the magic says ZIP; `open` covers every byte-level check and a caller without a bound factory passes null and gets `Unsupported("zip")`. JSON markers are searched inside the 64 KiB window (the ≤ 10 MB figure is the downstream parser's cap); a non-XML UTF-16 payload lands on `Unsupported("unknown")`.
+
 | First bytes / content | Result |
 |---|---|
 | `PK\x03\x04` | ZIP: an entry named exactly `manifest.json` whose `format` is `neutrodyne-backup` → `NEUTRODYNE_BACKUP`; else any entry ending `.csv` (case-insensitive) → `TAKEOUT_CSV`; else `Unsupported("zip")` |
@@ -1255,6 +1286,13 @@ object ImportDocuments {                    // pure adapters; OPML applies the f
 | `URL_LIST` (M8) | `UrlListParser` (04) | none → "YouTube" pre-filled only if every item is YouTube | ≤ 1 MB, ≤ 5,000 lines |
 | `NEUTRODYNE_BACKUP` | `BackupCodec` | from the archive | creates a session without `import_item` rows (the restore adds them when it finishes) and routes to the restore preview ([Full backup and restore](#full-backup-and-restore)) |
 
+**Implementation note (2026-10-17, M3).** The M3 `ImportSessions` handles only `OPML` (this table's
+first row) and `NEUTRODYNE_BACKUP` (the session-without-items row). A payload the sniffer already
+recognises as `NEWPIPE_JSON`, `LIBRETUBE_JSON`, `TAKEOUT_CSV` or `URL_LIST` — formats whose parsers
+are M8 work — is answered with `ImportError.Unsupported(UnsupportedSource.UNKNOWN)`, the same
+taxonomy entry an unrecognised payload gets; the UI copy stays "This doesn't look like a podcast
+list", which is honest for M3 because no parser could consume it anyway.
+
 ### Archive guard
 
 The archive container is JVM code (`java.util.zip`), so it sits in the `:feeds:jvm` island behind small common interfaces in `:feeds`, which `:core:data`'s `androidMain` and `desktopMain` bind to the island's classes ([D81](../PLAN.md#3-key-decisions)):
@@ -1277,6 +1315,8 @@ class ZipArchiveWriter : ArchiveWriterFactory  // java.util.zip.ZipOutputStream,
 ```
 
 `ZipGuard` wraps `java.util.zip.ZipFile` over the local payload copy (random access; never extracts to disk, so entry names are never paths — no zip-slip). Entry names containing `..`, starting with `/` or containing `\` reject the archive (`ArchiveException(HOSTILE, "zip_path")`, surfaced as `Hostile("zip_path")`); on devices the `ZipFile` constructor already throws `ZipException` for the first two (apps targeting 34+), which `ZipGuard` maps to the same error, so JVM tests, the desktop and Android devices agree. Any other `ZipException` → `ArchiveException(CORRUPT)`, surfaced as `Corrupt("zip")` (backups) or `Unsupported("zip")`. The sync server reads and writes its per-account ZIPs with its own `java.util.zip` code and the same `BackupCodec`, because it may depend only on `:sync:protocol` and `:feeds` ([PLAN 5.1](../PLAN.md#51-module-graph) rule 7).
+
+*Implementation note (2026-10-17, M3):* four points the code fixes that the prose above leaves open. A central directory listing one name twice is rejected as `Hostile("zip_entries")` — the name→entry lookup would be ambiguous. The platform `ZipException` (Android's `SafeZipPathValidatorCallback`, target 34+) is recognised by its "Invalid zip entry path" message prefix, because the name checks below are the cross-platform rule and that message is the constructor's only such failure. The ratio check divides the counted inflated bytes by the central directory's declared *compressed* size: `ZipFile` bounds the inflater's input to that size, so the declaration cannot hide a bomb behind a smaller real stream (a bigger one merely delays rejection to the byte caps, which remain authoritative). The Takeout column's MB are decimal — 5,000,000 and 250,000,000 bytes — where the Backup column's MiB are binary.
 
 | Cap | Backup | Takeout ZIP |
 |---|---|---|
@@ -1382,6 +1422,8 @@ The manifest is written last because it carries the hashes; readers open the loc
 @Serializable data class SettingValueV1(val key: String, val type: String,   // SettingKey subclass name
                                         val value: JsonPrimitive? = null, val values: List<String>? = null)
 ```
+
+Implementation note (2026-10-17, M3): `BackupManifest.format`, `formatVersion` and `minReaderVersion` carry `@EncodeDefault`, so they are always written — under `encodeDefaults = false` a defaulted field never reaches the wire, and the [Sniffing](#sniffing) rule's `format` check could then never recognise our own archives. `EpisodeLineV1.fc` stays in the DTO for 10's staging files; `BackupCodec`'s ARCHIVE mode (the default) strips it on encode, STAGING mode keeps it.
 
 **Line timestamps (`ts`, `posAt`, `pl`, `lp`, `fc`).** `ts` is the last user-state change (`episode_state.updatedAt`); `ts = 0` is the no-state-change sentinel for lines exported only as queue, download, current-episode or stub hints, which have no `episode_state` row (02 writes no NULL into the required field and never synthesises now). Such a line carries no state: `pl`, `st`, `lp`, `dis`, `md` are null and `pc = 0`, `fav = false`. `posAt` is independent (`episode_position.updatedAt`): a line with `ts = 0` but `pos > 0` still merges its position by the position rule. Expected combinations: `pl = null` with `pos > 0` (and usually `st` set) is in progress, never played. In a restore **Merge** a null `pl` never clears a locally played mark (played merges by OR/max); Replace takes the backup's state, and the First-link column (`LINK_MERGE`) decides by clock, so there a newer remote "unplayed" does clear it ([Merge and Replace rules](#merge-and-replace-rules), MS2 acceptance 3). On merge, a `ts = 0` line writes no state fields and captures none — but its stub (unmatched, with `u` or `yt`), its queue reference and its position are still honoured per the rules below: when the merged position is non-zero and the merged result unplayed, the in-progress proxy is derived with `EpisodeStateDao.ensure(id, posAt)` and `startedAt = COALESCE(startedAt, posAt)` — stamped `posAt`, as 06's position save would have stamped it, never now and never 0; an existing row keeps its `updatedAt` ([02 Restore matching](02-data-model.md#restore-matching)). `fc` (2026-10-06) exists only in 10's first-link staging files, never in archives: the clock milliseconds of each state field the server record actually carries (`played`, `fav`, `playCount`, `lastPlayedAt`, `measuredDurationMs`, `pos`), so the First-link column compares a field's own clock and leaves a field the record lacks untouched. A staged line's `ts` is the newest of its non-`pos` state clocks, or 0 when the record has none of them (only `pos` or an Up next reference); the server's per-account ZIPs use the same `ts` mapping without `fc` ([10 Merge](10-sync.md#merge) step 2, [10 Backups](10-sync.md#backups)).
 
