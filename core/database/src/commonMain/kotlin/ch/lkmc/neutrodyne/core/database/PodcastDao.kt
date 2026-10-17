@@ -87,6 +87,10 @@ abstract class PodcastDao(
     @Query("SELECT * FROM podcast_url_alias WHERE podcastId = :podcastId")
     abstract suspend fun aliases(podcastId: Long): List<PodcastUrlAliasEntity>
 
+    /** 05 OPML export: every subscription row, read inside the exporter's one read transaction. */
+    @Query("SELECT * FROM podcast")
+    abstract suspend fun allForExport(): List<PodcastEntity>
+
     @Query("SELECT COUNT(*) FROM episode WHERE podcastId = :podcastId")
     abstract fun observeEpisodeCount(podcastId: Long): Flow<Int>
 
