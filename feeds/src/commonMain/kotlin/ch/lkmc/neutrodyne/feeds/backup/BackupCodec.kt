@@ -239,7 +239,7 @@ public class EpisodeLines internal constructor(
             pending = readDecoded()
             pendingReady = true
         }
-        return pending != null
+        return pendingReady && pending != null
     }
 
     override fun next(): EpisodeLineV1 {
@@ -251,6 +251,9 @@ public class EpisodeLines internal constructor(
     override fun close() {
         if (closed) return
         closed = true
+        // Drop any held line: a consumed or prefetched item must not outlive close.
+        pending = null
+        pendingReady = false
         input.close()
     }
 

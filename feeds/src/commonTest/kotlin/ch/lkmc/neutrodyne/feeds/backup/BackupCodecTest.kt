@@ -353,6 +353,23 @@ class BackupCodecTest {
     }
 
     @Test
+    fun closingDropsPendingAndPrefetchedLines() {
+        val payload = "{\"p\":\"a\",\"k\":\"b\",\"ts\":0}\n{\"p\":\"c\",\"k\":\"d\",\"ts\":5}\n"
+        // A consumed-then-closed iterator must not replay the last returned line.
+        val consumed = codec.episodeLines(sourceOf(payload))
+        assertEquals("b", consumed.next().k)
+        consumed.close()
+        assertFalse(consumed.hasNext())
+        assertFailsWith<NoSuchElementException> { consumed.next() }
+        // A prefetched-but-unconsumed line dies with the reader too.
+        val prefetched = codec.episodeLines(sourceOf(payload))
+        assertTrue(prefetched.hasNext())
+        prefetched.close()
+        assertFalse(prefetched.hasNext())
+        assertFailsWith<NoSuchElementException> { prefetched.next() }
+    }
+
+    @Test
     fun entryNamesAreExactlyTheBackupWhitelist() {
         assertEquals(
             setOf(
