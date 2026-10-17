@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.feeds.jvm.opml
 
+import ch.lkmc.neutrodyne.feeds.jvm.Goldens
 import ch.lkmc.neutrodyne.feeds.opml.OpmlFailure
 import ch.lkmc.neutrodyne.feeds.opml.OpmlLimits
 import ch.lkmc.neutrodyne.feeds.opml.OpmlReadResult
@@ -193,6 +194,44 @@ class XmlPullOpmlReaderTest {
             "SALVAGED warning expected, got ${result.document.warnings}",
         )
         assertEquals(3, opens)
+    }
+
+    /**
+     * The misdeclared-encoding repair re-opens the source at most once per tolerant leg
+     * (`EncodingReparse`): the `misdeclared_cp1252_relaxed` fixture fails strict, decodes to
+     * mojibake relaxed, and wins its single windows-1252 re-parse — three opens total.
+     */
+    @Test
+    fun redecodeReopensRelaxedAtMostOnce() {
+        var opens = 0
+        val result =
+            reader.read({
+                opens++
+                Buffer().write(Goldens.fixture("opml", "misdeclared_cp1252_relaxed.opml").readBytes())
+            })
+        val doc = (result as OpmlReadResult.Ok).document
+        assertEquals(ParseMode.RELAXED, doc.mode)
+        assertEquals("Café & bar", doc.entries[0].text)
+        assertEquals(3, opens)
+    }
+
+    /**
+     * The same bound on the salvage leg: `&#xZZZZ;` throws out of both pull legs, the first
+     * salvage scan decodes the `misdeclared_cp1252_salvage` fixture to mojibake and the one
+     * windows-1252 re-parse wins — four opens total.
+     */
+    @Test
+    fun redecodeReopensSalvageAtMostOnce() {
+        var opens = 0
+        val result =
+            reader.read({
+                opens++
+                Buffer().write(Goldens.fixture("opml", "misdeclared_cp1252_salvage.opml").readBytes())
+            })
+        val doc = (result as OpmlReadResult.Ok).document
+        assertEquals(ParseMode.SALVAGE, doc.mode)
+        assertEquals("Café & bar", doc.entries[0].text)
+        assertEquals(4, opens)
     }
 
     /**
