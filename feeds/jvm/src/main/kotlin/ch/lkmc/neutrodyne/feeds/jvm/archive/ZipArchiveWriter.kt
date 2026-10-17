@@ -23,15 +23,28 @@ public class ZipArchiveWriter : ArchiveWriterFactory {
     override fun create(
         path: Path,
         deflateLevel: Int,
-    ): ArchiveWriter =
-        Writer(
-            ZipOutputStream(BufferedOutputStream(FileOutputStream(path.toFile()))).apply {
-                setLevel(deflateLevel)
-            },
-        )
+    ): ArchiveWriter {
+        // The writer keeps the leaf file stream: `ZipOutputStream`'s own close cannot finish
+        // an archive whose entry close already failed (a second `closeEntry` then dies on the
+        // ended deflater), so the descriptor is released directly on the failure path.
+        val fileStream = FileOutputStream(path.toFile())
+        val out = ZipOutputStream(BufferedOutputStream(fileStream))
+        try {
+            out.setLevel(deflateLevel)
+            return Writer(out, fileStream)
+        } catch (e: Throwable) {
+            try {
+                fileStream.close()
+            } catch (closeFailure: Throwable) {
+                e.addSuppressed(closeFailure)
+            }
+            throw e
+        }
+    }
 
     private class Writer(
         private val out: ZipOutputStream,
+        private val fileStream: FileOutputStream,
     ) : ArchiveWriter {
         private var openEntry: EntrySink? = null
         private var closed = false
@@ -49,8 +62,14 @@ public class ZipArchiveWriter : ArchiveWriterFactory {
         override fun close() {
             if (closed) return
             closed = true
-            openEntry?.close()
-            out.close()
+            try {
+                openEntry?.close()
+                out.close()
+            } finally {
+                // A failed entry close skips the stream's own close; the descriptor is
+                // released directly either way.
+                runCatching { fileStream.close() }
+            }
         }
 
         /**
