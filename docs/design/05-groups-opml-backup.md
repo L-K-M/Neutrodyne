@@ -1448,6 +1448,8 @@ A backup does not depend on the ABI or capabilities of the app that wrote it (`A
 
 Write order is therefore `episodes.jsonl` (inside the read transaction), `library.json`, `queue.json`, `settings.json`, `subscriptions.opml`, `manifest.json`. The "Create backup" flow (`BackupKey`): switch "Include passwords for private feeds" (off every time); then `preflight(includePasswords)`, and when it reports private links or passwords the same warning dialog as [OPML export](#options-and-warnings) ("This backup contains private access links for N feeds…", "…and N passwords in plain text.", [R1.9](../PLAN.md#21-functional-requirements)); then the `CreateDocument` launcher (Android) or the save dialog (desktop: File › Back up library…, 11); then `createBackup(uri, includePasswords)` on `@ApplicationScope`.
 
+**Implementation note (2026-10-17, M3 B9):** Before publication, the writer enforces the JSON/JSONL codec caps and the 50 MiB acquisition limit, then streams the completed stage through the bound archive reader with `ArchiveCaps.BACKUP`. A limit failure returns `TooLarge`, deletes the stage and preserves the previous target; installation-ID persistence failure returns `Storage`. Snapshot production retries the next drop level on `TooLarge`. `SCHEDULED` uses the manual archive shape, including OPML, but never passwords.
+
 ### Validation and preview
 
 A backup arrives through the import pipeline ([Sniffing](#sniffing) → `NEUTRODYNE_BACKUP` session, no items). `BackupRepository.inspect(sessionId)` validates with `ZipGuard` caps, then:

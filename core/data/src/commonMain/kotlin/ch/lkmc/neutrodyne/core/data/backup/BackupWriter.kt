@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.data.exporting.BuiltExport
 import ch.lkmc.neutrodyne.core.data.exporting.OpmlExporter
+import ch.lkmc.neutrodyne.core.data.importing.MAX_IMPORT_PAYLOAD_BYTES
 import ch.lkmc.neutrodyne.core.database.BackupDao
 import ch.lkmc.neutrodyne.core.database.BackupEpisodeRow
 import ch.lkmc.neutrodyne.core.database.BackupMemberRow
@@ -34,6 +35,9 @@ import ch.lkmc.neutrodyne.core.model.settings.BackupSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
 import ch.lkmc.neutrodyne.feeds.backup.AppInfoV1
+import ch.lkmc.neutrodyne.feeds.backup.ArchiveCaps
+import ch.lkmc.neutrodyne.feeds.backup.ArchiveException
+import ch.lkmc.neutrodyne.feeds.backup.ArchiveReaderFactory
 import ch.lkmc.neutrodyne.feeds.backup.ArchiveWriter
 import ch.lkmc.neutrodyne.feeds.backup.ArchiveWriterFactory
 import ch.lkmc.neutrodyne.feeds.backup.BackupCodec
@@ -76,7 +80,9 @@ import okio.HashingSink
 import okio.Path
 import okio.Path.Companion.toPath
 import okio.Sink
+import okio.blackholeSink
 import okio.buffer
+import okio.utf8Size
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Instant
 import kotlin.uuid.Uuid
@@ -113,6 +119,7 @@ internal class BackupWriter(
     private val settings: SettingsRepository,
     private val secrets: SecretStore,
     private val archives: ArchiveWriterFactory,
+    private val readers: ArchiveReaderFactory,
     private val opml: OpmlExporter,
     private val buildInfo: BuildInfo,
     private val clock: Clock,
@@ -125,8 +132,8 @@ internal class BackupWriter(
     /**
      * Writes a [kind] backup to [target]. [includeCredentials] embeds feed passwords in plain
      * text (D33, manual backups only); `credentialOrigin` is written either way so a restore can
-     * flag `needsCredentials`. Failures leave any previous [target] untouched; unrepresentable
-     * episode lines report [BackupError.TooLarge], failed settings writes [BackupError.Storage].
+     * flag `needsCredentials`. Failures leave any previous [target] untouched; format/acquisition
+     * limits report [BackupError.TooLarge], failed settings writes [BackupError.Storage].
      */
     suspend fun write(
         kind: BackupKind,
@@ -164,6 +171,11 @@ internal class BackupWriter(
             } catch (rejected: WriteRejected) {
                 deleteStaged(staged)
                 Outcome.Failure(rejected.error)
+            } catch (rejected: ArchiveException) {
+                deleteStaged(staged)
+                Outcome.Failure(
+                    if (rejected.kind == ArchiveException.Kind.HOSTILE) BackupError.TooLarge else BackupError.Io,
+                )
             } catch (t: Throwable) {
                 deleteStaged(staged)
                 Log.w(TAG, t) { "backup write to ${target.name} failed" }
@@ -267,15 +279,28 @@ internal class BackupWriter(
             throw t
         }
 
+        val bytes = fileSystem.metadataOrNull(staged)?.size ?: throw WriteRejected(BackupError.Io)
+        if (bytes > MAX_IMPORT_PAYLOAD_BYTES) throw WriteRejected(BackupError.TooLarge)
+        validateArchive(staged)
+
         // Step 4: flush to media, then the atomic rename — the previous target stays intact
-        // until the staged archive is complete (05 Writing).
+        // until the staged archive is complete and passes the restore-side caps.
         fileSystem.openReadWrite(staged).use { it.flush() }
         fileSystem.atomicMove(staged, target)
         return BackupSummary(
-            bytes = fileSystem.metadataOrNull(target)?.size ?: 0L,
+            bytes = bytes,
             podcasts = read.podcasts.size,
             episodeLines = read.episodes.lines,
         )
+    }
+
+    /** A producer must not replace the last good backup with an archive its reader rejects. */
+    private fun validateArchive(path: Path) {
+        readers.open(path, ArchiveCaps.BACKUP).use { reader ->
+            for (entry in reader.entryNames) {
+                reader.open(entry).buffer().use { it.readAll(blackholeSink()) }
+            }
+        }
     }
 
     /**
@@ -320,6 +345,14 @@ internal class BackupWriter(
         payload: String,
         records: Int,
     ): EntryInfo {
+        val maxBytes =
+            when (name) {
+                BackupCodec.ENTRY_LIBRARY -> BackupCodec.LIBRARY_MAX_BYTES
+                BackupCodec.ENTRY_MANIFEST -> BackupCodec.MANIFEST_MAX_BYTES
+                else -> ArchiveCaps.BACKUP.maxEntryBytes
+            }
+        if (payload.utf8Size() > maxBytes) throw WriteRejected(BackupError.TooLarge)
+
         val metered = MeteredEntry(writer.entry(name))
         metered.sink.use { it.writeUtf8(payload) }
         return metered.info(name, records)

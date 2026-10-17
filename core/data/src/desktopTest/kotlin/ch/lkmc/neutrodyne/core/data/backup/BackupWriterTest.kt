@@ -6,6 +6,7 @@ import androidx.room3.useWriterConnection
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.execSql
 import ch.lkmc.neutrodyne.core.data.exporting.OpmlExporter
+import ch.lkmc.neutrodyne.core.data.importing.MAX_IMPORT_PAYLOAD_BYTES
 import ch.lkmc.neutrodyne.core.data.testBuildInfo
 import ch.lkmc.neutrodyne.core.database.CredentialEntity
 import ch.lkmc.neutrodyne.core.database.EpisodeEntity
@@ -56,7 +57,9 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
 import okio.ByteString.Companion.toByteString
+import okio.FileMetadata
 import okio.FileSystem
+import okio.ForwardingFileSystem
 import okio.Path
 import okio.Path.Companion.toPath
 import okio.Sink
@@ -64,6 +67,7 @@ import okio.buffer
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.io.path.createTempDirectory
+import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -94,18 +98,21 @@ class BackupWriterTest {
 
     @AfterTest fun close() = db.close()
 
-    private fun newWriter(archives: ArchiveWriterFactory = ZipArchiveWriter()) =
-        BackupWriter(
-            db,
-            settings,
-            secrets,
-            archives,
-            exporter,
-            testBuildInfo(),
-            clock,
-            fileSystem,
-            Dispatchers.IO,
-        )
+    private fun newWriter(
+        archives: ArchiveWriterFactory = ZipArchiveWriter(),
+        fileSystem: FileSystem = this.fileSystem,
+    ) = BackupWriter(
+        db,
+        settings,
+        secrets,
+        archives,
+        ZipGuard(),
+        exporter,
+        testBuildInfo(),
+        clock,
+        fileSystem,
+        Dispatchers.IO,
+    )
 
     private fun target(name: String = "backup.zip"): Path = dir / name
 
@@ -552,6 +559,81 @@ class BackupWriterTest {
         }
 
     @Test
+    fun anArchiveTrippingTheReadRatioCapCannotReplaceThePreviousBackup() =
+        runTest {
+            val podcast = seedPodcast()
+            val target = target()
+            val writer = newWriter()
+            assertIs<Outcome.Success<*>>(writer.write(BackupKind.MANUAL, target, includeCredentials = false))
+            val before = fileSystem.read(target) { readByteArray() }
+            val title = "t".repeat(REPEATED_TITLE_BYTES)
+            val episodeCount = (ArchiveCaps.DEFAULT_RATIO_FLOOR_BYTES / title.length).toInt() + 1
+            val ids =
+                db.ingestDao().insertEpisodes(
+                    List(episodeCount) { index ->
+                        episodeEntity(podcastId = podcast, identityKey = "ep-$index") { copy(title = title) }
+                    },
+                )
+            for (chunk in ids.chunked(DB_BIND_CHUNK)) db.episodeStateDao().ensureAll(chunk, clock.now())
+
+            assertEquals(
+                Outcome.Failure(BackupError.TooLarge),
+                writer.write(BackupKind.MANUAL, target, includeCredentials = false),
+            )
+            fileSystem.read(target) { assertContentEquals(before, readByteArray()) }
+            assertFalse(fileSystem.exists("$target.tmp".toPath()))
+        }
+
+    @Test
+    fun anArchiveBeyondTheImportPayloadCapCannotReplaceThePreviousBackup() =
+        runTest {
+            seedPodcast()
+            val target = target()
+            assertIs<Outcome.Success<*>>(newWriter().write(BackupKind.MANUAL, target, includeCredentials = false))
+            val before = fileSystem.read(target) { readByteArray() }
+            val staged = "$target.tmp".toPath()
+            val oversized =
+                object : ForwardingFileSystem(fileSystem) {
+                    override fun metadataOrNull(path: Path): FileMetadata? {
+                        val metadata = super.metadataOrNull(path) ?: return null
+                        return if (path == staged) {
+                            FileMetadata(isRegularFile = true, size = MAX_IMPORT_PAYLOAD_BYTES + 1)
+                        } else {
+                            metadata
+                        }
+                    }
+                }
+
+            assertEquals(
+                Outcome.Failure(BackupError.TooLarge),
+                newWriter(fileSystem = oversized).write(BackupKind.MANUAL, target, includeCredentials = false),
+            )
+            fileSystem.read(target) { assertContentEquals(before, readByteArray()) }
+            assertFalse(fileSystem.exists(staged))
+        }
+
+    @Test
+    fun anOversizedLibraryJsonCannotReplaceThePreviousBackup() =
+        runTest {
+            val target = target()
+            val writer = newWriter()
+            assertIs<Outcome.Success<*>>(writer.write(BackupKind.AUTO_SNAPSHOT, target, includeCredentials = false))
+            val before = fileSystem.read(target) { readByteArray() }
+            val random = Random(7)
+            val alphabet = 'a'..'z'
+            // Low compression keeps this within archive caps, isolating the codec's library cap.
+            val title = CharArray(BackupCodec.LIBRARY_MAX_BYTES.toInt() + 1) { alphabet.random(random) }
+            seedPodcast { copy(title = title.concatToString()) }
+
+            assertEquals(
+                Outcome.Failure(BackupError.TooLarge),
+                writer.write(BackupKind.AUTO_SNAPSHOT, target, includeCredentials = false),
+            )
+            fileSystem.read(target) { assertContentEquals(before, readByteArray()) }
+            assertFalse(fileSystem.exists("$target.tmp".toPath()))
+        }
+
+    @Test
     fun concurrentWritersSerialiseOnMutex() =
         runTest {
             seedPodcast()
@@ -678,5 +760,7 @@ class BackupWriterTest {
         const val CREDENTIAL_ORIGIN = "https://supercast.tech"
         const val CREDENTIAL_USER = "alice"
         const val CREDENTIAL_PASS = "s3cret"
+        const val REPEATED_TITLE_BYTES = 8 * 1024
+        const val DB_BIND_CHUNK = 500
     }
 }
