@@ -34,13 +34,19 @@ import ch.lkmc.neutrodyne.core.model.GroupCounts
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
+import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionController
 import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedController
 import ch.lkmc.neutrodyne.core.ui.MarkPlayedOutcome
+import ch.lkmc.neutrodyne.core.ui.PlayedActionOrigin
+import ch.lkmc.neutrodyne.core.ui.SwipeConfig
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.UserMessages
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_copy_link
+import ch.lkmc.neutrodyne.core.ui.resources.action_undo
+import ch.lkmc.neutrodyne.core.ui.resources.episode_marked_played
+import ch.lkmc.neutrodyne.core.ui.resources.episode_marked_unplayed
 import ch.lkmc.neutrodyne.core.ui.resources.episode_offline_toast
 import ch.lkmc.neutrodyne.core.ui.resources.feed_group_deleted
 import ch.lkmc.neutrodyne.core.ui.resources.feed_group_unknown
@@ -119,6 +125,7 @@ public class FeedsViewModel(
 
     /** Message id → URL behind a no-handler snackbar's "Copy link" action (08). */
     private val copyLinks = mutableMapOf<Long, String>()
+    private val swipeUndos = mutableMapOf<Long, EpisodeAction.SetPlayed>()
 
     /** Evicting an entry also stops cachedIn's upstream collector, even with no UI subscriber. */
     public fun pagingFor(source: FeedSource): Flow<PagingData<FeedItem>> {
@@ -268,16 +275,24 @@ public class FeedsViewModel(
             )
         }
 
+    private val swipeSettings =
+        combine(
+            settings.observe(AppearanceSettingKeys.FEEDS_ROW_SWIPE),
+            settings.observe(AppearanceSettingKeys.SWIPE_START_ACTION),
+            settings.observe(AppearanceSettingKeys.SWIPE_END_ACTION),
+        ) { enabled, start, end -> if (enabled) SwipeConfig(start, end) else null }
+
     public val uiState: StateFlow<FeedsUiState> =
         combine(
             screenState,
             tabsWithCounts,
             selectedPrefs,
             baselines,
-            settings.observe(AppearanceSettingKeys.FEEDS_ROW_SWIPE),
-        ) { screen, selected, (prefsSource, prefs), visits, rowSwipe ->
+            swipeSettings,
+        ) { screen, selected, (prefsSource, prefs), visits, swipe ->
             screen.copy(
-                rowSwipe = rowSwipe,
+                rowSwipe = swipe != null,
+                swipe = swipe,
                 tabs = selected.tabs.toImmutableList(),
                 selected = selected.selected,
                 hasGroups = selected.hasGroups,
@@ -368,11 +383,34 @@ public class FeedsViewModel(
             }
     }
 
+    public val episodeSelection =
+        EpisodeSelectionController(viewModelScope, episodes::setPlayed, ::reportWriteFailed)
+
     /** Repository-owned row actions (08 EpisodeRow); the route owns navigation and URL opens. */
     public fun onRowAction(action: EpisodeAction) {
         when (action) {
+            is EpisodeAction.Select -> {
+                episodeSelection.toggle(action.episodeId)
+            }
+
             is EpisodeAction.SetPlayed -> {
-                write { episodes.setPlayed(listOf(action.episodeId), action.played) }
+                write {
+                    episodes.setPlayed(listOf(action.episodeId), action.played)
+                    if (action.origin == PlayedActionOrigin.SWIPE) {
+                        val label =
+                            if (action.played) {
+                                Res.string.episode_marked_played
+                            } else {
+                                Res.string.episode_marked_unplayed
+                            }
+                        val message =
+                            userMessages.post(
+                                UiText.Res(label),
+                                UiText.Res(Res.string.action_undo),
+                            )
+                        swipeUndos[message.id] = action
+                    }
+                }
             }
 
             // The offline row's cloud_off affordance stays enabled (08's row table): while the
@@ -396,7 +434,7 @@ public class FeedsViewModel(
             }
 
             // PlayNext/PlayLast need the player (M4), DownloadToggle the download engine (M6),
-            // CheckAvailability the YouTube engine (M8), Select selection mode (M2).
+            // CheckAvailability the YouTube engine (M8).
             else -> {
                 Unit
             }
@@ -446,6 +484,7 @@ public class FeedsViewModel(
     /** The screen acks a shown snackbar so its [UserMessage] leaves the state. */
     public fun onMessageShown(id: Long) {
         copyLinks.remove(id)
+        swipeUndos.remove(id)
         userMessages.shown(id)
     }
 
@@ -457,6 +496,11 @@ public class FeedsViewModel(
                 UiText.Res(Res.string.action_copy_link),
             )
         copyLinks[message.id] = url
+    }
+
+    public fun undoSwipe(id: Long) {
+        val action = swipeUndos.remove(id) ?: return
+        write { episodes.setPlayed(listOf(action.episodeId), !action.played) }
     }
 
     /** The route resolves a snackbar action by id; a copy-link message hands its URL back once. */

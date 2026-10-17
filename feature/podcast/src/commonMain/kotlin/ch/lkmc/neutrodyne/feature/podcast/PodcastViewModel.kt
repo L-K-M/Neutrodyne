@@ -29,6 +29,7 @@ import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
+import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionController
 import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedController
 import ch.lkmc.neutrodyne.core.ui.MarkPlayedOutcome
 import ch.lkmc.neutrodyne.core.ui.UiText
@@ -113,9 +114,16 @@ public class PodcastViewModel
                 state.copy(messages = messages)
             }.stateIn(viewModelScope, SHARING, PodcastUiState())
 
+        public val episodeSelection =
+            EpisodeSelectionController(viewModelScope, episodes::setPlayed, ::reportWriteFailed)
+
         /** Repository-owned row actions; the route owns navigation and external URLs. */
         public fun onRowAction(action: EpisodeAction) {
             when (action) {
+                is EpisodeAction.Select -> {
+                    episodeSelection.toggle(action.episodeId)
+                }
+
                 is EpisodeAction.SetPlayed -> {
                     write { episodes.setPlayed(listOf(action.episodeId), action.played) }
                 }

@@ -33,7 +33,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
@@ -74,6 +82,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_play_next
 import ch.lkmc.neutrodyne.core.ui.resources.action_resume
 import ch.lkmc.neutrodyne.core.ui.resources.action_resume_download
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry_download
+import ch.lkmc.neutrodyne.core.ui.resources.action_select
 import ch.lkmc.neutrodyne.core.ui.resources.action_watch_on_youtube
 import ch.lkmc.neutrodyne.core.ui.resources.episode_minutes_left
 import ch.lkmc.neutrodyne.core.ui.resources.episode_offline_row
@@ -82,6 +91,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.summary_downloading
 import ch.lkmc.neutrodyne.core.ui.resources.summary_percent_played
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
+import androidx.compose.ui.semantics.selected as semanticsSelected
 
 /**
  * The shared episode row (08 EpisodeRow): [EpisodeRowStyle] picks the leading slot (feed art vs the
@@ -90,10 +100,8 @@ import org.jetbrains.compose.resources.stringResource
  * [EpisodeRowSummary], with the menu entries mirrored as custom actions; inner buttons clear their
  * semantics so a screen reader stops once per row.
  *
- * Swipe: `caps.swipe` is always `null` at M1a (08's `feeds_row_swipe` setting lands with M2), so no
- * swipe container wraps the row yet. A secondary click (desktop, mice on Android) or the
- * hover/focus overflow button opens the action menu; long-press dispatches `Select` (selection
- * mode itself is M2).
+ * Android swipes honour the screen's capability gate; desktop rows only scroll. Selection
+ * gestures dispatch IDs; the screen supplies the loaded order for range selection.
  */
 @Composable
 public fun EpisodeRow(
@@ -117,6 +125,7 @@ public fun EpisodeRow(
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
     var focused by remember { mutableStateOf(false) }
+    val focusRequester = remember { FocusRequester() }
 
     val container =
         if (selected == true || live?.isNowPlaying == true) {
@@ -126,7 +135,7 @@ public fun EpisodeRow(
         }
     val menuActions = rowMenuActions(row, live, caps)
 
-    Box(modifier = modifier) {
+    EpisodeSwipe(row, caps.swipe, onAction, modifier) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier =
@@ -136,10 +145,32 @@ public fun EpisodeRow(
                     .background(container)
                     .hoverable(interactionSource)
                     .onFocusChanged { focused = it.isFocused }
-                    .onSecondaryClick { menuOpen = true }
-                    .semantics(mergeDescendants = true) {
+                    .focusRequester(focusRequester)
+                    .onEpisodePointerGesture(
+                        onFocus = { focusRequester.requestFocus() },
+                        onMenu = { menuOpen = true },
+                        onSelect = { onAction(EpisodeAction.Select(row.id)) },
+                        onExtend = { onAction(EpisodeAction.ExtendSelection(row.id)) },
+                    ).onPreviewKeyEvent { event ->
+                        when {
+                            event.key == Key.Menu || (event.key == Key.F10 && event.isShiftPressed) -> {
+                                if (event.type == KeyEventType.KeyDown) menuOpen = true
+                                true
+                            }
+
+                            (event.key == Key.Enter || event.key == Key.NumPadEnter) && focused -> {
+                                if (event.type == KeyEventType.KeyDown) onAction(EpisodeAction.Open(row.id))
+                                true
+                            }
+
+                            else -> {
+                                false
+                            }
+                        }
+                    }.semantics(mergeDescendants = true) {
                         contentDescription = summary
                         stateDescription = stateDesc
+                        if (selected != null) semanticsSelected = selected
                         customActions =
                             menuActions.map { (label, action) ->
                                 CustomAccessibilityAction(label) {
@@ -148,8 +179,15 @@ public fun EpisodeRow(
                                 }
                             }
                     }.combinedClickable(
-                        onClick = { onAction(EpisodeAction.Open(row.id)) },
-                        onLongClick = { onAction(EpisodeAction.Select(row.id)) },
+                        onClick = {
+                            val action =
+                                if (selected == null) EpisodeAction.Open(row.id) else EpisodeAction.Select(row.id)
+                            onAction(action)
+                        },
+                        onLongClick = {
+                            focusRequester.requestFocus()
+                            onAction(EpisodeAction.Select(row.id))
+                        },
                     ).alpha(if (dimmed) DIMMED_ALPHA else 1f)
                     .padding(horizontal = ROW_PADDING_H, vertical = ROW_PADDING_V),
         ) {
@@ -243,6 +281,7 @@ private fun rowMenuActions(
         actions += playActionLabel(row, live) to EpisodeAction.PlayToggle(row.id)
     }
     actions += stringResource(Res.string.action_open) to EpisodeAction.Open(row.id)
+    actions += stringResource(Res.string.action_select) to EpisodeAction.Select(row.id)
     if (row.playedAt == null) {
         actions += stringResource(Res.string.action_mark_played) to
             EpisodeAction.SetPlayed(row.id, played = true)

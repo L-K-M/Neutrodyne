@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.AllGroupsKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
+import ch.lkmc.neutrodyne.core.ui.BindEpisodeSelection
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeRouteResult
 import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedDialog
@@ -36,7 +37,10 @@ internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
     val urls = LocalPlatformActions.current.urls
     val clipboard = LocalClipboardManager.current
 
+    BindEpisodeSelection(viewModel.episodeSelection)
+
     FeedsScreen(
+        selection = viewModel.episodeSelection,
         state = state,
         pagingFor = viewModel::pagingFor,
         prefsFor = viewModel::prefsFor,
@@ -50,6 +54,7 @@ internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
         onRefresh = viewModel::onRefresh,
         onFiltersChange = viewModel::onFilters,
         onAction = { action ->
+            if (action is EpisodeAction.Open || action is EpisodeAction.OpenPodcast) viewModel.episodeSelection.clear()
             when (dispatchEpisodeRoute(action, navigator, urls)) {
                 EpisodeRouteResult.HANDLED -> {}
 
@@ -86,6 +91,7 @@ internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
         // The "Copy link" tap reports back by message id (01's onMessageAction contract); the
         // clipboard is a composition concern the platform-free ViewModel never sees.
         onMessageAction = { id ->
+            viewModel.undoSwipe(id)
             viewModel.consumeCopyLink(id)?.let { clipboard.setText(AnnotatedString(it)) }
         },
     )

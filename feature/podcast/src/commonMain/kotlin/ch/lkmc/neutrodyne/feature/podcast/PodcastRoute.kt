@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastSettingsKey
+import ch.lkmc.neutrodyne.core.ui.BindEpisodeSelection
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeRouteResult
 import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedDialog
@@ -65,7 +66,10 @@ internal fun PodcastRoute(key: PodcastKey) {
         }
     }
 
+    BindEpisodeSelection(viewModel.episodeSelection)
+
     PodcastScreen(
+        selection = viewModel.episodeSelection,
         state = state,
         items = items,
         live = live,
@@ -76,6 +80,7 @@ internal fun PodcastRoute(key: PodcastKey) {
         onFiltersChange = viewModel::onFiltersChange,
         onOrderChange = viewModel::setOrder,
         onAction = { action ->
+            if (action is EpisodeAction.Open || action is EpisodeAction.OpenPodcast) viewModel.episodeSelection.clear()
             when (dispatchEpisodeRoute(action, navigator, urls)) {
                 EpisodeRouteResult.HANDLED -> {
                     Unit

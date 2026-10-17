@@ -389,4 +389,14 @@
         <item quantity="one">%1$d Folge in '%2$s' als gespielt markieren?</item>
         <item quantity="other">%1$d Folgen in '%2$s' als gespielt markieren?</item>
     </plurals>
+    <string name="action_select">Auswählen</string>
+    <string name="selection_select_all">Alle auswählen</string>
+    <string name="selection_close">Auswahl schließen</string>
+    <plurals name="selection_count">
+        <item quantity="one">%1$d ausgewählt</item>
+        <item quantity="other">%1$d ausgewählt</item>
+    </plurals>
+    <string name="action_undo">Rückgängig</string>
+    <string name="episode_marked_played">Als gespielt markiert</string>
+    <string name="episode_marked_unplayed">Als ungespielt markiert</string>
 </resources>

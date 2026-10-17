@@ -411,4 +411,14 @@
         <item quantity="one">Mark %1$d episode in '%2$s' as played?</item>
         <item quantity="other">Mark %1$d episodes in '%2$s' as played?</item>
     </plurals>
+    <string name="action_select">Select</string>
+    <string name="selection_select_all">Select all</string>
+    <string name="selection_close">Close selection</string>
+    <plurals name="selection_count">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
+    <string name="action_undo">Undo</string>
+    <string name="episode_marked_played">Marked played</string>
+    <string name="episode_marked_unplayed">Marked unplayed</string>
 </resources>

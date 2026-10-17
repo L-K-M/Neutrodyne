@@ -1814,6 +1814,15 @@ Each page is wrapped in `NdPullToRefresh` (`PullToRefreshBox`); a pull calls `Re
 
 Both gestures never coexist half-working (`SwipeToDismissBox` would capture horizontal drags inside pages, risk U1). The pager node exposes custom accessibility actions "Next group" and "Previous group" (M2 acceptance 8); with a hardware keyboard Ctrl+Tab / Ctrl+Shift+Tab switch pages (both apps). On the desktop rows never swipe (the setting is hidden), the pager follows a touchpad's horizontal two-finger scroll and Shift+wheel, and the tabs, the All groups sheet and Ctrl+Tab are the main ways to switch; a mouse drag does not page (Unverified default of the multiplatform `HorizontalPager` for mouse input; if it pages, `userScrollEnabled` stays as specified above).
 
+**Implementation note (2026-10-16, M2):** D10 adds Android row swipes and
+Appearance gesture controls. The stored start/end defaults remain `ADD_UP_NEXT`
+and `MARK_PLAYED`. Queue actions (M4) and download actions (M6) are hidden in
+the chooser and inert when stored; their effective setting reads "None"
+without rewriting the saved value. `MARK_PLAYED` toggles played/unplayed.
+Only its tertiary-container background is needed in M2; add/delete backgrounds
+arrive with their actions. Rows commit only on release past 40 % of their
+width, regardless of fling velocity. Desktop rows ignore `caps.swipe`.
+
 ### Visits and new episodes
 
 05's visit rule is implemented here: `LifecycleResumeEffect` plus `pagerState.settledPage` call `onVisitStart(source)` when a page settles while Feeds is resumed and `onVisitEnd(source)` when another page settles, Feeds leaves composition or the app pauses; the ViewModel calls `markVisited(source, leftAt = now)` for visits ≥ 1 s. The ViewModel keeps the `lastViewedAt` read at visit start as the highlight baseline: `highlightNew = row.isNew && row.firstSeenAt > baseline` (05 [Counts and new since last visit](05-groups-opml-backup.md#counts-and-new-since-last-visit)). Tab counts come from `observeGroupCounts(sinceMs)` and `observeVirtualCounts(sinceMs)`.
