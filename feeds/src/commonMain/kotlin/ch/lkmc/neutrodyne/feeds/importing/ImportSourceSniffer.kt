@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.feeds.importing
 
 import ch.lkmc.neutrodyne.feeds.backup.ArchiveCaps
 import ch.lkmc.neutrodyne.feeds.backup.ArchiveException
+import ch.lkmc.neutrodyne.feeds.backup.ArchiveReader
 import ch.lkmc.neutrodyne.feeds.backup.ArchiveReaderFactory
 import ch.lkmc.neutrodyne.feeds.backup.BackupCodec
 import okio.Path
@@ -106,10 +107,7 @@ public object ImportSourceSniffer {
         return try {
             archives.open(archivePath, ArchiveCaps.TAKEOUT).use { reader ->
                 val isBackup =
-                    BackupCodec.ENTRY_MANIFEST in reader.entryNames &&
-                        reader.open(BackupCodec.ENTRY_MANIFEST).use {
-                            codec.manifestFormat(it) == BackupCodec.FORMAT
-                        }
+                    BackupCodec.ENTRY_MANIFEST in reader.entryNames && manifestSaysBackup(reader)
                 when {
                     isBackup -> {
                         SniffResult.Recognized(SniffedFormat.NEUTRODYNE_BACKUP)
@@ -131,6 +129,21 @@ public object ImportSourceSniffer {
             }
         }
     }
+
+    /**
+     * The manifest probe of the ZIP row. A damaged entry only means the backup row does
+     * not apply, so CORRUPT falls through to the `.csv` check; a tripped guard
+     * (HOSTILE) rethrows into the outer catch and stays fatal.
+     */
+    private fun manifestSaysBackup(reader: ArchiveReader): Boolean =
+        try {
+            reader.open(BackupCodec.ENTRY_MANIFEST).use {
+                codec.manifestFormat(it) == BackupCodec.FORMAT
+            }
+        } catch (e: ArchiveException) {
+            if (e.kind == ArchiveException.Kind.HOSTILE) throw e
+            false
+        }
 
     private fun classifyXml(text: String): SniffResult {
         val root = firstElement(text)?.substringAfterLast(':')?.lowercase()

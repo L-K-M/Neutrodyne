@@ -140,6 +140,27 @@ class ImportSourceSnifferTest {
     }
 
     @Test
+    fun aDamagedManifestEntryStillReachesTheCsvFallback() {
+        // The manifest entry exists but its data is damaged: the backup row does not
+        // apply, so the .csv row still decides (05 Sniffing's else-if table).
+        val damaged =
+            FakeArchives(
+                entries = mapOf("manifest.json" to byteArrayOf(0x01), "Subs.csv" to byteArrayOf(0x01)),
+                openErrors =
+                    mapOf("manifest.json" to ArchiveException(ArchiveException.Kind.CORRUPT, "zip")),
+            )
+        assertEquals(SniffedFormat.TAKEOUT_CSV, recognized(sniff(zip, damaged)))
+        // A guard failure on the same entry stays fatal: hostile never falls through.
+        val hostile =
+            FakeArchives(
+                entries = mapOf("manifest.json" to byteArrayOf(0x01), "Subs.csv" to byteArrayOf(0x01)),
+                openErrors =
+                    mapOf("manifest.json" to ArchiveException(ArchiveException.Kind.HOSTILE, "zip_bomb")),
+            )
+        assertEquals(SniffResult.Hostile("zip_bomb"), sniff(zip, hostile))
+    }
+
+    @Test
     fun hostileAndCorruptArchivesMapTheirReason() {
         val hostile = FakeArchives(error = ArchiveException(ArchiveException.Kind.HOSTILE, "zip_path"))
         assertEquals(SniffResult.Hostile("zip_path"), sniff(zip, hostile))
@@ -163,6 +184,7 @@ class ImportSourceSnifferTest {
     private class FakeArchives(
         private val entries: Map<String, ByteArray>? = null,
         private val error: ArchiveException? = null,
+        private val openErrors: Map<String, ArchiveException> = emptyMap(),
     ) : ArchiveReaderFactory {
         var lastCaps: ArchiveCaps? = null
             private set
@@ -173,16 +195,18 @@ class ImportSourceSnifferTest {
         ): ArchiveReader {
             lastCaps = caps
             error?.let { throw it }
-            return Reader(entries.orEmpty())
+            return Reader(entries.orEmpty(), openErrors)
         }
 
         private class Reader(
             private val entries: Map<String, ByteArray>,
+            private val openErrors: Map<String, ArchiveException>,
         ) : ArchiveReader {
             override val entryNames = entries.keys.toList()
 
             override fun open(name: String): Source =
-                entries[name]?.let { Buffer().write(it) }
+                openErrors[name]?.let { throw it }
+                    ?: entries[name]?.let { Buffer().write(it) }
                     ?: throw ArchiveException(ArchiveException.Kind.CORRUPT, "zip")
 
             override fun close() {}
