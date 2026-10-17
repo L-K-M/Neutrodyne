@@ -403,6 +403,10 @@ public class FeedsViewModel(
         }
     }
 
+    /**
+     * The counted "Mark all as played" confirmation. It lives in the ViewModel, so it survives
+     * configuration changes but not process death: a destructive confirmation is not restored.
+     */
     public val markPlayed: MarkFeedPlayedController =
         MarkFeedPlayedController(viewModelScope, clock, feedRepository::countUnplayed) { source, before, count ->
             when (val result = episodes.markFeedPlayed(source, before, count)) {
