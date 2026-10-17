@@ -27,11 +27,13 @@ import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
@@ -128,7 +130,9 @@ internal class ImportFetchRunner(
             if (pending.isEmpty()) {
                 when (finish(sessionId)) {
                     Finish.DONE -> {
-                        announceDone(sessionId)
+                        // DONE committed: its effects run as one non-cancellable unit so a
+                        // host cancel landing now cannot leave a done session unannounced.
+                        withContext(NonCancellable) { announceDone(sessionId) }
                         return ImportFetchResult.COMPLETED
                     }
 
@@ -497,7 +501,9 @@ internal class ImportFetchRunner(
         }
 
     private suspend fun finishOrDone(sessionId: Long): ImportFetchResult {
-        if (finish(sessionId) == Finish.DONE) announceDone(sessionId)
+        if (finish(sessionId) == Finish.DONE) {
+            withContext(NonCancellable) { announceDone(sessionId) }
+        }
         return ImportFetchResult.COMPLETED
     }
 

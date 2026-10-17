@@ -33,6 +33,7 @@ import ch.lkmc.neutrodyne.core.testing.database.queueEntryEntity
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
@@ -337,6 +338,36 @@ class ImportFetchRunnerTest {
             // …but CANCELLED is never overwritten into DONE and no done effects fire.
             assertTrue(reports.posts.isEmpty())
             assertEquals(0, snapshots.requestSoonCalls)
+        }
+
+    @Test
+    fun aHostCancelAfterDoneStillDeliversTheDoneEffects() =
+        runTest {
+            // §7's finish commits DONE, then posts the report and pokes the snapshot
+            // scheduler: a host cancel landing between those steps must not lose the
+            // committed session's effects — they finish as one non-cancellable unit.
+            val podcastId = pendingPodcast(FEED_A)
+            val sessionId = newSession()
+            queueItem(sessionId, ordinal = 0, url = FEED_A, podcastId = podcastId)
+            adapter.results[FEED_A] = adapterParsed(parsedFeed())
+
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            lateinit var job: Job
+            reports.onPostDone = { _, _ ->
+                job.cancel()
+                entered.complete(Unit)
+                release.await()
+            }
+            job = backgroundScope.launch { runner.run(sessionId, attempt = 0) }
+
+            entered.await()
+            release.complete(Unit)
+            job.join()
+
+            assertSessionDone(sessionId)
+            assertEquals(1, reports.posts.size)
+            assertEquals(1, snapshots.requestSoonCalls, "a committed DONE keeps its effects")
         }
 
     // --- Exhaustion and the finish guard -------------------------------------------------------------
