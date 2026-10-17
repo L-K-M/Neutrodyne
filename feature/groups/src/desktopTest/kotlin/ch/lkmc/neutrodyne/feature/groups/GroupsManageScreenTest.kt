@@ -133,7 +133,7 @@ class GroupsManageScreenTest {
                 moveTo(Offset(start.x, end.y), delayMillis = 16)
                 release()
             }
-            waitForIdle()
+            waitUntil { calls.size == 1 && !vm.uiState.value.busy }
             assertEquals(listOf(ids.drop(1) + a), calls)
         }
 

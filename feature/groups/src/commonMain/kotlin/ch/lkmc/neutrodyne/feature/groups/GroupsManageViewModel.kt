@@ -126,7 +126,8 @@ internal class GroupsManageViewModel(
         val requested =
             latest.map { it.id }.toMutableList().apply {
                 remove(id)
-                add(if (next == null) size else indexOf(next), id)
+                // A neighbour that vanished meanwhile anchors nothing: append instead of crashing.
+                add(next?.let(::indexOf)?.takeIf { it >= 0 } ?: size, id)
             }
         preview = requested
         publishGroups()
