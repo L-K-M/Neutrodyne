@@ -131,6 +131,23 @@ class ImportDaoTest {
             assertEquals(listOf(fetching, committed), dao.activeSessions().map { it.id })
         }
 
+    @Test fun sessionWritesReemitOpenSessions() =
+        runTest {
+            val first = dao.insertSession(importSessionEntity(createdAt = 1))
+            val second = dao.insertSession(importSessionEntity(createdAt = 2))
+
+            dao.observeOpenSessions().test {
+                assertEquals(listOf(first, second), awaitItem().map { it.id })
+                dao.setSourceName(first, "renamed.opml")
+                assertEquals("renamed.opml", awaitItem().single { it.id == first }.sourceName)
+                dao.setState(second, ImportState.COMMITTED)
+                assertEquals(ImportState.COMMITTED, awaitItem().single { it.id == second }.state)
+                dao.setState(second, ImportState.CANCELLED)
+                assertEquals(listOf(first), awaitItem().map { it.id })
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
     @Test fun progressAndTalliesCountByStatus() =
         runTest {
             val session = dao.insertSession(importSessionEntity())
@@ -168,6 +185,53 @@ class ImportDaoTest {
                 dao.observeItemTallies(session).first(),
             )
             assertEquals(2, dao.queuedCount(session))
+        }
+
+    @Test fun itemWritesReemitProgressAndTallies() =
+        runTest {
+            val session = dao.insertSession(importSessionEntity())
+            dao.insertItems(
+                listOf(
+                    importItemEntity(session, 0),
+                    importItemEntity(session, 1, selected = false),
+                ),
+            )
+
+            dao.observeProgress(session).test {
+                assertEquals(
+                    mapOf(ImportItemStatus.PREVIEW to 2),
+                    awaitItem().associate { it.status to it.count },
+                )
+                dao.setItemStatus(
+                    session,
+                    ordinal = 0,
+                    status = ImportItemStatus.FETCH_FAILED,
+                    errorDetail = "NETWORK_IO",
+                )
+                assertEquals(
+                    mapOf(ImportItemStatus.PREVIEW to 1, ImportItemStatus.FETCH_FAILED to 1),
+                    awaitItem().associate { it.status to it.count },
+                )
+                cancelAndIgnoreRemainingEvents()
+            }
+
+            dao.observeItemTallies(session).test {
+                assertEquals(
+                    ImportItemTallies(itemCount = 2, selectedCount = 1, youtubeCount = 0),
+                    awaitItem(),
+                )
+                dao.setSelected(session, ordinal = 1, selected = true)
+                assertEquals(
+                    ImportItemTallies(itemCount = 2, selectedCount = 2, youtubeCount = 0),
+                    awaitItem(),
+                )
+                dao.deleteItems(session, ordinals = listOf(0))
+                assertEquals(
+                    ImportItemTallies(itemCount = 1, selectedCount = 1, youtubeCount = 0),
+                    awaitItem(),
+                )
+                cancelAndIgnoreRemainingEvents()
+            }
         }
 
     @Test fun pagedItemsFiltersStatusesAcrossPageBoundaries() =
