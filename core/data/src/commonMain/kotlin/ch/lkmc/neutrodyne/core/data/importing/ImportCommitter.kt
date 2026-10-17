@@ -89,39 +89,58 @@ internal class ImportCommitter(
     private val clock: Clock,
     private val newSyncId: () -> String = { Uuid.random().toString() },
 ) {
-    suspend fun confirm(sessionId: Long): Outcome<Unit, ImportError> {
-        val commit =
-            try {
-                coordinator.withCredentialCommit { commitLocked(sessionId) }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                return Outcome.Failure(ImportError.Storage)
+    suspend fun confirm(sessionId: Long): Outcome<Unit, ImportError> =
+        try {
+            when (coordinator.withCredentialCommit { commitLocked(sessionId) }) {
+                Commit.GONE -> {
+                    Outcome.Failure(ImportError.SessionGone)
+                }
+
+                Commit.REPLAYED -> {
+                    Outcome.Success(Unit)
+                }
+
+                Commit.READY_TO_FINISH -> {
+                    // Keep cancellation between chunks; the final marker and its effects
+                    // must finish together, outside the credential coordinator.
+                    withContext(NonCancellable) { finishCommit(sessionId) }
+                    Outcome.Success(Unit)
+                }
             }
-        when (commit) {
-            Commit.GONE -> return Outcome.Failure(ImportError.SessionGone)
-            Commit.REPLAYED -> return Outcome.Success(Unit)
-            Commit.COMMITTED -> Unit
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            Outcome.Failure(ImportError.Storage)
         }
 
-        // 05 §6 step 4's effects — after the COMMITTED write. Each is best-effort (02's
-        // subscribe ordering): they run non-cancellable so a caller cancelled at this
-        // boundary still fires them, and the runner's `activeSessions()` re-read recovers
-        // the scheduling a surfaced post-commit cancellation skips.
-        withContext(NonCancellable) {
-            suspendRunCatching { workScheduler.schedule(sessionId) }
-                .onFailure { e -> Log.w(TAG, e) { "import fetch scheduling failed for session $sessionId" } }
-            suspendRunCatching { refresh.reschedulePeriodic() }
-                .onFailure { e -> Log.w(TAG, e) { "periodic reschedule failed after import commit" } }
-            suspendRunCatching { channels.sync() }
-                .onFailure { e -> Log.w(TAG, e) { "group channel sync failed after import commit" } }
-        }
-        return Outcome.Success(Unit)
+    /** Called non-cancellably so Room cannot commit the marker and skip scheduling its host. */
+    private suspend fun finishCommit(sessionId: Long) {
+        val marked =
+            db.withWriteTransaction {
+                val latest = db.importDao().sessionById(sessionId) ?: return@withWriteTransaction false
+                if (latest.state != ImportState.PREVIEW) return@withWriteTransaction false
+
+                // Merge into the latest row: a stale preview must not replace worker markers.
+                val latestOptions = latest.optionsJson?.let(ImportOptionsJson::decode) ?: ImportOptions()
+                val now = clock.now()
+                db.importDao().markCommitted(
+                    sessionId,
+                    ImportOptionsJson.encode(latestOptions.copy(committedAt = now, attemptMarkerAt = now)),
+                ) > 0
+            }
+        if (!marked) return
+
+        suspendRunCatching { workScheduler.schedule(sessionId) }
+            .onFailure { e -> Log.w(TAG, e) { "import fetch scheduling failed for session $sessionId" } }
+        suspendRunCatching { refresh.reschedulePeriodic() }
+            .onFailure { e -> Log.w(TAG, e) { "periodic reschedule failed after import commit" } }
+        suspendRunCatching { channels.sync() }
+            .onFailure { e -> Log.w(TAG, e) { "group channel sync failed after import commit" } }
     }
 
     /**
-     * The whole credential-guarded commit. Returns [Commit.COMMITTED] only when the session's
-     * own `PREVIEW` → `COMMITTED` write landed; the other values all mean "nothing left to do".
+     * The credential-guarded chunks. The final marker and scheduling run after this releases
+     * the coordinator; the other results mean there is nothing left to commit.
      */
     private suspend fun commitLocked(sessionId: Long): Commit =
         when (val plan = db.withReadTransaction { planLocked(sessionId) }) {
@@ -181,24 +200,7 @@ internal class ImportCommitter(
                     writeChunk(sessionId, plan.options, ctx, chunk)
                 }
             }
-            val marked =
-                db.withWriteTransaction {
-                    val latest = db.importDao().sessionById(sessionId) ?: return@withWriteTransaction false
-                    if (latest.state != ImportState.PREVIEW) return@withWriteTransaction false
-                    // Worker fields merge into the options this row holds NOW (A1's guard keeps
-                    // user edits away from them); never the gate-read copy — an updateOptions
-                    // landing mid-commit would otherwise be clobbered.
-                    val latestOptions =
-                        latest.optionsJson?.let(ImportOptionsJson::decode) ?: ImportOptions()
-                    val now = clock.now()
-                    db.importDao().markCommitted(
-                        sessionId,
-                        ImportOptionsJson.encode(
-                            latestOptions.copy(committedAt = now, attemptMarkerAt = now),
-                        ),
-                    ) > 0
-                }
-            return if (marked) Commit.COMMITTED else Commit.REPLAYED
+            return Commit.READY_TO_FINISH
         } catch (t: Throwable) {
             // A chunk's rollback already protected the rows it wrote; here the puts whose
             // referencing insert never landed go back — unless a committed chunk (or another
@@ -606,7 +608,7 @@ internal class ImportCommitter(
      * the idempotent no-op of a session already past `PREVIEW` (or one a racing cancel stole);
      * [COMMITTED] means this call's own transition write landed and post-commit effects run.
      */
-    private enum class Commit { GONE, REPLAYED, COMMITTED }
+    private enum class Commit { GONE, REPLAYED, READY_TO_FINISH }
 
     private companion object {
         const val TAG = "ImportCommitter"

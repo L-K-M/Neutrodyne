@@ -30,6 +30,7 @@ import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -481,19 +482,23 @@ class ImportCommitTest {
         }
 
     @Test
-    fun aCancelAtCommittedStillPersistsTheCommit() =
+    fun aCancelAtCommittedStillSchedulesItsFetchAndEffects() =
         runTest {
             val sid = seedSession(items = listOf(item(1, "https://a.example.com/f")))
 
             val job =
                 CoroutineScope(SupervisorJob() + Dispatchers.Default)
-                    .launch { committer.confirm(sid) }
+                    .launch(start = CoroutineStart.LAZY) { committer.confirm(sid) }
             driver.arm("UPDATE import_session SET state = 'COMMITTED'") { job.cancel() }
+            job.start()
             job.join()
 
             assertTrue(job.isCancelled, "Room surfaces the post-commit cancellation")
             assertEquals(ImportState.COMMITTED, db.importDao().sessionById(sid)?.state)
             assertEquals(1, db.podcastDao().allForExport().size)
+            assertEquals(listOf(sid), scheduler.sessions)
+            assertEquals(listOf("reschedulePeriodic()"), refresh.calls)
+            assertEquals(listOf("sync()"), channels.calls)
         }
 
     @Test
