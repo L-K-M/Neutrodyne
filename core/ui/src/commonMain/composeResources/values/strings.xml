@@ -388,6 +388,39 @@
     <string name="feeds_images_tap">Only after I tap</string>
     <string name="feeds_not_on_desktop">Not used on computers</string>
     <string name="write_failed">Couldn&apos;t save the change</string>
+    <string name="feed_group_deleted">'%1$s' was deleted — showing All</string>
+    <string name="feed_group_unknown">This group no longer exists. Showing All</string>
+    <string name="feeds_all">All</string>
+    <string name="feeds_ungrouped">Ungrouped</string>
+    <string name="feeds_all_groups">All groups</string>
+    <string name="feeds_next_group">Next group</string>
+    <string name="feeds_previous_group">Previous group</string>
+    <string name="groups_recent">Recent</string>
+    <string name="groups_new">New group</string>
+    <string name="groups_manage">Manage groups</string>
+    <string name="groups_empty">No groups yet</string>
+    <string name="mark_played_all">All</string>
+    <string name="mark_played_week">Older than 1 week</string>
+    <string name="mark_played_month">Older than 1 month</string>
+    <string name="mark_played_three_months">Older than 3 months</string>
+    <string name="mark_played_confirm">Mark as played</string>
+    <string name="mark_played_counting">Counting episodes…</string>
+    <string name="mark_played_selection_changed">The selection changed. Check the new count and confirm again.</string>
+    <string name="mark_played_no_undo">You cannot undo this action.</string>
+    <plurals name="mark_played_count">
+        <item quantity="one">Mark %1$d episode in '%2$s' as played?</item>
+        <item quantity="other">Mark %1$d episodes in '%2$s' as played?</item>
+    </plurals>
+    <string name="action_select">Select</string>
+    <string name="selection_select_all">Select all</string>
+    <string name="selection_close">Close selection</string>
+    <plurals name="selection_count">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
+    <string name="action_undo">Undo</string>
+    <string name="episode_marked_played">Marked played</string>
+    <string name="episode_marked_unplayed">Marked unplayed</string>
 
     <!-- M2 group editor -->
     <string name="group_edit_new">New group</string>

@@ -95,6 +95,26 @@ class GroupVisualsSemanticsTest {
         }
 
     @Test
+    fun emptyMosaicUsesFirstGraphemeOfMultiwordName() = assertMosaicGrapheme("Morning News", "M")
+
+    @Test
+    fun emptyMosaicKeepsCompleteEmojiGrapheme() = assertMosaicGrapheme("👩🏽‍🚀 Space News", "👩🏽‍🚀")
+
+    private fun assertMosaicGrapheme(
+        name: String,
+        grapheme: String,
+    ) = runDesktopComposeUiTest(width = 360, height = 560) {
+        installFakeImageLoader()
+        setContent {
+            NeutrodyneTheme(AppearancePrefs(dynamicColor = false), SystemUiState.DEFAULT) {
+                GroupMosaic(groupFixture(name = name, iconKey = null, memberCount = 0), emptyList(), 0, 0)
+            }
+        }
+        waitForIdle()
+        onNodeWithText(grapheme, useUnmergedTree = true).assertExists()
+    }
+
+    @Test
     fun tabLabelExposesTabRoleSelectedStateAndCounts() =
         runDesktopComposeUiTest(width = 360, height = 160) {
             installFakeImageLoader()

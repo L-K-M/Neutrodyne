@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
 import ch.lkmc.neutrodyne.core.database.FeedQueryBuilder
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
+import ch.lkmc.neutrodyne.core.domain.MarkFeedPlayedResult
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.EpisodeDetail
 import ch.lkmc.neutrodyne.core.model.FeedSource
@@ -92,17 +93,39 @@ internal class EpisodeRepositoryImpl(
         }
     }
 
-    /** R2.6's bulk mark-played: the confirmation count and marked rows share one predicate (02). */
     override suspend fun markFeedPlayed(
         source: FeedSource,
         sortDateBefore: Long?,
     ) {
-        val now = clock.now()
-        db.withWriteTransaction {
-            val ids = db.episodeDao().unplayedIds(FeedQueryBuilder.unplayedIds(source, sortDateBefore))
-            for (chunk in ids.chunked(BIND_CHUNK)) markPlayedChunk(chunk, now)
-        }
+        markFeedPlayedSelection(source, sortDateBefore, expectedCount = null)
     }
+
+    override suspend fun markFeedPlayed(
+        source: FeedSource,
+        sortDateBefore: Long?,
+        expectedCount: Int,
+    ): MarkFeedPlayedResult {
+        require(expectedCount >= 0) { "Expected count must be non-negative" }
+        return markFeedPlayedSelection(source, sortDateBefore, expectedCount)
+    }
+
+    private suspend fun markFeedPlayedSelection(
+        source: FeedSource,
+        sortDateBefore: Long?,
+        expectedCount: Int?,
+    ): MarkFeedPlayedResult =
+        db.withWriteTransaction {
+            val feed = db.feedDao()
+            if (expectedCount != null) {
+                val actual = feed.countUnplayed(FeedQueryBuilder.countUnplayed(source, sortDateBefore))
+                if (actual != expectedCount) return@withWriteTransaction MarkFeedPlayedResult.SelectionChanged(actual)
+            }
+
+            val ids = feed.unplayedIds(FeedQueryBuilder.unplayedIds(source, sortDateBefore))
+            val now = clock.now()
+            for (chunk in ids.chunked(BIND_CHUNK)) markPlayedChunk(chunk, now)
+            MarkFeedPlayedResult.Played(ids.size)
+        }
 
     override suspend fun setFavorite(
         episodeId: Long,

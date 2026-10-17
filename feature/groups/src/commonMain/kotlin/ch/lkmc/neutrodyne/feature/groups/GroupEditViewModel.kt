@@ -61,15 +61,19 @@ internal data class GroupEditDraft(
     companion object {
         private const val FIELD_COUNT = 5
 
-        fun restore(values: List<String>): GroupEditDraft {
-            val (name, color, icon, playOrder, showAsTab) = values
+        /** Null for a malformed entry (e.g. saved by another app version): the editor starts fresh. */
+        fun restore(values: List<String>): GroupEditDraft? {
+            if (values.size < FIELD_COUNT) return null
+            val (name, color, icon, playOrderName, showAsTab) = values
+            val playOrder = FeedOrder.entries.firstOrNull { it.name == playOrderName } ?: return null
+            val memberIds = values.drop(FIELD_COUNT).map { it.toLongOrNull() ?: return null }.toSet()
             return GroupEditDraft(
                 name,
                 color.toIntOrNull(),
                 icon.ifEmpty { null },
-                FeedOrder.valueOf(playOrder),
+                playOrder,
                 showAsTab.toBoolean(),
-                values.drop(FIELD_COUNT).map(String::toLong).toSet(),
+                memberIds,
             )
         }
     }

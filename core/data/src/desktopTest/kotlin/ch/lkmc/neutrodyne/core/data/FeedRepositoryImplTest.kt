@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.model.EpisodeType
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.downloadEntity
@@ -43,7 +44,7 @@ class FeedRepositoryImplTest {
     private fun repository(
         db: NeutrodyneDatabase,
         clock: TestClock = TestClock(),
-    ) = FeedRepositoryImpl(db, clock)
+    ) = FeedRepositoryImpl(db, FakeSettingsRepository(), clock)
 
     /** Full projection→model mapping: every UI-relevant column lands on the right `EpisodeRow` field. */
     @Test

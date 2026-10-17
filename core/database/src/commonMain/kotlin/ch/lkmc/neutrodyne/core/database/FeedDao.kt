@@ -5,13 +5,17 @@ package ch.lkmc.neutrodyne.core.database
 import androidx.paging.PagingSource
 import androidx.room3.Dao
 import androidx.room3.DaoReturnTypeConverters
+import androidx.room3.Embedded
 import androidx.room3.RawQuery
 import androidx.room3.RoomRawQuery
 import androidx.room3.paging.PagingSourceDaoReturnTypeConverter
+import ch.lkmc.neutrodyne.core.model.FeedCounts
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
+import ch.lkmc.neutrodyne.core.model.GroupCounts
 import ch.lkmc.neutrodyne.core.model.MediaFilter
+import kotlinx.coroutines.flow.Flow
 
 /**
  * Feed pages (02 Feed pages, D30): [page] runs a [FeedQueryBuilder]-built raw query. M1a delivers
@@ -39,7 +43,34 @@ interface FeedDao {
         ],
     )
     fun page(query: RoomRawQuery): PagingSource<Int, EpisodeRowProjection>
+
+    @RawQuery(
+        observedEntities = [
+            PodcastGroupEntity::class, PodcastGroupMemberEntity::class, PodcastEntity::class,
+            EpisodeEntity::class, EpisodeStateEntity::class,
+        ],
+    )
+    fun observeGroupCounts(query: RoomRawQuery): Flow<List<GroupCountRow>>
+
+    @RawQuery(
+        observedEntities = [
+            PodcastGroupMemberEntity::class, PodcastEntity::class, EpisodeEntity::class, EpisodeStateEntity::class,
+        ],
+    )
+    fun observeVirtualCounts(query: RoomRawQuery): Flow<FeedCounts>
+
+    @RawQuery
+    suspend fun countUnplayed(query: RoomRawQuery): Int
+
+    @RawQuery
+    suspend fun unplayedIds(query: RoomRawQuery): List<Long>
 }
+
+/** Empty groups have a row with zero counts, including groups whose members have no episodes. */
+data class GroupCountRow(
+    val groupId: Long,
+    @Embedded val counts: FeedCounts,
+)
 
 /**
  * Builds feed-page raw queries (02 Feed pages). SQL is assembled only from the enumerated
@@ -130,30 +161,71 @@ object FeedQueryBuilder {
         return RoomRawQuery(sql) { st -> args.forEachIndexed { i, v -> st.bindLong(i + 1, v) } }
     }
 
-    /**
-     * `markFeedPlayed`'s id selection (02 Bulk "Mark all as played"): the `countUnplayed`
-     * predicate selecting `e.id`, so the confirmation count and the marked rows share it.
-     */
+    /** LEFT joins retain empty groups while the episode join uses the per-podcast date index. */
+    fun groupCounts(
+        sinceMs: Long,
+        nowMs: Long,
+    ): RoomRawQuery =
+        boundQuery(
+            "SELECT g.id AS groupId," +
+                " COUNT(CASE WHEN s.playedAt IS NULL THEN e.id END) AS unplayed," +
+                " COUNT(CASE WHEN s.playedAt IS NULL AND e.isNew = 1" +
+                " AND e.firstSeenAt > COALESCE(g.lastViewedAt, g.createdAt) THEN e.id END) AS newSinceVisit" +
+                " FROM podcast_group g" +
+                " LEFT JOIN podcast_group_member m ON m.groupId = g.id" +
+                " LEFT JOIN podcast p ON p.id = m.podcastId" +
+                " LEFT JOIN episode e ON e.podcastId = m.podcastId" +
+                " AND e.sortDate >= MAX(?, CASE WHEN g.hideOlderThanDays IS NULL THEN 0" +
+                " ELSE ? - g.hideOlderThanDays * ${GroupCounts.DAY_MS} END)" +
+                " AND $VISIBLE AND e.availability = 'AVAILABLE'" +
+                " LEFT JOIN episode_state s ON s.episodeId = e.id GROUP BY g.id",
+            listOf(sinceMs, nowMs),
+        )
+
+    fun virtualCounts(
+        source: FeedSource,
+        sinceMs: Long,
+        lastViewedAt: Long,
+    ): RoomRawQuery {
+        require(source == FeedSource.All || source == FeedSource.Ungrouped) { "Not a virtual feed: $source" }
+        val predicate = if (source == FeedSource.All) "p.includeInAll = 1" else UNGROUPED
+        return boundQuery(
+            "SELECT COUNT(CASE WHEN s.playedAt IS NULL THEN e.id END) AS unplayed," +
+                " COUNT(CASE WHEN s.playedAt IS NULL AND e.isNew = 1 AND e.firstSeenAt > ?" +
+                " THEN e.id END) AS newSinceVisit" +
+                " FROM episode e CROSS JOIN podcast p LEFT JOIN episode_state s ON s.episodeId = e.id" +
+                " WHERE p.id = e.podcastId AND $predicate AND e.sortDate >= ?" +
+                " AND $VISIBLE AND e.availability = 'AVAILABLE'",
+            listOf(lastViewedAt, sinceMs),
+        )
+    }
+
+    fun countUnplayed(
+        source: FeedSource,
+        sortDateBefore: Long?,
+    ): RoomRawQuery = unplayedSelection("COUNT(*)", source, sortDateBefore)
+
     fun unplayedIds(
         source: FeedSource,
         sortDateBefore: Long?,
+    ): RoomRawQuery = unplayedSelection("e.id", source, sortDateBefore)
+
+    // Only the projection differs: confirmation and the transactional write cannot drift.
+    // Badge windows and AVAILABLE-only counting deliberately do not constrain this bulk action (02).
+    private fun unplayedSelection(
+        columns: String,
+        source: FeedSource,
+        sortDateBefore: Long?,
     ): RoomRawQuery {
-        val where = mutableListOf(VISIBLE)
+        val where = mutableListOf(VISIBLE, "s.playedAt IS NULL")
         val args = mutableListOf<Long>()
-        val from =
-            if (source == FeedSource.All) {
-                where += "p.id = e.podcastId"
+        when (source) {
+            FeedSource.All -> {
                 where += "p.includeInAll = 1"
-                "episode e CROSS JOIN podcast p"
-            } else {
-                "episode e JOIN podcast p ON p.id = e.podcastId"
             }
 
-        when (source) {
-            FeedSource.All -> {}
-
             FeedSource.Ungrouped -> {
-                where += "NOT EXISTS (SELECT 1 FROM podcast_group_member m WHERE m.podcastId = e.podcastId)"
+                where += UNGROUPED
             }
 
             is FeedSource.Group -> {
@@ -166,15 +238,22 @@ object FeedQueryBuilder {
                 args += source.podcastId
             }
         }
-
-        where += "s.playedAt IS NULL"
         sortDateBefore?.let {
             where += "e.sortDate < ?"
             args += it
         }
-
-        val sql =
-            "SELECT e.id FROM $from $ROW_JOINS WHERE ${where.joinToString(" AND ")}"
-        return RoomRawQuery(sql) { st -> args.forEachIndexed { i, v -> st.bindLong(i + 1, v) } }
+        return boundQuery(
+            "SELECT $columns FROM episode e JOIN podcast p ON p.id = e.podcastId" +
+                " LEFT JOIN episode_state s ON s.episodeId = e.id WHERE ${where.joinToString(" AND ")}",
+            args,
+        )
     }
+
+    private const val UNGROUPED =
+        "NOT EXISTS (SELECT 1 FROM podcast_group_member m WHERE m.podcastId = e.podcastId)"
+
+    private fun boundQuery(
+        sql: String,
+        args: List<Long>,
+    ): RoomRawQuery = RoomRawQuery(sql) { st -> args.forEachIndexed { i, v -> st.bindLong(i + 1, v) } }
 }

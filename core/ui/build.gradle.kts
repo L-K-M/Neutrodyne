@@ -56,6 +56,7 @@ kotlin {
             implementation(libs.androidx.activity.compose)
         }
         desktopTest.dependencies {
+            implementation(libs.kotlinx.coroutines.swing)
             implementation(libs.cmp.ui.test)
             // Skiko natives so runComposeUiTest can render on this machine's OS.
             implementation(compose.desktop.currentOs)

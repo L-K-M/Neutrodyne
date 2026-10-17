@@ -39,12 +39,14 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlin.uuid.Uuid
 
 @SingleIn(AppScope::class)
@@ -121,35 +123,38 @@ internal class GroupRepositoryImpl(
             }
         if (!GroupIcons.isValid(draft.iconKey)) return Outcome.Failure(GroupError.InvalidIconKey)
 
-        return db.withWriteTransaction {
-            if (!podcastsExist(memberIds)) return@withWriteTransaction Outcome.Failure(GroupError.NotFound)
-            val now = clock.now()
-            withNameConflict(name.nameKey) {
-                val groupId =
-                    dao.insert(
-                        PodcastGroupEntity(
-                            uuid = Uuid.random().toString(),
-                            name = name.name,
-                            nameKey = name.nameKey,
-                            orderKey = orderKeys.after(dao.lastGroupOrderKey()),
-                            colorArgb =
-                                draft.colorArgb?.let(GroupPalette::opaque)
-                                    ?: GroupPalette.nextColor(dao.groupColors()),
-                            iconKey = draft.iconKey,
-                            playOrder = draft.playOrder,
-                            showAsTab = draft.showAsTab,
-                            createdAt = now,
-                            updatedAt = now,
-                        ),
-                    )
-                var lastKey: String? = null
-                for (podcastId in memberIds) {
-                    lastKey = orderKeys.after(lastKey)
-                    dao.insertMember(memberRow(groupId, podcastId, lastKey, now))
+        val outcome =
+            db.withWriteTransaction {
+                if (!podcastsExist(memberIds)) return@withWriteTransaction Outcome.Failure(GroupError.NotFound)
+                val now = clock.now()
+                withNameConflict(name.nameKey) {
+                    val groupId =
+                        dao.insert(
+                            PodcastGroupEntity(
+                                uuid = Uuid.random().toString(),
+                                name = name.name,
+                                nameKey = name.nameKey,
+                                orderKey = orderKeys.after(dao.lastGroupOrderKey()),
+                                colorArgb =
+                                    draft.colorArgb?.let(GroupPalette::opaque)
+                                        ?: GroupPalette.nextColor(dao.groupColors()),
+                                iconKey = draft.iconKey,
+                                playOrder = draft.playOrder,
+                                showAsTab = draft.showAsTab,
+                                createdAt = now,
+                                updatedAt = now,
+                            ),
+                        )
+                    var lastKey: String? = null
+                    for (podcastId in memberIds) {
+                        lastKey = orderKeys.after(lastKey)
+                        dao.insertMember(memberRow(groupId, podcastId, lastKey, now))
+                    }
+                    groupId
                 }
-                groupId
             }
-        }
+        if (outcome is Outcome.Success && memberIds.isNotEmpty()) rescheduleAfterCommit("group create")
+        return outcome
     }
 
     override suspend fun update(
@@ -218,57 +223,82 @@ internal class GroupRepositoryImpl(
     override suspend fun setMembers(
         groupId: Long,
         podcastIds: Set<Long>,
-    ): Outcome<Unit, GroupError> =
-        db.withWriteTransaction {
-            if (dao.groupById(groupId) == null || !podcastsExist(podcastIds)) {
-                return@withWriteTransaction Outcome.Failure(GroupError.NotFound)
-            }
+    ): Outcome<Unit, GroupError> {
+        var changed = false
+        val outcome =
+            db.withWriteTransaction {
+                if (dao.groupById(groupId) == null || !podcastsExist(podcastIds)) {
+                    return@withWriteTransaction Outcome.Failure(GroupError.NotFound)
+                }
 
-            val current = dao.membersOf(groupId).mapTo(HashSet()) { it.podcastId }
-            if (current == podcastIds) return@withWriteTransaction Outcome.Success(Unit)
+                val current = dao.membersOf(groupId).mapTo(HashSet()) { it.podcastId }
+                if (current == podcastIds) return@withWriteTransaction Outcome.Success(Unit)
 
-            val now = clock.now()
-            val removed = current - podcastIds
-            if (removed.isNotEmpty()) dao.deleteMembers(groupId, removed)
-            var lastKey = dao.lastMemberOrderKey(groupId)
-            for (podcastId in podcastIds - current) {
-                lastKey = orderKeys.after(lastKey)
-                dao.insertMember(memberRow(groupId, podcastId, lastKey, now))
+                val now = clock.now()
+                val removed = current - podcastIds
+                if (removed.isNotEmpty()) dao.deleteMembers(groupId, removed)
+                var lastKey = dao.lastMemberOrderKey(groupId)
+                for (podcastId in podcastIds - current) {
+                    lastKey = orderKeys.after(lastKey)
+                    dao.insertMember(memberRow(groupId, podcastId, lastKey, now))
+                }
+                dao.touchUpdatedAt(setOf(groupId), now)
+                changed = true
+                Outcome.Success(Unit)
             }
-            dao.touchUpdatedAt(setOf(groupId), now)
-            Outcome.Success(Unit)
-        }
+        if (changed) rescheduleAfterCommit("membership edit")
+        return outcome
+    }
 
     override suspend fun applyMembership(
         podcastIds: Set<Long>,
         add: Set<Long>,
         remove: Set<Long>,
-    ): Outcome<Unit, GroupError> =
-        db.withWriteTransaction {
-            val groups = add + remove
-            if (!podcastsExist(podcastIds) ||
-                dao.existingIds(groups.toList()).size != groups.size
-            ) {
-                return@withWriteTransaction Outcome.Failure(GroupError.NotFound)
-            }
-
-            val now = clock.now()
-            val changed = mutableSetOf<Long>()
-            for (groupId in remove) {
-                if (dao.deleteMembers(groupId, podcastIds) > 0) changed += groupId
-            }
-            for (groupId in add) {
-                var lastKey = dao.lastMemberOrderKey(groupId)
-                for (podcastId in podcastIds) {
-                    val orderKey = orderKeys.after(lastKey)
-                    if (dao.insertMember(memberRow(groupId, podcastId, orderKey, now)) == -1L) continue
-                    lastKey = orderKey
-                    changed += groupId
+    ): Outcome<Unit, GroupError> {
+        var changedAny = false
+        val outcome =
+            db.withWriteTransaction {
+                val groups = add + remove
+                if (!podcastsExist(podcastIds) ||
+                    dao.existingIds(groups.toList()).size != groups.size
+                ) {
+                    return@withWriteTransaction Outcome.Failure(GroupError.NotFound)
                 }
+
+                val now = clock.now()
+                val changed = mutableSetOf<Long>()
+                for (groupId in remove) {
+                    if (dao.deleteMembers(groupId, podcastIds) > 0) changed += groupId
+                }
+                for (groupId in add) {
+                    var lastKey = dao.lastMemberOrderKey(groupId)
+                    for (podcastId in podcastIds) {
+                        val orderKey = orderKeys.after(lastKey)
+                        if (dao.insertMember(memberRow(groupId, podcastId, orderKey, now)) == -1L) continue
+                        lastKey = orderKey
+                        changed += groupId
+                    }
+                }
+                if (changed.isNotEmpty()) dao.touchUpdatedAt(changed, now)
+                changedAny = changed.isNotEmpty()
+                Outcome.Success(Unit)
             }
-            if (changed.isNotEmpty()) dao.touchUpdatedAt(changed, now)
-            Outcome.Success(Unit)
+        if (changedAny) rescheduleAfterCommit("membership edit")
+        return outcome
+    }
+
+    /**
+     * 05: memberships and the group set decide each podcast's effective refresh interval (the
+     * least over its groups), so a committed change re-plans the periodic refresh. It runs
+     * NonCancellable like ScopeSettingsRepository's writes: a screen closing after the commit
+     * must not skip it. A failed reschedule never fails the committed write.
+     */
+    private suspend fun rescheduleAfterCommit(write: String) {
+        withContext(NonCancellable) {
+            suspendRunCatching { refreshController.reschedulePeriodic() }
+                .onFailure { Log.w(TAG, it) { "Refresh reschedule failed after $write" } }
         }
+    }
 
     override suspend fun delete(groupId: Long): Outcome<DeletedGroupToken, GroupError> {
         // Snapshot and delete inside the one write transaction (05 steps 1–2): the member and
@@ -317,15 +347,22 @@ internal class GroupRepositoryImpl(
                 )
         }
 
-        // 05 step 2: the least refresh interval over the remaining groups may rise; a failed
-        // reschedule never turns a committed delete into a failure. SnapshotScheduler.requestSoon
-        // joins it when M3 brings that port (see the 2026-10-16 note in 05).
-        suspendRunCatching { refreshController.reschedulePeriodic() }
-            .onFailure { Log.w(TAG, it) { "Refresh reschedule failed after group delete" } }
+        // 05 step 2: the least refresh interval over the remaining groups may rise.
+        // SnapshotScheduler.requestSoon joins it when M3 brings that port (see the 2026-10-16
+        // note in 05).
+        rescheduleAfterCommit("group delete")
         return Outcome.Success(token)
     }
 
-    override suspend fun undoDelete(token: DeletedGroupToken): Outcome<Long, GroupError> =
+    override suspend fun undoDelete(token: DeletedGroupToken): Outcome<Long, GroupError> {
+        val outcome = undoLocked(token)
+
+        // 05 step 2 in reverse: the restored group may lower the least refresh interval again.
+        if (outcome is Outcome.Success) rescheduleAfterCommit("group undo")
+        return outcome
+    }
+
+    private suspend fun undoLocked(token: DeletedGroupToken): Outcome<Long, GroupError> =
         undoMutex.withLock {
             val pending =
                 pendingDeletes[token.value]

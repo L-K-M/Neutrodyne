@@ -13,6 +13,11 @@ public object NdSceneMetadata {
     /** Metadata for bottom-sheet keys (`AddPodcastKey`, `SpeedKey`, …). */
     public fun bottomSheet(): Map<String, Any> = mapOf(KEY_OVERLAY to OVERLAY_SHEET)
 
+    /** All groups starts half height and can be dragged to full height (08). */
+    public fun halfHeightBottomSheet(): Map<String, Any> = bottomSheet() + (KEY_HALF_HEIGHT to true)
+
+    public const val KEY_HALF_HEIGHT: String = "nd.sheet.halfHeight"
+
     /** Metadata for dialog keys (`ExportKey`, `VerificationNoticeKey`, …). */
     public fun dialog(): Map<String, Any> = mapOf(KEY_OVERLAY to OVERLAY_DIALOG)
 

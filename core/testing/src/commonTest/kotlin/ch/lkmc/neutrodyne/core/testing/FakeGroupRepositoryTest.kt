@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.testing
 
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.DeletedGroupToken
+import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.domain.GroupRepository
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
@@ -15,10 +16,12 @@ import ch.lkmc.neutrodyne.core.model.GroupPalette
 import ch.lkmc.neutrodyne.core.model.MediaFilter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.time.Duration.Companion.seconds
 
 class FakeGroupRepositoryTest {
     @Test fun fakeUsesSharedUnicodeAndDuplicateRules() =
@@ -164,6 +167,34 @@ class FakeGroupRepositoryTest {
                 )
             repo.mosaics.value = mapOf(7L to listOf(member))
             assertEquals(listOf(member), repo.observeMosaics().first()[7L])
+        }
+
+    /** Like the real repository, the fake fires onDeleted outside its lock, so a sync may read it. */
+    @Test fun onDeletedMayReadTheRepository() =
+        runTest {
+            val clock = TestClock()
+            val seen = mutableListOf<Set<String>>()
+            lateinit var repo: FakeGroupRepository
+            val reading =
+                object : GroupChannelSync {
+                    override suspend fun sync() = Unit
+
+                    override suspend fun onUuidChanged(
+                        oldUuid: String,
+                        newUuid: String,
+                    ) = Unit
+
+                    override suspend fun onDeleted(uuid: String) {
+                        seen += repo.pendingUndoUuids()
+                    }
+                }
+            repo = FakeGroupRepository(clock, channelSync = reading)
+            val tech = assertIs<Outcome.Success<Long>>(repo.create(GroupDraft("Tech"))).value
+            assertIs<Outcome.Success<DeletedGroupToken>>(repo.delete(tech))
+            clock.nowMs += GroupRepository.UNDO_WINDOW_MS
+
+            assertEquals(emptySet(), withTimeout(5.seconds) { repo.pendingUndoUuids() })
+            assertEquals(listOf(emptySet<String>()), seen)
         }
 
     @Test fun paletteAndIconCataloguesFollowTheDocumentedValues() {
