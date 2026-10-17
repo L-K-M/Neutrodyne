@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.core.database.PodcastSettingsEntity
 import ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity
 import ch.lkmc.neutrodyne.core.database.ScopeOverrides
 import ch.lkmc.neutrodyne.core.domain.BackupError
+import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.model.AliasReason
 import ch.lkmc.neutrodyne.core.model.DeleteAfter
 import ch.lkmc.neutrodyne.core.model.DownloadState
@@ -168,6 +169,24 @@ class BackupWriterTest {
                     ),
                     reader.entryNames,
                 )
+            }
+        }
+
+    @Test
+    fun scheduledArchiveKeepsOpmlAndExcludesPasswords() =
+        runTest {
+            seedCredentialPodcast()
+
+            assertIs<Outcome.Success<*>>(
+                newWriter().write(BackupKind.SCHEDULED, target(), includeCredentials = true),
+            )
+
+            reader(target()).use { reader ->
+                assertTrue(BackupCodec.ENTRY_OPML in reader.entryNames)
+                assertEquals(BackupKind.SCHEDULED, reader.manifest().kind)
+                assertFalse(reader.manifest().includesCredentials)
+                assertTrue(reader.library().credentials.isEmpty())
+                assertFalse(CREDENTIAL_PASS in String(reader.bytes(BackupCodec.ENTRY_OPML)))
             }
         }
 
@@ -494,6 +513,42 @@ class BackupWriterTest {
             assertEquals(Outcome.Failure(BackupError.Io), outcome)
             fileSystem.read(target) { assertContentEquals(before, readByteArray()) }
             assertFalse(fileSystem.exists("$target.tmp".toPath()))
+        }
+
+    @Test
+    fun oversizedEpisodeLineCannotReplaceARestorableBackup() =
+        runTest {
+            val podcast = seedPodcast()
+            val target = target()
+            val writer = newWriter()
+            assertIs<Outcome.Success<*>>(writer.write(BackupKind.MANUAL, target, includeCredentials = false))
+            val before = fileSystem.read(target) { readByteArray() }
+            val episode =
+                seedEpisode(podcast) {
+                    copy(guid = "g".repeat(BackupCodec.EPISODE_LINE_MAX_BYTES.toInt() + 1))
+                }
+            db.episodeStateDao().upsert(episodeStateEntity(episode, playedAt = 10L))
+
+            assertEquals(
+                Outcome.Failure(BackupError.TooLarge),
+                writer.write(BackupKind.MANUAL, target, includeCredentials = false),
+            )
+            fileSystem.read(target) { assertContentEquals(before, readByteArray()) }
+            assertFalse(fileSystem.exists("$target.tmp".toPath()))
+        }
+
+    @Test
+    fun installationIdWriteFailureDoesNotPublishASnapshot() =
+        runTest {
+            seedPodcast()
+            settings.failNextSet = SettingsError.WriteFailed
+
+            assertEquals(
+                Outcome.Failure(BackupError.Storage),
+                newWriter().write(BackupKind.AUTO_SNAPSHOT, target(), includeCredentials = false),
+            )
+            assertFalse(fileSystem.exists(target()))
+            assertFalse(fileSystem.exists("${target()}.tmp".toPath()))
         }
 
     @Test

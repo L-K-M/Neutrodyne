@@ -99,7 +99,7 @@ import kotlin.uuid.Uuid
  * The R1.9 warning counts [preflight] reports are derived from the same rows and the same
  * credential rule the write path uses; the write itself re-derives the numbers from its own
  * in-transaction snapshot, so a warning can only drift when the library or a credential changes
- * between the dialog and the save — the same two-call window an OPML export has (05 Writing).
+ * between the dialog and the save (05 Writing).
  * Passwords travel only on opt-in and only in manual backups (D33, 05): snapshots never carry
  * credentials or `subscriptions.opml`. Secret I/O stays outside the Room transaction — 05 keeps
  * `SecretStore` calls (Android Keystore, the desktop secrets file) out of Room transactions.
@@ -125,8 +125,8 @@ internal class BackupWriter(
     /**
      * Writes a [kind] backup to [target]. [includeCredentials] embeds feed passwords in plain
      * text (D33, manual backups only); `credentialOrigin` is written either way so a restore can
-     * flag `needsCredentials`. Failures leave any previous [target] untouched and report
-     * [BackupError.Io].
+     * flag `needsCredentials`. Failures leave any previous [target] untouched; unrepresentable
+     * episode lines report [BackupError.TooLarge], failed settings writes [BackupError.Storage].
      */
     suspend fun write(
         kind: BackupKind,
@@ -161,6 +161,9 @@ internal class BackupWriter(
             } catch (c: CancellationException) {
                 deleteStaged(staged)
                 throw c
+            } catch (rejected: WriteRejected) {
+                deleteStaged(staged)
+                Outcome.Failure(rejected.error)
             } catch (t: Throwable) {
                 deleteStaged(staged)
                 Log.w(TAG, t) { "backup write to ${target.name} failed" }
@@ -177,6 +180,7 @@ internal class BackupWriter(
         // 05 Writing step 1: the portable snapshot is read once, outside the transaction.
         val settingValues = settingValues()
         val installationId = installationId()
+        val includeOpml = kind != BackupKind.AUTO_SNAPSHOT
 
         val writer = archives.create(staged)
         val read: Read
@@ -196,7 +200,7 @@ internal class BackupWriter(
                         members = libraryMemberships().groupBy { it.groupId },
                         queue = queueRefs(),
                         session = playSession(),
-                        opml = if (kind == BackupKind.MANUAL) opml.readSnapshot() else null,
+                        opml = if (includeOpml) opml.readSnapshot() else null,
                     )
                 }
 
@@ -227,7 +231,7 @@ internal class BackupWriter(
                     codec.encodeSettings(SettingsV1(settingValues)),
                     records = settingValues.size,
                 )
-            if (kind == BackupKind.MANUAL) {
+            if (includeOpml) {
                 // groupId is never set here, so `document` cannot return null.
                 val built = checkNotNull(opml.document(ExportRequest(), checkNotNull(read.opml)))
                 entries += writeOpmlEntry(writer, built)
@@ -291,7 +295,15 @@ internal class BackupWriter(
             while (true) {
                 val chunk = episodeChunk(after, BackupDao.EPISODE_CHUNK)
                 if (chunk.isEmpty()) break
-                for (row in chunk) codec.writeEpisodeLine(out, row.toLine())
+                for (row in chunk) {
+                    val line = Buffer()
+                    codec.writeEpisodeLine(line, row.toLine())
+                    // The reader's cap excludes LF. Never publish a line it would skip.
+                    if (line.size - 1 > BackupCodec.EPISODE_LINE_MAX_BYTES) {
+                        throw WriteRejected(BackupError.TooLarge)
+                    }
+                    out.writeAll(line)
+                }
                 lines += chunk.size
                 played += chunk.count { it.playedAt != null }
                 inProgress += chunk.count { it.playedAt == null && it.startedAt != null }
@@ -398,7 +410,10 @@ internal class BackupWriter(
         val stored = settings.get(BackupSettingKeys.INSTALLATION_ID)
         if (stored.isNotEmpty()) return stored
         val minted = Uuid.random().toString()
-        return if (settings.set(BackupSettingKeys.INSTALLATION_ID, minted) is Outcome.Success) minted else stored
+        if (settings.set(BackupSettingKeys.INSTALLATION_ID, minted) is Outcome.Failure) {
+            throw WriteRejected(BackupError.Storage)
+        }
+        return minted
     }
 
     /** `AppInfoV1`: Android's `apkAbi`, the desktop's `<os>-<arch>` (05's documented values). */
@@ -590,6 +605,11 @@ internal class BackupWriter(
         val played: Int,
         val inProgress: Int,
     )
+
+    /** Expected refusals keep their domain error while the shared failure path removes staging. */
+    private class WriteRejected(
+        val error: BackupError,
+    ) : Exception()
 
     /**
      * One entry's metering chain (05 Writing step 2): bytes written are counted on the way into
