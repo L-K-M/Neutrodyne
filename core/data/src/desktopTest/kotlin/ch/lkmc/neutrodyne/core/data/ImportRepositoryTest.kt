@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.data
 
 import androidx.paging.testing.asSnapshot
+import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.credentials.CredentialCommitCoordinatorImpl
 import ch.lkmc.neutrodyne.core.data.credentials.DesktopSecretStore
@@ -17,6 +18,7 @@ import ch.lkmc.neutrodyne.core.data.importing.ImportWarningJson
 import ch.lkmc.neutrodyne.core.data.importing.ImportWorkPolicy
 import ch.lkmc.neutrodyne.core.data.importing.PayloadStore
 import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
+import ch.lkmc.neutrodyne.core.domain.ImportError
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
 import ch.lkmc.neutrodyne.core.model.ChangeOrigin
@@ -41,14 +43,17 @@ import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipGuard
 import ch.lkmc.neutrodyne.feeds.jvm.opml.XmlPullOpmlReader
 import ch.lkmc.neutrodyne.youtube.api.YouTubeUrlClassifier
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import okio.FileSystem
 import java.io.File
+import java.util.concurrent.CountDownLatch
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -70,7 +75,9 @@ import kotlin.uuid.Uuid
 @OptIn(ExperimentalUuidApi::class)
 class ImportRepositoryTest {
     private val clock = TestClock()
-    private val db = TestDb.inMemory(clock = clock)
+    private val driver = CommitCancellingDriver()
+    private val db = TestDb.inMemory(driver = driver, clock = clock)
+    private val fileSystem = HookedDeleteFileSystem(FileSystem.SYSTEM)
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val refresh = FakeRefreshController()
     private val channels = FakeGroupChannelSync()
@@ -93,7 +100,7 @@ class ImportRepositoryTest {
         store =
             PayloadStore(
                 storagePaths = storagePathsFor(root),
-                fileSystem = FileSystem.SYSTEM,
+                fileSystem = fileSystem,
                 payloads = payloads,
                 httpClients = OkHttpNeutrodyneHttpClients(newNetworkClients(), testUserAgent()),
                 netErrors = testClassifier,
@@ -539,6 +546,135 @@ class ImportRepositoryTest {
             assertEquals(ImportState.DONE, db.importDao().sessionById(done)?.state)
             assertEquals(ImportState.PREVIEW, db.importDao().sessionById(requested)?.state)
             assertTrue(scheduler.cancelled.isEmpty())
+        }
+
+    // --- The restore-request race (05 §9's PREVIEW cancel) ----------------------------------------------
+
+    @Test
+    fun aPreviewDeleteRacingACommittedRestoreRequestNeverStrandsARow() =
+        runTest {
+            // A restore intent landing while the payload delete runs must not leave a live
+            // row pointing at a deleted file — either the request wins outright (row and
+            // payload both kept) or the cancel wins (both gone). The hook writes it
+            // synchronously on the same connection, so no nested transaction is awaited.
+            payloads.register(URI, file = opmlFixture("antennapod_flat_atom"))
+            val sid = assertCreate()
+            fileSystem.onDelete = {
+                driver.exec(
+                    "UPDATE import_session SET optionsJson = " +
+                        "'${ImportOptionsJson.encode(ImportOptions(restoreRequestedAt = clock.now()))}'" +
+                        " WHERE id = $sid",
+                )
+            }
+
+            repository.cancel(sid)
+
+            val session = db.importDao().sessionById(sid)
+            if (session != null) {
+                assertTrue(
+                    File(root, "cache").resolve(requireNotNull(session.payloadPath)).exists(),
+                    "a live row must keep its payload",
+                )
+            }
+        }
+
+    @Test
+    fun aCommittedRestoreRequestKeepsPreviewRowAndPayload() =
+        runTest {
+            payloads.register(URI, file = opmlFixture("antennapod_flat_atom"))
+            val sid = assertCreate()
+
+            // The requester's own write transaction is genuinely open and holding the writer
+            // lock while cancel runs — the committed request wins and keeps both.
+            val inRequest = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val requester =
+                async(Dispatchers.Default) {
+                    db.withWriteTransaction {
+                        checkNotNull(db.importDao().sessionById(sid))
+                        inRequest.complete(Unit)
+                        release.await()
+                        db
+                            .importDao()
+                            .setOptionsJson(
+                                sid,
+                                ImportOptionsJson.encode(
+                                    ImportOptions(restoreRequestedAt = clock.now()),
+                                ),
+                            )
+                    }
+                }
+            inRequest.await()
+            val cancelling = async(Dispatchers.Default) { repository.cancel(sid) }
+            release.complete(Unit)
+            requester.await()
+            cancelling.await()
+
+            val session = assertNotNull(db.importDao().sessionById(sid), "the requested row is not cancel's")
+            assertNotNull(
+                ImportOptionsJson.decode(requireNotNull(session.optionsJson)).restoreRequestedAt,
+                "the committed request stands",
+            )
+            assertTrue(
+                File(root, "cache").resolve(requireNotNull(session.payloadPath)).exists(),
+                "the payload stays with its row",
+            )
+        }
+
+    @Test
+    fun aCancelWinningTheRestoreRaceDeletesBothAndFailsTheRequester() =
+        runTest {
+            payloads.register(URI, file = opmlFixture("antennapod_flat_atom"))
+            val sid = assertCreate()
+
+            // The cancel holds its write transaction across the payload delete, so the
+            // delete hook is where its ownership claim is held: the requester only starts
+            // there, and its own transaction can then commit only after the cancel's — it
+            // must find the row gone. The hook waits on the requester STARTING, never on
+            // its transaction (which cannot run while the cancel holds the writer lock).
+            val claimHeld = CompletableDeferred<Unit>()
+            val requesterStarted = CountDownLatch(1)
+            fileSystem.onDelete = {
+                claimHeld.complete(Unit)
+                requesterStarted.await()
+            }
+            val requester =
+                async(Dispatchers.Default) {
+                    claimHeld.await()
+                    requesterStarted.countDown()
+                    db.requestImportRestore(sid, clock.now())
+                }
+
+            repository.cancel(sid)
+            val outcome = requester.await()
+
+            assertEquals(
+                ImportError.SessionGone,
+                assertIs<Outcome.Failure<ImportError>>(outcome).error,
+            )
+            assertNull(db.importDao().sessionById(sid))
+        }
+
+    @Test
+    fun aCorruptOptionsRowIsNeverOverwrittenOrDeleted() =
+        runTest {
+            val sid = db.seedImportSession(payloadPath = "import/c.bin")
+            File(root, "cache/import").mkdirs()
+            val payload = File(root, "cache/import/c.bin").apply { writeText("x") }
+            db.importDao().setOptionsJson(sid, "{corrupt")
+
+            // Neither cancel nor an options edit may touch a row they cannot read —
+            // deleting it or writing defaults could erase a hidden restore intent.
+            repository.cancel(sid)
+            repository.updateOptions(sid) { it.copy(importGroups = false) }
+
+            val session = assertNotNull(db.importDao().sessionById(sid), "the unreadable row is left alone")
+            assertEquals("{corrupt", session.optionsJson)
+            assertTrue(payload.exists(), "its payload stays with it")
+
+            // Observations still surface the row — with defaults, never a crash.
+            val view = assertNotNull(repository.observeSession(sid).first())
+            assertEquals(ImportOptions(), view.options)
         }
 
     // --- Helpers --------------------------------------------------------------------------------------

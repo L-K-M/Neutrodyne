@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.data.importing
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Dispatcher
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.database.ImportSessionEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
@@ -21,8 +22,8 @@ import kotlinx.coroutines.withContext
  *
  * Until `db-maintenance` ships (M11b) the interim hosts run this directly: Android's
  * `AutoSnapshotWorker` as its first step, the desktop `import-backup` lane once per 24 h.
- * Each expired session's file goes first; a deletion failure keeps the row so the next pass
- * retries the file instead of orphaning it.
+ * Each expired session's file goes before its row; a deletion failure keeps the row so the
+ * next pass retries the file instead of orphaning it.
  */
 @Inject
 internal class ImportSessionCleaner(
@@ -36,32 +37,20 @@ internal class ImportSessionCleaner(
         val cutoff = now - SESSION_TTL_MS
         var deleted = 0
         for (expired in db.importDao().expiredSessions(cutoff)) {
-            // Re-read before touching the file: a confirm or a restore request landing since
-            // the scan made this row live work — its payload is not garbage.
-            if (!isExpirable(expired.id, cutoff)) continue
-            val payloadPath = expired.payloadPath
-            if (payloadPath != null &&
-                !withContext(io) { payloads.deleteIfPresent(payloads.payloadFile(payloadPath)) }
-            ) {
-                continue
-            }
-            if (deleteIfStillExpired(expired.id, cutoff)) deleted++
+            if (sweepIfStillExpired(expired.id, cutoff)) deleted++
         }
         return deleted
     }
 
-    /** The scan's expiry rule re-evaluated on the current row (see [isExpired]). */
-    private suspend fun isExpirable(
-        sessionId: Long,
-        cutoff: Long,
-    ): Boolean = db.importDao().sessionById(sessionId)?.let { isExpired(it, cutoff) } == true
-
     /**
-     * The row delete re-checks the expiry rule inside the write transaction: a row that moved
-     * on since the scan (a fix-up reopened `DONE`, a restore was requested on an abandoned
-     * `PREVIEW`) is not deleted under it.
+     * The ownership claim, the payload delete and the row delete as one write transaction —
+     * the scan is only a snapshot, so the expiry rule is re-evaluated on the current row
+     * under the writer lock before anything is touched. A restore request (or a fix-up
+     * reopen) committed first is seen here and keeps row AND payload; one arriving after
+     * the commit finds no row. A failed file delete keeps the row so the next pass retries
+     * the file first.
      */
-    private suspend fun deleteIfStillExpired(
+    private suspend fun sweepIfStillExpired(
         sessionId: Long,
         cutoff: Long,
     ): Boolean =
@@ -69,12 +58,19 @@ internal class ImportSessionCleaner(
             val dao = db.importDao()
             val session = dao.sessionById(sessionId) ?: return@withWriteTransaction false
             if (!isExpired(session, cutoff)) return@withWriteTransaction false
+            val payloadPath = session.payloadPath
+            if (payloadPath != null &&
+                !withContext(io) { payloads.deleteIfPresent(payloads.payloadFile(payloadPath)) }
+            ) {
+                return@withWriteTransaction false
+            }
             dao.deleteSession(sessionId) > 0
         }
 
     /**
      * `DONE`/`CANCELLED`/abandoned `PREVIEW` past the window. A `PREVIEW` session whose
-     * restore was requested is its host's work; `COMMITTED`/`FETCHING` never arrive here.
+     * restore was requested is its host's work; `COMMITTED`/`FETCHING` never arrive here —
+     * and an unreadable `optionsJson` could hide a request, so corrupt rows stay too.
      */
     private fun isExpired(
         session: ImportSessionEntity,
@@ -82,13 +78,19 @@ internal class ImportSessionCleaner(
     ): Boolean {
         if (session.state !in EXPIRABLE_STATES) return false
         if ((session.finishedAt ?: session.createdAt) >= cutoff) return false
-        return session.state != ImportState.PREVIEW ||
-            session.optionsJson
-                ?.let(ImportOptionsJson::decode)
-                ?.restoreRequestedAt == null
+        if (session.state != ImportState.PREVIEW) return true
+        val encoded = session.optionsJson ?: return true
+        val options = ImportOptionsJson.decodeOrNull(encoded)
+        if (options == null) {
+            Log.w(TAG) { "import session ${session.id} skipped: unreadable options" }
+            return false
+        }
+        return options.restoreRequestedAt == null
     }
 
     private companion object {
+        const val TAG = "ImportSessionCleaner"
+
         /** 05 §9: `COALESCE(finishedAt, createdAt)` older than this sweeps the session. */
         const val SESSION_TTL_MS = 7L * 86_400_000
 

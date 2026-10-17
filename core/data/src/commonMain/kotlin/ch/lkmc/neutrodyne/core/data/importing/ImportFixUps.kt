@@ -166,41 +166,51 @@ internal class ImportFixUps(
 
     /**
      * The requeue + marker + reopen + schedule quartet of §8's Retry and Enter password —
-     * one write transaction so the runner's `derive`/`finish` pair can never split them
-     * (d92eeb42's ordering), then the best-effort host enqueue outside it.
+     * one non-cancellable stretch so the runner's `derive`/`finish` pair can never split
+     * them (d92eeb42's ordering) and a committed transaction can never lose the
+     * `APPEND_OR_REPLACE` enqueue owed to it: cancellation surfacing at Room's COMMIT used
+     * to drop the schedule call that ran after the transaction returned.
      */
     private suspend fun requeueAndSchedule(
         sessionId: Long,
         ordinals: Set<Int>,
         statuses: Set<ImportItemStatus>,
     ) {
-        val scheduled =
-            db.withWriteTransaction {
-                val dao = db.importDao()
-                val session = dao.sessionById(sessionId) ?: return@withWriteTransaction false
-                if (session.state !in FIXUP_STATES) return@withWriteTransaction false
-
-                val requeue =
-                    dao
-                        .itemsByOrdinals(sessionId, ordinals)
-                        .filter { it.status in statuses && it.podcastId != null && it.sessionOwned() }
-                        .map { it.ordinal }
-                if (requeue.isEmpty()) return@withWriteTransaction false
-
-                dao.requeueItems(sessionId, requeue)
-                val options = session.optionsJson?.let(ImportOptionsJson::decode) ?: ImportOptions()
-                dao.setOptionsJson(
-                    sessionId,
-                    ImportOptionsJson.encode(options.copy(attemptMarkerAt = clock.now())),
-                )
-                if (session.state == ImportState.DONE) dao.setState(sessionId, ImportState.FETCHING)
-                true
-            }
-        if (!scheduled) return
-
-        // §8: the fix-up enqueue must run after a finishing worker, never be dropped — and it
-        // must land even when the caller is gone (same NonCancellable as the commit's effects).
         withContext(NonCancellable) {
+            val scheduled =
+                db.withWriteTransaction {
+                    val dao = db.importDao()
+                    val session = dao.sessionById(sessionId) ?: return@withWriteTransaction false
+                    if (session.state !in FIXUP_STATES) return@withWriteTransaction false
+
+                    // An unreadable options row is never rewritten — defaults could erase a
+                    // restore intent hidden inside it, so the whole fix-up stays unapplied.
+                    val options = session.optionsJson?.let(ImportOptionsJson::decodeOrNull)
+                    if (session.optionsJson != null && options == null) {
+                        Log.w(TAG) { "import fix-up skipped: unreadable options for session $sessionId" }
+                        return@withWriteTransaction false
+                    }
+
+                    val requeue =
+                        dao
+                            .itemsByOrdinals(sessionId, ordinals)
+                            .filter { it.status in statuses && it.podcastId != null && it.sessionOwned() }
+                            .map { it.ordinal }
+                    if (requeue.isEmpty()) return@withWriteTransaction false
+
+                    dao.requeueItems(sessionId, requeue)
+                    dao.setOptionsJson(
+                        sessionId,
+                        ImportOptionsJson.encode(
+                            (options ?: ImportOptions()).copy(attemptMarkerAt = clock.now()),
+                        ),
+                    )
+                    if (session.state == ImportState.DONE) dao.setState(sessionId, ImportState.FETCHING)
+                    true
+                }
+            if (!scheduled) return@withContext
+
+            // §8: the fix-up enqueue must run after a finishing worker, never be dropped.
             suspendRunCatching { workScheduler.schedule(sessionId, ImportWorkPolicy.APPEND_OR_REPLACE) }
                 .onFailure { Log.w(TAG, it) { "import fix-up scheduling failed for session $sessionId" } }
         }

@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.data
 
+import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.importing.ImportOptionsJson
 import ch.lkmc.neutrodyne.core.data.importing.ImportWorkPolicy
@@ -19,6 +20,8 @@ import ch.lkmc.neutrodyne.core.model.ImportState
 import kotlinx.serialization.json.Json
 import okio.Buffer
 import okio.FileSystem
+import okio.ForwardingFileSystem
+import okio.Path
 import okio.Path.Companion.toPath
 import okio.Source
 import okio.Timeout
@@ -170,6 +173,55 @@ internal suspend fun NeutrodyneDatabase.seedImportSession(
     importDao().insertItems(items.map { it.copy(sessionId = sessionId) })
     return sessionId
 }
+
+/**
+ * A `FileSystem` whose [onDelete] hook runs inside each `delete` — the point where a
+ * racing restore request lands relative to a sweep's or a preview cancel's ownership
+ * claim. The hook is synchronous: it must never wait on a second Room transaction while
+ * the caller holds the writer lock — the second transaction cannot run then, so waiting
+ * would deadlock the test instead of reproducing the race.
+ */
+internal class HookedDeleteFileSystem(
+    delegate: FileSystem,
+) : ForwardingFileSystem(delegate) {
+    @Volatile
+    var onDelete: (() -> Unit)? = null
+
+    override fun delete(
+        path: Path,
+        mustExist: Boolean,
+    ) {
+        onDelete?.invoke()
+        super.delete(path, mustExist)
+    }
+}
+
+/**
+ * The restore host's claim of a preview session (05 Full backup and restore →
+ * `ImportOptions.restoreRequestedAt`): inside one write transaction the row must still
+ * exist as `PREVIEW`, then the request is stamped — the shape a real
+ * `BackupRepository.restore` has against the cleaner's and cancel's ownership rules.
+ * [ImportError.SessionGone] when the row is gone or already past `PREVIEW`.
+ */
+internal suspend fun NeutrodyneDatabase.requestImportRestore(
+    sessionId: Long,
+    requestedAt: Long,
+): Outcome<Unit, ImportError> =
+    withWriteTransaction {
+        val dao = importDao()
+        val session =
+            dao.sessionById(sessionId)
+                ?: return@withWriteTransaction Outcome.Failure(ImportError.SessionGone)
+        if (session.state != ImportState.PREVIEW) {
+            return@withWriteTransaction Outcome.Failure(ImportError.SessionGone)
+        }
+        val options = session.optionsJson?.let(ImportOptionsJson::decode) ?: ImportOptions()
+        dao.setOptionsJson(
+            sessionId,
+            ImportOptionsJson.encode(options.copy(restoreRequestedAt = requestedAt)),
+        )
+        Outcome.Success(Unit)
+    }
 
 /** Records the schedule policy and cancellation of each host request. */
 internal class FakeImportWorkScheduler : ImportWorkScheduler {
