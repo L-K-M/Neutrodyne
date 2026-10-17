@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.youtube.api
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -58,6 +59,11 @@ class YouTubeIdsTest {
     fun channelFromFeedLevel() {
         assertEquals(CHANNEL, YouTubeIds.channelFromFeedLevel(SUFFIX))
         assertEquals(CHANNEL, YouTubeIds.channelFromFeedLevel(CHANNEL))
+
+        // Corrupt feed data fails fast instead of minting a bogus channel ID.
+        assertFailsWith<IllegalStateException> { YouTubeIds.channelFromFeedLevel("a".repeat(22)) }
+        assertFailsWith<IllegalStateException> { YouTubeIds.channelFromFeedLevel("UC" + "a".repeat(22)) }
+        assertFailsWith<IllegalStateException> { YouTubeIds.channelFromFeedLevel("bad") }
     }
 
     private companion object {

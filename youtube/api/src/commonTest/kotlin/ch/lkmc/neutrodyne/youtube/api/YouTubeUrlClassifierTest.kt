@@ -37,6 +37,8 @@ class YouTubeUrlClassifierTest {
         assertClassifies("https://www.youtube-nocookie.com/embed/$VIDEO", YtRef.Video(VIDEO))
         assertClassifies("http://youtu.be/$VIDEO", YtRef.Video(VIDEO))
         assertClassifies("HTTPS://WWW.YOUTUBE.COM/@x", YtRef.Handle("@x"))
+        // The /@handle row of 04's table precedes youtu.be/{id} under first-match-wins.
+        assertClassifies("https://youtu.be/@mrbeast", YtRef.Handle("@mrbeast"))
     }
 
     @Test
@@ -61,6 +63,7 @@ class YouTubeUrlClassifierTest {
 
         assertClassifies("https://www.youtube.com/feeds/videos.xml?channel_id=bad", null)
         assertClassifies("https://www.youtube.com/feeds/videos.xml", null)
+        assertClassifies("https://www.youtube.com/feeds/videos.xml?user=${"a".repeat(101)}", null)
     }
 
     @Test
@@ -103,6 +106,11 @@ class YouTubeUrlClassifierTest {
         assertClassifies("https://www.youtube.com/c/", null)
         assertClassifies("https://www.youtube.com/results?search_query=x", null)
         assertClassifies("https://www.youtube.com/hashtag/foo", null)
+
+        // Legacy names share the 100-character cap of handles and custom names.
+        assertClassifies("https://www.youtube.com/c/${"a".repeat(100)}", YtRef.LegacyPath("c/${"a".repeat(100)}"))
+        assertClassifies("https://www.youtube.com/c/${"a".repeat(101)}", null)
+        assertClassifies("https://www.youtube.com/user/${"a".repeat(101)}", null)
     }
 
     @Test
@@ -121,6 +129,9 @@ class YouTubeUrlClassifierTest {
 
         assertClassifies("https://www.youtube.com/watch?v=short", null)
         assertClassifies("https://www.youtube.com/watch", null)
+
+        // 04's table maps /watch only through a valid v=; a lone list= is not a subscribable form.
+        assertClassifies("https://www.youtube.com/watch?list=PL6566A39B68523E18", null)
     }
 
     @Test
@@ -143,6 +154,11 @@ class YouTubeUrlClassifierTest {
         assertClassifies("feed:https://www.youtube.com/@x", YtRef.Handle("@x"))
         assertClassifies("view-source:https://www.youtube.com/channel/$CHANNEL", YtRef.Channel(CHANNEL))
         assertClassifies("feed:youtube.com/@x", YtRef.Handle("@x"))
+        assertClassifies("youtu.be/@mrbeast", YtRef.Handle("@mrbeast"))
+
+        // A "://" inside a query value must not be mistaken for a scheme marker.
+        assertClassifies("youtube.com/watch?continue=https://accounts.google.com&v=$VIDEO", YtRef.Video(VIDEO))
+        assertClassifies("youtube.com:8080/watch?v=$VIDEO", YtRef.Video(VIDEO))
     }
 
     @Test
@@ -161,6 +177,17 @@ class YouTubeUrlClassifierTest {
 
         // The host is never percent-decoded.
         assertClassifies("https://youtube%2Ecom/@x", null)
+
+        // WHATWG treats '\' as '/' in http(s) URLs, so it ends the authority: the host is evil.com.
+        assertClassifies("https://evil.com\\@youtube.com/watch?v=$VIDEO", null)
+
+        // Explicit ports are stripped before host matching; a spoofed host stays rejected.
+        assertClassifies("https://www.youtube.com:443/@x", YtRef.Handle("@x"))
+        assertClassifies("https://youtube.com.evil.example:443/@x", null)
+
+        // A trailing dot is a different host string, and a non-http(s) scheme is never prepended over.
+        assertClassifies("https://youtube.com./@x", null)
+        assertClassifies("foo://youtube.com/@x", null)
     }
 
     @Test
@@ -193,6 +220,16 @@ class YouTubeUrlClassifierTest {
         assertHost("@handle", false)
         assertHost(CHANNEL, false)
         assertHost("", false)
+
+        // isYouTubeHost shares classify's host parsing: last-'@' userinfo, no percent-decoding, exact hosts.
+        assertHost("https://youtube.com@evil.example/@x", false)
+        assertHost("https://evil.example@youtube.com/@x", true)
+        assertHost("https://youtube%2Ecom/@x", false)
+        assertHost("https://evil.com\\@youtube.com/@x", false)
+        assertHost("https://www.youtube.com:443/@x", true)
+        assertHost("https://youtube.com./@x", false)
+        assertHost("youtube.com/redirect?q=https://x.com", true)
+        assertHost("foo://youtube.com/@x", false)
     }
 
     /**
