@@ -1,0 +1,17 @@
+{
+  "entries": [
+    {
+      "htmlUrl": "https://cafe.example.com",
+      "ordinal": 0,
+      "title": "Café & bar",
+      "url": "https://cafe.example.com/rss"
+    },
+    {
+      "ordinal": 1,
+      "title": "Plain",
+      "url": "https://plain.example.com/rss"
+    }
+  ],
+  "format": "OPML",
+  "groups": []
+}

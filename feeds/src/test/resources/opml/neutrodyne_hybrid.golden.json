@@ -1,0 +1,69 @@
+{
+  "entries": [
+    {
+      "categories": [
+        "tech",
+        "news"
+      ],
+      "folderId": 0,
+      "htmlUrl": "https://atp.fm",
+      "ndSource": "rss",
+      "ordinal": 0,
+      "text": "ATP",
+      "title": "Accidental Tech Podcast",
+      "type": "rss",
+      "url": "https://atp.fm/rss"
+    },
+    {
+      "categories": [
+        "tech"
+      ],
+      "folderId": 0,
+      "htmlUrl": "https://www.youtube.com/channel/UCBJycsmduvYEL83R_U4JriQ",
+      "ndSource": "youtube",
+      "ndYtVariants": "UULF,UULV",
+      "ordinal": 1,
+      "text": "Channel",
+      "title": "Channel",
+      "type": "rss",
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCBJycsmduvYEL83R_U4JriQ"
+    },
+    {
+      "categories": [
+        "news"
+      ],
+      "folderId": 1,
+      "ndSource": "rss",
+      "ordinal": 2,
+      "text": "The Daily",
+      "title": "The Daily",
+      "type": "rss",
+      "url": "https://feeds.example.com/daily"
+    },
+    {
+      "ndSource": "rss",
+      "ordinal": 3,
+      "text": "Some Show",
+      "title": "Some Show",
+      "type": "rss",
+      "url": "https://example.com/rss"
+    }
+  ],
+  "folders": [
+    {
+      "colorArgb": -22016,
+      "iconKey": "code",
+      "id": 0,
+      "name": "tech"
+    },
+    {
+      "colorArgb": -16759604,
+      "iconKey": "news",
+      "id": 1,
+      "name": "news"
+    }
+  ],
+  "headTitle": "Neutrodyne",
+  "mode": "STRICT",
+  "neutrodyne": true
+}

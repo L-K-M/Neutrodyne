@@ -1,0 +1,31 @@
+{
+  "entries": [
+    {
+      "customTitle": "ATP",
+      "groupNames": [
+        "tech"
+      ],
+      "htmlUrl": "https://atp.fm",
+      "ordinal": 0,
+      "title": "Accidental Tech Podcast",
+      "url": "https://atp.fm/rss"
+    },
+    {
+      "groupNames": [
+        "tech"
+      ],
+      "ordinal": 1,
+      "title": "Channel",
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCBJycsmduvYEL83R_U4JriQ",
+      "youtubeVariantsHint": 1
+    }
+  ],
+  "format": "OPML",
+  "groups": [
+    {
+      "colorArgb": -22016,
+      "iconKey": "code",
+      "name": "tech"
+    }
+  ]
+}
