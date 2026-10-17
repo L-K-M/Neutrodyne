@@ -95,6 +95,7 @@ Exceptions to [D15](../PLAN.md#3-key-decisions) "episode is written only by inge
 | `DbMaintenance` | class, `:core:data` `commonMain` | The maintenance steps, run by `DbMaintenanceWorker` (Android) and `DesktopMaintenanceLane` (desktop) | 11 |
 | `FetchStateBatcher` | class, `:core:data` | Batches fetch-state-only `podcast` writes ([Refresh selection and fetch-state writes](#refresh-selection-and-fetch-state-writes)) | 03 (M1a, 2026-10-06: implemented in `:core:database` instead — the M1a package builds before `:core:data` exists and may not edit it; it moves to `:core:data` when that module lands; 2026-10-07: buffer, drain and write are serialized on a `Mutex` so `flush()` is a barrier for every earlier write, and the 5-s deadline is a job scheduled from the first buffered outcome on a caller-supplied `CoroutineScope` — the refresh run's scope in production, `backgroundScope` in tests — measured on `Clock.elapsedRealtime()` so a wall-clock setback never strands a batch) |
 | `EpisodeRowProjection`, `ContextItem`, `MediaLookupRow`, `ExistingEpisodeKey`, `EpisodeFeedUpdate`, `PodcastFeedMetadata`, `PodcastFetchState`, `DueFeed` (requested by 03), `YouTubeFeedMetadata`, `YouTubeFacts`, `ArtworkSyncResult`, `QueryPlanRow` | DAO projections, `:core:database` | Query results and partial-entity updates | 03, 04, 06, 07, 08 |
+| `LibraryShape`, `BackupPodcastRow`, `BackupAliasRow`, `BackupAmbiguousGuidRow`, `BackupMemberRow`, `BackupQueueRow`, `BackupSessionRow`, `BackupEpisodeRow`, `backupReadTransaction` | DAO projections and helper, `:core:database` | The export reads' projected columns and the one-read-transaction entry point ([Backup export](#backup-export)); `LibraryShape(podcasts, memberships)` is the `observeLibraryShape` row (M3, 2026-10-17) | 05 |
 | `PodcastDao`, `EpisodeDao`, `IngestDao`, `FeedDao`, `GroupDao`, `ScopeSettingsDao`, `EpisodeStateDao`, `PositionDao`, `QueueDao`, `PlaySessionDao`, `DownloadDao`, `ArtworkDao`, `ChapterDao`, `CredentialDao`, `ImportDao`, `BackupDao`, `MaintenanceDao`; `SyncStateDao` (with `withApplying`), `SyncOutboxDao` (with `captureLiteral`, `captureAll`, `captureAt`, requested by 10), `SyncClockDao`, `SyncParkedDao`, `SyncHeldDao` | DAOs, `:core:database` | One DAO per area | impl modules, `:sync:impl` |
 | `EpisodeStateDao.applyRemote`, `PositionDao.applyRemote` | DAO functions, `:core:database` | Column-scoped writes of synced episode state and positions ([User-state writes](#user-state-writes)) | 10 |
 | `DatabaseOpener.strictMigrations` | constructor parameter bound by the app graphs | Rethrow migration failures in the Android `debug` build and desktop development runs ([Error handling and recovery](#error-handling-and-recovery)) | 01, 11 |
@@ -1876,6 +1877,9 @@ SELECT id, 0 AS rank FROM podcast WHERE feedKey = :key
 UNION ALL SELECT id, 1 FROM podcast WHERE feedKey IN (:keys)
 UNION ALL SELECT podcastId, 2 FROM podcast_url_alias WHERE url IN (:keys)
 ORDER BY rank, id LIMIT 1;
+-- Implementation note (2026-10-17, M3): Room's query parser treats `rank` as a
+-- window-function keyword, so `BackupDao.matchPodcastByKeys` names the column `r`
+-- and wraps the union in a single-column outer select. Same ordering, same result.
 -- 2. real podcast:guid
 SELECT id FROM podcast WHERE podcastGuid = :guid AND podcastGuidDerived = 0 ORDER BY id LIMIT 1;
 -- 3. otherwise insert as in Import commit (status PENDING_FIRST_FETCH, initialFetch = 1) plus the backup's artworkUrl,
@@ -1999,7 +2003,8 @@ sequenceDiagram
 | `DownloadDao.observeEntries`, `observePlayedCompletedIds` | `Flow` | `download`, `episode`, `podcast`, `episode_state` (+ `artwork`) | Downloads screen; `download` changes on transitions only |
 | `PositionDao.observeFor`, `DownloadDao.observeLiveFor`, `EpisodeStateDao.observeFor` | `Flow`, `IN (:ids)` | one table each | High churn by design; ≤ 200 IDs |
 | `PlaySessionDao.observeCurrentEpisodeId`, `ArtworkDao.observe` | `Flow` | one table each | |
-| `ImportDao.observeProgress`, `ImportDao.pagedItems` | `Flow`, `PagingSource` | `import_item` | Medium churn only while an import runs |
+| `ImportDao.observeProgress`, `ImportDao.pagedItems`, `ImportDao.observeItemTallies` | `Flow`, `PagingSource` | `import_item` | Medium churn only while an import runs |
+| `ImportDao.observeSession`, `ImportDao.observeOpenSessions` | `Flow` | `import_session` | One row per session; written only on transitions and option edits |
 | 10's `SyncScheduler` outbox flow (`invalidationTracker.createFlow("sync_outbox")`, debounced 1–2 s) | `Flow` (tables only, no query) | `sync_outbox` | High churn while linked (every capture); used only to schedule pushes, then `hasPushWorthy()` one-shot |
 | `SyncHeldDao.observeAll` | `Flow` | `sync_held` | Low churn; the held-changes prompt |
 

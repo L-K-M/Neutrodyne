@@ -125,6 +125,17 @@ class ConverterTest {
         }
     }
 
+    /** Every enum name `ImportDao` spells inside SQL must sit in the registry it guards. */
+    @Test
+    fun importDaoSqlLiteralsAreRegistered() {
+        val registered = SqlEnumLiterals.ALL.mapTo(mutableSetOf()) { it.enumName to it.name }
+        val spelledInSql =
+            ImportState.entries.map { "ImportState" to it.name } +
+                listOf("ImportItemStatus" to "QUEUED", "ImportItemKind" to "YOUTUBE")
+
+        assertEquals(emptyList(), spelledInSql.filter { it !in registered })
+    }
+
     /** The committed constant sets — removing or renaming one fails the append-only rule. */
     @Test
     fun persistedEnumsKeepTheCommittedNames() {

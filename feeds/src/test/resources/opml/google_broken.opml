@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="1.0">
+  <head>
+    <title>Google Reader subscriptions</title>
+  </head>
+  <body>
+    <outline text="Tom &amp; Jerry" type="rss" xmlUrl="https://a.example.com/rss" htmlUrl="https://a.example.com"/>
+    <outline text="Tom & Jerry" type="rss" xmlUrl="https://b.example.com/rss"/>
+  </body>
+</opml>

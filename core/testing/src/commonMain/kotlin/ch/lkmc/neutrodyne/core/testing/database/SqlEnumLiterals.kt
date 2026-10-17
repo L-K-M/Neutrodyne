@@ -9,7 +9,9 @@ import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.ImportFormat
+import ch.lkmc.neutrodyne.core.model.ImportItemKind
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
+import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.MemberSource
 import ch.lkmc.neutrodyne.core.model.OwnerType
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
@@ -43,7 +45,9 @@ object SqlEnumLiterals {
             literals<AliasReason>("SUBSCRIBE_INPUT", "IMPORT", "RESTORE", "SYNC")
             literals<MemberSource>("MANUAL", "RULE")
             literals<ImportFormat>("OPML", "NEUTRODYNE_BACKUP")
-            literals<ImportItemStatus>("PREVIEW", "SUBSCRIBED", "FETCH_FAILED")
+            literals<ImportState>("PREVIEW", "COMMITTED", "FETCHING", "DONE", "CANCELLED")
+            literals<ImportItemStatus>("PREVIEW", "QUEUED", "SUBSCRIBED", "FETCH_FAILED")
+            literals<ImportItemKind>("YOUTUBE")
             literals<FeedErrorKind>("IDENTITY_CONFLICT", "UNKNOWN")
         }
 
