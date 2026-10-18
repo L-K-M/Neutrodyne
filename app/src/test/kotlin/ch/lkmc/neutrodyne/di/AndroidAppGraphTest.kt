@@ -8,10 +8,12 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenInitializer
 import ch.lkmc.neutrodyne.core.model.ExportRequest
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
+import ch.lkmc.neutrodyne.core.navigation.BackupKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
+import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
@@ -190,6 +192,14 @@ class AndroidAppGraphTest {
                 graph.databaseOpener.requireDatabase().close()
             }
         }
+
+    @Test
+    fun everyImportNotificationTargetHasAnEntry() {
+        val provider = entryProvider<NavKey> { graph.entryInstallers.forEach { install -> install() } }
+        for (key in listOf(ImportKey("1"), BackupKey)) {
+            assertThat(provider(key).contentKey).isNotNull()
+        }
+    }
 
     private companion object {
         val STARTUP_BANDS =
