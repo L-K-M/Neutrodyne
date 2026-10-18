@@ -23,6 +23,7 @@ import ch.lkmc.neutrodyne.core.domain.GroupRepository
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.domain.OrderedRow
 import ch.lkmc.neutrodyne.core.domain.RefreshController
+import ch.lkmc.neutrodyne.core.domain.SnapshotScheduler
 import ch.lkmc.neutrodyne.core.domain.planOrderKeyWrites
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.ContextType
@@ -58,6 +59,7 @@ internal class GroupRepositoryImpl(
     private val orderKeys: OrderKeys,
     private val channelSync: GroupChannelSync,
     private val refreshController: RefreshController,
+    private val snapshots: SnapshotScheduler,
     @ApplicationScope private val appScope: CoroutineScope,
 ) : GroupRepository {
     private val dao get() = db.groupDao()
@@ -159,7 +161,10 @@ internal class GroupRepositoryImpl(
                 }
             }
         if (outcome is Outcome.Success && memberIds.isNotEmpty()) rescheduleAfterCommit("group create")
-        if (outcome is Outcome.Success) syncChannels()
+        if (outcome is Outcome.Success) {
+            syncChannels()
+            requestSnapshotAfterCommit("group create")
+        }
         return outcome
     }
 
@@ -217,22 +222,32 @@ internal class GroupRepositoryImpl(
                 Outcome.Success(Unit)
             }.also { outcome ->
                 if (outcome is Outcome.Success && edit is GroupEdit.Rename) syncChannels()
+                if (outcome is Outcome.Success) requestSnapshotAfterCommit("group update")
             }
 
     override suspend fun reorder(groupIdsInOrder: List<Long>): Outcome<Unit, GroupError> =
-        db.withWriteTransaction {
-            val current = dao.groupsInOrder()
-            val writes =
-                planOrderKeyWrites(
-                    current.map { OrderedRow(it.id, it.orderKey) },
-                    groupIdsInOrder,
-                    orderKeys,
-                )
-                    ?: return@withWriteTransaction Outcome.Failure(GroupError.NotFound)
-            val now = clock.now()
-            for ((groupId, orderKey) in writes) dao.setGroupOrderKey(groupId, orderKey, now)
-            Outcome.Success(Unit)
-        }
+        committing { applyReorder(groupIdsInOrder) }
+
+    private suspend fun applyReorder(groupIdsInOrder: List<Long>): Outcome<Unit, GroupError> {
+        var changed = false
+        val outcome =
+            db.withWriteTransaction {
+                val current = dao.groupsInOrder()
+                val writes =
+                    planOrderKeyWrites(
+                        current.map { OrderedRow(it.id, it.orderKey) },
+                        groupIdsInOrder,
+                        orderKeys,
+                    )
+                        ?: return@withWriteTransaction Outcome.Failure(GroupError.NotFound)
+                val now = clock.now()
+                for ((groupId, orderKey) in writes) dao.setGroupOrderKey(groupId, orderKey, now)
+                changed = writes.isNotEmpty()
+                Outcome.Success(Unit)
+            }
+        if (changed) requestSnapshotAfterCommit("group reorder")
+        return outcome
+    }
 
     override suspend fun setMembers(
         groupId: Long,
@@ -265,7 +280,10 @@ internal class GroupRepositoryImpl(
                 changed = true
                 Outcome.Success(Unit)
             }
-        if (changed) rescheduleAfterCommit("membership edit")
+        if (changed) {
+            rescheduleAfterCommit("membership edit")
+            requestSnapshotAfterCommit("membership edit")
+        }
         return outcome
     }
 
@@ -308,15 +326,19 @@ internal class GroupRepositoryImpl(
                 changedAny = changed.isNotEmpty()
                 Outcome.Success(Unit)
             }
-        if (changedAny) rescheduleAfterCommit("membership edit")
+        if (changedAny) {
+            rescheduleAfterCommit("membership edit")
+            requestSnapshotAfterCommit("membership edit")
+        }
         return outcome
     }
 
     /**
-     * A write and the effects it owes (undo token, channel sweep, reschedule) finish as one unit.
-     * Room re-checks cancellation as a transaction returns, so a screen closing right after COMMIT
-     * would otherwise drop the effects of a write that landed. [rescheduleAfterCommit] and
-     * [syncChannels] rely on it: call them only inside this block.
+     * A write and the effects it owes (undo token, channel sweep, reschedule, snapshot request)
+     * finish as one unit. Room re-checks cancellation as a transaction returns, so a screen
+     * closing right after COMMIT would otherwise drop the effects of a write that landed.
+     * [rescheduleAfterCommit], [requestSnapshotAfterCommit] and [syncChannels] rely on it: call
+     * them only inside this block.
      */
     private suspend fun <T> committing(write: suspend () -> T): T = withContext(NonCancellable) { write() }
 
@@ -328,6 +350,15 @@ internal class GroupRepositoryImpl(
     private suspend fun rescheduleAfterCommit(write: String) {
         suspendRunCatching { refreshController.reschedulePeriodic() }
             .onFailure { Log.w(TAG, it) { "Refresh reschedule failed after $write" } }
+    }
+
+    /**
+     * 05 Snapshot production: every committed group or membership write pokes the debounced
+     * `backup-auto-snapshot-now`. A failed enqueue is logged; it never fails the committed write.
+     */
+    private suspend fun requestSnapshotAfterCommit(write: String) {
+        suspendRunCatching { snapshots.requestSoon() }
+            .onFailure { Log.w(TAG, it) { "Snapshot request failed after $write" } }
     }
 
     override suspend fun delete(groupId: Long): Outcome<DeletedGroupToken, GroupError> =
@@ -385,9 +416,9 @@ internal class GroupRepositoryImpl(
 
         syncChannels()
         // 05 step 2: the least refresh interval over the remaining groups may rise; a failed
-        // reschedule never turns a committed delete into a failure. SnapshotScheduler.requestSoon
-        // joins it when M3 brings that port (see the 2026-10-16 note in 05).
+        // reschedule never turns a committed delete into a failure.
         rescheduleAfterCommit("group delete")
+        requestSnapshotAfterCommit("group delete")
         return Outcome.Success(token)
     }
 
@@ -400,6 +431,7 @@ internal class GroupRepositoryImpl(
         if (outcome is Outcome.Success) {
             rescheduleAfterCommit("group undo")
             syncChannels()
+            requestSnapshotAfterCommit("group undo")
         }
         return outcome
     }

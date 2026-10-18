@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
@@ -42,7 +43,8 @@ class CommitCancellationTest {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val channels = FakeGroupChannelSync()
     private val refresh = FakeRefreshController()
-    private val groups = GroupRepositoryImpl(db, TestClock(), TestOrderKeys, channels, refresh, appScope)
+    private val snapshots = FakeSnapshotScheduler()
+    private val groups = GroupRepositoryImpl(db, TestClock(), TestOrderKeys, channels, refresh, snapshots, appScope)
 
     @AfterTest
     fun tearDown() {
@@ -65,6 +67,7 @@ class CommitCancellationTest {
             assertEquals(setOf(uuid), groups.pendingUndoUuids())
             assertEquals(listOf("sync()"), channels.calls)
             assertEquals(listOf("reschedulePeriodic()"), refresh.calls)
+            assertEquals(2, snapshots.requestSoonCalls, "create and the cancelled-at-commit delete both poke")
         }
 
     @Test
@@ -78,12 +81,13 @@ class CommitCancellationTest {
 
             assertEquals(listOf(podcast), db.groupDao().membersOf(id).map { it.podcastId })
             assertEquals(listOf("reschedulePeriodic()"), refresh.calls)
+            assertEquals(2, snapshots.requestSoonCalls, "create and the cancelled-at-commit edit both poke")
         }
 
     @Test
     fun aGroupSettingCancelledAtCommitStillReschedulesAndSweeps() =
         runTest {
-            val settings = ScopeSettingsRepositoryImpl(db, FakeSettingsRepository(), { refresh }, channels)
+            val settings = ScopeSettingsRepositoryImpl(db, FakeSettingsRepository(), { refresh }, channels, snapshots)
             val id = assertIs<Outcome.Success<Long>>(groups.create(GroupDraft("Tech"))).value
             channels.calls.clear()
             refresh.calls.clear()
@@ -102,6 +106,7 @@ class CommitCancellationTest {
             )
             assertEquals(listOf("reschedulePeriodic()"), refresh.calls)
             assertEquals(listOf("sync()"), channels.calls)
+            assertEquals(2, snapshots.requestSoonCalls, "create and the cancelled-at-commit write both poke")
         }
 
     @Test
