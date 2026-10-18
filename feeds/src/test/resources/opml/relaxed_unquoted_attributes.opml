@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="1.0"><body>
+  <outline text="Double" type="rss" xmlUrl="https://d.example.com/rss"/>
+  <outline text='Single' type='rss' xmlUrl='https://s.example.com/rss'/>
+  <outline text=Bare type=rss xmlUrl=https://b.example.com/>
+</body></opml>

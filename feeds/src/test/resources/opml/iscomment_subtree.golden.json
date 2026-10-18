@@ -1,0 +1,25 @@
+{
+  "entries": [
+    {
+      "folderId": 0,
+      "ordinal": 0,
+      "preselect": false,
+      "text": "Old Show",
+      "type": "rss",
+      "url": "https://old.example.com/rss"
+    },
+    {
+      "ordinal": 1,
+      "text": "Live Show",
+      "type": "rss",
+      "url": "https://live.example.com/rss"
+    }
+  ],
+  "folders": [
+    {
+      "id": 0,
+      "name": "Archive"
+    }
+  ],
+  "mode": "STRICT"
+}

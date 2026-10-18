@@ -1,0 +1,17 @@
+{
+  "entries": [
+    {
+      "htmlUrl": "https://e.example.com",
+      "ordinal": 0,
+      "title": "Caf & TeaTime",
+      "url": "https://e.example.com/rss"
+    },
+    {
+      "ordinal": 1,
+      "title": "Fish & Chips  2026",
+      "url": "https://f.example.com/rss"
+    }
+  ],
+  "format": "OPML",
+  "groups": []
+}

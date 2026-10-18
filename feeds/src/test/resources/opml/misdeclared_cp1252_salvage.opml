@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="1.0"><body>
+  <outline text="Café & bar" type="rss" xmlUrl="https://cafe.example.com/rss" htmlUrl="https://cafe.example.com" note="&#xZZZZ;"/>
+  <outline text="Plain" type="rss" xmlUrl="https://plain.example.com/rss"/>
+</body></opml>

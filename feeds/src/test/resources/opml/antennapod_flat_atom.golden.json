@@ -1,0 +1,23 @@
+{
+  "entries": [
+    {
+      "htmlUrl": "https://atp.fm",
+      "ordinal": 0,
+      "text": "ATP",
+      "title": "Accidental Tech Podcast",
+      "type": "atom",
+      "url": "https://atp.fm/rss"
+    },
+    {
+      "htmlUrl": "https://example.com",
+      "ordinal": 1,
+      "text": "Daily",
+      "title": "The Daily",
+      "type": "rss",
+      "url": "https://feeds.example.com/daily"
+    }
+  ],
+  "folders": [],
+  "headTitle": "AntennaPod Subscriptions",
+  "mode": "STRICT"
+}

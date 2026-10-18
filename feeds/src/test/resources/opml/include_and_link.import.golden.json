@@ -1,0 +1,18 @@
+{
+  "entries": [
+    {
+      "ordinal": 0,
+      "title": "Feed",
+      "url": "https://feed.example.com/rss"
+    }
+  ],
+  "format": "OPML",
+  "groups": [],
+  "ignoredOutlines": 2,
+  "warnings": [
+    {
+      "code": "LINKED_LISTS",
+      "count": 2
+    }
+  ]
+}
