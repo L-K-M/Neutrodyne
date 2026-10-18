@@ -110,6 +110,10 @@ import kotlin.uuid.Uuid
  * credentials or `subscriptions.opml`. Secret I/O stays outside the Room transaction — 05 keeps
  * `SecretStore` calls (Android Keystore, the desktop secrets file) out of Room transactions.
  *
+ * `AUTO_SNAPSHOT` writes may also carry a [SnapshotLevel] and a tighter compressed-size cap
+ * (05 Snapshot production's retry ladder); every other kind always writes the full manual
+ * shape under the shared limits.
+ *
  * The single [mutex] is the process-wide backup mutex of 05 Writing: writes serialise here.
  */
 @SingleIn(AppScope::class)
@@ -132,14 +136,25 @@ internal class BackupWriter(
     /**
      * Writes a [kind] backup to [target]. [includeCredentials] embeds feed passwords in plain
      * text (D33, manual backups only); `credentialOrigin` is written either way so a restore can
-     * flag `needsCredentials`. Failures leave any previous [target] untouched; format/acquisition
-     * limits report [BackupError.TooLarge], failed settings writes [BackupError.Storage].
+     * flag `needsCredentials`. [level] selects 05 Snapshot production's episode-line filter —
+     * `AUTO_SNAPSHOT` only, because a non-snapshot write must never silently drop history.
+     * [maxCompressedBytes] lets the producer tighten the staged ZIP's publication cap; it never
+     * replaces the 50 MiB acquisition limit. Failures leave any previous [target] untouched;
+     * format/acquisition limits report [BackupError.TooLarge], failed settings writes
+     * [BackupError.Storage].
      */
     suspend fun write(
         kind: BackupKind,
         target: Path,
         includeCredentials: Boolean,
-    ): Outcome<BackupSummary, BackupError> = mutex.withLock { writeLocked(kind, target, includeCredentials) }
+        level: SnapshotLevel = SnapshotLevel.FULL,
+        maxCompressedBytes: Long = MAX_IMPORT_PAYLOAD_BYTES,
+    ): Outcome<BackupSummary, BackupError> {
+        require(kind == BackupKind.AUTO_SNAPSHOT || level == SnapshotLevel.FULL) {
+            "history levels apply to AUTO_SNAPSHOT writes; a $kind write carries every line"
+        }
+        return mutex.withLock { writeLocked(kind, target, includeCredentials, level, maxCompressedBytes) }
+    }
 
     /**
      * The R1.9 warning counts (05 Writing): private feed links in the library and the passwords
@@ -158,13 +173,15 @@ internal class BackupWriter(
         kind: BackupKind,
         target: Path,
         includeCredentials: Boolean,
+        level: SnapshotLevel,
+        maxCompressedBytes: Long,
     ): Outcome<BackupSummary, BackupError> =
         withContext(io) {
             val staged = stagedPath(target)
             try {
                 // A leftover stage from a crashed write must not leak into the new archive.
                 fileSystem.delete(staged, mustExist = false)
-                Outcome.Success(writeArchive(kind, target, staged, includeCredentials))
+                Outcome.Success(writeArchive(kind, target, staged, includeCredentials, level, maxCompressedBytes))
             } catch (c: CancellationException) {
                 deleteStaged(staged)
                 throw c
@@ -188,6 +205,8 @@ internal class BackupWriter(
         target: Path,
         staged: Path,
         includeCredentials: Boolean,
+        level: SnapshotLevel,
+        maxCompressedBytes: Long,
     ): BackupSummary {
         // 05 Writing step 1: the portable snapshot is read once, outside the transaction.
         val settingValues = settingValues()
@@ -198,11 +217,15 @@ internal class BackupWriter(
         val read: Read
         try {
             // Step 2: one read transaction — every export row plus the streamed
-            // `episodes.jsonl` (the archive's first entry) and the OPML's rows.
+            // `episodes.jsonl` (the archive's first entry) and the OPML's rows. Queue and
+            // session refs come first: `queue.json`'s references protect episode lines at
+            // levels ≥ 1, so the protection set exists before the stream starts.
             read =
                 db.backupReadTransaction {
+                    val queue = queueRefs()
+                    val session = playSession()
                     Read(
-                        episodes = writeEpisodesEntry(writer),
+                        episodes = writeEpisodesEntry(writer, level, protectedRefs(queue, session)),
                         podcasts = libraryPodcasts(),
                         aliases = libraryAliases().groupBy({ it.podcastId }, { it.url }),
                         settings = libraryPodcastSettings().associate { it.podcastId to it.o },
@@ -210,8 +233,8 @@ internal class BackupWriter(
                         groups = libraryGroups(),
                         groupSettings = libraryGroupSettings().associate { it.groupId to it.o },
                         members = libraryMemberships().groupBy { it.groupId },
-                        queue = queueRefs(),
-                        session = playSession(),
+                        queue = queue,
+                        session = session,
                         opml = if (includeOpml) opml.readSnapshot() else null,
                     )
                 }
@@ -259,6 +282,7 @@ internal class BackupWriter(
                     episodeKeysVersion = EpisodeKeys.VERSION,
                     urlNormalizerVersion = UrlNormalizer.VERSION,
                     installationId = installationId,
+                    snapshotLevel = level.wire,
                     includesCredentials = credentials.isNotEmpty(),
                     counts =
                         CountsV1(
@@ -280,7 +304,11 @@ internal class BackupWriter(
         }
 
         val bytes = fileSystem.metadataOrNull(staged)?.size ?: throw WriteRejected(BackupError.Io)
-        if (bytes > MAX_IMPORT_PAYLOAD_BYTES) throw WriteRejected(BackupError.TooLarge)
+        // The producer's cap tightens the publication gate on the closed stage; the
+        // 50 MiB acquisition limit still holds, so a looser request can never weaken it.
+        if (bytes > minOf(maxCompressedBytes, MAX_IMPORT_PAYLOAD_BYTES)) {
+            throw WriteRejected(BackupError.TooLarge)
+        }
         validateArchive(staged)
 
         // Step 4: flush to media, then the atomic rename — the previous target stays intact
@@ -306,11 +334,19 @@ internal class BackupWriter(
     /**
      * `episodes.jsonl`, streamed inside the read transaction: [BackupDao.episodeChunk] keyset
      * pages of [BackupDao.EPISODE_CHUNK] rows encoded line by line — the episode library is
-     * never materialised (02 Backup export). `ts = 0` lines carry a `stateUpdatedAt` NULL row's
-     * no-state sentinel verbatim; `played`/`inProgress` count played lines and
-     * started-but-never-played lines for `CountsV1`.
+     * never materialised (02 Backup export). [level] drops or slims rows in Kotlin before
+     * encoding (02: the query itself does not change); [refs] are the `queue.json` references
+     * read ahead of the stream, protected at every level. `ts = 0` lines carry a
+     * `stateUpdatedAt` NULL row's no-state sentinel verbatim; `played`/`inProgress` count
+     * played lines and started-but-never-played lines among the lines actually written, so
+     * `CountsV1` describes the filtered file.
      */
-    private suspend fun BackupDao.writeEpisodesEntry(writer: ArchiveWriter): EpisodeWrite {
+    private suspend fun BackupDao.writeEpisodesEntry(
+        writer: ArchiveWriter,
+        level: SnapshotLevel,
+        refs: Set<ProtectedRef>,
+    ): EpisodeWrite {
+        val cutoff = clock.now() - OLD_HISTORY_MS
         val metered = MeteredEntry(writer.entry(BackupCodec.ENTRY_EPISODES))
         var lines = 0
         var played = 0
@@ -321,17 +357,18 @@ internal class BackupWriter(
                 val chunk = episodeChunk(after, BackupDao.EPISODE_CHUNK)
                 if (chunk.isEmpty()) break
                 for (row in chunk) {
+                    val dto = row.toLevelLine(level, cutoff, refs) ?: continue
                     val line = Buffer()
-                    codec.writeEpisodeLine(line, row.toLine())
+                    codec.writeEpisodeLine(line, dto)
                     // The reader's cap excludes LF. Never publish a line it would skip.
                     if (line.size - 1 > BackupCodec.EPISODE_LINE_MAX_BYTES) {
                         throw WriteRejected(BackupError.TooLarge)
                     }
                     out.writeAll(line)
+                    lines++
+                    if (row.playedAt != null) played++
+                    if (row.playedAt == null && row.startedAt != null) inProgress++
                 }
-                lines += chunk.size
-                played += chunk.count { it.playedAt != null }
-                inProgress += chunk.count { it.playedAt == null && it.startedAt != null }
                 if (chunk.size < BackupDao.EPISODE_CHUNK) break
                 after = chunk.last().id
             }
@@ -576,6 +613,105 @@ internal class BackupWriter(
         return EpisodeRefV1(feedKey, identityKey, EpisodeKeys.versionOf(identityKey))
     }
 
+    /**
+     * The `(feedKey, identityKey)` refs `queue.json` will carry — every Up next entry plus the
+     * play session's `current`, whether or not it is queued — read inside the export
+     * transaction before the episode stream so [SnapshotLevel]'s filter protects their lines
+     * at every level: a referenced line is never slimmed or dropped, so it still restores or
+     * stubs on an empty database (05 Snapshot production; the session `anchor` is a resume
+     * hint, not a protected reference).
+     */
+    private fun protectedRefs(
+        queue: List<BackupQueueRow>,
+        session: BackupSessionRow?,
+    ): Set<ProtectedRef> {
+        val refs = HashSet<ProtectedRef>(queue.size + 1)
+        for (row in queue) refs += ProtectedRef(row.feedKey, row.identityKey)
+        session?.let {
+            val feedKey = it.currentFeedKey
+            val identityKey = it.currentIdentityKey
+            if (feedKey != null && identityKey != null) {
+                refs += ProtectedRef(feedKey, identityKey)
+            }
+        }
+        return refs
+    }
+
+    /**
+     * [level]'s verdict on one export row (05 Snapshot production's level table): `null` drops
+     * the line from the archive. `droppablePlayed` is the same set for levels 1 and 2 —
+     * played, `pl` older than [cutoff], no position, not favourite, unreferenced. Level 1
+     * slims it to [slimmedLine]; level 2 drops it plus old tombstone-only lines; level 3
+     * keeps only in-progress, favourite and referenced lines.
+     */
+    private fun BackupEpisodeRow.toLevelLine(
+        level: SnapshotLevel,
+        cutoff: Long,
+        refs: Set<ProtectedRef>,
+    ): EpisodeLineV1? {
+        val referenced = ProtectedRef(feedKey, identityKey) in refs
+        val position = positionMs
+        val played = playedAt
+        val hasPosition = position != null && position > 0
+        val droppablePlayed =
+            !referenced && !hasPosition && isFavorite != true && played != null && played < cutoff
+        return when (level) {
+            SnapshotLevel.FULL -> {
+                toLine()
+            }
+
+            SnapshotLevel.SLIM_HISTORY -> {
+                if (droppablePlayed) slimmedLine() else toLine()
+            }
+
+            SnapshotLevel.DROP_HISTORY -> {
+                if (droppablePlayed || droppableTombstone(cutoff, referenced)) null else toLine()
+            }
+
+            SnapshotLevel.ACTIVE_ONLY -> {
+                if (referenced || isFavorite == true || (playedAt == null && (hasPosition || startedAt != null))) {
+                    toLine()
+                } else {
+                    null
+                }
+            }
+        }
+    }
+
+    /**
+     * Level 2's second drop set: an unreferenced line whose only state is a download
+     * tombstone older than [cutoff]. A played/progress/favourite/duration mark or a live
+     * download row makes it more than "tombstone-only".
+     */
+    private fun BackupEpisodeRow.droppableTombstone(
+        cutoff: Long,
+        referenced: Boolean,
+    ): Boolean {
+        val dismissed = downloadDismissedAt
+        val position = positionMs
+        return !referenced &&
+            dismissed != null &&
+            dismissed < cutoff &&
+            playedAt == null &&
+            startedAt == null &&
+            lastPlayedAt == null &&
+            (playCount ?: 0) == 0 &&
+            isFavorite != true &&
+            measuredDurationMs == null &&
+            !(position != null && position > 0) &&
+            !downloaded
+    }
+
+    /** Level 1's exact slim shape — `p`, `k`, `kv`, `pl`, `ts` and nothing else (05). */
+    private fun BackupEpisodeRow.slimmedLine(): EpisodeLineV1 =
+        EpisodeLineV1(
+            p = feedKey,
+            k = identityKey,
+            kv = EpisodeKeys.versionOf(identityKey),
+            pl = playedAt,
+            ts = stateUpdatedAt ?: 0L,
+        )
+
     /** The row columns map 1:1 onto `EpisodeLineV1` (02 Backup export); `id` is never exported. */
     private fun BackupEpisodeRow.toLine(): EpisodeLineV1 =
         EpisodeLineV1(
@@ -679,6 +815,9 @@ internal class BackupWriter(
         /** One slot per archive entry (episodes, library, queue, settings, opml, manifest). */
         const val ENTRY_SLOTS = 6
 
+        /** 05's "older than 365 days" bound for levels 1–2, measured against the write time. */
+        const val OLD_HISTORY_MS: Long = 365L * 24 * 60 * 60 * 1000
+
         // `SettingValueV1.type` is the SettingKey subclass name — literals, never reflection,
         // so the wire contract survives minified builds.
         const val TYPE_BOOL = "Bool"
@@ -690,3 +829,31 @@ internal class BackupWriter(
         const val TYPE_CHOICE = "Choice"
     }
 }
+
+/**
+ * 05 Snapshot production's episode-line levels — the producer asks for one and
+ * [BackupWriter.write] applies it inside the export stream. [wire] is the integer the
+ * manifest's `snapshotLevel` and `SnapshotStatus.level` carry; the numeric form lives only
+ * at those boundaries, never as a magic `Int` inside the writer.
+ */
+internal enum class SnapshotLevel(
+    val wire: Int,
+) {
+    /** Level 0 — every Backup export line (the manual/scheduled shape; the default). */
+    FULL(0),
+
+    /** Level 1 — old played lines without a live reference slim to `p`, `k`, `kv`, `pl`, `ts`. */
+    SLIM_HISTORY(1),
+
+    /** Level 2 — those lines drop, and old tombstone-only lines drop. */
+    DROP_HISTORY(2),
+
+    /** Level 3 — only in-progress, favourite, queued and current lines remain. */
+    ACTIVE_ONLY(3),
+}
+
+/** `(feedKey, identityKey)` — the join between `queue.json` refs and episode lines. */
+private data class ProtectedRef(
+    val p: String,
+    val k: String,
+)
