@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.data.backup.RestoreRunner
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshRequest
 import ch.lkmc.neutrodyne.core.database.ImportSessionEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.domain.ImportReportPoster
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.settings.DesktopSettingKeys
@@ -56,6 +57,7 @@ internal class DesktopImportBackupLane
         private val work: LaneImportWorkScheduler,
         private val settings: SettingsRepository,
         private val network: NetworkMonitor,
+        private val reports: ImportReportPoster,
     ) : JobLane {
         override val name: String = NAME
 
@@ -93,6 +95,11 @@ internal class DesktopImportBackupLane
                 // tick. Completed/Failed/NotPending all leave the row out of PREVIEW intent
                 // (or never had it) — the next candidate goes on the same pass.
                 if (result == null || result is RestoreRunResult.Retry) return
+                if (result is RestoreRunResult.Failed) {
+                    val auto = session.optionsJson?.let(ImportOptionsJson::decodeOrNull)?.fromAndroidBackup == true
+                    suspendRunCatching { reports.postRestoreFailed(session.id, auto, result.error) }
+                        .onFailure { Log.w(TAG, it) { "restore failure notice failed for session ${session.id}" } }
+                }
             }
         }
 

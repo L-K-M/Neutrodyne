@@ -499,4 +499,13 @@
     </plurals>
     <string name="notification_episode_line">%1$s — %2$s</string>
     <string name="notification_other_podcasts">Other podcasts</string>
+
+    <!-- M3 import/backup reports (05 §8). -->
+    <string name="notification_import_done_title">Import finished</string>
+    <string name="notification_import_done">%1$d added · %2$d need attention</string>
+    <string name="notification_restore_failed_title">Restore failed</string>
+    <string name="notification_restore_failed">The backup could not be restored.</string>
+    <string name="notification_restore_failed_auto">The backed-up library could not be restored.</string>
+    <string name="notification_snapshot_pending_title">Backup found</string>
+    <string name="notification_snapshot_pending">A Neutrodyne backup is ready to restore.</string>
 </resources>

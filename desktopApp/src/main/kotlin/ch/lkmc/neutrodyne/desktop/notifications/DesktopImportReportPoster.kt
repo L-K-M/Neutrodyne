@@ -5,7 +5,9 @@ import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.DesktopNotification
 import ch.lkmc.neutrodyne.core.common.DesktopNotifier
 import ch.lkmc.neutrodyne.core.common.NotificationKind
+import ch.lkmc.neutrodyne.core.domain.BackupError
 import ch.lkmc.neutrodyne.core.domain.ImportReportPoster
+import ch.lkmc.neutrodyne.core.domain.ImportScreenVisibility
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.resolve
@@ -13,6 +15,11 @@ import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.import_done_added
 import ch.lkmc.neutrodyne.core.ui.resources.import_done_attention
 import ch.lkmc.neutrodyne.core.ui.resources.import_done_title
+import ch.lkmc.neutrodyne.core.ui.resources.notification_restore_failed
+import ch.lkmc.neutrodyne.core.ui.resources.notification_restore_failed_auto
+import ch.lkmc.neutrodyne.core.ui.resources.notification_restore_failed_title
+import ch.lkmc.neutrodyne.core.ui.resources.notification_snapshot_pending
+import ch.lkmc.neutrodyne.core.ui.resources.notification_snapshot_pending_title
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
@@ -33,11 +40,13 @@ internal class DesktopImportReportPoster
     @Inject
     constructor(
         private val notifier: DesktopNotifier,
+        private val visibility: ImportScreenVisibility,
     ) : ImportReportPoster {
         override suspend fun postDone(
             sessionId: Long,
             counts: Map<ImportItemStatus, Int>,
         ) {
+            if (visibility.visibleSessionId.value == sessionId) return
             val added = counts[ImportItemStatus.SUBSCRIBED] ?: 0
             val attention = counts.filterKeys { it in ATTENTION_STATUSES }.values.sum()
             val body =
@@ -61,6 +70,43 @@ internal class DesktopImportReportPoster
                     title = UiText.Res(Res.string.import_done_title).resolve(),
                     body = body.resolve(),
                     route = "$ROUTE_PREFIX$sessionId",
+                ),
+            )
+        }
+
+        override suspend fun postRestoreFailed(
+            sessionId: Long,
+            auto: Boolean,
+            error: BackupError,
+        ) {
+            if (visibility.visibleSessionId.value == sessionId) return
+            notifier.post(
+                DesktopNotification(
+                    id = "restore-failed-$sessionId",
+                    kind = NotificationKind.IMPORT_BACKUP,
+                    title = UiText.Res(Res.string.notification_restore_failed_title).resolve(),
+                    body =
+                        UiText
+                            .Res(
+                                if (auto) {
+                                    Res.string.notification_restore_failed_auto
+                                } else {
+                                    Res.string.notification_restore_failed
+                                },
+                            ).resolve(),
+                    route = "$ROUTE_PREFIX$sessionId",
+                ),
+            )
+        }
+
+        override suspend fun postForeignSnapshotPending() {
+            notifier.post(
+                DesktopNotification(
+                    id = "backup-foreign",
+                    kind = NotificationKind.IMPORT_BACKUP,
+                    title = UiText.Res(Res.string.notification_snapshot_pending_title).resolve(),
+                    body = UiText.Res(Res.string.notification_snapshot_pending).resolve(),
+                    route = "neutrodyne://open/settings/backup",
                 ),
             )
         }

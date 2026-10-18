@@ -4,6 +4,8 @@ package ch.lkmc.neutrodyne.desktop.notifications
 import ch.lkmc.neutrodyne.core.common.DesktopNotification
 import ch.lkmc.neutrodyne.core.common.DesktopNotifier
 import ch.lkmc.neutrodyne.core.common.NotificationKind
+import ch.lkmc.neutrodyne.core.domain.BackupError
+import ch.lkmc.neutrodyne.core.domain.ImportScreenVisibility
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.test.runTest
@@ -20,7 +22,8 @@ import java.util.Locale
  */
 class DesktopImportReportPosterTest {
     private val notifier = RecordingNotifier()
-    private val poster = DesktopImportReportPoster(notifier)
+    private val visibility = ImportScreenVisibility()
+    private val poster = DesktopImportReportPoster(notifier, visibility)
     private lateinit var previousLocale: Locale
 
     @Before
@@ -72,6 +75,30 @@ class DesktopImportReportPosterTest {
             poster.postDone(9, mapOf(ImportItemStatus.ALREADY_SUBSCRIBED to 2, ImportItemStatus.MERGED to 1))
 
             assertThat(notifier.posts.single().body).isEqualTo("0 added")
+        }
+
+    @Test
+    fun visibleSessionsSuppressOnlyTheirOwnReports() =
+        runTest {
+            visibility.enter(7L)
+            poster.postDone(7L, mapOf(ImportItemStatus.SUBSCRIBED to 1))
+            poster.postRestoreFailed(7L, auto = false, error = BackupError.NotABackup)
+            poster.postDone(8L, mapOf(ImportItemStatus.SUBSCRIBED to 1))
+
+            assertThat(notifier.posts.map { it.id }).containsExactly("import-8")
+        }
+
+    @Test
+    fun aRestoreFailureAndPendingOfferProduceRealBannerRoutes() =
+        runTest {
+            poster.postRestoreFailed(9L, auto = false, error = BackupError.NotABackup)
+            poster.postForeignSnapshotPending()
+
+            val failure = notifier.posts.first()
+            assertThat(failure.title).isEqualTo("Restore failed")
+            assertThat(failure.body).isEqualTo("The backup could not be restored.")
+            assertThat(failure.route).isEqualTo("neutrodyne://open/import/9")
+            assertThat(notifier.posts.last().route).isEqualTo("neutrodyne://open/settings/backup")
         }
 
     private class RecordingNotifier : DesktopNotifier {

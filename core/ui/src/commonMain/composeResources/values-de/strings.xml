@@ -479,4 +479,13 @@
     </plurals>
     <string name="notification_episode_line">%1$s — %2$s</string>
     <string name="notification_other_podcasts">Andere Podcasts</string>
+
+    <!-- M3 import/backup reports (05 §8). -->
+    <string name="notification_import_done_title">Import abgeschlossen</string>
+    <string name="notification_import_done">%1$d hinzugefügt · %2$d zu prüfen</string>
+    <string name="notification_restore_failed_title">Wiederherstellung fehlgeschlagen</string>
+    <string name="notification_restore_failed">Das Backup konnte nicht wiederhergestellt werden.</string>
+    <string name="notification_restore_failed_auto">Die gesicherte Bibliothek konnte nicht wiederhergestellt werden.</string>
+    <string name="notification_snapshot_pending_title">Backup gefunden</string>
+    <string name="notification_snapshot_pending">Ein Neutrodyne-Backup kann wiederhergestellt werden.</string>
 </resources>

@@ -227,6 +227,23 @@ class DesktopImportBackupLaneTest {
     // --- Offline split ------------------------------------------------------------------------------
 
     @Test
+    fun aFailedRestorePostsItsReportAndDoesNotBlockImports() =
+        runTest {
+            val archive = writeArchive()
+            fileSystem.write(archive) { writeUtf8("not a zip") }
+            val failed = restoreSession(archive, createdAt = clock.now())
+            val healthy = committedSession()
+            queueItem(healthy, ordinal = 0, url = FEED_B, podcastId = pendingPodcast(FEED_B))
+            adapter.results[FEED_B] = adapterParsed(parsedFeed())
+
+            lane.run(now())
+
+            assertEquals(ImportState.CANCELLED, session(failed).state)
+            assertEquals(listOf(failed), reports.restoreFailures.map { it.sessionId })
+            assertEquals(ImportState.DONE, session(healthy).state)
+        }
+
+    @Test
     fun offlineRunsRestoresAndCleanupButNeverFetches() =
         runTest {
             network.setStatus(FakeNetworkMonitor.OFFLINE)
@@ -500,6 +517,7 @@ class DesktopImportBackupLaneTest {
             work = work,
             settings = settings,
             network = network,
+            reports = reports,
         )
     }
 
