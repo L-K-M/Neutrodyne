@@ -4,6 +4,7 @@
     <string name="import_edit_url">URL bearbeiten</string>
     <string name="import_enter_password">Passwort eingeben</string>
     <string name="import_remove">Entfernen</string>
+    <string name="import_remove_item">%1$s entfernen</string>
     <string name="import_credentials_invalid">Gib die Zugangsdaten ein. Der Benutzername darf keinen Doppelpunkt enthalten; Zeilenumbrüche sind in beiden Feldern unzulässig.</string>
     <string name="import_resume_progress">Import läuft… %1$d von %2$d</string>
     <string name="import_resume_view">Ansehen</string>

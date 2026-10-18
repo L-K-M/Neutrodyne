@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.domain.DiscardPreviewResult
 import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportSessionView
@@ -22,7 +23,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -84,11 +84,7 @@ internal class ImportResumeViewModel(
             .async {
                 val result =
                     suspendRunCatching {
-                        // Recheck after dispatch: another route may already have committed this preview.
-                        val latest = imports.observeSession(session.id).first()
-                        if (latest?.state != ImportState.PREVIEW) return@suspendRunCatching false
-                        imports.cancel(session.id)
-                        true
+                        imports.discardPreview(session.id) == DiscardPreviewResult.DISCARDED
                     }.getOrDefault(false)
                 if (!result) userMessages.post(UiText.Res(Res.string.write_failed))
                 result

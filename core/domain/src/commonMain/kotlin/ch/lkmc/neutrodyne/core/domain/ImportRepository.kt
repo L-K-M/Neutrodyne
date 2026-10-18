@@ -61,6 +61,9 @@ interface ImportRepository {
     /** PREVIEW: deletes the session; COMMITTED/FETCHING: stops the worker, state CANCELLED. */
     suspend fun cancel(sessionId: Long)
 
+    /** Atomically deletes only an owned PREVIEW, keeping active imports and restore intents. */
+    suspend fun discardPreview(sessionId: Long): DiscardPreviewResult
+
     suspend fun retry(
         sessionId: Long,
         ordinals: Set<Int>,
@@ -133,3 +136,6 @@ enum class HostileInput {
     ZIP_PATH,
     ZIP_ENTRIES,
 }
+
+/** A preview discard must never be mistaken for an active-import stop or a failed delete. */
+enum class DiscardPreviewResult { DISCARDED, NOT_PREVIEW, FAILED }

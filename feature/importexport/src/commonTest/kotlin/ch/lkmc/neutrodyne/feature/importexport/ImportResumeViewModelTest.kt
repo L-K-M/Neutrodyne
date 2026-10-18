@@ -71,7 +71,9 @@ class ImportResumeViewModelTest : MainDispatcherTest() {
             val id = (imports.create(ImportSource("file:///one", "one")) as Outcome.Success).value
             val repo =
                 object : ch.lkmc.neutrodyne.core.domain.ImportRepository by imports {
-                    override suspend fun cancel(sessionId: Long) = error("storage failed")
+                    override suspend fun discardPreview(
+                        sessionId: Long,
+                    ): ch.lkmc.neutrodyne.core.domain.DiscardPreviewResult = error("storage failed")
                 }
             val vm = ImportResumeViewModel(repo, CoroutineScope(coroutineContext + SupervisorJob()))
             advanceUntilIdle()
@@ -122,9 +124,11 @@ class ImportResumeViewModelTest : MainDispatcherTest() {
             val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
             val repo =
                 object : ch.lkmc.neutrodyne.core.domain.ImportRepository by imports {
-                    override suspend fun cancel(sessionId: Long) {
+                    override suspend fun discardPreview(
+                        sessionId: Long,
+                    ): ch.lkmc.neutrodyne.core.domain.DiscardPreviewResult {
                         gate.await()
-                        imports.cancel(sessionId)
+                        return imports.discardPreview(sessionId)
                     }
                 }
             val vm = ImportResumeViewModel(repo, CoroutineScope(coroutineContext + SupervisorJob()))

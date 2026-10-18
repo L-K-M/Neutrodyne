@@ -11,6 +11,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
@@ -24,6 +26,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.import_edit_url
 import ch.lkmc.neutrodyne.core.ui.resources.import_enter_password
 import ch.lkmc.neutrodyne.core.ui.resources.import_remove
 import ch.lkmc.neutrodyne.core.ui.resources.import_remove_all
+import ch.lkmc.neutrodyne.core.ui.resources.import_remove_item
 import ch.lkmc.neutrodyne.core.ui.resources.import_report_already
 import ch.lkmc.neutrodyne.core.ui.resources.import_report_attention
 import ch.lkmc.neutrodyne.core.ui.resources.import_report_done
@@ -160,11 +163,15 @@ internal fun ImportRowActions(
                 modifier = Modifier.testTag("import-password-${item.ordinal}"),
             )
         }
+        val removeLabel = stringResource(Res.string.import_remove_item, displayMetadata(item.title))
         NdTextButton(
             stringResource(Res.string.import_remove),
             onClick = onRemove,
             enabled = enabled,
-            modifier = Modifier.testTag("import-remove-${item.ordinal}"),
+            modifier =
+                Modifier.testTag("import-remove-${item.ordinal}").semantics {
+                    contentDescription = removeLabel
+                },
         )
     }
 }

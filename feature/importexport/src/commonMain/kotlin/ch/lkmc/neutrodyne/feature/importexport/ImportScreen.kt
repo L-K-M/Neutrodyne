@@ -1340,7 +1340,7 @@ private val FETCH_OUTCOMES =
 private val DISPLAY_URL = Regex("""(?i)[a-z][a-z0-9+.-]*://[^\s<>"{}|\\^`]+""")
 
 /** Imported labels can contain private URLs; show only their host without altering stored data. */
-private fun displayMetadata(value: String): String =
+internal fun displayMetadata(value: String): String =
     DISPLAY_URL.replace(value) { match ->
         val authority =
             match.value

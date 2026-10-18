@@ -12,12 +12,12 @@ import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
-import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.domain.GroupRepository
 import ch.lkmc.neutrodyne.core.domain.ImportError
 import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.domain.ImportScreenVisibility
+import ch.lkmc.neutrodyne.core.domain.ImportSessionOperations
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
@@ -103,16 +103,21 @@ internal class ImportViewModel
         private val visibility: ImportScreenVisibility,
         @ApplicationScope private val appScope: CoroutineScope,
         private val podcasts: PodcastRepository,
+        private val operations: ImportSessionOperations,
     ) : ViewModel() {
         private val state = MutableStateFlow(ImportUiState())
 
         // The UI dispatcher owns this tail; accepted edits survive leaving the route.
         private var pendingEdit: Job? = null
+        private val localBusy = MutableStateFlow(false)
         val uiState = state.asStateFlow()
         private val userMessages = UserMessages()
         val messages = userMessages.flow
 
         init {
+            viewModelScope.launch {
+                operations.busySessions.collect { updateBusy() }
+            }
             // 05 §8: the done notification is suppressed while this session's screen is open.
             visibility.enter(sessionId)
             viewModelScope.launch {
@@ -299,14 +304,14 @@ internal class ImportViewModel
             if (
                 session.state != ImportState.PREVIEW ||
                 session.format == ImportFormat.NEUTRODYNE_BACKUP ||
-                state.value.busy
+                busy()
             ) {
                 return
             }
-            state.update { it.copy(busy = true) }
+            setLocalBusy(true)
             // Report an unavailable application scope before accepting the operation.
             if (!appScope.coroutineContext.isActive) {
-                state.update { it.copy(busy = false) }
+                setLocalBusy(false)
                 userMessages.post(UiText.Res(Res.string.import_err_confirm))
                 return
             }
@@ -325,7 +330,7 @@ internal class ImportViewModel
                     }
                 }.also { job ->
                     // Completion also runs if cancellation prevents dispatching the body.
-                    job.invokeOnCompletion { state.update { it.copy(busy = false) } }
+                    job.invokeOnCompletion { setLocalBusy(false) }
                 }.await()
         }
 
@@ -336,7 +341,7 @@ internal class ImportViewModel
         suspend fun cancelSession(): Boolean {
             val session = state.value.session ?: return false
             if (
-                state.value.busy ||
+                busy() ||
                 (
                     session.state != ImportState.PREVIEW &&
                         session.state != ImportState.COMMITTED &&
@@ -345,9 +350,9 @@ internal class ImportViewModel
             ) {
                 return false
             }
-            state.update { it.copy(busy = true) }
+            setLocalBusy(true)
             if (!appScope.coroutineContext.isActive) {
-                state.update { it.copy(busy = false) }
+                setLocalBusy(false)
                 postWriteFailed()
                 return false
             }
@@ -361,7 +366,7 @@ internal class ImportViewModel
                             postWriteFailed()
                         }.isSuccess
                 }.also { job ->
-                    job.invokeOnCompletion { state.update { it.copy(busy = false) } }
+                    job.invokeOnCompletion { setLocalBusy(false) }
                 }.await()
         }
 
@@ -390,21 +395,9 @@ internal class ImportViewModel
             input: String,
         ): UiText? {
             if (!item.canFixUp) return UiText.Res(Res.string.write_failed)
-            val url = input.trim()
-            val authority =
-                url
-                    .substringAfter("://", "")
-                    .substringBefore('/')
-                    .substringBefore('?')
-                    .substringBefore('#')
-            if ((!url.startsWith("https://", true) && !url.startsWith("http://", true)) ||
-                authority.substringAfterLast('@').isBlank() || url.any { it.isWhitespace() || it < ' ' }
-            ) {
-                return addPodcastErrorText(AddPodcastError.InvalidUrl)
-            }
 
             return performFixUp {
-                when (val result = imports.editUrl(sessionId, item.ordinal, url)) {
+                when (val result = imports.editUrl(sessionId, item.ordinal, input)) {
                     is Outcome.Success -> null
                     is Outcome.Failure -> addPodcastErrorText(result.error)
                 }
@@ -455,18 +448,29 @@ internal class ImportViewModel
 
         private suspend fun performFixUp(block: suspend () -> UiText?): UiText? {
             val session = state.value.session ?: return UiText.Res(Res.string.write_failed)
-            if (state.value.busy || session.state !in FIXUP_STATES || !appScope.coroutineContext.isActive) {
+            if (busy() || session.state !in FIXUP_STATES || !appScope.coroutineContext.isActive) {
                 return UiText.Res(Res.string.write_failed)
             }
-            state.update { it.copy(busy = true) }
-            return appScope
-                .async {
+            val operation =
+                operations.start(sessionId) {
                     // Exceptions can contain a literal password, even without a URL to redact.
                     suspendRunCatching { block() }.getOrElse { UiText.Res(Res.string.write_failed) }
-                }.also { job ->
-                    job.invokeOnCompletion { state.update { it.copy(busy = false) } }
-                }.await()
+                } ?: return UiText.Res(Res.string.write_failed)
+            updateBusy()
+            operation.invokeOnCompletion { updateBusy() }
+            return operation.await()
         }
+
+        private fun setLocalBusy(value: Boolean) {
+            localBusy.value = value
+            updateBusy()
+        }
+
+        private fun updateBusy() {
+            state.update { it.copy(busy = localBusy.value || sessionId in operations.busySessions.value) }
+        }
+
+        private fun busy(): Boolean = state.value.busy || sessionId in operations.busySessions.value
 
         fun acknowledgeMessage(id: Long) = userMessages.shown(id)
 
@@ -475,7 +479,7 @@ internal class ImportViewModel
             val session = state.value.session ?: return false
             return session.state == ImportState.PREVIEW &&
                 session.format != ImportFormat.NEUTRODYNE_BACKUP &&
-                !state.value.busy
+                !busy()
         }
 
         private fun edit(block: suspend () -> Unit) {

@@ -18,6 +18,7 @@ import ch.lkmc.neutrodyne.core.data.importing.ImportWarningJson
 import ch.lkmc.neutrodyne.core.data.importing.ImportWorkPolicy
 import ch.lkmc.neutrodyne.core.data.importing.PayloadStore
 import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
+import ch.lkmc.neutrodyne.core.domain.DiscardPreviewResult
 import ch.lkmc.neutrodyne.core.domain.ImportError
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
@@ -58,6 +59,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -546,6 +548,74 @@ class ImportRepositoryTest {
             repository.updateOptions(sid) { it.copy(importGroups = false) }
 
             assertEquals(true, optionsOf(sid).importGroups)
+        }
+
+    @Test fun previewCancelReportsFailureWhenThePreviewIsRetained() =
+        runTest {
+            payloads.register(URI, file = opmlFixture("antennapod_flat_atom"))
+            val id = assertCreate()
+            fileSystem.onDelete = { throw java.io.IOException("synthetic payload deletion failure") }
+            try {
+                assertFailsWith<IllegalStateException>("Cancel must report a failed preview deletion") {
+                    repository.cancel(id)
+                }
+                assertEquals(ImportState.PREVIEW, db.importDao().sessionById(id)!!.state)
+            } finally {
+                fileSystem.onDelete = null
+            }
+        }
+
+    @Test fun previewDiscardKeepsAnImportCommittedAfterTheBannerRead() =
+        runTest {
+            payloads.register(URI, file = opmlFixture("antennapod_flat_atom"))
+            val id = assertCreate()
+            assertEquals(ImportState.PREVIEW, repository.observeSession(id).first()!!.state)
+            assertIs<Outcome.Success<Unit>>(repository.confirm(id))
+
+            assertEquals(DiscardPreviewResult.NOT_PREVIEW, repository.discardPreview(id))
+            assertEquals(ImportState.COMMITTED, repository.observeSession(id).first()!!.state)
+            assertTrue(scheduler.cancelled.isEmpty(), "Preview discard must never stop active work")
+        }
+
+    @Test fun previewDiscardReportsPayloadDeletionFailureAndCanBeRetried() =
+        runTest {
+            payloads.register(URI, file = opmlFixture("antennapod_flat_atom"))
+            val id = assertCreate()
+            val session = assertNotNull(db.importDao().sessionById(id))
+            val payload = File(root, "cache").resolve(requireNotNull(session.payloadPath))
+            fileSystem.onDelete = { throw java.io.IOException("synthetic payload deletion failure") }
+            try {
+                assertEquals(DiscardPreviewResult.FAILED, repository.discardPreview(id))
+                assertEquals(ImportState.PREVIEW, db.importDao().sessionById(id)!!.state)
+                assertTrue(payload.isFile)
+            } finally {
+                fileSystem.onDelete = null
+            }
+
+            assertEquals(DiscardPreviewResult.DISCARDED, repository.discardPreview(id))
+            assertNull(db.importDao().sessionById(id))
+            assertTrue(db.importDao().itemsOf(id).isEmpty())
+            assertTrue(!payload.exists())
+            assertEquals(DiscardPreviewResult.NOT_PREVIEW, repository.discardPreview(id))
+        }
+
+    @Test fun previewDiscardReportsUnreadableOptionsWithoutDeletingItsPayload() =
+        runTest {
+            val id = db.seedImportSession(payloadPath = "import/corrupt.bin")
+            File(root, "cache/import").mkdirs()
+            val payload = File(root, "cache/import/corrupt.bin").apply { writeText("payload") }
+            db.importDao().setOptionsJson(id, "{corrupt")
+
+            assertEquals(DiscardPreviewResult.FAILED, repository.discardPreview(id))
+            assertEquals("{corrupt", db.importDao().sessionById(id)!!.optionsJson)
+            assertTrue(payload.isFile)
+        }
+
+    @Test fun previewDiscardLeavesARequestedRestoreOwnedByItsHost() =
+        runTest {
+            val id = db.seedImportSession(options = ImportOptions(restoreRequestedAt = clock.now()))
+            assertEquals(DiscardPreviewResult.NOT_PREVIEW, repository.discardPreview(id))
+            assertNotNull(db.importDao().sessionById(id))
         }
 
     // --- Cancel ----------------------------------------------------------------------------------------

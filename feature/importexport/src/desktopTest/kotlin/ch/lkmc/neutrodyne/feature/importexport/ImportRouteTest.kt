@@ -12,6 +12,7 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
@@ -37,6 +38,7 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.domain.ImportScreenVisibility
+import ch.lkmc.neutrodyne.core.domain.ImportSessionOperations
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.GroupProposal
@@ -238,7 +240,8 @@ class ImportRouteTest {
                         filter: ImportItemFilter,
                     ) = kotlinx.coroutines.flow.flowOf(androidx.paging.PagingData.from(rows.take(1)))
                 }
-            val vm = ImportViewModel(id, repo, groups, visibility, appScope, podcasts)
+            val vm =
+                ImportViewModel(id, repo, groups, visibility, appScope, podcasts, ImportSessionOperations(appScope))
             setRouteContent(ImportKey(id.toString()), vm)
             onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Remove all"))
             onNodeWithText("Remove all").performClick()
@@ -246,7 +249,7 @@ class ImportRouteTest {
             assertTrue(imports.calls.any { it.startsWith("remove($id,") && "99" in it })
         }
 
-    @Test fun editUrlValidatesAndKeepsRepositoryFailuresInline() =
+    @Test fun editUrlShowsRepositoryValidationAndKeepsFailuresInline() =
         runComposeUiTest {
             val row = item(0, status = ImportItemStatus.GONE).copy(podcastId = 12)
             val id = kotlinx.coroutines.runBlocking { seed(listOf(row)) }
@@ -261,6 +264,7 @@ class ImportRouteTest {
                         input: String,
                     ): Outcome<Unit, AddPodcastError> {
                         submitted += input
+                        if (input.isBlank()) return Outcome.Failure(AddPodcastError.InvalidUrl)
                         return if (fail) {
                             Outcome.Failure(AddPodcastError.Http(503))
                         } else {
@@ -268,21 +272,22 @@ class ImportRouteTest {
                         }
                     }
                 }
-            val vm = ImportViewModel(id, repo, groups, visibility, appScope, podcasts)
+            val vm =
+                ImportViewModel(id, repo, groups, visibility, appScope, podcasts, ImportSessionOperations(appScope))
             setRouteContent(ImportKey(id.toString()), vm)
             onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-edit-0"))
             onNodeWithTag("import-edit-0").performClick()
             onNodeWithText("Save").performClick()
             onNodeWithText("That doesn't look like a feed address").assertExists()
-            assertTrue(submitted.isEmpty())
+            assertEquals(listOf(""), submitted)
             onNodeWithTag("import-url-input").performTextReplacement("https://new.example/feed")
             onNodeWithText("Save").performClick()
-            waitUntil { submitted.size == 1 }
+            waitUntil { submitted.size == 2 }
             onNodeWithText("The server answered 503").assertExists()
             onNodeWithTag("import-url-input").assertExists()
             fail = false
             onNodeWithText("Save").performClick()
-            waitUntil { submitted.size == 2 }
+            waitUntil { submitted.size == 3 }
             waitUntil { onAllNodes(hasTestTag("import-url-input")).fetchSemanticsNodes().isEmpty() }
         }
 
@@ -308,7 +313,8 @@ class ImportRouteTest {
                         }
                     }
                 }
-            val vm = ImportViewModel(id, repo, groups, visibility, appScope, podcasts)
+            val vm =
+                ImportViewModel(id, repo, groups, visibility, appScope, podcasts, ImportSessionOperations(appScope))
             setRouteContent(ImportKey(id.toString()), vm)
             onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-password-0"))
             onNodeWithTag("import-password-0").performClick()
@@ -344,7 +350,10 @@ class ImportRouteTest {
                         ordinals: Set<Int>,
                     ) = error("unreadable storage")
                 }
-            setRouteContent(ImportKey(id.toString()), ImportViewModel(id, repo, groups, visibility, appScope, podcasts))
+            setRouteContent(
+                ImportKey(id.toString()),
+                ImportViewModel(id, repo, groups, visibility, appScope, podcasts, ImportSessionOperations(appScope)),
+            )
             onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-retry-0"))
             onNodeWithTag("import-retry-0").performClick()
             waitUntil { host.currentSnackbarData != null }
@@ -369,7 +378,10 @@ class ImportRouteTest {
                         ordinals: Set<Int>,
                     ) = error("unreadable storage")
                 }
-            setRouteContent(ImportKey(id.toString()), ImportViewModel(id, repo, groups, visibility, appScope, podcasts))
+            setRouteContent(
+                ImportKey(id.toString()),
+                ImportViewModel(id, repo, groups, visibility, appScope, podcasts, ImportSessionOperations(appScope)),
+            )
             onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-remove-0"))
             onNodeWithTag("import-remove-0").performClick()
             waitUntil { host.currentSnackbarData != null }
@@ -388,6 +400,29 @@ class ImportRouteTest {
             onNodeWithTag("import-remove-0").performClick()
             waitUntil { imports.items.value[id] == listOf(existing) }
             assertTrue(imports.calls.contains("remove($id, [0])"))
+        }
+
+    @Test fun removeNamesItsPodcastForScreenReaders() =
+        runComposeUiTest {
+            val row = item(0, title = "News Hour", status = ImportItemStatus.GONE).copy(podcastId = 12)
+            val id = seed(sessionItems = listOf(row))
+            setState(id, ImportState.DONE)
+            setRouteContent(ImportKey(id.toString()))
+
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-remove-0"))
+            onNodeWithTag("import-remove-0").assert(hasContentDescription("Remove News Hour"))
+        }
+
+    @Test fun removeNamesItsPodcastForScreenReadersInGerman() =
+        runComposeUiTest {
+            Locale.setDefault(Locale.GERMAN)
+            val row = item(0, title = "News Hour", status = ImportItemStatus.GONE).copy(podcastId = 12)
+            val id = seed(sessionItems = listOf(row))
+            setState(id, ImportState.DONE)
+            setRouteContent(ImportKey(id.toString()))
+
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-remove-0"))
+            onNodeWithTag("import-remove-0").assert(hasContentDescription("News Hour entfernen"))
         }
 
     @Test fun attentionFilterKeepsNoMediaAndDeferredSections() =
@@ -470,7 +505,17 @@ class ImportRouteTest {
         viewModel: ImportViewModel? = null,
     ) {
         val sessionId = key.sessionId.toLongOrNull() ?: -1L
-        val vm = viewModel ?: ImportViewModel(sessionId, imports, groups, visibility, appScope, podcasts)
+        val vm =
+            viewModel
+                ?: ImportViewModel(
+                    sessionId,
+                    imports,
+                    groups,
+                    visibility,
+                    appScope,
+                    podcasts,
+                    ImportSessionOperations(appScope),
+                )
         setContent {
             CompositionLocalProvider(LocalLifecycleOwner provides ResumedLifecycleOwner()) {
                 CompositionLocalProvider(
@@ -564,7 +609,8 @@ class ImportRouteTest {
                         error("disk failed")
                     }
                 }
-            val vm = ImportViewModel(id, repo, groups, visibility, appScope, podcasts)
+            val vm =
+                ImportViewModel(id, repo, groups, visibility, appScope, podcasts, ImportSessionOperations(appScope))
             setRouteContent(ImportKey(id.toString()), vm)
             onNodeWithText("Cancel").performClick()
             waitUntil(timeoutMillis = 5_000) { attempted.get() && !vm.uiState.value.busy }
@@ -832,7 +878,16 @@ class ImportRouteTest {
         runComposeUiTest {
             setRouteContent(
                 ImportKey("99"),
-                viewModel = ImportViewModel(99L, imports, groups, visibility, appScope, podcasts),
+                viewModel =
+                    ImportViewModel(
+                        99L,
+                        imports,
+                        groups,
+                        visibility,
+                        appScope,
+                        podcasts,
+                        ImportSessionOperations(appScope),
+                    ),
             )
 
             onNodeWithText("This import is no longer available").assertExists()
@@ -842,7 +897,8 @@ class ImportRouteTest {
     @Test
     fun aNonNumericKeyShowsTheUnavailableBody() =
         runComposeUiTest {
-            val vm = ImportViewModel(1L, imports, groups, visibility, appScope, podcasts)
+            val vm =
+                ImportViewModel(1L, imports, groups, visibility, appScope, podcasts, ImportSessionOperations(appScope))
             setRouteContent(ImportKey("not-a-number"), viewModel = vm)
 
             onNodeWithText("This import is no longer available").assertExists()

@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.domain.ImportError
 import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.domain.ImportScreenVisibility
+import ch.lkmc.neutrodyne.core.domain.ImportSessionOperations
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.GroupProposal
@@ -71,7 +72,15 @@ class ImportViewModelTest : MainDispatcherTest() {
     private fun TestScope.appScope(): CoroutineScope = CoroutineScope(coroutineContext + SupervisorJob())
 
     private fun TestScope.viewModel(sessionId: Long) =
-        ImportViewModel(sessionId, imports, groups, visibility, appScope(), podcasts)
+        ImportViewModel(
+            sessionId,
+            imports,
+            groups,
+            visibility,
+            appScope(),
+            podcasts,
+            ImportSessionOperations(appScope()),
+        )
 
     private fun item(
         ordinal: Int,
@@ -209,7 +218,16 @@ class ImportViewModelTest : MainDispatcherTest() {
                     ) = error("write failed")
                 }
             try {
-                val vm = ImportViewModel(id, repo, groups, visibility, appScope(), podcasts)
+                val vm =
+                    ImportViewModel(
+                        id,
+                        repo,
+                        groups,
+                        visibility,
+                        appScope(),
+                        podcasts,
+                        ImportSessionOperations(appScope()),
+                    )
                 advanceUntilIdle()
                 assertEquals(
                     UiText.Res(Res.string.write_failed),
@@ -229,15 +247,13 @@ class ImportViewModelTest : MainDispatcherTest() {
             }
         }
 
-    @Test fun invalidFixUpsNeverReachRepository() =
+    @Test fun invalidCredentialsAndIneligibleFixUpsNeverReachRepository() =
         runTest {
             val row = item(0, status = ImportItemStatus.AUTH_REQUIRED).copy(podcastId = 12)
             val id = seed(listOf(row), state = ImportState.DONE)
             val vm = viewModel(id)
             advanceUntilIdle()
             val before = imports.calls.toList()
-            assertTrue(vm.editUrl(row, "file:///private") != null)
-            assertTrue(vm.editUrl(row, "https://") != null)
             assertTrue(vm.enterPassword(row, BasicCredentials("", "")) != null)
             assertTrue(vm.enterPassword(row, BasicCredentials("u:injected", "password")) != null)
             assertFalse(vm.remove(row.copy(status = ImportItemStatus.MERGED)))
@@ -280,7 +296,8 @@ class ImportViewModelTest : MainDispatcherTest() {
                         return imports.enterPassword(sessionId, ordinal, credentials)
                     }
                 }
-            val vm = ImportViewModel(id, repo, groups, visibility, appScope(), podcasts)
+            val vm =
+                ImportViewModel(id, repo, groups, visibility, appScope(), podcasts, ImportSessionOperations(appScope()))
             val store = ViewModelStore()
             store.put("import", vm)
             advanceUntilIdle()
@@ -308,7 +325,15 @@ class ImportViewModelTest : MainDispatcherTest() {
             val id = seed(listOf(row), state = ImportState.DONE)
             val appJob = SupervisorJob()
             val vm =
-                ImportViewModel(id, imports, groups, visibility, CoroutineScope(coroutineContext + appJob), podcasts)
+                ImportViewModel(
+                    id,
+                    imports,
+                    groups,
+                    visibility,
+                    CoroutineScope(coroutineContext + appJob),
+                    podcasts,
+                    ImportSessionOperations(CoroutineScope(coroutineContext + appJob)),
+                )
             advanceUntilIdle()
             val caller = launch(start = CoroutineStart.UNDISPATCHED) { vm.retry(row) }
             assertTrue(vm.uiState.value.busy, "Accepted retry must set busy before dispatch")
@@ -381,7 +406,8 @@ class ImportViewModelTest : MainDispatcherTest() {
                         imports.updateOptions(sessionId, change)
                     }
                 }
-            val vm = ImportViewModel(id, repo, groups, visibility, appScope(), podcasts)
+            val vm =
+                ImportViewModel(id, repo, groups, visibility, appScope(), podcasts, ImportSessionOperations(appScope()))
             advanceUntilIdle()
             val rename = launch { assertNull(vm.setTargetGroupName("News")) }
             runCurrent()
@@ -406,7 +432,8 @@ class ImportViewModelTest : MainDispatcherTest() {
                         imports.updateOptions(sessionId, change)
                     }
                 }
-            val vm = ImportViewModel(id, repo, groups, visibility, appScope(), podcasts)
+            val vm =
+                ImportViewModel(id, repo, groups, visibility, appScope(), podcasts, ImportSessionOperations(appScope()))
             val store = ViewModelStore()
             store.put("import", vm)
             advanceUntilIdle()
@@ -472,7 +499,8 @@ class ImportViewModelTest : MainDispatcherTest() {
                         imports.updateOptions(sessionId, change)
                     }
                 }
-            val vm = ImportViewModel(id, repo, groups, visibility, appScope(), podcasts)
+            val vm =
+                ImportViewModel(id, repo, groups, visibility, appScope(), podcasts, ImportSessionOperations(appScope()))
             advanceUntilIdle()
             val rename = launch { assertNull(vm.renameGroup("tech", "News")) }
             runCurrent()
@@ -497,7 +525,8 @@ class ImportViewModelTest : MainDispatcherTest() {
                         imports.updateOptions(sessionId, change)
                     }
                 }
-            val vm = ImportViewModel(id, repo, groups, visibility, appScope(), podcasts)
+            val vm =
+                ImportViewModel(id, repo, groups, visibility, appScope(), podcasts, ImportSessionOperations(appScope()))
             advanceUntilIdle()
             vm.setTreatExistingAsPlayed(true)
             launch { vm.renameGroup("tech", "News") }
@@ -526,7 +555,15 @@ class ImportViewModelTest : MainDispatcherTest() {
             val id = seed()
             val appJob = SupervisorJob()
             val vm =
-                ImportViewModel(id, imports, groups, visibility, CoroutineScope(coroutineContext + appJob), podcasts)
+                ImportViewModel(
+                    id,
+                    imports,
+                    groups,
+                    visibility,
+                    CoroutineScope(coroutineContext + appJob),
+                    podcasts,
+                    ImportSessionOperations(CoroutineScope(coroutineContext + appJob)),
+                )
             advanceUntilIdle()
             val caller = launch(start = CoroutineStart.UNDISPATCHED) { vm.confirm() }
             assertTrue(vm.uiState.value.busy)
@@ -543,7 +580,15 @@ class ImportViewModelTest : MainDispatcherTest() {
             val id = seed()
             val appJob = SupervisorJob()
             val vm =
-                ImportViewModel(id, imports, groups, visibility, CoroutineScope(coroutineContext + appJob), podcasts)
+                ImportViewModel(
+                    id,
+                    imports,
+                    groups,
+                    visibility,
+                    CoroutineScope(coroutineContext + appJob),
+                    podcasts,
+                    ImportSessionOperations(CoroutineScope(coroutineContext + appJob)),
+                )
             advanceUntilIdle()
             val caller = launch(start = CoroutineStart.UNDISPATCHED) { vm.cancelSession() }
             assertTrue(vm.uiState.value.busy)
@@ -810,7 +855,16 @@ class ImportViewModelTest : MainDispatcherTest() {
                     }
                 }
             val id = seed()
-            val vm = ImportViewModel(id, gated, groups, visibility, appScope(), podcasts)
+            val vm =
+                ImportViewModel(
+                    id,
+                    gated,
+                    groups,
+                    visibility,
+                    appScope(),
+                    podcasts,
+                    ImportSessionOperations(appScope()),
+                )
             advanceUntilIdle()
             val owner = Job(coroutineContext.job)
             val routeScope = CoroutineScope(coroutineContext + owner)
@@ -839,7 +893,16 @@ class ImportViewModelTest : MainDispatcherTest() {
                     }
                 }
             val id = seed()
-            val vm = ImportViewModel(id, gated, groups, visibility, appScope(), podcasts)
+            val vm =
+                ImportViewModel(
+                    id,
+                    gated,
+                    groups,
+                    visibility,
+                    appScope(),
+                    podcasts,
+                    ImportSessionOperations(appScope()),
+                )
             advanceUntilIdle()
 
             launch { vm.confirm() }
@@ -878,7 +941,15 @@ class ImportViewModelTest : MainDispatcherTest() {
             val appJob = SupervisorJob()
             val id = seed()
             val vm =
-                ImportViewModel(id, imports, groups, visibility, CoroutineScope(coroutineContext + appJob), podcasts)
+                ImportViewModel(
+                    id,
+                    imports,
+                    groups,
+                    visibility,
+                    CoroutineScope(coroutineContext + appJob),
+                    podcasts,
+                    ImportSessionOperations(CoroutineScope(coroutineContext + appJob)),
+                )
             advanceUntilIdle()
 
             appJob.cancel()
@@ -1011,7 +1082,16 @@ class ImportViewModelTest : MainDispatcherTest() {
                     ): Unit = throw IllegalStateException("boom")
                 }
             val id = seed()
-            val vm = ImportViewModel(id, broken, groups, visibility, appScope(), podcasts)
+            val vm =
+                ImportViewModel(
+                    id,
+                    broken,
+                    groups,
+                    visibility,
+                    appScope(),
+                    podcasts,
+                    ImportSessionOperations(appScope()),
+                )
             advanceUntilIdle()
 
             vm.setImportGroups(false)

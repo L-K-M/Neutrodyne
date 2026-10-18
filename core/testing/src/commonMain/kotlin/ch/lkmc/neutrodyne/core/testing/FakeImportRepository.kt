@@ -6,6 +6,7 @@ import androidx.paging.PagingData
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
+import ch.lkmc.neutrodyne.core.domain.DiscardPreviewResult
 import ch.lkmc.neutrodyne.core.domain.ImportError
 import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
@@ -151,20 +152,18 @@ class FakeImportRepository(
 
     override suspend fun confirm(sessionId: Long): Outcome<Unit, ImportError> {
         calls += "confirm($sessionId)"
-        val session = sessions.value[sessionId] ?: return Outcome.Failure(ImportError.SessionGone)
         if (confirmOutcome is Outcome.Failure) return confirmOutcome
-        if (session.state != ImportState.PREVIEW) return confirmOutcome
-
         val committedAt = clock.now()
-        sessions.update {
-            it +
-                (
-                    sessionId to
-                        session.copy(
-                            state = ImportState.COMMITTED,
-                            options = session.options.copy(committedAt = committedAt),
-                        )
+        while (true) {
+            val current = sessions.value
+            val session = current[sessionId] ?: return Outcome.Failure(ImportError.SessionGone)
+            if (session.state != ImportState.PREVIEW) return confirmOutcome
+            val committed =
+                session.copy(
+                    state = ImportState.COMMITTED,
+                    options = session.options.copy(committedAt = committedAt),
                 )
+            if (sessions.compareAndSet(current, current + (sessionId to committed))) break
         }
         mutateItems(sessionId) { item ->
             if (item.status == ImportItemStatus.PREVIEW && item.selected) {
@@ -187,6 +186,23 @@ class FakeImportRepository(
             return
         }
         sessions.update { it + (sessionId to session.copy(state = ImportState.CANCELLED)) }
+    }
+
+    override suspend fun discardPreview(sessionId: Long): DiscardPreviewResult {
+        calls += "discardPreview($sessionId)"
+        // Claim the session atomically, just as the production write transaction does.
+        while (true) {
+            val current = sessions.value
+            val session = current[sessionId] ?: return DiscardPreviewResult.NOT_PREVIEW
+            if (session.state != ImportState.PREVIEW || session.options.restoreRequestedAt != null) {
+                return DiscardPreviewResult.NOT_PREVIEW
+            }
+            if (!sessions.compareAndSet(current, current - sessionId)) continue
+
+            items.update { it - sessionId }
+            proposals.update { it - sessionId }
+            return DiscardPreviewResult.DISCARDED
+        }
     }
 
     /** Re-queues the need-attention statuses; a DONE session goes back to FETCHING (05). */

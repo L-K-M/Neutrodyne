@@ -4,6 +4,7 @@
     <string name="import_edit_url">Edit URL</string>
     <string name="import_enter_password">Enter password</string>
     <string name="import_remove">Remove</string>
+    <string name="import_remove_item">Remove %1$s</string>
     <string name="import_credentials_invalid">Enter feed credentials. The username cannot contain a colon, and neither field can contain line breaks.</string>
     <string name="import_resume_progress">Importing… %1$d of %2$d</string>
     <string name="import_resume_view">View</string>

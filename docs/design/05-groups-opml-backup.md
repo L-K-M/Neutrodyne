@@ -1009,6 +1009,7 @@ interface ImportRepository {
     suspend fun updateOptions(sessionId: Long, change: (ImportOptions) -> ImportOptions)
     suspend fun confirm(sessionId: Long): Outcome<Unit, ImportError>
     suspend fun cancel(sessionId: Long)                       // PREVIEW: delete; COMMITTED/FETCHING: stop the worker, CANCELLED
+    suspend fun discardPreview(sessionId: Long): DiscardPreviewResult // DISCARDED, NOT_PREVIEW or FAILED; never stops active work
     suspend fun retry(sessionId: Long, ordinals: Set<Int>)
     suspend fun editUrl(sessionId: Long, ordinal: Int, input: String): Outcome<Unit, AddPodcastError>
     suspend fun enterPassword(sessionId: Long, ordinal: Int, credentials: BasicCredentials): Outcome<Unit, AddPodcastError>
@@ -1285,6 +1286,9 @@ page boundaries. Preview pages retain file order. `ImportSessionView` also carri
 failures from attention, and Remove all reaches unloaded no-media rows through
 `ImportRepository.remove`. These are observed read projections, without a schema
 change. Artwork is observed through `PodcastRepository` only outside preview.
+Report writes are owned by an application-scoped per-session coordinator shared by
+route instances. Busy state survives route disposal; overlapping fix-ups are rejected
+until the accepted write completes, including its credential probe and persistence.
 
 The progress screen observes `ImportDao.observeProgress` ("Fetched 87 of 139"). At `DONE` the runner posts one notification, "139 added, 3 need attention", whose click opens `neutrodyne://open/import/{sessionId}` through 01's `IntentRouter` ([01 Intent routing](01-foundation.md#intent-routing)); it is skipped while that session's screen is visible. Android: channel `import_backup` (ID 3001, tag `import-{sessionId}`), skipped when `POST_NOTIFICATIONS` is not granted (never requested for imports). Desktop: `DesktopNotifier` through the OS notification centre ([11 Notifications](11-desktop.md#notifications)).
 
@@ -1300,7 +1304,16 @@ Implementation note (2026-10-18, M3 C3b): the desktop `import-backup` lane runs 
 
 ### 9. Session lifetime
 
-`PREVIEW` cancel deletes the session and the payload immediately. 02's `db-maintenance` step 3 deletes sessions in `DONE`, `CANCELLED` or abandoned `PREVIEW` with `COALESCE(finishedAt, createdAt)` older than 7 days and their payloads ([02 db-maintenance worker](02-data-model.md#db-maintenance-worker)). Until `db-maintenance` ships (M11b), `AutoSnapshotWorker` (Android, as its first step) and the `import-backup` lane (desktop, once per 24 h) run the same `ImportDao` cleanup (M3). `ExternalImportActivity` sessions created after the user left get a "ready to review" notification (ID 3002, Android) instead of being lost ([Receiving files](#receiving-files)); the desktop needs none, because its inputs reach the running window directly.
+`PREVIEW` cancel deletes the session and the payload immediately. The resume banner
+uses `discardPreview`: ownership, payload deletion and row deletion share one write
+transaction. It returns `NOT_PREVIEW` if confirm or a restore request won first,
+`FAILED` for an unreadable options row or a failed deletion, and `DISCARDED` only
+when the preview was deleted. The banner surfaces unsuccessful discards as a write
+failure and never calls the active-import stop path. The open preview's legacy
+`cancel` path also reports a payload deletion failure instead of letting the route
+close as if deletion succeeded.
+
+02's `db-maintenance` step 3 deletes sessions in `DONE`, `CANCELLED` or abandoned `PREVIEW` with `COALESCE(finishedAt, createdAt)` older than 7 days and their payloads ([02 db-maintenance worker](02-data-model.md#db-maintenance-worker)). Until `db-maintenance` ships (M11b), `AutoSnapshotWorker` (Android, as its first step) and the `import-backup` lane (desktop, once per 24 h) run the same `ImportDao` cleanup (M3). `ExternalImportActivity` sessions created after the user left get a "ready to review" notification (ID 3002, Android) instead of being lost ([Receiving files](#receiving-files)); the desktop needs none, because its inputs reach the running window directly.
 
 ---
 
