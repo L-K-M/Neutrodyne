@@ -53,7 +53,7 @@ internal class ExportRepositoryImpl(
         // A deleted group is the one failure the sealed ExportError has no case for; Io is the
         // closest — the file could not be produced.
         val built = exporter.build(request) ?: return Outcome.Failure(ExportError.Io)
-        val path = exportDir / built.fileName
+        val path = preparedFile(built.fileName) ?: return Outcome.Failure(ExportError.Io)
         val layout =
             when (request.layout) {
                 ExportLayout.GROUPED -> OpmlLayout.GROUPED
