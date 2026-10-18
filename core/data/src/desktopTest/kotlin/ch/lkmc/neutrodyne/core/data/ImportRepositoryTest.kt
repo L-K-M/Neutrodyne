@@ -274,6 +274,51 @@ class ImportRepositoryTest {
             assertEquals(listOf(old, fetching), open.map { it.id })
         }
 
+    private suspend fun reportSession(): Long {
+        val rows =
+            (0 until 100).map { ordinal ->
+                val status = if (ordinal % 2 == 0) ImportItemStatus.NO_MEDIA else ImportItemStatus.SUBSCRIBED
+                importItem(ordinal, "https://host$ordinal.example/feed", status = status)
+            } +
+                listOf(
+                    importItem(
+                        100,
+                        "https://youtube.com/feed",
+                        status = ImportItemStatus.FETCH_FAILED,
+                    ).copy(errorDetail = "DEFERRED"),
+                )
+        return db.seedImportSession(state = ImportState.DONE, items = rows)
+    }
+
+    @Test fun reportCountsDeferredSeparately() =
+        runTest {
+            val view = repository.observeSession(reportSession()).first()!!
+            assertEquals(1, view.deferredCount, "Deferred failures need a separate session count")
+        }
+
+    @Test fun reportIncludesUnloadedNoMediaOrdinals() =
+        runTest {
+            val view = repository.observeSession(reportSession()).first()!!
+            assertEquals(
+                (0 until 100 step 2).toSet(),
+                view.noMediaOrdinals,
+                "Remove all must include unloaded no-media rows",
+            )
+        }
+
+    @Test fun reportGroupsRowsAcrossPages() =
+        runTest {
+            val id = reportSession()
+            val paged = repository.pagedItems(id, ImportItemFilter.ALL).asSnapshot { scrollTo(100) }
+            assertEquals(
+                (1 until 100 step 2).toList() + (0 until 100 step 2).toList() + 100,
+                paged.map {
+                    it.ordinal
+                },
+                "Report sections must stay contiguous across pages",
+            )
+        }
+
     // --- Paged items and the filter table -----------------------------------------------------------
 
     @Test
@@ -316,7 +361,7 @@ class ImportRepositoryTest {
             // A committed session counts its still-PREVIEW rows as not imported too.
             assertEquals(listOf(2, 3, 4, 8), ordinals(ImportItemFilter.NOT_IMPORTED))
             assertEquals(listOf(5, 6, 9), ordinals(ImportItemFilter.NEEDS_ATTENTION))
-            assertEquals((1..9).toList(), ordinals(ImportItemFilter.ALL))
+            assertEquals(listOf(1, 7, 5, 6, 9, 2, 3, 4, 8), ordinals(ImportItemFilter.ALL))
         }
 
     @Test

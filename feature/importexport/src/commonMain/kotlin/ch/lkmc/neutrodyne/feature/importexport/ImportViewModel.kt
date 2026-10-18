@@ -12,24 +12,31 @@ import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.domain.GroupRepository
 import ch.lkmc.neutrodyne.core.domain.ImportError
 import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.domain.ImportScreenVisibility
+import ch.lkmc.neutrodyne.core.domain.PodcastRepository
+import ch.lkmc.neutrodyne.core.model.ArtworkRef
+import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.GroupProposal
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportItemFilter
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
 import ch.lkmc.neutrodyne.core.model.ImportItemView
+import ch.lkmc.neutrodyne.core.model.ImportReportSection
 import ch.lkmc.neutrodyne.core.model.ImportSessionView
 import ch.lkmc.neutrodyne.core.model.ImportState
+import ch.lkmc.neutrodyne.core.model.reportSection
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessages
 import ch.lkmc.neutrodyne.core.ui.platform.NotificationPermissionRequester
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.export_err_storage
+import ch.lkmc.neutrodyne.core.ui.resources.import_credentials_invalid
 import ch.lkmc.neutrodyne.core.ui.resources.import_err_confirm
 import ch.lkmc.neutrodyne.core.ui.resources.import_err_gone
 import ch.lkmc.neutrodyne.core.ui.resources.import_err_network
@@ -48,6 +55,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
@@ -63,7 +71,7 @@ internal data class ImportUiState(
     val proposals: List<GroupProposal> = emptyList(),
     /** The existing groups offered by the "Put everything into group…" picker. */
     val existingGroups: List<Group> = emptyList(),
-    /** A confirm or cancel data job is in flight — edits and actions stay frozen meanwhile. */
+    /** A confirm, cancel or fix-up data job is in flight — edits and actions stay frozen meanwhile. */
     val busy: Boolean = false,
     /** Ephemeral chip state (08: ALL / Only new / Not imported; NEEDS_ATTENTION in the report). */
     val filter: ImportItemFilter = ImportItemFilter.ALL,
@@ -94,6 +102,7 @@ internal class ImportViewModel
         private val groups: GroupRepository,
         private val visibility: ImportScreenVisibility,
         @ApplicationScope private val appScope: CoroutineScope,
+        private val podcasts: PodcastRepository,
     ) : ViewModel() {
         private val state = MutableStateFlow(ImportUiState())
 
@@ -356,6 +365,109 @@ internal class ImportViewModel
                 }.await()
         }
 
+        /** Repository re-checks session ownership and status before every write. */
+        suspend fun retry(item: ImportItemView): Boolean {
+            if (!item.canFixUp || item.status == ImportItemStatus.QUEUED) return false
+            return performWrite { imports.retry(sessionId, setOf(item.ordinal)) }
+        }
+
+        suspend fun remove(item: ImportItemView): Boolean {
+            if (!item.canFixUp) return false
+            return performWrite { imports.remove(sessionId, setOf(item.ordinal)) }
+        }
+
+        suspend fun removeAllNoMedia(): Boolean {
+            val ordinals =
+                state.value.session
+                    ?.noMediaOrdinals
+                    .orEmpty()
+            if (ordinals.isEmpty()) return false
+            return performWrite { imports.remove(sessionId, ordinals) }
+        }
+
+        suspend fun editUrl(
+            item: ImportItemView,
+            input: String,
+        ): UiText? {
+            if (!item.canFixUp) return UiText.Res(Res.string.write_failed)
+            val url = input.trim()
+            val authority =
+                url
+                    .substringAfter("://", "")
+                    .substringBefore('/')
+                    .substringBefore('?')
+                    .substringBefore('#')
+            if ((!url.startsWith("https://", true) && !url.startsWith("http://", true)) ||
+                authority.substringAfterLast('@').isBlank() || url.any { it.isWhitespace() || it < ' ' }
+            ) {
+                return addPodcastErrorText(AddPodcastError.InvalidUrl)
+            }
+
+            return performFixUp {
+                when (val result = imports.editUrl(sessionId, item.ordinal, url)) {
+                    is Outcome.Success -> null
+                    is Outcome.Failure -> addPodcastErrorText(result.error)
+                }
+            }
+        }
+
+        suspend fun enterPassword(
+            item: ImportItemView,
+            credentials: BasicCredentials,
+        ): UiText? {
+            if (!item.canFixUp || item.status != ImportItemStatus.AUTH_REQUIRED) {
+                return UiText.Res(Res.string.write_failed)
+            }
+            if ((credentials.username.isEmpty() && credentials.password.isEmpty()) ||
+                ':' in credentials.username || credentials.username.any { it < ' ' || it == '\u007f' } ||
+                credentials.password.any { it < ' ' || it == '\u007f' }
+            ) {
+                return UiText.Res(Res.string.import_credentials_invalid)
+            }
+
+            return performFixUp {
+                when (val result = imports.enterPassword(sessionId, item.ordinal, credentials)) {
+                    is Outcome.Success -> null
+                    is Outcome.Failure -> addPodcastErrorText(result.error)
+                }
+            }
+        }
+
+        /** The row observes persisted artwork; previews never invoke this stream. */
+        fun artworkFor(podcastId: Long): Flow<ArtworkRef?> =
+            podcasts.observePodcast(podcastId).map { it?.artwork }.catch { emit(null) }
+
+        private val ImportItemView.canFixUp: Boolean
+            get() =
+                podcastId != null &&
+                    reportSection() in FIXABLE_SECTIONS &&
+                    !(status == ImportItemStatus.FETCH_FAILED && errorDetail == "DEFERRED")
+
+        private suspend fun performWrite(write: suspend () -> Unit): Boolean {
+            val error =
+                performFixUp {
+                    write()
+                    null
+                }
+            if (error != null) userMessages.post(error)
+            return error == null
+        }
+
+        private suspend fun performFixUp(block: suspend () -> UiText?): UiText? {
+            val session = state.value.session ?: return UiText.Res(Res.string.write_failed)
+            if (state.value.busy || session.state !in FIXUP_STATES || !appScope.coroutineContext.isActive) {
+                return UiText.Res(Res.string.write_failed)
+            }
+            state.update { it.copy(busy = true) }
+            return appScope
+                .async {
+                    // Exceptions can contain a literal password, even without a URL to redact.
+                    suspendRunCatching { block() }.getOrElse { UiText.Res(Res.string.write_failed) }
+                }.also { job ->
+                    job.invokeOnCompletion { state.update { it.copy(busy = false) } }
+                }.await()
+        }
+
         fun acknowledgeMessage(id: Long) = userMessages.shown(id)
 
         /** Editable means a real non-backup PREVIEW session with no confirm/cancel in flight. */
@@ -400,6 +512,13 @@ internal class ImportViewModel
 
         private companion object {
             const val TAG = "ImportViewModel"
+            val FIXABLE_SECTIONS =
+                setOf(
+                    ImportReportSection.QUEUED,
+                    ImportReportSection.ATTENTION,
+                    ImportReportSection.NO_MEDIA,
+                )
+            val FIXUP_STATES = setOf(ImportState.COMMITTED, ImportState.FETCHING, ImportState.DONE)
         }
     }
 

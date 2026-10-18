@@ -112,7 +112,7 @@ internal class ImportRepositoryImpl(
             .distinctUntilChanged()
             .flatMapLatest { state ->
                 Pager(PAGING_CONFIG) {
-                    db.importDao().pagedItems(sessionId, filterStatuses(filter, state))
+                    db.importDao().pagedItems(sessionId, filterStatuses(filter, state), state ?: ImportState.PREVIEW)
                 }.flow.map { data -> data.map(::itemView) }
             }
 
@@ -257,11 +257,13 @@ internal class ImportRepositoryImpl(
             db.importDao().observeSession(sessionId),
             db.importDao().observeProgress(sessionId),
             db.importDao().observeItemTallies(sessionId),
-        ) { session, progress, tallies -> session?.toView(progress, tallies) }
+            db.importDao().observeNoMediaOrdinals(sessionId),
+        ) { session, progress, tallies, noMedia -> session?.toView(progress, tallies, noMedia) }
 
     private fun ImportSessionEntity.toView(
         progress: List<ImportStatusCount>,
         tallies: ImportItemTallies,
+        noMedia: List<Int>,
     ): ImportSessionView =
         ImportSessionView(
             id = id,
@@ -275,6 +277,8 @@ internal class ImportRepositoryImpl(
             selectedCount = tallies.selectedCount,
             youtubeCount = tallies.youtubeCount,
             createdAt = createdAt,
+            deferredCount = tallies.deferredCount,
+            noMediaOrdinals = noMedia.toSet(),
         )
 
     /** Rows show monogram, title and host — never the URL (05 §5). */

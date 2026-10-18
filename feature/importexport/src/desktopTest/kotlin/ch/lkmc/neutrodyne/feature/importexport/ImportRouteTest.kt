@@ -45,6 +45,7 @@ import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeImportRepository
+import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
@@ -74,6 +75,7 @@ import kotlin.test.assertTrue
 class ImportRouteTest {
     private lateinit var previousLocale: Locale
     private val imports = FakeImportRepository()
+    private val podcasts = FakePodcastRepository()
     private val groups = FakeGroupRepository()
     private val visibility = ImportScreenVisibility()
     private val navigator = RecordingAppNavigator()
@@ -166,7 +168,7 @@ class ImportRouteTest {
         viewModel: ImportViewModel? = null,
     ) {
         val sessionId = key.sessionId.toLongOrNull() ?: -1L
-        val vm = viewModel ?: ImportViewModel(sessionId, imports, groups, visibility, appScope)
+        val vm = viewModel ?: ImportViewModel(sessionId, imports, groups, visibility, appScope, podcasts)
         setContent {
             CompositionLocalProvider(LocalLifecycleOwner provides ResumedLifecycleOwner()) {
                 CompositionLocalProvider(
@@ -260,7 +262,7 @@ class ImportRouteTest {
                         error("disk failed")
                     }
                 }
-            val vm = ImportViewModel(id, repo, groups, visibility, appScope)
+            val vm = ImportViewModel(id, repo, groups, visibility, appScope, podcasts)
             setRouteContent(ImportKey(id.toString()), vm)
             onNodeWithText("Cancel").performClick()
             waitUntil(timeoutMillis = 5_000) { attempted.get() && !vm.uiState.value.busy }
@@ -523,7 +525,10 @@ class ImportRouteTest {
     @Test
     fun aMissingSessionShowsTheUnavailableBody() =
         runComposeUiTest {
-            setRouteContent(ImportKey("99"), viewModel = ImportViewModel(99L, imports, groups, visibility, appScope))
+            setRouteContent(
+                ImportKey("99"),
+                viewModel = ImportViewModel(99L, imports, groups, visibility, appScope, podcasts),
+            )
 
             onNodeWithText("This import is no longer available").assertExists()
             onNodeWithText("Back").assertExists()
@@ -532,7 +537,7 @@ class ImportRouteTest {
     @Test
     fun aNonNumericKeyShowsTheUnavailableBody() =
         runComposeUiTest {
-            val vm = ImportViewModel(1L, imports, groups, visibility, appScope)
+            val vm = ImportViewModel(1L, imports, groups, visibility, appScope, podcasts)
             setRouteContent(ImportKey("not-a-number"), viewModel = vm)
 
             onNodeWithText("This import is no longer available").assertExists()

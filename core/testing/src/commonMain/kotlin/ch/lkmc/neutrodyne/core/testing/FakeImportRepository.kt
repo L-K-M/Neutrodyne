@@ -21,6 +21,7 @@ import ch.lkmc.neutrodyne.core.model.ImportSessionView
 import ch.lkmc.neutrodyne.core.model.ImportSource
 import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.ImportWarning
+import ch.lkmc.neutrodyne.core.model.reportSection
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -107,7 +108,14 @@ class FakeImportRepository(
     ): Flow<PagingData<ImportItemView>> =
         combine(sessions, items) { bySession, byItem ->
             val statuses = filterStatuses(filter, bySession[sessionId]?.state)
-            PagingData.from(byItem[sessionId].orEmpty().filter { it.status in statuses })
+            val rows = byItem[sessionId].orEmpty().filter { it.status in statuses }
+            PagingData.from(
+                if (bySession[sessionId]?.state == ImportState.PREVIEW) {
+                    rows
+                } else {
+                    rows.sortedWith(compareBy<ImportItemView> { it.reportSection().ordinal }.thenBy { it.ordinal })
+                },
+            )
         }
 
     /** Only PREVIEW items may toggle (05's status table); `ordinals = null` means all. */
@@ -245,6 +253,16 @@ class FakeImportRepository(
             counts = sessionItems.groupingBy { it.status }.eachCount(),
             selectedCount = sessionItems.count { it.selected },
             youtubeCount = sessionItems.count { it.selected && it.kind == ImportItemKind.YOUTUBE },
+            deferredCount =
+                sessionItems.count {
+                    it.status == ImportItemStatus.FETCH_FAILED &&
+                        it.errorDetail == "DEFERRED"
+                },
+            noMediaOrdinals =
+                sessionItems
+                    .filter { it.status == ImportItemStatus.NO_MEDIA }
+                    .map { it.ordinal }
+                    .toSet(),
         )
 
     private companion object {
