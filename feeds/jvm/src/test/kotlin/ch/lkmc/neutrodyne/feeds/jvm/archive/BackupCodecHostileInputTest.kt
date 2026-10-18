@@ -19,6 +19,7 @@ import java.io.BufferedOutputStream
 import java.nio.file.Files
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -34,6 +35,12 @@ import kotlin.test.assertTrue
  */
 class BackupCodecHostileInputTest {
     private val codec = BackupCodec()
+    private val tempFiles = mutableListOf<Path>()
+
+    @AfterTest
+    fun deleteTempFiles() {
+        for (path in tempFiles) FileSystem.SYSTEM.delete(path, mustExist = false)
+    }
 
     @Test
     fun aHugeUnknownLibraryArrayIsSkippedNotMaterialised() {
@@ -173,6 +180,7 @@ class BackupCodecHostileInputTest {
 
     private fun backupZip(write: (ZipOutputStream) -> Unit): Path {
         val path = Files.createTempFile("backup-codec", ".zip").toOkioPath()
+        tempFiles += path
         ZipOutputStream(BufferedOutputStream(Files.newOutputStream(path.toNioPath()))).use(write)
         return path
     }
