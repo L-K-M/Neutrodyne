@@ -18,6 +18,7 @@ import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.core.model.PlayContextSpec
 import ch.lkmc.neutrodyne.core.model.PlaySessionInfo
+import ch.lkmc.neutrodyne.core.model.QueueRemoval
 import ch.lkmc.neutrodyne.core.model.RejectReason
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.UpNextItem
@@ -26,6 +27,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeYouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.core.testing.ProtocolOrderKeys
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
+import ch.lkmc.neutrodyne.core.testing.database.episodeStateEntity
 import ch.lkmc.neutrodyne.core.testing.database.groupEntity
 import ch.lkmc.neutrodyne.core.testing.database.memberEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
@@ -226,6 +228,102 @@ class QueueRepositoryImplTest {
             } finally {
                 tracked.close()
             }
+        }
+
+    @Test fun removeWithUndoSnapshotsStoredOrderAndUndoRestoresAroundConcurrentEdits() =
+        runTest {
+            val ids = seed(5)
+            queue(ids.take(4))
+            val removal = repo.removeWithUndo(listOf(ids[1], ids[2], -1L))
+            // The token is the stored truth: the unqueued request id is absent and the order is
+            // the pre-delete one, both captured inside the delete's transaction.
+            assertEquals(QueueRemoval(listOf(ids[1], ids[2]), ids.take(4)), removal)
+            assertEquals(listOf(ids[0], ids[3]), order())
+
+            // Concurrent edits: a new tail item and a survivor move to the front.
+            repo.addLast(listOf(ids[4]))
+            repo.move(ids[3], 0)
+            assertEquals(listOf(ids[3], ids[0], ids[4]), order())
+            val survivors = db.queueDao().entries()
+
+            repo.undoRemoval(removal)
+            // ids[1]/ids[2] land before their surviving original successor ids[3], keeping the
+            // concurrent order of ids[3], ids[0], ids[4] and the removed pair's relative order.
+            assertEquals(listOf(ids[1], ids[2], ids[3], ids[0], ids[4]), order())
+            assertEquals(survivors, db.queueDao().entries().filter { it.episodeId !in removal.removedIds })
+        }
+
+    @Test fun undoSkipsRequeuedCurrentPlayedAndMissingRowsButRestoresUnavailable() =
+        runTest {
+            val ids = seed(5)
+            queue(ids)
+            val removal = repo.removeWithUndo(ids)
+            assertEquals(ids, removal.removedIds)
+
+            // Since the removal: ids[0] was requeued (lands at the end), ids[1] became current,
+            // ids[2] was played, ids[3] turned unavailable, ids[4]'s episode vanished.
+            repo.addLast(listOf(ids[0]))
+            db.playSessionDao().write(PlaySessionEntity(currentEpisodeId = ids[1], generation = 70, updatedAt = 1))
+            db.episodeStateDao().upsert(episodeStateEntity(ids[2], playedAt = 5))
+            db.episodeDao().setAvailability(ids[3], Availability.UNAVAILABLE)
+            db.useWriterConnection { it.execSql("DELETE FROM episode WHERE id = ${ids[4]}") }
+
+            repo.undoRemoval(removal)
+            // Only ids[3] restores — unplayed, existing, non-current; its old membership means
+            // the availability gate does not apply — and it lands after ids[0], its closest
+            // surviving predecessor, which stays where the re-add put it.
+            assertEquals(listOf(ids[0], ids[3]), order())
+            assertEquals(70, db.playSessionDao().get()?.generation)
+        }
+
+    @Test fun undoFallsBackToSurvivingPredecessorThenToClampedIndex() =
+        runTest {
+            val ids = seed(4)
+            queue(ids.take(3))
+
+            // Last item removed: no original successor survives, so it follows its predecessor —
+            // ahead of the concurrently appended ids[3], whose relative order is untouched.
+            val last = repo.removeWithUndo(listOf(ids[2]))
+            repo.addLast(listOf(ids[3]))
+            repo.undoRemoval(last)
+            assertEquals(listOf(ids[0], ids[1], ids[2], ids[3]), order())
+
+            // No survivor at all: the first item's old index 0 clamps ahead of a foreign queue.
+            val first = repo.removeWithUndo(listOf(ids[0]))
+            repo.remove(listOf(ids[1], ids[2], ids[3]))
+            val foreign = seed(1).single()
+            queue(listOf(foreign))
+            repo.undoRemoval(first)
+            assertEquals(listOf(ids[0], foreign), order())
+        }
+
+    @Test fun undoPreservesRemovedOrderWhenSurvivingAnchorsWereReversed() =
+        runTest {
+            val ids = seed(5)
+            queue(ids)
+            val removal = repo.removeWithUndo(listOf(ids[1], ids[3]))
+            repo.move(ids[4], 0)
+            val survivors = db.queueDao().entries()
+
+            repo.undoRemoval(removal)
+
+            assertEquals(removal.removedIds, order().filter { it in removal.removedIds })
+            assertEquals(survivors, db.queueDao().entries().filter { it.episodeId !in removal.removedIds })
+        }
+
+    @Test fun clearWithUndoRestoresTheStoredOrderAndNeverTouchesGeneration() =
+        runTest {
+            val ids = seed(4)
+            queue(ids)
+            db.playSessionDao().write(PlaySessionEntity(generation = 70, updatedAt = 1))
+
+            val removal = repo.clearWithUndo()
+            assertEquals(QueueRemoval(ids, ids), removal)
+            assertTrue(order().isEmpty())
+
+            repo.undoRemoval(removal)
+            assertEquals(ids, order())
+            assertEquals(70, db.playSessionDao().get()?.generation)
         }
 
     @Test fun virtualQueueRequiresNonnegativeLimit() {

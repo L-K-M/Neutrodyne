@@ -99,3 +99,16 @@ data class PlaybackMediaInfo(
     /** System surfaces use podcast art when episode art is not pinned (06 Artwork rule). */
     val podcastArtwork: ArtworkRef = artwork,
 )
+
+/**
+ * The undo token of `QueueRepository.removeWithUndo`/`clearWithUndo` (06 Up next operations): the
+ * episode ids actually deleted and the complete stored Up next order before deletion, captured in
+ * the same write transaction. `undoRemoval` re-inserts the still eligible ids where the surviving
+ * order places them; it is not a snapshot rollback — concurrent edits keep their positions.
+ */
+data class QueueRemoval(
+    /** Queued ids the call deleted, in their original queue order (a subset of the request). */
+    val removedIds: List<Long>,
+    /** The full stored Up next order from before the delete, in queue order. */
+    val originalOrder: List<Long>,
+)

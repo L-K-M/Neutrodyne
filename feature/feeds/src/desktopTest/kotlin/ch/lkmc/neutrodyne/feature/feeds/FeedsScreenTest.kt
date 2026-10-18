@@ -85,6 +85,8 @@ import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
 import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
+import ch.lkmc.neutrodyne.core.testing.FakePlaybackStateSource
 import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
@@ -92,6 +94,7 @@ import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
 import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
 import ch.lkmc.neutrodyne.core.testing.testLibraryTile
+import ch.lkmc.neutrodyne.core.testing.testPlatformInfo
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionController
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
@@ -864,6 +867,7 @@ class FeedsScreenTest {
                             onVisibleIds = { _, ids -> onVisibleIds(ids) },
                             pagingFor = { cachedFeed },
                             onRefresh = { onRefresh() },
+                            onPlay = {},
                             onFiltersChange = { _, filters -> onFiltersChange(filters) },
                             onAction = onAction,
                             onMarkAllPlayedClick = { onMarkAllPlayed() },
@@ -1074,6 +1078,9 @@ private class PagerFixture {
                     FakeEpisodeLiveStateSource(),
                     groups,
                     settings,
+                    FakePlaybackController(),
+                    FakePlaybackStateSource(),
+                    testPlatformInfo,
                     Dispatchers.Unconfined,
                 ).also {
                     model = it
@@ -1104,6 +1111,7 @@ private class PagerFixture {
                         pagingFor = viewModel::pagingFor,
                         prefsFor = viewModel::prefsFor,
                         onRefresh = viewModel::onRefresh,
+                        onPlay = viewModel::playFeed,
                         onFiltersChange = viewModel::onFilters,
                         onAction = {},
                         onMarkAllPlayedClick = viewModel::markAllPlayed,

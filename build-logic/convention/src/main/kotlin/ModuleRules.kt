@@ -89,6 +89,7 @@ internal fun Project.configureModuleGraphAssert() {
                 ":core:designsystem -> :core:model",
                 ":core:ui -> :core:(designsystem|model|common|navigation)",
                 ":core:ui -> :download:api",
+                ":core:ui -> :playback:api",
                 ":core:testing -> :core:(domain|model|common|database|navigation)",
                 ":core:testing -> :(playback|download|youtube|sync):api",
                 ":core:testing -> :sync:protocol",

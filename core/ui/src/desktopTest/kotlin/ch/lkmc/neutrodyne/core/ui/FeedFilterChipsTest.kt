@@ -51,7 +51,7 @@ class FeedFilterChipsTest {
         }
 
     @Test
-    fun milestoneGatedChipsAreAbsentEvenForStoredFlags() =
+    fun inProgressIsAvailableWhileDownloadedRemainsGated() =
         runComposeUiTest {
             val previous = Locale.getDefault()
             Locale.setDefault(Locale.ENGLISH)
@@ -64,8 +64,8 @@ class FeedFilterChipsTest {
                     )
                 }
                 onNodeWithText("Downloaded").assertDoesNotExist()
-                onNodeWithText("In progress").assertDoesNotExist()
-                onNodeWithText("Clear filters").assertDoesNotExist()
+                onNodeWithText("In progress").assertIsSelected()
+                onNodeWithText("Clear filters").assertExists()
             } finally {
                 Locale.setDefault(previous)
             }

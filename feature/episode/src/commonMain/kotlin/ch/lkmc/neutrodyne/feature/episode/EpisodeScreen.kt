@@ -24,7 +24,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -73,10 +72,12 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_mark_played
 import ch.lkmc.neutrodyne.core.ui.resources.action_mark_unplayed
 import ch.lkmc.neutrodyne.core.ui.resources.action_more
 import ch.lkmc.neutrodyne.core.ui.resources.action_open_website
+import ch.lkmc.neutrodyne.core.ui.resources.action_pause
 import ch.lkmc.neutrodyne.core.ui.resources.action_play
 import ch.lkmc.neutrodyne.core.ui.resources.action_play_again
 import ch.lkmc.neutrodyne.core.ui.resources.action_play_last
 import ch.lkmc.neutrodyne.core.ui.resources.action_play_next
+import ch.lkmc.neutrodyne.core.ui.resources.action_resume
 import ch.lkmc.neutrodyne.core.ui.resources.action_share
 import ch.lkmc.neutrodyne.core.ui.resources.action_unfavorite
 import ch.lkmc.neutrodyne.core.ui.resources.action_up_next
@@ -85,20 +86,17 @@ import ch.lkmc.neutrodyne.core.ui.resources.episode_loading
 import ch.lkmc.neutrodyne.core.ui.resources.episode_no_notes
 import ch.lkmc.neutrodyne.core.ui.resources.episode_not_found
 import ch.lkmc.neutrodyne.core.ui.resources.episode_offline_row
-import ch.lkmc.neutrodyne.core.ui.resources.episode_offline_toast
 import ch.lkmc.neutrodyne.core.ui.resources.episode_opens_youtube
 import ch.lkmc.neutrodyne.core.ui.resources.summary_downloaded
 import ch.lkmc.neutrodyne.core.ui.resources.summary_video
-import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.core.ui.showNotes
-import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 
 /**
  * The episode detail screen (08 Episode detail): a 120 dp cover beside the title (YouTube renders
  * its art 16:9 full width instead), the meta line, the action row and the sanitised show notes as
  * one lazy item per block. Play, download and Up-next actions dispatch to the route's handler and
- * stay inert until M4/M6; timestamp taps wait for M5's seek — both deviations recorded in 08.
+ * use the playback controller in M4 and download engine in M6; timestamps wait for M5's seek.
  */
 @Composable
 internal fun EpisodeScreen(
@@ -109,8 +107,6 @@ internal fun EpisodeScreen(
     modifier: Modifier = Modifier,
 ) {
     val episode = state.episode
-    val snackbar = LocalSnackbarHost.current
-    val scope = rememberCoroutineScope()
     var imagesRevealed by rememberSaveable { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -138,9 +134,7 @@ internal fun EpisodeScreen(
                 LazyColumn(Modifier.fillMaxSize()) {
                     offlineBannerItem(state.offline)
                     item(key = "header", contentType = "header") {
-                        EpisodeHeader(episode, state, onAction) { message ->
-                            scope.launch { snackbar.showSnackbar(message) }
-                        }
+                        EpisodeHeader(episode, state, onAction)
                     }
                     val notes = state.notes
                     if (notes == null || notes.blocks.isEmpty()) {
@@ -289,7 +283,6 @@ private fun EpisodeHeader(
     episode: EpisodeDetail,
     state: EpisodeUiState,
     onAction: (EpisodeAction) -> Unit,
-    toast: (String) -> Unit,
 ) {
     val isYouTube = episode.sourceType != SourceType.RSS
     Column(Modifier.fillMaxWidth().padding(horizontal = H_PADDING)) {
@@ -359,7 +352,7 @@ private fun EpisodeHeader(
             }
         }
 
-        ActionRow(episode, state, isYouTube, onAction, toast)
+        ActionRow(episode, state, isYouTube, onAction)
     }
 }
 
@@ -406,7 +399,7 @@ private fun metaLine(episode: EpisodeDetail): UiText {
 /**
  * The action row (08 Episode detail): the primary play affordance — "Watch on YouTube" for
  * YouTube sources while external mode is the only mode (M8 adds the engine's Play), the
- * offline-undownloaded state shows `cloud_off` "Offline" and toasts on tap — plus Download, Up
+ * offline-undownloaded state shows `cloud_off` "Offline" and dispatches the playback intent — plus Download, Up
  * next and the played toggle as icon-label buttons. `FlowRow` wraps them onto extra lines so
  * every action stays reachable at 200 % text on a compact width (08's fontScale ≥ 1.5 rule).
  */
@@ -417,11 +410,9 @@ private fun ActionRow(
     state: EpisodeUiState,
     isYouTube: Boolean,
     onAction: (EpisodeAction) -> Unit,
-    toast: (String) -> Unit,
 ) {
-    val offlineToast = stringResource(Res.string.episode_offline_toast)
     val downloaded = episode.downloadState == DownloadState.COMPLETED
-    val playableOffline = !state.offline || downloaded
+    val playableOffline = state.isNowPlaying || !state.offline || downloaded
     var upNextMenu by remember { mutableStateOf(false) }
 
     FlowRow(
@@ -439,7 +430,6 @@ private fun ActionRow(
         } else if (!playableOffline) {
             NdButton(onClick = {
                 onAction(EpisodeAction.PlayToggle(episode.id))
-                toast(offlineToast)
             }) {
                 Icon(
                     NdIcons.CloudOff,
@@ -454,16 +444,17 @@ private fun ActionRow(
         } else {
             NdButton(onClick = { onAction(EpisodeAction.PlayToggle(episode.id)) }) {
                 Icon(
-                    NdIcons.PlayArrow,
+                    if (state.isNowPlaying && state.isPlaying) NdIcons.Pause else NdIcons.PlayArrow,
                     contentDescription = null,
                     modifier = Modifier.size(BUTTON_ICON),
                 )
                 Text(
                     stringResource(
-                        if (episode.playedAt != null) {
-                            Res.string.action_play_again
-                        } else {
-                            Res.string.action_play
+                        when {
+                            state.isNowPlaying && state.isPlaying -> Res.string.action_pause
+                            state.isNowPlaying -> Res.string.action_resume
+                            episode.playedAt != null -> Res.string.action_play_again
+                            else -> Res.string.action_play
                         },
                     ),
                     modifier = Modifier.padding(start = BUTTON_LABEL_GAP),

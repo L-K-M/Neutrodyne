@@ -293,6 +293,7 @@ object FeedInvalidationProbe {
         private val db: NeutrodyneDatabase,
         private val scope: TestScope,
         private val feed: FeedSource,
+        private val filters: FeedFilters = FeedFilters(),
     ) {
         private var source: PagingSource<Int, EpisodeRowProjection>? = null
         private val onInvalidated: () -> Unit = { invalidations++ }
@@ -303,7 +304,7 @@ object FeedInvalidationProbe {
             db.invalidationTracker.refresh()
             scope.runCurrent()
             source =
-                db.feedDao().page(FeedQueryBuilder.page(feed, FeedFilters(), FeedOrder.NEWEST_FIRST)).also {
+                db.feedDao().page(FeedQueryBuilder.page(feed, filters, FeedOrder.NEWEST_FIRST)).also {
                     it.registerInvalidatedCallback(onInvalidated)
                     val page = it.load(PagingSource.LoadParams.Refresh<Int>(null, PAGE_SIZE, false))
                     assertIs<PagingSource.LoadResult.Page<Int, EpisodeRowProjection>>(page)
@@ -311,6 +312,12 @@ object FeedInvalidationProbe {
                 }
             scope.runCurrent()
             assertFalse(assertNotNull(source).invalid, "fresh source for $feed")
+        }
+
+        suspend fun ids(): Set<Long> {
+            val result = assertNotNull(source).load(PagingSource.LoadParams.Refresh<Int>(null, PAGE_SIZE, false))
+            assertIs<PagingSource.LoadResult.Page<Int, EpisodeRowProjection>>(result)
+            return result.data.mapTo(HashSet()) { it.id }
         }
 
         suspend fun drainAndRearm() {

@@ -19,7 +19,7 @@
     <string name="library_empty_title">Deine Bibliothek ist leer</string>
     <string name="library_empty_body">Abonnements, die du hinzufügst, erscheinen hier als Kacheln.</string>
     <string name="up_next_empty_title">„Als Nächstes“ ist leer</string>
-    <string name="up_next_empty_body">Reihe Folgen aus einem Feed oder deiner Bibliothek ein.</string>
+    <string name="up_next_empty_body">Füge Folgen mit „Als Nächstes abspielen“ oder „Zuletzt abspielen“ hinzu.</string>
     <string name="downloads_empty_title">Keine Downloads</string>
     <string name="downloads_empty_body">Heruntergeladene Folgen werden hier aufgelistet.</string>
     <string name="discover_empty_title">Finde etwas Neues</string>

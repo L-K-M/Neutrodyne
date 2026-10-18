@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.core.domain
 
 import ch.lkmc.neutrodyne.core.model.AddResult
 import ch.lkmc.neutrodyne.core.model.PlaySessionInfo
+import ch.lkmc.neutrodyne.core.model.QueueRemoval
 import ch.lkmc.neutrodyne.core.model.UpNextItem
 import ch.lkmc.neutrodyne.core.model.VirtualQueue
 import kotlinx.coroutines.flow.Flow
@@ -35,6 +36,28 @@ interface QueueRepository {
     suspend fun remove(episodeIds: List<Long>)
 
     suspend fun clearUpNext()
+
+    /**
+     * [remove]/[clearUpNext] returning the undo token: the ids actually deleted (a subset of the
+     * request, in queue order) and the stored order before deletion, captured in the same
+     * transaction as the delete.
+     */
+    suspend fun removeWithUndo(episodeIds: List<Long>): QueueRemoval
+
+    suspend fun clearWithUndo(): QueueRemoval
+
+    /**
+     * Restores [removal]'s rows in one transaction. Only ids still missing from Up next, still
+     * existing, unplayed and not current are re-inserted; membership is restored rather than
+     * re-added, so the add path's availability/YouTube gates do not apply. In original removed
+     * order each id goes before its nearest surviving original successor, else after its closest
+     * surviving original predecessor, else at its old index clamped to the list. Placement never
+     * precedes a row restored earlier in this batch, even when surviving anchors were reversed.
+     * Existing entries
+     * keep their relative order — an already requeued id is left exactly where it is. Never
+     * touches `play_session`.
+     */
+    suspend fun undoRemoval(removal: QueueRemoval)
 
     /** Stop after Up next: retain current/queue; clear context/anchor and increment generation. */
     suspend fun clearContext()
