@@ -45,6 +45,7 @@ internal fun ImportSessionRoute(
     sessionId: Long,
     viewModel: ImportViewModel =
         assistedMetroViewModel<ImportViewModel, ImportViewModel.Factory> { create(sessionId) },
+    restoreViewModel: RestoreViewModel? = null,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val messages by viewModel.messages.collectAsStateWithLifecycle()
@@ -53,30 +54,43 @@ internal fun ImportSessionRoute(
     val scope = rememberCoroutineScope()
     ShowUserMessages(messages, viewModel::acknowledgeMessage)
 
-    ImportScreen(
-        state = state,
-        items = viewModel.items,
-        onQuery = viewModel::setQuery,
-        onFilter = viewModel::setFilter,
-        onToggle = viewModel::toggleItem,
-        onSelectAll = viewModel::selectAll,
-        onSelectNone = viewModel::selectNone,
-        onImportGroups = viewModel::setImportGroups,
-        onIncludeGroup = viewModel::setGroupIncluded,
-        onRenameGroup = viewModel::renameGroup,
-        onTargetGroup = viewModel::setTargetGroup,
-        onTargetGroupName = viewModel::setTargetGroupName,
-        onTreatExisting = viewModel::setTreatExistingAsPlayed,
-        onNotify = { enabled -> viewModel.setNotifyNewEpisodes(enabled, requester) },
-        onConfirm = { scope.launch { viewModel.confirm() } },
-        onCancelPreview = {
-            scope.launch {
-                if (viewModel.cancelSession()) navigator.pop(key)
-            }
-        },
-        onStopImport = { scope.launch { viewModel.cancelSession() } },
-        onBack = { navigator.pop(key) },
-    )
+    val importContent: @Composable () -> Unit = {
+        ImportScreen(
+            state = state,
+            items = viewModel.items,
+            onQuery = viewModel::setQuery,
+            onFilter = viewModel::setFilter,
+            onToggle = viewModel::toggleItem,
+            onSelectAll = viewModel::selectAll,
+            onSelectNone = viewModel::selectNone,
+            onImportGroups = viewModel::setImportGroups,
+            onIncludeGroup = viewModel::setGroupIncluded,
+            onRenameGroup = viewModel::renameGroup,
+            onTargetGroup = viewModel::setTargetGroup,
+            onTargetGroupName = viewModel::setTargetGroupName,
+            onTreatExisting = viewModel::setTreatExistingAsPlayed,
+            onNotify = { enabled -> viewModel.setNotifyNewEpisodes(enabled, requester) },
+            onConfirm = { scope.launch { viewModel.confirm() } },
+            onCancelPreview = {
+                scope.launch {
+                    if (viewModel.cancelSession()) navigator.pop(key)
+                }
+            },
+            onStopImport = { scope.launch { viewModel.cancelSession() } },
+            onBack = { navigator.pop(key) },
+        )
+    }
+    if (state.session?.format == ImportFormat.NEUTRODYNE_BACKUP) {
+        RestoreSessionRoute(
+            sessionId = sessionId,
+            importState = state,
+            onCancel = { scope.launch { if (viewModel.cancelSession()) navigator.pop(key) } },
+            report = importContent,
+            providedViewModel = restoreViewModel,
+        )
+    } else {
+        importContent()
+    }
 }
 
 /** Preview-editable only while a real non-backup PREVIEW session sits behind the key. */

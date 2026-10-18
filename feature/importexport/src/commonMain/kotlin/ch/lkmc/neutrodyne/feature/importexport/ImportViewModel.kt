@@ -83,7 +83,7 @@ internal data class ImportUiState(
  * Preview edits (`setSelected`, `updateOptions`) are serialized in acceptance order;
  * accepted edits, [confirm] and [cancelSession] run on `@ApplicationScope`, so a disappearing
  * route cannot take them down and the job itself owns `busy`. A `NEUTRODYNE_BACKUP` PREVIEW
- * session renders the unavailable body (the restore preview is D4) and no path here calls the
+ * session uses RestoreViewModel for its preview and no path here calls the
  * normal import [ImportRepository.confirm] for it — the committer would reject it anyway.
  */
 internal class ImportViewModel

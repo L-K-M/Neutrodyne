@@ -896,6 +896,20 @@ PREVIEW                                         FETCHING / DONE
 | Computer backup (desktop, replaces the Android backup section) | Static text "Computers have no automatic backup. Create a backup now and then, or keep your library in step with Sync." with "Sync settings" (`SyncSettingsKey`) ([05 Auto Backup](05-groups-opml-backup.md#auto-backup), [11 Behaviour differences from Android](11-desktop.md#behaviour-differences-from-android)) |
 | Debug builds only (Android `BuildInfo.debug`) | "Write snapshot now" → `BackupRepository.writeSnapshotNow()`. Published APKs are release builds and have no such row; 05's nightly `bmgr` procedure triggers the same function through the shell-only `SnapshotNowReceiver` ([05 Testing with bmgr](05-groups-opml-backup.md#testing-with-bmgr)) |
 
+*Implementation note (2026-10-18, M3 D4):* manual backup creation uses
+`prepareBackup(includePasswords)` and the returned descriptor's privacy counts,
+then the warning and save picker, then `savePreparedBackup(prepared, uri)`.
+This supersedes the advisory `preflight` / `createBackup` sequence in the table
+above and implements 05's frozen-consent contract. Restore acquisition uses the
+existing `PlatformActions.files` picker and `ImportRepository.create`.
+`SyncController` is not available on this base; the linked reach question and
+its server-count confirmation remain staged for MS2. The preview shows the
+inspected linked host, and the repository/runner's explicit `Unsupported`
+result remains visible rather than claiming a linked restore succeeded.
+The M6 re-download offer remains staged with the report work. The Android
+section shows the static screen-lock requirement; a device-specific lock
+warning awaits a platform capability seam.
+
 ### Export dialog
 
 `ExportKey(groupId)`, `:feature:importexport`, M3.
