@@ -589,6 +589,15 @@
     <string name="import_err_confirm">Der Import konnte nicht abgeschlossen werden</string>
     <string name="import_err_gone">Dieser Import ist nicht mehr verfügbar</string>
     <string name="import_err_network">Keine Verbindung — prüfe das Netzwerk und versuche es erneut</string>
+    <string name="import_err_title">Diese Datei konnte nicht importiert werden</string>
+    <string name="import_err_unreadable">Diese Datei konnte nicht geöffnet werden. Wähle sie direkt in Neutrodyne aus.</string>
+    <string name="import_err_unreadable_desktop">Diese Datei konnte nicht geöffnet werden. Prüfe, ob Neutrodyne sie lesen darf. Erlaube unter macOS den Zugriff in Systemeinstellungen › Datenschutz &amp; Sicherheit › Dateien und Ordner.</string>
+    <string name="import_err_too_large">Diese Datei ist zu groß für eine Abonnementliste (Grenze 50 MB).</string>
+    <string name="import_err_storage">Nicht genug Speicherplatz.</string>
+    <string name="import_err_hostile">Diese Datei kann nicht sicher importiert werden.</string>
+    <string name="import_err_empty">In dieser Datei wurden keine Podcasts gefunden.</string>
+    <string name="import_err_single_feed">Das ist ein Podcast-Feed, keine Abonnementliste.</string>
+    <string name="import_err_unsupported">Dieses Dateiformat wird nicht unterstützt.</string>
 
     <!-- M3 OPML export (05 OPML export, 08 Export dialog). -->
     <string name="export_title">Abonnements exportieren</string>
