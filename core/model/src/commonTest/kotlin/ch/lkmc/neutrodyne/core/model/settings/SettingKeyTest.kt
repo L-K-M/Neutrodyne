@@ -135,6 +135,41 @@ class SettingKeyTest {
         assertEquals(SettingsFile.DEVICE, BackupSettingKeys.INSTALLATION_ID.file)
     }
 
+    /**
+     * 06 Settings: all eight `playback.*` keys are portable; only the five that describe the
+     * user's taste are synced; `pause_for_navigation`, `stream_on_metered` and
+     * `stream_cache_mb` describe this device, so they stay out of sync.
+     */
+    @Test fun playbackKeysHaveDesignDefaultsAndSyncClassification() {
+        val playbackKeys = PlaybackSettingKeys.ALL
+        assertEquals(8, playbackKeys.size)
+        assertTrue(AllSettingKeys.list.containsAll(playbackKeys))
+        val synced =
+            setOf(
+                "playback.speed",
+                "playback.skip_silence",
+                "playback.speed_presets",
+                "playback.skip_back_ms",
+                "playback.skip_forward_ms",
+            )
+        for (key in playbackKeys) {
+            assertEquals(SettingsFile.PORTABLE, key.file, key.name)
+            assertEquals(key.name in synced, key.synced, key.name)
+        }
+        assertEquals(1.0f, PlaybackSettingKeys.SPEED.default)
+        assertEquals(false, PlaybackSettingKeys.SKIP_SILENCE.default)
+        assertEquals("0.8,1.0,1.2,1.5,1.8,2.0", PlaybackSettingKeys.SPEED_PRESETS.default)
+        assertEquals(10_000L, PlaybackSettingKeys.SKIP_BACK_MS.default)
+        assertEquals(30_000L, PlaybackSettingKeys.SKIP_FORWARD_MS.default)
+        assertEquals(true, PlaybackSettingKeys.PAUSE_FOR_NAVIGATION.default)
+        assertEquals(StreamOnMetered.ALLOW, PlaybackSettingKeys.STREAM_ON_METERED.default)
+        assertEquals(
+            listOf(StreamOnMetered.ALLOW, StreamOnMetered.ASK, StreamOnMetered.NEVER),
+            PlaybackSettingKeys.STREAM_ON_METERED.values,
+        )
+        assertEquals(500, PlaybackSettingKeys.STREAM_CACHE_MB.default)
+    }
+
     @Test fun selectionKeysAreRegisteredAndDeviceLocal() {
         val feed = AppearanceSettingKeys.FEEDS_SELECTED_SOURCE
         val library = AppearanceSettingKeys.LIBRARY_GROUP_FILTER

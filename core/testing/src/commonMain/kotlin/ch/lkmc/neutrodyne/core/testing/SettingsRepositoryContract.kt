@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
 import kotlinx.collections.immutable.ImmutableSet
@@ -161,6 +162,32 @@ abstract class SettingsRepositoryContract {
 
             assertEquals(Outcome.Failure(SettingsError.OutOfRange(restrictedChoice.name)), result)
             assertEquals(LibrarySegment.PODCASTS, repository.get(restrictedChoice))
+        }
+
+    /**
+     * 05 Rules 4 via the shared validator: out-of-range or ill-formed values fail with
+     * `OutOfRange` and leave the stored value alone; a hostile record can never write them.
+     */
+    @Test
+    fun setRejectsValuesOutsideAKeysDeclaredRanges() =
+        runTest {
+            val repository = createRepository()
+            for (bad in listOf(0.4f, 3.1f, 1.51f, Float.NaN)) {
+                assertEquals(
+                    Outcome.Failure(SettingsError.OutOfRange(PlaybackSettingKeys.SPEED.name)),
+                    repository.set(PlaybackSettingKeys.SPEED, bad),
+                    "speed $bad should be rejected",
+                )
+            }
+            assertEquals(
+                Outcome.Failure(SettingsError.OutOfRange(PlaybackSettingKeys.SKIP_BACK_MS.name)),
+                repository.set(PlaybackSettingKeys.SKIP_BACK_MS, 7_000L),
+            )
+            assertEquals(PlaybackSettingKeys.SPEED.default, repository.get(PlaybackSettingKeys.SPEED))
+
+            // A valid value still lands.
+            assertEquals(Outcome.Success(Unit), repository.set(PlaybackSettingKeys.SPEED, 1.5f))
+            assertEquals(1.5f, repository.get(PlaybackSettingKeys.SPEED))
         }
 
     @Test
