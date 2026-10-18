@@ -94,4 +94,6 @@ data class PlaybackMediaInfo(
     val durationMs: Long?,
     val measuredDurationMs: Long?,
     val playedAt: Long?,
+    /** Keyset anchor for explicit/context starts; media lookups populate the episode sort date. */
+    val sortDate: Long? = null,
 )

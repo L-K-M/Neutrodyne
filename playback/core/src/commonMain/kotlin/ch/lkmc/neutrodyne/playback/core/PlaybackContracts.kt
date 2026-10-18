@@ -12,6 +12,12 @@ sealed interface StartOutcome {
         val startPositionMs: Long,
     ) : StartOutcome
 
+    /** No session mutation or prepare; only an explicit timestamp requests a seek. */
+    data class AlreadyCurrent(
+        val queue: VirtualQueue,
+        val seekPositionMs: Long?,
+    ) : StartOutcome
+
     data class Refused(
         val result: PlayResult,
     ) : StartOutcome

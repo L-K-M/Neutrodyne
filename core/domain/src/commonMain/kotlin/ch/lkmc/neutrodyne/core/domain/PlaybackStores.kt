@@ -18,7 +18,8 @@ interface PlaySessionStore {
     /** Same coherent shape as QueueRepository.observeVirtualQueue; k >= 0. */
     suspend fun virtualQueue(k: Int): VirtualQueue
 
-    /** Promote/remove current from Up next, touch last-played, set context/anchor as requested. */
+    /** Save start.departure before arrival, promote/remove current from Up next, touch last-played,
+     * and set context/anchor as requested, all in the same transaction. */
     suspend fun commitStart(
         start: SessionStart,
         now: Long,
@@ -62,6 +63,8 @@ data class SessionStart(
     val contextRetention: ContextRetention,
     val anchorEpisodeId: Long?,
     val anchorSortDate: Long?,
+    /** Interrupted current, captured after start gates; save/mark before promoting arrival. */
+    val departure: Departure? = null,
 )
 
 /** Core-decided save/played flags; pinStartedAt is wall-clock start time, never a tick timestamp. */
