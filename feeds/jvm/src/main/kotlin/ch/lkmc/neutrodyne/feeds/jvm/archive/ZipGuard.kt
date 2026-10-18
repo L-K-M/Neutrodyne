@@ -81,13 +81,14 @@ public class ZipGuard : ArchiveReaderFactory {
     }
 
     /**
-     * The constructor-time `ZipException` on Android ("Invalid zip entry path: …", thrown by the
-     * platform's path validator for `..` or leading `/` when the app targets 34+) maps to the same
-     * `zip_path` our own name check produces on the JVM; every other `ZipException` is a malformed
-     * archive. (Only reachable on devices; the JVM constructor does no name validation.)
+     * The constructor-time `ZipException` the platform's path validator causes on Android for `..`
+     * or leading `/` when the app targets 34+ maps to the same `zip_path` our own name check
+     * produces on the JVM; every other `ZipException` is a malformed archive. (Only reachable on
+     * devices; the JVM constructor does no name validation.) Internal for the per-release
+     * platform-message test.
      */
-    private fun mapOpenFailure(e: ZipException): ArchiveException =
-        if (e.message?.startsWith(ANDROID_PATH_MESSAGE) == true) {
+    internal fun mapOpenFailure(e: ZipException): ArchiveException =
+        if (ANDROID_PATH_MESSAGES.any { e.message?.startsWith(it) == true }) {
             hostile("zip_path")
         } else {
             corrupt("zip")
@@ -292,10 +293,12 @@ public class ZipGuard : ArchiveReaderFactory {
 
     private companion object {
         /**
-         * Android's zip path validator throws `ZipException("Invalid zip entry path: <name>")` from
-         * the `ZipFile` constructor (SafeZipPathValidatorCallback, apps targeting 34+).
+         * How the `ZipFile` constructor reports SafeZipPathValidatorCallback's rejection (apps
+         * targeting 34+): API 34's native zip clears the callback's exception and throws
+         * "restricted zip entry name" (libcore zip_util.c); API 35+ rethrows the callback's own
+         * "Invalid zip entry path: <name>".
          */
-        const val ANDROID_PATH_MESSAGE = "Invalid zip entry path"
+        val ANDROID_PATH_MESSAGES = listOf("restricted zip entry name", "Invalid zip entry path")
 
         // The END record: 22 fixed bytes at the file tail, then a comment of up to 64 KiB.
         const val ENDHDR = 22
