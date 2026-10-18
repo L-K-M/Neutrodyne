@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.core.model.GroupPalette
 import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
+import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.memberEntity
@@ -53,6 +54,7 @@ class GroupRepositoryTest {
             orderKeys,
             FakeGroupChannelSync(),
             refresh,
+            FakeSnapshotScheduler(),
             appScope,
         )
 
@@ -191,6 +193,7 @@ class GroupRepositoryTest {
                                 orderKeys,
                                 FakeGroupChannelSync(),
                                 FakeRefreshController(),
+                                FakeSnapshotScheduler(),
                                 appScope,
                             )
                         start.await()
@@ -361,7 +364,16 @@ class GroupRepositoryTest {
                         finished += "reschedulePeriodic()"
                     }
                 }
-            val screenRepo = GroupRepositoryImpl(db, clock, orderKeys, FakeGroupChannelSync(), slow, appScope)
+            val screenRepo =
+                GroupRepositoryImpl(
+                    db,
+                    clock,
+                    orderKeys,
+                    FakeGroupChannelSync(),
+                    slow,
+                    FakeSnapshotScheduler(),
+                    appScope,
+                )
 
             val edit = launch(Dispatchers.Default) { screenRepo.setMembers(tech, setOf(p1)) }
             entered.await()

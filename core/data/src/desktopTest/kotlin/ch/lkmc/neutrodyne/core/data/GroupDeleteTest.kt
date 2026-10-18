@@ -23,6 +23,7 @@ import ch.lkmc.neutrodyne.core.model.GroupEdit
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
@@ -52,12 +53,13 @@ import kotlin.test.assertNull
 class GroupDeleteTest {
     private val channelSync = FakeGroupChannelSync()
     private val refresh = FakeRefreshController()
+    private val snapshots = FakeSnapshotScheduler()
 
     private fun repository(
         db: NeutrodyneDatabase,
         clock: Clock,
         appScope: CoroutineScope,
-    ) = GroupRepositoryImpl(db, clock, TestOrderKeys, channelSync, refresh, appScope)
+    ) = GroupRepositoryImpl(db, clock, TestOrderKeys, channelSync, refresh, snapshots, appScope)
 
     /**
      * Tests that merely need the token live must NOT pass `backgroundScope`: [runTest] skips

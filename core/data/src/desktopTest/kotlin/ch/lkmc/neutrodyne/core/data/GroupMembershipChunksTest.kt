@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
+import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.groupEntity
@@ -39,7 +40,15 @@ class GroupMembershipChunksTest {
     private val db = TestDb.inMemory(driver = driver, clock = clock)
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val repo =
-        GroupRepositoryImpl(db, clock, TestOrderKeys, FakeGroupChannelSync(), FakeRefreshController(), appScope)
+        GroupRepositoryImpl(
+            db,
+            clock,
+            TestOrderKeys,
+            FakeGroupChannelSync(),
+            FakeRefreshController(),
+            FakeSnapshotScheduler(),
+            appScope,
+        )
 
     @AfterTest fun close() {
         appScope.cancel()

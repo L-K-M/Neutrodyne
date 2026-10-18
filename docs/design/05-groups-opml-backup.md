@@ -346,14 +346,14 @@ sequenceDiagram
 | Import history (`import_item.groupNamesJson`) | unaffected (names, not IDs) |
 
 **Implementation note (2026-10-16, M2)** — C1 lands the mechanism with two slices deferred to
-their owning milestones: `SnapshotScheduler.requestSoon()` does not run on delete yet because the
-port itself arrives with M3's backup work; the 10-second undo window runs as a `delay` job on the
-injected `@ApplicationScope` and `GroupChannelSync.onDeleted(uuid)` fires at its end — process
-death still finalizes the delete, and the start-up sweep spares exactly the uuids the repository
-reports through `GroupRepository.pendingUndoUuids()` (the "live undo tokens" the sweep rule above
-refers to). `NoGroupChannels` sits in `:core:domain` next to the port rather than
-`:core:data` `desktopMain`, so both shells bind the same interim no-op until C5's
-`GroupNotificationChannels` replaces it on Android. `GroupMerger` exists in `:core:data` with the
+their owning milestones: `SnapshotScheduler.requestSoon()` on delete was deferred to M3's backup
+work, whose C6b slice wired the call site once the port existed; the 10-second undo window runs
+as a `delay` job on the injected `@ApplicationScope` and `GroupChannelSync.onDeleted(uuid)` fires
+at its end — process death still finalizes the delete, and the start-up sweep spares exactly the
+uuids the repository reports through `GroupRepository.pendingUndoUuids()` (the "live undo tokens"
+the sweep rule above refers to). `NoGroupChannels` sits in `:core:domain` next to the port and is
+bound only on the desktop. Android binds `AndroidGroupChannelSync` in `:app`, delivered by M2's
+C5 slice as described below. `GroupMerger` exists in `:core:data` with the
 transaction this document specifies — union memberships, keep the survivor's settings, move a
 GROUP play context, then `sync()` — but has no callers until the restore path (M3) and
 `SyncApplier` (M10) land.
@@ -689,8 +689,8 @@ hooks below are implemented by C3 after the interval write commits, with a lazy
 `Provider<RefreshController>` to avoid a dependency cycle. Unchanged intervals,
 notification-only writes, invalid writes and missing scopes do not reschedule.
 A post-commit scheduling failure is logged; it does not turn a committed write
-into `SettingsError.WriteFailed`. Channel reconciliation arrives with C5, and
-snapshot requests with M3.
+into `SettingsError.WriteFailed`. Android channel reconciliation is bound by M2's C5; snapshot
+requests arrived with M3's C6b write-site wiring.
 
 - Writes are a read-modify-write inside one write transaction (`@Upsert` is allowed on these single-writer tables, [02 DAO rules](02-data-model.md#dao-rules)); a row whose fields are all `null` is deleted. Rule 1 (dependent fields) and validation run before the write; an invalid value returns 01's `SettingsError.OutOfRange(field name)` and writes nothing. A podcast or group that no longer exists makes the write a no-op returning success (the screen is closing anyway).
 - After a write: refresh interval changed → `RefreshController.reschedulePeriodic()`; `notifyNewEpisodes` changed → `GroupChannelSync.sync()` (Android; the screen requests `POST_NOTIFICATIONS` per 03's permission rule); always → `SnapshotScheduler.requestSoon()` (Android). 07 and 06 observe the resolver flows; nothing else is pushed. Sync needs no call: the triggers capture the synced columns (02).
