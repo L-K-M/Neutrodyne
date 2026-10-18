@@ -29,7 +29,6 @@ import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.model.ExportLayout
-import ch.lkmc.neutrodyne.core.model.PreparedExport
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
@@ -85,7 +84,7 @@ internal fun ExportDialogContent(
             Spacer(Modifier.height(BODY_GAP))
             val warning = state.warning
             if (warning != null) {
-                WarningBody(warning)
+                PrivateLinksWarning(warning.privateLinks, warning.passwords)
             } else {
                 OptionsBody(state, onLayout, onYouTube, onPasswords)
             }
@@ -134,24 +133,27 @@ private fun exportTitle(groupName: String?): String =
 
 /** The R1.9 counts, quoted from the prepared artifact — never from a re-read of the library. */
 @Composable
-private fun WarningBody(warning: PreparedExport) {
+internal fun PrivateLinksWarning(
+    privateLinks: Int,
+    passwords: Int,
+) {
     Column {
-        if (warning.privateLinks > 0) {
+        if (privateLinks > 0) {
             Text(
                 pluralStringResource(
                     Res.plurals.export_private_links,
-                    warning.privateLinks,
-                    warning.privateLinks,
+                    privateLinks,
+                    privateLinks,
                 ),
                 style = MaterialTheme.typography.bodyLarge,
             )
         }
-        if (warning.passwords > 0) {
+        if (passwords > 0) {
             Text(
                 pluralStringResource(
                     Res.plurals.export_passwords,
-                    warning.passwords,
-                    warning.passwords,
+                    passwords,
+                    passwords,
                 ),
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.padding(top = WARNING_GAP),
