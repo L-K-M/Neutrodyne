@@ -98,6 +98,9 @@ sealed interface BackupError {
 
     data object DestinationUnavailable : BackupError
 
-    /** An Android-only member was called on the desktop (05). */
+    /**
+     * The call is not supported here: an Android-only member on the desktop, or a linked
+     * restore request — linked execution (unlink, capture, ALL_DEVICES) is MS2 (05).
+     */
     data object Unsupported : BackupError
 }
