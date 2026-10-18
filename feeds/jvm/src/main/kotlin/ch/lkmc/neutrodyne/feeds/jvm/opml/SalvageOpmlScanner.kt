@@ -164,13 +164,14 @@ internal class SalvageOpmlScanner(
             }
         }
 
-        /** End of the tag starting at [tagStart]: the first `>` or `<` outside quotes, -1 at EOF. */
+        /** End of the tag starting at [tagStart]: the first `>` or `<` outside quoted values, -1 at EOF. */
         private fun findTagEnd(
             reader: Reader,
             tagStart: Int,
         ): Int {
             var i = tagStart + 1
             var quote = '\u0000'
+            var awaitingValue = false
             while (true) {
                 if (i - tagStart > SALVAGE_TAG_MAX_CHARS) {
                     throw OpmlCapExceeded(
@@ -185,9 +186,11 @@ internal class SalvageOpmlScanner(
                 val c = window[i]
                 if (quote == '\u0000') {
                     when (c) {
-                        '"', '\'' -> quote = c
+                        '"', '\'' -> if (awaitingValue) quote = c
                         '>', '<' -> return i
                     }
+                    // Match TAG_ATTR: a quote opens a value only after '=' and optional whitespace.
+                    if (!c.isWhitespace()) awaitingValue = c == '='
                 } else if (c == quote) {
                     quote = '\u0000'
                 }
@@ -254,7 +257,7 @@ internal class SalvageOpmlScanner(
                 val raw = match.groups[3]?.value ?: match.groups[4]?.value ?: continue
                 val value = unescapeEntities(raw)
                 meter.add(value)
-                map[name] = value
+                map.putIfAbsent(name, value)
             }
             return map
         }
@@ -304,12 +307,12 @@ internal class SalvageOpmlScanner(
                 "apos" -> return "'"
             }
             if (!token.startsWith('#')) return null
-            val codePoint =
-                if (token.length > 2 && (token[1] == 'x' || token[1] == 'X')) {
-                    token.substring(2).toIntOrNull(16)
-                } else {
-                    token.substring(1).toIntOrNull()
-                } ?: return null
+            val hex = token.length > 1 && (token[1] == 'x' || token[1] == 'X')
+            val digits = token.substring(if (hex) 2 else 1)
+            if (digits.isEmpty()) return null
+            if (digits.any { it !in '0'..'9' && (!hex || (it !in 'a'..'f' && it !in 'A'..'F')) }) return null
+
+            val codePoint = digits.toIntOrNull(if (hex) 16 else 10) ?: return null
             if (codePoint > 0x10FFFF || codePoint in 0xD800..0xDFFF) return null
             return String(Character.toChars(codePoint))
         }
