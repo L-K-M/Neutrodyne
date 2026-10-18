@@ -89,17 +89,16 @@ internal class RestoreViewModel
             }
             viewModelScope.launch {
                 backups.observeRestore().collect { progress ->
-                    if (progress is RestoreProgress.Finished && progress.sessionId != sessionId) return@collect
+                    if (progress != null && progress.sessionId != sessionId) return@collect
                     state.update {
                         it.copy(
                             progress = progress,
                             error =
-                                if (it.requested &&
-                                    progress is RestoreProgress.Failed
-                                ) {
-                                    progress.error
-                                } else {
-                                    it.error
+                                when {
+                                    !it.requested -> it.error
+                                    progress is RestoreProgress.Failed -> progress.error
+                                    progress is RestoreProgress.Running -> null
+                                    else -> it.error
                                 },
                         )
                     }

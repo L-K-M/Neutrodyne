@@ -3,6 +3,8 @@
 <resources>
     <string name="settings_appearance">Darstellung</string>
     <string name="settings_appearance_summary">Design, dynamische Farben und Kontrast</string>
+    <string name="settings_backup">Sicherung</string>
+    <string name="settings_backup_summary">Abonnements exportieren, Bibliothek sichern oder wiederherstellen</string>
     <string name="settings_about">Über</string>
     <string name="settings_about_summary">Version und Build</string>
     <string name="settings_licences">Lizenzen</string>

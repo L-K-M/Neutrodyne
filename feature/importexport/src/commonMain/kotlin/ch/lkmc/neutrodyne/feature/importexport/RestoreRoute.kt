@@ -27,11 +27,13 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.common.DateFormatter
 import ch.lkmc.neutrodyne.core.designsystem.components.NdActionRole
+import ch.lkmc.neutrodyne.core.designsystem.components.NdBanner
 import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
+import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.domain.BackupError
 import ch.lkmc.neutrodyne.core.domain.RestoreProgress
 import ch.lkmc.neutrodyne.core.model.BackupPreview
@@ -68,10 +70,13 @@ import ch.lkmc.neutrodyne.core.ui.resources.restore_settings
 import ch.lkmc.neutrodyne.core.ui.resources.restore_title
 import ch.lkmc.neutrodyne.core.ui.resources.restore_updates
 import ch.lkmc.neutrodyne.core.ui.resources.restore_waiting
+import ch.lkmc.neutrodyne.core.ui.resources.restore_warn_ignored_entries
+import ch.lkmc.neutrodyne.core.ui.resources.restore_warn_skipped_lines
 import ch.lkmc.neutrodyne.core.ui.resources.restore_written_android
 import ch.lkmc.neutrodyne.core.ui.resources.restore_written_desktop
 import dev.zacsweers.metrox.viewmodel.assistedMetroViewModel
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
 @Composable
@@ -268,6 +273,32 @@ private fun PreviewSummary(preview: BackupPreview) {
         }
         preview.linkedServerHost?.let { Text(stringResource(Res.string.restore_linked, it)) }
         if (preview.includesCredentials) Text(stringResource(Res.string.restore_credentials))
+
+        for (warning in preview.warnings) {
+            val text =
+                when (warning.code) {
+                    "SKIPPED_LINES" -> {
+                        pluralStringResource(
+                            Res.plurals.restore_warn_skipped_lines,
+                            warning.count,
+                            warning.count,
+                        )
+                    }
+
+                    "IGNORED_ENTRIES" -> {
+                        pluralStringResource(
+                            Res.plurals.restore_warn_ignored_entries,
+                            warning.count,
+                            warning.count,
+                        )
+                    }
+
+                    else -> {
+                        continue
+                    }
+                }
+            NdBanner(message = text, icon = NdIcons.Info)
+        }
     }
 }
 

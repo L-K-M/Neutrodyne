@@ -22,4 +22,12 @@
     <string name="restore_phase_episodes">Hörverlauf</string>
     <string name="restore_phase_other">Daten wiederherstellen</string>
     <string name="restore_updates">Nach Updates suchen</string>
+    <plurals name="restore_warn_skipped_lines">
+        <item quantity="one">%1$d Zeile des Hörverlaufs wurde übersprungen.</item>
+        <item quantity="other">%1$d Zeilen des Hörverlaufs wurden übersprungen.</item>
+    </plurals>
+    <plurals name="restore_warn_ignored_entries">
+        <item quantity="one">%1$d unbekannter Sicherungseintrag wurde ignoriert.</item>
+        <item quantity="other">%1$d unbekannte Sicherungseinträge wurden ignoriert.</item>
+    </plurals>
 </resources>

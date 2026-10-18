@@ -44,6 +44,7 @@ import ch.lkmc.neutrodyne.core.model.ImportItemView
 import ch.lkmc.neutrodyne.core.model.ImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportSource
 import ch.lkmc.neutrodyne.core.model.ImportState
+import ch.lkmc.neutrodyne.core.model.ImportWarning
 import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
@@ -75,6 +76,88 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalTestApi::class)
 class ImportRouteTest {
+    @Test fun englishBackupPreviewUsesSingularWarningCounts() =
+        backupPreviewWarnings(
+            Locale.ENGLISH,
+            1,
+            "Listening history",
+            "1 listening history line was skipped.",
+            "1 unknown backup entry was ignored.",
+        )
+
+    @Test fun englishBackupPreviewUsesPluralWarningCounts() =
+        backupPreviewWarnings(
+            Locale.ENGLISH,
+            2,
+            "Listening history",
+            "2 listening history lines were skipped.",
+            "2 unknown backup entries were ignored.",
+        )
+
+    @Test fun germanBackupPreviewUsesSingularWarningCounts() =
+        backupPreviewWarnings(
+            Locale.GERMAN,
+            1,
+            "Hörverlauf",
+            "1 Zeile des Hörverlaufs wurde übersprungen.",
+            "1 unbekannter Sicherungseintrag wurde ignoriert.",
+        )
+
+    @Test fun germanBackupPreviewUsesPluralWarningCounts() =
+        backupPreviewWarnings(
+            Locale.GERMAN,
+            2,
+            "Hörverlauf",
+            "2 Zeilen des Hörverlaufs wurden übersprungen.",
+            "2 unbekannte Sicherungseinträge wurden ignoriert.",
+        )
+
+    private fun backupPreviewWarnings(
+        locale: Locale,
+        count: Int,
+        historyLabel: String,
+        skipped: String,
+        ignored: String,
+    ) = runComposeUiTest {
+        Locale.setDefault(locale)
+        backups.inspectOutcome =
+            Outcome.Success(
+                restorePreview().copy(
+                    warnings = listOf(ImportWarning("SKIPPED_LINES", count), ImportWarning("IGNORED_ENTRIES", count)),
+                ),
+            )
+        val id = seed(format = ImportFormat.NEUTRODYNE_BACKUP)
+        setRouteContent(ImportKey(id.toString()))
+        assertDisplayedWhenReady(historyLabel)
+        onNodeWithText(skipped).assertExists()
+        onNodeWithText(ignored).assertExists()
+        assertTrue(backups.restoreRequests.isEmpty())
+    }
+
+    @Test fun backupPreviewDisclosesSkippedHistoryLinesBeforeReplaceConfirmation() =
+        runComposeUiTest {
+            backups.inspectOutcome =
+                Outcome.Success(
+                    restorePreview().copy(
+                        warnings =
+                            listOf(
+                                ch.lkmc.neutrodyne.core.model
+                                    .ImportWarning("SKIPPED_LINES", 2),
+                            ),
+                    ),
+                )
+            val id = seed(format = ImportFormat.NEUTRODYNE_BACKUP)
+            setRouteContent(ImportKey(id.toString()))
+            assertDisplayedWhenReady("Listening history")
+            onNodeWithText("2 listening history lines were skipped.")
+                .assertExists("Skipped backup history must be disclosed before Replace")
+            onNodeWithText("Replace").performClick()
+            onNodeWithText("2 listening history lines were skipped.").assertExists()
+            onNodeWithText("Restore").performClick()
+            onNodeWithText("Replace your library?").assertExists()
+            assertTrue(backups.restoreRequests.isEmpty())
+        }
+
     private lateinit var previousLocale: Locale
     private val imports = FakeImportRepository()
     private val backups =
@@ -632,7 +715,7 @@ class ImportRouteTest {
                 )
             backups.restoreProgress.value =
                 ch.lkmc.neutrodyne.core.domain.RestoreProgress
-                    .Running("episodes", 12, 20)
+                    .Running(id, "episodes", 12, 20)
             setRouteContent(ImportKey(id.toString()))
             assertDisplayedWhenReady("Restoring… Listening history 12 of 20")
             runOnIdle {

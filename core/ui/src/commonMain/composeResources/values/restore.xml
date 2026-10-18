@@ -22,4 +22,12 @@
     <string name="restore_phase_episodes">Listening history</string>
     <string name="restore_phase_other">Restoring data</string>
     <string name="restore_updates">Check for updates</string>
+    <plurals name="restore_warn_skipped_lines">
+        <item quantity="one">%1$d listening history line was skipped.</item>
+        <item quantity="other">%1$d listening history lines were skipped.</item>
+    </plurals>
+    <plurals name="restore_warn_ignored_entries">
+        <item quantity="one">%1$d unknown backup entry was ignored.</item>
+        <item quantity="other">%1$d unknown backup entries were ignored.</item>
+    </plurals>
 </resources>

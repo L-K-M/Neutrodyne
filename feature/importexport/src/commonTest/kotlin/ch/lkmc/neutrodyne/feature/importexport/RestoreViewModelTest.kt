@@ -144,13 +144,13 @@ class RestoreViewModelTest : MainDispatcherTest() {
             vm.requestRestore()
             runCurrent()
             assertEquals(RestoreProgress.Finished(7, false), vm.uiState.value.progress)
-            backups.restoreProgress.value = RestoreProgress.Running("episodes", 12, 20)
+            backups.restoreProgress.value = RestoreProgress.Running(7, "episodes", 12, 20)
             runCurrent()
             assertEquals(backups.restoreProgress.value, vm.uiState.value.progress)
             backups.restoreProgress.value = RestoreProgress.Finished(99, false)
             runCurrent()
             assertTrue(vm.uiState.value.progress is RestoreProgress.Running)
-            backups.restoreProgress.value = RestoreProgress.Failed(BackupError.Storage)
+            backups.restoreProgress.value = RestoreProgress.Failed(7, BackupError.Storage)
             runCurrent()
             assertEquals(BackupError.Storage, vm.uiState.value.error)
         }
@@ -173,7 +173,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
                                 .ImportOptions(restoreRequestedAt = 1L),
                     )
             )
-            backups.restoreProgress.value = RestoreProgress.Failed(BackupError.Storage)
+            backups.restoreProgress.value = RestoreProgress.Failed(id, BackupError.Storage)
             val vm = RestoreViewModel(id, backups, imports, playback, backgroundScope)
             runCurrent()
             assertEquals(BackupError.Storage, vm.uiState.value.error, "A resumed restore must expose its failure")
@@ -182,7 +182,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
 
     @Test fun anOlderGlobalFailureDoesNotPoisonANewRestore() =
         runTest {
-            backups.restoreProgress.value = RestoreProgress.Failed(BackupError.Io)
+            backups.restoreProgress.value = RestoreProgress.Failed(99, BackupError.Io)
             val accepted =
                 object : BackupRepository by backups {
                     override suspend fun restore(
@@ -205,7 +205,7 @@ class RestoreViewModelTest : MainDispatcherTest() {
                         sessionId: Long,
                         request: RestoreRequest,
                     ): Outcome<Unit, BackupError> {
-                        backups.restoreProgress.value = RestoreProgress.Failed(BackupError.Storage)
+                        backups.restoreProgress.value = RestoreProgress.Failed(7, BackupError.Storage)
                         kotlinx.coroutines.yield()
                         return Outcome.Success(Unit)
                     }
