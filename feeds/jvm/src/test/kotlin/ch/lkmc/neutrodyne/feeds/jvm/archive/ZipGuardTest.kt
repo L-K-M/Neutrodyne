@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.feeds.backup.ArchiveException
 import okio.blackholeSink
 import okio.buffer
 import java.io.IOException
+import java.util.zip.ZipException
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -255,5 +256,23 @@ class ZipGuardTest {
         val e = assertFailsWith<ArchiveException>(block = block)
         assertEquals(ArchiveException.Kind.CORRUPT, e.kind)
         return e.reason
+    }
+
+    /**
+     * Android's path validator surfaces differently per release: API 34's native zip clears the
+     * callback's exception and throws "restricted zip entry name"; API 35+ rethrows "Invalid zip
+     * entry path: …". Both are the platform's `..`/leading-`/` rejection, hence `zip_path`.
+     */
+    @Test
+    fun platformPathRejectionsMapToHostileOnEveryAndroidRelease() {
+        for (message in listOf("restricted zip entry name", "Invalid zip entry path: ../x")) {
+            val error = ZipGuard().mapOpenFailure(ZipException(message))
+            assertEquals(ArchiveException.Kind.HOSTILE, error.kind, message)
+            assertEquals("zip_path", error.reason, message)
+        }
+        assertEquals(
+            ArchiveException.Kind.CORRUPT,
+            ZipGuard().mapOpenFailure(ZipException("zip END header not found")).kind,
+        )
     }
 }
