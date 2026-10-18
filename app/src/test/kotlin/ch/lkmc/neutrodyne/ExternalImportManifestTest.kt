@@ -45,7 +45,11 @@ class ExternalImportManifestTest {
             }
             assertThat(filter.values("data", "scheme").all { it.isEmpty() }).isTrue()
         }
-        val alias = manifest.getElementsByTagName("activity-alias").item(0) as Element
+        val aliases = manifest.getElementsByTagName("activity-alias")
+        val alias =
+            (0 until aliases.length)
+                .map { aliases.item(it) as Element }
+                .single { it.attr("name") == ".OpmlByExtensionAlias" }
         assertThat(alias.attr("name")).isEqualTo(".OpmlByExtensionAlias")
         assertThat(alias.attr("targetActivity")).isEqualTo(".ExternalImportActivity")
         assertThat(alias.attr("enabled")).isEqualTo("@bool/neutrodyne_api31_or_newer")

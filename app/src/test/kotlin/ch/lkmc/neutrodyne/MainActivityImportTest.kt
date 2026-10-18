@@ -37,7 +37,7 @@ class MainActivityImportTest {
     fun coldDeliveryQueuesImportKeyUntilTheRootIsReady() {
         val app = org.robolectric.RuntimeEnvironment.getApplication() as ImportHostApplication
         val delivery =
-            Intent(app, MainActivity::class.java).apply {
+            Intent().setClassName(app, INTERNAL_MAIN_ACTIVITY).apply {
                 action = Intent.ACTION_VIEW
                 data = Uri.parse("neutrodyne://open/import/71")
             }
@@ -61,7 +61,7 @@ class MainActivityImportTest {
         val controller = Robolectric.buildActivity(MainActivity::class.java, Intent(Intent.ACTION_MAIN)).create()
         for (id in listOf("42", "43")) {
             val delivery =
-                Intent(app, MainActivity::class.java).apply {
+                Intent().setClassName(app, INTERNAL_MAIN_ACTIVITY).apply {
                     action = Intent.ACTION_VIEW
                     data = Uri.parse("neutrodyne://open/import/$id")
                 }
@@ -86,7 +86,8 @@ class MainActivityImportTest {
     fun preSessionErrorIsRetainedForTheMainActivityDialog() {
         val app = org.robolectric.RuntimeEnvironment.getApplication() as ImportHostApplication
         val delivery =
-            Intent(app, MainActivity::class.java)
+            Intent()
+                .setClassName(app, INTERNAL_MAIN_ACTIVITY)
                 .putExtra(IMPORT_ERROR_EXTRA, ImportAcquisitionError.UNREADABLE.name)
         val controller = Robolectric.buildActivity(MainActivity::class.java, delivery).create()
         assertThat(

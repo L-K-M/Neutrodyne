@@ -220,7 +220,7 @@ class ExternalImportActivityTest {
             val controller = Robolectric.buildActivity(ExternalImportActivity::class.java, view(uri)).create()
             pumpUntil { controller.get().isFinishing }
             val handoff = shadowOf(controller.get()).nextStartedActivity
-            assertThat(handoff.component!!.className).isEqualTo(MainActivity::class.java.name)
+            assertThat(handoff.component!!.className).isEqualTo(INTERNAL_MAIN_ACTIVITY)
             assertThat(handoff.getStringExtra(IMPORT_ERROR_EXTRA)).isEqualTo(code.name)
             assertThat(handoff.data).isNull()
             assertThat(handoff.clipData).isNull()
@@ -310,7 +310,7 @@ class ExternalImportActivityTest {
         id: Long,
     ) {
         assertThat(handoff.action).isEqualTo(Intent.ACTION_VIEW)
-        assertThat(handoff.component!!.className).isEqualTo(MainActivity::class.java.name)
+        assertThat(handoff.component!!.className).isEqualTo(INTERNAL_MAIN_ACTIVITY)
         assertThat(handoff.dataString).isEqualTo("neutrodyne://open/import/$id")
         assertThat(handoff.flags).isEqualTo(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         assertThat(handoff.clipData).isNull()

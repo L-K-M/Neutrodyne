@@ -69,7 +69,8 @@ class ExternalImportActivity : AppCompatActivity() {
             model.result.collect { result ->
                 if (result == null) return@collect
                 val handoff =
-                    Intent(this@ExternalImportActivity, MainActivity::class.java)
+                    Intent()
+                        .setClassName(this@ExternalImportActivity, INTERNAL_MAIN_ACTIVITY)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 when (result) {
                     is Outcome.Success -> {

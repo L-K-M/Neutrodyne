@@ -2034,12 +2034,13 @@ Serves R1.1, R8.3, R8.9. Delivered in [M3](../PLAN.md#m3-import-export-and-backu
 
 1. Resolve the stream: VIEW → `intent.data`; SEND → `IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)`, else `clipData.getItemAt(0).uri`. No URI, or a scheme other than `content`/`file` → toast "Nothing to import", `finish()`.
 2. A retained `ExternalImportViewModel` calls `ImportRepository.create(ImportSource(uri.toString(), displayName = null))` ([1. Acquire](#1-acquire) step 5: the copy runs in the caller's coroutine while the grant lives; sniffing, parsing and persisting continue in `@ApplicationScope`). A progress overlay appears only if the call takes longer than 300 ms.
-3. Success → `startActivity(Intent(ACTION_VIEW, "neutrodyne://open/import/{sessionId}").setClass(this, MainActivity::class.java).addFlags(FLAG_ACTIVITY_NEW_TASK or FLAG_ACTIVITY_CLEAR_TOP))`, `finish()`. 01's `IntentRouter` turns it into `Navigate(LibraryKey, [ImportKey(sessionId)])`. `MainActivity` itself has no file filters.
+3. Success → `startActivity(Intent(ACTION_VIEW, "neutrodyne://open/import/{sessionId}").setClassName(this, "ch.lkmc.neutrodyne.InternalMainActivity").addFlags(FLAG_ACTIVITY_NEW_TASK or FLAG_ACTIVITY_CLEAR_TOP))`, `finish()`. 01's `IntentRouter` turns it into `Navigate(LibraryKey, [ImportKey(sessionId)])`. `MainActivity` itself has no file filters.
 4. Failure → a dialog with the [error text](#error-handling-and-failure-modes), then `finish()`.
 5. If the user leaves after the copy but before the session is ready, the application-scope job still finishes and posts "Ready to review: 142 podcasts from antennapod-feeds.opml" (channel `import_backup`, ID 3002, tag = session ID) deep-linking to the session.
 
 **Implementation note (2026-10-18, M3 D7).** Pre-session acquisition failures
-are handed to `MainActivity` as a bounded error code and shown there in an
+are handed through the non-exported `InternalMainActivity` alias to
+`MainActivity` as a bounded error code and shown there in an
 `NdDialog`, then the external receiver finishes. This keeps the error on the
 main task after the transient receiver releases its grant. Missing or invalid
 streams (including `SEND_MULTIPLE`, which is not supported) still show
@@ -2049,9 +2050,14 @@ and the existing repository owns parsing and session persistence on
 `@ApplicationScope`. D7 installs external receiving and the main task's route
 delivery; the SAF `PlatformActions.files` launcher already exists, but the
 Discover, Library and Backup import controls are not wired on this base and
-remain with their UI slices. The detached “Ready to review” notification in
-behaviour 5 still needs a repository completion hook; session persistence
-already survives cancellation after acquisition.
+remain with their UI slices. When the receiver leaves after acquisition, the
+repository observes staging completion on `@ApplicationScope` and posts the
+behaviour 5 notice through `ImportReportPoster`: channel `import_backup`, ID
+3002, tag equal to the session ID, with the persisted item count and source
+name. It uses the protected internal alias for taps and skips posting when
+notification permission, the master switch or the channel is disabled. Backup
+previews have no parsed import items yet, so their notice names the file
+without claiming a podcast count.
 
 **In-app entry points** (both platforms; all in `:feature:importexport`, launched from Discover, Library overflow, Settings › Backup and onboarding, 08, and on the desktop also from File › Import OPML or backup… and Ctrl/Cmd+O, [11 Desktop UX](11-desktop.md#desktop-ux)): `FilePicker.openFile()` of `:core:ui`'s `PlatformActions` — on Android `rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument())` with `arrayOf("*/*")` (MIME filtering would grey out `.opml` files on providers without a mapping), on the desktop the native open dialog without a type filter (08; AWT's filters do not work on Windows anyway, [Platform constraints](#platform-constraints)) → the screen's ViewModel calls `create(ImportSource(uri, displayName))` and navigates to `ImportKey(sessionId)`; an "Import from URL" field creates the session from an `https://` source. A backup file picked anywhere routes to the restore preview because its session format is `NEUTRODYNE_BACKUP`.
 

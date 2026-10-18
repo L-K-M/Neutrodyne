@@ -5,10 +5,11 @@ package ch.lkmc.neutrodyne.notifications
 import android.Manifest
 import android.app.Application
 import android.app.Notification
+import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Intent
 import androidx.core.net.toUri
-import ch.lkmc.neutrodyne.MainActivity
+import ch.lkmc.neutrodyne.INTERNAL_MAIN_ACTIVITY
 import ch.lkmc.neutrodyne.core.domain.BackupError
 import ch.lkmc.neutrodyne.core.domain.ImportScreenVisibility
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
@@ -52,6 +53,60 @@ class AndroidImportReportPosterTest {
     }
 
     @Test
+    fun theReadyBackupPreviewDoesNotInventAPodcastCount() =
+        runBlocking<Unit> {
+            // Backup previews have no parsed import_item rows; their archive is reviewed later.
+            poster.postReady(71L, 0, "backup.zip")
+
+            val notification = manager.activeNotifications.single().notification
+            assertThat(notification.extras.getString(Notification.EXTRA_TEXT)).isEqualTo("From backup.zip")
+        }
+
+    @Test
+    fun theReadyPreviewUsesItsCountNameAndProtectedSessionTap() =
+        runBlocking<Unit> {
+            poster.postReady(71L, 142, "antennapod-feeds.opml")
+
+            val posted = manager.activeNotifications.single()
+            assertThat(posted.id).isEqualTo(ImportBackupChannels.ID_IMPORT_READY)
+            assertThat(posted.tag).isEqualTo("71")
+            val notification = posted.notification
+            assertThat(notification.channelId).isEqualTo(ImportBackupChannels.CHANNEL)
+            assertThat(notification.extras.getString(Notification.EXTRA_TITLE)).isEqualTo("Ready to review")
+            assertThat(notification.extras.getString(Notification.EXTRA_TEXT))
+                .isEqualTo("142 podcasts from antennapod-feeds.opml")
+            assertThat(notification.contentIntent.isImmutable).isTrue()
+            val intent = shadowOf(notification.contentIntent).savedIntent
+            assertThat(intent.component?.className).isEqualTo(INTERNAL_MAIN_ACTIVITY)
+            assertThat(intent.dataString).isEqualTo("neutrodyne://open/import/71")
+        }
+
+    @Test
+    fun theReadyPreviewHonorsPermissionMasterSwitchChannelAndVisibility() =
+        runBlocking<Unit> {
+            shadowOf(application).denyPermissions(Manifest.permission.POST_NOTIFICATIONS)
+            poster.postReady(71L, 1, "a.opml")
+            assertThat(manager.activeNotifications).isEmpty()
+
+            shadowOf(application).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+            shadowManager.setNotificationsEnabled(false)
+            poster.postReady(71L, 1, "a.opml")
+            assertThat(manager.activeNotifications).isEmpty()
+
+            shadowManager.setNotificationsEnabled(true)
+            visibility.enter(71L)
+            poster.postReady(71L, 1, "a.opml")
+            assertThat(manager.activeNotifications).isEmpty()
+
+            visibility.leave(71L)
+            manager.createNotificationChannel(
+                NotificationChannel(ImportBackupChannels.CHANNEL, "Muted", NotificationManager.IMPORTANCE_NONE),
+            )
+            poster.postReady(71L, 1, "a.opml")
+            assertThat(manager.activeNotifications).isEmpty()
+        }
+
+    @Test
     fun theDoneReportLandsAt3001WithTheSessionRoute() =
         runBlocking<Unit> {
             poster.postDone(
@@ -72,7 +127,7 @@ class AndroidImportReportPosterTest {
             val intent = shadowOf(notification.contentIntent).savedIntent
             assertThat(intent.action).isEqualTo(Intent.ACTION_VIEW)
             assertThat(intent.data).isEqualTo("neutrodyne://open/import/5".toUri())
-            assertThat(intent.component?.className).isEqualTo(MainActivity::class.qualifiedName)
+            assertThat(intent.component?.className).isEqualTo(INTERNAL_MAIN_ACTIVITY)
         }
 
     @Test

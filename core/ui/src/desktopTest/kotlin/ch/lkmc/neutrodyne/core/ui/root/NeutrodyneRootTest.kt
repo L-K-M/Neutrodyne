@@ -94,6 +94,67 @@ class NeutrodyneRootTest {
     }
 
     @Test
+    fun groupNotificationSelectsFeedsInsteadOfDroppingTheRoute() =
+        runComposeUiTest {
+            val pending = Channel<Route>(Channel.UNLIMITED)
+            val routes = pending.receiveAsFlow()
+            val selected = mutableListOf<String?>()
+            setContent {
+                TestRoot(routes = routes, selectFeedSource = {
+                    selected += it
+                    true
+                })
+            }
+            onNodeWithTag("nav_library").performClick()
+            onNodeWithText("count:0").assertIsDisplayed()
+            val route =
+                ch.lkmc.neutrodyne.core.navigation.IntentRouter.route(
+                    ch.lkmc.neutrodyne.core.navigation.RouteInput(
+                        ch.lkmc.neutrodyne.core.navigation.RouteInput.Action.VIEW,
+                        "neutrodyne://open/group/tech",
+                        internal = true,
+                    ),
+                )
+            kotlin.test.assertEquals(Route.SelectFeed("tech"), route)
+            runOnIdle { pending.trySend(route) }
+            onNodeWithText("count:0").assertDoesNotExist()
+            onNodeWithText("feeds-content").assertIsDisplayed()
+            runOnIdle { kotlin.test.assertEquals<List<String?>>(listOf("tech"), selected) }
+        }
+
+    @Test
+    fun selectingAllFeedsClearsTheFeedsDetailStack() =
+        runComposeUiTest {
+            val pending = Channel<Route>(Channel.UNLIMITED)
+            val selected = mutableListOf<String?>()
+            setContent {
+                TestRoot(routes = pending.receiveAsFlow(), selectFeedSource = {
+                    selected += it
+                    true
+                })
+            }
+            onNodeWithText("open-podcast").performClick()
+            onNodeWithText("podcast-3").assertIsDisplayed()
+
+            runOnIdle { pending.trySend(Route.SelectFeed(null)) }
+            onNodeWithText("podcast-3").assertDoesNotExist()
+            onNodeWithText("feeds-content").assertIsDisplayed()
+            runOnIdle { kotlin.test.assertEquals<List<String?>>(listOf(null), selected) }
+        }
+
+    @Test
+    fun failedFeedSelectionKeepsTheCurrentTabAndReportsTheFailure() =
+        runComposeUiTest {
+            val pending = Channel<Route>(Channel.UNLIMITED)
+            setContent { TestRoot(routes = pending.receiveAsFlow(), selectFeedSource = { false }) }
+            onNodeWithTag("nav_library").performClick()
+
+            runOnIdle { pending.trySend(Route.SelectFeed("tech")) }
+            onNodeWithText("count:0").assertIsDisplayed()
+            onNodeWithText("Couldn't save the change").assertIsDisplayed()
+        }
+
+    @Test
     fun importRoutesWaitForStartupAndWarmDeliveryReplacesThePreview() =
         runComposeUiTest {
             val pending = Channel<Route>(Channel.UNLIMITED)
@@ -342,13 +403,14 @@ private val TestPlatformActions =
         override val notifications = null
     }
 
-private fun testActions(): RootActions =
+private fun testActions(selectFeedSource: suspend (String?) -> Boolean = { true }): RootActions =
     RootActions(
         retryStartup = {},
         dismissNotice = {},
         continueHere = {},
         dismissRemoteSession = {},
         playbackKey = { false },
+        selectFeedSource = selectFeedSource,
     )
 
 private val TestSlots = RootSlots(player = {}, userMessages = emptyFlow())
@@ -361,12 +423,13 @@ private val TestSlots = RootSlots(player = {}, userMessages = emptyFlow())
 private fun TestRoot(
     startup: StartupGateState = StartupGateState.Ready,
     routes: Flow<Route> = emptyFlow(),
+    selectFeedSource: suspend (String?) -> Boolean = { true },
 ) {
     CompositionLocalProvider(LocalPlatformActions provides TestPlatformActions) {
         NeutrodyneRoot(
             state = RootUiState.READY.copy(startup = startup),
             routes = routes,
-            actions = testActions(),
+            actions = testActions(selectFeedSource),
             slots = TestSlots,
             installers = TestInstallers,
             platform = BuildInfo.Platform.DESKTOP,

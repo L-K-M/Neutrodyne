@@ -13,11 +13,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.splashscreen.SplashScreen
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.lifecycle.DEFAULT_ARGS_KEY
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.flowWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.viewmodel.MutableCreationExtras
 import ch.lkmc.neutrodyne.core.common.GraphHolder
+import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenException
@@ -63,7 +66,14 @@ class MainActivity : AppCompatActivity() {
     /** `appearance.*` once the settings file has emitted; null until then (08 App scheme). */
     private val appearance = mutableStateOf<AppearancePrefs?>(null)
 
-    internal val routing: MainIntentViewModel by lazy { ViewModelProvider(this)[MainIntentViewModel::class.java] }
+    internal val routing: MainIntentViewModel by lazy {
+        // Intent extras are untrusted; only restored routing state may seed the handle.
+        val extras =
+            MutableCreationExtras(defaultViewModelCreationExtras).apply {
+                this[DEFAULT_ARGS_KEY] = Bundle.EMPTY
+            }
+        ViewModelProvider(viewModelStore, defaultViewModelProviderFactory, extras)[MainIntentViewModel::class.java]
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
@@ -92,6 +102,14 @@ class MainActivity : AppCompatActivity() {
                     state = ROOT_STATE_BASE.copy(startup = openState.toGateState()),
                     actions =
                         RootActions(
+                            selectFeedSource = { uuid ->
+                                suspendRunCatching {
+                                    graph.settingsRepository.set(
+                                        AppearanceSettingKeys.FEEDS_SELECTED_SOURCE,
+                                        uuid?.let { "group:$it" } ?: "all",
+                                    )
+                                }.getOrNull() is Outcome.Success
+                            },
                             retryStartup = { graph.appScope.launch { suspendRunCatching { opener.awaitOpen() } } },
                             dismissNotice = {},
                             continueHere = {},
@@ -114,10 +132,10 @@ class MainActivity : AppCompatActivity() {
                 importError?.let { error ->
                     NeutrodyneTheme(prefs = appearance.value ?: AppearancePrefs(), system = systemUi) {
                         NdDialog(
-                            onDismissRequest = { routing.error.value = null },
+                            onDismissRequest = { routing.dismissError() },
                             title = getString(R.string.import_into_neutrodyne),
                             text = getString(error.message),
-                            confirm = NdDialogAction(getString(android.R.string.ok)) { routing.error.value = null },
+                            confirm = NdDialogAction(getString(android.R.string.ok)) { routing.dismissError() },
                         )
                     }
                 }

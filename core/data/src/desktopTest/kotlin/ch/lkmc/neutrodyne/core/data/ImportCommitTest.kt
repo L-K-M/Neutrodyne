@@ -32,6 +32,7 @@ import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceGroup
 import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
+import ch.lkmc.neutrodyne.core.testing.FakeImportReportPoster
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
@@ -122,6 +123,7 @@ class ImportCommitTest {
                 opmlReader = XmlPullOpmlReader.discovered(),
                 archives = ZipGuard(),
                 clock = clock,
+                reports = FakeImportReportPoster(),
                 appScope = appScope,
                 io = Dispatchers.Default,
             )

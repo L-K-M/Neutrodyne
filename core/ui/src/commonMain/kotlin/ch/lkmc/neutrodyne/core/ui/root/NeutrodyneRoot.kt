@@ -74,8 +74,10 @@ import ch.lkmc.neutrodyne.core.ui.resources.nav_downloads
 import ch.lkmc.neutrodyne.core.ui.resources.nav_feeds
 import ch.lkmc.neutrodyne.core.ui.resources.nav_library
 import ch.lkmc.neutrodyne.core.ui.resources.nav_up_next
+import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
+import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -138,9 +140,25 @@ public fun NeutrodyneRoot(
                     LaunchedEffect(routes) {
                         routes.collect { route ->
                             when (route) {
-                                is Route.Navigate -> navigation.open(route.tab, route.stack)
-                                is Route.Push -> navigation.push(route.key)
-                                else -> Unit
+                                is Route.Navigate -> {
+                                    navigation.open(route.tab, route.stack)
+                                }
+
+                                is Route.Push -> {
+                                    navigation.push(route.key)
+                                }
+
+                                is Route.SelectFeed -> {
+                                    if (actions.selectFeedSource(route.groupUuid)) {
+                                        navigation.open(FeedsKey, emptyList())
+                                    } else {
+                                        snackbarHost.showSnackbar(getString(Res.string.write_failed))
+                                    }
+                                }
+
+                                else -> {
+                                    Unit
+                                }
                             }
                         }
                     }

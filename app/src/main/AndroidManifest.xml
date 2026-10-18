@@ -43,6 +43,12 @@
       </intent-filter>
     </activity>
 
+    <!-- Internal routes are reachable only through this OS-protected entry point. -->
+    <activity-alias
+      android:name=".InternalMainActivity"
+      android:targetActivity=".MainActivity"
+      android:exported="false" />
+
     <activity
       android:name=".ExternalImportActivity"
       android:exported="true"
