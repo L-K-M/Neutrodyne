@@ -1,0 +1,19 @@
+{
+  "entries": [
+    {
+      "htmlUrl": "https://cafe.example.com",
+      "ordinal": 0,
+      "text": "Café & bar",
+      "type": "rss",
+      "url": "https://cafe.example.com/rss"
+    },
+    {
+      "ordinal": 1,
+      "text": "Plain",
+      "type": "rss",
+      "url": "https://plain.example.com/rss"
+    }
+  ],
+  "folders": [],
+  "mode": "RELAXED"
+}

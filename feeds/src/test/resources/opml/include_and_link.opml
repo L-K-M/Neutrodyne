@@ -1,0 +1,7 @@
+<opml version="1.0">
+  <body>
+    <outline type="include" text="Shared list" url="https://lists.example.com/shared.opml"/>
+    <outline type="link" text="Friend list" url="https://lists.example.com/friends.opml"/>
+    <outline type="rss" text="Feed" xmlUrl="https://feed.example.com/rss"/>
+  </body>
+</opml>
