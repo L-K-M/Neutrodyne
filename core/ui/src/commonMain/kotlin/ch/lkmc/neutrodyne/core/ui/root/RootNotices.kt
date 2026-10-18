@@ -46,6 +46,7 @@ internal fun RootBanners(
     actions: RootActions,
     navigator: AppNavigator,
     onFeedsOrLibrary: Boolean,
+    importResume: @Composable (available: Boolean) -> Boolean = { false },
 ) {
     val held = state.heldChanges
     if (held != null && onFeedsOrLibrary) {
@@ -63,7 +64,9 @@ internal fun RootBanners(
         )
     }
 
-    if (state.notice == RootNotice.FIRST_RUN_CHOICE) {
+    val shown = if (held != null && onFeedsOrLibrary) 1 else 0
+    val hasImport = importResume(shown < MAX_BANNERS)
+    if (state.notice == RootNotice.FIRST_RUN_CHOICE && shown + (if (hasImport) 1 else 0) < MAX_BANNERS) {
         NdBanner(
             message = stringResource(Res.string.notice_first_run_body),
             primary =
@@ -118,6 +121,8 @@ internal fun ContinueOnThisDeviceCard(
         }
     }
 }
+
+private const val MAX_BANNERS = 2
 
 private val CARD_MARGIN = 8.dp
 private val CARD_PADDING = 16.dp

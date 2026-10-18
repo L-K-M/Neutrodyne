@@ -146,6 +146,8 @@ public class RootActions(
 public class RootSlots(
     public val player: @Composable (PlayerSlotState) -> Unit,
     public val userMessages: Flow<UserMessage>,
+    /** The import feature fills one priority-7 banner position after startup. */
+    public val importResume: @Composable (available: Boolean, open: (Long) -> Unit) -> Boolean = { _, _ -> false },
 )
 
 /** Everything the root needs that is not a callback or a slot (01 root contract). */

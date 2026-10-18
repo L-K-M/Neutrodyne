@@ -285,6 +285,71 @@ class NeutrodyneRootTest {
             onNodeWithText("Als Nächstes").assertIsDisplayed()
         }
 
+    @Test fun importSlotStaysOnRootsAndNeverStacksPreviews() =
+        runComposeUiTest {
+            val slots =
+                RootSlots(player = {}, userMessages = emptyFlow(), importResume = { available, open ->
+                    if (available) {
+                        NdButton(
+                            "review-import",
+                            onClick = {
+                                open(1)
+                            },
+                        )
+                    }
+                    available
+                })
+            setContent { TestRoot(slots = slots) }
+            onNodeWithText("review-import").assertExists()
+            onNodeWithTag("nav_library").performClick()
+            onNodeWithText("review-import").assertExists()
+            onNodeWithText("review-import").performClick()
+            onNodeWithText("import-screen").assertExists()
+            onNodeWithText("review-import").assertDoesNotExist()
+            pressEscape()
+            onNodeWithText("review-import").assertExists()
+            onNodeWithTag("nav_discover").performClick()
+            onNodeWithText("review-import").assertDoesNotExist()
+        }
+
+    @Test fun closedStartupGateNeverComposesImportServices() =
+        runComposeUiTest {
+            var state by mutableStateOf(RootUiState.READY.copy(startup = StartupGateState.Pending))
+            var calls = 0
+            val slots =
+                RootSlots(player = {}, userMessages = emptyFlow(), importResume = { _, _ ->
+                    calls++
+                    false
+                })
+            setContent { TestRoot(slots = slots, state = state) }
+            waitForIdle()
+            kotlin.test.assertEquals(0, calls)
+            runOnIdle { state = RootUiState.READY }
+            waitForIdle()
+            kotlin.test.assertTrue(calls > 0)
+        }
+
+    @Test fun importPriorityKeepsTheRootAtTwoBanners() =
+        runComposeUiTest {
+            var state by mutableStateOf(
+                RootUiState.READY.copy(
+                    heldChanges = HeldChangesBanner(1, "Other device", 2, 1),
+                    notice = RootNotice.FIRST_RUN_CHOICE,
+                ),
+            )
+            val slots =
+                RootSlots(player = {}, userMessages = emptyFlow(), importResume = { available, _ ->
+                    if (available) Text("import-banner")
+                    available
+                })
+            setContent { TestRoot(slots = slots, state = state) }
+            onNodeWithText("import-banner").assertExists()
+            onNodeWithText("Turn off").assertDoesNotExist()
+            runOnIdle { state = state.copy(heldChanges = null) }
+            onNodeWithText("import-banner").assertExists()
+            onNodeWithText("Turn off").assertExists()
+        }
+
     private fun ComposeUiTest.setRootContent() {
         setContent { TestRoot() }
     }
@@ -334,12 +399,15 @@ private val TestSlots = RootSlots(player = {}, userMessages = emptyFlow())
  * composes it.
  */
 @Composable
-private fun TestRoot() {
+private fun TestRoot(
+    slots: RootSlots = TestSlots,
+    state: RootUiState = RootUiState.READY,
+) {
     CompositionLocalProvider(LocalPlatformActions provides TestPlatformActions) {
         NeutrodyneRoot(
-            state = RootUiState.READY,
+            state = state,
             actions = testActions(),
-            slots = TestSlots,
+            slots = slots,
             installers = TestInstallers,
             platform = BuildInfo.Platform.DESKTOP,
             modifier = Modifier.testTag("root-box"),
@@ -349,6 +417,11 @@ private fun TestRoot() {
 
 private val TestInstallers: Set<EntryProviderInstaller> =
     buildSet {
+        add {
+            entry<ch.lkmc.neutrodyne.core.navigation.ImportKey>(metadata = NdSceneMetadata.paneDetail()) {
+                Text("import-screen")
+            }
+        }
         add { entry<FeedsKey>(metadata = NdSceneMetadata.paneList()) { FeedsStub() } }
         add { entry<LibraryKey>(metadata = NdSceneMetadata.paneList()) { LibraryStub() } }
         add {

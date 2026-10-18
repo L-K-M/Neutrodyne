@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.desktop.window
 
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -30,6 +31,7 @@ import ch.lkmc.neutrodyne.desktop.notifications.DesktopBannerNotifier
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Before
@@ -199,6 +201,47 @@ class NeutrodyneWindowContentTest {
                 onAllNodesWithText("OpenJDK runtime (Temurin 25)").fetchSemanticsNodes().isNotEmpty()
             }
             onNodeWithText("OpenJDK runtime (Temurin 25)").assertIsDisplayed()
+        }
+
+    @Test
+    fun persistedImportsResumeThroughTheRealRootAndMetroGraph() =
+        runComposeUiTest {
+            runBlocking { graph.databaseOpener.awaitOpen() }
+            val source =
+                kotlin.io.path
+                    .createTempFile("nd-resume", ".opml")
+                    .toFile()
+            try {
+                source.writeText(
+                    """<opml version="2.0"><body>
+                <outline text="Test show" xmlUrl="https://example.com/feed"/>
+                </body></opml>""",
+                )
+                runBlocking {
+                    repeat(2) {
+                        val result =
+                            graph.importRepository.create(
+                                ch.lkmc.neutrodyne.core.model
+                                    .ImportSource(source.toURI().toString(), "feeds-$it.opml"),
+                            )
+                        assertThat(result).isInstanceOf(ch.lkmc.neutrodyne.core.common.Outcome.Success::class.java)
+                    }
+                }
+                setWindowContent()
+                waitUntil("the import resume banner loads", TIMEOUT_MS) {
+                    onAllNodesWithText("Finish importing 1 podcast").fetchSemanticsNodes().isNotEmpty()
+                }
+                onAllNodesWithText("Finish importing 1 podcast").assertCountEquals(1)
+                onNodeWithText("Review").performClick()
+                waitUntil("the persisted preview opens", TIMEOUT_MS) {
+                    onAllNodesWithText("Subscribe to 1 podcast").fetchSemanticsNodes().isNotEmpty()
+                }
+                onNodeWithText("Subscribe to 1 podcast").assertIsDisplayed()
+                onNodeWithText("Finish importing 1 podcast").assertDoesNotExist()
+                assertThat(runBlocking { graph.importRepository.observeOpenSessions().first() }).hasSize(2)
+            } finally {
+                source.delete()
+            }
         }
 
     private fun ComposeUiTest.setWindowContent() {
