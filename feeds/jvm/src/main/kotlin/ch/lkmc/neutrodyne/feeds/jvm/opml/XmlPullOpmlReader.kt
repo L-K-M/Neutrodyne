@@ -498,14 +498,12 @@ private class ReadSession(
         val v = raw.trim()
         if (!v.startsWith('#')) return null
         val hex = v.substring(1)
-        // ASCII hex only: `toLong(16)` alone would accept a sign or a non-ASCII digit.
+        // Length first, then ASCII hex only: `toLong(16)` would throw on "" or an over-long
+        // value and accept a sign or a non-ASCII digit.
+        if (hex.length != RGB_HEX_DIGITS && hex.length != ARGB_HEX_DIGITS) return null
         if (!hex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) return null
         val value = hex.toLong(16)
-        return when (hex.length) {
-            6 -> (0xFF000000L or value).toInt()
-            8 -> value.toInt()
-            else -> null
-        }
+        return if (hex.length == RGB_HEX_DIGITS) (0xFF000000L or value).toInt() else value.toInt()
     }
 
     private enum class Kind {
@@ -522,5 +520,7 @@ private class ReadSession(
         const val OUTLINE = "outline"
         const val NEUTRODYNE_NS = "urn:neutrodyne:opml:1"
         const val OPML_SUFFIX = ".opml"
+        const val RGB_HEX_DIGITS = 6 // `#RRGGBB`
+        const val ARGB_HEX_DIGITS = 8 // `#AARRGGBB`
     }
 }

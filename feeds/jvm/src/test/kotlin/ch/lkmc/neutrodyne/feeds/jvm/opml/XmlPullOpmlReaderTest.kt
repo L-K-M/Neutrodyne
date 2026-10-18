@@ -129,6 +129,8 @@ class XmlPullOpmlReaderTest {
     fun groupColorRejectsSignedAndNonAsciiHex() {
         assertEquals(0xFFFFAA00.toInt(), folderColor("#FFAA00"))
         for (raw in listOf(
+            "#",
+            "#123456789abcdef0123",
             "#-fffff",
             "#+fffff",
             "#-fffffff",
