@@ -4,7 +4,9 @@ package ch.lkmc.neutrodyne.di
 import android.app.Application
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
+import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenInitializer
+import ch.lkmc.neutrodyne.core.model.ExportRequest
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
@@ -28,6 +30,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.io.File
 
 /**
  * The Android graph test (01 Dependency injection rule 10): the real graph builds, every key that exists in M0a has
@@ -123,6 +126,34 @@ class AndroidAppGraphTest {
             graph.databaseOpener.requireDatabase().close()
         }
     }
+
+    /**
+     * M3 C1: `ExportRepository` binds through the Android seam — `prepare` mints the cache
+     * file AND a `content://{applicationId}.fileprovider/export/…` URI resolved by the
+     * manifest's FileProvider, proving the authority and the `export/` root end to end.
+     */
+    @Test
+    fun exportRepositoryPreparesThroughTheFileProviderSeam() =
+        runBlocking {
+            graph.databaseOpener.awaitOpen()
+            try {
+                val prepared =
+                    (graph.exportRepository.prepare(ExportRequest()) as Outcome.Success).value
+
+                val authority = "${RuntimeEnvironment.getApplication().packageName}.fileprovider"
+                assertThat(prepared.shareUri)
+                    .isEqualTo("content://$authority/export/${prepared.fileName}")
+                assertThat(prepared.mimeType).isEqualTo("text/x-opml")
+                assertThat(
+                    File(
+                        RuntimeEnvironment.getApplication().cacheDir,
+                        "export/${prepared.fileName}",
+                    ).isFile,
+                ).isTrue()
+            } finally {
+                graph.databaseOpener.requireDatabase().close()
+            }
+        }
 
     @Test
     fun newEpisodePosterUsesTheAndroidAdapter() =
