@@ -313,7 +313,7 @@ internal class SalvageOpmlScanner(
             if (digits.any { it !in '0'..'9' && (!hex || (it !in 'a'..'f' && it !in 'A'..'F')) }) return null
 
             val codePoint = digits.toIntOrNull(if (hex) 16 else 10) ?: return null
-            if (codePoint > 0x10FFFF || codePoint in 0xD800..0xDFFF) return null
+            if (!isXmlChar(codePoint)) return null
             return String(Character.toChars(codePoint))
         }
 
@@ -367,6 +367,10 @@ internal class SalvageOpmlScanner(
 
         private fun isNameStart(c: Char): Boolean = c.isLetter() || c == '_' || c == ':' || c.code >= 0x80
 
+        /** A strict parser rejects a reference to anything else, so salvage keeps it literal. */
+        private fun isXmlChar(codePoint: Int): Boolean =
+            codePoint in XML_CHAR_CONTROLS || XML_CHAR_RANGES.any { codePoint in it }
+
         private fun isNameChar(c: Char): Boolean =
             c.isLetterOrDigit() || c == '_' || c == '-' || c == ':' || c == '.' || c.code >= 0x80
     }
@@ -385,6 +389,10 @@ internal class SalvageOpmlScanner(
 
         /** Longest spelled-out entity name the unescape scan looks back at (`&…;` is short). */
         const val MAX_ENTITY_CHARS = 16
+
+        /** XML 1.0 `Char` production (§2.2): tab, LF and CR, then three ranges. */
+        val XML_CHAR_CONTROLS = setOf('\t'.code, '\n'.code, '\r'.code)
+        val XML_CHAR_RANGES = listOf(0x20..0xD7FF, 0xE000..0xFFFD, 0x10000..0x10FFFF)
 
         val TAG_ATTR = Regex("""(\w[\w:.-]*)\s*=\s*("([^"]*)"|'([^']*)')""")
     }
