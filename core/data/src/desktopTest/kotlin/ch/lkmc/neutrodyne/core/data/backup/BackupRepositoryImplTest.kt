@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.data.backup
 
+import ch.lkmc.neutrodyne.core.common.JobLanePoker
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.CommitCancellingDriver
 import ch.lkmc.neutrodyne.core.data.FakeImportWorkScheduler
@@ -16,6 +17,7 @@ import ch.lkmc.neutrodyne.core.data.importing.ImportOptionsJson
 import ch.lkmc.neutrodyne.core.data.importing.ImportSessionCleaner
 import ch.lkmc.neutrodyne.core.data.importing.ImportSessions
 import ch.lkmc.neutrodyne.core.data.importing.ImportWorkScheduler
+import ch.lkmc.neutrodyne.core.data.importing.LaneImportWorkScheduler
 import ch.lkmc.neutrodyne.core.data.importing.PayloadStore
 import ch.lkmc.neutrodyne.core.data.importing.RestoreEnqueue
 import ch.lkmc.neutrodyne.core.data.newNetworkClients
@@ -64,6 +66,7 @@ import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipArchiveWriter
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipGuard
 import ch.lkmc.neutrodyne.feeds.jvm.opml.XmlPullOpmlReader
 import ch.lkmc.neutrodyne.youtube.api.YouTubeUrlClassifier
+import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -473,6 +476,35 @@ class BackupRepositoryImplTest {
                     checkNotNull(checkNotNull(db.importDao().sessionById(claimed)).optionsJson),
                 )
             assertEquals(clock.now(), options.restoreRequestedAt)
+        }
+
+    /**
+     * The claim path against the real `LaneImportWorkScheduler` (C3b): `restore` writes the
+     * durable intent *before* calling `scheduleRestore`, so the scheduler plainly sees the
+     * request's own intent — answering `ALREADY_RUNNING` there would roll the stamp back and
+     * deny queued work. The durable row is the queue; the poke only wakes the lane.
+     */
+    @Test
+    fun theLaneSchedulerAcknowledgesTheRequestItIsWokenFor() =
+        runTest {
+            val pokes = mutableListOf<String>()
+            val laneScheduler =
+                LaneImportWorkScheduler(db, Provider { JobLanePoker { pokes += it } })
+            val realRepo = repositoryOf(scheduler = laneScheduler)
+            val sessionId = backupSession()
+
+            val result = realRepo.restore(sessionId, RestoreRequest(RestoreMode.MERGE, emptySet()))
+
+            assertIs<Outcome.Success<*>>(result)
+            assertEquals(listOf("import-backup"), pokes)
+            assertTrue(laneScheduler.hasRestoreWork(), "the durable intent is restore work")
+
+            // And the same durable check gates a second request — no fake was involved.
+            assertEquals(
+                Outcome.Failure(BackupError.RestoreRunning),
+                realRepo.restore(sessionId, RestoreRequest(RestoreMode.MERGE, emptySet())),
+            )
+            assertEquals(1, pokes.size, "the declined request never pokes")
         }
 
     @Test

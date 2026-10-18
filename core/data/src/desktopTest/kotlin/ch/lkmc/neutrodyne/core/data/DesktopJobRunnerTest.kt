@@ -289,6 +289,31 @@ class DesktopJobRunnerTest {
             runner.stop(3.seconds)
         }
 
+    /**
+     * `import-backup` is in the regained set although it is a *mixed* lane — the poke wakes its
+     * fetch pass, while its restore/cleanup legs already ran on the offline ticks.
+     */
+    @Test
+    fun aReturnToOnlinePokesTheMixedImportBackupLane() =
+        runTest {
+            val importBackup = FailingLane("import-backup")
+            val maintenance = FailingLane("maintenance")
+            val network = FakeNetworkMonitor(FakeNetworkMonitor.OFFLINE)
+            val runner = runner(importBackup, maintenance, network = network)
+            runner.start()
+            advanceTimeBy(DesktopJobRunner.START_SETTLE_MS + 1.seconds)
+            awaitRuns(importBackup, 1)
+            awaitRuns(maintenance, 1)
+
+            network.setStatus(FakeNetworkMonitor.ONLINE)
+            runCurrent()
+
+            awaitRuns(importBackup, 2)
+            expectQuietly { maintenance.runCount.get() == 1 }
+
+            runner.stop(3.seconds)
+        }
+
     // --- Wake catch-up (PLAN M1 AC10's 3-hour sleep, 11 Testing's last leg) -----------------------
 
     @Test

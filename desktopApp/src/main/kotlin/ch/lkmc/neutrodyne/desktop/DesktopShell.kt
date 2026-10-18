@@ -235,10 +235,14 @@ internal object DesktopShell {
         // closes — the M0b close rule: nothing is busy, so a close request quits — and the
         // clean shutdown runs before main returns. The content is gated on the database open
         // (band 100 above) exactly like Android's StartupGate.
+        val menuActions = DesktopMenuActions()
+        // 11 Notifications' fallback: banner taps route through the root's navigator.
+        graph.bannerNotifier.routeDispatch = menuActions::applyRoute
         application {
             NeutrodyneWindow(
                 installers = graph.entryInstallers,
-                menuActions = DesktopMenuActions(),
+                menuActions = menuActions,
+                banners = graph.bannerNotifier,
                 activator = activator,
                 background = background,
                 databaseOpener = graph.databaseOpener,
