@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.ExportError
 import ch.lkmc.neutrodyne.core.domain.ExportRepository
 import ch.lkmc.neutrodyne.core.domain.GroupRepository
@@ -27,6 +28,7 @@ import dev.zacsweers.metro.AssistedInject
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metrox.viewmodel.ManualViewModelAssistedFactory
 import dev.zacsweers.metrox.viewmodel.ManualViewModelAssistedFactoryKey
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
@@ -78,11 +80,14 @@ internal class ExportDestinations(
     val share: (PreparedExport) -> Unit,
 )
 
-/** The export the warning was raised for, kept so Continue delivers that exact artifact. */
+/**
+ * The export the warning was raised for: immutable artifact + chosen action only — never the
+ * route's platform seams, which die with the composition that built them. Continue passes the
+ * live route's destinations instead.
+ */
 private data class PendingExport(
     val export: PreparedExport,
     val action: ExportAction,
-    val destinations: ExportDestinations,
 )
 
 /**
@@ -90,6 +95,11 @@ private data class PendingExport(
  * group id shares that group. `prepare` runs exactly once per action; the returned
  * `PreparedExport` is the immutable artifact every later step works on — the warning counts
  * come from it and [deliver] never rebuilds it after consent (R1.9/AC10).
+ *
+ * [export] and [confirmWarning] are `suspend` operations the route launches on its own
+ * composition scope: the interactive flow (prepare, destination pick, delivery) cancels with
+ * the route/activity that owns it, so the retained VM never holds a dead Activity's launchers
+ * or a stranded picker continuation. Cancellation clears `busy` and leaves the flow retryable.
  */
 internal class ExportViewModel
     @AssistedInject
@@ -138,15 +148,21 @@ internal class ExportViewModel
             state.update { it.copy(includePasswords = include) }
         }
 
-        fun export(
+        /**
+         * Runs the interactive export — prepare, optional warning, destination pick, delivery —
+         * on the caller's scope. A platform or repository throw that is not a typed
+         * [Outcome.Failure] becomes `export_err_io`; cancellation still propagates.
+         */
+        suspend fun export(
             action: ExportAction,
             destinations: ExportDestinations,
         ) {
             // The busy flag is the duplicate/stale guard: while a flow runs, further taps and
-            // any late-arriving second launch are ignored; viewModelScope drops the rest on pop.
+            // any late-arriving second launch are ignored.
             if (!state.value.ready || state.value.busy) return
+            pending = null
             state.update { it.copy(busy = true, warning = null) }
-            viewModelScope.launch {
+            try {
                 val options = state.value
                 val request =
                     ExportRequest(
@@ -155,37 +171,54 @@ internal class ExportViewModel
                         includeYouTube = options.includeYouTube,
                         includePasswords = options.includePasswords,
                     )
-                when (val outcome = exports.prepare(request)) {
+                val outcome =
+                    suspendRunCatching { exports.prepare(request) }.getOrElse {
+                        userMessages.post(UiText.Res(Res.string.export_err_io))
+                        return
+                    }
+                when (outcome) {
                     is Outcome.Failure -> {
                         userMessages.post(errorText(outcome.error))
                     }
 
                     is Outcome.Success -> {
                         // 05: the dialog's layout/YouTube memories write back on export. A failed
-                        // memory write must not fail the export itself.
-                        settings.set(BackupSettingKeys.OPML_LAYOUT, options.layout)
-                        settings.set(BackupSettingKeys.OPML_INCLUDE_YOUTUBE, options.includeYouTube)
+                        // or thrown memory write must not fail the export itself.
+                        suspendRunCatching {
+                            settings.set(BackupSettingKeys.OPML_LAYOUT, options.layout)
+                            settings.set(BackupSettingKeys.OPML_INCLUDE_YOUTUBE, options.includeYouTube)
+                        }
                         val export = outcome.value
                         if (export.privateLinks > 0 || export.passwords > 0) {
-                            pending = PendingExport(export, action, destinations)
+                            pending = PendingExport(export, action)
                             state.update { it.copy(warning = export) }
                         } else {
                             deliver(export, action, destinations)
                         }
                     }
                 }
+            } finally {
                 state.update { it.copy(busy = false) }
             }
         }
 
-        /** Continue on the warning: delivers the artifact the counts were read from. */
-        fun confirmWarning() {
+        /**
+         * Continue on the warning through the caller's live [destinations]: delivers the artifact
+         * the counts were read from. If the caller dies mid-delivery, the artifact goes back to
+         * pending so a recreated route can finish it — never a dead route's seams.
+         */
+        suspend fun confirmWarning(destinations: ExportDestinations) {
             val warned = pending ?: return
             if (state.value.busy) return
             pending = null
             state.update { it.copy(warning = null, busy = true) }
-            viewModelScope.launch {
-                deliver(warned.export, warned.action, warned.destinations)
+            try {
+                deliver(warned.export, warned.action, destinations)
+            } catch (c: CancellationException) {
+                pending = warned
+                state.update { it.copy(warning = warned.export) }
+                throw c
+            } finally {
                 state.update { it.copy(busy = false) }
             }
         }
@@ -208,15 +241,27 @@ internal class ExportViewModel
                         userMessages.post(UiText.Res(Res.string.export_err_unavailable))
                         return
                     }
-                    destinations.share(export)
+                    suspendRunCatching { destinations.share(export) }.getOrElse {
+                        userMessages.post(UiText.Res(Res.string.export_err_unavailable))
+                        return
+                    }
                     state.update { it.copy(finished = FinishedExport(export, null, shared = true)) }
                 }
 
                 ExportAction.SAVE -> {
                     // A dismissed destination picker stays silent — nothing was accepted, so
-                    // there is neither a write nor a message.
-                    val uri = destinations.save(export) ?: return
-                    when (val outcome = exports.saveTo(export, uri)) {
+                    // there is neither a write nor a message. A thrown picker is a real failure.
+                    val uri =
+                        suspendRunCatching { destinations.save(export) }.getOrElse {
+                            userMessages.post(UiText.Res(Res.string.export_err_io))
+                            return
+                        } ?: return
+                    val outcome =
+                        suspendRunCatching { exports.saveTo(export, uri) }.getOrElse {
+                            userMessages.post(UiText.Res(Res.string.export_err_io))
+                            return
+                        }
+                    when (outcome) {
                         is Outcome.Success -> {
                             state.update {
                                 it.copy(finished = FinishedExport(export, uri, shared = false))

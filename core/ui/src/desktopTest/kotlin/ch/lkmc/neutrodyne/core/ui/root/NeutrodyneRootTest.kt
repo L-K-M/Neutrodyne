@@ -55,7 +55,10 @@ import ch.lkmc.neutrodyne.core.ui.platform.PlatformActions
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.nav_feeds
 import ch.lkmc.neutrodyne.core.ui.resources.nav_library
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 import java.util.Locale
@@ -167,6 +170,24 @@ class NeutrodyneRootTest {
             onNodeWithText("open-dialog").performClick()
             onNodeWithText("export-dialog").assertIsDisplayed()
             onNodeWithText("feeds-content").assertIsDisplayed()
+        }
+
+    @Test
+    fun aPoppedDialogsSnackbarSurvivesOnTheRootScope() =
+        runComposeUiTest {
+            // The export dialog's post-pop snackbar rides `LocalRootScope`: it must outlive the
+            // disposed entry but still end when the root leaves composition.
+            var rootAlive by mutableStateOf(true)
+            setContent { if (rootAlive) TestRoot() }
+
+            onNodeWithText("open-dialog").performClick()
+            onNodeWithText("export-done").performClick()
+
+            onNodeWithText("export-dialog").assertDoesNotExist()
+            onNodeWithText("Saved").assertIsDisplayed()
+
+            runOnIdle { rootAlive = false }
+            waitUntil(timeoutMillis = 5_000) { capturedRootScope?.isActive == false }
         }
 
     @Test
@@ -352,7 +373,7 @@ private val TestInstallers: Set<EntryProviderInstaller> =
             }
         }
         add { entry<AddPodcastKey>(metadata = NdSceneMetadata.bottomSheet()) { Text("add-podcast-sheet") } }
-        add { entry<ExportKey>(metadata = NdSceneMetadata.dialog()) { Text("export-dialog") } }
+        add { entry<ExportKey>(metadata = NdSceneMetadata.dialog()) { ExportDialogStub(it) } }
     }
 
 @Composable
@@ -374,6 +395,34 @@ private fun LibraryStub() {
         TestTopBar(Res.string.nav_library)
         Text("count:$count")
         NdButton(label = "inc", onClick = { count++ })
+    }
+}
+
+/**
+ * The last `LocalRootScope` seen by [ExportDialogStub] — the assertion that the root-owned job
+ * ends when the root leaves composition needs the scope itself, not the dismissed snackbar.
+ */
+private var capturedRootScope: CoroutineScope? = null
+
+/**
+ * Mirrors `ExportRoute`'s terminal flow for the seam test: pop the entry, then post the "Saved"
+ * snackbar on `LocalRootScope` — the work must survive the entry disposal the pop causes.
+ */
+@Composable
+private fun ExportDialogStub(key: ExportKey) {
+    val navigator = LocalAppNavigator.current
+    val snackbar = LocalSnackbarHost.current
+    val rootScope = LocalRootScope.current
+    capturedRootScope = rootScope
+    Column {
+        Text("export-dialog")
+        NdButton(
+            label = "export-done",
+            onClick = {
+                navigator.pop(key)
+                rootScope.launch { snackbar.showSnackbar("Saved", "Show in folder") }
+            },
+        )
     }
 }
 

@@ -2,12 +2,14 @@
 
 package ch.lkmc.neutrodyne.feature.importexport
 
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.navigation.ExportKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
@@ -17,26 +19,37 @@ import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_share
 import ch.lkmc.neutrodyne.core.ui.resources.export_saved
 import ch.lkmc.neutrodyne.core.ui.resources.export_show_in_folder
+import ch.lkmc.neutrodyne.core.ui.root.LocalRootScope
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
 import dev.zacsweers.metrox.viewmodel.assistedMetroViewModel
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.getString
 
 /**
  * The `ExportKey` entry (05 OPML export): the shared dialog over the library or one group. The
  * platform seams stay here — the ViewModel sees only [ExportDestinations], so common UI never
  * touches intents, AWT or the file system.
+ *
+ * The interactive export runs on this entry's composition scope: when the dialog is disposed —
+ * pop, or an Activity recreation — the in-flight prepare/pick is cancelled instead of driving a
+ * dead route's seams. The post-save snackbar is different work: it launches on the root-owned
+ * `LocalRootScope`, so it survives the pop that disposes this entry but still ends with the
+ * root, and it re-reads the live `LocalPlatformActions` rather than a stale callback.
  */
 @Composable
-internal fun ExportRoute(key: ExportKey) {
-    val viewModel = assistedMetroViewModel<ExportViewModel, ExportViewModel.Factory> { create(key.groupId) }
+internal fun ExportRoute(
+    key: ExportKey,
+    viewModel: ExportViewModel =
+        assistedMetroViewModel<ExportViewModel, ExportViewModel.Factory> { create(key.groupId) },
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val navigator = LocalAppNavigator.current
     val snackbar = LocalSnackbarHost.current
+    val rootScope = LocalRootScope.current
     val actions = LocalPlatformActions.current
+    val scope = rememberCoroutineScope()
     ShowUserMessages(messages, viewModel::acknowledgeMessage)
     val destinations =
         remember(actions) {
@@ -50,11 +63,8 @@ internal fun ExportRoute(key: ExportKey) {
         }
     LaunchedEffect(state.finished) {
         val finished = viewModel.consumeFinished() ?: return@LaunchedEffect
-        // Popping disposes this entry; the root snackbar must survive that disposal.
-        withContext(NonCancellable) {
-            navigator.pop(key)
-            if (!finished.shared) showSavedSnackbar(snackbar, actions, finished)
-        }
+        navigator.pop(key)
+        if (!finished.shared) rootScope.launch { showSavedSnackbar(snackbar, actions, finished) }
     }
     ExportDialogContent(
         state = state,
@@ -62,9 +72,9 @@ internal fun ExportRoute(key: ExportKey) {
         onLayout = viewModel::setLayout,
         onYouTube = viewModel::setYouTube,
         onPasswords = viewModel::setPasswords,
-        onShare = { viewModel.export(ExportAction.SHARE, destinations) },
-        onSave = { viewModel.export(ExportAction.SAVE, destinations) },
-        onConfirmWarning = viewModel::confirmWarning,
+        onShare = { scope.launch { viewModel.export(ExportAction.SHARE, destinations) } },
+        onSave = { scope.launch { viewModel.export(ExportAction.SAVE, destinations) } },
+        onConfirmWarning = { scope.launch { viewModel.confirmWarning(destinations) } },
         onCancelWarning = viewModel::cancelWarning,
     )
 }
@@ -72,6 +82,8 @@ internal fun ExportRoute(key: ExportKey) {
 /**
  * "Saved" with the destination's follow-up (05 Destinations): Android offers the sheet again on
  * the same prepared artifact's share URI, the desktop "Show in folder" on the saved `file:` URI.
+ * An action snackbar on the serial root host must stay bounded (08's rule: `Long` with an
+ * action, `Short` without) — the M3 default of `Indefinite` would starve every later message.
  */
 private suspend fun showSavedSnackbar(
     snackbar: SnackbarHostState,
@@ -87,7 +99,13 @@ private suspend fun showSavedSnackbar(
             actions.reveal != null && destination != null -> getString(Res.string.export_show_in_folder)
             else -> null
         }
-    val result = snackbar.showSnackbar(getString(Res.string.export_saved), label)
+    val result =
+        snackbar.showSnackbar(
+            message = getString(Res.string.export_saved),
+            actionLabel = label,
+            withDismissAction = label != null,
+            duration = if (label != null) SnackbarDuration.Long else SnackbarDuration.Short,
+        )
     if (result != SnackbarResult.ActionPerformed) return
     when {
         actions.share != null && shareUri != null -> {

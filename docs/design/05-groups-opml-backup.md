@@ -117,7 +117,7 @@ All repository functions are main-safe (`suspend` or `Flow`), follow [01 Corouti
 | DAO calls | Room query context (`@Dispatcher(IO)`) | Batch sizes and transaction rules of [02 Conventions](02-data-model.md#conventions): import commit 500 items, restore 1,000 lines per transaction |
 | Copying payloads, OPML/JSON/CSV parsing, ZIP reading and writing | `@Dispatcher(IO)` (blocking streams) | Caps enforced while streaming; no `ContentResolver` or other platform file call inside a transaction |
 | Group proposals of a 10,000-item preview, OPML document building | `@Dispatcher(Default)` | Debounced 100 ms on item changes |
-| Manual OPML and backup export | `@ApplicationScope` | Leaving the dialog does not cancel; result reported as a `UserMessage` |
+| Manual OPML export's interactive flow (prepare, destination pick, delivery) | the export route's composition scope — `suspend` ops the route launches | Leaving or recreating the dialog cancels the flow and clears `busy`; the retained pending artifact lets a recreated route finish it, and errors post as a `UserMessage`. Backup export keeps `@ApplicationScope` when it lands |
 | Delete-group undo window | `@ApplicationScope`, `delay(10_000)` | Process death within the window makes the delete final |
 | `ImportFetchWorker`, `RestoreWorker`, `AutoSnapshotWorker` (Android) | `CoroutineWorker` created by `MetroWorkerFactory` ([01 Dependency injection](01-foundation.md#dependency-injection)) | Idempotent, resumable, 8-min soft deadline ([N2](../PLAN.md#22-non-functional-requirements)); the first two host the common `ImportFetchRunner` and `RestoreRunner` |
 | `import-backup` lane (desktop) | `DesktopJobRunner` lane on `Dispatchers.IO` ([11 Background work](11-desktop.md#background-work)) | The same runners without a soft deadline; a quit stops the lane and the next start resumes from the persisted session state |
@@ -944,6 +944,18 @@ per-OS split. The group action surface wired is the Library group tile's
 menu ("Share as OPML" on Android, "Export group as OPML…" on the desktop)
 plus the Library overflow's "Export subscriptions…"; the feed-header
 overflow variant stays with the group-feed row that owns that menu.
+
+**Implementation note (2026-10-18, M3 D3 review fix).** The dialog's
+lifetime model tightened: `export`/`confirmWarning` are `suspend` operations
+the route launches on its composition scope, so a pop or an Activity
+recreation cancels the in-flight prepare/pick instead of driving a dead
+route's seams — the ViewModel's pending warning keeps only the immutable
+`PreparedExport` plus the action, and Continue receives the live route's
+destinations; a cancelled confirm re-arms the same warning. The post-save
+"Saved" snackbar launches on the root-owned `LocalRootScope` so it survives
+the pop but ends with the root. On the desktop, `awaitEdt` bridges the file
+dialogs: an AWT throw resumes the awaiting coroutine exceptionally, and a
+cancelled caller's still-queued or modal dialog is disposed on the EDT.
 
 File names: OPML `neutrodyne-subscriptions-{yyyy-MM-dd}.opml`, MIME `text/x-opml`; a group `neutrodyne-{slug}-{yyyy-MM-dd}.opml` (slug = `nameKey` with non-`[a-z0-9]` runs → `-`, trimmed, ≤ 40 chars, fallback `group`); NewPipe JSON `neutrodyne-youtube-{yyyy-MM-dd}.json`, MIME `application/json` ([04 NewPipe subscriptions JSON](04-youtube.md#newpipe-subscriptions-json-import-and-export)).
 
