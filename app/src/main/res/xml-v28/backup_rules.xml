@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<!-- API 28–30: separate includes allow either encrypted cloud backup or device transfer (05). -->
+<full-backup-content>
+  <include domain="file" path="backup/auto-snapshot.zip" requireFlags="clientSideEncryption" />
+  <include domain="file" path="datastore/settings.preferences_pb" requireFlags="clientSideEncryption" />
+  <include domain="file" path="backup/auto-snapshot.zip" requireFlags="deviceToDeviceTransfer" />
+  <include domain="file" path="datastore/settings.preferences_pb" requireFlags="deviceToDeviceTransfer" />
+</full-backup-content>
