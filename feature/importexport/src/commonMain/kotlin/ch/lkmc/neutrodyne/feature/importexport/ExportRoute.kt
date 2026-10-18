@@ -31,9 +31,12 @@ import org.jetbrains.compose.resources.getString
  * platform seams stay here — the ViewModel sees only [ExportDestinations], so common UI never
  * touches intents, AWT or the file system.
  *
- * The interactive export runs on this entry's composition scope: when the dialog is disposed —
- * pop, or an Activity recreation — the in-flight prepare/pick is cancelled instead of driving a
- * dead route's seams. The post-save snackbar is different work: it launches on the root-owned
+ * The interactive export launches on this entry's composition scope, but the ViewModel runs its
+ * data work — prepare and the accepted destination copy — on the injected `@ApplicationScope`
+ * job this scope only awaits: disposing the dialog (pop, or an Activity recreation) cancels the
+ * caller, never the copy (05: leaving does not cancel an accepted save). The platform calls
+ * stay bound to this scope's captured context, so a disposed route's dead seams are never
+ * invoked. The post-save snackbar is different work: it launches on the root-owned
  * `LocalRootScope`, so it survives the pop that disposes this entry but still ends with the
  * root, and it re-reads the live `LocalPlatformActions` rather than a stale callback.
  */

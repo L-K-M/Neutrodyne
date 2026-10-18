@@ -39,6 +39,10 @@ import ch.lkmc.neutrodyne.core.ui.platform.PlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.RevealInFolder
 import ch.lkmc.neutrodyne.core.ui.root.LocalRootScope
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import java.util.Locale
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -61,6 +65,9 @@ class ExportRouteTest {
     private val navigator = RecordingAppNavigator()
     private val host = SnackbarHostState()
     private val revealed = mutableListOf<String>()
+
+    /** The VM's injected `@ApplicationScope` stand-in — the flow's data jobs outlive the route. */
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val actions =
         object : PlatformActions {
@@ -93,6 +100,7 @@ class ExportRouteTest {
 
     @AfterTest
     fun tearDown() {
+        appScope.cancel()
         Locale.setDefault(previousLocale)
     }
 
@@ -134,7 +142,7 @@ class ExportRouteTest {
     /** The route under a fake root-owned scope that dies with its provider's composition. */
     private fun androidx.compose.ui.test.ComposeUiTest.setRouteContent() {
         ownerAlive = true
-        val viewModel = ExportViewModel(null, exports, settings, groups)
+        val viewModel = ExportViewModel(null, exports, settings, groups, appScope)
         setContent {
             CompositionLocalProvider(LocalLifecycleOwner provides ResumedLifecycleOwner()) {
                 CompositionLocalProvider(

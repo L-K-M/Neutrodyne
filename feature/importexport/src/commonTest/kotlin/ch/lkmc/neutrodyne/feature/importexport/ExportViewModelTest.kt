@@ -25,8 +25,10 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -68,7 +70,17 @@ class ExportViewModelTest : MainDispatcherTest() {
         val shared = mutableListOf<PreparedExport>()
     }
 
-    private fun viewModel(groupId: Long? = null) = ExportViewModel(groupId, exports, settings, groups)
+    /**
+     * The injected `@ApplicationScope` stand-in: a detached scope on the test's own scheduler.
+     * Its jobs are plain foreground work — `backgroundScope` would fit the detached lifetime
+     * but `advanceUntilIdle` stops once only background events remain, starving a job that
+     * must run to completion on its own — so a cancelled route can never take a data job
+     * down with it, while cancelling this scope's job models application shutdown.
+     */
+    private fun TestScope.appScope(): CoroutineScope = CoroutineScope(coroutineContext + SupervisorJob())
+
+    private fun TestScope.viewModel(groupId: Long? = null) =
+        ExportViewModel(groupId, exports, settings, groups, appScope())
 
     private fun prepared(
         privateLinks: Int = 0,
@@ -304,7 +316,7 @@ class ExportViewModelTest : MainDispatcherTest() {
                     }
                 }
             exports.prepareOutcome = Outcome.Success(prepared())
-            val vm = ExportViewModel(null, gated, settings, groups)
+            val vm = ExportViewModel(null, gated, settings, groups, appScope())
             val destinations = Destinations()
             advanceUntilIdle()
 
@@ -410,10 +422,11 @@ class ExportViewModelTest : MainDispatcherTest() {
             assertEquals(listOf("neutrodyne-subscriptions.opml" to PICKED_URI), exports.savedTo)
         }
 
-    @Test fun aRouteLeavingMidPrepareCancelsTheFlowAndStaysRetryable() =
+    @Test fun aRouteLeavingMidPrepareStillFinishesThePrivatePrepare() =
         runTest {
-            // The caller's scope is the route's: disposing it mid-prepare must cancel cleanly —
-            // no late delivery, busy cleared, a fresh tap allowed.
+            // The caller cancels but the prepare belongs to the application job: it finishes —
+            // then the dead route's UI half is skipped (no pick, no save, no share) and busy
+            // clears only when the job actually ends.
             val gate = CompletableDeferred<Unit>()
             val gated =
                 object : ExportRepository by exports {
@@ -423,7 +436,7 @@ class ExportViewModelTest : MainDispatcherTest() {
                     }
                 }
             exports.prepareOutcome = Outcome.Success(prepared())
-            val vm = ExportViewModel(null, gated, settings, groups)
+            val vm = ExportViewModel(null, gated, settings, groups, appScope())
             val destinations = Destinations()
             val owner = Job(coroutineContext.job)
             val routeScope = CoroutineScope(coroutineContext + owner)
@@ -437,14 +450,87 @@ class ExportViewModelTest : MainDispatcherTest() {
             gate.complete(Unit)
             advanceUntilIdle()
 
-            assertFalse(vm.uiState.value.busy)
+            assertEquals(1, exports.prepareRequests.size, "a caller-cancelled prepare never finished")
             assertTrue(destinations.saved.isEmpty())
+            assertTrue(destinations.shared.isEmpty())
             assertTrue(exports.savedTo.isEmpty())
             assertNull(vm.uiState.value.finished)
+            assertFalse(vm.uiState.value.busy)
 
             vm.export(ExportAction.SAVE, destinations.api)
             advanceUntilIdle()
             assertEquals(listOf("neutrodyne-subscriptions.opml" to PICKED_URI), exports.savedTo)
+        }
+
+    @Test fun aRecreatedRouteCannotPrepareWhileTheOrphanedJobStillWrites() =
+        runTest {
+            // busy belongs to the data job, not the caller: while the orphaned prepare still
+            // writes, a recreated route's tap is ignored — no duplicate same-name work.
+            val gate = CompletableDeferred<Unit>()
+            val gated =
+                object : ExportRepository by exports {
+                    override suspend fun prepare(request: ExportRequest): Outcome<PreparedExport, ExportError> {
+                        gate.await()
+                        return exports.prepare(request)
+                    }
+                }
+            exports.prepareOutcome = Outcome.Success(prepared())
+            val vm = ExportViewModel(null, gated, settings, groups, appScope())
+            val destinations = Destinations()
+            val owner = Job(coroutineContext.job)
+            val routeScope = CoroutineScope(coroutineContext + owner)
+            advanceUntilIdle()
+
+            routeScope.launch { vm.export(ExportAction.SAVE, destinations.api) }
+            runCurrent()
+            assertTrue(vm.uiState.value.busy)
+
+            owner.cancel()
+            launch { vm.export(ExportAction.SAVE, destinations.api) }
+            runCurrent()
+            gate.complete(Unit)
+            advanceUntilIdle()
+
+            assertEquals(1, exports.prepareRequests.size, "an orphaned job's busy was released early")
+            assertTrue(destinations.saved.isEmpty())
+            assertFalse(vm.uiState.value.busy)
+        }
+
+    @Test fun anApplicationShutdownCancelsTheInFlightDataJob() =
+        runTest {
+            // Caller cancellation lets the data job finish; shutting the application scope down
+            // is the opposite — the in-flight job dies with it and busy still clears.
+            val appJob = SupervisorJob()
+            val appScope = CoroutineScope(coroutineContext + appJob)
+            val gate = CompletableDeferred<Unit>()
+            val gated =
+                object : ExportRepository by exports {
+                    override suspend fun prepare(request: ExportRequest): Outcome<PreparedExport, ExportError> {
+                        gate.await()
+                        return exports.prepare(request)
+                    }
+                }
+            exports.prepareOutcome = Outcome.Success(prepared())
+            val vm = ExportViewModel(null, gated, settings, groups, appScope)
+            val destinations = Destinations()
+            val owner = Job(coroutineContext.job)
+            val routeScope = CoroutineScope(coroutineContext + owner)
+            advanceUntilIdle()
+
+            routeScope.launch { vm.export(ExportAction.SAVE, destinations.api) }
+            runCurrent()
+            assertTrue(vm.uiState.value.busy)
+
+            appJob.cancel()
+            gate.complete(Unit)
+            advanceUntilIdle()
+
+            assertTrue(exports.prepareRequests.isEmpty(), "a cancelled app job still prepared")
+            assertTrue(destinations.saved.isEmpty())
+            assertFalse(vm.uiState.value.busy)
+
+            // The route itself survived the application's death — it ends with the test.
+            owner.cancel()
         }
 
     @Test fun aRouteLeavingWhileThePickerIsOpenDropsTheLateResult() =
@@ -468,6 +554,69 @@ class ExportViewModelTest : MainDispatcherTest() {
 
             assertTrue(exports.savedTo.isEmpty(), "a late picker result was written after the owner died")
             assertNull(vm.uiState.value.finished)
+            assertFalse(vm.uiState.value.busy)
+        }
+
+    @Test fun aPickerResultThatOnlyReachedADeadOwnerWritesNothing() =
+        runTest {
+            // The picker's answer landed as its owner was already dead: the URI is not an
+            // acceptance, so the job writes nothing and reports no success.
+            exports.prepareOutcome = Outcome.Success(prepared())
+            val vm = viewModel()
+            val owner = Job(coroutineContext.job)
+            val routeScope = CoroutineScope(coroutineContext + owner)
+            val destinations =
+                Destinations(saveBody = {
+                    owner.cancel()
+                    PICKED_URI
+                })
+            advanceUntilIdle()
+
+            routeScope.launch { vm.export(ExportAction.SAVE, destinations.api) }
+            advanceUntilIdle()
+
+            assertEquals(1, destinations.saved.size)
+            assertTrue(exports.savedTo.isEmpty(), "a dead owner's picker result was written")
+            assertNull(vm.uiState.value.finished)
+            assertFalse(vm.uiState.value.busy)
+        }
+
+    @Test fun anAcceptedSaveKeepsCopyingAfterTheRouteDies() =
+        runTest {
+            // The picker answered while the route lived: the accepted URI's copy belongs to the
+            // data job, so a route leaving mid-copy does not cancel it — it finishes once.
+            val copyGate = CompletableDeferred<Unit>()
+            val gated =
+                object : ExportRepository by exports {
+                    override suspend fun saveTo(
+                        export: PreparedExport,
+                        destinationUri: String,
+                    ): Outcome<Unit, ExportError> {
+                        copyGate.await()
+                        return exports.saveTo(export, destinationUri)
+                    }
+                }
+            exports.prepareOutcome = Outcome.Success(prepared())
+            val vm = ExportViewModel(null, gated, settings, groups, appScope())
+            val destinations = Destinations()
+            val owner = Job(coroutineContext.job)
+            val routeScope = CoroutineScope(coroutineContext + owner)
+            advanceUntilIdle()
+
+            routeScope.launch { vm.export(ExportAction.SAVE, destinations.api) }
+            runCurrent()
+            assertEquals(1, destinations.saved.size)
+            assertTrue(vm.uiState.value.busy)
+
+            owner.cancel()
+            copyGate.complete(Unit)
+            advanceUntilIdle()
+
+            assertEquals(listOf("neutrodyne-subscriptions.opml" to PICKED_URI), exports.savedTo)
+            assertEquals(
+                FinishedExport(prepared(), PICKED_URI, shared = false),
+                vm.uiState.value.finished,
+            )
             assertFalse(vm.uiState.value.busy)
         }
 
@@ -517,7 +666,7 @@ class ExportViewModelTest : MainDispatcherTest() {
                     }
                 }
             exports.prepareOutcome = Outcome.Success(prepared())
-            val vm = ExportViewModel(null, throwing, settings, groups)
+            val vm = ExportViewModel(null, throwing, settings, groups, appScope())
             val destinations = Destinations()
             advanceUntilIdle()
 
@@ -597,7 +746,7 @@ class ExportViewModelTest : MainDispatcherTest() {
                     }
                 }
             exports.prepareOutcome = Outcome.Success(prepared())
-            val vm = ExportViewModel(null, throwing, settings, groups)
+            val vm = ExportViewModel(null, throwing, settings, groups, appScope())
             val destinations = Destinations()
             advanceUntilIdle()
 
@@ -626,7 +775,7 @@ class ExportViewModelTest : MainDispatcherTest() {
                     ): Outcome<Unit, SettingsError> = throw IOException("datastore gone")
                 }
             exports.prepareOutcome = Outcome.Success(prepared())
-            val vm = ExportViewModel(null, exports, flakySettings, groups)
+            val vm = ExportViewModel(null, exports, flakySettings, groups, appScope())
             val destinations = Destinations()
             advanceUntilIdle()
 
