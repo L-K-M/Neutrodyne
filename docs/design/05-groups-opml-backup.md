@@ -1993,7 +1993,7 @@ The reinstall deliberately omits the `-t` of the official script, so it also pro
 - Local debug builds (`BuildInfo.debug`, [D2](../PLAN.md#3-key-decisions)) additionally show a "Write snapshot now" row in Settings › Backup (08) that calls the same function; release builds do not have it.
 - The script cannot list `files/backup/` with `run-as` (the release build is not debuggable; the debuggable-build exposure, risk P11, was retired 2026-10-05); its assertions use only the receiver's result line and the local transport's file list.
 
-Pass: after reinstall the library, groups, played state, positions and Up next are back, and the local transport's backup data for the package contains only the two included files (no `databases/`, no `Podcasts/`). Device-to-device: the D2D script of the same page (Android 12+; its `D2dTransport` lives in Google Play services, so it needs a Google APIs image and is manual only). An automated `FirstLaunchRestoreTest` (GMD) covers the logic without `bmgr`: place a snapshot file, start with an empty database, assert the restored library.
+Pass: after reinstall the library, groups, played state, positions and Up next are back, and the local transport's backup data for the package contains only the two included files (no `databases/`, no `Podcasts/`). Device-to-device: the D2D script of the same page (Android 12+; its `D2dTransport` lives in Google Play services, so it needs a Google APIs image and is manual only). An automated `FirstLaunchRestoreDeviceTest` (GMD, `nightly.yml`'s opt-in `first-launch-restore` scope) covers the logic without `bmgr`: place a snapshot file written by the real writer, start with an empty database, assert the restored library (implementation note under [Testing](#testing)).
 
 ---
 
@@ -2166,6 +2166,25 @@ line count of exactly 400,000 with independent state recounts. `FULL` (level 0) 
 inside the 20 MB compressed cap; counts, timing, heap and size evidence go to
 `build/review-e2/`. The `SnapshotWorkerTest` row above still owns the Robolectric host legs
 (guards, watcher, worker lifecycle).
+
+**Implementation note (2026-10-18, M3):** the `FirstLaunchRestoreTest` row is implemented as
+`FirstLaunchRestoreDeviceTest` (`:app` `androidTest`), run on the `api26` and `api36` GMDs by
+`nightly.yml`'s opt-in `first-launch-restore` scope, which passes
+`-Pandroid.testInstrumentationRunnerArguments.firstLaunchSeed=restore` plus the class filter
+([09 `nightly.yml`](09-quality-and-release.md#nightlyyml)). `NeutrodyneTestRunner` seeds
+`files/backup/auto-snapshot.zip` through a throwaway `AndroidAppGraph` and the real
+`BackupRepository.writeSnapshotNow()` before production `onCreate`, then removes exactly what a
+reinstall loses — the database family and the *device* DataStore file — while the snapshot and
+the *portable* DataStore file stand in for what Auto Backup delivers; a portable preference
+changed after the write proves the restore's SETTINGS skip. The test then only observes
+production behaviour: band 100's `OpenResult.created`, the `backup-restore` work's `SUCCEEDED`
+`WorkInfo` (its public `restore-session-{id}` tag yields the session id), the session's
+`fromAndroidBackup` flag and exact HISTORY+UP_NEXT `MERGE` request, content equality of the
+seeded library, and the snapshot's retirement to `restored-*.zip` (or a valid, different
+replacement a periodic write may already have produced). Without the seed argument the class
+skips through `Assume`, and a skip is never a pass — the seeded scope is the evidence. The
+`bmgr`, device-to-device and reference-device checks stay separate gates
+([Testing with bmgr](#testing-with-bmgr)).
 
 ---
 
