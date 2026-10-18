@@ -1,0 +1,16 @@
+<opml version="1.0">
+  <head>
+    <title>Overcast Subscriptions</title>
+  </head>
+  <body>
+    <outline type="rss" text="Show" xmlUrl="https://show.example.com/rss" htmlUrl="https://show.example.com">
+      <outline type="podcast-episode" text="Episode One" url="https://show.example.com/e1.mp3"/>
+      <outline type="podcast-episode" text="Episode Two" url="https://show.example.com/e2.mp3"/>
+    </outline>
+    <outline type="rss" text="Other" xmlUrl="https://other.example.com/rss" subscribed="0"/>
+    <outline type="podcast-playlist" text="playlists" title="playlists">
+      <outline type="podcast-episode" text="Saved One" url="https://misc.example.com/s1.mp3"/>
+      <outline type="podcast-episode" text="Saved Two" url="https://misc.example.com/s2.mp3"/>
+    </outline>
+  </body>
+</opml>
