@@ -1618,6 +1618,18 @@ Other states: `DOWNLOADING` "{p} %" in rows and "{12.3 MB} of {48.0 MB} · {1.2 
 
 Serves R4.7, R4.8, R5.2, R5.5, R5.7, R8.5, N4. Delivered in M4 (sheet, mini and full player, speed sheet), M5 (sleep sheet, chapters tab, timestamp seeks), M9a (YouTube issue banners), M10 (artwork tint, side panel, tabletop, landscape), MD1 (the same player on the desktop, usually as the side panel), MS3 (the "Continue on this device" card and the "Marked played on" line, [Sync screens](#sync-screens)). Honours [D56](../PLAN.md#3-key-decisions), [D43](../PLAN.md#3-key-decisions), [D84](../PLAN.md#3-key-decisions). Behaviour behind every button is 06's common Player API ([06 UI boundary](06-playback.md#ui-boundary), [06 Shared playback core](06-playback.md#shared-playback-core)), served by Media3 on Android and by 11's `DesktopPlaybackController` on the desktop; `:feature:player` is common code with no Media3 type in v1.0 (06 [No Media3 in features](06-playback.md#no-media3-in-features-v10)).
 
+**Implementation note (2026-10-18, M4).** The M4 player renders the mini/full
+sheet at every width, without reserving a side-panel column or changing the
+saved panel preference. The panel geometry remains available for MD1; artwork
+tint, tabletop and landscape adaptation remain M10/MD1, and sleep/chapters
+remain M5. The full player exposes a content slot for W10's shared Up next
+list. M4 uses the existing Material 3 slider because the documented `NdSlider`
+wrapper is not present in the codebase. The play button interpolates Compose
+rounded corners between a square and a circle, without adding graphics-shapes.
+Desktop composes the same sheet against
+the unavailable controller; this does not establish audible desktop playback
+or MD1 resize coverage.
+
 ### Structure and states
 
 `NeutrodyneRoot` (`:core:ui`, hosted by `MainActivity` and `NeutrodyneWindow`) composes `Box(Modifier.semantics { testTagsAsResourceId = true }) { NdNavigationSuiteScaffold { Row { Box(Modifier.weight(1f)) { NeutrodyneNavHost(…) }; if (layout.playerPanel) PlayerSidePanel(…) } }; if (!layout.playerPanel) PlayerSheet(…) }` (`testTagsAsResourceId` lets 09's UI Automator journeys find Compose nodes by resource ID on Android; the desktop's `runComposeUiTest` uses test tags directly): the sheet overlays the whole window, including the navigation bar, so it can grow over it without resizing the scaffold. When `LocalPaneLayout.playerPanel` is true the sheet is not composed and `PlayerSidePanel` takes its fixed width at the end of the content row ([Side panel, medium widths and tabletop](#side-panel-medium-widths-and-tabletop)). With `nowPlaying == null` neither exists and `LocalMiniPlayerInset` is 0. Switching between the two (unfolding, resizing a window) never carries the sheet's value: a sheet created after the panel starts `Collapsed`.

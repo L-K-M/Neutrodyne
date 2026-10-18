@@ -15,6 +15,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.navigation.BackupKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
@@ -33,6 +34,9 @@ import ch.lkmc.neutrodyne.feature.settings.resources.settings_backup
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_backup_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_licences
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_licences_summary
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_playback
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_playback_summary_off
+import ch.lkmc.neutrodyne.feature.settings.resources.settings_playback_summary_on
 import org.jetbrains.compose.resources.stringResource
 import ch.lkmc.neutrodyne.feature.settings.resources.Res as SettingsRes
 
@@ -52,6 +56,10 @@ internal fun SettingsHomeRoute(settings: SettingsRepository) {
             initialValue = FeedsSettingKeys.REFRESH_INTERVAL_MINUTES.default,
         )
 
+    val speedFlow = remember(settings) { settings.observe(PlaybackSettingKeys.SPEED) }
+    val silenceFlow = remember(settings) { settings.observe(PlaybackSettingKeys.SKIP_SILENCE) }
+    val speed by speedFlow.collectAsStateWithLifecycle(initialValue = PlaybackSettingKeys.SPEED.default)
+    val silence by silenceFlow.collectAsStateWithLifecycle(initialValue = PlaybackSettingKeys.SKIP_SILENCE.default)
     Column(Modifier.fillMaxSize()) {
         NdTopAppBar(
             title = stringResource(Res.string.settings),
@@ -69,6 +77,20 @@ internal fun SettingsHomeRoute(settings: SettingsRepository) {
                 title = stringResource(Res.string.settings_feeds),
                 summary = feedsIntervalText(interval).asString(),
                 onClick = { navigator.push(SettingsKey(SettingsPage.FEEDS)) },
+            )
+            SettingsRow(
+                icon = NdIcons.PlayArrow,
+                title = stringResource(SettingsRes.string.settings_playback),
+                summary =
+                    stringResource(
+                        if (silence) {
+                            SettingsRes.string.settings_playback_summary_on
+                        } else {
+                            SettingsRes.string.settings_playback_summary_off
+                        },
+                        speed.toString(),
+                    ),
+                onClick = { navigator.push(SettingsKey(SettingsPage.PLAYBACK)) },
             )
             SettingsRow(
                 icon = NdIcons.History,

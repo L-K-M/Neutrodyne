@@ -2,6 +2,8 @@
 package ch.lkmc.neutrodyne.di
 
 import android.app.Application
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import ch.lkmc.neutrodyne.SnapshotNowReceiver
@@ -24,12 +26,15 @@ import ch.lkmc.neutrodyne.core.navigation.ImportFileKey
 import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
+import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastSettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
+import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
+import ch.lkmc.neutrodyne.feature.player.PlayerViewModel
 import ch.lkmc.neutrodyne.notifications.AndroidGroupChannelSync
 import ch.lkmc.neutrodyne.notifications.AndroidImportReportPoster
 import ch.lkmc.neutrodyne.notifications.AndroidNewEpisodePoster
@@ -38,6 +43,7 @@ import ch.lkmc.neutrodyne.youtube.api.AudioPref
 import ch.lkmc.neutrodyne.youtube.api.ResolveResult
 import com.google.common.truth.Truth.assertThat
 import dev.zacsweers.metro.createGraphFactory
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -55,6 +61,16 @@ import java.io.File
 @Config(application = Application::class)
 class AndroidAppGraphTest {
     private val graph = createGraphFactory<AndroidAppGraph.Factory>().create(RuntimeEnvironment.getApplication())
+
+    @Test
+    fun playerSpeedEntryAndWindowViewModelResolveWithoutOpeningDatabase() {
+        val provider = entryProvider<NavKey> { graph.entryInstallers.forEach { it() } }
+        assertThat(provider(SpeedKey).metadata[NdSceneMetadata.KEY_OVERLAY]).isEqualTo(NdSceneMetadata.OVERLAY_SHEET)
+        val player = graph.metroViewModelFactory.create(PlayerViewModel::class, CreationExtras.Empty)
+        assertThat(player.uiState.value.now).isNull()
+        player.viewModelScope.cancel()
+        assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+    }
 
     @Test
     fun playbackBindingsAreUniqueTruthfulAndDoNotOpenTheDatabase() =
@@ -293,6 +309,7 @@ class AndroidAppGraphTest {
                 FeedsKey,
                 LibraryKey,
                 UpNextKey,
+                SpeedKey,
                 DownloadsKey,
                 DiscoverKey,
                 SettingsHomeKey,

@@ -661,9 +661,13 @@ Kinds: **KMP** = `neutrodyne.kmp.*` with the targets `android` and `jvm("desktop
 | `:feature:downloads` | feature | common | + `:download:api`, `:playback:api` (`playDownloads`), `:youtube:api` (`YouTubeHealth.retryNow`) | — | M6 |
 | `:feature:discover` | feature | common | + `:youtube:api` | — | M1a (add by URL), M7 |
 | `:feature:importexport` | feature | common | + `:playback:api` (pause before Replace), `:download:api` (re-download offer), `:youtube:api` (`YouTubeCapabilities`) | — | M3 |
-| `:feature:settings` | feature | common; Settings › Desktop shown only when `PlatformInfo.kind` is the desktop | + `:youtube:api` (`YouTubeEngine` rows in Settings › YouTube, M9a); the update check through `:core:domain` (`AppUpdateChecker`, `UpdateNotices`: Settings › Updates, Install & updates help, M11a) | aboutlibraries-core | M0a |
+| `:feature:settings` | feature | common; Settings › Desktop shown only when `PlatformInfo.kind` is the desktop | + `:playback:api` (`PlaybackMaintenance`, M4), `:youtube:api` (`YouTubeEngine` rows in Settings › YouTube, M9a); the update check through `:core:domain` (`AppUpdateChecker`, `UpdateNotices`: Settings › Updates, Install & updates help, M11a) | aboutlibraries-core | M0a |
 | `:feature:sync` | feature | common: Settings › Sync, link flows, devices, mass-change dialog, restore-while-linked prompts ([08 Sync screens](08-ui-ux.md#sync-screens)) | + `:sync:api` | — | MS2 |
 | `:benchmark` | `com.android.test`, `androidx.baselineprofile` (producer) | Android: out-of-process system tests (M6b), Macrobenchmarks against `benchmarkRelease` (M10), `BaselineProfileGenerator` (M11b) | `targetProjectPath = ":app"` | uiautomator (M6b), benchmark-macro-junit4 (M10) | M6b ([09 Out-of-process system tests](09-quality-and-release.md#out-of-process-system-tests), [09 Macrobenchmark and profiles](09-quality-and-release.md#macrobenchmark-and-profiles)) |
+
+**Implementation note (2026-10-18, M4).** Settings declares `:playback:api`
+directly for streaming-cache usage and clearing through `PlaybackMaintenance`.
+It does not access the cache implementation or database.
 
 **`api` vs `implementation`:** a module exposes a dependency as `api` only when its types appear in that module's public signatures (`:core:domain` → `:core:model`, `paging-common`; `:core:network` → `ktor-client-core`; `:core:network:okhttp` → `okhttp`; `:core:database` → `room3-runtime`, `room3-paging`); everything else is `implementation`. Implementation classes in implementation modules are `internal`; only graph contributions, Android framework components and the public API are `public` (Unverified whether Metro aggregates `internal` contributions across modules; S8 decides whether contributed implementations may stay `internal`).
 

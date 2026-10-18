@@ -54,6 +54,7 @@ import ch.lkmc.neutrodyne.desktop.resources.tray_show
 import ch.lkmc.neutrodyne.desktop.resources.tray_tooltip
 import ch.lkmc.neutrodyne.desktop.resources.window_title
 import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
+import ch.lkmc.neutrodyne.feature.player.PlayerRoute
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.coroutines.CoroutineScope
@@ -308,13 +309,13 @@ internal fun NeutrodyneWindowContent(
     val slots =
         remember(menuActions, banners, openHandler) {
             RootSlots(
-                // No player before M4; the slot composes inside the root, where the
-                // navigator is readable — it hands the shell's menus the root's push
-                // (recorded in 11, 2026-10-06).
+                // Keep menu/input glue inside the root so it reads the root's navigator.
+                // The shared player follows these hooks on the same window store.
                 player = {
                     menuActions.attachPush(it.navigate)
                     menuActions.attachNavigator(LocalAppNavigator.current)
                     openHandler?.let { DesktopInputFeedback(it) }
+                    PlayerRoute(it)
                 },
                 userMessages = banners?.userMessages ?: emptyFlow(),
                 importResume = { available, open -> importResumeBanner(available, open) },

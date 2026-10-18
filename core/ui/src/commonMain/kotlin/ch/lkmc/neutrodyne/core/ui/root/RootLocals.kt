@@ -36,3 +36,8 @@ public val LocalSettingsBadge: androidx.compose.runtime.ProvidableCompositionLoc
  */
 public val LocalMiniPlayerInset: androidx.compose.runtime.ProvidableCompositionLocal<Dp> =
     staticCompositionLocalOf { 0.dp }
+
+/** Speed overlays use the activity/window player's store rather than creating an entry player. */
+public val LocalRootViewModelStoreOwner:
+    androidx.compose.runtime.ProvidableCompositionLocal<androidx.lifecycle.ViewModelStoreOwner?> =
+    staticCompositionLocalOf { null }
