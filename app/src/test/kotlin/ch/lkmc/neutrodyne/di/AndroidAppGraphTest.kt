@@ -149,6 +149,8 @@ class AndroidAppGraphTest {
                 "CredentialLoadInitializer" to 120..199,
                 "PeriodicRefreshInitializer" to 200..299,
                 "RefreshForegroundObserverInitializer" to 200..299,
+                // 05 Destinations: expired private exports are swept in the cleanup band.
+                "ExportFilesCleaner" to 300..399,
             )
 
         /** The five destinations and the Settings screens M0a renders (01 M0 checklist step 16). */
