@@ -800,15 +800,12 @@ Serves R4.8, R2.6, R3.7, R7.5. Delivered in M4; M8 (external-mode exclusions), M
 
 ### Starting playback
 
-**Implementation note (2026-10-18, M4).** The P1 integration connects W3's
-additive start inputs to W2: the low-churn media projection includes `sortDate`,
-and `commitStart` saves `SessionStart.departure` through the same guarded helper
-as transitions, before arrival promotion inside the transaction. Both shell
-graphs expose the five durable playback ports through Metro `Provider<T>`;
-graph tests resolve them after `awaitOpen()` and check singleton identity.
-The [integration record](../M4-P1-INTEGRATION.md) lists the contract corrections
-and verification evidence. This completes the documented contract without a
-schema or start-policy change.
+**Implementation note (2026-10-18, M4).** The media projection carries
+`sortDate` for keyset anchors, and `commitStart` saves `SessionStart.departure`
+through the same guarded helper as transitions, before promoting the arrival
+inside the same transaction. Both shell graphs expose the five durable playback
+ports through Metro `Provider<T>`; graph tests resolve them after `awaitOpen()`
+and check singleton identity. No schema or start-policy change.
 
 **Implementation note (2026-10-18, M4).** Automatic/no-argument starts and empty-player resumption select the first playable Up next entry, retaining unplayable rows greyed in place, then fall back to eligible context. Explicit row starts return that row's refusal. A queue-selected start keeps a null anchor; a context fallback anchors at its selected item. W3 implements selection in `PlayStarter`. This owner-adopted rule also applies wherever this document abbreviates selection as "Up next head".
 
