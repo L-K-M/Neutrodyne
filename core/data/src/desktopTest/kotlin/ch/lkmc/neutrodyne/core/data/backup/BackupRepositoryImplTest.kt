@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.data.backup
 
 import ch.lkmc.neutrodyne.core.common.JobLanePoker
+import ch.lkmc.neutrodyne.core.common.Origin
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.CommitCancellingDriver
 import ch.lkmc.neutrodyne.core.data.FakeImportWorkScheduler
@@ -34,13 +35,18 @@ import ch.lkmc.neutrodyne.core.database.CredentialEntity
 import ch.lkmc.neutrodyne.core.domain.BackupError
 import ch.lkmc.neutrodyne.core.domain.ExportError
 import ch.lkmc.neutrodyne.core.domain.RestoreProgress
+import ch.lkmc.neutrodyne.core.domain.SecretStore
+import ch.lkmc.neutrodyne.core.domain.StoredSecret
 import ch.lkmc.neutrodyne.core.model.BackupPreview
 import ch.lkmc.neutrodyne.core.model.BackupSummary
+import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.CreateImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportState
+import ch.lkmc.neutrodyne.core.model.PreparedBackup
+import ch.lkmc.neutrodyne.core.model.PrivacyCounts
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.RestoreMode
 import ch.lkmc.neutrodyne.core.model.RestoreRequest
@@ -62,6 +68,7 @@ import ch.lkmc.neutrodyne.feeds.backup.BackupCodec
 import ch.lkmc.neutrodyne.feeds.backup.BackupKind
 import ch.lkmc.neutrodyne.feeds.backup.BackupManifest
 import ch.lkmc.neutrodyne.feeds.backup.CredentialV1
+import ch.lkmc.neutrodyne.feeds.identity.PrivateFeedUrls
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipArchiveWriter
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipGuard
 import ch.lkmc.neutrodyne.feeds.jvm.opml.XmlPullOpmlReader
@@ -86,9 +93,11 @@ import okio.buffer
 import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertSame
@@ -314,12 +323,12 @@ class BackupRepositoryImplTest {
         }
 
     @Test
-    fun aWriterFailureStillSweepsTheOwnedCacheTarget() =
+    fun aWriterFailureLeavesAbandonedLeavesToTheCleaner() =
         runTest {
             seedPodcast(db, "https://a.example.com/f")
             assertIs<Outcome.Success<*>>(repository.createBackup("dest://first", false))
-            val owned = destination.sources.single()
-            fileSystem.write(owned) { writeUtf8("abandoned private backup") }
+            val abandoned = destination.sources.single()
+            fileSystem.write(abandoned) { writeUtf8("abandoned private backup") }
             settings.reset(BackupSettingKeys.INSTALLATION_ID)
             settings.failNextSet = ch.lkmc.neutrodyne.core.domain.SettingsError.WriteFailed
 
@@ -328,7 +337,15 @@ class BackupRepositoryImplTest {
                 repository.createBackup("dest://never", false),
             )
 
-            assertFalse(fileSystem.exists(owned), "writer failure must still clean this flow's cache file")
+            // Prepared leaves are unique per call and owned by their descriptor: a failed
+            // write sweeps its own stage but never another flow's artifact — an abandoned
+            // leaf is ExportFilesCleaner's to retire.
+            assertTrue(fileSystem.exists(abandoned), "an abandoned leaf is the cleaner's, not this call's")
+            assertEquals(
+                listOf(abandoned),
+                fileSystem.list(exportDirOf(storagePaths)),
+                "the failed call left neither its leaf nor its stage behind",
+            )
             assertEquals(1, destination.copied.size)
         }
 
@@ -354,6 +371,200 @@ class BackupRepositoryImplTest {
                 )
             }
             reader(publicCopy).use { assertTrue(it.library().credentials.isEmpty()) }
+        }
+
+    // --- Prepared backup (05 Writing's frozen-consent flow) ----------------------------------------
+
+    @Test
+    fun preparedBackupSavesItsFrozenBytesAndCountsDespiteLaterChanges() =
+        runTest {
+            seedPodcast(db, "https://public.example.com/feed")
+            seedPodcast(db, "https://feeds.patreon.com/member-only")
+            seedCredentialPodcast()
+
+            val prepared =
+                assertIs<Outcome.Success<PreparedBackup>>(repository.prepareBackup(includePasswords = true)).value
+            // Counts and bytes come from the same write — this is what the warning shows.
+            assertEquals(PrivacyCounts(privateLinks = 1, passwords = 1), prepared.privacy)
+            assertEquals(3, prepared.summary.podcasts)
+            assertTrue(prepared.fileName.startsWith("neutrodyne-backup-"))
+            assertTrue(prepared.fileName.endsWith(".zip"))
+            val source = (prepared as PreparedBackupFile).source
+            val frozenBytes = fileSystem.read(source) { readByteArray() }
+
+            // A private subscription and a credential change after consent must not
+            // reach the artifact the user was warned about.
+            seedPodcast(db, "https://feeds.patreon.com/late-arrival")
+            secrets.remove(CREDENTIAL_ORIGIN)
+
+            assertIs<Outcome.Success<*>>(repository.savePreparedBackup(prepared, "dest://frozen.zip"))
+            val copied = destination.copied.single()
+            assertEquals("dest://frozen.zip", copied.first)
+            assertContentEquals(frozenBytes, copied.second)
+            reader(tempArchive(copied.second)).use { r ->
+                val library = r.library()
+                assertEquals(3, library.podcasts.size)
+                assertEquals(1, library.podcasts.count { PrivateFeedUrls.looksPrivate(it.feedUrl) })
+                assertEquals(
+                    listOf(CredentialV1(CREDENTIAL_ORIGIN, CREDENTIAL_USER, CREDENTIAL_PASS)),
+                    library.credentials,
+                )
+            }
+        }
+
+    @Test
+    fun sameMinutePreparesKeepIndependentSources() =
+        runTest {
+            seedCredentialPodcast()
+
+            val withPasswords =
+                assertIs<Outcome.Success<PreparedBackup>>(repository.prepareBackup(includePasswords = true)).value
+            val without =
+                assertIs<Outcome.Success<PreparedBackup>>(repository.prepareBackup(includePasswords = false)).value
+
+            // Same clock => the same friendly minute name; the owned leaves still differ.
+            assertEquals(withPasswords.fileName, without.fileName)
+            assertNotEquals(
+                (withPasswords as PreparedBackupFile).source,
+                (without as PreparedBackupFile).source,
+            )
+            assertEquals(1, withPasswords.privacy.passwords)
+            assertEquals(0, without.privacy.passwords)
+
+            assertIs<Outcome.Success<*>>(repository.savePreparedBackup(without, "dest://public"))
+            assertIs<Outcome.Success<*>>(repository.savePreparedBackup(withPasswords, "dest://private"))
+            val byUri = destination.copied.toMap()
+            reader(tempArchive(checkNotNull(byUri["dest://private"]))).use {
+                assertEquals(
+                    listOf(CredentialV1(CREDENTIAL_ORIGIN, CREDENTIAL_USER, CREDENTIAL_PASS)),
+                    it.library().credentials,
+                )
+            }
+            reader(tempArchive(checkNotNull(byUri["dest://public"]))).use {
+                assertTrue(it.library().credentials.isEmpty())
+            }
+        }
+
+    @Test
+    fun saveRefusesAForeignDescriptorBeforeTouchingTheDestination() =
+        runTest {
+            seedPodcast(db, "https://a.example.com/f")
+            val foreign =
+                object : PreparedBackup {
+                    override val fileName = "neutrodyne-backup-2026-01-01-0000.zip"
+                    override val summary = BackupSummary(1, 1, 1)
+                    override val privacy = PrivacyCounts(9, 9)
+                }
+
+            assertEquals(
+                Outcome.Failure(BackupError.PreparedExpired),
+                repository.savePreparedBackup(foreign, "dest://never"),
+            )
+            assertTrue(destination.sources.isEmpty(), "the destination seam is never reached")
+        }
+
+    @Test
+    fun saveFailsExplicitlyWhenTheOwnedSourceIsGone() =
+        runTest {
+            seedPodcast(db, "https://a.example.com/f")
+            val swept =
+                assertIs<Outcome.Success<PreparedBackup>>(repository.prepareBackup(includePasswords = false)).value
+            // What ExportFilesCleaner does to an abandoned leaf.
+            fileSystem.delete((swept as PreparedBackupFile).source)
+
+            assertEquals(
+                Outcome.Failure(BackupError.PreparedExpired),
+                repository.savePreparedBackup(swept, "dest://late"),
+            )
+            assertTrue(destination.sources.isEmpty())
+
+            // A consumed descriptor expires too — the same bytes are never saved twice.
+            val prepared =
+                assertIs<Outcome.Success<PreparedBackup>>(repository.prepareBackup(includePasswords = false)).value
+            assertIs<Outcome.Success<*>>(repository.savePreparedBackup(prepared, "dest://first"))
+            assertEquals(
+                Outcome.Failure(BackupError.PreparedExpired),
+                repository.savePreparedBackup(prepared, "dest://again"),
+            )
+        }
+
+    @Test
+    fun aFailedSaveKeepsTheSourceForAWarnedRetry() =
+        runTest {
+            seedCredentialPodcast()
+            val prepared =
+                assertIs<Outcome.Success<PreparedBackup>>(repository.prepareBackup(includePasswords = true)).value
+            val source = (prepared as PreparedBackupFile).source
+            val frozenBytes = fileSystem.read(source) { readByteArray() }
+
+            destination.failWith = ExportError.DestinationUnavailable
+            assertEquals(
+                Outcome.Failure(BackupError.DestinationUnavailable),
+                repository.savePreparedBackup(prepared, "dest://retry"),
+            )
+            assertTrue(fileSystem.exists(source), "a failed save preserves the owned artifact")
+            assertEquals(0L, settings.get(BackupSettingKeys.LAST_MANUAL_BACKUP_AT))
+
+            destination.failWith = null
+            assertIs<Outcome.Success<*>>(repository.savePreparedBackup(prepared, "dest://retry"))
+            assertContentEquals(frozenBytes, destination.copied.single().second)
+            assertFalse(fileSystem.exists(source), "a landed copy consumes the leaf")
+            assertEquals(clock.now(), settings.get(BackupSettingKeys.LAST_MANUAL_BACKUP_AT))
+            assertEquals(
+                emptyList(),
+                fileSystem.list(exportDirOf(storagePaths)),
+                "no staged or spent leaf remains",
+            )
+        }
+
+    @Test
+    fun savingAPreparedBackupNeverRereadsTheLibraryOrSecrets() =
+        runTest {
+            val countingSecrets = CountingSecretStore(secrets)
+            val repo =
+                BackupRepositoryImpl(
+                    db = db,
+                    writer =
+                        BackupWriter(
+                            db,
+                            settings,
+                            countingSecrets,
+                            ZipArchiveWriter(),
+                            ZipGuard(),
+                            exporter,
+                            androidInfo,
+                            clock,
+                            fileSystem,
+                            Dispatchers.IO,
+                        ),
+                    stager = stager,
+                    runner = runner,
+                    sessions = sessions,
+                    producer = androidProducer,
+                    destination = destination,
+                    payloads = payloads,
+                    settings = settings,
+                    workScheduler = workScheduler,
+                    clock = clock,
+                    storagePaths = storagePaths,
+                    fileSystem = fileSystem,
+                    io = Dispatchers.IO,
+                )
+            seedCredentialPodcast()
+
+            val prepared =
+                assertIs<Outcome.Success<PreparedBackup>>(repo.prepareBackup(includePasswords = true)).value
+            val readsAtPrepare = countingSecrets.forPodcastCalls
+            assertEquals(1, readsAtPrepare)
+
+            // Mutating after the write would be caught by any re-read — byte equality is
+            // proven by the frozen-bytes test; here the counters alone condemn a reread.
+            seedPodcast(db, "https://feeds.patreon.com/late")
+            secrets.remove(CREDENTIAL_ORIGIN)
+            assertIs<Outcome.Success<*>>(repo.savePreparedBackup(prepared, "dest://saved"))
+
+            assertEquals(readsAtPrepare, countingSecrets.forPodcastCalls, "save must not touch secrets")
+            assertEquals(1, destination.copied.size)
         }
 
     // --- Inspect ----------------------------------------------------------------------------------
@@ -771,6 +982,35 @@ class BackupRepositoryImplTest {
         caller.start()
         caller.join()
         assertEquals(1, driver.cancellations, "the commit hook fired")
+    }
+
+    /** Wraps the fake to count `forPodcast` secret reads a save would repeat. */
+    private class CountingSecretStore(
+        private val inner: SecretStore,
+    ) : SecretStore {
+        var forPodcastCalls = 0
+
+        override suspend fun awaitLoaded() = inner.awaitLoaded()
+
+        override fun basicAuthorization(origin: Origin): String? = inner.basicAuthorization(origin)
+
+        override suspend fun put(
+            origin: String,
+            username: String,
+            secret: CharArray,
+            attributes: Map<String, String>,
+        ): Long? = inner.put(origin, username, secret, attributes)
+
+        override suspend fun get(origin: String): StoredSecret? = inner.get(origin)
+
+        override suspend fun remove(origin: String) = inner.remove(origin)
+
+        override suspend fun forPodcast(podcastId: Long): BasicCredentials? {
+            forPodcastCalls++
+            return inner.forPodcast(podcastId)
+        }
+
+        override suspend fun podcastIndexKey(): Pair<String, String>? = inner.podcastIndexKey()
     }
 
     /** Records the destination copy; `failWith`/`explode` reproduce the seam's error lanes. */

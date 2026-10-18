@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.domain
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.model.BackupPreview
 import ch.lkmc.neutrodyne.core.model.BackupSummary
+import ch.lkmc.neutrodyne.core.model.PreparedBackup
 import ch.lkmc.neutrodyne.core.model.PrivacyCounts
 import ch.lkmc.neutrodyne.core.model.RestoreRequest
 import ch.lkmc.neutrodyne.core.model.SnapshotStatus
@@ -17,10 +18,33 @@ import kotlinx.coroutines.flow.Flow
  * Implemented by `:core:data` in M3.
  */
 interface BackupRepository {
+    /**
+     * Writes a manual backup straight to [destinationUri]. Non-interactive callers only:
+     * the R1.9 warning cannot be checked against the saved bytes (05 Writing). The
+     * interactive flow is [prepareBackup] → warning → [savePreparedBackup].
+     */
     suspend fun createBackup(
         destinationUri: String,
         includePasswords: Boolean,
     ): Outcome<BackupSummary, BackupError>
+
+    /**
+     * Writes a manual backup once into a private cache leaf and returns its receipt
+     * (05 Writing). The descriptor's summary and privacy counts are measured from that
+     * same write, so the R1.9 warning always describes the bytes the user may save.
+     */
+    suspend fun prepareBackup(includePasswords: Boolean): Outcome<PreparedBackup, BackupError>
+
+    /**
+     * Copies a [prepareBackup] artifact to [destinationUri] without touching the library
+     * or secrets again (05 Writing). The owned cache file is deleted on success; a failed
+     * copy keeps it for a retry, and an expired or foreign descriptor fails explicitly —
+     * the archive is never rebuilt silently.
+     */
+    suspend fun savePreparedBackup(
+        prepared: PreparedBackup,
+        destinationUri: String,
+    ): Outcome<Unit, BackupError>
 
     /** Validates the session's archive and builds the restore preview (05). */
     suspend fun inspect(sessionId: Long): Outcome<BackupPreview, BackupError>
@@ -39,7 +63,12 @@ interface BackupRepository {
     /** Android; a no-op on the desktop (05 Auto Backup). */
     suspend fun setSnapshotEnabled(enabled: Boolean)
 
-    /** The R1.9 warning counts before [createBackup] (05 Writing). */
+    /**
+     * Advisory R1.9 warning counts (05 Writing). These are read from a separate, earlier
+     * snapshot than a later [createBackup], so library or credential changes in between
+     * make them stale. The interactive flow warns from [PreparedBackup.privacy] instead;
+     * this stays for callers that only need a preview.
+     */
     suspend fun preflight(includePasswords: Boolean): PrivacyCounts
 
     /** Android: the foreign snapshot → a restore session id; desktop: Unsupported (05). */
@@ -102,6 +131,14 @@ sealed interface BackupError {
     data object RestoreRunning : BackupError
 
     data object DestinationUnavailable : BackupError
+
+    /**
+     * `savePreparedBackup` cannot use the descriptor: it did not come from
+     * `prepareBackup`, or its owned cache copy was already consumed by a save or swept
+     * as abandoned (05 Writing). The archive is never rebuilt — a fresh `prepareBackup`
+     * is the only recovery.
+     */
+    data object PreparedExpired : BackupError
 
     /**
      * The call is not supported here: an Android-only member on the desktop, or a linked

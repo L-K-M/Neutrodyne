@@ -31,6 +31,7 @@ import ch.lkmc.neutrodyne.core.model.BackupSummary
 import ch.lkmc.neutrodyne.core.model.CreateImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportState
+import ch.lkmc.neutrodyne.core.model.PreparedBackup
 import ch.lkmc.neutrodyne.core.model.PrivacyCounts
 import ch.lkmc.neutrodyne.core.model.RestoreRequest
 import ch.lkmc.neutrodyne.core.model.SnapshotStatus
@@ -53,21 +54,31 @@ import okio.FileSystem
 import okio.Path
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Instant
+import kotlin.uuid.Uuid
 
 /**
  * `BackupRepository` (05 Full backup and restore, M3 B12c) — the public contract's common
  * implementation. Every member delegates to the service that owns the work:
- * [BackupWriter] for the manual write and the R1.9 preflight counts,
- * [BackupStager] for archive validation and the preview, [RestoreRunner] for progress,
- * [AutoSnapshotProducer] for the Android snapshot lane and [ImportSessions] for the
- * adopted-snapshot session. `restore` itself only writes the durable intent and pays the
- * owed native enqueue — the runner does the restore.
+ * [BackupWriter] for the manual write, the measured receipt and the advisory R1.9
+ * preflight counts, [BackupStager] for archive validation and the preview,
+ * [RestoreRunner] for progress, [AutoSnapshotProducer] for the Android snapshot lane and
+ * [ImportSessions] for the adopted-snapshot session. `restore` itself only writes the
+ * durable intent and pays the owed native enqueue — the runner does the restore.
  *
- * Manual `createBackup` runs the whole write → copy → cleanup under [backupMutex], not just
- * the writer's own lock: two callers in the same minute mint the same file name, so the
- * prepared cache artifact stays private to one caller until its copy (and delete) ends —
- * an opted-in password backup can never overwrite a concurrent password-free caller's
- * source mid-flight.
+ * The frozen-consent flow (05 Writing): [prepareBackup] writes the archive once into an
+ * owned `<cache>/export/prepared-{uuid}.zip` leaf — unique independently of the friendly
+ * minute name, so same-minute prepares with different password choices can never
+ * overwrite or cross-contaminate each other — and returns a [PreparedBackupFile] whose
+ * summary and privacy counts come from that same write. [savePreparedBackup] then copies
+ * exactly those bytes out; a foreign descriptor or a swept/consumed source fails before
+ * the destination seam is touched, the archive is never rebuilt, and a failed copy keeps
+ * the leaf for a warned retry while a landed one consumes it. A Cancel before the save
+ * leaves only the private cache file, which `ExportFilesCleaner` retires with the rest
+ * of the 24-hour export cache.
+ *
+ * The whole prepare → copy → cleanup runs under [backupMutex], wider than the writer's
+ * own lock, so the destination copy and the leaf's deletion stay serialized against
+ * every other manual backup call.
  *
  * Not contributed to the graph yet: [ExportDestination] binds with the platform rows
  * (C1 `SafExportDestination`, C3 `FileExportDestination`), like `ExportRepositoryImpl`.
@@ -98,56 +109,112 @@ internal class BackupRepositoryImpl(
 
     // --- Manual backup (05 Writing) --------------------------------------------------------------
 
+    /**
+     * The non-interactive caller's one shot: prepare, copy, sweep. A failed destination
+     * copy still deletes the leaf — without a returned descriptor there is no warned
+     * retry — so the flow's cache footprint matches what the interactive Cancel leaves.
+     */
     override suspend fun createBackup(
         destinationUri: String,
         includePasswords: Boolean,
     ): Outcome<BackupSummary, BackupError> =
         backupMutex.withLock {
-            // `<cache>/export/` is this flow's own directory — the writer stages into it
-            // but never creates it.
-            val dirReady =
-                suspendRunCatching { withContext(io) { fileSystem.createDirectories(exportDir) } }
-            if (dirReady.isFailure) {
-                Log.w(TAG, dirReady.exceptionOrNull()) { "export directory creation failed" }
-                return@withLock Outcome.Failure(BackupError.Storage)
-            }
-
-            val target = exportDir / backupFileName(clock.now())
+            val prepared =
+                when (val prepared = prepareLocked(includePasswords)) {
+                    is Outcome.Failure -> return@withLock Outcome.Failure(prepared.error)
+                    is Outcome.Success -> prepared.value
+                }
             try {
-                val summary =
-                    when (val written = writer.write(BackupKind.MANUAL, target, includePasswords)) {
-                        is Outcome.Failure -> return@withLock Outcome.Failure(written.error)
-                        is Outcome.Success -> written.value
-                    }
-                // A throw from the platform seam (provider quirks beyond its own Outcome
-                // cases) reports "couldn't write" rather than crashing — ExportRepositoryImpl's
-                // rule. The finally sweeps the owned artifact on every path, cancellation
-                // included, so a same-minute name never leaks across calls.
-                val saved =
-                    suspendRunCatching { destination.save(target, destinationUri) }
-                        .getOrNull() ?: return@withLock Outcome.Failure(BackupError.Io)
-                when (saved) {
-                    is Outcome.Failure -> {
-                        Outcome.Failure(saved.error.toBackupError())
-                    }
-
-                    is Outcome.Success -> {
-                        // The timestamp is bookkeeping for "Last backup: …" — a failed set
-                        // is logged, not reported: the destination copy already landed.
-                        val stamped =
-                            suspendRunCatching {
-                                settings.set(BackupSettingKeys.LAST_MANUAL_BACKUP_AT, clock.now())
-                            }
-                        if (stamped.getOrNull() !is Outcome.Success) {
-                            Log.w(TAG, stamped.exceptionOrNull()) { "last_manual_backup_at write failed" }
-                        }
-                        Outcome.Success(summary)
-                    }
+                when (val saved = saveLocked(prepared, destinationUri)) {
+                    is Outcome.Failure -> Outcome.Failure(saved.error)
+                    is Outcome.Success -> Outcome.Success(prepared.summary)
                 }
             } finally {
-                deleteOwned(target)
+                deleteOwned(prepared.source)
             }
         }
+
+    override suspend fun prepareBackup(includePasswords: Boolean): Outcome<PreparedBackup, BackupError> =
+        backupMutex.withLock { prepareLocked(includePasswords) }
+
+    override suspend fun savePreparedBackup(
+        prepared: PreparedBackup,
+        destinationUri: String,
+    ): Outcome<Unit, BackupError> = backupMutex.withLock { saveLocked(prepared, destinationUri) }
+
+    /**
+     * Writes the archive once into an owned leaf unique across calls — never the friendly
+     * document name, so two same-minute prepares can never share a source — and returns
+     * the descriptor carrying that write's measured summary and R1.9 counts.
+     */
+    private suspend fun prepareLocked(includePasswords: Boolean): Outcome<PreparedBackupFile, BackupError> {
+        // `<cache>/export/` is this flow's own directory — the writer stages into it
+        // but never creates it.
+        val dirReady =
+            suspendRunCatching { withContext(io) { fileSystem.createDirectories(exportDir) } }
+        if (dirReady.isFailure) {
+            Log.w(TAG, dirReady.exceptionOrNull()) { "export directory creation failed" }
+            return Outcome.Failure(BackupError.Storage)
+        }
+
+        val source = exportDir / preparedLeafName()
+        return when (val written = writer.writeMeasured(BackupKind.MANUAL, source, includePasswords)) {
+            is Outcome.Failure -> {
+                written
+            }
+
+            is Outcome.Success -> {
+                Outcome.Success(
+                    PreparedBackupFile(
+                        fileName = backupFileName(clock.now()),
+                        summary = written.value.summary,
+                        privacy = written.value.privacy,
+                        source = source,
+                    ),
+                )
+            }
+        }
+    }
+
+    /**
+     * The consented copy: the descriptor must be a [PreparedBackupFile] this repository
+     * minted and its owned leaf must still exist — a fake or foreign descriptor, or a
+     * source the cleaner already swept or an earlier save consumed, is refused before
+     * the destination seam is touched and the archive is never rebuilt. A landed copy
+     * consumes the leaf; a failed one preserves it so the user can retry the warned
+     * artifact.
+     */
+    private suspend fun saveLocked(
+        prepared: PreparedBackup,
+        destinationUri: String,
+    ): Outcome<Unit, BackupError> {
+        val owned = prepared as? PreparedBackupFile ?: return Outcome.Failure(BackupError.PreparedExpired)
+        val sourceExists =
+            withContext(io) { suspendRunCatching { fileSystem.exists(owned.source) }.getOrNull() } == true
+        if (!sourceExists) return Outcome.Failure(BackupError.PreparedExpired)
+
+        // A throw from the platform seam (provider quirks beyond its own Outcome cases)
+        // reports "couldn't write" rather than crashing — ExportRepositoryImpl's rule.
+        val saved =
+            suspendRunCatching { destination.save(owned.source, destinationUri) }
+                .getOrNull() ?: return Outcome.Failure(BackupError.Io)
+        when (saved) {
+            is Outcome.Failure -> return Outcome.Failure(saved.error.toBackupError())
+            is Outcome.Success -> Unit
+        }
+
+        // The timestamp is bookkeeping for "Last backup: …" — a failed set is logged, not
+        // reported: the destination copy already landed.
+        val stamped =
+            suspendRunCatching {
+                settings.set(BackupSettingKeys.LAST_MANUAL_BACKUP_AT, clock.now())
+            }
+        if (stamped.getOrNull() !is Outcome.Success) {
+            Log.w(TAG, stamped.exceptionOrNull()) { "last_manual_backup_at write failed" }
+        }
+        deleteOwned(owned.source)
+        return Outcome.Success(Unit)
+    }
 
     override suspend fun preflight(includePasswords: Boolean): PrivacyCounts = writer.preflight(includePasswords)
 
@@ -408,6 +475,9 @@ internal class BackupRepositoryImpl(
                 .onFailure { Log.w(TAG, it) { "prepared backup cleanup failed: $target" } }
         }
     }
+
+    /** The owned cache leaf — a UUID, never the friendly name, so it is unique across calls. */
+    private fun preparedLeafName(): String = "prepared-${Uuid.random()}.zip"
 
     /** 05 Writing step 5's name: `neutrodyne-backup-{yyyy-MM-dd-HHmm}.zip` in UTC. */
     private fun backupFileName(nowMs: Long): String {

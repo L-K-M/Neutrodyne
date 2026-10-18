@@ -93,11 +93,30 @@ data class SnapshotWrite(
     val after: SnapshotStatus,
 )
 
-/** The R1.9 private-links/passwords warning counts before `createBackup` (05 Writing). */
+/** The R1.9 private-links/passwords warning counts for a backup (05 Writing). */
 data class PrivacyCounts(
     val privateLinks: Int,
     val passwords: Int,
 )
+
+/**
+ * A finished manual backup held in the private cache until the user consents (05
+ * Writing). `BackupRepository.prepareBackup` writes the archive once and returns this
+ * descriptor; [summary] and [privacy] are measured from that same write, so the warning
+ * shown to the user always matches the bytes `savePreparedBackup` later copies out.
+ * Opaque on purpose: only `:core:data` can build one, so a caller cannot fabricate a
+ * cache path or a receipt.
+ */
+interface PreparedBackup {
+    /** Display/document name, `neutrodyne-backup-{yyyy-MM-dd-HHmm}.zip` (05 Writing). */
+    val fileName: String
+
+    /** Byte/row counts measured while the archive bytes were written. */
+    val summary: BackupSummary
+
+    /** R1.9 warning counts measured while the archive bytes were written. */
+    val privacy: PrivacyCounts
+}
 
 /**
  * The policies `RestoreMerger` merges a staged library with (05 RestoreMerger):
