@@ -3,7 +3,6 @@
 package ch.lkmc.neutrodyne.core.testing.database
 
 import androidx.paging.PagingSource
-import androidx.room3.useWriterConnection
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.database.EpisodePositionEntity
 import ch.lkmc.neutrodyne.core.database.EpisodeRowProjection
@@ -54,11 +53,28 @@ object FeedInvalidationProbe {
             try {
                 repeat(POSITION_WRITES) { tick ->
                     val id = ids[tick % ids.size]
+                    val write = position(id, tick + 1)
                     db.withWriteTransaction {
-                        // M4's guarded save primitives are not implemented yet. An ignored ensure
-                        // is harmless; startedAt is already set, so only the position changes.
-                        db.episodeStateDao().ensure(EpisodeStateEntity(id, updatedAt = NOW))
-                        db.positionDao().upsert(position(id, tick + 1))
+                        // 06's save sequence (02 User-state writes): lazy row insert, the guarded
+                        // update, then the lazy state row and the one-shot startedAt stamp. The
+                        // seeded states already carry startedAt, so ensure is ignored and
+                        // markStarted no-ops, only unobserved episode_position is written.
+                        db.positionDao().insertIfAbsent(write)
+                        val written =
+                            db.positionDao().updateGuarded(
+                                id,
+                                write.positionMs,
+                                write.durationMs,
+                                write.positionSource,
+                                write.updatedAt,
+                                pinStartedAt = NOW,
+                            )
+                        assertEquals(1, written, "guarded position write for $id")
+                        assertEquals(
+                            -1L,
+                            db.episodeStateDao().ensure(EpisodeStateEntity(id, updatedAt = write.updatedAt)),
+                        )
+                        assertEquals(0, db.episodeStateDao().markStarted(id, write.updatedAt), "startedAt already set")
                     }
                     counter.drainAndRearm()
                     assertEquals(0, counter.invalidations, "$feed position tick $tick")
@@ -69,26 +85,22 @@ object FeedInvalidationProbe {
                 }
 
                 repeat(SESSION_WRITES) { tick ->
-                    // M4 owns these missing DAO writers. Exercise the real tables without
-                    // widening production APIs merely to arrange a hygiene test.
-                    db.useWriterConnection { connection ->
-                        connection.usePrepared(
-                            "UPDATE play_session SET generation = generation + 1, updatedAt = ? WHERE id = 0",
-                        ) {
-                            it.bindLong(1, NOW + tick)
-                            it.step()
-                        }
+                    // 06's SessionWriter shape (02 Transactions): ensure the singleton, read it,
+                    // write the bumped record, one transaction per session write.
+                    val now = NOW + tick
+                    db.withWriteTransaction {
+                        db.playSessionDao().ensureNow(now)
+                        val session = assertNotNull(db.playSessionDao().get())
+                        db.playSessionDao().write(session.copy(generation = session.generation + 1, updatedAt = now))
                     }
                     counter.drainAndRearm()
-                    db.useWriterConnection { connection ->
-                        connection.usePrepared("UPDATE queue_entry SET orderKey = ? WHERE id = ?") {
-                            it.bindText(1, "a$tick")
-                            it.bindLong(2, queueId)
-                            it.step()
-                        }
-                    }
+                    // 02 Up next ordering: one orderKey update per move.
+                    db.queueDao().updateOrderKey(queueId, "a$tick")
                     counter.drainAndRearm()
                 }
+                // 05's Replace pre-step is the same one-row UPDATE: still unobserved.
+                db.playSessionDao().clearContext(NOW + SESSION_WRITES)
+                counter.drainAndRearm()
                 assertEquals(0, counter.invalidations, "$feed session/Up next writes")
                 assertEquals(
                     "a${SESSION_WRITES - 1}",
@@ -100,7 +112,13 @@ object FeedInvalidationProbe {
                 )
 
                 db.withWriteTransaction {
-                    assertEquals(1, db.episodeStateDao().markPlayed(listOf(ids.first()), NOW + 1))
+                    // 02's shared mark-played chain: lazy state rows, the played stamp, the
+                    // position reset and the Up-next removal, one transaction.
+                    val marked = listOf(ids.first())
+                    db.episodeStateDao().ensureAll(marked, NOW + 1)
+                    assertEquals(1, db.episodeStateDao().markPlayed(marked, NOW + 1))
+                    db.positionDao().reset(marked, NOW + 1)
+                    db.queueDao().removeEpisodes(marked)
                 }
                 counter.drainAndRearm()
                 assertEquals(1, counter.invalidations, "$feed played-state positive control")
@@ -132,17 +150,47 @@ object FeedInvalidationProbe {
             counter.open()
             try {
                 db.withWriteTransaction {
-                    db.positionDao().upsert(position(id, 1))
                     // Creation plus startedAt is a single committed state transition.
-                    db.episodeStateDao().ensure(EpisodeStateEntity(id, startedAt = NOW, updatedAt = NOW))
+                    db.positionDao().insertIfAbsent(position(id, 1))
+                    val written =
+                        db.positionDao().updateGuarded(
+                            id,
+                            1_000L,
+                            null,
+                            PositionSource.STREAM,
+                            NOW,
+                            pinStartedAt = NOW,
+                        )
+                    assertEquals(1, written, "first guarded position write")
+                    db.episodeStateDao().ensure(EpisodeStateEntity(id, updatedAt = NOW))
+                    assertEquals(1, db.episodeStateDao().markStarted(id, NOW), "first startedAt stamp")
                 }
                 counter.drainAndRearm()
                 assertEquals(1, counter.invalidations, "$feed initial startedAt transition")
                 assertEquals(NOW, db.episodeStateDao().byEpisode(id)?.startedAt)
                 repeat(POSITION_WRITES) { tick ->
+                    val write = position(id, tick + 2)
                     db.withWriteTransaction {
-                        db.episodeStateDao().ensure(EpisodeStateEntity(id, updatedAt = NOW))
-                        db.positionDao().upsert(position(id, tick + 2))
+                        db.positionDao().insertIfAbsent(write)
+                        val written =
+                            db.positionDao().updateGuarded(
+                                id,
+                                write.positionMs,
+                                write.durationMs,
+                                write.positionSource,
+                                write.updatedAt,
+                                pinStartedAt = NOW,
+                            )
+                        assertEquals(1, written, "guarded position write")
+                        assertEquals(
+                            -1L,
+                            db.episodeStateDao().ensure(EpisodeStateEntity(id, updatedAt = write.updatedAt)),
+                        )
+                        assertEquals(
+                            0,
+                            db.episodeStateDao().markStarted(id, write.updatedAt),
+                            "markStarted no-ops after the first",
+                        )
                     }
                     counter.drainAndRearm()
                 }
@@ -240,7 +288,8 @@ object FeedInvalidationProbe {
             NOW + tick,
     )
 
-    private class Counter(
+    /** Counts invalidations of an open feed `PagingSource`, re-arming after each invalidation. */
+    class Counter(
         private val db: NeutrodyneDatabase,
         private val scope: TestScope,
         private val feed: FeedSource,

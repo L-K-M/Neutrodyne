@@ -96,4 +96,6 @@ data class PlaybackMediaInfo(
     val playedAt: Long?,
     /** Keyset anchor for explicit/context starts; media lookups populate the episode sort date. */
     val sortDate: Long? = null,
+    /** System surfaces use podcast art when episode art is not pinned (06 Artwork rule). */
+    val podcastArtwork: ArtworkRef = artwork,
 )
