@@ -355,12 +355,13 @@ class RestoreEpisodeMergerTest {
             val settled =
                 merger.mergeLibrary(staged, MergePolicy.RESTORE_MERGE, setOf(RestoreCategory.SETTINGS))
             val summary =
-                episodes.mergeEpisodes(
-                    staged,
-                    settled,
-                    MergePolicy.RESTORE_MERGE,
-                    setOf(RestoreCategory.SETTINGS),
-                )
+                episodes
+                    .mergeEpisodes(
+                        staged,
+                        settled,
+                        MergePolicy.RESTORE_MERGE,
+                        setOf(RestoreCategory.SETTINGS),
+                    ).summary
 
             assertEquals(0, summary.episodeLines)
             assertNull(db.episodeStateDao().byEpisode(e))
@@ -1122,7 +1123,7 @@ class RestoreEpisodeMergerTest {
         progress: (Int, Int) -> Unit = { _, _ -> },
     ): MergeSummary {
         val settled = merger.mergeLibrary(staged, policy, categories)
-        return episodes.mergeEpisodes(staged, settled, policy, categories, total, progress)
+        return episodes.mergeEpisodes(staged, settled, policy, categories, total, progress).summary
     }
 
     /** A restore bound to the real `OrderKey` port — the Replace `ok` cases. */

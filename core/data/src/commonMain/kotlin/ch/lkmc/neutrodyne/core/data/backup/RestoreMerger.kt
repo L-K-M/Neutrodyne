@@ -121,6 +121,7 @@ internal class RestoreMerger(
 
         val credentialIds = HashMap<String, Long>()
         val podcastIdByKey = HashMap<String, Long>()
+        val insertedPodcastIds = HashSet<Long>()
         val uuidChanges = ArrayList<UuidChange>()
         var podcastsAdded = 0
         var podcastsMatched = 0
@@ -186,6 +187,7 @@ internal class RestoreMerger(
                     if (localId == null) {
                         localId = insertPodcast(podcast, now, credentialIds)
                         podcastsAdded++
+                        insertedPodcastIds += localId
                     } else {
                         podcastsMatched++
                         applyMatchedPodcast(localId, podcast, policy)
@@ -248,6 +250,7 @@ internal class RestoreMerger(
                 ),
             podcastIdByKey = podcastIdByKey.toMap(),
             groupIdByUuid = groupIdByUuid,
+            insertedPodcastIds = insertedPodcastIds,
         )
     }
 
@@ -794,6 +797,12 @@ internal class LibraryMergeResult(
     val summary: MergeSummary,
     val podcastIdByKey: Map<String, Long>,
     val groupIdByUuid: Map<String, Long>,
+    /**
+     * The local ids transaction A inserted fresh — B12b's finish writes these as QUEUED
+     * `import_item`s (matched rows report ALREADY_SUBSCRIBED instead). Recorded at the
+     * write, never re-derived by a live lookup.
+     */
+    val insertedPodcastIds: Set<Long> = emptySet(),
 )
 
 /**
