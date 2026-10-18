@@ -1,0 +1,31 @@
+{
+  "entries": [
+    {
+      "groupNames": [
+        "Blogs"
+      ],
+      "htmlUrl": "https://blog.example.com",
+      "ordinal": 0,
+      "title": "Blog",
+      "url": "https://blog.example.com/feed"
+    },
+    {
+      "groupNames": [
+        "Tech"
+      ],
+      "ordinal": 1,
+      "title": "Direct",
+      "url": "https://direct.example.com/feed"
+    }
+  ],
+  "format": "OPML",
+  "groups": [
+    {
+      "excludedReason": "wrapper",
+      "name": "Tech"
+    },
+    {
+      "name": "Blogs"
+    }
+  ]
+}

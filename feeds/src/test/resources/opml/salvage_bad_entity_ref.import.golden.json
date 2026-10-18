@@ -1,0 +1,35 @@
+{
+  "entries": [
+    {
+      "ordinal": 0,
+      "title": "Broken ref",
+      "url": "https://b.example.com/rss"
+    },
+    {
+      "groupNames": [
+        "Tech"
+      ],
+      "ordinal": 1,
+      "title": "Fine",
+      "url": "https://f.example.com/rss"
+    },
+    {
+      "ordinal": 2,
+      "title": "Also bad",
+      "url": "https://a2.example.com/rss"
+    }
+  ],
+  "format": "OPML",
+  "groups": [
+    {
+      "name": "Tech"
+    }
+  ],
+  "ignoredOutlines": 1,
+  "salvaged": true,
+  "warnings": [
+    {
+      "code": "SALVAGED"
+    }
+  ]
+}

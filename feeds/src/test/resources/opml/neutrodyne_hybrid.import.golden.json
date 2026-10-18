@@ -1,0 +1,51 @@
+{
+  "entries": [
+    {
+      "customTitle": "ATP",
+      "groupNames": [
+        "tech",
+        "news"
+      ],
+      "htmlUrl": "https://atp.fm",
+      "ordinal": 0,
+      "title": "Accidental Tech Podcast",
+      "url": "https://atp.fm/rss"
+    },
+    {
+      "groupNames": [
+        "tech"
+      ],
+      "htmlUrl": "https://www.youtube.com/channel/UCBJycsmduvYEL83R_U4JriQ",
+      "ordinal": 1,
+      "title": "Channel",
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCBJycsmduvYEL83R_U4JriQ",
+      "youtubeVariantsHint": 5
+    },
+    {
+      "groupNames": [
+        "news"
+      ],
+      "ordinal": 2,
+      "title": "The Daily",
+      "url": "https://feeds.example.com/daily"
+    },
+    {
+      "ordinal": 3,
+      "title": "Some Show",
+      "url": "https://example.com/rss"
+    }
+  ],
+  "format": "OPML",
+  "groups": [
+    {
+      "colorArgb": -22016,
+      "iconKey": "code",
+      "name": "tech"
+    },
+    {
+      "colorArgb": -16759604,
+      "iconKey": "news",
+      "name": "news"
+    }
+  ]
+}

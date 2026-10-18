@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="1.0"><body>
+  <outline text="Whole" type="rss" xmlUrl="https://w.example.com/rss"/>
+  <outline text="Partial" type="rss" xmlUrl="https://p.example.com/rss" note="unterminated

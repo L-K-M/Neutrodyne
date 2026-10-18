@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.domain.ExportRepository
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.NewEpisodePoster
 import ch.lkmc.neutrodyne.core.domain.SecretStore
@@ -62,6 +63,12 @@ interface AndroidAppGraph {
 
     /** What `AuthInterceptor` injects: the same singleton as [secretStore]. */
     val credentialLookup: CredentialLookup
+
+    /**
+     * M3 C1: the OPML/backup export service — the graph test proves it binds through the
+     * Android seam (SAF destination + FileProvider share URIs), not a common default.
+     */
+    val exportRepository: ExportRepository
 
     /** The Coil `SingletonImageLoader.Factory` installed in `NeutrodyneApplication` (08 Coil ImageLoader). */
     val imageLoaderFactory: NeutrodyneImageLoaderFactory
