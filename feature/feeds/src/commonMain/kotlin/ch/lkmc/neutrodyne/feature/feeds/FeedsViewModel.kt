@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers.Default
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.EpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
@@ -23,7 +24,7 @@ import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.AVAILABLE_FEED_FILTER_CAPABILITIES
-import ch.lkmc.neutrodyne.core.model.DownloadState
+import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedCounts
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedPrefs
@@ -34,28 +35,33 @@ import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.GroupCounts
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
 import ch.lkmc.neutrodyne.core.model.withCapabilities
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionController
 import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedController
 import ch.lkmc.neutrodyne.core.ui.MarkPlayedOutcome
+import ch.lkmc.neutrodyne.core.ui.PlaybackActions
 import ch.lkmc.neutrodyne.core.ui.PlayedActionOrigin
 import ch.lkmc.neutrodyne.core.ui.SwipeConfig
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.UserMessages
+import ch.lkmc.neutrodyne.core.ui.YouTubeLinks
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_copy_link
 import ch.lkmc.neutrodyne.core.ui.resources.action_undo
 import ch.lkmc.neutrodyne.core.ui.resources.episode_marked_played
 import ch.lkmc.neutrodyne.core.ui.resources.episode_marked_unplayed
-import ch.lkmc.neutrodyne.core.ui.resources.episode_offline_toast
 import ch.lkmc.neutrodyne.core.ui.resources.feed_group_deleted
 import ch.lkmc.neutrodyne.core.ui.resources.feed_group_unknown
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_all
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_ungrouped
 import ch.lkmc.neutrodyne.core.ui.resources.no_handler
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
+import ch.lkmc.neutrodyne.playback.api.PlaybackController
+import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metrox.viewmodel.ViewModelKey
@@ -72,6 +78,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -91,11 +98,14 @@ public class FeedsViewModel(
     private val episodes: EpisodeRepository,
     private val refreshController: RefreshController,
     private val network: NetworkMonitor,
-    podcasts: PodcastRepository,
+    private val podcasts: PodcastRepository,
     private val clock: Clock,
     liveStateSource: EpisodeLiveStateSource,
     groups: GroupRepository,
     private val settings: SettingsRepository,
+    private val playbackController: PlaybackController,
+    private val playbackStates: PlaybackStateSource,
+    platformInfo: PlatformInfo,
     @Dispatcher(Default) private val defaultDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
     // Accessed from Main, like the ViewModel's callbacks and Compose pagingFor calls.
@@ -398,6 +408,55 @@ public class FeedsViewModel(
     public val episodeSelection =
         EpisodeSelectionController(viewModelScope, episodes::setPlayed, ::reportWriteFailed)
 
+    /**
+     * Shared start/queue/consent handling (08 Issues, results and events); the route also
+     * resolves playback snackbar actions through `playback.onMessageAction`.
+     */
+    public val playback =
+        PlaybackActions(
+            viewModelScope,
+            playbackController,
+            playbackStates,
+            userMessages,
+            platformInfo.kind,
+            allowMeteredStreaming = ::allowMeteredStreaming,
+            onFailure = ::reportWriteFailed,
+        )
+
+    /** The Enter password dialog's target podcast, set by an AuthRequired snackbar action. */
+    private val credentialsPrompt = MutableStateFlow<Long?>(null)
+    public val pendingCredentials: StateFlow<Long?> = credentialsPrompt.asStateFlow()
+
+    /** The page header's Play button (08 Feeds): the source's own filters and play order. */
+    public fun playFeed(source: FeedSource) {
+        playback.play(feedTitle(source)) {
+            val prefs = prefsFor(source).first()
+            playbackController.playFeed(source, prefs.filters, prefs.playOrder)
+        }
+    }
+
+    /** The page emitting the row action owns its context, including during a pager transition. */
+    public fun playEpisode(
+        source: FeedSource,
+        episodeId: Long,
+    ) {
+        playback.playToggle(episodeId, feedTitle(source)) {
+            val prefs = prefsFor(source).first()
+            playbackController.playFeed(source, prefs.filters, prefs.playOrder, episodeId)
+        }
+    }
+
+    /** Selection mode's "Play next"/"Play last" (08 Selection mode); clears the selection. */
+    public fun playSelectionNext() {
+        val ids = episodeSelection.ids.value.toList()
+        playback.playNext(ids) { episodeSelection.deselect(ids) }
+    }
+
+    public fun playSelectionLast() {
+        val ids = episodeSelection.ids.value.toList()
+        playback.playLast(ids) { episodeSelection.deselect(ids) }
+    }
+
     /** Repository-owned row actions (08 EpisodeRow); the route owns navigation and URL opens. */
     public fun onRowAction(action: EpisodeAction) {
         when (action) {
@@ -425,32 +484,55 @@ public class FeedsViewModel(
                 }
             }
 
-            // The offline row's cloud_off affordance stays enabled (08's row table): while the
-            // player is M4 the tap answers with the offline toast — only when the episode has
-            // no download, since a downloaded row would play.
+            // Row play anchors the current page's feed context at that episode (05 Start
+            // rules, 08 Feeds actions); the shared toggle pauses/resumes the current item.
             is EpisodeAction.PlayToggle -> {
-                // uiState still holds its offline=false initial value before the first
-                // combine emission (and a stale value after a WhileSubscribed restart), so
-                // the gate reads the live StateFlow — an early tap still answers (08's note).
-                if (!network.status.value.isConnected) {
-                    viewModelScope.launch {
-                        val downloaded =
-                            suspendRunCatching {
-                                episodes.observeEpisode(action.episodeId).first()
-                            }.getOrNull()?.downloadState == DownloadState.COMPLETED
-                        if (!downloaded) {
-                            userMessages.post(UiText.Res(Res.string.episode_offline_toast))
-                        }
-                    }
-                }
+                playEpisode(selection.value.source, action.episodeId)
             }
 
-            // PlayNext/PlayLast need the player (M4), DownloadToggle the download engine (M6),
-            // CheckAvailability the YouTube engine (M8).
+            is EpisodeAction.PlayNext -> {
+                playback.playNext(listOf(action.episodeId))
+            }
+
+            is EpisodeAction.PlayLast -> {
+                playback.playLast(listOf(action.episodeId))
+            }
+
+            // DownloadToggle needs the download engine (M6), CheckAvailability the YouTube
+            // engine (M8).
             else -> {
                 Unit
             }
         }
+    }
+
+    /**
+     * An `AuthRequired` snackbar's Enter action (08): the episode's podcast owns the
+     * credentials, so the prompt resolves it before the dialog opens.
+     */
+    public fun onEnterPassword(episodeId: Long) {
+        viewModelScope.launch {
+            val podcastId =
+                suspendRunCatching { episodes.observeEpisode(episodeId).first()?.podcastId }
+                    .getOrNull() ?: return@launch
+            credentialsPrompt.value = podcastId
+        }
+    }
+
+    /** The Enter password dialog's commit; failures surface as a snackbar (03 Basic auth). */
+    public fun onCredentials(credentials: BasicCredentials) {
+        val podcastId = credentialsPrompt.value ?: return
+        credentialsPrompt.value = null
+        viewModelScope.launch {
+            val outcome = suspendRunCatching { podcasts.setCredentials(podcastId, credentials) }.getOrNull()
+            if (outcome == null || outcome is Outcome.Failure) {
+                reportWriteFailed(IllegalStateException("setCredentials($podcastId) failed"))
+            }
+        }
+    }
+
+    public fun onCredentialsDismissed() {
+        credentialsPrompt.value = null
     }
 
     /**
@@ -497,6 +579,7 @@ public class FeedsViewModel(
     public fun onMessageShown(id: Long) {
         copyLinks.remove(id)
         swipeUndos.remove(id)
+        playback.onMessageShown(id)
         userMessages.shown(id)
     }
 
@@ -517,6 +600,45 @@ public class FeedsViewModel(
 
     /** The route resolves a snackbar action by id; a copy-link message hands its URL back once. */
     public fun consumeCopyLink(id: Long): String? = copyLinks.remove(id)
+
+    /** The refused YouTube start's watch URL, when the episode still has one (08). */
+    public suspend fun youtubeWatchUrl(episodeId: Long): String? =
+        suspendRunCatching { episodes.observeEpisode(episodeId).first()?.externalMediaId }
+            .getOrNull()
+            ?.let(YouTubeLinks::watch)
+
+    /** The feed's title for "Nothing unplayed in '{context}'" (08; groups use user names). */
+    private fun feedTitle(source: FeedSource): UiText? =
+        when (source) {
+            FeedSource.All -> {
+                UiText.Res(Res.string.feeds_all)
+            }
+
+            FeedSource.Ungrouped -> {
+                UiText.Res(Res.string.feeds_ungrouped)
+            }
+
+            is FeedSource.Group -> {
+                knownGroups.find { it.id == source.groupId }?.name?.let(UiText::Raw)
+            }
+
+            is FeedSource.Podcast -> {
+                null
+            }
+        }
+
+    /** Always-consent persists `playback.stream_on_metered = ALLOW` (08's metered dialog). */
+    private suspend fun allowMeteredStreaming() {
+        when (val result = settings.set(PlaybackSettingKeys.STREAM_ON_METERED, StreamOnMetered.ALLOW)) {
+            is Outcome.Success -> {
+                Unit
+            }
+
+            is Outcome.Failure -> {
+                error("playback.stream_on_metered write failed: ${result.error}")
+            }
+        }
+    }
 
     /** A failed write is logged and surfaces as a snackbar — it never escapes the scope. */
     private fun write(block: suspend () -> Unit): Job =

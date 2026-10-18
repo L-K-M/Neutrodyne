@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.testing
 import ch.lkmc.neutrodyne.core.domain.QueueRepository
 import ch.lkmc.neutrodyne.core.model.AddResult
 import ch.lkmc.neutrodyne.core.model.PlaySessionInfo
+import ch.lkmc.neutrodyne.core.model.QueueRemoval
 import ch.lkmc.neutrodyne.core.model.UpNextItem
 import ch.lkmc.neutrodyne.core.model.VirtualQueue
 import kotlinx.coroutines.flow.Flow
@@ -18,6 +19,12 @@ class FakeQueueRepository : QueueRepository {
     val requestedWindows = mutableListOf<Int>()
     val calls = mutableListOf<Call>()
     var addResult: AddResult = AddResult.Added(0)
+
+    /** The token `removeWithUndo`/`clearWithUndo` hand back — configured by the test, never computed. */
+    var removal: QueueRemoval = QueueRemoval(emptyList(), emptyList())
+
+    /** The exact tokens [undoRemoval] received, in call order; [failure] applies there too. */
+    val undos = mutableListOf<QueueRemoval>()
     var failure: Throwable? = null
 
     enum class Operation { NEXT, LAST, MOVE, REMOVE, CLEAR, CLEAR_CONTEXT }
@@ -66,6 +73,21 @@ class FakeQueueRepository : QueueRepository {
 
     override suspend fun clearUpNext() {
         record(Call(Operation.CLEAR))
+    }
+
+    override suspend fun removeWithUndo(episodeIds: List<Long>): QueueRemoval {
+        record(Call(Operation.REMOVE, episodeIds.toList()))
+        return removal
+    }
+
+    override suspend fun clearWithUndo(): QueueRemoval {
+        record(Call(Operation.CLEAR))
+        return removal
+    }
+
+    override suspend fun undoRemoval(removal: QueueRemoval) {
+        undos += removal
+        failure?.let { throw it }
     }
 
     override suspend fun clearContext() {

@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.database
 
+import androidx.paging.PagingSource
 import androidx.room3.RoomRawQuery
 import androidx.room3.useReaderConnection
 import androidx.room3.useWriterConnection
@@ -20,10 +21,14 @@ import ch.lkmc.neutrodyne.core.testing.database.FeedQueryProbe
 import ch.lkmc.neutrodyne.core.testing.database.SeedDatabase
 import ch.lkmc.neutrodyne.core.testing.database.Seeded
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
+import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
+import ch.lkmc.neutrodyne.core.testing.database.episodeStateEntity
+import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 /**
@@ -202,6 +207,79 @@ class QueryPlanTest {
                     }
                 }
                 assertEquals(before, db.feedDao().contextTail(query))
+            } finally {
+                db.close()
+            }
+        }
+
+    /**
+     * W10 (AC16): the In-progress chip's live membership. `page` and the context `filterFlags`
+     * both mean `startedAt IS NOT NULL AND playedAt IS NULL`; the feed keeps a queued row visible
+     * while the tail excludes it, and played/started/reset transitions move membership at once.
+     */
+    @Test
+    fun inProgressFilterAndContextFlagTrackStartedUnplayedMembership() =
+        runTest {
+            val db = TestDb.inMemory()
+            try {
+                val podcast = db.podcastDao().insertPodcast(podcastEntity())
+
+                suspend fun episode(key: String) =
+                    db.ingestDao().insertEpisodes(
+                        listOf(episodeEntity(podcastId = podcast, identityKey = key, title = key)),
+                    )
+                val unstarted = episode("e-unstarted").single()
+                val started = episode("e-started").single()
+                val queued = episode("e-queued").single()
+                val playedStarted = episode("e-played-started").single()
+                val playedOnly = episode("e-played").single()
+                for (id in listOf(started, queued)) {
+                    db.episodeStateDao().upsert(episodeStateEntity(id) { copy(startedAt = 5) })
+                }
+                db.episodeStateDao().upsert(episodeStateEntity(playedStarted) { copy(startedAt = 5, playedAt = 6) })
+                db.episodeStateDao().upsert(episodeStateEntity(playedOnly, playedAt = 7))
+                db.queueDao().insert(QueueEntryEntity(episodeId = queued, orderKey = "a", addedAt = 0))
+
+                val filters = FeedFilters(inProgressOnly = true)
+
+                suspend fun pageIds(): Set<Long> {
+                    val result =
+                        db
+                            .feedDao()
+                            .page(FeedQueryBuilder.page(FeedSource.All, filters, FeedOrder.NEWEST_FIRST))
+                            .load(PagingSource.LoadParams.Refresh<Int>(null, 20, false))
+                    assertIs<PagingSource.LoadResult.Page<Int, EpisodeRowProjection>>(result)
+                    return result.data.mapTo(HashSet()) { it.id }
+                }
+
+                suspend fun tailIds(): List<Long> {
+                    val spec = contextSpec(FeedSource.All, filters, FeedOrder.NEWEST_FIRST)
+                    assertEquals(
+                        FilterFlagBits.IN_PROGRESS,
+                        spec.filterFlags and FilterFlagBits.IN_PROGRESS,
+                        "a feed start carries the flag",
+                    )
+                    return db.feedDao().contextTail(FeedQueryBuilder.contextTail(spec, null, null, 20, true)).map {
+                        it.episodeId
+                    }
+                }
+
+                // Started never played; a queued row stays on the feed but not in the tail.
+                assertEquals(setOf(started, queued), pageIds())
+                assertEquals(listOf(started), tailIds())
+
+                // Played leaves both sets, whether or not it had started.
+                db.episodeStateDao().markPlayed(listOf(started), 8)
+                assertEquals(setOf(queued), pageIds())
+                assertEquals(emptyList(), tailIds())
+
+                // A first start joins; an explicit reset leaves again.
+                db.episodeStateDao().ensureAll(listOf(unstarted), 9)
+                db.episodeStateDao().markStarted(unstarted, 9)
+                assertEquals(setOf(unstarted, queued), pageIds())
+                assertEquals(listOf(unstarted), tailIds())
+                db.episodeStateDao().clearStarted(unstarted, 10)
+                assertEquals(setOf(queued), pageIds())
             } finally {
                 db.close()
             }

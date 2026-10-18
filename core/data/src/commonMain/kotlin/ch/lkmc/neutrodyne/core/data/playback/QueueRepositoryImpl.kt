@@ -20,6 +20,7 @@ import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.PlayContextInfo
 import ch.lkmc.neutrodyne.core.model.PlaySessionInfo
+import ch.lkmc.neutrodyne.core.model.QueueRemoval
 import ch.lkmc.neutrodyne.core.model.RejectReason
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.UpNextItem
@@ -180,6 +181,87 @@ internal class QueueRepositoryImpl(
 
     override suspend fun clearUpNext() {
         db.withWriteTransaction { db.queueDao().clear() }
+    }
+
+    override suspend fun removeWithUndo(episodeIds: List<Long>): QueueRemoval =
+        db.withWriteTransaction {
+            val originalOrder = db.queueDao().entries().map { it.episodeId }
+            val requested = episodeIds.toSet()
+            val removed = originalOrder.filter { it in requested }
+            for (chunk in removed.chunked(PLAYBACK_BIND_CHUNK)) {
+                db.queueDao().removeEpisodes(chunk)
+            }
+            QueueRemoval(removed, originalOrder)
+        }
+
+    override suspend fun clearWithUndo(): QueueRemoval =
+        db.withWriteTransaction {
+            val originalOrder = db.queueDao().entries().map { it.episodeId }
+            db.queueDao().clear()
+            QueueRemoval(originalOrder, originalOrder)
+        }
+
+    /**
+     * Undo is a membership restore, not a re-add and not a rollback: the stored order at undo time
+     * stays fixed and each restorable id is inserted between the neighbours its token still finds.
+     * The eligibility read is `mediaInfo` (existence + `playedAt`); the add path's availability and
+     * YouTube-capability gates deliberately do not apply, so a row that turned unavailable or
+     * external since removal comes back.
+     */
+    override suspend fun undoRemoval(removal: QueueRemoval) {
+        if (removal.removedIds.isEmpty()) return
+        db.withWriteTransaction {
+            val entries = db.queueDao().entries()
+            val queued = entries.map { it.episodeId }.toHashSet()
+            val currentId = db.playSessionDao().get()?.currentEpisodeId
+            val candidates =
+                removal.removedIds.distinct().filter { it !in queued && it != currentId }
+            if (candidates.isEmpty()) return@withWriteTransaction
+            val media = db.episodeDao().mediaInfo(candidates).associateBy { it.id }
+            val positions =
+                removal.originalOrder.withIndex().associate { (index, id) -> id to index }
+            val restorable =
+                candidates
+                    .filter { it in media && media.getValue(it).playedAt == null }
+                    .sortedBy { positions[it] ?: Int.MAX_VALUE }
+            if (restorable.isEmpty()) return@withWriteTransaction
+
+            val desired = entries.map { it.episodeId }.toMutableList()
+            val present = desired.toMutableSet()
+            var afterPrevious = 0
+            for (id in restorable) {
+                // Concurrent moves can reverse the surviving anchors; restored rows still keep their order.
+                val index = maxOf(afterPrevious, undoIndex(removal.originalOrder, positions, desired, present, id))
+                desired.add(index, id)
+                afterPrevious = index + 1
+                present += id
+            }
+            db.applyQueueWrites(planQueueWrites(entries, desired, orderKeys), clock.now())
+        }
+    }
+
+    /**
+     * The insertion index for one restored id: before its nearest original successor still queued,
+     * else after its closest original predecessor still queued (rows restored earlier in this pass
+     * count), else its old index clamped to the list; ids foreign to the token's order append.
+     */
+    private fun undoIndex(
+        originalOrder: List<Long>,
+        positions: Map<Long, Int>,
+        desired: List<Long>,
+        present: Set<Long>,
+        episodeId: Long,
+    ): Int {
+        val originalIndex = positions[episodeId] ?: return desired.size
+        for (i in originalIndex + 1 until originalOrder.size) {
+            val anchor = originalOrder[i]
+            if (anchor in present) return desired.indexOf(anchor)
+        }
+        for (i in originalIndex - 1 downTo 0) {
+            val anchor = originalOrder[i]
+            if (anchor in present) return desired.indexOf(anchor) + 1
+        }
+        return minOf(originalIndex, desired.size)
     }
 
     /** "Stop after Up next": the only queue-path write that touches `play_session`. */

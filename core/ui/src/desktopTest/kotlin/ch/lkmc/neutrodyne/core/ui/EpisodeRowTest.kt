@@ -296,6 +296,42 @@ class EpisodeRowTest {
             assertEquals(listOf<EpisodeAction>(EpisodeAction.WatchOnYouTube(1, "vid-42")), actions)
         }
 
+    @Test
+    fun queueRowAppendsTheSameMenuAndTalkbackActions() =
+        runDesktopComposeUiTest(width = 500, height = 250) {
+            val actions = mutableListOf<EpisodeAction>()
+            var removed = 0
+            setContent {
+                NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                    EpisodeRow(
+                        testEpisodeRow(1),
+                        RowLive(isNowPlaying = true, isPlaying = true),
+                        EpisodeRowStyle.QUEUE,
+                        RowCaps.FULL.copy(downloads = false),
+                        false,
+                        null,
+                        { actions += it },
+                        additionalActions = listOf("Remove from Up next" to { removed++ }),
+                    )
+                }
+            }
+            onNodeWithText("Episode 1").performCustomAccessibilityActionWithLabel("Pause")
+            onNodeWithText("Episode 1").performCustomAccessibilityActionWithLabel("Play next")
+            onNodeWithText("Episode 1").performCustomAccessibilityActionWithLabel("Play last")
+            onNodeWithText("Episode 1").performCustomAccessibilityActionWithLabel("Remove from Up next")
+            assertEquals(
+                listOf(EpisodeAction.PlayToggle(1), EpisodeAction.PlayNext(1), EpisodeAction.PlayLast(1)),
+                actions,
+            )
+            assertEquals(1, removed)
+            val labels =
+                onNodeWithText(
+                    "Episode 1",
+                ).fetchSemanticsNode().config[SemanticsActions.CustomActions].map { it.label }
+            assertFalse("Select" in labels)
+            assertFalse("Download" in labels)
+        }
+
     /** The leading custom action's label on the merged row node (08's playback slot). */
     private fun ComposeUiTest.firstCustomActionLabel(): String =
         onNodeWithText("Episode 1")

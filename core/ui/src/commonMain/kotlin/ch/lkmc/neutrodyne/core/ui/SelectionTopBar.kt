@@ -35,6 +35,8 @@ import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_mark_played
 import ch.lkmc.neutrodyne.core.ui.resources.action_mark_unplayed
 import ch.lkmc.neutrodyne.core.ui.resources.action_more
+import ch.lkmc.neutrodyne.core.ui.resources.action_play_last
+import ch.lkmc.neutrodyne.core.ui.resources.action_play_next
 import ch.lkmc.neutrodyne.core.ui.resources.selection_close
 import ch.lkmc.neutrodyne.core.ui.resources.selection_count
 import ch.lkmc.neutrodyne.core.ui.resources.selection_select_all
@@ -66,13 +68,15 @@ public fun BindEpisodeSelection(selection: EpisodeSelectionController) {
     }
 }
 
-/** Only M2 actions are exposed; queue and download actions arrive with their services. */
+/** Screen-owned episode selection actions; downloads arrive with M6. */
 @Composable
 public fun SelectionTopBar(
     selection: EpisodeSelectionController,
     count: Int,
     onSelectAll: () -> Unit,
     modifier: Modifier = Modifier,
+    onPlayNext: (() -> Unit)? = null,
+    onPlayLast: (() -> Unit)? = null,
 ) {
     val busy by selection.busy.collectAsStateWithLifecycle()
     var menu by rememberSaveable { mutableStateOf(false) }
@@ -92,6 +96,26 @@ public fun SelectionTopBar(
             Box {
                 NdIconButton({ menu = true }, NdIcons.MoreVert, stringResource(Res.string.action_more))
                 DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                    if (onPlayNext != null) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(Res.string.action_play_next)) },
+                            enabled = !busy,
+                            onClick = {
+                                menu = false
+                                onPlayNext()
+                            },
+                        )
+                    }
+                    if (onPlayLast != null) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(Res.string.action_play_last)) },
+                            enabled = !busy,
+                            onClick = {
+                                menu = false
+                                onPlayLast()
+                            },
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text(stringResource(Res.string.action_mark_unplayed)) },
                         enabled = !busy,

@@ -161,6 +161,8 @@ internal fun PodcastScreen(
     onVisibleIds: (Set<Long>) -> Unit = {},
     listState: LazyListState = rememberLazyListState(),
     selection: EpisodeSelectionController? = null,
+    onPlaySelectionNext: (() -> Unit)? = null,
+    onPlaySelectionLast: (() -> Unit)? = null,
 ) {
     val selectedIds =
         selection
@@ -183,7 +185,13 @@ internal fun PodcastScreen(
 
     Column(modifier = modifier.fillMaxSize().episodeSelectionKeys(selection, selectAll)) {
         if (selectedIds.isNotEmpty() && selection != null) {
-            SelectionTopBar(selection, selectedIds.size, selectAll)
+            SelectionTopBar(
+                selection,
+                selectedIds.size,
+                selectAll,
+                onPlayNext = onPlaySelectionNext,
+                onPlayLast = onPlaySelectionLast,
+            )
         } else {
             NdTopAppBar(
                 title = if (headerGone) detail?.displayTitle.orEmpty() else "",

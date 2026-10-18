@@ -854,6 +854,15 @@ sequenceDiagram
 
 ### Up next operations
 
+**Implementation note (2026-10-18, M4).** `QueueRepository.removeWithUndo` and
+`clearWithUndo` return the actual removed IDs plus the original order from the
+removal transaction. `undoRemoval` inserts only missing, unplayed, non-current
+entries, retaining greyed unavailable entries and preserving the relative order
+of every existing entry. Queue Undo therefore cannot duplicate current or move an
+episode that was requeued concurrently. These operations do not change session
+generation. Restored entries also retain their original relative order when
+concurrent moves reverse their surviving anchors.
+
 | Operation | Rule |
 |---|---|
 | Play next / Play last | `addNext` / `addLast` (02: `orderKey = OrderKey.before(first)` / `OrderKey.after(last)`, [02 Up next ordering](02-data-model.md#up-next-ordering)); an already-queued item moves (one row's key changes); inserts chunked at 500 |
