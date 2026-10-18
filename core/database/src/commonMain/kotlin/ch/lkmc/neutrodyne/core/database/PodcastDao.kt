@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.database
 import androidx.room3.Dao
 import androidx.room3.Delete
 import androidx.room3.Insert
+import androidx.room3.OnConflictStrategy
 import androidx.room3.Query
 import androidx.room3.Update
 import androidx.room3.withWriteTransaction
@@ -28,8 +29,20 @@ abstract class PodcastDao(
     @Insert
     abstract suspend fun insertPodcast(row: PodcastEntity): Long
 
+    /**
+     * 02 Import commit: `INSERT OR IGNORE` — `-1` means a unique index raced the insert; the
+     * caller re-reads `feedKey`/aliases inside its transaction to tell a concurrent subscription
+     * apart from a `syncId` collision (which it retries with a fresh UUIDv4).
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    abstract suspend fun insertPodcastOrIgnore(row: PodcastEntity): Long
+
     @Insert
     abstract suspend fun insertAlias(row: PodcastUrlAliasEntity)
+
+    /** 02 Import commit: `INSERT OR IGNORE` — an existing alias row simply stands (idempotent). */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    abstract suspend fun insertAliasOrIgnore(row: PodcastUrlAliasEntity): Long
 
     @Insert
     abstract suspend fun insertAliases(rows: List<PodcastUrlAliasEntity>)
@@ -86,6 +99,10 @@ abstract class PodcastDao(
     /** The suspend variant of [observeAliases] for in-transaction lookups (03 new-feed-url rule 1). */
     @Query("SELECT * FROM podcast_url_alias WHERE podcastId = :podcastId")
     abstract suspend fun aliases(podcastId: Long): List<PodcastUrlAliasEntity>
+
+    /** 05 OPML export: every subscription row, read inside the exporter's one read transaction. */
+    @Query("SELECT * FROM podcast")
+    abstract suspend fun allForExport(): List<PodcastEntity>
 
     @Query("SELECT COUNT(*) FROM episode WHERE podcastId = :podcastId")
     abstract fun observeEpisodeCount(podcastId: Long): Flow<Int>

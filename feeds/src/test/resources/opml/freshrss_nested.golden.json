@@ -1,0 +1,32 @@
+{
+  "entries": [
+    {
+      "folderId": 1,
+      "htmlUrl": "https://blog.example.com",
+      "ordinal": 0,
+      "text": "Blog",
+      "type": "rss",
+      "url": "https://blog.example.com/feed"
+    },
+    {
+      "folderId": 0,
+      "ordinal": 1,
+      "text": "Direct",
+      "type": "rss",
+      "url": "https://direct.example.com/feed"
+    }
+  ],
+  "folders": [
+    {
+      "id": 0,
+      "name": "Tech"
+    },
+    {
+      "id": 1,
+      "name": "Blogs",
+      "parentId": 0
+    }
+  ],
+  "headTitle": "FreshRSS export",
+  "mode": "STRICT"
+}

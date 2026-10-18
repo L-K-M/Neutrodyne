@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="1.0">
+  <head>
+    <title>gpodder subscriptions</title>
+  </head>
+  <body>
+    <outline title="Audio" text="Audio">
+      <outline title="Audiopod" text="An audio show" type="rss" url="https://audio.example.com/feed" xmlUrl="https://audio.example.com/feed"/>
+      <outline title="Fallback" text="gPodder url fallback" type="rss" url="https://fallback.example.com/feed"/>
+    </outline>
+    <outline title="Video" text="Video">
+      <outline title="Videopod" text="A video show" type="rss" xmlUrl="https://video.example.com/feed"/>
+    </outline>
+    <outline title="Friends" text="A linked list" type="link" url="https://lists.example.com/friends.opml"/>
+  </body>
+</opml>
