@@ -264,25 +264,17 @@ public class EpisodeLines internal constructor(
                     return null
                 }
 
-                is RawLine.Oversized -> {
+                is RawLine.Oversized, is RawLine.Undecodable -> {
                     skippedLines++
                 }
 
                 is RawLine.Text -> {
-                    // Okio's UTF-8 decode replaces bad bytes with U+FFFD, so a line
-                    // containing it was undecodable: skip and count (05 Validation). A
-                    // literal U+FFFD in genuine content is sacrificed — the spec trades
-                    // that for "warning, not fatal".
-                    if ('\uFFFD' in line.text) {
+                    try {
+                        return json.decodeFromString<EpisodeLineV1>(line.text)
+                    } catch (e: SerializationException) {
                         skippedLines++
-                    } else {
-                        try {
-                            return json.decodeFromString<EpisodeLineV1>(line.text)
-                        } catch (e: SerializationException) {
-                            skippedLines++
-                        } catch (e: IllegalArgumentException) {
-                            skippedLines++
-                        }
+                    } catch (e: IllegalArgumentException) {
+                        skippedLines++
                     }
                 }
             }
@@ -303,9 +295,9 @@ public class EpisodeLines internal constructor(
                     input.skip(newline + 1)
                     return RawLine.Oversized
                 }
-                val text = input.readUtf8(newline)
+                val bytes = input.readByteArray(newline)
                 input.skip(1)
-                return RawLine.Text(text.removeSuffix("\r"))
+                return decodeRawLine(bytes)
             }
             if (input.buffer.size > BackupCodec.EPISODE_LINE_MAX_BYTES) {
                 discardLine()
@@ -316,11 +308,19 @@ public class EpisodeLines internal constructor(
                 // caught by the next loop pass, so only a newline-free tail is the last line.
                 if (input.buffer.size == 0L) return RawLine.End
                 if (input.buffer.indexOf(LF) < 0) {
-                    return RawLine.Text(input.readUtf8(input.buffer.size).removeSuffix("\r"))
+                    return decodeRawLine(input.readByteArray(input.buffer.size))
                 }
             }
         }
     }
+
+    /** Validate the original bytes: a genuine U+FFFD is valid content, not an encoding error. */
+    private fun decodeRawLine(bytes: ByteArray): RawLine =
+        try {
+            RawLine.Text(bytes.decodeToString(throwOnInvalidSequence = true).removeSuffix("\r"))
+        } catch (_: CharacterCodingException) {
+            RawLine.Undecodable
+        }
 
     /** Skips bytes through the next `\n`, discarding in bounded chunks; stops at exhaustion. */
     private fun discardLine() {
@@ -342,6 +342,8 @@ public class EpisodeLines internal constructor(
         data object End : RawLine
 
         data object Oversized : RawLine
+
+        data object Undecodable : RawLine
 
         data class Text(
             val text: String,
