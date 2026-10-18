@@ -86,6 +86,14 @@ abstract class PodcastDao(
     @Query("SELECT podcastId FROM podcast_url_alias WHERE url = :url")
     abstract suspend fun aliasOwner(url: String): Long?
 
+    /**
+     * 05 §7 derive: the winner of a merge that consumed the feed `url` was last fetched as —
+     * the `MERGE` alias the merger leaves on the surviving podcast. Other reasons (REDIRECT,
+     * IMPORT, …) say nothing about an import item's fate and are not returned.
+     */
+    @Query("SELECT podcastId FROM podcast_url_alias WHERE url = :url AND reason = 'MERGE'")
+    abstract suspend fun mergeAliasOwner(url: String): Long?
+
     /** Subscribe-time soft dedupe (03): real `podcastGuid`s only, never derived ones. */
     @Query("SELECT * FROM podcast WHERE podcastGuid = :guid AND podcastGuidDerived = 0")
     abstract suspend fun byRealGuid(guid: String): List<PodcastEntity>
