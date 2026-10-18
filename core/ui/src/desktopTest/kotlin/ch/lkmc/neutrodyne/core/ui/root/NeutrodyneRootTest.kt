@@ -389,7 +389,7 @@ class NeutrodyneRootTest {
             onNodeWithTag("nav_library").performClick()
             onNodeWithText("review-import").assertExists()
             onNodeWithText("review-import").performClick()
-            onNodeWithText("import-screen").assertExists()
+            onNodeWithText("import-1").assertExists()
             onNodeWithText("review-import").assertDoesNotExist()
             pressEscape()
             onNodeWithText("review-import").assertExists()
@@ -507,11 +507,6 @@ private fun TestRoot(
 
 private val TestInstallers: Set<EntryProviderInstaller> =
     buildSet {
-        add {
-            entry<ch.lkmc.neutrodyne.core.navigation.ImportKey>(metadata = NdSceneMetadata.paneDetail()) {
-                Text("import-screen")
-            }
-        }
         add { entry<FeedsKey>(metadata = NdSceneMetadata.paneList()) { FeedsStub() } }
         add { entry<LibraryKey>(metadata = NdSceneMetadata.paneList()) { LibraryStub() } }
         add {
