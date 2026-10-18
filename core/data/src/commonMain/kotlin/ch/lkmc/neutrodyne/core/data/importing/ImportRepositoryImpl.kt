@@ -154,37 +154,53 @@ internal class ImportRepositoryImpl(
             val dao = db.importDao()
             val session = dao.sessionById(sessionId) ?: return@withWriteTransaction Unit
             if (session.state != ImportState.PREVIEW) return@withWriteTransaction Unit
-            val options = session.optionsJson?.let(ImportOptionsJson::decode) ?: ImportOptions()
-            dao.setOptionsJson(sessionId, ImportOptionsJson.encode(options.withUserChanges(change)))
+            val options = session.optionsJson?.let(ImportOptionsJson::decodeOrNull)
+            if (session.optionsJson != null && options == null) {
+                // The edit must not write defaults over an unreadable row — that could
+                // erase a restore intent hidden inside it.
+                Log.w(TAG) { "import options update skipped: unreadable options for session $sessionId" }
+                return@withWriteTransaction Unit
+            }
+            dao.setOptionsJson(
+                sessionId,
+                ImportOptionsJson.encode((options ?: ImportOptions()).withUserChanges(change)),
+            )
         }
     }
 
     override suspend fun confirm(sessionId: Long): Outcome<Unit, ImportError> = committer.confirm(sessionId)
 
     /**
-     * 05 §9 / the state table: `PREVIEW` loses payload then row (a confirm that raced ahead
-     * wins the re-check); `COMMITTED`/`FETCHING` stop the host and record `CANCELLED` without
-     * touching the subscriptions; `DONE` is terminal — cancel never resurrects it. A `PREVIEW`
-     * session with a requested restore is the restore host's and is left alone.
+     * 05 §9 / the state table: `PREVIEW` loses payload then row — the ownership re-check,
+     * the payload delete and the row delete inside ONE write transaction, so a confirm or
+     * a restore request can only land before it (the row is left with its payload) or
+     * after it (the row is gone). `COMMITTED`/`FETCHING` stop the host and record
+     * `CANCELLED` without touching the subscriptions; `DONE` is terminal — cancel never
+     * resurrects it. A `PREVIEW` session with a requested restore is the restore host's
+     * and is left alone.
      */
     override suspend fun cancel(sessionId: Long) {
         val dao = db.importDao()
         val session = dao.sessionById(sessionId) ?: return
         when (session.state) {
             ImportState.PREVIEW -> {
-                val options = session.optionsJson?.let(ImportOptionsJson::decode)
-                if (options?.restoreRequestedAt != null) return
-                // Payload-then-row in one non-cancellable stretch: a caller cancelled between
-                // the two must not leave a row that points at a deleted file.
+                // The early read is a fast path — the transaction re-claims under the lock.
+                if (!session.previewOwned()) return
+                // Non-cancellable so a caller cancelled mid-delete cannot strand a row
+                // whose payload is gone; a failed file delete keeps the row so a later
+                // cancel or sweep retries the file first.
                 withContext(NonCancellable) {
-                    session.payloadPath?.let { withContext(io) { payloads.delete(payloads.payloadFile(it)) } }
                     db.withWriteTransaction {
                         val latest = dao.sessionById(sessionId) ?: return@withWriteTransaction
-                        val requested =
-                            latest.optionsJson?.let(ImportOptionsJson::decode)?.restoreRequestedAt != null
-                        if (latest.state == ImportState.PREVIEW && !requested) {
-                            dao.deleteSession(sessionId)
+                        if (latest.state != ImportState.PREVIEW || !latest.previewOwned()) {
+                            return@withWriteTransaction
                         }
+                        val cleared =
+                            latest.payloadPath?.let {
+                                withContext(io) { payloads.deleteIfPresent(payloads.payloadFile(it)) }
+                            } != false
+                        if (!cleared) return@withWriteTransaction
+                        dao.deleteSession(sessionId)
                     }
                 }
             }
@@ -228,6 +244,16 @@ internal class ImportRepositoryImpl(
         ordinals: Set<Int>,
     ) = fixUps.remove(sessionId, ordinals)
 
+    /**
+     * A `PREVIEW` session is cancel's only while its options decode cleanly and carry no
+     * restore request — an unreadable `optionsJson` could hide one, so corrupt rows stay.
+     */
+    private fun ImportSessionEntity.previewOwned(): Boolean {
+        val encoded = optionsJson ?: return true
+        val options = ImportOptionsJson.decodeOrNull(encoded) ?: return false
+        return options.restoreRequestedAt == null
+    }
+
     // --- Mapping -------------------------------------------------------------------------------
 
     private fun sessionViewFlow(sessionId: Long): Flow<ImportSessionView?> =
@@ -248,7 +274,7 @@ internal class ImportRepositoryImpl(
             state = state,
             recoveredBySalvage = recoveredBySalvage,
             warnings = warningsJson?.let(ImportWarningJson::decodeAll).orEmpty(),
-            options = optionsJson?.let(ImportOptionsJson::decode) ?: ImportOptions(),
+            options = optionsJson?.let(ImportOptionsJson::decodeOrNull) ?: ImportOptions(),
             counts = progress.associate { it.status to it.count },
             selectedCount = tallies.selectedCount,
             youtubeCount = tallies.youtubeCount,
@@ -284,7 +310,7 @@ internal class ImportRepositoryImpl(
         session: ImportSessionEntity,
         groups: List<GroupRow>,
     ): List<GroupProposal> {
-        val options = session.optionsJson?.let(ImportOptionsJson::decode) ?: ImportOptions()
+        val options = session.optionsJson?.let(ImportOptionsJson::decodeOrNull) ?: ImportOptions()
         if (options.sourceGroups.isEmpty()) return emptyList()
 
         val memberCounts = HashMap<String, Int>()

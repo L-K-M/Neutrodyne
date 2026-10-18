@@ -20,6 +20,11 @@ import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -38,7 +43,8 @@ import kotlin.test.assertTrue
  */
 class ImportFixUpsTest {
     private val clock = TestClock()
-    private val db = TestDb.inMemory(clock = clock)
+    private val driver = CommitCancellingDriver()
+    private val db = TestDb.inMemory(driver = driver, clock = clock)
     private val scheduler = FakeImportWorkScheduler()
     private val podcasts = CascadingPodcasts()
     private val fixUps =
@@ -207,6 +213,76 @@ class ImportFixUpsTest {
             assertEquals(ImportItemStatus.FETCH_FAILED, item(cancelled, 1).status)
             assertTrue(podcasts.inner.calls.isEmpty())
             assertTrue(scheduler.scheduled.isEmpty())
+        }
+
+    @Test
+    fun aCancelAtTheRequeueCommitStillSchedulesTheHost() =
+        runTest {
+            val podcastId = seedPodcast(db, "https://a.example.com/f")
+            val sid =
+                db.seedImportSession(
+                    state = ImportState.FETCHING,
+                    options = ImportOptions(committedAt = 1, attemptMarkerAt = 5),
+                    items =
+                        listOf(
+                            importItem(
+                                1,
+                                "https://a.example.com/f",
+                                status = ImportItemStatus.FETCH_FAILED,
+                                podcastId = podcastId,
+                            ),
+                        ),
+                )
+
+            // Room can commit the requeue transaction and still surface the cancellation —
+            // the committed fix-up must keep its APPEND_OR_REPLACE enqueue (05 §8: a request
+            // arriving while the worker ends still runs after it).
+            lateinit var job: kotlinx.coroutines.Job
+            job =
+                CoroutineScope(SupervisorJob() + Dispatchers.Default)
+                    .launch(start = CoroutineStart.LAZY) { fixUps.retry(sid, setOf(1)) }
+            driver.arm("UPDATE import_session SET optionsJson") { job.cancel() }
+            job.start()
+            job.join()
+
+            assertTrue(job.isCancelled, "Room surfaces the post-commit cancellation")
+            assertEquals(1, driver.cancellations, "the commit hook fired")
+            assertEquals(ImportItemStatus.QUEUED, item(sid, 1).status, "the requeue committed")
+            assertEquals(
+                listOf(sid to ImportWorkPolicy.APPEND_OR_REPLACE),
+                scheduler.scheduled,
+                "the committed requeue is owed its host enqueue",
+            )
+        }
+
+    @Test
+    fun aCorruptOptionsRowKeepsTheFixUpUnapplied() =
+        runTest {
+            val podcastId = seedPodcast(db, "https://a.example.com/f")
+            val sid =
+                db.seedImportSession(
+                    state = ImportState.FETCHING,
+                    items =
+                        listOf(
+                            importItem(
+                                1,
+                                "https://a.example.com/f",
+                                status = ImportItemStatus.FETCH_FAILED,
+                                podcastId = podcastId,
+                            ),
+                        ),
+                )
+            db.importDao().setOptionsJson(sid, "{corrupt")
+
+            fixUps.retry(sid, setOf(1))
+
+            assertEquals(ImportItemStatus.FETCH_FAILED, item(sid, 1).status)
+            assertTrue(scheduler.scheduled.isEmpty(), "nothing eligible — nothing scheduled")
+            assertEquals(
+                "{corrupt",
+                db.importDao().sessionById(sid)?.optionsJson,
+                "defaults never overwrite an unreadable row",
+            )
         }
 
     // --- Edit URL -------------------------------------------------------------------------------------
