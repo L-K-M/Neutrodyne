@@ -26,6 +26,9 @@ object YouTubeIds {
     private const val PLAIN_UPLOADS_LENGTH = 24
     private const val VARIANT_UPLOADS_LENGTH = 26
 
+    /** Every uploads-family playlist ID starts with "UU", whether plain or a variant. */
+    private const val UPLOADS_FAMILY_PREFIX = "UU"
+
     /** Long-form uploads only (`UULF`). */
     private const val VARIANTS_LONG_FORM = 1
 
@@ -48,6 +51,8 @@ object YouTubeIds {
      * LENGTH, never from the text: 24 chars is `UU` + the 22-char channel suffix (hint [VARIANTS_ALL]);
      * 26 chars is a 4-char variant prefix + the same suffix (`UULF`→1, `UUSH`→2, `UULV`→4, others no
      * hint). "UULF…" with 24 chars is therefore the plain uploads list of a channel named "UCLF…".
+     * Only the "UU" uploads family converts; a different prefix of the same length is an ordinary
+     * playlist, not a channel.
      */
     fun uploadsToChannel(playlistId: String): Pair<String, Int?>? {
         val prefixLength =
@@ -56,6 +61,7 @@ object YouTubeIds {
                 VARIANT_UPLOADS_LENGTH -> 4
                 else -> return null
             }
+        if (!playlistId.startsWith(UPLOADS_FAMILY_PREFIX)) return null
         val channelId = "UC" + playlistId.substring(prefixLength)
         if (!CHANNEL.matches(channelId)) return null
 

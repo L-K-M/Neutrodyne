@@ -93,6 +93,13 @@ class YouTubeUrlClassifierTest {
             "https://www.youtube.com/playlist?list=$plainTwentyFour",
             YtRef.Channel("UCLFBJycsmduvYEL83R_U4JQ", 7),
         )
+
+        // Only the "UU" uploads family converts; other families of the same lengths stay playlists.
+        assertClassifies("https://www.youtube.com/playlist?list=PL$SUFFIX", YtRef.Playlist("PL$SUFFIX"))
+        assertClassifies(
+            "https://www.youtube.com/feeds/videos.xml?playlist_id=PLxx$SUFFIX",
+            YtRef.Playlist("PLxx$SUFFIX"),
+        )
     }
 
     @Test
@@ -198,6 +205,28 @@ class YouTubeUrlClassifierTest {
         assertClassifies("https://www.youtube.com/@e%CC%81", YtRef.Handle("@\u00E9"))
 
         assertClassifies("https://www.youtube.com/@a%2Fb", null)
+    }
+
+    @Test
+    fun mixedRawAndEncodedSupplementaryChars() {
+        // U+2000B is a UTF-16 surrogate pair; raw spans must encode to UTF-8 whole, not per half.
+        val supplementary = "\uD840\uDC0B"
+        assertClassifies(
+            "https://www.youtube.com/@${supplementary}a%62",
+            YtRef.Handle("@${supplementary}ab"),
+        )
+        assertClassifies(
+            "https://www.youtube.com/c/${supplementary}a%62",
+            YtRef.LegacyPath("c/${supplementary}ab"),
+        )
+
+        // Controls: fully raw and fully escaped forms already classified correctly.
+        assertClassifies("https://www.youtube.com/@${supplementary}ab", YtRef.Handle("@${supplementary}ab"))
+        assertClassifies("https://www.youtube.com/@%F0%A0%80%8Bab", YtRef.Handle("@${supplementary}ab"))
+
+        // Invalid escapes stay literal and malformed UTF-8 still decodes to U+FFFD.
+        assertClassifies("https://www.youtube.com/@x%2", YtRef.Handle("@x%2"))
+        assertClassifies("https://www.youtube.com/@%FF", YtRef.Handle("@\uFFFD"))
     }
 
     @Test
