@@ -8,15 +8,19 @@ import androidx.compose.runtime.rememberCoroutineScope
 import ch.lkmc.neutrodyne.core.common.LinuxDesktopPortal
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import java.awt.Component
 import java.awt.Desktop
+import java.awt.Dialog
 import java.awt.FileDialog
 import java.awt.Frame
 import java.io.File
 import java.io.FilenameFilter
 import java.net.URI
+import javax.swing.JDialog
 import javax.swing.JFileChooser
 import javax.swing.SwingUtilities
 import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * The desktop [PlatformActions] (08 Modules). `NeutrodyneWindow` calls this with the
@@ -72,41 +76,39 @@ private class DesktopPlatformActions(
             override suspend fun pickFile(
                 mimeTypes: List<String>,
                 extensions: List<String>,
-            ): String? =
-                suspendCancellableCoroutine { cont ->
-                    SwingUtilities.invokeLater {
-                        cont.resume(showFileDialog(extensions, directoriesOnly = false))
-                    }
+            ): String? {
+                val pending = PendingDialog()
+                return awaitEdt(onCancel = { pending.dismiss() }) {
+                    showFileDialog(pending, extensions, directoriesOnly = false)
                 }
+            }
 
             override suspend fun pickFolder(title: String): String? {
                 portal?.let { p ->
                     val chosen = p.chooseDirectory(title, null)
                     if (chosen != null) return chosen
                 }
-                return suspendCancellableCoroutine { cont ->
-                    SwingUtilities.invokeLater {
-                        cont.resume(showFileDialog(emptyList(), directoriesOnly = true))
-                    }
+                val pending = PendingDialog()
+                return awaitEdt(onCancel = { pending.dismiss() }) {
+                    showFileDialog(pending, emptyList(), directoriesOnly = true)
                 }
             }
         }
 
     override val saver: FileSaver =
-        FileSaver { suggestedName, _ ->
-            suspendCancellableCoroutine { cont ->
-                SwingUtilities.invokeLater {
-                    cont.resume(showSaveDialog(suggestedName))
-                }
+        FileSaver { suggestedName, mimeType ->
+            val pending = PendingDialog()
+            awaitEdt(onCancel = { pending.dismiss() }) {
+                showSaveDialog(pending, suggestedName, mimeType)
             }
         }
 
     override val reveal: RevealInFolder =
         RevealInFolder { path ->
-            val file = File(path)
+            val file = localFile(path) ?: return@RevealInFolder false
             // Linux has the portal's ShowItems (selects the file); elsewhere open the parent folder.
             if (portal != null && isLinux()) {
-                scope.launch { portal.showItems(path) }
+                scope.launch { portal.showItems(file.absolutePath) }
                 true
             } else {
                 try {
@@ -128,6 +130,42 @@ private class DesktopPlatformActions(
     override val notifications: NotificationPermissionRequester? = null
 }
 
+/**
+ * Runs [block] on the Swing EDT and suspends for its result. A throw inside [block] resumes the
+ * caller exceptionally instead of dying on the EDT and stranding the continuation forever.
+ * Cancelling the caller skips a still-queued block; when the block is already inside a modal
+ * dialog, [onCancel] runs on the EDT (a modal dialog pumps queued runnables) to dismiss it — a
+ * dead composition never leaves a dialog up or a continuation hanging.
+ */
+internal suspend fun <T> awaitEdt(
+    onCancel: () -> Unit = {},
+    block: () -> T,
+): T =
+    suspendCancellableCoroutine { cont ->
+        SwingUtilities.invokeLater {
+            if (cont.isActive) {
+                try {
+                    val result = block()
+                    if (cont.isActive) cont.resume(result)
+                } catch (e: Throwable) {
+                    if (cont.isActive) cont.resumeWithException(e)
+                }
+            }
+        }
+        cont.invokeOnCancellation {
+            SwingUtilities.invokeLater { onCancel() }
+        }
+    }
+
+/** The dialog an EDT block is about to open, so a cancelled caller can still dismiss it there. */
+private class PendingDialog {
+    var dialog: Dialog? = null
+
+    fun dismiss() {
+        dialog?.dispose()
+    }
+}
+
 private fun isLinux(): Boolean =
     System
         .getProperty("os.name")
@@ -137,17 +175,24 @@ private fun isLinux(): Boolean =
 
 /** OS file-open dialog; [extensions] without the dot filter the listing ("" = all files). */
 private fun showFileDialog(
+    pending: PendingDialog,
     extensions: List<String>,
     directoriesOnly: Boolean,
 ): String? {
     if (directoriesOnly && !isMacOs()) {
-        // Windows/Linux Swing chooser in directories-only mode (11's per-OS split).
-        val chooser = JFileChooser()
+        // Windows/Linux Swing chooser in directories-only mode (11's per-OS split). The chooser
+        // builds its dialog internally, so it is captured through createDialog for dismissal.
+        val chooser =
+            object : JFileChooser() {
+                override fun createDialog(parent: Component?): JDialog =
+                    super.createDialog(parent).also { pending.dialog = it }
+            }
         chooser.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
         if (chooser.showOpenDialog(null) != JFileChooser.APPROVE_OPTION) return null
         return chooser.selectedFile?.absolutePath
     }
     val dialog = FileDialog(null as Frame?, null, FileDialog.LOAD)
+    pending.dialog = dialog
     if (directoriesOnly) {
         System.setProperty("apple.awt.fileDialogForDirectories", "true")
         dialog.mode = FileDialog.LOAD
@@ -170,10 +215,53 @@ private fun isMacOs(): Boolean =
         .lowercase()
         .contains("mac")
 
-private fun showSaveDialog(suggestedName: String): String? {
+private fun showSaveDialog(
+    pending: PendingDialog,
+    suggestedName: String,
+    mimeType: String,
+): String? {
     val dialog = FileDialog(null as Frame?, null, FileDialog.SAVE)
+    pending.dialog = dialog
     dialog.file = suggestedName
     dialog.isVisible = true
     val file = dialog.file ?: return null
-    return File(dialog.directory, file).absolutePath
+    return savedFileUri(dialog.directory, file, mimeType)
 }
+
+/**
+ * The deterministic half of [showSaveDialog] (05 Destinations): a chosen name without an
+ * extension gets the type's default, and the result is the escaped local `file:` URI
+ * `FileExportDestination` accepts — never a bare path, so `file:` and `content:` callers stay
+ * distinguishable.
+ */
+internal fun savedFileUri(
+    directory: String,
+    chosenName: String,
+    mimeType: String,
+): String {
+    val extension = defaultExtension(mimeType)
+    val name =
+        if (extension != null && '.' !in chosenName) {
+            chosenName + extension
+        } else {
+            chosenName
+        }
+    return File(directory, name).toURI().toASCIIString()
+}
+
+/** The extension [FileSaver.create] appends to an extensionless name, per 05's export types. */
+internal fun defaultExtension(mimeType: String): String? =
+    when (mimeType) {
+        "text/x-opml" -> ".opml"
+        "application/json" -> ".json"
+        "application/zip" -> ".zip"
+        else -> null
+    }
+
+/** [path] may arrive as a raw path (pickers) or the saver's escaped `file:` URI. */
+private fun localFile(path: String): File? =
+    try {
+        if (path.startsWith("file:")) File(URI(path)) else File(path)
+    } catch (e: Exception) {
+        null
+    }

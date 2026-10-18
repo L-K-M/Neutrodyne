@@ -511,4 +511,34 @@
     <string name="notification_snapshot_needs_newer">Your backup needs a newer version of Neutrodyne</string>
     <string name="import_backup_title">Import and backup</string>
     <string name="import_backup_pending">Import and backup details are not available in this build yet.</string>
+
+    <!-- M3 OPML export (05 OPML export, 08 Export dialog). -->
+    <string name="export_title">Export subscriptions</string>
+    <string name="export_group_title_share">Share '%1$s' as OPML</string>
+    <string name="export_group_title_export">Export '%1$s' as OPML</string>
+    <string name="export_layout_grouped">Grouped (recommended)</string>
+    <string name="export_layout_flat">Flat list</string>
+    <string name="export_layout_flat_note">Groups are kept as tags only</string>
+    <string name="export_include_youtube">Include YouTube channels</string>
+    <string name="export_youtube_note">Other podcast apps may not be able to play these</string>
+    <string name="export_include_passwords">Include passwords for private feeds</string>
+    <string name="export_save">Save to file</string>
+    <string name="export_saved">Saved</string>
+    <string name="export_show_in_folder">Show in folder</string>
+    <plurals name="export_private_links">
+        <item quantity="one">This file contains a private access link for %1$d feed. Anyone with the file can listen to it.</item>
+        <item quantity="other">This file contains private access links for %1$d feeds. Anyone with the file can listen to them.</item>
+    </plurals>
+    <plurals name="export_passwords">
+        <item quantity="one">It also contains %1$d password in plain text.</item>
+        <item quantity="other">It also contains %1$d passwords in plain text.</item>
+    </plurals>
+    <string name="action_continue">Continue</string>
+    <string name="export_err_io">Couldn&apos;t write the file</string>
+    <string name="export_err_storage">Not enough storage space</string>
+    <string name="export_err_destination">Couldn&apos;t write to the chosen location</string>
+    <string name="export_err_unavailable">Export isn&apos;t available</string>
+    <string name="export_subscriptions">Export subscriptions…</string>
+    <string name="group_export_opml">Export group as OPML…</string>
+    <string name="group_share_opml">Share as OPML</string>
 </resources>
