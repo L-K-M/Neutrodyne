@@ -38,6 +38,7 @@ public class FakeArchiveWriterFactory : ArchiveWriterFactory {
         override fun entry(name: String): Sink {
             check(!closed) { "archive writer is closed" }
             check(openEntry == null) { "an archive entry is still open; close it before the next" }
+            check(name !in entries) { "duplicate archive entry name: $name" }
             val buffer = Buffer()
             entries[name] = buffer
             return EntrySink(buffer).also { openEntry = it }
