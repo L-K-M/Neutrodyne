@@ -236,10 +236,10 @@ class BackupCodecTest {
         val queue =
             codec.decodeQueue(
                 sourceOf(
-                    """{"zzz":true,"upNext":[{"p":"a","k":"b","kv":1,"extra":5}],"session":{"current":{"p":"a","k":"b","x":{}}}}""",
+                    """{"zzz":true,"upNext":[{"p":"a","k":"b","kv":2,"extra":5}],"session":{"current":{"p":"a","k":"b","x":{}}}}""",
                 ),
             )
-        assertEquals(UpNextRefV1("a", "b"), queue.upNext[0])
+        assertEquals(UpNextRefV1("a", "b", 2), queue.upNext[0])
     }
 
     @Test
@@ -352,6 +352,20 @@ class BackupCodecTest {
         lines.use { l -> for (line in l) decoded += line }
         assertEquals(listOf("d"), decoded.map { it.k })
         assertEquals(1, lines.skippedLines)
+    }
+
+    @Test
+    fun validReplacementCharactersDoNotDiscardEpisodeState() {
+        val expected = EpisodeLineV1(p = "example.com/rss", k = "episode-1", t = "Episode \uFFFD", pl = 5L, ts = 10L)
+        val encoded = codec.encodeEpisodeLine(expected)
+        for (ending in listOf("\n", "\r\n", "")) {
+            val lines = codec.episodeLines(sourceOf(encoded + ending))
+            val decoded = mutableListOf<EpisodeLineV1>()
+            lines.use { stream -> for (line in stream) decoded += line }
+
+            assertEquals(listOf(expected), decoded, "valid Unicode must round-trip for ending=$ending")
+            assertEquals(0, lines.skippedLines)
+        }
     }
 
     @Test

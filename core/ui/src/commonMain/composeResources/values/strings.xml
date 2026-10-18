@@ -508,4 +508,6 @@
     <string name="notification_restore_failed_auto">The backed-up library could not be restored.</string>
     <string name="notification_snapshot_pending_title">Backup found</string>
     <string name="notification_snapshot_pending">A Neutrodyne backup is ready to restore.</string>
+    <string name="import_backup_title">Import and backup</string>
+    <string name="import_backup_pending">Import and backup details are not available in this build yet.</string>
 </resources>
