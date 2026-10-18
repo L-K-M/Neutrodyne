@@ -446,7 +446,7 @@ internal object FirstLaunchRestoreSeed {
         val name: String,
         val members: List<PodcastSpec>,
     ) {
-        /** Minted at seed time; a MERGE restore keeps the backup's `uuid`. */
+        /** Minted at seed time; a MERGE restore gives the restored group a fresh `uuid` (05). */
         var uuid: String = ""
     }
 

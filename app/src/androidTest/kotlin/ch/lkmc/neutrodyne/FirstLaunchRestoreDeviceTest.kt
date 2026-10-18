@@ -195,7 +195,11 @@ class FirstLaunchRestoreDeviceTest {
                 checkNotNull(
                     db.groupDao().groupsInOrder().firstOrNull { it.name == spec.name },
                 ) { "group ${spec.name} must be restored" }
-            assertEquals(spec.uuid, group.uuid)
+            // 05 B10 note: Merge adopts a backup uuid only in Replace; a restored new group
+            // gets a fresh canonical v4 uuid, like a user-created one.
+            check(spec.uuid.isNotEmpty()) { "the seed must mint group ${spec.name}'s backup uuid" }
+            assertNotEquals(spec.uuid, group.uuid)
+            assertTrue("group ${spec.name} uuid ${group.uuid}", CANONICAL_UUID.matches(group.uuid))
             assertEquals(
                 spec.members.map { it.feedKey },
                 db.groupDao().membersOf(group.id).map { member ->
@@ -326,6 +330,9 @@ class FirstLaunchRestoreDeviceTest {
     private companion object {
         /** 05's work table — the unique-work name, spelled out so no internal constant is needed. */
         const val RESTORE_WORK_NAME = "backup-restore"
+
+        /** 02 Naming and types: lowercase canonical version-4 UUID. */
+        val CANONICAL_UUID = Regex("[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
         const val RESTORE_TIMEOUT_MS = 180_000L
         const val OPEN_TIMEOUT_MS = 60_000L
         const val POLL_MS = 500L
