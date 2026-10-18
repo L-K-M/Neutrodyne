@@ -285,7 +285,7 @@ internal class ImportRepositoryImpl(
     private fun itemView(item: ImportItemEntity): ImportItemView =
         ImportItemView(
             ordinal = item.ordinal,
-            title = item.title ?: hostOf(item.normalizedUrl ?: item.originalUrl) ?: item.originalUrl,
+            title = item.title ?: hostOf(item.normalizedUrl ?: item.originalUrl).orEmpty(),
             host = hostOf(item.normalizedUrl ?: item.originalUrl).orEmpty(),
             kind = item.kind,
             status = item.status,

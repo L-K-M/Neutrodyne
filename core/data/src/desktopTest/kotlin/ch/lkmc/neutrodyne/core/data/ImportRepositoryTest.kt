@@ -344,6 +344,30 @@ class ImportRepositoryTest {
             assertTrue(view.selectable)
         }
 
+    @Test
+    fun untitledInvalidUrlsNeverBecomeCredentialBearingTitles() =
+        runTest {
+            val sid =
+                db.seedImportSession(
+                    items =
+                        listOf(
+                            importItem(
+                                1,
+                                "https://alice:s3cret@/rss",
+                                normalizedUrl = null,
+                                title = null,
+                                status = ImportItemStatus.INVALID_URL,
+                            ),
+                        ),
+                )
+
+            val view = repository.pagedItems(sid, ImportItemFilter.ALL).asSnapshot().single()
+
+            assertEquals("", view.host)
+            assertEquals("", view.title, "a missing public title/host must never fall back to the raw URL")
+            assertTrue(!view.selectable)
+        }
+
     // --- Group proposals -----------------------------------------------------------------------------
 
     @Test
