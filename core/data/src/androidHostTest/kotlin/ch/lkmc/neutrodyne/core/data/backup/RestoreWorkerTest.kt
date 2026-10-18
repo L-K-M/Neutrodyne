@@ -206,6 +206,26 @@ class RestoreWorkerTest {
                 .containsExactly(second)
         }
 
+    @Test
+    fun `unrunnable intents stay protected without re-enqueueing themselves`() =
+        runBlocking<Unit> {
+            val db = openDb()
+            val corrupt = backupSession(db, payloadPath = "import/unreadable.bin")
+            db.importDao().setOptionsJson(corrupt, "{broken")
+            val futureMode = backupSession(db, payloadPath = "import/future.bin")
+            db.importDao().setOptionsJson(futureMode, """{"restoreRequestedAt":1,"restoreMode":"FUTURE"}""")
+            val noPayload = backupSession(db, payloadPath = null)
+
+            assertThat(worker(db, corrupt).doWork())
+                .isInstanceOf(ListenableWorker.Result.Success::class.java)
+
+            assertThat(restoreSpecs()).isEmpty()
+            assertThat(db.importDao().sessionById(corrupt)?.optionsJson).isEqualTo("{broken")
+            assertThat(db.importDao().sessionById(futureMode)?.state).isEqualTo(ImportState.PREVIEW)
+            assertThat(db.importDao().sessionById(noPayload)?.state).isEqualTo(ImportState.PREVIEW)
+            assertThat(reports.restoreFailures).isEmpty()
+        }
+
     // -- Fixtures --------------------------------------------------------------------------------
 
     private fun openDb(): NeutrodyneDatabase = newDb(app, clock).also { db = it }

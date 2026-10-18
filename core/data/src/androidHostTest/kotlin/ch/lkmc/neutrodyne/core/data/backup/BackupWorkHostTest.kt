@@ -240,6 +240,33 @@ class BackupWorkHostTest {
             awaitReal { snapshots.soonWorkLive() }
         }
 
+    @Test
+    fun `start-up does not schedule intents the restore runner cannot consume`() =
+        runTest {
+            val db = openDb()
+            val corrupt = db.seedImportSession(format = ImportFormat.NEUTRODYNE_BACKUP)
+            db.importDao().setOptionsJson(corrupt, "{broken")
+            val futureMode =
+                db.seedImportSession(
+                    format = ImportFormat.NEUTRODYNE_BACKUP,
+                    payloadPath = "import/future.bin",
+                )
+            db.importDao().setOptionsJson(futureMode, """{"restoreRequestedAt":1,"restoreMode":"FUTURE"}""")
+            val noPayload =
+                db.seedImportSession(
+                    format = ImportFormat.NEUTRODYNE_BACKUP,
+                    options = ImportOptions(restoreMode = RestoreMode.MERGE, restoreRequestedAt = 1L),
+                )
+
+            initializer(db).run()
+            advanceUntilIdle()
+
+            assertThat(workManager.getWorkInfosForUniqueWork(RestoreWorkData.WORK_RESTORE).get()).isEmpty()
+            assertThat(db.importDao().sessionById(corrupt)?.optionsJson).isEqualTo("{broken")
+            assertThat(db.importDao().sessionById(futureMode)?.state).isEqualTo(ImportState.PREVIEW)
+            assertThat(db.importDao().sessionById(noPayload)?.state).isEqualTo(ImportState.PREVIEW)
+        }
+
     // -- Fixtures --------------------------------------------------------------------------------
 
     private fun openDb(): NeutrodyneDatabase = newDb(app, clock).also { db = it }

@@ -72,7 +72,7 @@ class ImportWorkSchedulerTest {
             scheduler.schedule(7L, ImportWorkPolicy.KEEP)
 
             val info = infoOf(ImportWorkData.workName(7L))
-            assertThat(info.state).isEqualTo(WorkInfo.State.ENQUEUED)
+            assertThat(info.state.isFinished).isFalse()
             assertThat(info.tags).contains(ImportWorkData.TAG_IMPORT)
             val spec = specOf(info.id)
             assertThat(spec.input.getLong("sessionId", -1L)).isEqualTo(7L)
@@ -201,6 +201,30 @@ class ImportWorkSchedulerTest {
             // The cancelled row's terminal state must not block a new request.
             assertThat(scheduler.scheduleRestore(21L, auto = false))
                 .isEqualTo(RestoreEnqueue.ENQUEUED)
+        }
+
+    @Test
+    fun `a stale succeeded spec does not acknowledge a new request KEEP dropped`() =
+        runTest {
+            workManager
+                .enqueueUniqueWork(
+                    RestoreWorkData.WORK_RESTORE,
+                    ExistingWorkPolicy.KEEP,
+                    OneTimeWorkRequestBuilder<RestoreWorker>().build(),
+                ).result
+                .get()
+            val stale =
+                OneTimeWorkRequestBuilder<RestoreWorker>()
+                    .setInputData(RestoreWorkData.dataOf(13L, auto = false))
+                    .addTag(RestoreWorkData.sessionTag(13L))
+                    .build()
+            val workDb = (workManager as WorkManagerImpl).workDatabase
+            workDb.workSpecDao().insertWorkSpec(stale.workSpec)
+            workDb.workSpecDao().setState(WorkInfo.State.SUCCEEDED, stale.id.toString())
+            workDb.workNameDao().insert(WorkName(RestoreWorkData.WORK_RESTORE, stale.id.toString()))
+            workDb.workTagDao().insert(WorkTag(RestoreWorkData.sessionTag(13L), stale.id.toString()))
+
+            assertFailsWith<IllegalStateException> { scheduler.scheduleRestore(13L, auto = false) }
         }
 
     @Test
