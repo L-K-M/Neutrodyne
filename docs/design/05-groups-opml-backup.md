@@ -1578,7 +1578,25 @@ capture, the ALL_DEVICES steps) lands with MS2. The linked branches below descri
 
 **Implementation note (2026-10-18, B12b):** a replay still queues a matched podcast awaiting its first fetch, including one inserted by an interrupted attempt. Auto-snapshot retirement finishes before a terminal session marker; a failed rename or cancellation-marker write leaves durable work for retry. Settings restore requires the declared JSON primitive type rather than coercing strings into booleans or numbers.
 
-*Implementation note (2026-10-18, M3 B12c):* `BackupRepositoryImpl` (`:core:data` `commonMain`) lands the public contract over the existing services. `restore` claims the actual backup `PREVIEW` session in one write transaction — `restoreMode`/`restoreCategories`/`linkedReach` and `restoreRequestedAt` merge into the existing `optionsJson`, parser and system fields untouched — with three arbitration lanes: `ImportWorkScheduler.hasRestoreWork()` (an unanswered check fails closed), this row's own `restoreRequestedAt`, and the shared fail-closed intent predicate over every backup `PREVIEW` row (a malformed `optionsJson` counts as intent). The claim transaction and the owed enqueue are one `NonCancellable` unit: cancellation at Room COMMIT probes the row for the stamp and still pays the enqueue when it landed. `scheduleRestore(sessionId, auto)` answers `ENQUEUED` (success) or `ALREADY_RUNNING` — a definitive decline rolls back only this still-unused stamp (exact `restoreRequestedAt` match) and reports `RestoreRunning`; a thrown call is unknown acceptance, so the intent stays durable and `Storage` reports it — the native host's start-up reconciliation (C2/C3) re-scans `PREVIEW` backup sessions for `restoreRequestedAt` and enqueues whatever could not be paid. `createBackup` serialises the whole write → `ExportDestination.save` → cache sweep under one mutex so same-minute names stay private to one caller, stamps `backup.last_manual_backup_at` only after a landed copy and never reports bookkeeping failure as a failed copy. `inspect` resolves the session's stored payload through `BackupStager.inspect` inside `StagedBackup.use` and writes nothing. `observeRestore` is `RestoreRunner.progress` itself. The Android snapshot members delegate to `AutoSnapshotProducer`; `restoreAndroidBackup` goes through `ImportSessions.createAdopted` (`fromAndroidBackup`) so own and foreign snapshots recover the same way. Graph contribution waits for C2/C3's real `ExportDestination`/`ImportWorkScheduler`/`SnapshotScheduler` bindings.
+*Implementation note (2026-10-18, M3 B12c):* `BackupRepositoryImpl` (`:core:data`
+`commonMain`) implements the public contract over the existing services. `restore`
+requires an actual backup `PREVIEW` session with a payload, preserves parser/system
+fields and claims mode/categories/reach/request time in one write transaction.
+Arbitration checks native work, this row's request and the shared fail-closed intent
+predicate over other backup previews. The entire claim and owed enqueue are one
+`NonCancellable` unit; database failures return `Storage` rather than escaping.
+Dispatch uses the claim's own stamp and automatic-origin receipt. `ALREADY_RUNNING`
+undoes only a matching, unused dispatch stamp, preserving the user's preview choices;
+work already accepted for the same session answers `ENQUEUED`. Unknown acceptance
+keeps the intent for C2/C3 startup reconciliation.
+
+The whole manual write/copy/cache-sweep runs under one mutex so same-minute names stay
+private to one caller. Owned cache cleanup also covers writer failure/cancellation.
+The last-manual timestamp is observational bookkeeping after a successful copy.
+`inspect` validates the stored payload within `StagedBackup.use` and writes nothing;
+`observeRestore` is the runner's progress flow. Android snapshot members delegate to
+the producer, and adoption uses `ImportSessions.createAdopted` for own and foreign
+snapshots alike. Graph registration waits for real native scheduler bindings.
 
 1. **Validate** again (the cache copy is ours, but cheap to re-check); failure → session `CANCELLED`, `RestoreProgress.Failed`, notification (ID 3003 on Android; `DesktopNotifier` on the desktop). For `auto` restores (Android) a `Corrupt` or `NotABackup` snapshot is renamed to `restored-{epochMs}.zip` as well, so the installation-ID guard of [Snapshot production](#snapshot-production) stops protecting a file that can never be restored; `NewerFormat` keeps it ([First-launch restore](#first-launch-restore)).
 2. **Replace pre-step** (skipped on an empty database): on a linked device with reach `THIS_DEVICE`, 10's unlink runs first ([10 Unlink and Delete my data](10-sync.md#unlink-and-delete-my-data)); with reach `ALL_DEVICES` (confirmed after 10's pull, with `linkedAt` already cleared, [Restore while linked](#restore-while-linked)) every write of steps 2–7 runs with `applying = 1`. Then local podcasts matched by no backup podcast → `UnsubscribeUseCase(ids)` (03: pauses playback of them, deletes download files, D24); local groups matched by no backup group → deleted without undo (channels deleted immediately on Android); for every matched podcast, delete its `episode_state` and `episode_position` rows (only when HISTORY is selected; one transaction per podcast); clear `queue_entry` and the `play_session` context (UP_NEXT).

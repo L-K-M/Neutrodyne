@@ -76,6 +76,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import okio.FileSystem
+import okio.IOException
 import okio.Path
 import okio.Path.Companion.toPath
 import okio.buffer
@@ -310,6 +311,25 @@ class BackupRepositoryImplTest {
         }
 
     @Test
+    fun aWriterFailureStillSweepsTheOwnedCacheTarget() =
+        runTest {
+            seedPodcast(db, "https://a.example.com/f")
+            assertIs<Outcome.Success<*>>(repository.createBackup("dest://first", false))
+            val owned = destination.sources.single()
+            fileSystem.write(owned) { writeUtf8("abandoned private backup") }
+            settings.reset(BackupSettingKeys.INSTALLATION_ID)
+            settings.failNextSet = ch.lkmc.neutrodyne.core.domain.SettingsError.WriteFailed
+
+            assertEquals(
+                Outcome.Failure(BackupError.Storage),
+                repository.createBackup("dest://never", false),
+            )
+
+            assertFalse(fileSystem.exists(owned), "writer failure must still clean this flow's cache file")
+            assertEquals(1, destination.copied.size)
+        }
+
+    @Test
     fun concurrentBackupsNeverShareThePreparedArtifact() =
         runTest {
             // Same clock => same-minute file name: only the repository's serialization keeps
@@ -381,6 +401,42 @@ class BackupRepositoryImplTest {
             assertEquals(setOf(RestoreCategory.HISTORY), options.restoreCategories)
             assertEquals(clock.now(), options.restoreRequestedAt)
             assertEquals(listOf(sessionId to false), workScheduler.restores)
+        }
+
+    @Test
+    fun aMissingPayloadCannotBecomeAPhantomRestore() =
+        runTest {
+            for (path in listOf(null, "")) {
+                val sessionId =
+                    db.seedImportSession(
+                        format = ImportFormat.NEUTRODYNE_BACKUP,
+                        payloadPath = path,
+                    )
+
+                assertEquals(
+                    Outcome.Failure(BackupError.Io),
+                    repository.restore(sessionId, RestoreRequest(RestoreMode.MERGE, emptySet())),
+                )
+                val row = checkNotNull(db.importDao().sessionById(sessionId))
+                assertNull(ImportOptionsJson.decode(checkNotNull(row.optionsJson)).restoreRequestedAt)
+            }
+            assertTrue(workScheduler.restores.isEmpty())
+        }
+
+    @Test
+    fun aFailedIntentWriteReturnsStorageWithoutEnqueuing() =
+        runTest {
+            val sessionId = backupSession()
+            driver.armOnStep("UPDATE import_session SET optionsJson") { throw IOException("intent write failed") }
+
+            assertEquals(
+                Outcome.Failure(BackupError.Storage),
+                repository.restore(sessionId, RestoreRequest(RestoreMode.MERGE, emptySet())),
+            )
+
+            val row = checkNotNull(db.importDao().sessionById(sessionId))
+            assertNull(ImportOptionsJson.decode(checkNotNull(row.optionsJson)).restoreRequestedAt)
+            assertTrue(workScheduler.restores.isEmpty())
         }
 
     @Test
@@ -471,7 +527,7 @@ class BackupRepositoryImplTest {
                     checkNotNull(checkNotNull(db.importDao().sessionById(sessionId)).optionsJson),
                 )
             assertNull(options.restoreRequestedAt)
-            assertNull(options.restoreMode)
+            assertEquals(RestoreMode.REPLACE, options.restoreMode, "only the dispatch stamp is undone")
         }
 
     @Test
@@ -680,6 +736,7 @@ class BackupRepositoryImplTest {
     private class RecordingExportDestination : ExportDestination {
         /** `(destinationUri, copied bytes)` per accepted save, in order. */
         val copied = mutableListOf<Pair<String, ByteArray>>()
+        val sources = mutableListOf<Path>()
         var failWith: ExportError? = null
         var explode = false
 
@@ -689,6 +746,7 @@ class BackupRepositoryImplTest {
             source: Path,
             destinationUri: String,
         ): Outcome<Unit, ExportError> {
+            sources += source
             if (explode) error("provider exploded")
             failWith?.let { return Outcome.Failure(it) }
             val bytes = FileSystem.SYSTEM.read(source) { readByteArray() }

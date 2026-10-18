@@ -40,6 +40,8 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -110,12 +112,12 @@ internal class BackupRepositoryImpl(
             }
 
             val target = exportDir / backupFileName(clock.now())
-            val summary =
-                when (val written = writer.write(BackupKind.MANUAL, target, includePasswords)) {
-                    is Outcome.Failure -> return@withLock Outcome.Failure(written.error)
-                    is Outcome.Success -> written.value
-                }
             try {
+                val summary =
+                    when (val written = writer.write(BackupKind.MANUAL, target, includePasswords)) {
+                        is Outcome.Failure -> return@withLock Outcome.Failure(written.error)
+                        is Outcome.Success -> written.value
+                    }
                 // A throw from the platform seam (provider quirks beyond its own Outcome
                 // cases) reports "couldn't write" rather than crashing — ExportRepositoryImpl's
                 // rule. The finally sweeps the owned artifact on every path, cancellation
@@ -131,9 +133,13 @@ internal class BackupRepositoryImpl(
                     is Outcome.Success -> {
                         // The timestamp is bookkeeping for "Last backup: …" — a failed set
                         // is logged, not reported: the destination copy already landed.
-                        suspendRunCatching {
-                            settings.set(BackupSettingKeys.LAST_MANUAL_BACKUP_AT, clock.now())
-                        }.onFailure { Log.w(TAG, it) { "last_manual_backup_at write failed" } }
+                        val stamped =
+                            suspendRunCatching {
+                                settings.set(BackupSettingKeys.LAST_MANUAL_BACKUP_AT, clock.now())
+                            }
+                        if (stamped.getOrNull() !is Outcome.Success) {
+                            Log.w(TAG, stamped.exceptionOrNull()) { "last_manual_backup_at write failed" }
+                        }
                         Outcome.Success(summary)
                     }
                 }
@@ -174,8 +180,8 @@ internal class BackupRepositoryImpl(
      * mode, categories, reach and `restoreRequestedAt` merged into the existing `optionsJson`
      * (parser/system fields are preserved untouched) — then pay the owed native enqueue.
      *
-     * The transaction and the enqueue are one [NonCancellable] unit: a cancellation
-     * delivered at Room COMMIT still probes the row and enqueues when the stamp landed
+     * The transaction and the enqueue are one [NonCancellable] unit: cancellation
+     * delivered at Room COMMIT cannot separate a landed intent from its enqueue
      * (the host then owns the work). [RestoreEnqueue.ALREADY_RUNNING] means the platform
      * *definitively* declined the new request, so this stamp — provably unused — is rolled
      * back and the caller sees [BackupError.RestoreRunning]; a thrown enqueue is unknown
@@ -195,37 +201,40 @@ internal class BackupRepositoryImpl(
                 .getOrDefault(true)
         if (busy) return Outcome.Failure(BackupError.RestoreRunning)
 
-        var stampedAt: Long? = null
-        val claimed: Outcome<Unit, BackupError> =
-            try {
-                db.withWriteTransaction { claimLocked(sessionId, request) { stampedAt = it } }
-            } catch (cancelled: CancellationException) {
-                // Cancellation at COMMIT cannot tell us whether the stamp landed — the row
-                // is the only witness (ImportSessions.persist's probe rule).
-                if (!intentLanded(sessionId, stampedAt)) throw cancelled
-                dispatchRestore(sessionId)
-                throw cancelled
+        currentCoroutineContext().ensureActive()
+        return withContext(NonCancellable) {
+            val claimed: Outcome<ClaimedRestore, BackupError> =
+                try {
+                    db.withWriteTransaction { claimLocked(sessionId, request) }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Log.w(TAG, error) { "restore intent write failed" }
+                    return@withContext Outcome.Failure(BackupError.Storage)
+                }
+            when (claimed) {
+                is Outcome.Failure -> claimed
+                is Outcome.Success -> dispatchRestore(sessionId, claimed.value)
             }
-        if (claimed is Outcome.Failure) return claimed
-        return dispatchRestore(sessionId)
+        }
     }
 
     /**
      * The claim transaction body: the row must be a `NEUTRODYNE_BACKUP` session still in
      * `PREVIEW` with a decodable `optionsJson` and no restore intent anywhere — this row's
-     * or another preview backup session's. [onStamped] records the stamp before the write
-     * so the commit-cancellation probe can tell our intent from someone else's.
+     * or another preview backup session's. The returned receipt belongs to this write,
+     * rather than a later read that could observe another request's metadata.
      */
     private suspend fun claimLocked(
         sessionId: Long,
         request: RestoreRequest,
-        onStamped: (Long) -> Unit,
-    ): Outcome<Unit, BackupError> {
+    ): Outcome<ClaimedRestore, BackupError> {
         val dao = db.importDao()
         val session = dao.sessionById(sessionId) ?: return Outcome.Failure(BackupError.NotABackup)
         if (session.sourceFormat != ImportFormat.NEUTRODYNE_BACKUP) {
             return Outcome.Failure(BackupError.NotABackup)
         }
+        if (session.payloadPath.isNullOrBlank()) return Outcome.Failure(BackupError.Io)
         if (session.state != ImportState.PREVIEW) {
             // COMMITTED/FETCHING means a restore already claimed this session (the finish
             // marker keeps `restoreRequestedAt`); DONE/CANCELLED leaves nothing restorable.
@@ -246,7 +255,6 @@ internal class BackupRepositoryImpl(
             return Outcome.Failure(BackupError.RestoreRunning)
         }
         val stamp = clock.now()
-        onStamped(stamp)
         dao.setOptionsJson(
             sessionId,
             ImportOptionsJson.encode(
@@ -258,7 +266,7 @@ internal class BackupRepositoryImpl(
                 ),
             ),
         )
-        return Outcome.Success(Unit)
+        return Outcome.Success(ClaimedRestore(stamp, options.fromAndroidBackup))
     }
 
     /**
@@ -267,13 +275,12 @@ internal class BackupRepositoryImpl(
      * only this still-unused stamp and an unknown answer keeps the intent for the native
      * host's start-up reconciliation.
      */
-    private suspend fun dispatchRestore(sessionId: Long): Outcome<Unit, BackupError> =
+    private suspend fun dispatchRestore(
+        sessionId: Long,
+        claim: ClaimedRestore,
+    ): Outcome<Unit, BackupError> =
         withContext(NonCancellable) {
-            val session = suspendRunCatching { db.importDao().sessionById(sessionId) }.getOrNull()
-            val options = session?.optionsJson?.let(ImportOptionsJson::decodeOrNull)
-            val auto = options?.fromAndroidBackup == true
-            val stamp = options?.restoreRequestedAt
-            val ack = suspendRunCatching { workScheduler.scheduleRestore(sessionId, auto) }
+            val ack = suspendRunCatching { workScheduler.scheduleRestore(sessionId, claim.auto) }
             when (val result = ack.getOrNull()) {
                 null -> {
                     // Unknown acceptance: the intent stays durable; the host's start-up
@@ -289,7 +296,7 @@ internal class BackupRepositoryImpl(
                 }
 
                 RestoreEnqueue.ALREADY_RUNNING -> {
-                    if (undoIntent(sessionId, stamp)) {
+                    if (undoIntent(sessionId, claim.stamp)) {
                         Outcome.Failure(BackupError.RestoreRunning)
                     } else {
                         // The intent could not be undone — it may still execute, which
@@ -307,53 +314,30 @@ internal class BackupRepositoryImpl(
      */
     private suspend fun undoIntent(
         sessionId: Long,
-        stamp: Long?,
+        stamp: Long,
     ): Boolean =
         suspendRunCatching {
             db.withWriteTransaction {
                 val dao = db.importDao()
-                val session = dao.sessionById(sessionId) ?: return@withWriteTransaction
-                if (session.sourceFormat != ImportFormat.NEUTRODYNE_BACKUP) return@withWriteTransaction
-                if (session.state != ImportState.PREVIEW) return@withWriteTransaction
+                val session = dao.sessionById(sessionId) ?: return@withWriteTransaction false
+                if (session.sourceFormat != ImportFormat.NEUTRODYNE_BACKUP) return@withWriteTransaction false
+                if (session.state != ImportState.PREVIEW) return@withWriteTransaction false
                 val options =
                     session.optionsJson?.let(ImportOptionsJson::decodeOrNull)
-                        ?: return@withWriteTransaction
-                if (options.restoreRequestedAt != stamp) return@withWriteTransaction
+                        ?: return@withWriteTransaction false
+                if (options.restoreRequestedAt != stamp) return@withWriteTransaction false
                 dao.setOptionsJson(
                     sessionId,
                     ImportOptionsJson.encode(
                         options.copy(
-                            restoreMode = null,
-                            restoreCategories = emptySet(),
-                            linkedReach = null,
                             restoreRequestedAt = null,
                         ),
                     ),
                 )
-                Unit
+                true
             }
         }.onFailure { Log.w(TAG, it) { "restore intent rollback failed for session $sessionId" } }
-            .isSuccess
-
-    /**
-     * The commit-cancellation probe (ImportSessions.persist's rule): whether the transaction
-     * landed our stamp is read back from the row, never guessed from the call site. A row
-     * that cannot be read answers "landed" — never delete intent a write may have committed.
-     */
-    private suspend fun intentLanded(
-        sessionId: Long,
-        stamp: Long?,
-    ): Boolean =
-        withContext(NonCancellable) {
-            if (stamp == null) return@withContext false
-            suspendRunCatching {
-                val session = db.importDao().sessionById(sessionId) ?: return@suspendRunCatching false
-                session.state == ImportState.PREVIEW &&
-                    session.optionsJson
-                        ?.let(ImportOptionsJson::decodeOrNull)
-                        ?.restoreRequestedAt == stamp
-            }.getOrDefault(true)
-        }
+            .getOrDefault(false)
 
     override fun observeRestore(): Flow<RestoreProgress?> = runner.progress
 
@@ -458,6 +442,11 @@ internal class BackupRepositoryImpl(
             is ImportError.Storage -> BackupError.Storage
             ImportError.Unreadable, is ImportError.Network, ImportError.SessionGone -> BackupError.Io
         }
+
+    private class ClaimedRestore(
+        val stamp: Long,
+        val auto: Boolean,
+    )
 
     private companion object {
         const val TAG = "BackupRepositoryImpl"
