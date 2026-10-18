@@ -115,6 +115,11 @@ class AndroidAppGraphTest {
         // 05's work table: the auto-backup arm and durable-work reconciliation run in band
         // 200 too — after the database open, in the scheduling band.
         assertThat(dbOrder).isLessThan(orders.getValue("AutoBackupInitializer"))
+        // 05 First-launch restore: the adopted snapshot's restore request runs after the
+        // database open and before the auto-backup lane's durable-work reconciliation.
+        assertThat(dbOrder).isLessThan(orders.getValue("FirstLaunchRestoreInitializer"))
+        assertThat(orders.getValue("FirstLaunchRestoreInitializer"))
+            .isLessThan(orders.getValue("AutoBackupInitializer"))
     }
 
     /**
@@ -199,6 +204,8 @@ class AndroidAppGraphTest {
                 "ImportBackupChannelsInitializer" to 10..10,
                 "GroupChannelsInitializer" to 140..140,
                 "DatabaseOpenInitializer" to 100..119,
+                // 05 First-launch restore: order 110, inside the database band.
+                "FirstLaunchRestoreInitializer" to 100..119,
                 // M1b's `credential-load` sits at 120: after the database, before refresh work.
                 "CredentialLoadInitializer" to 120..199,
                 "PeriodicRefreshInitializer" to 200..299,
