@@ -7,11 +7,13 @@ import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import ch.lkmc.neutrodyne.core.artwork.ArtworkKeys
 import ch.lkmc.neutrodyne.core.artwork.ArtworkRefMapper
-import ch.lkmc.neutrodyne.core.common.CrashReporter
-import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenInitializer
-import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
+import ch.lkmc.neutrodyne.core.model.ExternalReason
+import ch.lkmc.neutrodyne.core.model.FeedFilters
+import ch.lkmc.neutrodyne.core.model.FeedOrder
+import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
@@ -32,6 +34,9 @@ import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
 import ch.lkmc.neutrodyne.feature.library.LibraryViewModel
+import ch.lkmc.neutrodyne.playback.api.PlayResult
+import ch.lkmc.neutrodyne.youtube.api.AudioPref
+import ch.lkmc.neutrodyne.youtube.api.ResolveResult
 import coil3.PlatformContext
 import coil3.map.Mapper
 import coil3.request.Options
@@ -59,6 +64,37 @@ class DesktopAppGraphTest {
     fun tearDown() {
         graph.appScope.cancel()
     }
+
+    @Test
+    fun playbackBindingsAreUniqueTruthfulAndDoNotOpenTheDatabase() =
+        runBlocking {
+            assertThat(graph.playbackController).isSameInstanceAs(graph.playbackController)
+            assertThat(graph.playbackStateSource).isSameInstanceAs(graph.playbackController)
+            assertThat(graph.playbackMaintenance).isSameInstanceAs(graph.playbackController)
+            assertThat(graph.playbackStateSource.nowPlaying.value).isNull()
+            assertThat(graph.playbackStateSource.effectivePlayback.value).isNull()
+            assertThat(graph.playbackController.playEpisode(1)).isEqualTo(PlayResult.ServiceUnavailable)
+            assertThat(graph.playbackController.playEpisodeAt(1, 20)).isEqualTo(PlayResult.ServiceUnavailable)
+            assertThat(
+                graph.playbackController.playFeed(FeedSource.All, FeedFilters(), FeedOrder.NEWEST_FIRST),
+            ).isEqualTo(PlayResult.ServiceUnavailable)
+            assertThat(graph.playbackController.play()).isEqualTo(PlayResult.ServiceUnavailable)
+            graph.playbackController.pause()
+            graph.playbackController.dismiss()
+            assertThat(graph.playbackMaintenance.streamingCacheBytes()).isEqualTo(0)
+            graph.playbackMaintenance.clearStreamingCache()
+            assertThat(graph.localMediaIndex.localUriOrNull(1)).isNull()
+            assertThat(graph.youtubeCapabilities).isSameInstanceAs(graph.youtubeCapabilities)
+            assertThat(graph.youtubeCapabilities.capabilities.value.inAppPlayback).isFalse()
+            assertThat(
+                graph.youtubeCapabilities.capabilities.value.externalReason,
+            ).isEqualTo(ExternalReason.NOT_YET_AVAILABLE)
+            assertThat(graph.youtubeStreamResolver.resolveAudio("id", AudioPref())).isEqualTo(ResolveResult.Unsupported)
+            graph.youtubeStreamResolver.invalidate("id")
+            graph.youtubeStreamResolver.invalidateAll()
+            assertThat(graph.initializers).isNotEmpty()
+            assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+        }
 
     @Test
     fun theGraphBuildsWithTemporaryAppDirsAndResolvesTheSharedBindings() {

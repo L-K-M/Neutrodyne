@@ -93,6 +93,9 @@ sealed interface SleepTimerMode {
 with only `pause()` — 05's restore-Replace confirmation is its first caller — plus
 `NoPlaybackController`, the no-op binding until M4 implements the rest of this interface.
 
+**Implementation note (2026-10-18, M4).** W1 expands the canonical API with the M4 subset. Sleep, chapter, Downloads and measured-duration writeback members stay in their owning milestones. `togglePlayPause()` is an ordered transport; failed starts emit `PlaybackEvent.StartRefused(PlayResult)`. `playNext(List<Long>)` / `playLast(List<Long>)` are queue-only controller conveniences over `QueueRepository`, not audio starts. `ScopeWriteResult.FAILED` exposes failed scope writes; `PlaybackStateSource.pendingMeteredConsent` retains a pending consent across collector restarts. `SettingScope` and the M4-only `EffectivePlayback(speed, skipSilence)` live in `:core:model`, reusing `SettingSource.PodcastOverride`; W4 owns settings keys and resolver extensions. `SessionStart.contextRetention: ContextRetention` replaces the sample's boolean `keepContext` with `KEEP` / `REPLACE`; `goBack(previous: QueueItem, departure, now)` carries the previous origin so only a context arrival restores the anchor. The persistence signatures retain the design's commit-return values: storage exceptions propagate for adapter mapping/retry, and cancellation propagates. No common no-op controller is contributed: each shell binds its own unavailable controller, empty state and cache maintenance until W8 / MD1; starts return `ServiceUnavailable`. Shells also bind the null local index until M6 and static external YouTube capabilities plus an unsupported resolver until M9 / MD3. These external implementations stay in the shell containers until the engine milestone needs shared implementations. No settings keys, schema, SQL, player or UI behavior lands in W1.
+
+
 ```kotlin
 // :playback:api — state (implemented by PlaybackStateHub on Android, DesktopPlaybackController on the desktop; all flows are main-safe)
 interface PlaybackStateSource {
@@ -247,7 +250,7 @@ playback/impl/src/main/kotlin/ch/lkmc/neutrodyne/playback/impl/                (
 
 Metro ([D82](../PLAN.md#3-key-decisions), [01 Components and scopes](01-foundation.md#components-and-scopes)); singletons are `@SingleIn(AppScope::class)`. `PlaybackModule` (`:playback:impl`, a binding container contributed to `AppScope`) binds `PlaybackController` → `PlaybackControllerImpl`, `PlaybackStateSource` → `PlaybackStateHub`, `PlaybackMaintenance` → `StreamingCache`, `EmbeddedChapterReader` → `MetadataRetrieverChapterReader` (M6) and `PlaybackSyncPort` → `PlaybackSyncBridge` (MS2), and provides `SimpleCache`. `:core:data` binds `QueueRepository`, `ChapterRepository`, `PlaySessionStore` and `PositionStore` with `@ContributesBinding` (the same classes serve the desktop graph); the `:playback:core` classes are plain `@Inject` classes. Dependencies that do not exist yet in early milestones are optional parameters with a default value, Metro's optional bindings ([Metro bindings](https://zacsweers.github.io/metro/latest/bindings/); Unverified: the exact form for nullable parameters, recorded by S8): `LocalMediaIndex? = null` and `DownloadController? = null` (absent until M6: no local files, no missing-file reports), `EmbeddedChapterReader? = null` (absent until M6), `PrePlaySync? = null` (bound by `:sync:impl` from MS2, called by `PlayStarter` from MS3) and `YouTubeEngine? = null` (bound by `:app`'s `YouTubeBindingsModule` from M9a, [01 YouTube bindings](01-foundation.md#youtube-bindings); absent before, so pre-warm is skipped). `YouTubeCapabilitiesSource` (bound from M2) is injected into `EpisodeResolver`, `QueueWindowPlanner`, `QueueRepositoryImpl` and `PlayStarter`, which read `capabilities.value` at each use and never cache a snapshot. `PlaybackChannels` (order 10) and, at order 300, `PlaybackPrefs` warm-up and `PlayerConnection` registration are contributed with `@ContributesIntoSet(AppScope::class)` as `AppInitializer`s. Service-side components (`QueueProjector`, `PositionTracker`, `SleepTimer`, `Chapters`, `EffectivePlaybackApplier`, `ErrorRecovery`, `PreResolver`, `MediaButtons`, `SessionCallback`) and the per-player core objects they wrap (`QueueWindowPlanner`, `PositionSaver`, `SleepTimerCore`, `ChapterIndex`, `EffectivePlaybackSettings`, `RecoveryBudget`) are unscoped and member-injected into the service (through the contributed `PlaybackServiceInjector`, 01 DI rule 1), so each service instance gets fresh ones; `EpisodeResolver`, `EpisodeSourceIndex`, `StreamingCache`, `MeteredStreamingGate`, `PlaybackHistory`, `PlaybackPrefs`, `PlaybackStateHub`, `PlaybackSyncBridge`, `RemotePlayedGuard` and `PlayerConnection` are `@SingleIn(AppScope::class)`.
 
-**Database laziness ([01 Application start-up](01-foundation.md#application-start-up), DI rule 7).** The system can create `NeutrodynePlaybackService` (resumption card at boot, media key) while the database is still opening, and member injection runs on the main thread in `onCreate`. Every dependency that reaches `NeutrodyneDatabase` (DAOs, `QueueRepository`, `PlaySessionStore`, `PositionStore`, `ChapterRepository`, `PlayContextResolver`, `EffectiveSettingsResolver`) is injected as `Lazy<…>` — also into the `:playback:core` objects — and dereferenced only inside a coroutine on IO after `DatabaseOpener.awaitOpen()`; constructors never touch the database. 01's start-up ordering test constructs the service while the open is pending.
+**Database laziness ([01 Application start-up](01-foundation.md#application-start-up), DI rule 7).** The system can create `NeutrodynePlaybackService` (resumption card at boot, media key) while the database is still opening, and member injection runs on the main thread in `onCreate`. Every dependency that reaches `NeutrodyneDatabase` (DAOs, `QueueRepository`, `PlaySessionStore`, `PositionStore`, `ChapterRepository`, `PlayContextResolver`, `EffectiveSettingsResolver`) is injected as `Provider<…>` — also into the `:playback:core` objects — and dereferenced only inside a coroutine on IO after `DatabaseOpener.awaitOpen()`; constructors never touch the database. 01's start-up ordering test constructs the service while the open is pending.
 
 ### New names introduced here
 
@@ -324,6 +327,8 @@ The core reaches the database only through the ports of [Modules and public API]
 
 ### Adapter contract
 
+**Implementation note (2026-10-18, M4).** W1 freezes projection inputs as `VirtualQueue` (full stored Up next, at most requested context count, generation and `QueueOrigin`) plus current media metadata and runtime capabilities. W1 declares `WindowOp` and `StartOutcome` in `:playback:core`, and `StartGate.check(PlaybackMediaInfo, localUri)` in `:core:domain`; W3 produces the scripts/outcomes and W7 applies them. `UpdateMetadata` may target current with the same ID/source without prepare/unpin; tail operations never replace current identity. `PlaybackMediaLookup` in `:core:domain` supplies `:core:model` metadata without exposing Room; W2 implements it. Adapters own in-memory `currentSinceMs`, set when committing or loading a different current, and pass it as `Departure.pinStartedAt`. Follow the ordered steps below. Services, workers and providers receive Metro `Provider<T>` for every transitive database user, dereferencing only on IO after `awaitOpen()`; graph construction and initializers must not eagerly resolve those users.
+
 Both adapters feed the core in the same order, which is what makes the two players agree:
 
 1. **Item change** (Media3 `onPositionDiscontinuity` to another item; engine `ItemTransition`): `PositionSaver` captures the outgoing position first; `PlayedRule` decides `Departure.markPlayed`; `PlaySessionStore.onTransition` commits in one transaction; `QueueWindowPlanner.endOwnWrite(generation)`; then `StartPositionRule`, `EffectivePlaybackSettings`, `ChapterIndex` and `SleepTimerCore` for the arriving item.
@@ -331,6 +336,14 @@ Both adapters feed the core in the same order, which is what makes the two playe
 3. **Same-item seek:** `PositionSaver.onSeek(origin)` — a user seek below 1 s is an explicit reset; seeks the core requests itself (start position, pickup) write nothing.
 4. **Database emissions** (virtual queue, capabilities, media lookup): `QueueWindowPlanner` diffs; the adapter applies the `WindowOp`s.
 5. **Teardown** (Android `onDestroy`, desktop quit, `Suspending`, device loss): `PositionSaver.flush()`, written on the application scope with `NonCancellable`.
+
+The W1 binding handoff is explicit: W8 replaces the Android controller/state/cache
+maintenance providers in `AndroidPlaybackBindings`, retaining its null local index
+until M6. W6 supplies the real cache maintenance implementation for W8 to bind.
+W5 contributes `ArtworkProviderGraph`; W8 contributes `PlaybackServiceInjector`
+through Metro's library injector interfaces (01 DI rule 1), without competing
+edits to `AndroidAppGraph`. Workers use the existing `WorkerCreator` map and
+`Provider<T>` for database users, with `awaitOpen()` before dereference on IO.
 
 ### Sync interplay
 
@@ -482,7 +495,7 @@ Serves N1, R3.9. Delivered in M4 (the position saves that make an update harmles
       <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />            <!-- M5 -->
     </intent-filter>
   </service>
-  <receiver android:name="androidx.media3.session.MediaButtonReceiver" android:exported="true">   <!-- M5 -->
+  <receiver android:name="androidx.media3.session.MediaButtonReceiver" android:exported="true">   <!-- M4 -->
     <intent-filter><action android:name="android.intent.action.MEDIA_BUTTON" /></intent-filter>
   </receiver>
   <meta-data android:name="com.google.android.gms.car.application"
@@ -777,13 +790,17 @@ Serves R4.8, R2.6, R3.7, R7.5. Delivered in M4; M8 (external-mode exclusions), M
 
 ### Definitions
 
+**Implementation note (2026-10-18, M4).** The 100-item cap applies to the player projection, not storage or UI. `VirtualQueue` carries all queued IDs so automatic starts can find a playable entry beyond unplayable rows. W3 projects at most 100 Up next items and suppresses context while the stored queue exceeds 100. W2 supplies bounded context reads and low-churn media lookup; no position ticks join the projection query. `PlayContextResolver.startItem` accepts `ContextEligibility.INCLUDE_EXTERNAL_YOUTUBE` for the external-only emptiness probe; all other predicates remain identical. Downloads query/command production stays M6.
+
 - **Current** = `play_session.currentEpisodeId`. An item that becomes current is **removed from `queue_entry`** in the same transaction, so Up next never contains the playing item and played items leave Up next automatically.
 - **Up next** = `queue_entry` ordered by `(orderKey, id)` (fractional-index keys, [02 Up next ordering](02-data-model.md#up-next-ordering), [D92](../PLAN.md#3-key-decisions)); user-owned, and synced as per-item records so concurrent edits on two devices both survive ([10 Ordered lists](10-sync.md#ordered-lists)).
 - **Play context** = `contextType`/`contextId` + order + filters + anchor (05's `PlayContextSpec` persisted in `play_session`); the **context tail** is the next items after the anchor that are unplayed, `AVAILABLE`, visible, playable with the current YouTube capabilities (`youtubePlayable`) and not in Up next ([02 Play context](02-data-model.md#play-context)); which episodes a context contains and where "Play" starts are 05's rules ([05 Playing a group](05-groups-opml-backup.md#playing-a-group)).
-- **Virtual queue** = `[current] ++ upNext ++ contextTail`. `QueueRepository.observeVirtualQueue(k)` emits current, at most `UP_NEXT_PROJECTION_CAP = 100` Up next items and `k` context items (queried as `k + 1`, the current item removed). Anchor `null` means "before the first item" (`(+∞, +∞)` for `NEWEST_FIRST`, `(−∞, −∞)` for `OLDEST_FIRST`).
+- **Virtual queue** = `[current] ++ upNext ++ contextTail`. `QueueRepository.observeVirtualQueue(k)` emits current, the complete stored Up next ID order and at most `k` eligible context items (queried as `k + 1`, the current item removed). Anchor `null` means "before the first item" (`(+∞, +∞)` for `NEWEST_FIRST`, `(−∞, −∞)` for `OLDEST_FIRST`).
 - **Window** = the virtual queue minus non-current items that cannot play: `availability != AVAILABLE`, YouTube when `!capabilities.inAppPlayback` (external mode, read from `YouTubeCapabilitiesSource` at each diff). Up next keeps such items in the database (08 greys them); the window skips them. The current item is `play_session`'s and is never filtered out — the start gates, [Error recovery](#error-recovery) and the [capability-flip rule](#youtube-branch) deal with it.
 
 ### Starting playback
+
+**Implementation note (2026-10-18, M4).** Automatic/no-argument starts and empty-player resumption select the first playable Up next entry, retaining unplayable rows greyed in place, then fall back to eligible context. Explicit row starts return that row's refusal. A queue-selected start keeps a null anchor; a context fallback anchors at its selected item. This owner-adopted rule also applies wherever this document abbreviates selection as "Up next head".
 
 Steps 1–3 below are `PlayStarter` (`:playback:core`); steps 4–5 are the adapter's. On Android all UI starts go through the session command `nd.PLAY_CONTEXT` so the database write, the projection and `prepare()` happen in the service, atomically with respect to the projector; the client then calls `MediaController.play()` from the visible UI ([D43](../PLAN.md#3-key-decisions)). With sync linked (MS3), `PlaybackControllerImpl` first runs pull before play (`PlayStarter.beforeUiStart()`, ≤ 1.5 s, [Sync interplay](#sync-interplay)). The desktop runs the same steps in `DesktopPlaybackController` without a session command.
 
@@ -816,8 +833,8 @@ sequenceDiagram
 
 1. **Plan** (read-only): `spec = playContextResolver.spec(source, filters, order)` (`downloadsSpec()` for `DOWNLOADS`).
    - `startEpisodeId` given (a row's play button, Auto pick) → current = it, anchor = it (05 start rule 1).
-   - "Play" without a start, Up next non-empty → current = Up next head, anchor `null` (the tail starts at the beginning of the order after Up next — [D44](../PLAN.md#3-key-decisions), M4 acceptance 6).
-   - "Play" without a start, Up next empty → current = `playContextResolver.startItem(spec)`, anchor = it; `null` → `nd.result = NOTHING_TO_PLAY`, or `NOTHING_TO_PLAY_EXTERNAL` when `!capabilities.inAppPlayback` and 02's start-item query with `youtubePlayable = 1` finds an item — 08 shows "Nothing unplayed in 'tech'" or "Episodes in 'tech' open in YouTube".
+   - "Play" without a start, playable Up next available → current = first playable Up next entry, anchor `null` (the tail starts at the beginning of the order after Up next — [D44](../PLAN.md#3-key-decisions), M4 acceptance 6).
+   - "Play" without a start, no playable Up next entry → current = `playContextResolver.startItem(spec)`, anchor = it; `null` → `nd.result = NOTHING_TO_PLAY`, or `NOTHING_TO_PLAY_EXTERNAL` when `!capabilities.inAppPlayback` and 02's start-item query with `youtubePlayable = 1` finds an item — 08 shows "Nothing unplayed in 'tech'" or "Episodes in 'tech' open in YouTube".
    - `playEpisode`/`playEpisodeAt` (no `contextType`): if the episode is already current → no commit, `seekTo(startPositionMs)` when given, result `STARTED`; if it is in Up next, it becomes current and the existing context and anchor are kept (Up next screen taps); otherwise context `EXTERNAL` (no tail — 05's entry-point table): it plays, then Up next, then playback stops.
 2. **Gates** on the planned current, in this order: no enclosure and no playable video ID → `NotPlayable(NoMedia)`; YouTube in external mode (`!inAppPlayback`) → `NotPlayable(YouTubeExternal(caps.externalReason))` (non-null whenever `inAppPlayback` is false, 04), also when the episode has a completed download; `availability != AVAILABLE` → `NotPlayable(YouTube(availability))`; the [metered and offline gate](#metered-and-offline-gate) (the offline check is `PlayStarter`'s on both platforms, the metered check Android's `StartGate`).
 3. **Commit** (`PlaySessionStore.commitStart`, implemented by `SessionWriter` in `:core:data`: one write transaction that, like every `SessionWriter` transaction, starts with `PlaySessionDao.ensure(now)`, [02 play_session](02-data-model.md#play_session)): `play_session` current, context columns from `spec`, anchor (`contextAnchorEpisodeId`, `contextAnchorSortDate`), `contextMinSortDate`, `generation + 1`, `updatedAt`; delete the new current from `queue_entry`; `EpisodeStateDao.touchLastPlayed`.
@@ -885,7 +902,7 @@ sequenceDiagram
 
 1. `want` empty → `exo.stop(); exo.clearMediaItems()` (if not already empty).
 2. `have` empty or `want[0] != have[currentIndex]` → current changed through the database: `setMediaItems(window, 0, StartPositionRule(...))`; `prepare()` only if `playWhenReady` or a play is pending.
-3. Otherwise: remove items before the current index (`removeMediaItems(0, cur)`; history lives in `PlaybackHistory`, not the player). Tail: compute the LCS of `haveTail` and `wantTail`; remove non-LCS items (descending index), then walk `wantTail` placing each item with `moveMediaItem` or `addMediaItem` — so reordering only the next item is one `moveMediaItem` and its pre-buffer survives. If the edit script exceeds 30 operations, `replaceMediaItems(1, size, wantTailItems)` instead. **Index 0 (current) is never touched** by steps 3–4.
+3. Otherwise: remove items before the current index (`removeMediaItems(0, cur)`; history lives in `PlaybackHistory`, not the player). Tail: compute the LCS of `haveTail` and `wantTail`; remove non-LCS items (descending index), then walk `wantTail` placing each item with `moveMediaItem` or `addMediaItem` — so reordering only the next item is one `moveMediaItem` and its pre-buffer survives. If the edit script exceeds 30 operations, `replaceMediaItems(1, size, wantTailItems)` instead. **Index 0 (current) is never replaced by tail edits**; step 4 may update its metadata without prepare or unpin.
 4. Same IDs, changed metadata (title, artwork version, completion, download state) → `replaceMediaItem(i, item)` (no re-prepare; [immutable LocalConfiguration](#mediaitem-shape)).
 5. Changed `LocalConfiguration` (fingerprint) on a non-current item, or a newly local item pinned `Remote` → `unpin` + remove + add at the same index.
 6. Before handing items over: `EpisodeSourceIndex.putAll(window)`; after removals: `index.remove` and `resolver.unpin` for items that left.
@@ -1307,6 +1324,11 @@ Fixtures in `playback/impl/src/test/resources/media/`, generated by `scripts/fix
 ---
 
 ## Delivery by milestone
+
+**Implementation note (2026-10-18, M4).** The standard Media3 `MediaButtonReceiver`
+declaration moves from the M5 row below into M4 for cold media-key starts. W8 owns
+its manifest/dependency wiring; boot-card resumption (`isForPlayback = false`) and
+hardware `SKIP` mapping stay M5. W1 adds contracts and shell stubs only.
 
 | Milestone | Delivered in this area |
 |---|---|

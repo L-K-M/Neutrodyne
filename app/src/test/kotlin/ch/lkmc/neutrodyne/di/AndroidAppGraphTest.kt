@@ -9,6 +9,10 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenInitializer
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.model.ExportRequest
+import ch.lkmc.neutrodyne.core.model.ExternalReason
+import ch.lkmc.neutrodyne.core.model.FeedFilters
+import ch.lkmc.neutrodyne.core.model.FeedOrder
+import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.BackupKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
@@ -28,6 +32,9 @@ import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import ch.lkmc.neutrodyne.notifications.AndroidGroupChannelSync
 import ch.lkmc.neutrodyne.notifications.AndroidImportReportPoster
 import ch.lkmc.neutrodyne.notifications.AndroidNewEpisodePoster
+import ch.lkmc.neutrodyne.playback.api.PlayResult
+import ch.lkmc.neutrodyne.youtube.api.AudioPref
+import ch.lkmc.neutrodyne.youtube.api.ResolveResult
 import com.google.common.truth.Truth.assertThat
 import dev.zacsweers.metro.createGraphFactory
 import kotlinx.coroutines.runBlocking
@@ -47,6 +54,37 @@ import java.io.File
 @Config(application = Application::class)
 class AndroidAppGraphTest {
     private val graph = createGraphFactory<AndroidAppGraph.Factory>().create(RuntimeEnvironment.getApplication())
+
+    @Test
+    fun playbackBindingsAreUniqueTruthfulAndDoNotOpenTheDatabase() =
+        runBlocking {
+            assertThat(graph.playbackController).isSameInstanceAs(graph.playbackController)
+            assertThat(graph.playbackStateSource).isSameInstanceAs(graph.playbackController)
+            assertThat(graph.playbackMaintenance).isSameInstanceAs(graph.playbackController)
+            assertThat(graph.playbackStateSource.nowPlaying.value).isNull()
+            assertThat(graph.playbackStateSource.effectivePlayback.value).isNull()
+            assertThat(graph.playbackController.playEpisode(1)).isEqualTo(PlayResult.ServiceUnavailable)
+            assertThat(graph.playbackController.playEpisodeAt(1, 20)).isEqualTo(PlayResult.ServiceUnavailable)
+            assertThat(
+                graph.playbackController.playFeed(FeedSource.All, FeedFilters(), FeedOrder.NEWEST_FIRST),
+            ).isEqualTo(PlayResult.ServiceUnavailable)
+            assertThat(graph.playbackController.play()).isEqualTo(PlayResult.ServiceUnavailable)
+            graph.playbackController.pause()
+            graph.playbackController.dismiss()
+            assertThat(graph.playbackMaintenance.streamingCacheBytes()).isEqualTo(0)
+            graph.playbackMaintenance.clearStreamingCache()
+            assertThat(graph.localMediaIndex.localUriOrNull(1)).isNull()
+            assertThat(graph.youtubeCapabilities).isSameInstanceAs(graph.youtubeCapabilities)
+            assertThat(graph.youtubeCapabilities.capabilities.value.inAppPlayback).isFalse()
+            assertThat(
+                graph.youtubeCapabilities.capabilities.value.externalReason,
+            ).isEqualTo(ExternalReason.NOT_YET_AVAILABLE)
+            assertThat(graph.youtubeStreamResolver.resolveAudio("id", AudioPref())).isEqualTo(ResolveResult.Unsupported)
+            graph.youtubeStreamResolver.invalidate("id")
+            graph.youtubeStreamResolver.invalidateAll()
+            assertThat(graph.initializers).isNotEmpty()
+            assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+        }
 
     @Test
     fun everyM0aKeyHasAnEntry() {

@@ -27,6 +27,12 @@ import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.notifications.DesktopBannerNotifier
 import ch.lkmc.neutrodyne.desktop.youtube.DesktopYouTubeBindingsModule
+import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
+import ch.lkmc.neutrodyne.playback.api.PlaybackController
+import ch.lkmc.neutrodyne.playback.api.PlaybackMaintenance
+import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
+import ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver
 import dev.zacsweers.metro.Binds
 import dev.zacsweers.metro.DependencyGraph
 import dev.zacsweers.metro.Provides
@@ -56,6 +62,13 @@ interface DesktopAppGraph {
     val appScope: CoroutineScope
 
     val initializers: Set<AppInitializer>
+
+    val playbackController: PlaybackController
+    val playbackStateSource: PlaybackStateSource
+    val playbackMaintenance: PlaybackMaintenance
+    val localMediaIndex: LocalMediaIndex
+    val youtubeCapabilities: YouTubeCapabilitiesSource
+    val youtubeStreamResolver: YouTubeStreamResolver
 
     /** Every feature's navigation entries (01 Feature entry installers). */
     val entryInstallers: Set<EntryProviderInstaller>
