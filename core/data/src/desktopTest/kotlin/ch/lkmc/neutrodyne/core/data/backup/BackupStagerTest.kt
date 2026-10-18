@@ -51,6 +51,7 @@ import okio.FileSystem
 import okio.ForwardingFileSystem
 import okio.Path
 import okio.Path.Companion.toPath
+import okio.Sink
 import okio.Source
 import okio.buffer
 import kotlin.coroutines.cancellation.CancellationException
@@ -423,6 +424,23 @@ class BackupStagerTest {
         }
 
     @Test
+    fun linkAndArtworkMustBeFetchableWithoutUserinfo() =
+        runTest {
+            for (url in listOf("javascript:x", "file:///etc/passwd", "https://u:p@/x")) {
+                for (podcast in listOf(podcast(KEY, link = url), podcast(KEY).copy(artworkUrl = url))) {
+                    val payloads = payloads(library = library(podcast))
+                    val archive = archiveOf(payloads, manifest = manifestBytes(payloads))
+                    assertEquals(
+                        BackupError.Corrupt(BackupCodec.ENTRY_LIBRARY),
+                        assertFailure(stager.inspect(archive, stage)),
+                        "link=${podcast.link}, artwork=${podcast.artworkUrl}",
+                    )
+                    assertStageClean()
+                }
+            }
+        }
+
+    @Test
     fun unknownSourceKindIsRejectedNotDefaultedToRss() =
         runTest {
             val bad = payloads(library = library(podcast(KEY).copy(source = "PEERTUBE")))
@@ -612,6 +630,39 @@ class BackupStagerTest {
 
             assertEquals(listOf(decoy), fileSystem.list(stage))
             assertContentEquals(before, fileSystem.source(archive).use { it.buffer().readByteArray() })
+        }
+
+    @Test
+    fun unexpectedFailureAlsoRemovesPrivateStageFiles() =
+        runTest {
+            fileSystem.createDirectories(stage)
+            val decoy = stage / "decoy.txt"
+            fileSystem.write(decoy) { writeUtf8("keep me") }
+            val failing =
+                object : ForwardingFileSystem(fileSystem) {
+                    override fun sink(
+                        file: Path,
+                        mustCreate: Boolean,
+                    ): Sink {
+                        if (file.name == BackupCodec.ENTRY_QUEUE) error("unexpected stage failure")
+                        return super.sink(file, mustCreate)
+                    }
+                }
+            val payloads =
+                payloads(
+                    library =
+                        library(podcast(KEY)).copy(
+                            credentials = listOf(CredentialV1("https://example.com", "member", "secret")),
+                        ),
+                )
+            val archive = archiveOf(payloads, manifest = manifestBytes(payloads))
+            val before = fileSystem.read(archive) { readByteArray() }
+            val failingStager = BackupStager(db, ZipGuard(), merger, failing, Dispatchers.IO)
+
+            assertFailsWith<IllegalStateException> { failingStager.inspect(archive, stage) }
+
+            assertEquals(listOf(decoy), fileSystem.list(stage), "private staged credentials must be removed")
+            assertContentEquals(before, fileSystem.read(archive) { readByteArray() })
         }
 
     @Test

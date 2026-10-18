@@ -119,6 +119,9 @@ internal class BackupStager(
                 // Filesystem failures inside the pass (createDirectories, sink) map to Io.
                 discard(dir)
                 return Outcome.Failure(BackupError.Io)
+            } catch (unexpected: Throwable) {
+                discard(dir)
+                throw unexpected
             }
         try {
             staged.preview = buildPreview(staged)
@@ -291,9 +294,7 @@ internal class BackupStager(
     private fun validate(library: LibraryV1) {
         for (podcast in library.podcasts) {
             if (!isFeedKey(podcast.key)) throw corruptLibrary()
-            if (!isPlainUrl(podcast.feedUrl) || UrlNormalizer.forIdentity(podcast.feedUrl) == null) {
-                throw corruptLibrary()
-            }
+            if (!isPlainUrl(podcast.feedUrl)) throw corruptLibrary()
             if (podcast.aliases.any { !isFeedKey(it) }) throw corruptLibrary()
             if (SourceType.entries.none { it.name == podcast.source }) throw corruptLibrary()
             if (podcast.link?.let { !isPlainUrl(it) } == true) throw corruptLibrary()
@@ -323,8 +324,9 @@ internal class BackupStager(
     private fun isFeedKey(value: String): Boolean =
         value.isNotEmpty() && UrlNormalizer.forIdentity("https://$value") == value
 
-    /** True when [url] carries no userinfo and no padding the splitter would strip. */
-    private fun isPlainUrl(url: String): Boolean = UrlNormalizer.splitUserInfo(url).first == url
+    /** A fetchable HTTP(S) URL without userinfo or padding the splitter would strip. */
+    private fun isPlainUrl(url: String): Boolean =
+        UrlNormalizer.splitUserInfo(url).first == url && UrlNormalizer.forIdentity(url) != null
 
     /**
      * Canonical UUIDs only: `parse` accepts mixed case but `toString` emits lowercase, and
