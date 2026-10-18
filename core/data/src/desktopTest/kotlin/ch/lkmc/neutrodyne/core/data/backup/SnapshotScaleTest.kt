@@ -280,6 +280,8 @@ class SnapshotScaleTest {
             assertEquals(EXPECTED_PLAYED, manifest.counts.played)
             assertEquals(EXPECTED_IN_PROGRESS, manifest.counts.inProgress)
             assertEquals(0, manifest.counts.upNext)
+            // An automatic snapshot never carries passwords (05 Credentials).
+            assertEquals(false, manifest.includesCredentials)
 
             // Small entries: full read; sha256 + byte count must match the manifest.
             for (info in manifest.entries) {
