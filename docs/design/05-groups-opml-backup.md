@@ -1488,6 +1488,8 @@ A backup arrives through the import pipeline ([Sniffing](#sniffing) → `NEUTROD
 4. `library.json` ≤ 32 MiB; `episodes.jsonl` is streamed, lines > 64 KiB or undecodable are skipped and counted (warning, not fatal).
 5. Matching is dry-run to compute what Replace would remove.
 
+*Implementation note (2026-10-17, M3 B12a):* `BackupStager.inspect` stages and validates in one archive open: the manifest's `entries` may declare only whitelist names besides `manifest.json` itself — a foreign or duplicate declaration, or a required name not declared-and-present, is `Corrupt`; archive entries never declared are counted (`IGNORED_ENTRIES`) and never opened. `library.json` content is then validated beyond structure (N3): feed `key`/`aliases` must be canonical `forIdentity` form, URL fields must be fetchable http(s) without userinfo, `source` must name a real `SourceType`, credential origins must be canonical `scheme://host[:port]` (so `sync:*` and `podcastindex` can never arrive from a backup), and `uuid`/`syncId` must be canonical UUIDs — any violation is `Corrupt(library.json)` rather than a silent rewrite. The dry run reuses `RestoreMerger.matchedLocalIds` inside one `withReadTransaction`; preview warnings carry `IGNORED_ENTRIES` and `SKIPPED_LINES` counts derived from decoded content, never `manifest.counts`.
+
 ```kotlin
 // :core:domain — canonical interface, owned here
 interface BackupRepository {
