@@ -9,7 +9,6 @@ import okio.Buffer
 import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
-import kotlin.test.assertTrue
 
 /** Strict-pass behaviors the golden corpus does not pin: failure reasons and the opener contract. */
 class XmlPullOpmlReaderTest {
@@ -17,10 +16,10 @@ class XmlPullOpmlReaderTest {
 
     private fun read(xml: String): OpmlReadResult = reader.read({ Buffer().writeString(xml, Charsets.UTF_8) })
 
-    private fun failure(xml: String): OpmlFailure = (read(xml) as OpmlReadResult.Failed).failure
+    private fun failure(xml: String): OpmlFailure = assertIs<OpmlReadResult.Failed>(read(xml)).failure
 
     private fun failureBytes(bytes: ByteArray): OpmlFailure =
-        (reader.read({ Buffer().write(bytes) }) as OpmlReadResult.Failed).failure
+        assertIs<OpmlReadResult.Failed>(reader.read({ Buffer().write(bytes) })).failure
 
     @Test
     fun emptyDocumentHasNoOutlines() {
@@ -114,6 +113,41 @@ class XmlPullOpmlReaderTest {
             head.toByteArray(Charsets.US_ASCII) +
                 "<opml version=\"1.0\"/>".toByteArray(Charsets.US_ASCII)
         assertIs<OpmlReadResult.Failed>(reader.read({ Buffer().write(bytes) }))
+    }
+
+    /** A pretty-printed `<title>` trims like folder names, so 05's gPodder title check holds. */
+    @Test
+    fun headTitleIsTrimmed() {
+        val xml =
+            "<opml version=\"1.0\"><head><title>\n    gPodder subscriptions\n  </title></head>" +
+                "<body><outline xmlUrl=\"https://example.com/feed\"/></body></opml>"
+        assertEquals("gPodder subscriptions", assertIs<OpmlReadResult.Ok>(read(xml)).document.headTitle)
+    }
+
+    /** `nd:groupColor` takes ASCII hex only: a sign or a non-ASCII digit is not a colour. */
+    @Test
+    fun groupColorRejectsSignedAndNonAsciiHex() {
+        assertEquals(0xFFFFAA00.toInt(), folderColor("#FFAA00"))
+        for (raw in listOf(
+            "#-fffff",
+            "#+fffff",
+            "#-fffffff",
+            "#\uFF26\uFF26\uFF26\uFF26\uFF26\uFF26",
+            "#\u0660\u0660\u0660\u0660\u0660\u0660",
+        )) {
+            assertEquals(null, folderColor(raw), raw)
+        }
+    }
+
+    private fun folderColor(raw: String): Int? {
+        val xml =
+            "<opml version=\"1.0\" xmlns:nd=\"urn:neutrodyne:opml:1\"><body>" +
+                "<outline text=\"g\" nd:groupColor=\"$raw\"><outline xmlUrl=\"https://example.com/feed\"/></outline>" +
+                "</body></opml>"
+        return assertIs<OpmlReadResult.Ok>(read(xml))
+            .document.folders
+            .single()
+            .colorArgb
     }
 
     /** `open` is invoked exactly once per pass — the strict pass. */

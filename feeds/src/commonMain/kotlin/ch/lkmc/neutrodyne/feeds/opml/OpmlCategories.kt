@@ -37,8 +37,8 @@ public object OpmlCategories {
         while (i < token.length) {
             val c = token[i]
             if (c == '%' && i + 2 < token.length) {
-                val hi = token[i + 1].digitToIntOrNull(16)
-                val lo = token[i + 2].digitToIntOrNull(16)
+                val hi = asciiHexDigit(token[i + 1])
+                val lo = asciiHexDigit(token[i + 2])
                 if (hi != null && lo != null) {
                     when (hi * 16 + lo) {
                         PERCENT, COMMA, SLASH -> {
@@ -55,7 +55,17 @@ public object OpmlCategories {
         return out.toString()
     }
 
+    /** `digitToIntOrNull(16)` also accepts non-ASCII digits (`\u0662`, fullwidth `\uFF23`) on the JVM. */
+    private fun asciiHexDigit(c: Char): Int? =
+        when (c) {
+            in '0'..'9' -> c - '0'
+            in 'a'..'f' -> c - 'a' + HEX_LETTER_BASE
+            in 'A'..'F' -> c - 'A' + HEX_LETTER_BASE
+            else -> null
+        }
+
     private const val PERCENT = 0x25
     private const val COMMA = 0x2C
     private const val SLASH = 0x2F
+    private const val HEX_LETTER_BASE = 10
 }

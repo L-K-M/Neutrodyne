@@ -93,7 +93,7 @@ class OpmlHostileInputTest {
         val bytes = doc.encodeToByteArray()
         val buffer = Buffer().write(bytes)
         val result = reader.read({ buffer })
-        assertEquals(OpmlFailure.TAG_TOO_LONG, (result as OpmlReadResult.Failed).failure)
+        assertEquals(OpmlFailure.TAG_TOO_LONG, assertIs<OpmlReadResult.Failed>(result).failure)
         assertTrue(
             buffer.size > bytes.size - EARLY_CUTOFF_BYTES,
             "guard tripped late: ${buffer.size} of ${bytes.size} bytes unread",
@@ -232,8 +232,8 @@ class OpmlHostileInputTest {
     @Test(timeout = HOSTILE_TIMEOUT_MS)
     fun entityInUtf16IsRejected() {
         val doc = "<!DOCTYPE opml [<!ENTITY x \"y\">]><opml version=\"1.0\"/>"
-        val bytes = BOM_UTF16LE + doc.toByteArray(Charsets.UTF_16LE)
-        assertEquals(OpmlFailure.ENTITY_DECLARED, failure(bytes))
+        assertEquals(OpmlFailure.ENTITY_DECLARED, failure(BOM_UTF16LE + doc.toByteArray(Charsets.UTF_16LE)))
+        assertEquals(OpmlFailure.ENTITY_DECLARED, failure(BOM_UTF16BE + doc.toByteArray(Charsets.UTF_16BE)))
     }
 
     private companion object {
@@ -251,5 +251,6 @@ class OpmlHostileInputTest {
         val EARLY_CUTOFF_BYTES = OpmlLimits().maxMarkupGapBytes + 256 * 1024
 
         val BOM_UTF16LE = byteArrayOf(0xFF.toByte(), 0xFE.toByte())
+        val BOM_UTF16BE = byteArrayOf(0xFE.toByte(), 0xFF.toByte())
     }
 }

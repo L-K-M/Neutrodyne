@@ -380,6 +380,7 @@ internal class MarkupGapGuard(
 
                     else -> {
                         feedMatcher(u)
+                        // kxml2's `parseDoctype` quotes with `'` only; a `"` hides nothing (PrologLexer).
                         if (quoted) {
                             if (u == SQUOTE) quoted = false
                         } else {
@@ -761,7 +762,7 @@ internal class MarkupGapGuard(
             if (u == EOF) return true
             if (blind > 0) {
                 take()
-                blind = 0
+                blind--
                 continue
             }
             if (!isNameChar(u)) return true
@@ -836,6 +837,7 @@ internal class MarkupGapGuard(
         if (mode == Mode.PENDING) {
             mode = Mode.BYTE
             for (i in 0 until headLen) emitUnit(head[i])
+            headLen = 0
         } else if (holdLen > 0) {
             for (i in 0 until holdLen) emitUnit(hold[i])
             holdLen = 0

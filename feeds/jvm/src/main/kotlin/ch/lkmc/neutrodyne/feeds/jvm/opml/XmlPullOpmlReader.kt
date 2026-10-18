@@ -273,7 +273,7 @@ private class ReadSession(
                 XmlPullParser.START_TAG -> {
                     onStartTag()
                     if (parser.name.equals("title", ignoreCase = true) && headTitle == null) {
-                        headTitle = readElementText(parser.depth)
+                        headTitle = readElementText(parser.depth).trim()
                     } else {
                         ignoreSubtree()
                     }
@@ -498,7 +498,9 @@ private class ReadSession(
         val v = raw.trim()
         if (!v.startsWith('#')) return null
         val hex = v.substring(1)
-        val value = hex.toLongOrNull(16) ?: return null
+        // ASCII hex only: `toLong(16)` alone would accept a sign or a non-ASCII digit.
+        if (!hex.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) return null
+        val value = hex.toLong(16)
         return when (hex.length) {
             6 -> (0xFF000000L or value).toInt()
             8 -> value.toInt()
