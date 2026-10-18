@@ -2137,6 +2137,19 @@ code in `:feeds` (`ch.lkmc.neutrodyne.feeds.opml`), so both the apps and the syn
 write identical bytes. The writer goldens stay separate from the reader fixtures
 (`neutrodyne_*.opml`) in the same corpus directory.
 
+**Implementation note (2026-10-18, M3):** the 400,000-episode scale leg runs on the desktop
+JVM as `SnapshotScaleTest` (`:core:data` `desktopTest`, discovered only by the capped-heap
+`mutationTest` task, which excludes it from `desktopTest`). It seeds a real Room database
+with 400,000 distinct state-bearing episodes — 4,000-row `insertEpisodes` batches plus one
+reused `episode_state` prepared statement, so no 400,000-object collection is retained — then
+runs `AutoSnapshotProducer` → `BackupWriter` → `ZipArchiveWriter` at the format's deflate
+level 6 and re-reads the closed archive through `ZipGuard` and `BackupCodec`: manifest counts
+(`episodeLines`, `played`, `inProgress`), per-entry SHA-256 and byte counts, and a streamed
+line count of exactly 400,000 with independent state recounts. `FULL` (level 0) must land
+inside the 20 MB compressed cap; counts, timing, heap and size evidence go to
+`build/review-e2/`. The `SnapshotWorkerTest` row above still owns the Robolectric host legs
+(guards, watcher, worker lifecycle).
+
 ---
 
 ## Error handling and failure modes

@@ -99,14 +99,15 @@ private const val TEST_HEAP = "2g"
 private const val CROSS_DEVICE_CATEGORY = "ch.lkmc.neutrodyne.core.testing.CrossDevice"
 private val CROSS_DEVICE_HOSTS = setOf(":desktopApp")
 
-/** The modules that own `MutationRobustnessTest`, and the test task it lives in (09 Untrusted-input robustness). */
+/** The modules that own capped-heap test classes, and the base task they live in (09 Untrusted-input robustness, 05 Snapshot testing). */
 private val MUTATION_OWNERS =
     mapOf(
+        ":core:data" to "desktopTest",
         ":feeds:jvm" to "test",
         ":youtube:api" to "desktopTest",
         ":sync:protocol" to "desktopTest",
     )
-private val CAPPED_TESTS = listOf("*MutationRobustnessTest", "*HostileInputTest")
+private val CAPPED_TESTS = listOf("*MutationRobustnessTest", "*HostileInputTest", "*SnapshotScaleTest")
 
 /**
  * The capped robustness tests run in their own `mutationTest` task with a small heap; the base task excludes them.
