@@ -201,6 +201,21 @@ class DesktopAppGraphTest {
         assertThat(graph.credentialLookup).isSameInstanceAs(graph.secretStore)
     }
 
+    /**
+     * M3 C3a: the export repository resolves to the real `ExportRepositoryImpl` — resolution
+     * also proves the `FileExportDestination` binding and the `OpmlExporter` chain — and the
+     * snapshot scheduler is D34's documented no-op, not a silent fallback. The impls are
+     * `internal` to `:core:data`, so the assertion goes through the resolved class names.
+     * Resolving the repository pulls the database, so the open runs first.
+     */
+    @Test
+    fun theExportRepositoryAndSnapshotSchedulerAreTheRealDesktopBindings() {
+        runBlocking { graph.databaseOpener.awaitOpen() }
+
+        assertThat(graph.exportRepository::class.simpleName).isEqualTo("ExportRepositoryImpl")
+        assertThat(graph.snapshotScheduler::class.simpleName).isEqualTo("NoSnapshotScheduler")
+    }
+
     private companion object {
         const val FIRST_BAND = 0
 

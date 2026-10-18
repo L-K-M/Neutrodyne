@@ -1,0 +1,14 @@
+{
+  "entries": [
+    {
+      "ordinal": 0,
+      "text": "Caf�",
+      "title": "Café",
+      "type": "rss",
+      "url": "https://cafe.example.com/rss"
+    }
+  ],
+  "folders": [],
+  "headTitle": "cp1252 �quote�",
+  "mode": "STRICT"
+}

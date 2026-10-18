@@ -1,0 +1,41 @@
+{
+  "entries": [
+    {
+      "categories": [
+        "tech"
+      ],
+      "folderId": 0,
+      "htmlUrl": "https://atp.fm",
+      "ndSource": "rss",
+      "ordinal": 0,
+      "text": "ATP",
+      "title": "Accidental Tech Podcast",
+      "type": "rss",
+      "url": "https://atp.fm/rss"
+    },
+    {
+      "categories": [
+        "tech"
+      ],
+      "folderId": 0,
+      "ndSource": "youtube",
+      "ndYtVariants": "UULF",
+      "ordinal": 1,
+      "text": "Channel",
+      "title": "Channel",
+      "type": "rss",
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCBJycsmduvYEL83R_U4JriQ"
+    }
+  ],
+  "folders": [
+    {
+      "colorArgb": -22016,
+      "iconKey": "code",
+      "id": 0,
+      "name": "tech"
+    }
+  ],
+  "headTitle": "tech",
+  "mode": "STRICT",
+  "neutrodyne": true
+}

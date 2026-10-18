@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="1.0"><body>
+  <outline text="First" type="rss" xmlUrl="https://one.example.com/rss"/>
+  <outline text="Second" type="rss" xmlUrl="https://two.example.com/rss"/>
