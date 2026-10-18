@@ -155,6 +155,23 @@ internal class AutoSnapshotProducer(
         return mutex.withLock { produceLocked() }
     }
 
+    /**
+     * [produce] plus the before/after status pair `writeSnapshotNow` reports (05 Testing
+     * with bmgr): both reads stay inside [mutex], so a concurrent write or control can
+     * never interleave between them; `after` differing from `before` proves this pass,
+     * and nothing else, published.
+     */
+    suspend fun produceReport(): ProduceReport {
+        if (!supported) {
+            return ProduceReport(SnapshotResult.Unsupported, UNSUPPORTED_STATUS, UNSUPPORTED_STATUS)
+        }
+        return mutex.withLock {
+            val before = status()
+            val result = produceLocked()
+            ProduceReport(result, before, status())
+        }
+    }
+
     private suspend fun produceLocked(): SnapshotResult {
         if (!settings.get(BackupSettingKeys.AUTO_SNAPSHOT_ENABLED)) return SnapshotResult.Disabled
 
@@ -423,6 +440,13 @@ internal class AutoSnapshotProducer(
             )
     }
 }
+
+/** [AutoSnapshotProducer.produceReport]'s verdict and the status pair read around it. */
+internal data class ProduceReport(
+    val result: SnapshotResult,
+    val before: SnapshotStatus,
+    val after: SnapshotStatus,
+)
 
 /**
  * What one [AutoSnapshotProducer.produce] pass did (05 Snapshot production): explicit states

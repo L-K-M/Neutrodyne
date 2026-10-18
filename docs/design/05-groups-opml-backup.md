@@ -1540,7 +1540,7 @@ interface BackupRepository {
     suspend fun restoreAndroidBackup(): Outcome<Long, BackupError>              // Android: foreign snapshot → restore session id;
                                                                                 // desktop: Unsupported
     suspend fun discardAndroidBackup()                                          // Android: foreign snapshot → restored-{ts}.zip
-    suspend fun writeSnapshotNow(): Outcome<SnapshotStatus, BackupError>        // Android: SnapshotNowReceiver (shell, bmgr) and the
+    suspend fun writeSnapshotNow(): Outcome<SnapshotWrite, BackupError>         // Android: SnapshotNowReceiver (shell, bmgr) and the
                                                                                 // debug build's "Write snapshot now"; desktop: Unsupported
 }
 // :core:model
@@ -1565,9 +1565,21 @@ sealed interface RestoreProgress {
 data class SnapshotStatus(val supported: Boolean,               // false on the desktop (no Auto Backup)
                           val enabled: Boolean, val lastWrittenAt: Long?, val bytes: Long?, val level: Int,
                           val lastError: String?,
-                          val foreignPending: Boolean)   // a snapshot from another installation waits (First-launch restore)
+                           val foreignPending: Boolean)   // a snapshot from another installation waits (First-launch restore)
+data class SnapshotWrite(val before: SnapshotStatus, val after: SnapshotStatus)
 data class PrivacyCounts(val privateLinks: Int, val passwords: Int)
 ```
+
+**Implementation note (2026-10-18, M3 C5).** `writeSnapshotNow` returns
+`Outcome<SnapshotWrite, BackupError>`: `SnapshotWrite(before, after)` carries the
+`SnapshotStatus` pair the producer reads inside its write mutex, so the receiver's
+`ok` proves this invocation published (the publication fields `lastWrittenAt`,
+`bytes` and `level` moved) instead of reporting a status a concurrent second write
+could have produced. The verdict rule below is unchanged: `enabled = false` reads
+`disabled`, no publication move reads `guarded`, a timed-out wait reads `pending`,
+typed failures read `error …`.
+
+The receiver starts its reporting coroutine undispatched so an already-cancelled application scope still enters the finalizer. Injection failures and cancellation also complete the ordered-broadcast result; they never claim a successful write. The write remains an independent application-owned job, so the eight-second wait cannot cancel it.
 
 Preview text: "Backup from 4 Oct 2026 (Neutrodyne 1.3): 142 podcasts, 6 groups, 3,214 played episodes, 12 in Up next, settings." Checkboxes: Listening history, Up next, Settings (Merge default: history and Up next on, settings off; Replace: all on). Mode: **Merge** (default, [canonical defaults](#settings)) or **Replace**; Replace requires a confirmation naming its effect ("Removes 9 podcasts and 2 groups that are not in the backup, and replaces your listening history"). Confirming Replace first calls `PlaybackController.pause()` from the feature layer. A backup made on the other platform says so ("Backup from 4 Oct 2026, made on Android"). While the device is linked the preview adds "This device syncs with sync.example.org", and Replace asks how far it reaches ([Restore while linked](#restore-while-linked)).
 
@@ -1959,7 +1971,7 @@ The reinstall deliberately omits the `-t` of the official script, so it also pro
 
 - No intent filter: only an explicit broadcast reaches it, and only from a sender holding `DUMP`, whose protection level is `signature|privileged|development`. The shell user (`adb shell`) holds it; a third-party app cannot, except after an `adb shell pm grant`. It follows the pattern of 09's `BenchmarkSeedReceiver`.
 - Member-injected: `onReceive` first calls `graph.inject(this)` (`AndroidAppGraph.inject(target: SnapshotNowReceiver)`, [01 Dependency injection](01-foundation.md#dependency-injection)), which sets `BackupRepository` as a Metro `Lazy` (01's rule for framework components created before the database is open). `onReceive` calls `goAsync()`, starts `BackupRepository.writeSnapshotNow()` on `@ApplicationScope` and waits for it at most 8 s (`withTimeoutOrNull` on the `Deferred`, so a slow write is never cancelled; a receiver must finish "under 10 seconds" even with `goAsync()`). It then sets `resultCode = Activity.RESULT_OK` with `resultData = "ok at=<lastWrittenAt> bytes=<bytes> level=<level>"`, or `RESULT_CANCELED` with `"disabled"`, `"guarded"`, `"pending"` or `"error <BackupError>"`, and calls `finish()`. `am broadcast` sends an ordered broadcast, waits for it to finish and prints the result code and data, so the script asserts on that line.
-- `writeSnapshotNow()` runs the [Snapshot production](#snapshot-production) algorithm at once under the backup mutex, without the work's constraints, and returns the resulting `SnapshotStatus`. The receiver maps it: `enabled = false` → `disabled` (nothing written); `lastWrittenAt` not advanced because a guard held (a pending restore or a foreign snapshot) → `guarded` (the file stays); otherwise `ok`.
+- `writeSnapshotNow()` runs the [Snapshot production](#snapshot-production) algorithm at once under the backup mutex, without the work's constraints, and returns `SnapshotWrite(before, after)` read under that mutex. The receiver maps `after.enabled = false` to `disabled`; unchanged publication fields (`lastWrittenAt`, `bytes`, `level`) to `guarded`; otherwise `ok`.
 - Harmless if misused: it does only what the daily work does. It is the one named exception to PLAN N7's and 7.2's test-hook rule ([D2](../PLAN.md#3-key-decisions); [01 Debug build type](01-foundation.md#debug-build-type)): shell-only, `DUMP`-protected and running only production code. It ships in every APK, so the check runs on exactly what users install; it works on the non-debuggable release build because the shell holds `DUMP` whatever the app's flags. R8 keeps it, because manifest-declared components are entry points ([shrink code](https://developer.android.com/build/shrink-code)), and its name stays readable (`-dontobfuscate`, [01 Release build and baseline profiles](01-foundation.md#release-build-and-baseline-profiles)).
 - Local debug builds (`BuildInfo.debug`, [D2](../PLAN.md#3-key-decisions)) additionally show a "Write snapshot now" row in Settings › Backup (08) that calls the same function; release builds do not have it.
 - The script cannot list `files/backup/` with `run-as` (the release build is not debuggable; the debuggable-build exposure, risk P11, was retired 2026-10-05); its assertions use only the receiver's result line and the local transport's file list.
@@ -2125,6 +2137,19 @@ code in `:feeds` (`ch.lkmc.neutrodyne.feeds.opml`), so both the apps and the syn
 write identical bytes. The writer goldens stay separate from the reader fixtures
 (`neutrodyne_*.opml`) in the same corpus directory.
 
+**Implementation note (2026-10-18, M3):** the 400,000-episode scale leg runs on the desktop
+JVM as `SnapshotScaleTest` (`:core:data` `desktopTest`, discovered only by the capped-heap
+`mutationTest` task, which excludes it from `desktopTest`). It seeds a real Room database
+with 400,000 distinct state-bearing episodes — 4,000-row `insertEpisodes` batches plus one
+reused `episode_state` prepared statement, so no 400,000-object collection is retained — then
+runs `AutoSnapshotProducer` → `BackupWriter` → `ZipArchiveWriter` at the format's deflate
+level 6 and re-reads the closed archive through `ZipGuard` and `BackupCodec`: manifest counts
+(`episodeLines`, `played`, `inProgress`), per-entry SHA-256 and byte counts, and a streamed
+line count of exactly 400,000 with independent state recounts. `FULL` (level 0) must land
+inside the 20 MB compressed cap; counts, timing, heap and size evidence go to
+`build/review-e2/`. The `SnapshotWorkerTest` row above still owns the Robolectric host legs
+(guards, watcher, worker lifecycle).
+
 ---
 
 ## Error handling and failure modes
@@ -2228,7 +2253,7 @@ Shared code lands for both platforms in the milestone named; "Android" and "desk
 | `PlayContextResolver`, `PlayContextSpec` | play contexts | `:core:domain` / `:core:model` |
 | `ImportOptions`, `SourceGroup`, `CreateImportOptions`, `ImportSessionView`, `ImportItemView`, `ImportItemFilter`, `GroupProposal`, `ImportWarning`, `ImportError` | import API | `:core:model` / `:core:domain` |
 | `ExportRepository`, `ExportRequest`, `ExportFormat`, `ExportLayout`, `PreparedExport` | export API | `:core:domain` / `:core:model` |
-| `RestoreMode` (`MERGE`, `REPLACE`), `RestoreCategory`, `RestoreRequest`, `RestoreProgress`, `BackupPreview`, `BackupSummary`, `SnapshotStatus`, `PrivacyCounts`, `BackupError`, `ExportError`; `BackupRepository` members `preflight`, `restoreAndroidBackup`, `discardAndroidBackup`, `writeSnapshotNow` | backup API | `:core:model` / `:core:domain` |
+| `RestoreMode` (`MERGE`, `REPLACE`), `RestoreCategory`, `RestoreRequest`, `RestoreProgress`, `BackupPreview`, `BackupSummary`, `SnapshotStatus`, `SnapshotWrite`, `PrivacyCounts`, `BackupError`, `ExportError`; `BackupRepository` members `preflight`, `restoreAndroidBackup`, `discardAndroidBackup`, `writeSnapshotNow` | backup API | `:core:model` / `:core:domain` |
 | `LinkedRestoreReach` (`THIS_DEVICE`, `ALL_DEVICES`), `RestoreRequest.linkedReach`, `BackupPreview.linkedServerHost` and `writtenOn`, `SnapshotStatus.supported`, `BackupError.Unsupported`, `PreparedExport.shareUri` nullable *(2026-10-05)* | backup API additions | `:core:model` / `:core:domain` |
 | `LibraryMerger` (`mergeStaged`), `MergePolicy` (`RESTORE_MERGE`, `RESTORE_REPLACE`, `LINK_MERGE`, `LINK_REPLACE`), `MergeSummary`, `GroupChannelSync` (`sync`, `onUuidChanged`, `onDeleted`) *(2026-10-05)* | ports used by 10 | `:core:domain` / `:core:model` |
 | `RestoreMerger`, `StagedLibrary`, `LibraryMergerImpl`, `RestoreRunner`, `ImportFetchRunner`, `GroupMerger`; ports `PayloadSource`, `ExportDestination`, `ImportWorkScheduler`, `SnapshotScheduler` *(2026-10-05)* | shared implementation | `:core:data` `commonMain` |

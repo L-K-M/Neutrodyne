@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.model.BackupSummary
 import ch.lkmc.neutrodyne.core.model.PrivacyCounts
 import ch.lkmc.neutrodyne.core.model.RestoreRequest
 import ch.lkmc.neutrodyne.core.model.SnapshotStatus
+import ch.lkmc.neutrodyne.core.model.SnapshotWrite
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -47,8 +48,12 @@ interface BackupRepository {
     /** Android: renames the pending foreign snapshot to `restored-{ts}.zip` (05). */
     suspend fun discardAndroidBackup()
 
-    /** Android only (SnapshotNowReceiver, the debug row); desktop: Unsupported (05). */
-    suspend fun writeSnapshotNow(): Outcome<SnapshotStatus, BackupError>
+    /**
+     * Android only (SnapshotNowReceiver, the debug row); desktop: Unsupported (05). The
+     * pair is read under the write lock so the receiver's before/after verdict proves a
+     * real publication, never an interleaved one.
+     */
+    suspend fun writeSnapshotNow(): Outcome<SnapshotWrite, BackupError>
 }
 
 /**

@@ -27,6 +27,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.notification_import_done_title
 import ch.lkmc.neutrodyne.core.ui.resources.notification_restore_failed
 import ch.lkmc.neutrodyne.core.ui.resources.notification_restore_failed_auto
 import ch.lkmc.neutrodyne.core.ui.resources.notification_restore_failed_title
+import ch.lkmc.neutrodyne.core.ui.resources.notification_snapshot_needs_newer
 import ch.lkmc.neutrodyne.core.ui.resources.notification_snapshot_pending
 import ch.lkmc.neutrodyne.core.ui.resources.notification_snapshot_pending_title
 import dev.zacsweers.metro.ContributesBinding
@@ -85,14 +86,28 @@ internal class AndroidImportReportPoster(
     ) = locked {
         if (visibility.visibleSessionId.value == sessionId) return@locked
         if (!canPost()) return@locked
+        val newer = error is BackupError.NewerFormat
+        // 05 First-launch restore: an auto restore that hits NewerFormat keeps the snapshot
+        // and answers on ID 3004 with the needs-newer wording; a manual failure keeps the
+        // session report's id/route and shows the same truthful text.
         post(
-            ImportBackupChannels.ID_RESTORE_FAILED,
-            sessionTag(sessionId),
-            getString(Res.string.notification_restore_failed_title),
+            if (newer && auto) ImportBackupChannels.ID_FOREIGN_SNAPSHOT else ImportBackupChannels.ID_RESTORE_FAILED,
+            if (newer && auto) FOREIGN_TAG else sessionTag(sessionId),
             getString(
-                if (auto) Res.string.notification_restore_failed_auto else Res.string.notification_restore_failed,
+                if (newer && auto) {
+                    Res.string.notification_snapshot_pending_title
+                } else {
+                    Res.string.notification_restore_failed_title
+                },
             ),
-            sessionIntent("import/$sessionId"),
+            getString(
+                when {
+                    newer -> Res.string.notification_snapshot_needs_newer
+                    auto -> Res.string.notification_restore_failed_auto
+                    else -> Res.string.notification_restore_failed
+                },
+            ),
+            sessionIntent(if (newer && auto) "settings/backup" else "import/$sessionId"),
         )
     }
 
