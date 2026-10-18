@@ -223,6 +223,15 @@
     <string name="feeds_add_url">Per URL oder YouTube-Link hinzufügen</string>
     <string name="feeds_import">Abonnements importieren</string>
     <string name="feeds_mark_all_played">Alle als gespielt markieren…</string>
+    <string name="import_done_title">Import abgeschlossen</string>
+    <plurals name="import_done_added">
+        <item quantity="one">%1$d hinzugefügt</item>
+        <item quantity="other">%1$d hinzugefügt</item>
+    </plurals>
+    <plurals name="import_done_attention">
+        <item quantity="one">%1$d erfordert Aufmerksamkeit</item>
+        <item quantity="other">%1$d erfordern Aufmerksamkeit</item>
+    </plurals>
     <string name="filter_unplayed">Ungespielt</string>
     <string name="filter_downloaded">Heruntergeladen</string>
     <string name="filter_in_progress">Angefangen</string>

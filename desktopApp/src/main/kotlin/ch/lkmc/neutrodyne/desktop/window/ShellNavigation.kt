@@ -2,6 +2,9 @@
 package ch.lkmc.neutrodyne.desktop.window
 
 import androidx.navigation3.runtime.NavKey
+import ch.lkmc.neutrodyne.core.navigation.AppNavigator
+import ch.lkmc.neutrodyne.core.navigation.FeedsKey
+import ch.lkmc.neutrodyne.core.navigation.Route
 import java.awt.Frame
 import java.awt.Window
 import javax.swing.SwingUtilities
@@ -17,9 +20,17 @@ internal class DesktopMenuActions {
     @Volatile
     private var push: ((NavKey) -> Unit)? = null
 
+    @Volatile
+    private var navigator: AppNavigator? = null
+
     /** Called from the player slot's composition inside the root (`navigation::push`). */
     fun attachPush(navigate: (NavKey) -> Unit) {
         push = navigate
+    }
+
+    /** The full navigator — also attached from the player slot's composition. */
+    fun attachNavigator(navigator: AppNavigator) {
+        this.navigator = navigator
     }
 
     /**
@@ -29,6 +40,30 @@ internal class DesktopMenuActions {
     fun pushKey(key: NavKey): Boolean {
         val navigate = push ?: return false
         SwingUtilities.invokeLater { navigate(key) }
+        return true
+    }
+
+    /**
+     * Applies an [IntentRouter] route (a notification's click target, 11 Notifications) on the
+     * AWT thread. Returns false while the root has not composed — the caller's banner is gone
+     * by the next compose anyway, matching the OS-notification rule that clicks after the app
+     * has quit apply nothing.
+     */
+    fun applyRoute(route: Route): Boolean {
+        val current = navigator ?: return false
+        SwingUtilities.invokeLater {
+            when (route) {
+                is Route.Navigate -> current.open(route.tab, route.stack)
+
+                is Route.Push -> current.push(route.key)
+
+                // `groupUuid` selects the Feeds pager's group — not a navigator-level API;
+                // no notification route emits SelectFeed (IntentRouter maps only open/*).
+                is Route.SelectFeed -> current.selectTab(FeedsKey)
+
+                Route.ExpandPlayer, Route.None -> Unit
+            }
+        }
         return true
     }
 }

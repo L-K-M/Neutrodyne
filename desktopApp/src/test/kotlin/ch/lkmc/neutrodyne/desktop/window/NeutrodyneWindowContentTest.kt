@@ -14,13 +14,19 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.navigation3.runtime.NavKey
+import ch.lkmc.neutrodyne.core.common.DesktopNotification
+import ch.lkmc.neutrodyne.core.common.NotificationKind
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
+import ch.lkmc.neutrodyne.core.navigation.ImportKey
+import ch.lkmc.neutrodyne.core.navigation.LibraryKey
+import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.di.createDesktopGraph
 import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
+import ch.lkmc.neutrodyne.desktop.notifications.DesktopBannerNotifier
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
 import com.google.common.truth.Truth.assertThat
@@ -138,6 +144,42 @@ class NeutrodyneWindowContentTest {
             assertThat(provided).isEqualTo(PlatformKind.DESKTOP)
         }
 
+    /**
+     * The in-app banner fallback end to end (11 Notifications before MD2's `OsDesktopNotifier`):
+     * a posted `DesktopNotification` surfaces on the root snackbar through
+     * `RootSlots.userMessages`, and its "Open" tap comes back through `userMessageAction` to the
+     * notifier's route dispatch — where the shell's `applyRoute` would take over.
+     */
+    @Test
+    fun aPostedNotificationShowsItsBannerAndAppliesItsRoute() =
+        runComposeUiTest {
+            runBlocking { graph.databaseOpener.awaitOpen() }
+            val banners = DesktopBannerNotifier()
+            val dispatched = mutableListOf<Route>()
+            banners.routeDispatch = {
+                dispatched += it
+                true
+            }
+            setContent {
+                NeutrodyneWindowContent(
+                    installers = graph.entryInstallers,
+                    menuActions = DesktopMenuActions(),
+                    viewModelFactory = graph.metroViewModelFactory,
+                    banners = banners,
+                )
+            }
+            runBlocking { banners.post(IMPORT_NOTIFICATION) }
+
+            waitUntil("the banner shows", TIMEOUT_MS) {
+                onAllNodesWithText("Import finished — 3 added").fetchSemanticsNodes().isNotEmpty()
+            }
+            onNodeWithText("Open").performClick()
+
+            waitUntil("the tap reaches the dispatch", TIMEOUT_MS) { dispatched.isNotEmpty() }
+            assertThat(dispatched.single())
+                .isEqualTo(Route.Navigate(LibraryKey, listOf(ImportKey("7"))))
+        }
+
     @Test
     fun licencesListTheOpenJdkRuntime() =
         runComposeUiTest {
@@ -174,6 +216,15 @@ class NeutrodyneWindowContentTest {
 
     private companion object {
         const val TIMEOUT_MS = 5_000L
+
+        val IMPORT_NOTIFICATION =
+            DesktopNotification(
+                id = "import-7",
+                kind = NotificationKind.IMPORT_BACKUP,
+                title = "Import finished",
+                body = "3 added",
+                route = "neutrodyne://open/import/7",
+            )
     }
 }
 

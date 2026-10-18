@@ -236,6 +236,15 @@
     <string name="feeds_add_url">Add by URL or YouTube link</string>
     <string name="feeds_import">Import subscriptions</string>
     <string name="feeds_mark_all_played">Mark all as played…</string>
+    <string name="import_done_title">Import finished</string>
+    <plurals name="import_done_added">
+        <item quantity="one">%1$d added</item>
+        <item quantity="other">%1$d added</item>
+    </plurals>
+    <plurals name="import_done_attention">
+        <item quantity="one">%1$d needs attention</item>
+        <item quantity="other">%1$d need attention</item>
+    </plurals>
     <string name="filter_unplayed">Unplayed</string>
     <string name="filter_downloaded">Downloaded</string>
     <string name="filter_in_progress">In progress</string>
