@@ -349,9 +349,12 @@ StartupWMClass=ch-lkmc-neutrodyne-desktop-MainKt
 | `neutrodyne://open/…` | The internal routes of 01 (notification clicks use them in-process; from outside they only navigate) |
 | A file ending in `.opml` or `.xml` | OPML import preview ([05 Receiving files](05-groups-opml-backup.md#receiving-files)) |
 | A file ending in `.zip` | 05's detection: Neutrodyne backup → restore preview; Takeout ZIP → import preview |
-| A directory, another file type, an unreadable path | Snackbar "Neutrodyne can't open this file"; logged without the path |
+| A directory, another file type, a missing path | Snackbar "Neutrodyne can't open this file"; logged without the path |
+| A file whose metadata or contents cannot be read because access is denied | `ImportError.Unreadable` dialog with the desktop folder-privacy hint ([05 Acquire step 7](05-groups-opml-backup.md#1-acquire)); logged without the path |
 
 Caps: ≤ 20 inputs per hand-off, each ≤ 4 KiB; files must be regular files ≤ 64 MiB before 05's own caps apply. Inputs that arrive before navigation is ready are queued in order and applied after the first frame.
+
+**Implementation note (2026-10-18, M3 D5+D6).** The minimal `DesktopOpenHandler` now receives first-launch arguments, existing instance hand-offs, macOS open callbacks and whole-window drops. It resolves file inputs through `ImportRepository.create`, applies the first accepted route after the ready root's first frame, and leaves later file sessions available to `observeOpenSessions()`. The File menu's import item and Ctrl/Cmd+O use the shared unfiltered picker flow. The remaining menus, OS associations and installer registrations stay in their owning desktop milestones.
 
 ### Smoke mode
 
@@ -1726,7 +1729,7 @@ Serves N1, N4, N5, N7, N8, N11 for the desktop; risks T19, T20, T24, T25, T26. R
 |---|---|---|---|
 | `AppDirsTest` | `desktopTest` (pure) | each OS with and without `LOCALAPPDATA`, `XDG_*` absolute, relative (ignored) and unset; macOS paths from `user.home`; `ensureCreated` sets `0700` on POSIX; an image root inside a data directory (and a data directory inside the image root) is refused before anything is written | M0b |
 | `SingleInstanceTest` | `desktopTest`, two JVMs started by the test (test sources are outside the `ProcessBuilder` rule) | second launch delivers its arguments and exits 0 without creating a window; owner still starting (no port file) → retries then succeeds; wrong token rejected; oversize line rejected; owner killed → the lock is free at once; stale `instance.port` overwritten (M0 AC11) | M0b |
-| `DesktopOpenHandlerTest` | `desktopTest` | every input row of [Links and files from the OS](#links-and-files-from-the-os) → its route; relative paths resolved against `cwd`; > 20 inputs truncated; directory and unknown type → message; inputs before the first frame queued in order | M0b, MD2 |
+| `DesktopOpenHandlerTest` | `desktopTest` | every input row of [Links and files from the OS](#links-and-files-from-the-os) → its route; relative paths resolved against `cwd`; > 20 inputs truncated; directory and unknown type → message; inputs before the first frame queued in order | M3, MD2 |
 | `UrlSchemeRegistrarTest` | nightly on `windows-2025` | `neutrodyne` written; a foreign `feed` handler is not overwritten; one of ours is updated to the current launcher; "take over" overwrites | MD2 |
 | `LinuxDesktopEntryTest` | `desktopTest` (pure, fake home) | `LinuxDesktopEntryWriter` for the menu and the autostart entry: extraction paths containing spaces, `(`, `$`, `\`, `"`, a backtick and `%` give an always double-quoted Exec with `%U` (or `--background`), the four inner characters backslash-escaped, `%` written `%%` in Exec only, then every `\` doubled by the string escape (a literal `\` reads `\\\\` and a literal `$` reads `\\$` in Exec), and a TryExec and Icon with only the string escape, no quotes and no `%` rewriting; a path with a control character or `=` is refused and writes nothing; MimeType kept; moving the archive and re-running refreshes Exec, TryExec and Icon without duplicating the entry; writes only under `~/.local/share`, never under `/usr/share`, and starts no process | MD2 |
 | `CloseBehaviourTest` | `desktopTest` with fakes | idle close quits within 2 s; close while playing or downloading hides and shows the tray; `KEEP_RUNNING` always hides; hidden and idle for 10 min quits (`TestClock`); no tray support → iconify (MD2 AC3) | M0b, MD2 |

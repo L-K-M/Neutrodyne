@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.AllGroupsKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
+import ch.lkmc.neutrodyne.core.navigation.ImportFileKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.ui.BindEpisodeSelection
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
@@ -75,6 +76,7 @@ internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
         onMarkAllPlayedClick = viewModel::markAllPlayed,
         onAddPodcast = { navigator.push(AddPodcastKey(null)) },
         onSearch = { navigator.selectTab(DiscoverKey) },
+        onImport = { navigator.push(ImportFileKey) },
         onCreateGroup = { navigator.push(GroupEditKey(null)) },
     )
 

@@ -66,6 +66,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_retry
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_add_url
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_caught_up
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_empty_body
+import ch.lkmc.neutrodyne.core.ui.resources.feeds_import
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_load_error
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_mark_all_played
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_onboarding_title
@@ -92,6 +93,7 @@ internal fun FeedPage(
     onAddPodcast: () -> Unit,
     onSearch: () -> Unit,
     modifier: Modifier = Modifier,
+    onImport: () -> Unit = {},
     live: State<Map<Long, RowLive>> = rememberUpdatedState(emptyMap()),
     onVisibleIds: (Set<Long>) -> Unit = {},
     visitBaseline: Long? = null,
@@ -106,8 +108,10 @@ internal fun FeedPage(
                     body = stringResource(Res.string.feeds_empty_body),
                     actionLabel = stringResource(Res.string.feeds_search),
                     onAction = onSearch,
-                    secondaryLabel = stringResource(Res.string.feeds_add_url),
-                    onSecondary = onAddPodcast,
+                    secondaryLabel = stringResource(Res.string.feeds_import),
+                    onSecondary = onImport,
+                    tertiaryLabel = stringResource(Res.string.feeds_add_url),
+                    onTertiary = onAddPodcast,
                 )
             } else {
                 FeedList(

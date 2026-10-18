@@ -792,7 +792,7 @@ class ImportRouteTest {
             onNode(hasScrollToIndexAction()).performScrollToNode(
                 hasText("Feed no longer available. Check its address or remove it."),
             )
-            onNodeWithText("Feed no longer available. Check its address or remove it.").assertIsDisplayed()
+            assertDisplayedWhenReady("Feed no longer available. Check its address or remove it.")
         }
 
     @Test fun queuedRowShowsPendingFetch() =

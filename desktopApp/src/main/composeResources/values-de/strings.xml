@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Unlicense -->
+<resources>
+    <string name="window_title">Neutrodyne</string>
+    <string name="tray_tooltip">Neutrodyne</string>
+    <string name="tray_show">Neutrodyne anzeigen</string>
+    <string name="tray_quit">Beenden</string>
+    <string name="menu_file">Datei</string>
+    <string name="menu_import">OPML oder Sicherung importieren…</string>
+    <string name="drop_to_import">Zum Importieren ablegen</string>
+    <string name="drop_to_add">Zum Hinzufügen eines Podcasts ablegen</string>
+    <string name="desktop_cannot_open_file">Neutrodyne kann diese Datei nicht öffnen</string>
+</resources>

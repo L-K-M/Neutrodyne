@@ -6,6 +6,7 @@ import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import ch.lkmc.neutrodyne.core.navigation.BackupKey
 import ch.lkmc.neutrodyne.core.navigation.ExportKey
+import ch.lkmc.neutrodyne.core.navigation.ImportFileKey
 import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import kotlin.test.Test
@@ -17,6 +18,11 @@ class ImportExportNavigationTest {
         val provider = entryProvider<NavKey> { ImportExportNavigation.entries().invoke(this) }
         assertEquals(NdSceneMetadata.dialog(), provider(ExportKey(null)).metadata)
         assertEquals(NdSceneMetadata.dialog(), provider(ExportKey(5L)).metadata)
+    }
+
+    @Test fun thePickerIsRegisteredAsADialog() {
+        val provider = entryProvider<NavKey> { ImportExportNavigation.entries().invoke(this) }
+        assertEquals(NdSceneMetadata.dialog(), provider(ImportFileKey).metadata)
     }
 
     @Test fun theImportSessionResolvesAsADetailPane() {

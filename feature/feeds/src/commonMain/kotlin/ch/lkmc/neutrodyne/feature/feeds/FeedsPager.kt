@@ -96,6 +96,7 @@ internal fun FeedsScreen(
     onAddPodcast: () -> Unit,
     onSearch: () -> Unit,
     modifier: Modifier = Modifier,
+    onImport: () -> Unit = {},
     prefsFor: (FeedSource) -> Flow<FeedPrefs> = { flowOf(FeedPrefs(filters = state.filters)) },
     pageState: SaveableStateHolder = rememberSaveableStateHolder(),
     live: State<Map<Long, RowLive>> = rememberUpdatedState(emptyMap()),
@@ -321,6 +322,7 @@ internal fun FeedsScreen(
                             onMarkAllPlayedClick = { onMarkAllPlayedClick(source) },
                             onAddPodcast = onAddPodcast,
                             onSearch = onSearch,
+                            onImport = onImport,
                         )
                     }
                 }
