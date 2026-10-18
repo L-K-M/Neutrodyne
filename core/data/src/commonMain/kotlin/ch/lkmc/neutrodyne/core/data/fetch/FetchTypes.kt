@@ -97,8 +97,11 @@ internal enum class Sniff { RSS, ATOM, RDF, OPML, HTML, JSON, OTHER }
 /** 32 MiB: the fetch-side body cap (03 Body, hashing and sniffing). */
 internal const val MAX_FEED_BYTES: Long = 32L * 1024 * 1024
 
-/** OkHttp's former follow-up limit, kept by the manual chain (03 Request rules). */
+/** OkHttp's former follow-up limit, kept by the manual chains (03 Request rules). */
 internal const val MAX_REDIRECT_FOLLOWUPS = 20
+
+/** The only 3xx codes the manual chains follow (03 Request rules). */
+internal val FOLLOWABLE_STATUSES = setOf(301, 302, 303, 307, 308)
 
 /** The Accept header of every feed request (03 Request rules). */
 internal const val FEED_ACCEPT =
