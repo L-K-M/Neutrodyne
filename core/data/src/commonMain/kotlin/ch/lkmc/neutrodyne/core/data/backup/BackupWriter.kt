@@ -66,6 +66,8 @@ import ch.lkmc.neutrodyne.feeds.opml.OpmlWriter
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -314,6 +316,7 @@ internal class BackupWriter(
         // Step 4: flush to media, then the atomic rename — the previous target stays intact
         // until the staged archive is complete and passes the restore-side caps.
         fileSystem.openReadWrite(staged).use { it.flush() }
+        currentCoroutineContext().ensureActive()
         fileSystem.atomicMove(staged, target)
         return BackupSummary(
             bytes = bytes,

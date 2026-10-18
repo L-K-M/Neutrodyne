@@ -53,6 +53,7 @@ import ch.lkmc.neutrodyne.feeds.backup.SettingsV1
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipArchiveWriter
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipGuard
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
@@ -66,6 +67,7 @@ import okio.Sink
 import okio.buffer
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.io.path.createTempDirectory
 import kotlin.random.Random
 import kotlin.test.AfterTest
@@ -830,6 +832,34 @@ class BackupWriterTest {
             assertEquals(Outcome.Failure(BackupError.Io), outcome)
             fileSystem.read(target) { assertContentEquals(before, readByteArray()) }
             assertFalse(fileSystem.exists("$target.tmp".toPath()))
+        }
+
+    @Test
+    fun cancellationAfterArchiveCloseCannotPublishTheStage() =
+        runTest {
+            seedPodcast()
+            val target = target()
+            assertIs<Outcome.Success<*>>(newWriter().write(BackupKind.AUTO_SNAPSHOT, target, false))
+            val before = fileSystem.read(target) { readByteArray() }
+            seedPodcast()
+            val staged = "$target.tmp".toPath()
+            val caller = Job()
+            val cancelling =
+                object : ForwardingFileSystem(fileSystem) {
+                    override fun metadataOrNull(path: Path): FileMetadata? {
+                        val metadata = super.metadataOrNull(path)
+                        if (path == staged) caller.cancel()
+                        return metadata
+                    }
+                }
+            val write =
+                async(Dispatchers.IO + caller) {
+                    newWriter(fileSystem = cancelling).write(BackupKind.AUTO_SNAPSHOT, target, false)
+                }
+
+            assertFailsWith<CancellationException> { write.await() }
+            fileSystem.read(target) { assertContentEquals(before, readByteArray()) }
+            assertFalse(fileSystem.exists(staged))
         }
 
     @Test
