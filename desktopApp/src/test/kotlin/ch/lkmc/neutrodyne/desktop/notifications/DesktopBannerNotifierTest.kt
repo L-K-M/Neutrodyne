@@ -7,12 +7,18 @@ import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.ui.UiText
+import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_open
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 
@@ -86,6 +92,22 @@ class DesktopBannerNotifierTest {
         }
 
     @Test
+    fun pendingQueuePressureKeepsTheVisibleBannersOpenAction() =
+        assertShownActionSurvives {
+            repeat(10) { notifier.post(notification(id = "new-$it")) }
+        }
+
+    @Test
+    fun cancellingAPendingIdDoesNotBreakItsAlreadyVisibleOpenAction() =
+        assertShownActionSurvives { notifier.cancel("n-1") }
+
+    @Test
+    fun replacingAnIdKeepsTheVisibleBannersOriginalRoute() =
+        assertShownActionSurvives {
+            notifier.post(notification(route = "neutrodyne://open/import/8"))
+        }
+
+    @Test
     fun anOpenTapRoutesThroughIntentRouterToTheShellDispatch() =
         runTest {
             notifier.post(notification(route = "neutrodyne://open/import/7"))
@@ -124,4 +146,32 @@ class DesktopBannerNotifierTest {
         body = body,
         route = route,
     )
+
+    private fun assertShownActionSurvives(mutatePending: suspend () -> Unit) =
+        runTest {
+            notifier.post(notification(route = "neutrodyne://open/import/7"))
+            val shown = CompletableDeferred<UserMessage>()
+            val collector =
+                launch {
+                    notifier.userMessages.collect {
+                        shown.complete(it)
+                        awaitCancellation()
+                    }
+                }
+            try {
+                val message = shown.await()
+                val dispatched = mutableListOf<Route>()
+                notifier.routeDispatch = {
+                    dispatched += it
+                    true
+                }
+
+                mutatePending()
+                notifier.messageAction(message.id)
+
+                assertThat(dispatched).containsExactly(Route.Navigate(LibraryKey, listOf(ImportKey("7"))))
+            } finally {
+                collector.cancelAndJoin()
+            }
+        }
 }

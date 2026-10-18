@@ -47,6 +47,7 @@ class DesktopBannerNotifier
         private val lock = Any()
         private val pending = MutableStateFlow<ImmutableList<Entry>>(persistentListOf())
         private val byMessageId = HashMap<Long, DesktopNotification>()
+        private var presentedMessageId: Long? = null
         private var nextMessageId = 0L
 
         /**
@@ -60,14 +61,24 @@ class DesktopBannerNotifier
         val userMessages: Flow<UserMessage> =
             flow {
                 while (true) {
-                    val head = pending.first { it.isNotEmpty() }.first()
+                    pending.first { it.isNotEmpty() }
+                    val head =
+                        synchronized(lock) {
+                            pending.value.firstOrNull()?.also { presentedMessageId = it.message.id }
+                        } ?: continue
                     // `emit` returns after the snackbar is dismissed and its action, if
                     // tapped, has already run `messageAction` — the entry must still be
                     // readable then, so removal happens after, not before, the show.
-                    emit(head.message)
-                    synchronized(lock) {
-                        byMessageId -= head.message.id
-                        pending.value = (pending.value - head).toImmutableList()
+                    var consumed = false
+                    try {
+                        emit(head.message)
+                        consumed = true
+                    } finally {
+                        synchronized(lock) {
+                            if (consumed) pending.value = (pending.value - head).toImmutableList()
+                            if (presentedMessageId == head.message.id) presentedMessageId = null
+                            pruneRoutes()
+                        }
                     }
                 }
             }
@@ -85,19 +96,25 @@ class DesktopBannerNotifier
                 val entries = (pending.value.filterNot { it.notificationId == n.id } + Entry(n.id, message))
                 val dropped = entries.size - MAX_PENDING
                 if (dropped > 0) {
-                    entries.take(dropped).forEach { byMessageId -= it.message.id }
                     Log.w(TAG) { "dropping $dropped pending notification(s) — queue cap $MAX_PENDING" }
                 }
                 pending.value = entries.takeLast(MAX_PENDING).toImmutableList()
+                pruneRoutes()
             }
         }
 
         override fun cancel(id: String) {
             synchronized(lock) {
-                val removed = pending.value.filter { it.notificationId == id }
-                removed.forEach { byMessageId -= it.message.id }
                 pending.value = pending.value.filterNot { it.notificationId == id }.toImmutableList()
+                pruneRoutes()
             }
+        }
+
+        /** Called under [lock]: retain only pending callbacks and the already-visible action. */
+        private fun pruneRoutes() {
+            val retained = pending.value.mapTo(HashSet()) { it.message.id }
+            presentedMessageId?.let { retained += it }
+            byMessageId.keys.retainAll(retained)
         }
 
         /** `RootActions.userMessageAction`: an "Open" tap applies the notification's route. */

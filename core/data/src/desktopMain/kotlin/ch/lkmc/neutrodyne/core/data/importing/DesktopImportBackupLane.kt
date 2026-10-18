@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.JobLane
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
+import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.data.backup.RestoreRunResult
 import ch.lkmc.neutrodyne.core.data.backup.RestoreRunner
@@ -106,9 +107,12 @@ internal class DesktopImportBackupLane
             if (!network.status.value.isConnected) return
             for (session in db.importDao().activeSessions()) {
                 val result =
-                    runTracked(session.id) {
-                        fetches.run(session.id, session.laneAttempts(), RefreshRequest.NO_DEADLINE)
-                    } ?: continue
+                    suspendRunCatching {
+                        runTracked(session.id) {
+                            fetches.run(session.id, session.laneAttempts(), RefreshRequest.NO_DEADLINE)
+                        }
+                    }.onFailure { Log.w(TAG, it) { "import session ${session.id} failed" } }
+                        .getOrNull() ?: continue
                 if (result == ImportFetchResult.RETRY) {
                     if (network.status.value.isConnected) bumpLaneAttempts(session.id)
                     return
@@ -169,7 +173,8 @@ internal class DesktopImportBackupLane
             suspendRunCatching { cleaner.cleanExpired(now.toEpochMilliseconds()) }
                 .onSuccess {
                     suspendRunCatching {
-                        settings.set(DesktopSettingKeys.LAST_IMPORT_CLEANUP_AT, now.toEpochMilliseconds())
+                        val saved = settings.set(DesktopSettingKeys.LAST_IMPORT_CLEANUP_AT, now.toEpochMilliseconds())
+                        if (saved is Outcome.Failure) Log.w(TAG) { "cleanup timestamp write rejected" }
                     }.onFailure { Log.w(TAG, it) { "cleanup timestamp write failed" } }
                 }.onFailure { Log.w(TAG, it) { "import session cleanup failed" } }
         }

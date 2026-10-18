@@ -38,7 +38,7 @@ internal class DesktopImportReportPoster
             sessionId: Long,
             counts: Map<ImportItemStatus, Int>,
         ) {
-            val added = counts.filterKeys { it in ADDED_STATUSES }.values.sum()
+            val added = counts[ImportItemStatus.SUBSCRIBED] ?: 0
             val attention = counts.filterKeys { it in ATTENTION_STATUSES }.values.sum()
             val body =
                 UiText.Joined(
@@ -71,14 +71,6 @@ internal class DesktopImportReportPoster
 
             /** 01's import route (IntentRouter `open/import/{id}` → `ImportKey`). */
             const val ROUTE_PREFIX = "neutrodyne://open/import/"
-
-            /** The "139 added" half of 05 §8's body — the subscriptions that landed. */
-            val ADDED_STATUSES =
-                setOf(
-                    ImportItemStatus.SUBSCRIBED,
-                    ImportItemStatus.ALREADY_SUBSCRIBED,
-                    ImportItemStatus.MERGED,
-                )
 
             /** The "3 need attention" half — 05 §8's attention buckets. */
             val ATTENTION_STATUSES =

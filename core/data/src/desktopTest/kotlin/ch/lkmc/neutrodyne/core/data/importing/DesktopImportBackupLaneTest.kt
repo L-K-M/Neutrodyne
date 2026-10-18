@@ -37,6 +37,7 @@ import ch.lkmc.neutrodyne.core.data.testBuildInfo
 import ch.lkmc.neutrodyne.core.data.testClassifier
 import ch.lkmc.neutrodyne.core.data.testUserAgent
 import ch.lkmc.neutrodyne.core.domain.SettingsError
+import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
@@ -53,6 +54,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeImportReportPoster
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
+import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
@@ -319,6 +321,50 @@ class DesktopImportBackupLaneTest {
                     .status,
             )
             assertEquals(sessionId, reports.posts.single().sessionId)
+        }
+
+    @Test
+    fun aUserRetryStartsANewFetchCampaignAfterTheAttemptCap() =
+        runTest {
+            val podcast = pendingPodcast(FEED_A)
+            val sessionId = committedSession(laneAttempts = 20)
+            queueItem(sessionId, ordinal = 0, url = FEED_A, podcastId = podcast)
+            lane.run(now())
+            val podcasts = FakePodcastRepository()
+            val fixUps = ImportFixUps(db, podcasts, UnsubscribeUseCase(podcasts, poster), work, clock)
+
+            fixUps.retry(sessionId, setOf(0))
+            adapter.results[FEED_A] = adapterParsed(parsedFeed())
+            lane.run(now())
+
+            assertTrue(adapter.calls.isNotEmpty(), "a user retry must fetch after automatic attempts are exhausted")
+            assertEquals(
+                ImportItemStatus.SUBSCRIBED,
+                db
+                    .importDao()
+                    .itemsOf(sessionId)
+                    .single()
+                    .status,
+            )
+            assertEquals(0, laneAttemptsOf(sessionId))
+        }
+
+    @Test
+    fun aCorruptSessionDoesNotBlockLaterImportsOrCleanup() =
+        runTest {
+            val corrupt = committedSession(createdAt = MARKER - 1)
+            db.importDao().setOptionsJson(corrupt, "{broken")
+            queueItem(corrupt, ordinal = 0, url = FEED_A, podcastId = pendingPodcast(FEED_A))
+            val healthy = committedSession()
+            queueItem(healthy, ordinal = 0, url = FEED_B, podcastId = pendingPodcast(FEED_B))
+            adapter.results[FEED_B] = adapterParsed(parsedFeed())
+            val expired = expiredSession()
+
+            lane.run(now())
+
+            assertEquals(ImportState.DONE, session(healthy).state)
+            assertNull(db.importDao().sessionById(expired))
+            assertEquals("{broken", session(corrupt).optionsJson, "unknown metadata must never be reset to defaults")
         }
 
     // --- Cancellation and replay -----------------------------------------------------------------

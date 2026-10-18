@@ -53,17 +53,25 @@ class DesktopImportReportPosterTest {
             assertThat(notification.id).isEqualTo("import-7")
             assertThat(notification.kind).isEqualTo(NotificationKind.IMPORT_BACKUP)
             assertThat(notification.title).isEqualTo("Import finished")
-            assertThat(notification.body).isEqualTo("3 added, 3 need attention")
+            assertThat(notification.body).isEqualTo("2 added, 3 need attention")
             assertThat(notification.route).isEqualTo("neutrodyne://open/import/7")
         }
 
     @Test
     fun aCleanReportLeavesOutTheAttentionHalf() =
         runTest {
-            poster.postDone(9, mapOf(ImportItemStatus.MERGED to 1))
+            poster.postDone(9, mapOf(ImportItemStatus.SUBSCRIBED to 1))
 
             val notification = notifier.posts.single()
             assertThat(notification.body).isEqualTo("1 added")
+        }
+
+    @Test
+    fun matchingExistingSubscriptionsDoesNotCountThemAsNewlyAdded() =
+        runTest {
+            poster.postDone(9, mapOf(ImportItemStatus.ALREADY_SUBSCRIBED to 2, ImportItemStatus.MERGED to 1))
+
+            assertThat(notifier.posts.single().body).isEqualTo("0 added")
         }
 
     private class RecordingNotifier : DesktopNotifier {
