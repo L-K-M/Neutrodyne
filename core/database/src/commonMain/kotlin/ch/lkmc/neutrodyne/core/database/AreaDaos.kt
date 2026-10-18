@@ -494,19 +494,6 @@ data class ArtworkPinRow(
     val localPath: String,
 )
 
-/** `import_session`/`import_item` (M3: the OPML import pipeline). */
-@Dao
-interface ImportDao {
-    @Insert
-    suspend fun insertSession(row: ImportSessionEntity): Long
-
-    @Insert
-    suspend fun insertItems(rows: List<ImportItemEntity>)
-
-    @Query("SELECT * FROM import_item WHERE sessionId = :sessionId ORDER BY ordinal")
-    suspend fun itemsOf(sessionId: Long): List<ImportItemEntity>
-}
-
 /** `BackupDao` (M3: `observeLibraryShape`, the backup export reads). */
 @Dao
 interface BackupDao
