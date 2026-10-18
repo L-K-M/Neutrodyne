@@ -1843,6 +1843,8 @@ worker/initializer/receiver registration follows in C2/C4/C5/C6b.
 
 Implementation note (2026-10-18, M3 C2/C4): the Android workers and order-200 initializer use the real WorkManager hosts. Restore follow-up and startup reconciliation schedule only requests the runner can consume: decodable options with a request stamp and mode, plus a payload path. Unreadable or unsupported intent metadata stays protected by the fail-closed ownership guard, but never creates a no-op re-enqueue loop. Admission accepts unfinished same-session work or completion of the exact newly enqueued request; an old completed spec is not proof that `KEEP` accepted a new request. Unknown acceptance preserves the durable intent for reconciliation. First-launch restore and the shell receiver follow in C5/C6b.
 
+Staging note (2026-10-18, M3 C2/C4): notification targets already register `ImportKey` and `BackupKey` with an explicit unavailable screen and Back action, so a tap cannot crash while D1/D4 are being implemented. Those UI slices replace the interim entries before M3 is complete. The `settings/backup` deep link targets `BackupKey` rather than the settings dispatcher's Appearance fallback.
+
 ### First-launch restore
 
 `FirstLaunchRestoreInitializer` (`AppInitializer`, order 110, `:core:data` `androidMain`):
