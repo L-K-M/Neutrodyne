@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.data.storagePathsFor
 import ch.lkmc.neutrodyne.core.domain.ExportError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
@@ -130,6 +131,21 @@ class FileExportDestinationTest {
                 Outcome.Failure(ExportError.DestinationUnavailable),
                 destination.save(source, "file://fileserver/share/feeds.opml"),
             )
+        }
+
+    @Test
+    fun localhostUrisWithQueriesOrFragmentsKeepTheTargetUntouched() =
+        runTest {
+            val target = File(targetDir, "feeds.opml").apply { writeText("old") }
+            val uri = fileUri(target).replace("file://", "file://localhost")
+            for (suffix in listOf("?q=1", "#fragment")) {
+                assertEquals(
+                    Outcome.Failure(ExportError.DestinationUnavailable),
+                    destination.save(source, uri + suffix),
+                )
+                assertEquals("old", target.readText())
+            }
+            assertNoTemps()
         }
 
     @Test
@@ -328,6 +344,31 @@ class FileExportDestinationTest {
 
             assertFailsWith<CancellationException> { save.await() }
             assertEquals("old", target.readText())
+            assertNoTemps()
+        }
+
+    @Test
+    fun cancellationAfterTheCopyStillPreservesTheTarget() =
+        runTest {
+            val target = File(targetDir, "feeds.opml").apply { writeText("old") }
+            val caller = Job()
+            val dest =
+                destination(
+                    fs =
+                        failingSink { delegate ->
+                            object : ForwardingSink(delegate) {
+                                override fun close() {
+                                    super.close()
+                                    caller.cancel()
+                                }
+                            }
+                        },
+                )
+            val save = async(Dispatchers.IO + caller) { dest.save(source, fileUri(target)) }
+
+            assertFailsWith<CancellationException> { save.await() }
+            assertEquals("old", target.readText(), "a cancelled copy must never be published")
+            assertEquals(SOURCE_BYTES, sourceFile.readText())
             assertNoTemps()
         }
 

@@ -94,6 +94,16 @@ class FilePayloadSourceTest {
         }
 
     @Test
+    fun localhostUrisWithQueriesOrFragmentsAreRejected() =
+        runTest {
+            val file = file("local.opml", "l")
+            val uri = fileUri(file).replace("file://", "file://localhost")
+            for (suffix in listOf("?q=1", "#fragment")) {
+                assertEquals(Outcome.Failure(ImportError.Unreadable), payloads.open(uri + suffix))
+            }
+        }
+
+    @Test
     fun nonFileSchemesAreRejected() =
         runTest {
             for (uri in listOf(

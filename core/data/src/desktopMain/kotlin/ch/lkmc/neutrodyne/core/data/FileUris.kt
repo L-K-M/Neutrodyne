@@ -27,6 +27,7 @@ internal object FileUris {
                 return null
             }
         if (parsed.scheme == null || !parsed.scheme.equals(SCHEME, ignoreCase = true)) return null
+        if (parsed.rawQuery != null || parsed.rawFragment != null) return null
         val usable =
             when {
                 parsed.authority.isNullOrEmpty() -> {

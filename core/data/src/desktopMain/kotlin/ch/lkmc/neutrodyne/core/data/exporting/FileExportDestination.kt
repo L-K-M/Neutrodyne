@@ -89,6 +89,7 @@ internal class FileExportDestination(
                 }
             try {
                 copyToTemp(source, temp)?.let { return@withContext Outcome.Failure(it) }
+                currentCoroutineContext().ensureActive()
                 try {
                     move.move(temp, target)
                 } catch (_: Exception) {
