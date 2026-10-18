@@ -55,6 +55,8 @@ internal interface ImportWorkScheduler {
      * surface as a thrown failure instead, because the caller then keeps the durable intent
      * for start-up reconciliation: a native host must re-scan `PREVIEW` backup sessions for
      * `restoreRequestedAt` at start-up and enqueue whatever the last claim could not.
+     * Existing work for this same session already owns its intent and answers
+     * [RestoreEnqueue.ENQUEUED], never a decline that could clear an accepted request.
      */
     suspend fun scheduleRestore(
         sessionId: Long,
