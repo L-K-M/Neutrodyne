@@ -1,0 +1,28 @@
+{
+  "entries": [
+    {
+      "groupNames": [
+        "feeds"
+      ],
+      "htmlUrl": "https://a.example.com",
+      "ordinal": 0,
+      "title": "Show A",
+      "url": "https://a.example.com/rss"
+    },
+    {
+      "groupNames": [
+        "feeds"
+      ],
+      "ordinal": 1,
+      "title": "Show B",
+      "url": "https://b.example.com/rss"
+    }
+  ],
+  "format": "OPML",
+  "groups": [
+    {
+      "excludedReason": "wrapper",
+      "name": "feeds"
+    }
+  ]
+}

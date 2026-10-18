@@ -20,10 +20,13 @@ private const val NOTIFICATION_BIND_CHUNK = 500
 @Dao
 interface EpisodeDao {
     /**
-     * Restore's stub insertion (05): `inFeed = 0` rows a later refresh matches by `identityKey`.
+     * Restore's stub insertion (05 `Stubs and matching`, 02's `INSERT OR IGNORE`): `inFeed = 0`
+     * rows a later refresh matches by `identityKey`. OR IGNORE because a `(podcastId,
+     * identityKey)` collision — a repeated line or a row refresh just committed — is not an
+     * error: the caller resolves a -1 return by `byIdentityKey` and treats it as matched.
      * Ingest's own inserts go through `IngestDao.insertEpisodes` (descending `feedOrder` there).
      */
-    @Insert
+    @Insert(onConflict = androidx.room3.OnConflictStrategy.IGNORE)
     suspend fun insertStub(row: EpisodeEntity): Long
 
     @Query("SELECT * FROM episode WHERE id = :id")
@@ -93,6 +96,19 @@ interface EpisodeDao {
     /** The stored description blob (`EpisodeDescriptionCodec` decodes it in `:core:data`). */
     @Query("SELECT html FROM episode_description WHERE episodeId = :episodeId")
     fun observeDescription(episodeId: Long): Flow<ByteArray?>
+
+    /**
+     * 02 User-state writes' "played except newest" selection (D66; 05 §7 runs the mark-played
+     * chain over these IDs when the import option asks): every non-new episode of the podcast
+     * except its newest row. `isNew = 0` keeps an episode a non-initial refresh found meanwhile
+     * unplayed.
+     */
+    @Query(
+        "SELECT e.id FROM episode e WHERE e.podcastId = :podcastId AND e.isNew = 0" +
+            " AND e.id <> (SELECT id FROM episode WHERE podcastId = :podcastId" +
+            " ORDER BY sortDate DESC, id DESC LIMIT 1)",
+    )
+    suspend fun playedExceptNewestIds(podcastId: Long): List<Long>
 
     /**
      * `markFeedPlayed`'s id selection (02 Bulk "Mark all as played"): one-shot query built by

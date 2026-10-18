@@ -1,0 +1,18 @@
+{
+  "entries": [
+    {
+      "htmlUrl": "https://atp.fm",
+      "ordinal": 0,
+      "title": "Accidental Tech",
+      "url": "https://atp.fm/rss"
+    },
+    {
+      "ordinal": 1,
+      "preselect": false,
+      "title": "Some Show",
+      "url": "https://show.example.com/rss"
+    }
+  ],
+  "format": "OPML",
+  "groups": []
+}

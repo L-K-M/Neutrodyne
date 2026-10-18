@@ -1,0 +1,19 @@
+{
+  "entries": [
+    {
+      "ordinal": 0,
+      "text": "Feed",
+      "type": "rss",
+      "url": "https://feed.example.com/rss"
+    }
+  ],
+  "folders": [],
+  "ignoredOutlines": 2,
+  "mode": "STRICT",
+  "warnings": [
+    {
+      "code": "LINKED_LISTS",
+      "count": 2
+    }
+  ]
+}

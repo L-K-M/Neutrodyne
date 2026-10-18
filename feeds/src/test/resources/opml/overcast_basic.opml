@@ -1,0 +1,9 @@
+<opml version="1.0">
+  <head>
+    <title>Overcast Subscriptions</title>
+  </head>
+  <body>
+    <outline type="rss" text="ATP" title="Accidental Tech" xmlUrl="https://atp.fm/rss" htmlUrl="https://atp.fm"/>
+    <outline type="rss" text="Some Show" xmlUrl="https://show.example.com/rss" subscribed="0"/>
+  </body>
+</opml>

@@ -1,0 +1,24 @@
+{
+  "entries": [
+    {
+      "groupNames": [
+        "Archive"
+      ],
+      "ordinal": 0,
+      "preselect": false,
+      "title": "Old Show",
+      "url": "https://old.example.com/rss"
+    },
+    {
+      "ordinal": 1,
+      "title": "Live Show",
+      "url": "https://live.example.com/rss"
+    }
+  ],
+  "format": "OPML",
+  "groups": [
+    {
+      "name": "Archive"
+    }
+  ]
+}

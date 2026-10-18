@@ -1,0 +1,28 @@
+{
+  "entries": [
+    {
+      "htmlUrl": "https://show.example.com",
+      "ordinal": 0,
+      "text": "Show",
+      "type": "rss",
+      "url": "https://show.example.com/rss"
+    },
+    {
+      "ordinal": 1,
+      "preselect": false,
+      "text": "Other",
+      "type": "rss",
+      "url": "https://other.example.com/rss"
+    }
+  ],
+  "folders": [],
+  "headTitle": "Overcast Subscriptions",
+  "ignoredOutlines": 5,
+  "mode": "STRICT",
+  "warnings": [
+    {
+      "code": "IGNORED_OUTLINES",
+      "count": 5
+    }
+  ]
+}
