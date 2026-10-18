@@ -8,9 +8,11 @@ import ch.lkmc.neutrodyne.core.database.PodcastScopeRow
 import ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.Effective
+import ch.lkmc.neutrodyne.core.model.EffectivePlayback
 import ch.lkmc.neutrodyne.core.model.ScopedSettingsView
 import ch.lkmc.neutrodyne.core.model.SettingField
 import ch.lkmc.neutrodyne.core.model.SettingOverrides
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
@@ -27,6 +29,26 @@ internal class EffectiveSettingsResolverImpl(
     private val settings: SettingsRepository,
 ) : EffectiveSettingsResolver {
     private val dao = db.scopeSettingsDao()
+
+    override suspend fun playback(
+        podcastId: Long,
+        contextGroupId: Long?,
+    ): EffectivePlayback =
+        dao.podcastScopes(listOf(podcastId)).resolvePlayback(
+            contextGroupId,
+            settings.get(PlaybackSettingKeys.SPEED),
+            settings.get(PlaybackSettingKeys.SKIP_SILENCE),
+        )
+
+    override fun observePlayback(
+        podcastId: Long,
+        contextGroupId: Long?,
+    ): Flow<EffectivePlayback> =
+        combine(
+            dao.observePodcastScope(podcastId),
+            settings.observe(PlaybackSettingKeys.SPEED),
+            settings.observe(PlaybackSettingKeys.SKIP_SILENCE),
+        ) { rows, speed, silence -> rows.resolvePlayback(contextGroupId, speed, silence) }.distinctUntilChanged()
 
     override suspend fun notifications(podcastIds: Collection<Long>): Map<Long, Effective<Boolean>> =
         podcastIds

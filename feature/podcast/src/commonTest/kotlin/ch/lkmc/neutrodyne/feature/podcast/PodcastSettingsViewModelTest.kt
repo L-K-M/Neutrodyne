@@ -81,15 +81,15 @@ class PodcastSettingsViewModelTest : MainDispatcherTest() {
             vm.setNotifyNewEpisodes(false, null)
             advanceUntilIdle()
             assertEquals(
-                SettingOverrides(60, false),
+                SettingOverrides(60, false, 1f, false),
                 vm.uiState.value.scoped!!
                     .effective,
             )
-            assertTrue(
+            val sourcesAfterEdit =
                 vm.uiState.value.scoped!!
-                    .sources.values
-                    .all { it == SettingSource.PodcastOverride },
-            )
+                    .sources
+            assertEquals(SettingSource.PodcastOverride, sourcesAfterEdit[SettingField.REFRESH_INTERVAL_MINUTES])
+            assertEquals(SettingSource.PodcastOverride, sourcesAfterEdit[SettingField.NOTIFY_NEW_EPISODES])
         }
 
     @Test

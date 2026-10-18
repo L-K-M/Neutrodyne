@@ -652,6 +652,22 @@ observable refresh/notification batch reads alongside the snapshot methods.
 
 ### Writing overrides
 
+**Implementation note (2026-10-18, M4).** W4 extends the existing M2 models
+with `playbackSpeed`, `skipSilence`, their attributed sources and
+`GroupPlaybackHint`s. Podcast settings resolve playback without a context;
+member-group overrides are hints rather than inherited defaults. Playback
+resolution uses only the requested context group after checking membership,
+including for Up next items. Refresh and notification merges remain unchanged.
+Player writes use the additive `ScopeSettingsRepository.writePlayback` operation
+so membership validation, the chosen scoped value and more-specific clears share
+one Room writer transaction. Only the edited field on the current member chain
+is cleared; other fields, podcasts and groups survive. Invalid legacy speeds read
+as inherit in the write callback too, so they cannot block unrelated edits. A failed global DataStore
+write rolls back the scoped clears. Room and DataStore have no shared commit:
+if the final Room commit fails after DataStore succeeds, the global can remain
+stored, the scoped overrides survive and the operation reports failure. No
+schema or backup format change is needed.
+
 ```kotlin
 // :core:model — mirror of 02's ScopeOverrides (all nullable)
 data class SettingOverrides(

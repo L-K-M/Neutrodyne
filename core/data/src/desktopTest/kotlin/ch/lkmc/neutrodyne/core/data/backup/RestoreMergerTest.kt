@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.data.execSql
 import ch.lkmc.neutrodyne.core.data.newDb
 import ch.lkmc.neutrodyne.core.data.newUnsubscribe
 import ch.lkmc.neutrodyne.core.data.repo.GroupMerger
+import ch.lkmc.neutrodyne.core.data.settings.EffectiveSettingsResolverImpl
 import ch.lkmc.neutrodyne.core.database.CredentialEntity
 import ch.lkmc.neutrodyne.core.database.EpisodePositionEntity
 import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
@@ -22,14 +23,17 @@ import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.StoredSecret
+import ch.lkmc.neutrodyne.core.model.Effective
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.MergePolicy
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
+import ch.lkmc.neutrodyne.core.model.SettingSource
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.ProtocolOrderKeys
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
@@ -1081,6 +1085,82 @@ class RestoreMergerTest {
             // The backup row replaces the local row; a backup without settings deletes it.
             assertEquals(ScopeOverrides(boostDb = 4.0f), db.scopeSettingsDao().forPodcast(p)?.o)
             assertNull(db.scopeSettingsDao().forGroup(g))
+        }
+
+    /**
+     * 05 Rules 4 (W4): an `OverridesV1` speed outside the 0.5–3.0/0.05 grid drops before persistence;
+     * the effective value inherits and valid speeds round-trip verbatim.
+     */
+    @Test
+    fun outOfRangeScopeSpeedsDropBeforePersistence() =
+        runTest {
+            merger.mergeLibrary(
+                stagedOf(
+                    podcasts =
+                        listOf(
+                            podcastV1(
+                                "https://a/feed",
+                                settings = OverridesV1(playbackSpeed = 9.9f, skipSilence = true),
+                            ),
+                            podcastV1("https://b/feed", settings = OverridesV1(playbackSpeed = 1.5f)),
+                        ),
+                    groups =
+                        listOf(
+                            groupV1(
+                                uuid = "u-1",
+                                name = "News",
+                                members = listOf("https://a/feed"),
+                                settings = OverridesV1(playbackSpeed = 1.25f),
+                            ),
+                        ),
+                ),
+                MergePolicy.RESTORE_MERGE,
+                ALL_CATEGORIES,
+            )
+
+            val resolver = EffectiveSettingsResolverImpl(db, FakeSettingsRepository())
+            val a = assertNotNull(db.podcastDao().byFeedKey("https://a/feed")).id
+            val b = assertNotNull(db.podcastDao().byFeedKey("https://b/feed")).id
+            val group = db.groupDao().groupsInOrder().single()
+            val groupId = group.id
+
+            assertNull(
+                db
+                    .scopeSettingsDao()
+                    .forPodcast(a)
+                    ?.o
+                    ?.playbackSpeed,
+            )
+            assertEquals(
+                true,
+                db
+                    .scopeSettingsDao()
+                    .forPodcast(a)
+                    ?.o
+                    ?.skipSilence,
+            )
+            assertEquals(
+                1.5f,
+                db
+                    .scopeSettingsDao()
+                    .forPodcast(b)
+                    ?.o
+                    ?.playbackSpeed,
+            )
+
+            // a's invalid 9.9 drops: the valid context-group override takes over (dropped = inherit).
+            assertEquals(
+                Effective(1.25f, SettingSource.Group(group.uuid, "News")),
+                resolver.playback(a, groupId).speed,
+            )
+            assertEquals(
+                Effective(true, SettingSource.PodcastOverride),
+                resolver.playback(a, groupId).skipSilence,
+            )
+            // With no context group the invalid speed drops straight to the global default.
+            assertEquals(Effective(1.0f, SettingSource.AppDefault), resolver.playback(a, null).speed)
+            // A valid scope speed restores verbatim and wins the chain.
+            assertEquals(Effective(1.5f, SettingSource.PodcastOverride), resolver.playback(b, groupId).speed)
         }
 
     // --- Credentials ------------------------------------------------------------------------------

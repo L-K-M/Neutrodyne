@@ -43,7 +43,9 @@ internal class DataStoreSettingsRepository(
         key: SettingKey<T>,
         value: T,
     ): Outcome<Unit, SettingsError> {
-        if (rejectsValue(key, value)) {
+        // Shared registry validation (05 Rules 4): a rejected value is OutOfRange, so a
+        // backup restore or sync apply counts it as skipped rather than failing.
+        if (!AllSettingKeys.acceptsValue(key, value)) {
             return Outcome.Failure(SettingsError.OutOfRange(key.name))
         }
 
@@ -78,12 +80,6 @@ internal class DataStoreSettingsRepository(
             SettingsFile.PORTABLE -> settingsStore
             SettingsFile.DEVICE -> deviceSettingsStore
         }
-
-    /** A `Choice` outside its declared values is the one value a key itself forbids. */
-    private fun rejectsValue(
-        key: SettingKey<*>,
-        value: Any,
-    ): Boolean = key is SettingKey.Choice<*> && key.values.none { it == value }
 
     private companion object {
         const val LOG_TAG = "Settings"
