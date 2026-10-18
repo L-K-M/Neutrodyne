@@ -134,6 +134,15 @@ class ExportRepositoryTest {
             assertEquals("neutrodyne-sci-fi-fantasy-2026-10-04.opml", prepared.fileName)
         }
 
+    @Test fun groupFileNameSlugDropsDashAtLengthCap() =
+        runTest {
+            val prefix = "a".repeat(39)
+            val groupId = group("$prefix b", "a")
+            val prepared = prepared(ExportRequest(groupId = groupId))
+
+            assertEquals("neutrodyne-$prefix-2026-10-04.opml", prepared.fileName)
+        }
+
     @Test fun htmlUrlPrefersStoredLinkAndWritesLanguage() =
         runTest {
             podcast("https://a.example.com/rss", "Show") {
@@ -348,20 +357,20 @@ class ExportRepositoryTest {
                 File(exportDir, "old.opml").apply {
                     parentFile?.mkdirs()
                     writeText("stale")
-                    setLastModified(clock.now() - 25 * 3_600_000L)
+                    assertTrue(setLastModified(clock.now() - 25 * 3_600_000L), "Could not set mtime for $this")
                 }
             val fresh =
                 File(exportDir, "new.opml").apply {
                     writeText("fresh")
                     // The clock is fixed: pin the fresh file's mtime so a real wall clock
                     // behind the test clock can never age it past the cutoff.
-                    setLastModified(clock.now())
+                    assertTrue(setLastModified(clock.now()), "Could not set mtime for $this")
                 }
             val outside =
                 File(root, "cache/other/old.txt").apply {
                     parentFile?.mkdirs()
                     writeText("other")
-                    setLastModified(clock.now() - 25 * 3_600_000L)
+                    assertTrue(setLastModified(clock.now() - 25 * 3_600_000L), "Could not set mtime for $this")
                 }
 
             val cleaner = ExportFilesCleaner(storagePathsFor(root), fileSystem, clock)
@@ -379,7 +388,7 @@ class ExportRepositoryTest {
                 File(exportDir, "old.opml").apply {
                     parentFile?.mkdirs()
                     writeText("stale")
-                    setLastModified(clock.now() - 25 * 3_600_000L)
+                    assertTrue(setLastModified(clock.now() - 25 * 3_600_000L), "Could not set mtime for $this")
                 }
             // A stale non-empty subdirectory is not an export leftover: delete() throws,
             // deleteQuietly swallows it, and the sweep still reaches the other children.
@@ -387,7 +396,7 @@ class ExportRepositoryTest {
                 File(exportDir, "stale-dir").apply {
                     mkdirs()
                     resolve("inner.opml").writeText("inner")
-                    setLastModified(clock.now() - 25 * 3_600_000L)
+                    assertTrue(setLastModified(clock.now() - 25 * 3_600_000L), "Could not set mtime for $this")
                 }
 
             ExportFilesCleaner(storagePathsFor(root), fileSystem, clock).run()
@@ -412,12 +421,12 @@ class ExportRepositoryTest {
                 File(exportDir, "edge.opml").apply {
                     parentFile?.mkdirs()
                     writeText("edge")
-                    setLastModified(clock.now() - 24 * 3_600_000L)
+                    assertTrue(setLastModified(clock.now() - 24 * 3_600_000L), "Could not set mtime for $this")
                 }
             val stale =
                 File(exportDir, "old.opml").apply {
                     writeText("stale")
-                    setLastModified(clock.now() - 24 * 3_600_000L - 1)
+                    assertTrue(setLastModified(clock.now() - 24 * 3_600_000L - 1), "Could not set mtime for $this")
                 }
 
             ExportFilesCleaner(storagePathsFor(root), fileSystem, clock).run()

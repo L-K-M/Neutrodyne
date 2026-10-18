@@ -222,7 +222,7 @@ internal class OpmlExporter(
                     }
                 }
             }
-        return slug.take(MAX_SLUG_CHARS).ifEmpty { FALLBACK_SLUG }
+        return slug.take(MAX_SLUG_CHARS).trimEnd('-').ifEmpty { FALLBACK_SLUG }
     }
 
     /** `{yyyy-MM-dd}` in UTC — deterministic across devices, matching the document's `dateCreated`. */

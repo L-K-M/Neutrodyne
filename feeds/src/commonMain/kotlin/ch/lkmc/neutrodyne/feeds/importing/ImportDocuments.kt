@@ -80,9 +80,10 @@ public object ImportDocuments {
 
     /**
      * Folders become group proposals in document order — for Neutrodyne files every folder (empty
-     * groups and order round-trip); for foreign files only folders directly holding feeds (a
-     * FreshRSS-style container of folders maps to its innermost folder). Proposals are deduplicated
-     * on the [GroupNames] name key, first spelling wins; category-only names follow in order of
+     * groups and order round-trip); for foreign files folders directly holding feeds plus
+     * the excluded wrapper (a FreshRSS-style container maps feeds to their innermost folder).
+     * Proposals are deduplicated on the [GroupNames] name key, first spelling wins; category-only
+     * names follow in order of
      * first appearance. The wrapper and gPodder-section exclusions of Group mapping are computed
      * here because the preview cannot see the folder tree once `import_item` rows exist.
      */
@@ -106,20 +107,21 @@ public object ImportDocuments {
         ) {
             var valid = GroupNames.validate(name) as? GroupNames.Validation.Valid
             var proposal = name
+            val truncated = valid == null
             if (valid == null) {
                 // The classifier truncates entry group names over the cap (05 Group mapping),
                 // so the proposal takes the same prefix: a member's truncated nameKey then
                 // resolves to it instead of silently losing the folder's grouping.
                 valid = GroupNames.truncate(name) ?: return
                 proposal = valid.name
-                truncatedNames++
             }
             if (!seen.add(valid.nameKey)) return
+            if (truncated) truncatedNames++
             groups += ImportGroup(proposal, colorArgb, iconKey, reason)
         }
 
         for (folder in doc.folders) {
-            if (!doc.neutrodyne && folder.id !in feedParents) continue
+            if (!doc.neutrodyne && folder.id !in feedParents && folder.id != topFolderId) continue
             val reason =
                 when {
                     folder.id == topFolderId -> {
