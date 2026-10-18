@@ -93,20 +93,20 @@ private class DesktopPlatformActions(
         }
 
     override val saver: FileSaver =
-        FileSaver { suggestedName, _ ->
+        FileSaver { suggestedName, mimeType ->
             suspendCancellableCoroutine { cont ->
                 SwingUtilities.invokeLater {
-                    cont.resume(showSaveDialog(suggestedName))
+                    cont.resume(showSaveDialog(suggestedName, mimeType))
                 }
             }
         }
 
     override val reveal: RevealInFolder =
         RevealInFolder { path ->
-            val file = File(path)
+            val file = localFile(path) ?: return@RevealInFolder false
             // Linux has the portal's ShowItems (selects the file); elsewhere open the parent folder.
             if (portal != null && isLinux()) {
-                scope.launch { portal.showItems(path) }
+                scope.launch { portal.showItems(file.absolutePath) }
                 true
             } else {
                 try {
@@ -170,10 +170,51 @@ private fun isMacOs(): Boolean =
         .lowercase()
         .contains("mac")
 
-private fun showSaveDialog(suggestedName: String): String? {
+private fun showSaveDialog(
+    suggestedName: String,
+    mimeType: String,
+): String? {
     val dialog = FileDialog(null as Frame?, null, FileDialog.SAVE)
     dialog.file = suggestedName
     dialog.isVisible = true
     val file = dialog.file ?: return null
-    return File(dialog.directory, file).absolutePath
+    return savedFileUri(dialog.directory, file, mimeType)
 }
+
+/**
+ * The deterministic half of [showSaveDialog] (05 Destinations): a chosen name without an
+ * extension gets the type's default, and the result is the escaped local `file:` URI
+ * `FileExportDestination` accepts — never a bare path, so `file:` and `content:` callers stay
+ * distinguishable.
+ */
+internal fun savedFileUri(
+    directory: String,
+    chosenName: String,
+    mimeType: String,
+): String {
+    val extension = defaultExtension(mimeType)
+    val name =
+        if (extension != null && '.' !in chosenName) {
+            chosenName + extension
+        } else {
+            chosenName
+        }
+    return File(directory, name).toURI().toASCIIString()
+}
+
+/** The extension [FileSaver.create] appends to an extensionless name, per 05's export types. */
+internal fun defaultExtension(mimeType: String): String? =
+    when (mimeType) {
+        "text/x-opml" -> ".opml"
+        "application/json" -> ".json"
+        "application/zip" -> ".zip"
+        else -> null
+    }
+
+/** [path] may arrive as a raw path (pickers) or the saver's escaped `file:` URI. */
+private fun localFile(path: String): File? =
+    try {
+        if (path.startsWith("file:")) File(URI(path)) else File(path)
+    } catch (e: Exception) {
+        null
+    }

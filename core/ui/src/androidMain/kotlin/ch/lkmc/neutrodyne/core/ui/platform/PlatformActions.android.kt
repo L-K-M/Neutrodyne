@@ -109,14 +109,9 @@ internal class AndroidPlatformActions(
             override fun shareFile(
                 uri: String,
                 mimeType: String,
+                title: String,
             ) {
-                val send =
-                    Intent(Intent.ACTION_SEND)
-                        .setType(mimeType)
-                        .putExtra(Intent.EXTRA_STREAM, Uri.parse(uri))
-                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                send.clipData = ClipData.newRawUri(null, Uri.parse(uri))
-                context.startActivity(Intent.createChooser(send, null))
+                context.startActivity(Intent.createChooser(shareFileIntent(uri, mimeType, title), null))
             }
         }
 
@@ -163,6 +158,28 @@ internal class AndroidPlatformActions(
 
 /** POST_NOTIFICATIONS exists from API 33 (Tiramisu). */
 private const val NOTIFICATION_PERMISSION_SDK = 33
+
+/**
+ * The `ACTION_SEND` [Intent] behind [ShareSheet.shareFile] (05 Destinations): [title] reaches the
+ * receiving app through both `EXTRA_TITLE` and the ClipData label — the grant flag alone does not
+ * keep the file name past the chooser, and an unlabeled ClipData leaks the content: URI string
+ * where a name belongs.
+ */
+internal fun shareFileIntent(
+    uri: String,
+    mimeType: String,
+    title: String,
+): Intent {
+    val stream = Uri.parse(uri)
+    val send =
+        Intent(Intent.ACTION_SEND)
+            .setType(mimeType)
+            .putExtra(Intent.EXTRA_STREAM, stream)
+            .putExtra(Intent.EXTRA_TITLE, title)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    send.clipData = ClipData.newRawUri(title, stream)
+    return send
+}
 
 /** One `ACTION_CREATE_DOCUMENT` launch's input — name plus the MIME type [FileSaver.create] was given. */
 internal data class CreateDocumentRequest(

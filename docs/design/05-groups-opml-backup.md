@@ -926,6 +926,25 @@ into a UNC write. `FilePayloadSource` likewise refuses every symlink — the
 "no … link" half of [Acquire step 7](#1-acquire)'s regular-file rule — since
 the metadata stat describes the link itself, not its target.
 
+**Implementation note (2026-10-18, M3 D3).** The export dialog lands in
+`:feature:importexport`: `ExportKey(groupId)` renders through
+`NdSceneMetadata.dialog()` into a `Dialog` window whose body draws the
+options — or, once `prepare` returns an artifact with `privateLinks > 0` or
+`passwords > 0`, the R1.9 counts — and the ViewModel retains that exact
+`PreparedExport` so Continue delivers it unregenerated. The route supplies
+the platform seams (`FileSaver.create` / `ShareSheet.shareFile`), so the
+controller never touches a picker or an `Intent`. Two seam details shipped
+differently from the sketch above: `ShareSheet.shareFile` takes the display
+name as a third parameter (`EXTRA_TITLE` plus the `ClipData` label — the
+grant alone does not carry the name through the chooser), and the desktop
+`FileSaver.create` returns the escaped local `file:` URI after applying the
+extension rule while the AWT `FileDialog` stays the dialog on every OS —
+the XDG portal `SaveFile` is not part of this slice and remains with D5's
+per-OS split. The group action surface wired is the Library group tile's
+menu ("Share as OPML" on Android, "Export group as OPML…" on the desktop)
+plus the Library overflow's "Export subscriptions…"; the feed-header
+overflow variant stays with the group-feed row that owns that menu.
+
 File names: OPML `neutrodyne-subscriptions-{yyyy-MM-dd}.opml`, MIME `text/x-opml`; a group `neutrodyne-{slug}-{yyyy-MM-dd}.opml` (slug = `nameKey` with non-`[a-z0-9]` runs → `-`, trimmed, ≤ 40 chars, fallback `group`); NewPipe JSON `neutrodyne-youtube-{yyyy-MM-dd}.json`, MIME `application/json` ([04 NewPipe subscriptions JSON](04-youtube.md#newpipe-subscriptions-json-import-and-export)).
 
 `res/xml/file_paths.xml` (`:app`, Android) contains `<cache-path name="export" path="export/"/>` (07 adds the download roots to the same file). `ExportFilesCleaner` (an `AppInitializer`, order 300, both platforms) deletes files in the export cache directory (Android `cacheDir/export/`, desktop `<cache>/export/`, [11 AppDirs](11-desktop.md#appdirs)) older than 24 h; each export also deletes older files with the same name.

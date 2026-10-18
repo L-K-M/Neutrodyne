@@ -470,4 +470,34 @@
     </plurals>
     <string name="notification_episode_line">%1$s — %2$s</string>
     <string name="notification_other_podcasts">Andere Podcasts</string>
+
+    <!-- M3 OPML export (05 OPML export, 08 Export dialog). -->
+    <string name="export_title">Abonnements exportieren</string>
+    <string name="export_group_title_share">'%1$s' als OPML teilen</string>
+    <string name="export_group_title_export">'%1$s' als OPML exportieren</string>
+    <string name="export_layout_grouped">Gruppiert (empfohlen)</string>
+    <string name="export_layout_flat">Flache Liste</string>
+    <string name="export_layout_flat_note">Gruppen bleiben nur als Schlagwörter erhalten</string>
+    <string name="export_include_youtube">YouTube-Kanäle einschließen</string>
+    <string name="export_youtube_note">Andere Podcast-Apps können diese eventuell nicht abspielen</string>
+    <string name="export_include_passwords">Passwörter für private Feeds einschließen</string>
+    <string name="export_save">In Datei speichern</string>
+    <string name="export_saved">Gespeichert</string>
+    <string name="export_show_in_folder">Im Ordner anzeigen</string>
+    <plurals name="export_private_links">
+        <item quantity="one">Diese Datei enthält einen privaten Zugangslink für %1$d Feed. Jeder mit der Datei kann ihn abonnieren.</item>
+        <item quantity="other">Diese Datei enthält private Zugangslinks für %1$d Feeds. Jeder mit der Datei kann sie abonnieren.</item>
+    </plurals>
+    <plurals name="export_passwords">
+        <item quantity="one">Sie enthält außerdem %1$d Passwort im Klartext.</item>
+        <item quantity="other">Sie enthält außerdem %1$d Passwörter im Klartext.</item>
+    </plurals>
+    <string name="action_continue">Fortfahren</string>
+    <string name="export_err_io">Die Datei konnte nicht geschrieben werden</string>
+    <string name="export_err_storage">Nicht genügend Speicherplatz</string>
+    <string name="export_err_destination">An den gewählten Ort konnte nicht geschrieben werden</string>
+    <string name="export_err_unavailable">Export ist nicht verfügbar</string>
+    <string name="export_subscriptions">Abonnements exportieren…</string>
+    <string name="group_export_opml">Gruppe als OPML exportieren…</string>
+    <string name="group_share_opml">Als OPML teilen</string>
 </resources>
