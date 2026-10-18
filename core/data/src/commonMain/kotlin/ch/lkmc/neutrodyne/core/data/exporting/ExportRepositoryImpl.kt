@@ -66,6 +66,7 @@ internal class ExportRepositoryImpl(
                     // A same-name predecessor (a same-day re-export) is replaced — 05's
                     // "each export also deletes older files with the same name".
                     fileSystem.write(path) { OpmlWriter.write(this, built.document, layout) }
+                    destination.shareUri(built.fileName)
                 }
             }
         if (written.isFailure) return Outcome.Failure(ExportError.Io)
@@ -73,7 +74,7 @@ internal class ExportRepositoryImpl(
             PreparedExport(
                 fileName = built.fileName,
                 mimeType = OPML_MIME_TYPE,
-                shareUri = destination.shareUri(built.fileName),
+                shareUri = written.getOrNull(),
                 feeds = built.document.feeds.size,
                 privateLinks = built.privateLinks,
                 passwords = built.passwords,

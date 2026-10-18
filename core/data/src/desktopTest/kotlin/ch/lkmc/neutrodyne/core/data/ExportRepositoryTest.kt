@@ -296,6 +296,14 @@ class ExportRepositoryTest {
             assertTrue(io.dispatches.get() > 0)
         }
 
+    @Test fun prepareMintsTheShareUriOnTheIoDispatcher() =
+        runTest {
+            seedLibrary()
+            destination.onShare = { assertTrue(io.active.get(), "FileProvider work must stay off Main") }
+
+            prepared()
+        }
+
     @Test fun saveToPropagatesDestinationFailure() =
         runTest {
             seedLibrary()
@@ -493,8 +501,12 @@ class ExportRepositoryTest {
         var saveOutcome: Outcome<Unit, ExportError> = Outcome.Success(Unit),
     ) : ExportDestination {
         val saves = mutableListOf<Pair<Path, String>>()
+        var onShare: (() -> Unit)? = null
 
-        override fun shareUri(fileName: String): String? = shareUriValue?.let { "$it$fileName" }
+        override fun shareUri(fileName: String): String? {
+            onShare?.invoke()
+            return shareUriValue?.let { "$it$fileName" }
+        }
 
         override suspend fun save(
             source: Path,
@@ -510,13 +522,21 @@ class ExportRepositoryTest {
         private val delegate: CoroutineDispatcher,
     ) : CoroutineDispatcher() {
         val dispatches = AtomicInteger()
+        val active: ThreadLocal<Boolean> = ThreadLocal.withInitial { false }
 
         override fun dispatch(
             context: CoroutineContext,
             block: Runnable,
         ) {
             dispatches.incrementAndGet()
-            delegate.dispatch(context, block)
+            delegate.dispatch(context) {
+                active.set(true)
+                try {
+                    block.run()
+                } finally {
+                    active.remove()
+                }
+            }
         }
     }
 }

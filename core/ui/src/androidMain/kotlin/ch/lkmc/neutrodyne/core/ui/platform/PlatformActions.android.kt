@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.ui.platform
 
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.Context
@@ -10,6 +11,7 @@ import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -38,7 +40,7 @@ public fun rememberAndroidPlatformActions(): PlatformActions {
             openFile.complete(it)
         }
     val createLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) {
+        rememberLauncherForActivityResult(CreateDocumentContract()) {
             createFile.complete(it)
         }
     val notificationLauncher =
@@ -64,13 +66,13 @@ public fun rememberAndroidPlatformActions(): PlatformActions {
     return actions
 }
 
-private class AndroidPlatformActions(
+internal class AndroidPlatformActions(
     private val context: Context,
     private val openFile: PendingResult<Uri?>,
     private val createFile: PendingResult<Uri?>,
     private val notification: PendingResult<Boolean>,
     private val openLauncher: ActivityResultLauncher<Array<String>>,
-    private val createLauncher: ActivityResultLauncher<String>,
+    private val createLauncher: ActivityResultLauncher<CreateDocumentRequest>,
     private val notificationLauncher: ActivityResultLauncher<String>,
 ) : PlatformActions {
     override val urls: ExternalUrlOpener =
@@ -135,11 +137,13 @@ private class AndroidPlatformActions(
         }
 
     override val saver: FileSaver =
-        FileSaver { suggestedName, _ ->
-            // CreateDocument's MIME type is fixed at construction; "*/*" is used and the document's
-            // real type is set by the writer (05's export writes zip/opml content regardless).
+        FileSaver { suggestedName, mimeType ->
+            // 05 Destinations: the MIME type rides the request — CreateDocument's own contract
+            // fixes the type at construction, so the launcher uses the per-request contract.
             suspendCancellableCoroutine { cont ->
-                createFile.start(cont.contramap { it?.toString() }) { createLauncher.launch(suggestedName) }
+                createFile.start(cont.contramap { it?.toString() }) {
+                    createLauncher.launch(CreateDocumentRequest(suggestedName, mimeType))
+                }
             }
         }
 
@@ -160,11 +164,37 @@ private class AndroidPlatformActions(
 /** POST_NOTIFICATIONS exists from API 33 (Tiramisu). */
 private const val NOTIFICATION_PERMISSION_SDK = 33
 
+/** One `ACTION_CREATE_DOCUMENT` launch's input — name plus the MIME type [FileSaver.create] was given. */
+internal data class CreateDocumentRequest(
+    val suggestedName: String,
+    val mimeType: String,
+)
+
+/**
+ * `ActivityResultContracts.CreateDocument` bakes the MIME type into its constructor, so it cannot
+ * answer [FileSaver.create]'s per-call type (05 Destinations: `text/x-opml`, `application/zip`).
+ * This contract is the same `ACTION_CREATE_DOCUMENT` intent with the type carried per launch.
+ */
+internal class CreateDocumentContract : ActivityResultContract<CreateDocumentRequest, Uri?>() {
+    override fun createIntent(
+        context: Context,
+        input: CreateDocumentRequest,
+    ): Intent =
+        Intent(Intent.ACTION_CREATE_DOCUMENT)
+            .setType(input.mimeType)
+            .putExtra(Intent.EXTRA_TITLE, input.suggestedName)
+
+    override fun parseResult(
+        resultCode: Int,
+        intent: Intent?,
+    ): Uri? = if (resultCode == Activity.RESULT_OK) intent?.data else null
+}
+
 /**
  * One outstanding activity-result call. [start] suspends the caller until [complete] delivers the
  * launcher result; a second [start] while one is pending finishes the first with `null`.
  */
-private class PendingResult<T> {
+internal class PendingResult<T> {
     private var continuation: Continuation<T>? = null
 
     fun start(
