@@ -10,8 +10,11 @@ import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.domain.BackupRepository
 import ch.lkmc.neutrodyne.core.domain.ExportRepository
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
+import ch.lkmc.neutrodyne.core.domain.ImportReportPoster
+import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.domain.NewEpisodePoster
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
@@ -69,6 +72,16 @@ interface AndroidAppGraph {
      * Android seam (SAF destination + FileProvider share URIs), not a common default.
      */
     val exportRepository: ExportRepository
+
+    /**
+     * M3 C2: the import and backup lanes' repositories — bound to the real impls so a feature
+     * row (D-rows) never resolves a stub, and the `import_backup` report poster.
+     */
+    val importRepository: ImportRepository
+
+    val backupRepository: BackupRepository
+
+    val importReportPoster: ImportReportPoster
 
     /** The Coil `SingletonImageLoader.Factory` installed in `NeutrodyneApplication` (08 Coil ImageLoader). */
     val imageLoaderFactory: NeutrodyneImageLoaderFactory
