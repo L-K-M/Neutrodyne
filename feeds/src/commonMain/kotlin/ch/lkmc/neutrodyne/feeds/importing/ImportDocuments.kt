@@ -83,9 +83,9 @@ public object ImportDocuments {
      * groups and order round-trip); for foreign files folders directly holding feeds plus
      * the excluded wrapper (a FreshRSS-style container maps feeds to their innermost folder).
      * Proposals are deduplicated on the [GroupNames] name key, first spelling wins; category-only
-     * names follow in order of
-     * first appearance. The wrapper and gPodder-section exclusions of Group mapping are computed
-     * here because the preview cannot see the folder tree once `import_item` rows exist.
+     * names follow in order of first appearance. The wrapper and gPodder-section exclusions of
+     * Group mapping are computed here because the preview cannot see the folder tree once
+     * `import_item` rows exist.
      */
     public fun fromOpml(doc: OpmlDocument): ImportDocument {
         val foldersById = doc.folders.associateBy { it.id }

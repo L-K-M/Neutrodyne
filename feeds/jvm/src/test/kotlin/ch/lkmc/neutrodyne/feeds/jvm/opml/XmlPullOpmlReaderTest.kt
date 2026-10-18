@@ -273,6 +273,23 @@ class XmlPullOpmlReaderTest {
     }
 
     @Test
+    fun strayQuoteAfterClosedValueDoesNotSwallowLaterSalvageOutlines() {
+        val xml =
+            """<opml version="1.0" note="&#xZZZZ;"><body>
+                <outline xmlUrl="https://a.example/feed" 'oops/>
+                <outline xmlUrl="https://b.example/feed"/>
+                <outline xmlUrl="https://c.example/feed"/>
+                </body></opml>"""
+        val doc = assertIs<OpmlReadResult.Ok>(read(xml)).document
+
+        assertEquals(ParseMode.SALVAGE, doc.mode)
+        assertEquals(
+            listOf("https://a.example/feed", "https://b.example/feed", "https://c.example/feed"),
+            doc.entries.map { it.url },
+        )
+    }
+
+    @Test
     fun strayApostropheDoesNotExtendSalvageTagCapIntoFollowingText() {
         // The text exceeds the 64 KiB tag cap, but stays below the markup-gap cap.
         val xml =
