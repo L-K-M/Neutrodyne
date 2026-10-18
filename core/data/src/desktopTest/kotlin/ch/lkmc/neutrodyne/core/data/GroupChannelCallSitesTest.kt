@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.model.GroupEdit
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
@@ -38,8 +39,9 @@ class GroupChannelCallSitesTest {
     private val channels = FakeGroupChannelSync()
     private val refresh = FakeRefreshController()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val groups = GroupRepositoryImpl(db, TestClock(), TestOrderKeys, channels, refresh, scope)
-    private val settings = ScopeSettingsRepositoryImpl(db, FakeSettingsRepository(), { refresh }, channels)
+    private val snapshots = FakeSnapshotScheduler()
+    private val groups = GroupRepositoryImpl(db, TestClock(), TestOrderKeys, channels, refresh, snapshots, scope)
+    private val settings = ScopeSettingsRepositoryImpl(db, FakeSettingsRepository(), { refresh }, channels, snapshots)
 
     @AfterTest
     fun close() {
@@ -143,8 +145,10 @@ class GroupChannelCallSitesTest {
                         rescheduled = true
                     }
                 }
-            val hookedGroups = GroupRepositoryImpl(db, TestClock(), TestOrderKeys, channels, controller, scope)
-            val hookedSettings = ScopeSettingsRepositoryImpl(db, FakeSettingsRepository(), { controller }, channels)
+            val hookedGroups =
+                GroupRepositoryImpl(db, TestClock(), TestOrderKeys, channels, controller, snapshots, scope)
+            val hookedSettings =
+                ScopeSettingsRepositoryImpl(db, FakeSettingsRepository(), { controller }, channels, snapshots)
             val id = assertIs<Outcome.Success<Long>>(hookedGroups.create(GroupDraft("Tech"))).value
             val token = assertIs<Outcome.Success<DeletedGroupToken>>(hookedGroups.delete(id)).value
             val writes: List<suspend () -> Unit> =

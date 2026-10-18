@@ -21,6 +21,7 @@ import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.groupEntity
 import ch.lkmc.neutrodyne.core.testing.database.memberEntity
@@ -44,7 +45,8 @@ class ScopeSettingsRepositoryTest {
     private val db = TestDb.inMemory()
     private val settings = FakeSettingsRepository()
     private val refresh = FakeRefreshController()
-    private val repo = ScopeSettingsRepositoryImpl(db, settings, { refresh }, FakeGroupChannelSync())
+    private val snapshots = FakeSnapshotScheduler()
+    private val repo = ScopeSettingsRepositoryImpl(db, settings, { refresh }, FakeGroupChannelSync(), snapshots)
     private val dao = db.scopeSettingsDao()
 
     @AfterTest fun close() = db.close()
@@ -168,6 +170,7 @@ class ScopeSettingsRepositoryTest {
                                     settings,
                                     { FakeRefreshController() },
                                     FakeGroupChannelSync(),
+                                    FakeSnapshotScheduler(),
                                 )
                             start.await()
                             when (field) {
@@ -306,7 +309,14 @@ class ScopeSettingsRepositoryTest {
                                 }.await()
                     }
                 }
-            val hooked = ScopeSettingsRepositoryImpl(db, settings, { controller }, FakeGroupChannelSync())
+            val hooked =
+                ScopeSettingsRepositoryImpl(
+                    db,
+                    settings,
+                    { controller },
+                    FakeGroupChannelSync(),
+                    FakeSnapshotScheduler(),
+                )
             assertEquals(Outcome.Success(Unit), hooked.updatePodcast(podcast) { SettingOverrides(120) })
             assertEquals(120, observed)
         }
@@ -319,7 +329,14 @@ class ScopeSettingsRepositoryTest {
                     override suspend fun reschedulePeriodic(): Unit =
                         throw SQLiteException("Scheduler database unavailable")
                 }
-            val hooked = ScopeSettingsRepositoryImpl(db, settings, { controller }, FakeGroupChannelSync())
+            val hooked =
+                ScopeSettingsRepositoryImpl(
+                    db,
+                    settings,
+                    { controller },
+                    FakeGroupChannelSync(),
+                    FakeSnapshotScheduler(),
+                )
             assertEquals(Outcome.Success(Unit), hooked.updatePodcast(podcast) { SettingOverrides(60) })
             assertEquals(60, dao.forPodcast(podcast)?.o?.refreshIntervalMinutes)
         }
