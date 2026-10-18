@@ -53,6 +53,14 @@ class YouTubeIdsTest {
 
         assertNull(YouTubeIds.uploadsToChannel("PL6566A39B68523E18"))
         assertNull(YouTubeIds.uploadsToChannel("UU" + "a".repeat(22)))
+
+        // Only the "UU" uploads family converts; same-length IDs of other families stay playlists.
+        assertNull(YouTubeIds.uploadsToChannel("PL$SUFFIX"))
+        assertNull(YouTubeIds.uploadsToChannel("RD$SUFFIX"))
+        assertNull(YouTubeIds.uploadsToChannel("PLxx$SUFFIX"))
+
+        // An unrecognized 26-char "UU" variant still maps, with no hint (like UUMO/UUPS).
+        assertEquals(CHANNEL to null, YouTubeIds.uploadsToChannel("UUXY$SUFFIX"))
     }
 
     @Test
