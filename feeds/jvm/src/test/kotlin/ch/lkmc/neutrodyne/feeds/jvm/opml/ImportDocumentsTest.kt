@@ -86,9 +86,9 @@ class ImportDocumentsTest {
         assertEquals(listOf<ImportGroup>(ImportGroup("feeds")), import.groups)
     }
 
-    /** A foreign file proposes only folders that directly hold feeds (FreshRSS nesting rule). */
+    /** A foreign container is proposed as an excluded wrapper even without direct feeds. */
     @Test
-    fun foreignContainersOfFoldersAreNotGroups() {
+    fun foreignWrapperWithoutDirectFeedsIsProposedButExcluded() {
         val doc =
             OpmlDocument(
                 entries = listOf(entry(0, "https://a.example.com/rss", folderId = 1)),
@@ -100,7 +100,32 @@ class ImportDocumentsTest {
                 mode = ParseMode.STRICT,
             )
         val import = ImportDocuments.fromOpml(doc)
-        assertEquals(listOf(ImportGroup("Inner")), import.groups)
+        assertEquals(
+            listOf(ImportGroup("Outer", excludedReason = ImportGroup.EXCLUDED_WRAPPER), ImportGroup("Inner")),
+            import.groups,
+        )
+        assertEquals(listOf("Inner"), import.entries.single().groupNames)
+    }
+
+    @Test
+    fun foreignNonWrapperFoldersWithoutDirectFeedsStaySkipped() {
+        val doc =
+            OpmlDocument(
+                entries = listOf(entry(0, "https://a.example/rss", folderId = 2)),
+                folders =
+                    listOf(
+                        FolderRef(id = 0, name = "Outer"),
+                        FolderRef(id = 1, name = "Middle", parentId = 0),
+                        FolderRef(id = 2, name = "Inner", parentId = 1),
+                        FolderRef(id = 3, name = "Empty"),
+                    ),
+                mode = ParseMode.STRICT,
+            )
+
+        assertEquals(
+            listOf(ImportGroup("Outer", excludedReason = ImportGroup.EXCLUDED_WRAPPER), ImportGroup("Inner")),
+            ImportDocuments.fromOpml(doc).groups,
+        )
     }
 
     /** Neutrodyne files propose every folder so empty groups and their order round-trip. */
@@ -156,6 +181,29 @@ class ImportDocumentsTest {
         val import = ImportDocuments.fromOpml(doc)
         assertEquals(listOf(ImportGroup("🎧".repeat(20) + "a".repeat(20))), import.groups)
         assertEquals(listOf(name), import.entries[0].groupNames)
+        assertEquals(
+            listOf(ImportDocumentWarning(ImportDocumentWarning.TRUNCATED_NAMES, 1)),
+            import.warnings,
+        )
+    }
+
+    @Test
+    fun duplicateTruncatedNamesCountOnlyAddedProposals() {
+        val prefix = "a".repeat(40)
+        val name = prefix + "first"
+        val doc =
+            OpmlDocument(
+                entries =
+                    listOf(
+                        entry(0, "https://a.example/rss", folderId = 0, categories = listOf(name, prefix + "second")),
+                        entry(1, "https://b.example/rss", folderId = 1),
+                    ),
+                folders = listOf(FolderRef(id = 0, name = name), FolderRef(id = 1, name = name)),
+                mode = ParseMode.STRICT,
+            )
+        val import = ImportDocuments.fromOpml(doc)
+
+        assertEquals(listOf(ImportGroup(prefix)), import.groups)
         assertEquals(
             listOf(ImportDocumentWarning(ImportDocumentWarning.TRUNCATED_NAMES, 1)),
             import.warnings,
