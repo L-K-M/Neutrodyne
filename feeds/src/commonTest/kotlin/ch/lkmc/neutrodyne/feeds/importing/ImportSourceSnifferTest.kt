@@ -94,6 +94,7 @@ class ImportSourceSnifferTest {
             recognized(sniffText("""{"localSubscriptions":["a"],"format":"json"}""")),
         )
         assertEquals(SniffedFormat.LIBRETUBE_JSON, recognized(sniffText("""{"channelGroups":[]}""")))
+        assertEquals(SniffedFormat.LIBRETUBE_JSON, recognized(sniffText("""{"groups":[]}""")))
         assertEquals(SniffedFormat.LIBRETUBE_JSON, recognized(sniffText("""{"format":"Piped"}""")))
         assertUnsupported("json", sniffText("""{"format":"piped"}"""))
         assertUnsupported("json", sniffText("""{"anything":1}"""))
@@ -111,13 +112,32 @@ class ImportSourceSnifferTest {
     }
 
     @Test
+    fun explicitLibreTubeMarkersDecideAnEmptySubscriptionsArray() {
+        for (text in listOf(
+            """{"format":"Piped","version":1,"subscriptions":[],"groups":[]}""",
+            """{"subscriptions":[],"format":"Piped"}""",
+            """{"subscriptions":[],"localSubscriptions":[]}""",
+            """{"subscriptions":[],"channelGroups":[]}""",
+            """{"subscriptions":[],"groups":[]}""",
+            """{"format":"Piped","subscriptions":["https://www.youtube.com/channel/UCx"]}""",
+        )) {
+            assertEquals(SniffedFormat.LIBRETUBE_JSON, recognized(sniffText(text)), text)
+        }
+    }
+
+    @Test
     fun theWindowStopsAt64KiBHoweverTheSourceReads() {
         // request() refills in segment-sized pulls, so a short-reading source leaves
         // more than 64 KiB buffered; a marker past the cap must not decide (05).
         val marker = "\",\"localSubscriptions\":[]}"
         val payload = "{\"pad\":\"" + "x".repeat(64 * 1024) + marker
-        val chunked = ChunkedSource(Buffer().write(payload.encodeToByteArray()), 100)
-        assertUnsupported("json", ImportSourceSniffer.sniff({ chunked }, "payload".toPath()))
+        assertUnsupported(
+            "json",
+            ImportSourceSniffer.sniff(
+                { ChunkedSource(Buffer().write(payload.encodeToByteArray()), 100) },
+                "payload".toPath(),
+            ),
+        )
     }
 
     @Test

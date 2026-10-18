@@ -26,6 +26,10 @@ import okio.buffer
  * `episodes.jsonl` lines ≤ [EPISODE_LINE_MAX_BYTES], streamed so a large file never
  * materialises.
  *
+ * Decode methods and [manifestFormat] leave [Source] ownership with the caller. Queue and
+ * settings sources must already carry the archive's [ArchiveCaps] byte limits.
+ * [episodeLines] instead returns an owning iterator that closes its source.
+ *
  * [mode] decides what the staging-only `EpisodeLineV1.fc` does on encode: it belongs only in
  * 10's first-link staging files, so ARCHIVE strips it — the invariant "fc never reaches an
  * archive" holds regardless of what a producer hands over. Decoding always accepts it.

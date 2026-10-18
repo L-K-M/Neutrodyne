@@ -236,10 +236,10 @@ class BackupCodecTest {
         val queue =
             codec.decodeQueue(
                 sourceOf(
-                    """{"zzz":true,"upNext":[{"p":"a","k":"b","kv":1,"extra":5}],"session":{"current":{"p":"a","k":"b","x":{}}}}""",
+                    """{"zzz":true,"upNext":[{"p":"a","k":"b","kv":2,"extra":5}],"session":{"current":{"p":"a","k":"b","x":{}}}}""",
                 ),
             )
-        assertEquals(UpNextRefV1("a", "b"), queue.upNext[0])
+        assertEquals(UpNextRefV1("a", "b", 2), queue.upNext[0])
     }
 
     @Test

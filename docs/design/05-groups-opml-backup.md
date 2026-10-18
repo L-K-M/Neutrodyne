@@ -1243,6 +1243,8 @@ Implementation note (2026-10-17, M3): the signature is `sniff(open: () -> okio.S
 | text, ≥ 80 % of non-empty non-`#` lines are URLs, `UC…` IDs or `@handles` | `URL_LIST` (M8; [04 URL list](04-youtube.md#url-list-import)) |
 | anything else | `Unsupported("unknown")` → "This doesn't look like a podcast list" |
 
+Implementation note (2026-10-18, M3): explicit LibreTube/Piped markers take precedence over the NewPipe array shape. An empty `subscriptions` array occurs in both formats; without those markers it remains NewPipe, but an empty Piped export must route to LibreTube.
+
 ### Adapters
 
 Every parser yields `ImportEntry`s that go through [Classify](#3-classify), [Group mapping](#4-group-mapping), preview, commit and fetch unchanged.
