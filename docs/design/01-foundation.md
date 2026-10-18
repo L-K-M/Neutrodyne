@@ -75,7 +75,7 @@ All verified 2026-10-04; the YouTube-engine, signature and CI-action rows on 202
 | Network | OkHttp BOM (`okhttp`, `okhttp-coroutines`, `okhttp-tls`, `mockwebserver3`, `mockwebserver3-junit4`) | 5.5.0 | Clients are built only in the island `:core:network:okhttp`; **no OkHttp `Cache`** ([D10](../PLAN.md#3-key-decisions)) |
 | | Ktor client (`ktor-client-core`, `ktor-client-okhttp`, `ktor-client-content-negotiation`, `ktor-serialization-kotlinx-json`) via `ktor-bom` | 3.6.0 | The HTTP API of common code, on the OkHttp engine with the island's client as `preconfigured` ([Ktor client engines](https://ktor.io/docs/client-engines.html)); `ktor-client-okhttp` is JVM-only, so it appears only in platform source sets; client SSE ([Ktor client SSE](https://ktor.io/docs/client-server-sent-events.html)) for 10's `SyncEventsClient` → [S12](#s12-ktor-fetch-pipeline) |
 | | Okio | 3.18.2 | KMP file system and hashing |
-| | kotlinx.serialization JSON | 1.11.0 | |
+| | kotlinx.serialization JSON (+ `kotlinx-serialization-json-okio`) | 1.11.0 | The okio artifact adds `Json.decodeFromBufferedSource`: 05's `BackupCodec` streams typed decodes off `okio.Source` instead of materialising a `String` plus a `JsonElement` tree |
 | | kotlinx.coroutines (`core`, `android`, `swing`, `guava`, `test`) | 1.11.0 | `-swing` gives the desktop `Dispatchers.Main` (Compose desktop does not depend on it); `-guava` for Media3 futures |
 | | kotlinx-datetime | 0.8.0 | With `kotlin.time.Instant`/`Clock` (stable since Kotlin 2.3) |
 | | kotlinx-collections-immutable | 0.5.2 | |
@@ -269,6 +269,7 @@ ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negoti
 ktor-serialization-kotlinx-json = { module = "io.ktor:ktor-serialization-kotlinx-json" }
 okio = { module = "com.squareup.okio:okio", version.ref = "okio" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
+kotlinx-serialization-json-okio = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json-okio", version.ref = "kotlinxSerialization" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
 kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "kotlinxCoroutines" }

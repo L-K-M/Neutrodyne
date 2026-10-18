@@ -4,17 +4,19 @@
 package ch.lkmc.neutrodyne.feeds.backup
 
 import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.okio.decodeFromBufferedSource
+import okio.Buffer
 import okio.BufferedSink
 import okio.BufferedSource
+import okio.ForwardingSource
 import okio.Source
 import okio.buffer
 
@@ -25,6 +27,11 @@ import okio.buffer
  * `manifest.json` ≤ [MANIFEST_MAX_BYTES], `library.json` ≤ [LIBRARY_MAX_BYTES] and
  * `episodes.jsonl` lines ≤ [EPISODE_LINE_MAX_BYTES], streamed so a large file never
  * materialises.
+ *
+ * Entries decode straight off their [Source] ([Json.decodeFromBufferedSource]) — never a
+ * whole-entry `String` plus a `JsonElement` tree, which both scale past the caps into an
+ * `OutOfMemoryError`. Unknown members are skipped iteratively by the lexer's token stack,
+ * so depth or size inside the caps is forward-compatible input, not a crash.
  *
  * Decode methods and [manifestFormat] leave [Source] ownership with the caller. Queue and
  * settings sources must already carry the archive's [ArchiveCaps] byte limits.
@@ -64,22 +71,24 @@ public class BackupCodec(
      */
     public fun decodeManifest(source: Source): BackupManifest {
         val text = source.buffer().readBounded(MANIFEST_MAX_BYTES)
-        val element = parse(text)
-        val format = (element as? JsonObject)?.get("format") as? JsonPrimitive
+        // The gate reads `format` and `minReaderVersion` through probe DTOs under the format's
+        // ignoreUnknownKeys, never a document JsonElement tree: its reader recurses on nested
+        // arrays, and an unknown member can be arbitrarily deep inside the 1 MiB cap.
+        val format = gateProbe<FormatGate>(text)?.format as? JsonPrimitive
         if (format?.isString != true || format.content != FORMAT) {
             throw BackupCodecException.NotABackup
         }
-        // The gate reads the raw field before the v1 decode: a newer manifest can change
-        // the v1 shape, and "update the app" must still win over "corrupt" (05
-        // Versioning). An absent or malformed field claims nothing — the full decode
-        // then supplies the default or reports Corrupt.
+        // The gate still runs before the v1 decode: a newer manifest can change the v1
+        // shape, and "update the app" must still win over "corrupt" (05 Versioning). An
+        // absent, malformed or container value claims nothing — the default stands and the
+        // v1 decode reports Corrupt where the field is really wrong.
         val minReaderVersion =
-            ((element as? JsonObject)?.get("minReaderVersion") as? JsonPrimitive)?.intOrNull
+            (gateProbe<MinReaderVersionGate>(text)?.minReaderVersion as? JsonPrimitive)?.intOrNull
                 ?: MIN_READER_VERSION
         if (minReaderVersion > FORMAT_VERSION) {
             throw BackupCodecException.NewerFormat(minReaderVersion)
         }
-        return decode(element)
+        return decodeText(text)
     }
 
     /**
@@ -91,27 +100,29 @@ public class BackupCodec(
     public fun manifestFormat(source: Source): String? {
         val buffered = source.buffer()
         if (buffered.request(MANIFEST_MAX_BYTES + 1)) return null
-        val element =
-            try {
-                json.parseToJsonElement(buffered.readUtf8())
-            } catch (e: SerializationException) {
-                return null
-            }
-        val format = (element as? JsonObject)?.get("format") as? JsonPrimitive
-        return format?.takeIf { it.isString }?.content
+        // The probe's String member fails to decode on anything that is not a JSON string,
+        // and ignoreUnknownKeys skips the rest iteratively — malformed input, a non-string
+        // `format` (container or scalar) and deep unknown members all land on null without
+        // ever materialising a tree.
+        return try {
+            json.decodeFromBufferedSource<FormatSniff>(buffered).format
+        } catch (e: SerializationException) {
+            null
+        }
     }
 
     public fun encodeLibrary(library: LibraryV1): String = json.encodeToString(library)
 
-    public fun decodeLibrary(source: Source): LibraryV1 = decode(parse(source.buffer().readBounded(LIBRARY_MAX_BYTES)))
+    public fun decodeLibrary(source: Source): LibraryV1 =
+        decodeStreaming(BoundedSource(source, LIBRARY_MAX_BYTES).buffer())
 
     public fun encodeQueue(queue: QueueV1): String = json.encodeToString(queue)
 
-    public fun decodeQueue(source: Source): QueueV1 = decode(parse(source.buffer().readUtf8()))
+    public fun decodeQueue(source: Source): QueueV1 = decodeStreaming(source.buffer())
 
     public fun encodeSettings(settings: SettingsV1): String = json.encodeToString(settings)
 
-    public fun decodeSettings(source: Source): SettingsV1 = decode(parse(source.buffer().readUtf8()))
+    public fun decodeSettings(source: Source): SettingsV1 = decodeStreaming(source.buffer())
 
     /**
      * One `episodes.jsonl` line, without the line terminator. In [Mode.ARCHIVE] the
@@ -135,22 +146,107 @@ public class BackupCodec(
      */
     public fun episodeLines(source: Source): EpisodeLines = EpisodeLines(source, json)
 
-    private fun parse(text: String): JsonElement =
+    /**
+     * Decodes a manifest gate-probe DTO over [text]: `ignoreUnknownKeys` lets the lexer skip
+     * every member but the probed field iteratively, so a deep unknown container never reaches
+     * a stack. A probed member that is itself a container deeper than the `JsonElement`
+     * reader's stack is an unusable gate value — null, which callers fold into the same
+     * verdicts the absent-value cases get. A [SerializationException] on a `{` document is
+     * malformed input ([BackupCodecException.Corrupt], ahead of the format gate as before);
+     * on a well-formed root that is not an object there is simply no member, hence null.
+     */
+    private inline fun <reified T> gateProbe(text: String): T? =
         try {
-            json.parseToJsonElement(text)
+            json.decodeFromString<T>(text)
         } catch (e: SerializationException) {
-            throw BackupCodecException.Corrupt(e)
+            if (text.firstJsonChar() == '{') throw BackupCodecException.Corrupt(e)
+            try {
+                json.parseToJsonElement(text)
+            } catch (inner: Throwable) {
+                if (inner is SerializationException || inner.isStackOverflowError()) {
+                    throw BackupCodecException.Corrupt(e)
+                }
+                throw inner
+            }
+            null
+        } catch (e: Throwable) {
+            if (!e.isStackOverflowError()) throw e
+            null
         }
 
-    private inline fun <reified T> decode(element: JsonElement): T =
+    private inline fun <reified T> decodeStreaming(source: BufferedSource): T =
+        decodeCatching { json.decodeFromBufferedSource<T>(source) }
+
+    private inline fun <reified T> decodeText(text: String): T = decodeCatching { json.decodeFromString<T>(text) }
+
+    /**
+     * Maps decode failures to [BackupCodecException.Corrupt]. `JsonElement`-typed members
+     * (`GroupV1.rule`, `SettingValueV1.value`) still route through kotlinx's tree reader,
+     * which recurses on nested arrays — a container deeper than the stack is a shape the
+     * DTOs cannot hold: Corrupt, never the Error itself.
+     */
+    private inline fun <T> decodeCatching(block: () -> T): T =
         try {
-            json.decodeFromJsonElement<T>(element)
+            block()
         } catch (e: SerializationException) {
             throw BackupCodecException.Corrupt(e)
         } catch (e: IllegalArgumentException) {
             // Enum names and other value failures surface as plain IllegalArgumentException.
             throw BackupCodecException.Corrupt(e)
+        } catch (e: Throwable) {
+            if (!e.isStackOverflowError()) throw e
+            throw BackupCodecException.Corrupt(e)
         }
+
+    /**
+     * The platform stack-overflow error cannot be named in commonMain (01 source-set
+     * rules); its simple class name is already unambiguous.
+     */
+    private fun Throwable.isStackOverflowError(): Boolean = this::class.simpleName == "StackOverflowError"
+
+    /** The first non-JSON-whitespace character, or null on an empty document. */
+    private fun String.firstJsonChar(): Char? = firstOrNull { it !in " \t\r\n" }
+
+    /**
+     * Counts the bytes a source supplies and throws [BackupCodecException.TooLarge] once more
+     * than [maxBytes] have flowed: [readBounded]'s cap without the eager prefetch, so a
+     * streaming decoder only pulls the bytes the payload needs.
+     */
+    private class BoundedSource(
+        delegate: Source,
+        private val maxBytes: Long,
+    ) : ForwardingSource(delegate) {
+        private var total: Long = 0
+
+        override fun read(
+            sink: Buffer,
+            byteCount: Long,
+        ): Long {
+            val count = super.read(sink, byteCount)
+            if (count > 0) {
+                total += count
+                if (total > maxBytes) throw BackupCodecException.TooLarge
+            }
+            return count
+        }
+    }
+
+    /** The [decodeManifest] gate probes: the two members read before the v1 decode. */
+    @Serializable
+    private data class FormatGate(
+        val format: JsonElement? = null,
+    )
+
+    @Serializable
+    private data class MinReaderVersionGate(
+        val minReaderVersion: JsonElement? = null,
+    )
+
+    /** The [manifestFormat] probe: the `format` member when it is a JSON string. */
+    @Serializable
+    private data class FormatSniff(
+        val format: String? = null,
+    )
 
     /**
      * Reads all remaining bytes as UTF-8, throwing [BackupCodecException.TooLarge] when the
