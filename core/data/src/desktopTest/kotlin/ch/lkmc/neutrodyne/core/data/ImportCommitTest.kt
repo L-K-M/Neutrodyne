@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.data.importing.ImportClassifier
 import ch.lkmc.neutrodyne.core.data.importing.ImportCommitter
 import ch.lkmc.neutrodyne.core.data.importing.ImportOptionsJson
 import ch.lkmc.neutrodyne.core.data.importing.ImportSessions
+import ch.lkmc.neutrodyne.core.data.importing.ImportWorkPolicy
 import ch.lkmc.neutrodyne.core.data.importing.ImportWorkScheduler
 import ch.lkmc.neutrodyne.core.data.importing.PayloadStore
 import ch.lkmc.neutrodyne.core.database.ImportItemEntity
@@ -1127,11 +1128,22 @@ class ImportCommitTest {
 
     private class FakeImportWorkScheduler : ImportWorkScheduler {
         val sessions = mutableListOf<Long>()
+        val policies = mutableListOf<ImportWorkPolicy>()
+        val cancelled = mutableListOf<Long>()
         var fail = false
 
-        override suspend fun schedule(sessionId: Long) {
+        override suspend fun schedule(
+            sessionId: Long,
+            policy: ImportWorkPolicy,
+        ) {
             if (fail) error("scheduler unavailable")
             sessions += sessionId
+            policies += policy
+        }
+
+        override suspend fun cancel(sessionId: Long) {
+            if (fail) error("scheduler unavailable")
+            cancelled += sessionId
         }
     }
 

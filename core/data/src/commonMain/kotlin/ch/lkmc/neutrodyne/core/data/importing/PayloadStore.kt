@@ -136,6 +136,19 @@ internal class PayloadStore(
         }
     }
 
+    /**
+     * Checked removal for the session cleaner (05 §9): `false` when the file could not be
+     * deleted — the caller keeps the session row so the next maintenance run retries the file
+     * first, instead of orphaning the payload. An already-missing file counts as done.
+     */
+    fun deleteIfPresent(path: Path): Boolean =
+        try {
+            fileSystem.delete(path, mustExist = false)
+            true
+        } catch (_: Exception) {
+            false
+        }
+
     private suspend fun copyFrom(
         uri: String,
         fallbackName: String?,
