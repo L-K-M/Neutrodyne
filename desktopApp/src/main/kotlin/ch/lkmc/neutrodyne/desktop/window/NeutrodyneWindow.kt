@@ -46,6 +46,7 @@ import ch.lkmc.neutrodyne.core.ui.root.RootActions
 import ch.lkmc.neutrodyne.core.ui.root.RootSlots
 import ch.lkmc.neutrodyne.core.ui.root.RootUiState
 import ch.lkmc.neutrodyne.core.ui.root.StartupGateState
+import ch.lkmc.neutrodyne.desktop.DesktopOpenHandler
 import ch.lkmc.neutrodyne.desktop.notifications.DesktopBannerNotifier
 import ch.lkmc.neutrodyne.desktop.resources.Res
 import ch.lkmc.neutrodyne.desktop.resources.tray_quit
@@ -89,6 +90,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     dataDir: Path,
     viewModelFactory: MetroViewModelFactory,
     onQuitRequest: () -> Unit,
+    openHandler: DesktopOpenHandler? = null,
 ) {
     val state = rememberNeutrodyneWindowState()
     val icon = remember { WindowIcons.windowIconPainter() }
@@ -113,15 +115,19 @@ internal fun ApplicationScope.NeutrodyneWindow(
         WindowEffects(activator = activator, background = background)
         DesktopMenuBar(menuActions, enabled = openState is DatabaseOpenState.Opened)
         DesktopApplicationMenu(menuActions = menuActions, onQuit = onQuitRequest)
-        NeutrodyneWindowContent(
-            installers = installers,
-            menuActions = menuActions,
-            banners = banners,
-            startup = openState.toGateState(),
-            onRetryStartup = { appScope.launch { suspendRunCatching { databaseOpener.awaitOpen() } } },
-            dataDir = dataDir,
-            viewModelFactory = viewModelFactory,
-        )
+        val content: @Composable () -> Unit = {
+            NeutrodyneWindowContent(
+                installers = installers,
+                menuActions = menuActions,
+                banners = banners,
+                startup = openState.toGateState(),
+                onRetryStartup = { appScope.launch { suspendRunCatching { databaseOpener.awaitOpen() } } },
+                dataDir = dataDir,
+                viewModelFactory = viewModelFactory,
+                openHandler = openHandler,
+            )
+        }
+        if (openHandler == null) content() else DesktopDropTarget(openHandler, content)
     }
 
     if (shouldShowTray(hidden) && SystemTray.isSupported()) {
@@ -274,6 +280,7 @@ internal fun NeutrodyneWindowContent(
     startup: StartupGateState = StartupGateState.Ready,
     onRetryStartup: () -> Unit = {},
     dataDir: Path? = null,
+    openHandler: DesktopOpenHandler? = null,
 ) {
     val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
     val platformActions = rememberDesktopPlatformActions()
@@ -298,7 +305,7 @@ internal fun NeutrodyneWindowContent(
             )
         }
     val slots =
-        remember(menuActions, banners) {
+        remember(menuActions, banners, openHandler) {
             RootSlots(
                 // No player before M4; the slot composes inside the root, where the
                 // navigator is readable — it hands the shell's menus the root's push
@@ -306,6 +313,7 @@ internal fun NeutrodyneWindowContent(
                 player = {
                     menuActions.attachPush(it.navigate)
                     menuActions.attachNavigator(LocalAppNavigator.current)
+                    openHandler?.let { DesktopInputFeedback(it) }
                 },
                 userMessages = banners?.userMessages ?: emptyFlow(),
             )

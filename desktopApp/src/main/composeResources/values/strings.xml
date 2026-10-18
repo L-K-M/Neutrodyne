@@ -8,4 +8,7 @@
     <string name="tray_quit">Quit</string>
     <string name="menu_file">File</string>
     <string name="menu_import">Import OPML or backup…</string>
+    <string name="drop_to_import">Drop to import</string>
+    <string name="drop_to_add">Drop to add podcast</string>
+    <string name="desktop_cannot_open_file">Neutrodyne can&apos;t open this file</string>
 </resources>
