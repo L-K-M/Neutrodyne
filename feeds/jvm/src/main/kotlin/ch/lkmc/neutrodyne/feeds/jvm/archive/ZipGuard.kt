@@ -209,7 +209,7 @@ public class ZipGuard : ArchiveReaderFactory {
         buf: ByteArray,
         pos: Long,
     ): Boolean {
-        if (pos < 0 || pos + buf.size > raf.length()) return false
+        if (pos < 0 || pos > raf.length() - buf.size) return false
         raf.seek(pos)
         raf.readFully(buf)
         return true

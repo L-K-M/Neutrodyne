@@ -112,6 +112,7 @@ internal object ZipTestFiles {
     fun zip64EndBomb(
         centot64: Long,
         declaredCenlen: Long? = null,
+        locatorOffset: Long? = null,
     ): ByteArray {
         val name = byteArrayOf('x'.code.toByte())
         val loc = ByteArray(LOCHDR + name.size)
@@ -136,7 +137,7 @@ internal object ZipTestFiles {
         put64(end64, ZIP64_ENDOFF, loc.size.toLong())
         val loc64 = ByteArray(ZIP64_LOCHDR)
         put32(loc64, 0, ZIP64_LOCSIG)
-        put64(loc64, ZIP64_LOCOFF, (loc.size + cen.size).toLong())
+        put64(loc64, ZIP64_LOCOFF, locatorOffset ?: (loc.size + cen.size).toLong())
         put32(loc64, 16, 1)
         val end = ByteArray(ENDHDR)
         put32(end, 0, ENDSIG)
