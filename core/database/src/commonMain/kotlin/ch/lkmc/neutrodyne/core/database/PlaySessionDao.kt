@@ -6,6 +6,9 @@ import androidx.room3.Dao
 import androidx.room3.Insert
 import androidx.room3.OnConflictStrategy
 import androidx.room3.Query
+import ch.lkmc.neutrodyne.core.model.ContextType
+import ch.lkmc.neutrodyne.core.model.FeedOrder
+import ch.lkmc.neutrodyne.core.model.MediaFilter
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -39,4 +42,34 @@ interface PlaySessionDao {
             " contextAnchorSortDate = NULL, generation = generation + 1, updatedAt = :now WHERE id = 0",
     )
     suspend fun clearContext(now: Long): Int
+
+    /**
+     * 05 transaction C: the backup's session lands — current episode, context (already
+     * resolved to local ids by the caller) and the context columns — `generation + 1` like
+     * every session write. Merge restores only while the local `currentEpisodeId` is free
+     * (`:onlyWhenIdle`); Replace takes the backup's unconditionally. `updatedAt` is a
+     * device-local column (02 play_session), so it stamps `now`, not a backup timestamp.
+     */
+    @Query(
+        "UPDATE play_session SET currentEpisodeId = :currentEpisodeId, contextType = :contextType," +
+            " contextId = :contextId, contextOrder = :contextOrder," +
+            " contextFilterFlags = :contextFilterFlags, contextMediaFilter = :contextMediaFilter," +
+            " contextMinSortDate = :contextMinSortDate, contextAnchorEpisodeId = :contextAnchorEpisodeId," +
+            " contextAnchorSortDate = :contextAnchorSortDate, generation = generation + 1," +
+            " updatedAt = :now" +
+            " WHERE id = 0 AND (:onlyWhenIdle = 0 OR currentEpisodeId IS NULL)",
+    )
+    suspend fun restoreSession(
+        currentEpisodeId: Long?,
+        contextType: ContextType?,
+        contextId: Long?,
+        contextOrder: FeedOrder,
+        contextFilterFlags: Int,
+        contextMediaFilter: MediaFilter,
+        contextMinSortDate: Long?,
+        contextAnchorEpisodeId: Long?,
+        contextAnchorSortDate: Long?,
+        onlyWhenIdle: Boolean,
+        now: Long,
+    ): Int
 }
