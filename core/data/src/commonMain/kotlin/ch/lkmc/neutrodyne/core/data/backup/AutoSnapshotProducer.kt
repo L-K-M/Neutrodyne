@@ -29,6 +29,7 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -41,6 +42,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okio.FileSystem
 import okio.Path
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * 05's Auto Backup producer (M3 C4b) — the Android-only snapshot lane, in common code so the
@@ -221,10 +223,9 @@ internal class AutoSnapshotProducer(
     }
 
     /**
-     * The toggle's durable half is the persisted flag — it is written first so a failed step
-     * after it can only leave a harmless leftover (a scheduled run still ends at the enabled
-     * gate; a leftover own file is replaced by the next write), never an unscheduled
-     * "enabled" state. Disabling while a foreign snapshot is pending is declined outright:
+     * An owned file must be removed before recording the disabled flag: a failed removal
+     * must not leave a supposedly-disabled snapshot in the OS backup include path. That
+     * mutation finishes non-cancellably once started. A foreign snapshot is declined outright:
      * deleting the file is Discard's job and the order matters (05 First-launch restore).
      */
     suspend fun setEnabled(enabled: Boolean): Boolean {
@@ -245,24 +246,34 @@ internal class AutoSnapshotProducer(
                     Log.i(TAG) { "auto-snapshot disable declined: a foreign snapshot is pending" }
                     return@withLock false
                 }
-                if (settings.set(BackupSettingKeys.AUTO_SNAPSHOT_ENABLED, false) is Outcome.Failure) {
-                    Log.w(TAG) { "auto-snapshot disable write failed" }
-                    return@withLock false
+                withContext(NonCancellable) {
+                    val removed =
+                        suspendRunCatching {
+                            withContext(io) { fileSystem.delete(snapshotFile, mustExist = false) }
+                        }
+                    if (removed.isFailure) {
+                        Log.w(TAG, removed.exceptionOrNull()) { "auto-snapshot file delete failed" }
+                        recordFailure(BackupError.Io)
+                        return@withContext false
+                    }
+                    if (settings.set(BackupSettingKeys.AUTO_SNAPSHOT_ENABLED, false) is Outcome.Failure) {
+                        Log.w(TAG) { "auto-snapshot disable write failed" }
+                        recordFailure(BackupError.Storage)
+                        return@withContext false
+                    }
+                    suspendRunCatching { snapshots.cancelScheduled() }
+                        .onFailure { Log.w(TAG, it) { "snapshot work cancellation failed" } }
+                    controlSignal.value++
+                    true
                 }
-                suspendRunCatching { snapshots.cancelScheduled() }
-                    .onFailure { Log.w(TAG, it) { "snapshot work cancellation failed" } }
-                suspendRunCatching {
-                    withContext(io) { fileSystem.delete(snapshotFile, mustExist = false) }
-                }.onFailure { Log.w(TAG, it) { "auto-snapshot file delete failed" } }
-                true
             }
         }
     }
 
     /**
      * 05's Discard: the pending foreign snapshot retires to `restored-{epochMs}.zip`, which a
-     * later successful write sweeps. `false` when nothing was retired — no file is a no-op
-     * success for the UI's banner, but a provably-own file is never the Discard's target and
+     * later successful write sweeps. No file is already settled; a provably-own file is
+     * never the Discard's target and
      * a failed rename keeps the foreign guard protecting the file.
      */
     suspend fun discardPending(): Boolean {
@@ -312,6 +323,8 @@ internal class AutoSnapshotProducer(
                             codec.decodeManifest(source).installationId
                         }
                     }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
                 } catch (t: Throwable) {
                     // Not openable, not a backup, hostile caps, a corrupt or a newer manifest —
                     // all fail closed to foreign protection (05 First-launch restore).

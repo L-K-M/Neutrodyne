@@ -34,6 +34,8 @@ import ch.lkmc.neutrodyne.core.testing.database.episodeStateEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.feeds.backup.AppInfoV1
 import ch.lkmc.neutrodyne.feeds.backup.ArchiveCaps
+import ch.lkmc.neutrodyne.feeds.backup.ArchiveReader
+import ch.lkmc.neutrodyne.feeds.backup.ArchiveReaderFactory
 import ch.lkmc.neutrodyne.feeds.backup.ArchiveWriterFactory
 import ch.lkmc.neutrodyne.feeds.backup.BackupCodec
 import ch.lkmc.neutrodyne.feeds.backup.BackupKind
@@ -43,21 +45,25 @@ import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipArchiveWriter
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipGuard
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import okio.FileSystem
+import okio.ForwardingFileSystem
 import okio.Path
 import okio.Path.Companion.toPath
 import okio.buffer
 import java.io.IOException
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
@@ -116,11 +122,13 @@ class AutoSnapshotProducerTest {
         // 05's 20 MB compressed cap — `AutoSnapshotProducer`'s default; small caps walk the
         // ladder without 20 MB fixtures.
         maxSnapshotBytes: Long = 20_000_000L,
+        fileSystem: FileSystem = this.fileSystem,
+        readers: ArchiveReaderFactory = ZipGuard(),
     ) = AutoSnapshotProducer(
         db = db,
         writer = writer,
         cleaner = cleaner,
-        readers = ZipGuard(),
+        readers = readers,
         settings = settings,
         snapshots = snapshots,
         workScheduler = workScheduler,
@@ -392,6 +400,82 @@ class AutoSnapshotProducerTest {
             // Re-enabling re-arms the debounced write (the periodic returns at next start).
             assertTrue(producer.setEnabled(true))
             assertEquals(1, snapshots.requestSoonCalls)
+        }
+
+    @Test
+    fun aFailedDeleteCannotReportTheSnapshotDisabled() =
+        runTest {
+            writeOwnSnapshot()
+            val refusing =
+                producerOf(
+                    fileSystem =
+                        object : ForwardingFileSystem(fileSystem) {
+                            override fun delete(
+                                path: Path,
+                                mustExist: Boolean,
+                            ) {
+                                if (path == snapshotPath()) throw IOException("snapshot delete refused")
+                                super.delete(path, mustExist)
+                            }
+                        },
+                )
+
+            assertFalse(refusing.setEnabled(false))
+
+            assertTrue(settings.get(BackupSettingKeys.AUTO_SNAPSHOT_ENABLED))
+            assertTrue(fileSystem.exists(snapshotPath()))
+            assertNotNull(refusing.status().lastError, "the failed control must be observable")
+            assertTrue(producer.setEnabled(false), "a later attempt can complete the disable")
+            assertFalse(fileSystem.exists(snapshotPath()))
+        }
+
+    @Test
+    fun cancellationAtTheDeleteStillPersistsTheDisabledFlag() =
+        runTest {
+            writeOwnSnapshot()
+            lateinit var disable: kotlinx.coroutines.Deferred<Boolean>
+            val cancelling =
+                producerOf(
+                    fileSystem =
+                        object : ForwardingFileSystem(fileSystem) {
+                            override fun delete(
+                                path: Path,
+                                mustExist: Boolean,
+                            ) {
+                                super.delete(path, mustExist)
+                                if (path == snapshotPath()) disable.cancel()
+                            }
+                        },
+                )
+            disable = async(Dispatchers.Default, start = CoroutineStart.LAZY) { cancelling.setEnabled(false) }
+
+            disable.start()
+            disable.join()
+
+            assertTrue(disable.isCancelled)
+            assertFalse(fileSystem.exists(snapshotPath()))
+            assertFalse(settings.get(BackupSettingKeys.AUTO_SNAPSHOT_ENABLED))
+            assertEquals(1, snapshots.cancelScheduledCalls)
+        }
+
+    @Test
+    fun aCancelledManifestProbePropagatesInsteadOfInventingAForeignGuard() =
+        runTest {
+            writeOwnSnapshot()
+            val cancelled =
+                producerOf(
+                    readers =
+                        object : ArchiveReaderFactory {
+                            override fun open(
+                                path: Path,
+                                caps: ArchiveCaps,
+                            ): ArchiveReader = throw CancellationException("manifest probe cancelled")
+                        },
+                )
+
+            assertFailsWith<CancellationException> { cancelled.status() }
+            assertFailsWith<CancellationException> { cancelled.produce() }
+            assertTrue(fileSystem.exists(snapshotPath()))
         }
 
     @Test
