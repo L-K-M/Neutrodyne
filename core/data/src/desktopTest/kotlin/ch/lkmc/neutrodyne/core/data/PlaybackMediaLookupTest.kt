@@ -31,6 +31,7 @@ class PlaybackMediaLookupTest {
                     podcastEntity {
                         copy(
                             customTitle = "Renamed",
+                            author = "Host",
                             sourceType = SourceType.YOUTUBE_CHANNEL,
                             artworkKey = "u-pod",
                             artworkUrl = "https://img/podcast.jpg",
@@ -45,6 +46,7 @@ class PlaybackMediaLookupTest {
                             enclosureLength = 42,
                             externalMediaId = "vid-1",
                             isVideo = true,
+                            pubDate = 1_600_000_000_000L,
                             durationMs = 1000,
                             availability = Availability.LIVE,
                             artworkKey = "u-ep",
@@ -68,6 +70,8 @@ class PlaybackMediaLookupTest {
             assertEquals(podcast, info.podcastId)
             assertEquals("Video", info.title)
             assertEquals("Renamed", info.podcastTitle)
+            assertEquals("Host", info.podcastAuthor)
+            assertEquals(1_600_000_000_000L, info.pubDate)
             assertEquals(ArtworkRef("u-ep", "https://img/ep.jpg", 7), info.artwork)
             assertEquals(ArtworkRef("u-pod", "https://img/podcast.jpg", 3), info.podcastArtwork)
             assertEquals(SourceType.YOUTUBE_CHANNEL, info.sourceType)

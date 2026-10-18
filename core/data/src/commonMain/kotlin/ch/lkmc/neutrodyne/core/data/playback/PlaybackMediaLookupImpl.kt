@@ -58,5 +58,7 @@ internal class PlaybackMediaLookupImpl(
             measuredDurationMs = measuredDurationMs,
             playedAt = playedAt,
             podcastArtwork = ArtworkRef(podcastArtworkKey, podcastArtworkUrl, podcastArtworkVersion),
+            podcastAuthor = author,
+            pubDate = pubDate,
         )
 }

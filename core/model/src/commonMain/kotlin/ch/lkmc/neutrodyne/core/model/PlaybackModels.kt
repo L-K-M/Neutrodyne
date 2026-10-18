@@ -98,4 +98,7 @@ data class PlaybackMediaInfo(
     val sortDate: Long? = null,
     /** System surfaces use podcast art when episode art is not pinned (06 Artwork rule). */
     val podcastArtwork: ArtworkRef = artwork,
+    /** Optional system-surface metadata from the existing media lookup projection. */
+    val podcastAuthor: String? = null,
+    val pubDate: Long? = null,
 )
