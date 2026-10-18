@@ -78,6 +78,7 @@ This file lets another person or agent take over the work at any point. **Last u
 - #119 deferred: the nightly mutation step's comment says it leaves the job's "last 15 minutes", but setup steps run first, leaving about 11 to 13.
 - #96 deferred: autofill content types on `CredentialFields` (before M1b enables them); the settings pop waiting for the removed-feed snackbar (needs a root-owned snackbar scope); the header/banner/chips duplication; two test notes.
 - #94 deferred: the mark-all pending id when its tile vanishes; sort radios outside a selectable group; `NdDialogAction` parameter order; the disabled destructive tint; the red-pixel predicate also matching amber; the hand-kept pushed-key lists in the graph tests.
+- M3 B10 review (`impl/m3-b10`, 2026-10-17): resolved on `impl/m3-b11` — `mergeLibrary` returns a `LibraryMergeResult` carrying its settled key/alias → local-id and staged `uuid` → survivor maps, and the episode phase attaches only through them. Still on B12's checklist: nothing in `mergeLibrary` wraps or blocks linked-device capture triggers; the B12 runner owns that wrapping.
 - #93 deferred: EmptyState's gap between stacked text buttons; a tile menu already open when selection starts; the zero-duration sentinel; `ShowNotesRendererTest`'s English click label.
 - #91 deferred: `DefaultArtworkStoreTest` shares a fixed `build/tmp` directory (use a temp dir); declare the `:core:common` → `:core:model` edge as `api`.
 - #90 deferred: 02's `encode` comment should say the header byte precedes both size paths.
