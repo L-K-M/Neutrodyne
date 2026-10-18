@@ -9,7 +9,8 @@ import java.nio.file.Paths
 /**
  * `file:` URI handling for the desktop file adapters (05 File inputs / Destinations, row C3a).
  * Desktop inputs arrive as `file://` URIs (11 Routing: import dialog, drop, file association,
- * hand-off); a save destination is one too.
+ * hand-off); a save destination is one too. The desktop shell shares this parser so it
+ * applies the same local-only policy before handing a file to the import adapter.
  *
  * The only authorities accepted are the empty one (`file:///…`, `file:/…`) and `localhost` —
  * both unambiguously local. Any other host is rejected outright: on Windows `Paths.get` would
@@ -17,9 +18,9 @@ import java.nio.file.Paths
  * the same local-only rule. [Paths.get] also rejects the rest — an opaque `file:x`, a query or
  * fragment, a bad escape — so malformed input never reaches a filesystem call.
  */
-internal object FileUris {
+public object FileUris {
     /** The local file [uri] names, or `null` when it is not a usable `file:` URI. */
-    fun parse(uri: String): Path? {
+    public fun parse(uri: String): Path? {
         val parsed =
             try {
                 URI(uri)
@@ -56,7 +57,7 @@ internal object FileUris {
     }
 
     /** The `file:` URI for an absolute local [path], percent-escaped (`Path.toUri` is RFC-correct). */
-    fun uriFor(path: Path): String = path.toUri().toASCIIString()
+    internal fun uriFor(path: Path): String = path.toUri().toASCIIString()
 
     private const val SCHEME = "file"
     private const val LOCALHOST = "localhost"

@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.desktop
 
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.data.FileUris
 import ch.lkmc.neutrodyne.core.domain.ImportError
 import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.model.ImportSource
@@ -18,7 +19,9 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import java.net.URI
 import java.nio.file.Files
+import java.nio.file.NoSuchFileException
 import java.nio.file.Path
+import java.nio.file.attribute.BasicFileAttributes
 
 /** All external desktop inputs share this ordered queue; resolving the repository waits for UI readiness. */
 internal class DesktopOpenHandler(
@@ -93,7 +96,17 @@ internal class DesktopOpenHandler(
         }
         val path =
             runCatching {
-                if (uri?.scheme.equals("file", ignoreCase = true)) Path.of(uri) else cwd.resolve(Path.of(input))
+                val fileUri =
+                    if (uri?.scheme.equals(
+                            "file",
+                            ignoreCase = true,
+                        )
+                    ) {
+                        input
+                    } else {
+                        cwd.resolve(Path.of(input)).toUri().toASCIIString()
+                    }
+                FileUris.parse(fileUri)
             }.getOrNull() ?: return reject()
         val file = path.toAbsolutePath().normalize()
         val extension =
@@ -101,9 +114,21 @@ internal class DesktopOpenHandler(
                 ?.toString()
                 ?.substringAfterLast('.', "")
                 ?.lowercase()
-        if (extension !in IMPORT_EXTENSIONS || !Files.isRegularFile(file) || !Files.isReadable(file)) return reject()
-        val size = runCatching { Files.size(file) }.getOrNull() ?: return reject()
-        if (size > MAX_OPEN_FILE_BYTES) return reject()
+        if (extension !in IMPORT_EXTENSIONS) return reject()
+
+        // Unlike isRegularFile, stat preserves access failures for the Unreadable dialog.
+        val attributes =
+            try {
+                Files.readAttributes(file, BasicFileAttributes::class.java)
+            } catch (_: NoSuchFileException) {
+                return reject()
+            }
+        if (!attributes.isRegularFile) return reject()
+        if (!Files.isReadable(file)) {
+            errors.send(ImportError.Unreadable)
+            return Route.None
+        }
+        if (attributes.size() > MAX_OPEN_FILE_BYTES) return reject()
 
         // The repository copies the selected file before returning and sniffs ZIPs itself.
         return when (

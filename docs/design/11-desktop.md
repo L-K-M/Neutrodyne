@@ -349,7 +349,8 @@ StartupWMClass=ch-lkmc-neutrodyne-desktop-MainKt
 | `neutrodyne://open/…` | The internal routes of 01 (notification clicks use them in-process; from outside they only navigate) |
 | A file ending in `.opml` or `.xml` | OPML import preview ([05 Receiving files](05-groups-opml-backup.md#receiving-files)) |
 | A file ending in `.zip` | 05's detection: Neutrodyne backup → restore preview; Takeout ZIP → import preview |
-| A directory, another file type, an unreadable path | Snackbar "Neutrodyne can't open this file"; logged without the path |
+| A directory, another file type, a missing path | Snackbar "Neutrodyne can't open this file"; logged without the path |
+| A file whose metadata or contents cannot be read because access is denied | `ImportError.Unreadable` dialog with the desktop folder-privacy hint ([05 Acquire step 7](05-groups-opml-backup.md#1-acquire)); logged without the path |
 
 Caps: ≤ 20 inputs per hand-off, each ≤ 4 KiB; files must be regular files ≤ 64 MiB before 05's own caps apply. Inputs that arrive before navigation is ready are queued in order and applied after the first frame.
 
