@@ -197,6 +197,7 @@ class FakeImportRepositoryTest {
             val preview = repo.sessions.value.getValue(id)
             val options =
                 preview.options.copy(
+                    redownloadIds = listOf(1L),
                     fromAndroidBackup = true,
                     sourceGroups = listOf(SourceGroup("news", "News", null, null, null)),
                 )
@@ -232,6 +233,7 @@ class FakeImportRepositoryTest {
             repo.updateOptions(id) {
                 it.copy(
                     notifyNewEpisodes = true,
+                    redownloadIds = listOf(1L),
                     fromAndroidBackup = true,
                     restoreRequestedAt = 123L,
                     laneAttempts = 2,
