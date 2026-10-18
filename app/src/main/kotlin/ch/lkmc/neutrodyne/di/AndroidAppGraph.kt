@@ -18,6 +18,11 @@ import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.ImportReportPoster
 import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.domain.NewEpisodePoster
+import ch.lkmc.neutrodyne.core.domain.PlayContextResolver
+import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
+import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
+import ch.lkmc.neutrodyne.core.domain.PositionStore
+import ch.lkmc.neutrodyne.core.domain.QueueRepository
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
@@ -32,6 +37,7 @@ import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver
 import dev.zacsweers.metro.Binds
 import dev.zacsweers.metro.DependencyGraph
+import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.coroutines.CoroutineScope
@@ -55,6 +61,13 @@ interface AndroidAppGraph {
     val localMediaIndex: LocalMediaIndex
     val youtubeCapabilities: YouTubeCapabilitiesSource
     val youtubeStreamResolver: YouTubeStreamResolver
+
+    /** Resolve database-backed playback ports only after the database open gate. */
+    val queueRepository: Provider<QueueRepository>
+    val playContextResolver: Provider<PlayContextResolver>
+    val playSessionStore: Provider<PlaySessionStore>
+    val positionStore: Provider<PositionStore>
+    val playbackMediaLookup: Provider<PlaybackMediaLookup>
 
     val workerFactory: WorkerFactory
 

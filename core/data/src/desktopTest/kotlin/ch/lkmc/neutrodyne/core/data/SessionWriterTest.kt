@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.data
 
 import androidx.room3.useReaderConnection
 import androidx.room3.useWriterConnection
+import ch.lkmc.neutrodyne.core.data.playback.PositionWriter
 import ch.lkmc.neutrodyne.core.data.playback.SessionWriter
 import ch.lkmc.neutrodyne.core.database.PlaySessionEntity
 import ch.lkmc.neutrodyne.core.database.QueueEntryEntity
@@ -71,6 +72,101 @@ class SessionWriterTest {
             assertNull(ended.contextAnchorSortDate)
             assertEquals(listOf(ids[0], ids[2]), writer.virtualQueue(20).upNext.map { it.episodeId })
             assertTrue(writer.virtualQueue(20).contextTail.isEmpty())
+        }
+
+    @Test fun startsSaveDepartureBeforeArrivalForBothContextModes() =
+        runTest {
+            for (retention in ContextRetention.entries) {
+                val ids = seed(2)
+                writer.commitStart(start(ids[0], ids[0], 200), 100)
+                queue(listOf(ids[1]))
+                val generation = db.playSessionDao().get()!!.generation
+                db.useWriterConnection {
+                    // Fail promotion if the outgoing progress has not already been saved.
+                    it.execSql(
+                        "CREATE TRIGGER departure_before_arrival BEFORE UPDATE OF lastPlayedAt ON episode_state" +
+                            " WHEN NEW.episodeId = ${ids[1]} AND NOT EXISTS" +
+                            " (SELECT 1 FROM episode_position WHERE episodeId = ${ids[0]} AND positionMs = 99)" +
+                            " BEGIN SELECT RAISE(ABORT, 'departure missing'); END",
+                    )
+                }
+
+                assertEquals(
+                    generation + 1,
+                    writer.commitStart(
+                        start(ids[1], ids[1], 100).copy(
+                            contextRetention = retention,
+                            departure = departure(ids[0]),
+                        ),
+                        200,
+                    ),
+                )
+                db.useWriterConnection { it.execSql("DROP TRIGGER departure_before_arrival") }
+                assertEquals(99, db.positionDao().byEpisode(ids[0])?.positionMs)
+                assertEquals(200, db.episodeStateDao().byEpisode(ids[0])?.startedAt)
+                assertEquals(ids[1], db.playSessionDao().get()?.currentEpisodeId)
+                assertEquals(200, db.episodeStateDao().byEpisode(ids[1])?.lastPlayedAt)
+                assertTrue(db.queueDao().entries().none { it.episodeId == ids[1] })
+                assertEquals(
+                    if (retention == ContextRetention.KEEP) ids[0] else ids[1],
+                    db.playSessionDao().get()?.contextAnchorEpisodeId,
+                )
+            }
+        }
+
+    @Test fun startDeparturesUseTransitionPositionAndPlayedGuards() =
+        runTest {
+            val ids = seed(6)
+            val positions = PositionWriter(db)
+            positions.save(ids[0], 500, 1000, PositionSource.STREAM, 110, 100) { true }
+            positions.markPlayed(ids[1], 120)
+            queue(listOf(ids[2]))
+            val departures =
+                listOf(
+                    departure(ids[0]).copy(positionMs = 0),
+                    departure(ids[1]),
+                    departure(ids[2], played = true),
+                    departure(ids[3]).copy(writePosition = false),
+                    departure(ids[4], played = true).copy(writePosition = false),
+                )
+            for (outgoing in departures) {
+                writer.commitStart(start(ids[5]).copy(departure = outgoing), 200)
+            }
+
+            assertEquals(500, db.positionDao().byEpisode(ids[0])?.positionMs)
+            assertNull(db.positionDao().byEpisode(ids[1]))
+            assertEquals(120, db.episodeStateDao().byEpisode(ids[1])?.playedAt)
+            assertEquals(0, db.positionDao().byEpisode(ids[2])?.positionMs)
+            assertEquals(200, db.episodeStateDao().byEpisode(ids[2])?.playedAt)
+            assertTrue(db.queueDao().entries().none { it.episodeId == ids[2] })
+            assertNull(db.positionDao().byEpisode(ids[3]))
+            assertNull(db.episodeStateDao().byEpisode(ids[3]))
+            assertEquals(200, db.episodeStateDao().byEpisode(ids[4])?.playedAt)
+        }
+
+    @Test fun failedStartRollsBackDepartureAndArrivalTogether() =
+        runTest {
+            val ids = seed(2)
+            writer.commitStart(start(ids[0]), 100)
+            queue(listOf(ids[1]))
+            val before = db.playSessionDao().get()
+            assertFailsWith<IllegalArgumentException> {
+                writer.commitStart(start(-1).copy(departure = departure(ids[0], played = true)), 200)
+            }
+            db.useWriterConnection {
+                it.execSql(
+                    "CREATE TRIGGER reject_start BEFORE UPDATE ON play_session" +
+                        " BEGIN SELECT RAISE(ABORT, 'test'); END",
+                )
+            }
+            assertFailsWith<Exception> {
+                writer.commitStart(start(ids[1]).copy(departure = departure(ids[0], played = true)), 200)
+            }
+            assertEquals(before, db.playSessionDao().get())
+            assertEquals(listOf(ids[1]), db.queueDao().queuedEpisodeIds())
+            assertNull(db.positionDao().byEpisode(ids[0]))
+            assertNull(db.episodeStateDao().byEpisode(ids[0])?.playedAt)
+            assertNull(db.episodeStateDao().byEpisode(ids[1]))
         }
 
     @Test fun selectedRowsNullAnchorsKeepContextAndExternalDismissal() =

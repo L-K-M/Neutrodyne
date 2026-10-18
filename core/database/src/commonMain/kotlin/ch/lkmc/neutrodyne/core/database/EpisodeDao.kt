@@ -20,7 +20,7 @@ private const val NOTIFICATION_BIND_CHUNK = 500
  * `episode_position`. The alternate-enclosure columns of the reference SQL ship with M5.
  */
 private const val MEDIA_INFO_SELECT =
-    "SELECT e.id, e.podcastId, e.title, e.enclosureUrl, e.enclosureType, e.enclosureLength," +
+    "SELECT e.id, e.podcastId, e.title, e.sortDate, e.enclosureUrl, e.enclosureType, e.enclosureLength," +
         " e.externalMediaId, e.isVideo, e.pubDate, e.availability, e.chaptersUrl, e.chaptersType," +
         " COALESCE(s.measuredDurationMs, e.durationMs) AS durationMs, s.measuredDurationMs," +
         " s.playedAt, d.state AS downloadState," +

@@ -12,6 +12,9 @@ import kotlinx.coroutines.flow.map
 /** In-memory guard/save seam; tests seed played timestamps and can inject a failed transaction. */
 class FakePositionStore : PositionStore {
     val positions = MutableStateFlow<Map<Long, StoredPosition>>(emptyMap())
+
+    // Episode played state can exist before the first position row, just as it does in Room.
+    private val playedWithoutPosition = mutableMapOf<Long, Long>()
     val calls = mutableListOf<Call>()
     var failure: Throwable? = null
 
@@ -46,12 +49,14 @@ class FakePositionStore : PositionStore {
     ): Boolean {
         record(Call(Operation.SAVE, episodeId, now, positionMs, durationMs, source, pinStartedAt))
         val old = positions.value[episodeId]
+        val playedAt = old?.playedAt ?: playedWithoutPosition[episodeId]
         if (!allowed() || (positionMs == 0L && (old?.positionMs ?: 0) > 0) ||
-            (old?.playedAt?.let { it >= pinStartedAt } == true)
+            (playedAt?.let { it >= pinStartedAt } == true)
         ) {
             return false
         }
-        positions.value = positions.value + (episodeId to StoredPosition(episodeId, positionMs, now, old?.playedAt))
+        positions.value = positions.value + (episodeId to StoredPosition(episodeId, positionMs, now, playedAt))
+        playedWithoutPosition.remove(episodeId)
         return true
     }
 
@@ -60,8 +65,8 @@ class FakePositionStore : PositionStore {
         now: Long,
     ) {
         record(Call(Operation.RESET, episodeId, now))
-        positions.value =
-            positions.value + (episodeId to StoredPosition(episodeId, 0, now, positions.value[episodeId]?.playedAt))
+        val old = positions.value[episodeId] ?: return
+        positions.value = positions.value + (episodeId to old.copy(positionMs = 0, updatedAt = now))
     }
 
     override suspend fun markPlayed(
@@ -69,7 +74,12 @@ class FakePositionStore : PositionStore {
         now: Long,
     ) {
         record(Call(Operation.PLAYED, episodeId, now))
-        positions.value = positions.value + (episodeId to StoredPosition(episodeId, 0, now, now))
+        val old = positions.value[episodeId]
+        if (old == null) {
+            playedWithoutPosition.getOrPut(episodeId) { now }
+            return
+        }
+        positions.value = positions.value + (episodeId to old.copy(positionMs = 0, updatedAt = now, playedAt = now))
     }
 
     override suspend fun markUnplayedForReplay(
@@ -77,9 +87,8 @@ class FakePositionStore : PositionStore {
         now: Long,
     ) {
         record(Call(Operation.REPLAY, episodeId, now))
-        val old = positions.value[episodeId]
-        positions.value =
-            positions.value +
-            (episodeId to StoredPosition(episodeId, old?.positionMs ?: 0, old?.updatedAt ?: now, null))
+        playedWithoutPosition.remove(episodeId)
+        val old = positions.value[episodeId] ?: return
+        positions.value = positions.value + (episodeId to old.copy(playedAt = null))
     }
 }

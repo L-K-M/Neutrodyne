@@ -97,7 +97,7 @@ interface PositionStore {
         allowed: () -> Boolean,
     ): Boolean
 
-    /** Explicit zero with reset=true for capture; preserves played status. */
+    /** Explicit zero clears started status while preserving played status. */
     suspend fun reset(
         episodeId: Long,
         now: Long,

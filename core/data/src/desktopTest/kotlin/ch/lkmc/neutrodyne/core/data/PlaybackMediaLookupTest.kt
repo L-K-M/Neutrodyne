@@ -39,7 +39,7 @@ class PlaybackMediaLookupTest {
                 )
             val episode =
                 db.episodeDao().insertStub(
-                    episodeEntity(podcastId = podcast, title = "Video") {
+                    episodeEntity(podcastId = podcast, title = "Video", sortDate = 12345) {
                         copy(
                             enclosureUrl = "https://cdn/e.mp4",
                             enclosureLength = 42,
@@ -65,6 +65,8 @@ class PlaybackMediaLookupTest {
             )
             val info = lookup.get(episode)!!
             assertEquals(episode, info.episodeId)
+            assertEquals(12345, info.sortDate)
+            assertEquals(info, lookup.observe(setOf(episode)).first().getValue(episode))
             assertEquals(podcast, info.podcastId)
             assertEquals("Video", info.title)
             assertEquals("Renamed", info.podcastTitle)

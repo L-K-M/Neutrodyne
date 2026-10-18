@@ -74,6 +74,7 @@ internal class SessionWriter(
         now: Long,
     ): Long =
         mutate(now) { session ->
+            saveDeparture(start.departure, now)
             promote(start.currentEpisodeId, now)
             val current = session.copy(currentEpisodeId = start.currentEpisodeId)
             if (start.contextRetention == ContextRetention.KEEP) return@mutate current

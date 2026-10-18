@@ -31,6 +31,7 @@ data class MediaLookupRow(
     val id: Long,
     val podcastId: Long,
     val title: String,
+    val sortDate: Long,
     val enclosureUrl: String?,
     val enclosureType: String?,
     val enclosureLength: Long?,

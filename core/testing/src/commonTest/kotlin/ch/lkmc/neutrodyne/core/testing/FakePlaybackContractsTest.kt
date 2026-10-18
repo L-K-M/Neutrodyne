@@ -178,6 +178,20 @@ class FakePlaybackContractsTest {
             assertEquals(24L, f.observe(1).first()?.updatedAt)
         }
 
+    @Test fun positionFakeDoesNotInventRowsForStateOnlyWrites() =
+        runTest {
+            val f = FakePositionStore()
+            f.reset(1, 10)
+            assertNull(f.observe(1).first())
+            f.markPlayed(1, 20)
+            assertNull(f.observe(1).first())
+            assertFalse(f.save(1, 900, null, PositionSource.STREAM, 21, 20) { true })
+            f.markUnplayedForReplay(1, 22)
+            assertNull(f.observe(1).first())
+            assertTrue(f.save(1, 900, null, PositionSource.STREAM, 23, 20) { true })
+            assertNull(f.observe(1).first()?.playedAt)
+        }
+
     @Test fun mediaLookupAndStartGateRemainIndependentOfStorageAndPlayers() =
         runTest {
             val f = FakePlaybackMediaLookup()

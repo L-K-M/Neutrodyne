@@ -10,7 +10,8 @@ import kotlinx.coroutines.flow.Flow
 /**
  * Main-safe durable Up next edits (06). Writes serialize in storage; success returns after commit.
  * Reads emit committed snapshots, never partial transactions. Storage failures propagate, including
- * through flows; cancellation is not swallowed. Queue edits never increment session generation.
+ * through flows; cancellation is not swallowed. Up next edits never increment session generation;
+ * clearing context does.
  * Playback rules/projectors, not this repository, skip unplayable rows or cap the player window.
  */
 interface QueueRepository {
