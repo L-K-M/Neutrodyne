@@ -423,7 +423,7 @@ class ImportCommitTest {
                         listOf(
                             item(
                                 1,
-                                "https://antennapod.org/deeplink/subscribe?url=x",
+                                "https://legacy.example.com/rss",
                                 normalizedUrl = "https://atp.fm/rss",
                             ),
                             item(2, "https://b.example.com/f"),
@@ -436,7 +436,7 @@ class ImportCommitTest {
             val aliases = db.podcastDao().aliases(podcast.id)
             assertEquals(1, aliases.size)
             assertEquals(AliasReason.IMPORT, aliases[0].reason)
-            assertTrue(aliases[0].url.startsWith("antennapod.org/"))
+            assertEquals("legacy.example.com/rss", aliases[0].url)
             assertTrue(
                 db.podcastDao().aliases(assertNotNull(db.podcastDao().byFeedKey("b.example.com/f")).id).isEmpty(),
             )
@@ -687,12 +687,17 @@ class ImportCommitTest {
                                 normalizedUrl = "https://h6.example.com/f",
                             ),
                             item(7, "https://u:s7@h7.example.com/f", normalizedUrl = "https://h7.example.com/f"),
+                            item(
+                                8,
+                                "https://antennapod.org/deeplink/subscribe?url=https%3A%2F%2Fu%3As8%40h8.example.com%2Ff",
+                                normalizedUrl = "https://h8.example.com/f",
+                            ),
                         ),
                 )
 
             assertIs<Outcome.Success<*>>(committer.confirm(sid))
 
-            for (n in 1..7) {
+            for (n in 1..8) {
                 val stored =
                     assertNotNull(
                         secrets.get("https://h$n.example.com"),
@@ -705,7 +710,7 @@ class ImportCommitTest {
                     "podcast for item $n links its credential",
                 )
             }
-            val passwords = (1..7).map { "s$it" }
+            val passwords = (1..8).map { "s$it" }
             val committedUrls =
                 db.importDao().itemsOf(sid).map { it.originalUrl } +
                     db.podcastDao().allForExport().map { it.feedUrl } +

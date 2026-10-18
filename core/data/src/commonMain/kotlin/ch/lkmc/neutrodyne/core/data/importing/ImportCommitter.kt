@@ -368,7 +368,9 @@ internal class ImportCommitter(
         podcastId: Long,
         now: Long,
     ) {
-        val originalKey = UrlNormalizer.forIdentity(item.originalUrl) ?: return
+        // A subscribe-page URI can contain encoded credentials; its wrapper is not a feed identity.
+        val original = AddInputNormalizer.normalize(item.originalUrl) as? NormalizedInput.Url ?: return
+        val originalKey = UrlNormalizer.forIdentity(original.url) ?: return
         if (originalKey == feedKey) return
         if (db.podcastDao().byFeedKey(originalKey) != null) return
         db.podcastDao().insertAliasOrIgnore(
