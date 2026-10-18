@@ -11,6 +11,17 @@ import ch.lkmc.neutrodyne.core.database.SqliteDriverBindings
 internal class CommitCancellingDriver : SQLiteDriver {
     private val delegate = SqliteDriverBindings.sqliteDriver()
 
+    private val opened = java.util.concurrent.CopyOnWriteArrayList<SQLiteConnection>()
+
+    /**
+     * Runs [sql] as one auto-committed statement on the real connection, bypassing the armed
+     * hooks — for hooks that must synchronously mutate the database mid-commit (a session
+     * delete between chunks). Only valid once Room opened its connection (inside a hook).
+     */
+    fun exec(sql: String) {
+        opened.first().prepare(sql).use { it.step() }
+    }
+
     @Volatile private var statement: String? = null
 
     @Volatile private var onCommit: (() -> Unit)? = null
@@ -41,6 +52,7 @@ internal class CommitCancellingDriver : SQLiteDriver {
 
     override fun open(fileName: String): SQLiteConnection {
         val connection = delegate.open(fileName)
+        opened += connection
         // Per connection: only the transaction that ran the armed statement may fire the hook.
         var ranHere = false
         return object : SQLiteConnection by connection {
