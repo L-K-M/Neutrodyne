@@ -1,0 +1,4 @@
+<resources>
+    <string name="appearance_mini_player_skip">Mini player skip button</string>
+    <string name="appearance_mini_player_skip_summary">Show the forward skip button in the mini player</string>
+</resources>

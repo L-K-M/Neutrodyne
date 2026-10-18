@@ -22,11 +22,13 @@ import ch.lkmc.neutrodyne.core.navigation.FeedsKey
 import ch.lkmc.neutrodyne.core.navigation.ImportFileKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
+import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastSettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
+import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
@@ -34,6 +36,7 @@ import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
 import ch.lkmc.neutrodyne.feature.library.LibraryViewModel
+import ch.lkmc.neutrodyne.feature.player.PlayerViewModel
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.youtube.api.AudioPref
 import ch.lkmc.neutrodyne.youtube.api.ResolveResult
@@ -90,6 +93,16 @@ class DesktopAppGraphTest {
                 graph.databaseOpener.requireDatabase().close()
             }
         }
+
+    @Test
+    fun playerSpeedEntryAndWindowViewModelResolveWithoutOpeningDatabase() {
+        val provider = entryProvider<NavKey> { graph.entryInstallers.forEach { it() } }
+        assertThat(provider(SpeedKey).metadata[NdSceneMetadata.KEY_OVERLAY]).isEqualTo(NdSceneMetadata.OVERLAY_SHEET)
+        val player = graph.metroViewModelFactory.create(PlayerViewModel::class, CreationExtras.Empty)
+        assertThat(player.uiState.value.now).isNull()
+        player.viewModelScope.cancel()
+        assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+    }
 
     @Test
     fun playbackBindingsAreUniqueTruthfulAndDoNotOpenTheDatabase() =
@@ -312,6 +325,7 @@ class DesktopAppGraphTest {
                 FeedsKey,
                 LibraryKey,
                 UpNextKey,
+                SpeedKey,
                 DownloadsKey,
                 DiscoverKey,
                 SettingsHomeKey,

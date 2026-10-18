@@ -83,13 +83,16 @@ public fun NdNavigationSuiteScaffold(
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         NavigationSuiteScaffoldLayout(
             navigationSuite = {
-                when (suiteType) {
-                    NavigationSuiteType.WideNavigationRailCollapsed,
-                    NavigationSuiteType.WideNavigationRailExpanded,
-                    NavigationSuiteType.NavigationRail,
-                    -> NdRail(items, selected, onSelect, footer, suiteType)
+                // The layout moves hidden chrome offscreen but retains its focus/semantics nodes.
+                if (state.currentValue != NavigationSuiteScaffoldValue.Hidden || state.isAnimating) {
+                    when (suiteType) {
+                        NavigationSuiteType.WideNavigationRailCollapsed,
+                        NavigationSuiteType.WideNavigationRailExpanded,
+                        NavigationSuiteType.NavigationRail,
+                        -> NdRail(items, selected, onSelect, footer, suiteType)
 
-                    else -> NdBar(items, selected, onSelect, suiteType)
+                        else -> NdBar(items, selected, onSelect, suiteType)
+                    }
                 }
             },
             navigationSuiteType = suiteType,

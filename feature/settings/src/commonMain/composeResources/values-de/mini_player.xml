@@ -1,0 +1,4 @@
+<resources>
+    <string name="appearance_mini_player_skip">Vorspultaste im Mini-Player</string>
+    <string name="appearance_mini_player_skip_summary">Die Vorspultaste im Mini-Player anzeigen</string>
+</resources>

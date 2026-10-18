@@ -24,6 +24,7 @@ internal fun SettingsRoute(
     when (key.page) {
         SettingsPage.APPEARANCE -> AppearancePage(settings, dynamicColorSupport, platform)
         SettingsPage.FEEDS -> FeedsPage(platform)
+        SettingsPage.PLAYBACK -> PlaybackPage(platform)
         SettingsPage.ABOUT -> AboutPage(buildInfo)
         else -> AppearancePage(settings, dynamicColorSupport, platform)
     }

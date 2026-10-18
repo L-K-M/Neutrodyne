@@ -7,7 +7,6 @@ import android.provider.Settings
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,9 +26,9 @@ import ch.lkmc.neutrodyne.core.database.DatabaseOpenException
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
+import ch.lkmc.neutrodyne.core.designsystem.rememberAndroidSystemUiState
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
-import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
@@ -49,6 +48,7 @@ import ch.lkmc.neutrodyne.core.ui.root.StartupFailure
 import ch.lkmc.neutrodyne.core.ui.root.StartupGateState
 import ch.lkmc.neutrodyne.di.AndroidAppGraph
 import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
+import ch.lkmc.neutrodyne.feature.player.PlayerRoute
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
@@ -60,7 +60,7 @@ import kotlin.time.Duration.Companion.seconds
  * The one launcher activity (01 Application element and components): AppCompat for per-app language, the system
  * splash, edge-to-edge, then the shared [NeutrodyneRoot]. The start-up gate renders
  * `DatabaseOpener.openState` (01 Splash and start-up gate): "Try again" re-runs `awaitOpen()` (a
- * failed result is never cached), "Manage storage" opens `ACTION_INTERNAL_STORAGE_SETTINGS`; playback,
+ * failed result is never cached), "Manage storage" opens `ACTION_INTERNAL_STORAGE_SETTINGS`;
  * notices and sync wire their state in later milestones.
  */
 class MainActivity : AppCompatActivity() {
@@ -89,7 +89,8 @@ class MainActivity : AppCompatActivity() {
             val opener = graph.databaseOpener
             val openState by opener.openState.collectAsStateWithLifecycle()
 
-            val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
+            val nowPlaying by graph.playbackStateSource.nowPlaying.collectAsStateWithLifecycle()
+            val systemUi = rememberAndroidSystemUiState()
             CompositionLocalProvider(
                 LocalPlatformActions provides rememberAndroidPlatformActions(),
                 // 07 Storage rows pick per-platform wording from this local.
@@ -100,7 +101,7 @@ class MainActivity : AppCompatActivity() {
                 LocalMetroViewModelFactory provides graph.metroViewModelFactory,
             ) {
                 NeutrodyneRoot(
-                    state = ROOT_STATE_BASE.copy(startup = openState.toGateState()),
+                    state = ROOT_STATE_BASE.copy(startup = openState.toGateState(), hasNowPlaying = nowPlaying != null),
                     actions =
                         RootActions(
                             selectFeedSource = { uuid ->
@@ -182,13 +183,13 @@ class MainActivity : AppCompatActivity() {
         /** 01 Application start-up: the settings wait never blocks the splash past 1 s. */
         val PREFS_GATE_TIMEOUT = 1.seconds
 
-        /** Everything below `startup` is still the M0 default (playback, notices, sync later). */
+        /** Defaults for notices and remote sessions until their milestones. */
         val ROOT_STATE_BASE = RootUiState.READY
 
-        /** No player (M4) and no user messages yet. */
+        /** Window player and import-resume content share the root slots. */
         val M0_ROOT_SLOTS =
             RootSlots(
-                player = {},
+                player = { PlayerRoute(it) },
                 userMessages = emptyFlow(),
                 importResume = { available, open -> importResumeBanner(available, open) },
             )

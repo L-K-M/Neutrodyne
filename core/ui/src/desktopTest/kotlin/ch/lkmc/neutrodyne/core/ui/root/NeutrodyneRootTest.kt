@@ -94,6 +94,94 @@ class NeutrodyneRootTest {
     }
 
     @Test
+    fun restoredExpandedPlayerMeasuresBeforeHidingSuite() =
+        runComposeUiTest {
+            var lastSlot: PlayerSlotState? = null
+            setContent {
+                TestRoot(
+                    state = RootUiState.READY.copy(hasNowPlaying = true),
+                    slots =
+                        RootSlots(
+                            player = { slot ->
+                                lastSlot = slot
+                                androidx.compose.runtime.SideEffect { slot.onExpandedSettled(true) }
+                            },
+                            userMessages = emptyFlow(),
+                        ),
+                )
+            }
+            runOnIdle { kotlin.test.assertTrue(requireNotNull(lastSlot).contentBottomPx > 0f) }
+        }
+
+    @Test
+    fun rootProvidesDesktopBackDispatcherToThePlayerSlot() =
+        runComposeUiTest {
+            var owner: androidx.navigationevent.NavigationEventDispatcherOwner? = null
+            setContent {
+                TestRoot(
+                    slots =
+                        RootSlots(player = {
+                            owner = androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner.current
+                        }, userMessages = emptyFlow()),
+                )
+            }
+            runOnIdle { kotlin.test.assertNotNull(owner) }
+        }
+
+    @Test
+    fun playerSlotNavigationRequestsCollapse() =
+        runComposeUiTest {
+            var slot: PlayerSlotState? = null
+            setContent { TestRoot(slots = RootSlots(player = { slot = it }, userMessages = emptyFlow())) }
+            runOnIdle { requireNotNull(slot).navigate(PodcastKey(3)) }
+            onNodeWithText("podcast-3").assertIsDisplayed()
+            runOnIdle { kotlin.test.assertEquals(1, slot?.collapseRequest) }
+        }
+
+    @Test
+    fun playerExpansionRouteReachesSlotAndKeepsWideLayoutAsSheet() =
+        runComposeUiTest {
+            val pending = Channel<Route>(Channel.UNLIMITED)
+            val routes = pending.receiveAsFlow()
+            var lastSlot: PlayerSlotState? = null
+            setContent {
+                TestRoot(
+                    routes = routes,
+                    state = RootUiState.READY.copy(hasNowPlaying = true),
+                    slots = RootSlots(player = { slot -> lastSlot = slot }, userMessages = emptyFlow()),
+                )
+            }
+            runOnIdle { pending.trySend(Route.ExpandPlayer) }
+            waitForIdle()
+            runOnIdle {
+                kotlin.test.assertEquals(1, lastSlot?.expandRequest)
+                kotlin.test.assertEquals(false, lastSlot?.layout?.playerPanel)
+                kotlin.test.assertTrue(requireNotNull(lastSlot).contentBottomPx > 0f)
+                lastSlot?.onExpandedSettled?.invoke(true)
+            }
+            onNodeWithTag("nav_feeds").assertDoesNotExist()
+            runOnIdle { lastSlot?.onExpandedSettled?.invoke(false) }
+            onNodeWithTag("nav_feeds").assertExists()
+        }
+
+    @Test
+    fun screenRoutesRequestPlayerCollapse() =
+        runComposeUiTest {
+            val pending = Channel<Route>(Channel.UNLIMITED)
+            val routes = pending.receiveAsFlow()
+            var lastSlot: PlayerSlotState? = null
+            setContent {
+                TestRoot(
+                    routes = routes,
+                    slots = RootSlots(player = { slot -> lastSlot = slot }, userMessages = emptyFlow()),
+                )
+            }
+            runOnIdle { pending.trySend(Route.Push(PodcastKey(3))) }
+            onNodeWithText("podcast-3").assertIsDisplayed()
+            runOnIdle { kotlin.test.assertEquals(1, lastSlot?.collapseRequest) }
+        }
+
+    @Test
     fun groupNotificationSelectsFeedsInsteadOfDroppingTheRoute() =
         runComposeUiTest {
             val pending = Channel<Route>(Channel.UNLIMITED)
