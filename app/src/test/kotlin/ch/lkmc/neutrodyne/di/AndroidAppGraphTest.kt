@@ -21,6 +21,7 @@ import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import ch.lkmc.neutrodyne.notifications.AndroidGroupChannelSync
+import ch.lkmc.neutrodyne.notifications.AndroidImportReportPoster
 import ch.lkmc.neutrodyne.notifications.AndroidNewEpisodePoster
 import com.google.common.truth.Truth.assertThat
 import dev.zacsweers.metro.createGraphFactory
@@ -101,6 +102,7 @@ class AndroidAppGraphTest {
                 .single()
                 .order
         assertThat(orders.getValue("NewEpisodeChannelsInitializer")).isLessThan(dbOrder)
+        assertThat(orders.getValue("ImportBackupChannelsInitializer")).isLessThan(dbOrder)
         assertThat(dbOrder).isLessThan(orders.getValue("GroupChannelsInitializer"))
         assertThat(
             orders.getValue("GroupChannelsInitializer"),
@@ -110,6 +112,9 @@ class AndroidAppGraphTest {
             .isLessThan(orders.getValue("PeriodicRefreshInitializer"))
         assertThat(orders.getValue("PeriodicRefreshInitializer"))
             .isLessThan(orders.getValue("RefreshForegroundObserverInitializer"))
+        // 05's work table: the auto-backup arm and durable-work reconciliation run in band
+        // 200 too — after the database open, in the scheduling band.
+        assertThat(dbOrder).isLessThan(orders.getValue("AutoBackupInitializer"))
     }
 
     /**
@@ -169,17 +174,37 @@ class AndroidAppGraphTest {
             }
         }
 
+    /**
+     * M3 C2: the import/backup lanes bind the real services — no stub can reach the graph —
+     * and the `import_backup` poster resolves to the Android adapter.
+     */
+    @Test
+    fun theImportLanesBindTheRealServices() =
+        runBlocking {
+            graph.databaseOpener.awaitOpen()
+            try {
+                assertThat(graph.importRepository).isSameInstanceAs(graph.importRepository)
+                assertThat(graph.backupRepository).isSameInstanceAs(graph.backupRepository)
+                assertThat(graph.importReportPoster).isInstanceOf(AndroidImportReportPoster::class.java)
+            } finally {
+                graph.databaseOpener.requireDatabase().close()
+            }
+        }
+
     private companion object {
         val STARTUP_BANDS =
             mapOf(
                 "DebugToolsInitializer" to 0..99,
                 "NewEpisodeChannelsInitializer" to 10..10,
+                "ImportBackupChannelsInitializer" to 10..10,
                 "GroupChannelsInitializer" to 140..140,
                 "DatabaseOpenInitializer" to 100..119,
                 // M1b's `credential-load` sits at 120: after the database, before refresh work.
                 "CredentialLoadInitializer" to 120..199,
                 "PeriodicRefreshInitializer" to 200..299,
                 "RefreshForegroundObserverInitializer" to 200..299,
+                // 05's work table: periodic arm, watcher and durable-work reconciliation.
+                "AutoBackupInitializer" to 200..299,
                 // 05 Destinations: expired private exports are swept in the cleanup band.
                 "ExportFilesCleaner" to 300..399,
             )
