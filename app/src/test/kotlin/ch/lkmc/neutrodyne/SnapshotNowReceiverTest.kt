@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.domain.BackupRepository
 import ch.lkmc.neutrodyne.core.domain.RestoreProgress
 import ch.lkmc.neutrodyne.core.model.BackupPreview
 import ch.lkmc.neutrodyne.core.model.BackupSummary
+import ch.lkmc.neutrodyne.core.model.PreparedBackup
 import ch.lkmc.neutrodyne.core.model.PrivacyCounts
 import ch.lkmc.neutrodyne.core.model.RestoreRequest
 import ch.lkmc.neutrodyne.core.model.SnapshotStatus
@@ -266,6 +267,14 @@ class SnapshotNowReceiverTest {
             destinationUri: String,
             includePasswords: Boolean,
         ): Outcome<BackupSummary, BackupError> = error("unused")
+
+        override suspend fun prepareBackup(includePasswords: Boolean): Outcome<PreparedBackup, BackupError> =
+            error("unused")
+
+        override suspend fun savePreparedBackup(
+            prepared: PreparedBackup,
+            destinationUri: String,
+        ): Outcome<Unit, BackupError> = error("unused")
 
         override suspend fun inspect(sessionId: Long): Outcome<BackupPreview, BackupError> = error("unused")
 

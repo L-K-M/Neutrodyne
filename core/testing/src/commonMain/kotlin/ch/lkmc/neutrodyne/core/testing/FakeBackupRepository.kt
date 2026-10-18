@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.domain.BackupRepository
 import ch.lkmc.neutrodyne.core.domain.RestoreProgress
 import ch.lkmc.neutrodyne.core.model.BackupPreview
 import ch.lkmc.neutrodyne.core.model.BackupSummary
+import ch.lkmc.neutrodyne.core.model.PreparedBackup
 import ch.lkmc.neutrodyne.core.model.PrivacyCounts
 import ch.lkmc.neutrodyne.core.model.RestoreRequest
 import ch.lkmc.neutrodyne.core.model.SnapshotStatus
@@ -39,6 +40,8 @@ class FakeBackupRepository : BackupRepository {
     val restoreProgress = MutableStateFlow<RestoreProgress?>(null)
 
     var createOutcome: Outcome<BackupSummary, BackupError> = Outcome.Success(BackupSummary(0, 0, 0))
+    var prepareOutcome: Outcome<PreparedBackup, BackupError> = Outcome.Success(FakePreparedBackup())
+    var savePreparedOutcome: Outcome<Unit, BackupError> = Outcome.Success(Unit)
 
     /** NotABackup by default so tests always seed the preview they mean. */
     var inspectOutcome: Outcome<BackupPreview, BackupError> = Outcome.Failure(BackupError.NotABackup)
@@ -55,12 +58,29 @@ class FakeBackupRepository : BackupRepository {
     /** `(sessionId, request)` of every [restore] call. */
     val restoreRequests = mutableListOf<Pair<Long, RestoreRequest>>()
 
+    /** `(prepared, destinationUri)` of every [savePreparedBackup] call. */
+    val savePreparedCalls = mutableListOf<Pair<PreparedBackup, String>>()
+
     override suspend fun createBackup(
         destinationUri: String,
         includePasswords: Boolean,
     ): Outcome<BackupSummary, BackupError> {
         calls += "createBackup($destinationUri, $includePasswords)"
         return createOutcome
+    }
+
+    override suspend fun prepareBackup(includePasswords: Boolean): Outcome<PreparedBackup, BackupError> {
+        calls += "prepareBackup($includePasswords)"
+        return prepareOutcome
+    }
+
+    override suspend fun savePreparedBackup(
+        prepared: PreparedBackup,
+        destinationUri: String,
+    ): Outcome<Unit, BackupError> {
+        calls += "savePreparedBackup(${prepared.fileName}, $destinationUri)"
+        savePreparedCalls += prepared to destinationUri
+        return savePreparedOutcome
     }
 
     override suspend fun inspect(sessionId: Long): Outcome<BackupPreview, BackupError> {
@@ -117,4 +137,11 @@ class FakeBackupRepository : BackupRepository {
         onWriteSnapshotNow()
         return Outcome.Success(SnapshotWrite(before, snapshotStatus.value))
     }
+
+    /** The fake's own descriptor — the real repository refuses it, which the seam requires. */
+    private class FakePreparedBackup(
+        override val fileName: String = "neutrodyne-backup-2026-01-01-0000.zip",
+        override val summary: BackupSummary = BackupSummary(0, 0, 0),
+        override val privacy: PrivacyCounts = PrivacyCounts(0, 0),
+    ) : PreparedBackup
 }
