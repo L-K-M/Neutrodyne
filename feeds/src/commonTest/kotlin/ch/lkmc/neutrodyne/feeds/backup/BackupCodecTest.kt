@@ -355,6 +355,20 @@ class BackupCodecTest {
     }
 
     @Test
+    fun validReplacementCharactersDoNotDiscardEpisodeState() {
+        val expected = EpisodeLineV1(p = "example.com/rss", k = "episode-1", t = "Episode \uFFFD", pl = 5L, ts = 10L)
+        val encoded = codec.encodeEpisodeLine(expected)
+        for (ending in listOf("\n", "\r\n", "")) {
+            val lines = codec.episodeLines(sourceOf(encoded + ending))
+            val decoded = mutableListOf<EpisodeLineV1>()
+            lines.use { stream -> for (line in stream) decoded += line }
+
+            assertEquals(listOf(expected), decoded, "valid Unicode must round-trip for ending=$ending")
+            assertEquals(0, lines.skippedLines)
+        }
+    }
+
+    @Test
     fun episodeLinesHandleMissingTerminatorCrlfAndBlankLines() {
         val payload = "{\"p\":\"a\",\"k\":\"b\",\"ts\":0}\r\n\r\n{\"p\":\"c\",\"k\":\"d\",\"ts\":5}"
         val lines = codec.episodeLines(sourceOf(payload))
