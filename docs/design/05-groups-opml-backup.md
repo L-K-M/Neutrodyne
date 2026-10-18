@@ -1528,6 +1528,15 @@ data class SnapshotStatus(val supported: Boolean,               // false on the 
 data class PrivacyCounts(val privateLinks: Int, val passwords: Int)
 ```
 
+**Implementation note (2026-10-19, M3 C5).** `writeSnapshotNow` returns
+`Outcome<SnapshotWrite, BackupError>`: `SnapshotWrite(before, after)` carries the
+`SnapshotStatus` pair the producer reads inside its write mutex, so the receiver's
+`ok` proves this invocation published (the publication fields `lastWrittenAt`,
+`bytes` and `level` moved) instead of reporting a status a concurrent second write
+could have produced. The verdict rule below is unchanged: `enabled = false` reads
+`disabled`, no publication move reads `guarded`, a timed-out wait reads `pending`,
+typed failures read `error …`.
+
 Preview text: "Backup from 4 Oct 2026 (Neutrodyne 1.3): 142 podcasts, 6 groups, 3,214 played episodes, 12 in Up next, settings." Checkboxes: Listening history, Up next, Settings (Merge default: history and Up next on, settings off; Replace: all on). Mode: **Merge** (default, [canonical defaults](#settings)) or **Replace**; Replace requires a confirmation naming its effect ("Removes 9 podcasts and 2 groups that are not in the backup, and replaces your listening history"). Confirming Replace first calls `PlaybackController.pause()` from the feature layer. A backup made on the other platform says so ("Backup from 4 Oct 2026, made on Android"). While the device is linked the preview adds "This device syncs with sync.example.org", and Replace asks how far it reaches ([Restore while linked](#restore-while-linked)).
 
 ### Restore algorithm

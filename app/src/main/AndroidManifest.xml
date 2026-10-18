@@ -43,6 +43,13 @@
       </intent-filter>
     </activity>
 
+    <!-- 05 Testing with bmgr: shell-only snapshot trigger. No intent filter: only an explicit
+         broadcast from a sender holding DUMP reaches it; the shell user holds DUMP. -->
+    <receiver
+      android:name="ch.lkmc.neutrodyne.SnapshotNowReceiver"
+      android:exported="true"
+      android:permission="android.permission.DUMP" />
+
     <!-- Export share-sheet URIs (05 Destinations); the paths resource exposes only <cache>/export/. -->
     <provider
       android:name="androidx.core.content.FileProvider"
