@@ -9,6 +9,8 @@ import org.junit.Assume.assumeTrue
 import java.io.IOException
 import java.nio.file.Files
 import java.util.Random
+import java.util.TimeZone
+import java.util.zip.ZipException
 import java.util.zip.ZipFile
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -57,6 +59,22 @@ class ZipArchiveWriterTest {
     }
 
     @Test
+    fun outputDoesNotDependOnTheDefaultTimeZone() {
+        val previous = TimeZone.getDefault()
+        val entries = listOf("a" to "payload".encodeToByteArray())
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
+            val utc = Files.readAllBytes(write(entries).toFile().toPath())
+            TimeZone.setDefault(TimeZone.getTimeZone("Pacific/Apia"))
+            val apia = Files.readAllBytes(write(entries).toFile().toPath())
+
+            assertContentEquals(utc, apia)
+        } finally {
+            TimeZone.setDefault(previous)
+        }
+    }
+
+    @Test
     fun oneEntryOpenAtATime() {
         val path = Files.createTempFile("zip-writer", ".zip").toOkioPath()
         ZipArchiveWriter().create(path).use { writer ->
@@ -64,6 +82,16 @@ class ZipArchiveWriterTest {
                 assertFailsWith<IllegalStateException> { writer.entry("b") }
             }
             writer.entry("b").close()
+        }
+    }
+
+    @Test
+    fun thePlatformWriterRejectsDuplicateEntryNames() {
+        val path = Files.createTempFile("zip-writer", ".zip").toOkioPath()
+        ZipArchiveWriter().create(path).use { writer ->
+            writer.entry("a").close()
+
+            assertFailsWith<ZipException> { writer.entry("a") }
         }
     }
 
