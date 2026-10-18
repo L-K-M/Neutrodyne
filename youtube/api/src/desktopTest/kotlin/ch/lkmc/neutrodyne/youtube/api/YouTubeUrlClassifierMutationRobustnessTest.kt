@@ -30,7 +30,12 @@ class YouTubeUrlClassifierMutationRobustnessTest {
     @Test
     fun everyStringSurvivesMutations() {
         val iterations = System.getProperty("neutrodyne.mutationIterations")?.toIntOrNull() ?: 20
-        corpus().forEachIndexed { index, form -> mutate(form, index, iterations) }
+        try {
+            require(iterations > 0) { "mutationIterations must be positive" }
+            corpus().forEachIndexed { index, form -> mutate(form, index, iterations) }
+        } finally {
+            workers.shutdownNow()
+        }
     }
 
     private fun corpus(): List<String> = FORMS + seededStrings()
@@ -143,7 +148,7 @@ class YouTubeUrlClassifierMutationRobustnessTest {
      * slice duplication, percent-escape splicing (valid, truncated and hostile payloads),
      * invalid-Unicode/control insertion and nesting into wrappers and YouTube URL contexts.
      */
-    internal fun mutantsOf(
+    private fun mutantsOf(
         original: String,
         random: Random,
     ): List<String> {
@@ -196,7 +201,7 @@ class YouTubeUrlClassifierMutationRobustnessTest {
         const val SEEDED_STRING_COUNT = 200
         const val MAX_SEEDED_LENGTH = 96
         const val MUTANT_TIMEOUT_MS = 2_000L
-        const val NEST_SLOT = " "
+        const val NEST_SLOT = "\u0000"
 
         val FORMS =
             listOf(
@@ -212,11 +217,16 @@ class YouTubeUrlClassifierMutationRobustnessTest {
                 // Channel and feed URIs.
                 "https://www.youtube.com/channel/UCBJycsmduvYEL83R_U4JriQ",
                 "https://www.youtube.com/feeds/videos.xml?channel_id=UCBJycsmduvYEL83R_U4JriQ",
-                "https://www.youtube.com/feeds/videos.xml?playlist_id=UUJycsmduvYEL83R_U4JriQ",
+                "https://www.youtube.com/feeds/videos.xml?playlist_id=UUBJycsmduvYEL83R_U4JriQ",
                 "https://www.youtube.com/feeds/videos.xml?user=MarquesBrownlee",
                 "UCBJycsmduvYEL83R_U4JriQ",
                 // Upload playlist and plain playlist forms.
-                "https://www.youtube.com/playlist?list=UUJycsmduvYEL83R_U4JriQ",
+                "https://www.youtube.com/playlist?list=UUBJycsmduvYEL83R_U4JriQ",
+                "https://www.youtube.com/playlist?list=UULFBJycsmduvYEL83R_U4JriQ",
+                "https://www.youtube.com/playlist?list=UUSHBJycsmduvYEL83R_U4JriQ",
+                "https://www.youtube.com/playlist?list=UULVBJycsmduvYEL83R_U4JriQ",
+                "https://www.youtube.com/playlist?list=UUMOBJycsmduvYEL83R_U4JriQ",
+                "https://www.youtube.com/playlist?list=UUPSBJycsmduvYEL83R_U4JriQ",
                 "https://www.youtube.com/playlist?list=PL6566A39B68523E18",
                 // Handles, legacy and bare custom forms.
                 "https://www.youtube.com/@mkbhd",
@@ -228,8 +238,10 @@ class YouTubeUrlClassifierMutationRobustnessTest {
                 "https://www.youtube.com/@%D0%BF%D1%80%D0%B8%D0%B2%D0%B5%D1%82",
                 "https://www.youtube.com/@%40nasa",
                 "@\uD840\uDC0Babc",
+                "https://www.youtube.com/@\uD840\uDC0Ba%62",
+                "https://www.youtube.com/c/\uD840\uDC0Ba%62",
                 "https://www.youtube.com/@ab\uD800",
-                "https://www.youtube.com/@cd",
+                "https://www.youtube.com/@\u0002cd",
                 // Nesting: stacked wrappers.
                 "feed:view-source:https://www.youtube.com/@mkbhd",
                 "view-source:https://youtu.be/dQw4w9WgXcQ",
@@ -241,12 +253,12 @@ class YouTubeUrlClassifierMutationRobustnessTest {
          */
         val POOL =
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" +
-                "%:/?#&=._-@+~,; \t\r\n  " +
+                "%:/?#&=._-@+~,; \t\r\n\u0000\u0007\u001B\u0000" +
                 "\uD800\uDC00\uD840\uDC0B\uFFFD"
 
         val PERCENT_ESCAPES = listOf("%2F", "%40", "%25", "%00", "%FF", "%E0%80", "%2", "%%", "%zz")
 
-        val HOSTILE_INSERTS = listOf(" ", "", "", "\uD800", "\uDFFF", "\uD840\uDC0B", "́")
+        val HOSTILE_INSERTS = listOf("\u0000", "\u007F", "\u001B", "\uD800", "\uDFFF", "\uD840\uDC0B", "\u0301")
 
         val NESTS =
             listOf(
