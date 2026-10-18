@@ -94,4 +94,6 @@ data class PlaybackMediaInfo(
     val durationMs: Long?,
     val measuredDurationMs: Long?,
     val playedAt: Long?,
+    /** System surfaces use podcast art when episode art is not pinned (06 Artwork rule). */
+    val podcastArtwork: ArtworkRef = artwork,
 )

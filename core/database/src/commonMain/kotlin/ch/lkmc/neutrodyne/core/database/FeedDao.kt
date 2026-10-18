@@ -9,12 +9,15 @@ import androidx.room3.Embedded
 import androidx.room3.RawQuery
 import androidx.room3.RoomRawQuery
 import androidx.room3.paging.PagingSourceDaoReturnTypeConverter
+import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.FeedCounts
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
+import ch.lkmc.neutrodyne.core.model.FilterFlagBits
 import ch.lkmc.neutrodyne.core.model.GroupCounts
 import ch.lkmc.neutrodyne.core.model.MediaFilter
+import ch.lkmc.neutrodyne.core.model.PlayContextSpec
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -64,12 +67,27 @@ interface FeedDao {
 
     @RawQuery
     suspend fun unplayedIds(query: RoomRawQuery): List<Long>
+
+    /**
+     * One-shot context tail/start rows (02 Play context) built by [FeedQueryBuilder.contextTail]:
+     * up to `k` eligible episodes strictly after the anchor. The current item is not excluded in
+     * SQL, callers fetch `k + 1` and drop it (06 Queue and play context).
+     */
+    @RawQuery
+    suspend fun contextTail(query: RoomRawQuery): List<ContextItem>
 }
 
 /** Empty groups have a row with zero counts, including groups whose members have no episodes. */
 data class GroupCountRow(
     val groupId: Long,
     @Embedded val counts: FeedCounts,
+)
+
+/** One context-tail row (02 Play context): the keyset identity plus the podcast for media joins. */
+data class ContextItem(
+    val episodeId: Long,
+    val sortDate: Long,
+    val podcastId: Long,
 )
 
 /**
@@ -209,6 +227,104 @@ object FeedQueryBuilder {
         source: FeedSource,
         sortDateBefore: Long?,
     ): RoomRawQuery = unplayedSelection("e.id", source, sortDateBefore)
+
+    /**
+     * The context tail / start-item query (02 Play context; membership and start rules are 05's
+     * "Playing a group"): unplayed, `AVAILABLE`, [VISIBLE], queue-free episodes ordered by
+     * `(sortDate, id)` in [spec]'s order, `LIMIT ?` = [k]. Both anchor fields must be null or
+     * non-null together. A null pair reads from the beginning of the order; a stored pair
+     * keysets strictly after it even when the anchor row was deleted. The current item is *not*
+     * excluded: callers fetch `k + 1` and drop it (06). `EXTERNAL` contexts have no tail and are
+     * rejected.
+     *
+     * [boundBySubscription] adds 05's `e.sortDate >= p.subscribedAt` start bound, meaningful only
+     * for `GROUP` contexts (the first `startItem` attempt of an oldest-first group) and ignored
+     * for the others. `DOWNLOADS` is completed downloads across every podcast (`includeInAll`
+     * ignored), matching the flag-driven `d.state = 'COMPLETED'` filter it subsumes.
+     */
+    fun contextTail(
+        spec: PlayContextSpec,
+        anchorEpisodeId: Long?,
+        anchorSortDate: Long?,
+        k: Int,
+        youtubePlayable: Boolean,
+        boundBySubscription: Boolean = false,
+    ): RoomRawQuery {
+        require(k >= 0) { "contextTail k must be >= 0: $k" }
+        require(spec.type != ContextType.EXTERNAL) { "EXTERNAL contexts have no tail (05)" }
+        require((anchorEpisodeId == null) == (anchorSortDate == null)) {
+            "the keyset anchor is a (sortDate, id) pair: $anchorSortDate / $anchorEpisodeId"
+        }
+
+        val where = mutableListOf<String>()
+        val args = mutableListOf<Long>()
+        val from =
+            if (spec.type == ContextType.ALL) {
+                // As in page(): CROSS JOIN pins the ordered index_episode_sortDate scan.
+                where += "p.id = e.podcastId"
+                where += "p.includeInAll = 1"
+                "episode e CROSS JOIN podcast p"
+            } else {
+                "episode e JOIN podcast p ON p.id = e.podcastId"
+            }
+        when (spec.type) {
+            ContextType.ALL, ContextType.DOWNLOADS, ContextType.EXTERNAL -> {
+                Unit
+            }
+
+            ContextType.UNGROUPED -> {
+                where += UNGROUPED
+            }
+
+            ContextType.GROUP -> {
+                where += "e.podcastId IN (SELECT m.podcastId FROM podcast_group_member m WHERE m.groupId = ?)"
+                args += requireNotNull(spec.contextId) { "GROUP context without contextId" }
+            }
+
+            ContextType.PODCAST -> {
+                where += "e.podcastId = ?"
+                args += requireNotNull(spec.contextId) { "PODCAST context without contextId" }
+            }
+        }
+        if (spec.type == ContextType.DOWNLOADS || spec.filterFlags and FilterFlagBits.DOWNLOADED != 0) {
+            where += "d.state = 'COMPLETED'"
+        }
+        if (spec.filterFlags and FilterFlagBits.IN_PROGRESS != 0) {
+            where += "s.startedAt IS NOT NULL AND s.playedAt IS NULL"
+        }
+        when (spec.mediaFilter) {
+            MediaFilter.AUDIO -> where += "e.isVideo = 0"
+            MediaFilter.VIDEO -> where += "e.isVideo = 1"
+            MediaFilter.ALL -> Unit
+        }
+        where += VISIBLE
+        where += "e.availability = 'AVAILABLE'"
+        where += "s.playedAt IS NULL"
+        where += "NOT EXISTS (SELECT 1 FROM queue_entry q WHERE q.episodeId = e.id)"
+        where += "(? = 1 OR p.sourceType = 'RSS')"
+        args += if (youtubePlayable) 1L else 0L
+        where += "e.sortDate >= ?"
+        args += spec.minSortDate ?: 0
+        if (boundBySubscription && spec.type == ContextType.GROUP) {
+            where += "e.sortDate >= p.subscribedAt"
+        }
+        if (anchorSortDate != null && anchorEpisodeId != null) {
+            val op = if (spec.order == FeedOrder.NEWEST_FIRST) "<" else ">"
+            where += "(e.sortDate, e.id) $op (?, ?)"
+            args += anchorSortDate
+            args += anchorEpisodeId
+        }
+        val dir = if (spec.order == FeedOrder.NEWEST_FIRST) "DESC" else "ASC"
+        args += k.toLong()
+        return boundQuery(
+            "SELECT e.id AS episodeId, e.sortDate, e.podcastId FROM $from" +
+                " LEFT JOIN episode_state s ON s.episodeId = e.id" +
+                " LEFT JOIN download d ON d.episodeId = e.id" +
+                " WHERE ${where.joinToString(" AND ")}" +
+                " ORDER BY e.sortDate $dir, e.id $dir LIMIT ?",
+            args,
+        )
+    }
 
     // Only the projection differs: confirmation and the transactional write cannot drift.
     // Badge windows and AVAILABLE-only counting deliberately do not constrain this bulk action (02).

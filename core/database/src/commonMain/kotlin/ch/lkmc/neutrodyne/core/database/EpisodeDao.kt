@@ -9,8 +9,32 @@ import androidx.room3.RawQuery
 import androidx.room3.RoomRawQuery
 import ch.lkmc.neutrodyne.core.model.Availability
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 
 private const val NOTIFICATION_BIND_CHUNK = 500
+
+/**
+ * The [MediaLookupRow] SELECT list and joins (02 Media lookup, M4): `episode`, `podcast` and the
+ * low-churn LEFT joins (`episode_state`, `download`, both artwork lookups), never
+ * `episode_position`. The alternate-enclosure columns of the reference SQL ship with M5.
+ */
+private const val MEDIA_INFO_SELECT =
+    "SELECT e.id, e.podcastId, e.title, e.enclosureUrl, e.enclosureType, e.enclosureLength," +
+        " e.externalMediaId, e.isVideo, e.pubDate, e.availability, e.chaptersUrl, e.chaptersType," +
+        " COALESCE(s.measuredDurationMs, e.durationMs) AS durationMs, s.measuredDurationMs," +
+        " s.playedAt, d.state AS downloadState," +
+        " COALESCE(p.customTitle, p.title) AS podcastTitle, p.author, p.sourceType, p.credentialId," +
+        " COALESCE(e.artworkKey, p.artworkKey) AS artworkKey," +
+        " COALESCE(e.imageUrl, p.artworkUrl) AS artworkUrl," +
+        " COALESCE(a.version, 0) AS artworkVersion," +
+        " p.artworkKey AS podcastArtworkKey, p.artworkUrl AS podcastArtworkUrl," +
+        " COALESCE(pa.version, 0) AS podcastArtworkVersion" +
+        " FROM episode e JOIN podcast p ON p.id = e.podcastId" +
+        " LEFT JOIN episode_state s ON s.episodeId = e.id" +
+        " LEFT JOIN download d ON d.episodeId = e.id" +
+        " LEFT JOIN artwork a ON a.key = COALESCE(e.artworkKey, p.artworkKey)" +
+        " LEFT JOIN artwork pa ON pa.key = p.artworkKey"
 
 /**
  * `episode` row access outside the ingest pipeline (02 Ingestion support): lookups by id and
@@ -116,6 +140,53 @@ interface EpisodeDao {
      */
     @RawQuery(observedEntities = [EpisodeEntity::class, PodcastEntity::class, EpisodeStateEntity::class])
     suspend fun unplayedIds(query: RoomRawQuery): List<Long>
+
+    // --- Playback media lookup (02 Media lookup, M4) -------------------------------------------------
+
+    /**
+     * One-shot `MediaLookupRow` batch, 06's loader-thread miss path and `PlaybackMediaLookup.get`.
+     * Room primitive [mediaInfoChunk] binds one ≤500-ID `IN` list; callers must use [mediaInfo]
+     * for larger sets (02 Transactions and threading).
+     */
+    suspend fun mediaInfo(ids: List<Long>): List<MediaLookupRow> =
+        ids.distinct().chunked(NOTIFICATION_BIND_CHUNK).flatMap { mediaInfoChunk(it) }
+
+    @Query("$MEDIA_INFO_SELECT WHERE e.id IN (:ids)")
+    suspend fun mediaInfoChunk(ids: List<Long>): List<MediaLookupRow>
+
+    /**
+     * The observed variant (06's projector): Room tracks exactly the queried low-churn tables:
+     * `episode`, `podcast`, `episode_state`, `download`, `artwork`, so position ticks never
+     * re-emit. Batch reads chunk like [mediaInfo]; an empty set emits one empty list.
+     */
+    fun observeMediaInfo(ids: List<Long>): Flow<List<MediaLookupRow>> =
+        ids
+            .distinct()
+            .chunked(NOTIFICATION_BIND_CHUNK)
+            .map { observeMediaInfoChunk(it) }
+            .let { chunks ->
+                when {
+                    chunks.isEmpty() -> flowOf(emptyList())
+                    chunks.size == 1 -> chunks.single()
+                    else -> combine(chunks) { parts -> parts.asList().flatten() }
+                }
+            }
+
+    @Query("$MEDIA_INFO_SELECT WHERE e.id IN (:ids)")
+    fun observeMediaInfoChunk(ids: List<Long>): Flow<List<MediaLookupRow>>
+
+    /**
+     * The queue-add validation batch (06 Up next operations, Reject row): existence, availability
+     * and source type per requested id. Missing ids are simply absent from the result.
+     */
+    suspend fun queueEligibility(ids: List<Long>): List<QueueEligibilityRow> =
+        ids.distinct().chunked(NOTIFICATION_BIND_CHUNK).flatMap { queueEligibilityChunk(it) }
+
+    @Query(
+        "SELECT e.id, e.availability, p.sourceType, e.externalMediaId" +
+            " FROM episode e JOIN podcast p ON p.id = e.podcastId WHERE e.id IN (:ids)",
+    )
+    suspend fun queueEligibilityChunk(ids: List<Long>): List<QueueEligibilityRow>
 }
 
 /** One visible, unplayed episode per membership (or one null group for an ungrouped podcast). */
