@@ -139,6 +139,7 @@ public data class MemberV1(
     val orderKey: String? = null,
 )
 
+/** Plaintext credentials, only in opted-in manual backups (05 Writing, D33). */
 @Serializable
 public data class CredentialV1(
     val origin: String,
@@ -245,7 +246,7 @@ public data class SettingsV1(
 @Serializable
 public data class SettingValueV1(
     val key: String,
-    /** The setting key's subclass name, for type checks on read. */
+    /** Stable wire type, e.g. "Bool" or "Int32"; use literal names, never reflected classes. */
     val type: String,
     val value: JsonPrimitive? = null,
     val values: List<String>? = null,

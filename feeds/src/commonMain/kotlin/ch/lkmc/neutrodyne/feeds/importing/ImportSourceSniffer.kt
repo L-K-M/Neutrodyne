@@ -205,8 +205,11 @@ public object ImportSourceSniffer {
             }
         }
         return when {
-            newPipe -> SniffResult.Recognized(SniffedFormat.NEWPIPE_JSON)
+            // Explicit markers disambiguate an empty subscriptions array shared by both formats.
             libreTube -> SniffResult.Recognized(SniffedFormat.LIBRETUBE_JSON)
+
+            newPipe -> SniffResult.Recognized(SniffedFormat.NEWPIPE_JSON)
+
             else -> SniffResult.Unsupported("json")
         }
     }
