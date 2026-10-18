@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
@@ -178,6 +179,27 @@ class ImportSessionCleanerTest {
 
             assertEquals(1, cleaner.cleanExpired())
             assertNull(db.importDao().sessionById(sid))
+        }
+
+    @Test
+    fun cancellationDuringPayloadDeletionStillRemovesItsRow() =
+        runTest {
+            val sid =
+                db.seedImportSession(
+                    state = ImportState.PREVIEW,
+                    createdAt = 0,
+                    payloadPath = "import/cancelled-sweep.bin",
+                )
+            writePayload("cancelled-sweep.bin")
+            val pass = async(Dispatchers.Default, start = CoroutineStart.LAZY) { cleaner.cleanExpired() }
+            fileSystem.onDelete = { pass.cancel() }
+
+            pass.start()
+            pass.join()
+
+            assertTrue(pass.isCancelled, "the cleaner's caller was cancelled at the file delete")
+            assertTrue(!payloadFile("cancelled-sweep.bin").exists(), "the payload delete completed")
+            assertNull(db.importDao().sessionById(sid), "cancellation must not roll back only the row delete")
         }
 
     @Test

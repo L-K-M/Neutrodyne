@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.model.ImportState
 import dev.zacsweers.metro.Inject
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
 /**
@@ -48,23 +49,25 @@ internal class ImportSessionCleaner(
      * under the writer lock before anything is touched. A restore request (or a fix-up
      * reopen) committed first is seen here and keeps row AND payload; one arriving after
      * the commit finds no row. A failed file delete keeps the row so the next pass retries
-     * the file first.
+     * the file first. Cancellation cannot roll back the row delete after its file is gone.
      */
     private suspend fun sweepIfStillExpired(
         sessionId: Long,
         cutoff: Long,
     ): Boolean =
-        db.withWriteTransaction {
-            val dao = db.importDao()
-            val session = dao.sessionById(sessionId) ?: return@withWriteTransaction false
-            if (!isExpired(session, cutoff)) return@withWriteTransaction false
-            val payloadPath = session.payloadPath
-            if (payloadPath != null &&
-                !withContext(io) { payloads.deleteIfPresent(payloads.payloadFile(payloadPath)) }
-            ) {
-                return@withWriteTransaction false
+        withContext(NonCancellable) {
+            db.withWriteTransaction {
+                val dao = db.importDao()
+                val session = dao.sessionById(sessionId) ?: return@withWriteTransaction false
+                if (!isExpired(session, cutoff)) return@withWriteTransaction false
+                val payloadPath = session.payloadPath
+                if (payloadPath != null &&
+                    !withContext(io) { payloads.deleteIfPresent(payloads.payloadFile(payloadPath)) }
+                ) {
+                    return@withWriteTransaction false
+                }
+                dao.deleteSession(sessionId) > 0
             }
-            dao.deleteSession(sessionId) > 0
         }
 
     /**
