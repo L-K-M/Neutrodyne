@@ -1024,6 +1024,8 @@ Unselected `PREVIEW` items are never committed and stay `PREVIEW` (shown under "
 6. `FirstLaunchRestoreInitializer` and the "Restore Android backup" action ([Auto Backup](#auto-backup), Android) use the internal `PayloadStore.adopt(path)`, which copies an app-private file the same way; `ImportSource` never points at app-private files.
 7. `file://` (desktop: the import dialog, a drop onto the window, the `.opml` association or a second launch's hand-off, [Desktop inputs](#desktop-inputs)): only a regular file (no directory, device or link to one); its size from the file system must be ≤ 50 MiB (`TooLarge`; 11's 64 MiB pre-check runs first); copied through the same counting stream to `<cache>/import/` ([11 AppDirs](11-desktop.md#appdirs)), so the user may move or delete the original at once. A permission error — including a refused macOS folder-privacy prompt ([11 macOS folder privacy](11-desktop.md#macos-folder-privacy)) — is `Unreadable`.
 
+**Implementation note (2026-10-17, M3 B4).** Step 2's GET follows the redirect chain by hand — the FEED client's own redirect support stays off ([03 Request rules](03-feeds-and-discovery.md#request-rules)): each `Location` resolves against the hop URL (RFC 3986) and must stay a credential-free `http(s)` target, within `MAX_REDIRECT_FOLLOWUPS` (20) follow-ups and never revisiting a URL (both bound breaches are `redirect_loop`). A 3xx whose `Location` is missing or unusable is the final response (`http_3xx`), the 50 MiB cap applies to the final body only, and a failure to create `<cache>/import/` is `ImportError.Storage` on every entry point.
+
 ### 2. Sniff and parse
 
 `ImportSourceSniffer` (`:feeds`, common) decides the format from bytes, never from MIME type or extension ([Sniffing](#sniffing)). For `OPML`, the bound `OpmlReader` — `XmlPullOpmlReader` from the `:feeds:jvm` island on both platforms, over Android's platform `XmlPullParser` or kxml2 2.3.0 on the desktop ([03 Package layout](03-feeds-and-discovery.md#package-layout)) — runs a cascade over the payload file (re-opened per pass):
@@ -1289,6 +1291,13 @@ object ImportDocuments {                    // pure adapters; OPML applies the f
 | `TAKEOUT_CSV` | `TakeoutSubscriptionsParser` (04), CSV or ZIP | none → "YouTube" pre-filled | RFC 4180; localised header skipped |
 | `URL_LIST` (M8) | `UrlListParser` (04) | none → "YouTube" pre-filled only if every item is YouTube | ≤ 1 MB, ≤ 5,000 lines |
 | `NEUTRODYNE_BACKUP` | `BackupCodec` | from the archive | creates a session without `import_item` rows (the restore adds them when it finishes) and routes to the restore preview ([Full backup and restore](#full-backup-and-restore)) |
+
+**Implementation note (2026-10-17, M3).** The M3 `ImportSessions` handles only `OPML` (this table's
+first row) and `NEUTRODYNE_BACKUP` (the session-without-items row). A payload the sniffer already
+recognises as `NEWPIPE_JSON`, `LIBRETUBE_JSON`, `TAKEOUT_CSV` or `URL_LIST` — formats whose parsers
+are M8 work — is answered with `ImportError.Unsupported(UnsupportedSource.UNKNOWN)`, the same
+taxonomy entry an unrecognised payload gets; the UI copy stays "This doesn't look like a podcast
+list", which is honest for M3 because no parser could consume it anyway.
 
 ### Archive guard
 
