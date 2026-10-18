@@ -53,6 +53,7 @@ import ch.lkmc.neutrodyne.feeds.backup.SettingsV1
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipArchiveWriter
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipGuard
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
@@ -66,12 +67,14 @@ import okio.Sink
 import okio.buffer
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.io.path.createTempDirectory
 import kotlin.random.Random
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
@@ -503,6 +506,315 @@ class BackupWriterTest {
             }
         }
 
+    // --- Snapshot levels and the publication cap (05 Snapshot production) ---------------------
+
+    @Test
+    fun levelOneSlimsOnlyOldUnprotectedPlayedLines() =
+        runTest {
+            val podcast = seedPodcast("https://example.com/p-level1.xml")
+            val cutoff = clock.now() - YEAR_MS
+            // Old, played and unreferenced: the only line level 1 slims — its state,
+            // tombstone and stub hints all leave the wire.
+            val slimmed =
+                seedEpisode(podcast, "k-slim") {
+                    copy(guid = "g-slim", enclosureUrl = "https://cdn.example.com/slim.mp3")
+                }
+            db.episodeStateDao().upsert(
+                episodeStateEntity(slimmed, playedAt = cutoff - 1, updatedAt = 40L) {
+                    copy(
+                        playCount = 3,
+                        lastPlayedAt = 30L,
+                        downloadDismissedAt = 35L,
+                        measuredDurationMs = 61_000L,
+                    )
+                },
+            )
+            // The boundary is inclusive: `pl` at the cutoff is not "older than 365 days".
+            val boundary =
+                seedEpisode(podcast, "k-boundary") { copy(enclosureUrl = "https://cdn.example.com/b.mp3") }
+            db.episodeStateDao().upsert(
+                episodeStateEntity(boundary, playedAt = cutoff, updatedAt = 41L) { copy(playCount = 2) },
+            )
+            // A position, a favourite, an Up next entry or the session current each keep
+            // the full line.
+            val positioned = seedEpisode(podcast, "k-pos")
+            db.episodeStateDao().upsert(episodeStateEntity(positioned, playedAt = cutoff - 1, updatedAt = 42L))
+            db.positionDao().upsert(EpisodePositionEntity(positioned, 12_000L, 60_000L, PositionSource.STREAM, 43L))
+            val favourite = seedEpisode(podcast, "k-fav")
+            db.episodeStateDao().upsert(
+                episodeStateEntity(favourite, playedAt = cutoff - 1, updatedAt = 44L) { copy(isFavorite = true) },
+            )
+            val queued = seedEpisode(podcast, "k-queued")
+            db.episodeStateDao().upsert(episodeStateEntity(queued, playedAt = cutoff - 1, updatedAt = 45L))
+            db.queueDao().insert(queueEntryEntity(queued, "q1"))
+            // The session's `current` is protected even when it is not in Up next.
+            val current = seedEpisode(podcast, "k-current")
+            db.episodeStateDao().upsert(episodeStateEntity(current, playedAt = cutoff - 1, updatedAt = 46L))
+            db.playSessionDao().ensureNow(1L)
+            db.useWriterConnection {
+                it.execSql("UPDATE play_session SET currentEpisodeId = $current WHERE id = 0")
+            }
+
+            assertIs<Outcome.Success<*>>(
+                newWriter().write(
+                    BackupKind.AUTO_SNAPSHOT,
+                    target(),
+                    includeCredentials = false,
+                    level = SnapshotLevel.SLIM_HISTORY,
+                ),
+            )
+            reader(target()).use { reader ->
+                val lines = reader.lines().associateBy { it.k }
+                assertEquals(6, lines.size)
+                // The exact slim shape: p, k, kv, pl, ts and nothing else.
+                assertEquals(
+                    EpisodeLineV1(
+                        p = "https://example.com/p-level1.xml",
+                        k = "k-slim",
+                        kv = 1,
+                        pl = cutoff - 1,
+                        ts = 40L,
+                    ),
+                    lines.getValue("k-slim"),
+                )
+                for ((kept, pl) in mapOf(
+                    "k-boundary" to cutoff,
+                    "k-pos" to cutoff - 1,
+                    "k-fav" to cutoff - 1,
+                    "k-queued" to cutoff - 1,
+                    "k-current" to cutoff - 1,
+                )) {
+                    assertEquals(pl, lines.getValue(kept).pl, kept)
+                }
+                assertEquals("https://cdn.example.com/b.mp3", lines.getValue("k-boundary").u)
+                assertEquals(2, lines.getValue("k-boundary").pc)
+                assertEquals(12_000L, lines.getValue("k-pos").pos)
+                assertTrue(lines.getValue("k-fav").fav)
+                assertEquals(1, reader.manifest().snapshotLevel)
+            }
+        }
+
+    @Test
+    fun levelTwoDropsOldPlayedLinesAndOldTombstones() =
+        runTest {
+            val podcast = seedPodcast("https://example.com/p-level2.xml")
+            val cutoff = clock.now() - YEAR_MS
+            val old = cutoff - 1
+            val droppedPlayed = seedEpisode(podcast, "k-drop")
+            db.episodeStateDao().upsert(episodeStateEntity(droppedPlayed, playedAt = old, updatedAt = 40L))
+            val favourite = seedEpisode(podcast, "k-fav")
+            db.episodeStateDao().upsert(
+                episodeStateEntity(favourite, playedAt = old, updatedAt = 41L) { copy(isFavorite = true) },
+            )
+            val positioned = seedEpisode(podcast, "k-pos")
+            db.episodeStateDao().upsert(episodeStateEntity(positioned, playedAt = old, updatedAt = 42L))
+            db.positionDao().upsert(EpisodePositionEntity(positioned, 5_000L, null, PositionSource.STREAM, 43L))
+            val queued = seedEpisode(podcast, "k-queued")
+            db.episodeStateDao().upsert(episodeStateEntity(queued, playedAt = old, updatedAt = 44L))
+            db.queueDao().insert(queueEntryEntity(queued, "q1"))
+            // An old played line that also carries a tombstone still drops (played rule).
+            val playedTombstone = seedEpisode(podcast, "k-ptomb")
+            db.episodeStateDao().upsert(
+                episodeStateEntity(playedTombstone, playedAt = old, updatedAt = 45L) {
+                    copy(downloadDismissedAt = old)
+                },
+            )
+            // Tombstone-only lines: old drops, fresh and protected keep.
+            val oldTombstone = seedEpisode(podcast, "k-tomb")
+            db.episodeStateDao().upsert(
+                episodeStateEntity(oldTombstone, updatedAt = 46L) { copy(downloadDismissedAt = old) },
+            )
+            val freshTombstone = seedEpisode(podcast, "k-fresh")
+            db.episodeStateDao().upsert(
+                episodeStateEntity(freshTombstone, updatedAt = 47L) { copy(downloadDismissedAt = cutoff) },
+            )
+            val mixedTombstone = seedEpisode(podcast, "k-mixed")
+            db.episodeStateDao().upsert(
+                episodeStateEntity(mixedTombstone, updatedAt = 48L) {
+                    copy(downloadDismissedAt = old, measuredDurationMs = 30_000L)
+                },
+            )
+            val positionedTombstone = seedEpisode(podcast, "k-post")
+            db.episodeStateDao().upsert(
+                episodeStateEntity(positionedTombstone, updatedAt = 49L) { copy(downloadDismissedAt = old) },
+            )
+            db.positionDao().upsert(
+                EpisodePositionEntity(positionedTombstone, 5_000L, null, PositionSource.STREAM, 50L),
+            )
+            val queuedTombstone = seedEpisode(podcast, "k-qtomb")
+            db.episodeStateDao().upsert(
+                episodeStateEntity(queuedTombstone, updatedAt = 51L) { copy(downloadDismissedAt = old) },
+            )
+            db.queueDao().insert(queueEntryEntity(queuedTombstone, "q2"))
+            // The session current is protected at level 2 as well.
+            val current = seedEpisode(podcast, "k-current")
+            db.episodeStateDao().upsert(
+                episodeStateEntity(current, updatedAt = 52L) { copy(downloadDismissedAt = old) },
+            )
+            db.playSessionDao().ensureNow(1L)
+            db.useWriterConnection {
+                it.execSql("UPDATE play_session SET currentEpisodeId = $current WHERE id = 0")
+            }
+
+            assertIs<Outcome.Success<*>>(
+                newWriter().write(
+                    BackupKind.AUTO_SNAPSHOT,
+                    target(),
+                    includeCredentials = false,
+                    level = SnapshotLevel.DROP_HISTORY,
+                ),
+            )
+            reader(target()).use { reader ->
+                val lines = reader.lines()
+                assertEquals(
+                    setOf("k-fav", "k-pos", "k-queued", "k-fresh", "k-mixed", "k-post", "k-qtomb", "k-current"),
+                    lines.map { it.k }.toSet(),
+                )
+                val manifest = reader.manifest()
+                assertEquals(2, manifest.snapshotLevel)
+                // Counts and the entry record describe the filtered file exactly.
+                assertEquals(lines.size, manifest.counts.episodeLines)
+                assertEquals(lines.count { it.pl != null }, manifest.counts.played)
+                assertEquals(lines.count { it.pl == null && it.st != null }, manifest.counts.inProgress)
+                val info = manifest.entries.single { it.name == BackupCodec.ENTRY_EPISODES }
+                val bytes = reader.bytes(BackupCodec.ENTRY_EPISODES)
+                assertEquals(bytes.size.toLong(), info.bytes)
+                assertEquals(bytes.toByteString().sha256().hex(), info.sha256)
+                assertEquals(lines.size, info.records)
+            }
+        }
+
+    @Test
+    fun levelThreeKeepsOnlyLiveLines() =
+        runTest {
+            val podcast = seedPodcast("https://example.com/p-level3.xml")
+            val old = clock.now() - YEAR_MS - 1
+            // Live lines: session current (never queued), Up next, in progress by
+            // startedAt, in progress by a bare position row, favourite.
+            val current =
+                seedEpisode(podcast, "k-current") { copy(enclosureUrl = "https://cdn.example.com/cur.mp3") }
+            val queued = seedEpisode(podcast, "k-queued")
+            db.queueDao().insert(queueEntryEntity(queued, "q1"))
+            val started = seedEpisode(podcast, "k-started")
+            db.episodeStateDao().upsert(episodeStateEntity(started, updatedAt = 40L) { copy(startedAt = 10L) })
+            val positionOnly = seedEpisode(podcast, "k-posonly")
+            db.positionDao().upsert(EpisodePositionEntity(positionOnly, 8_000L, null, PositionSource.STREAM, 41L))
+            val favourite = seedEpisode(podcast, "k-fav")
+            db.episodeStateDao().upsert(
+                episodeStateEntity(favourite, playedAt = old, updatedAt = 42L) { copy(isFavorite = true) },
+            )
+            // Dead lines: played (any age), tombstones, download-only rows all go.
+            val oldPlayed = seedEpisode(podcast, "k-old")
+            db.episodeStateDao().upsert(episodeStateEntity(oldPlayed, playedAt = old, updatedAt = 43L))
+            val freshPlayed = seedEpisode(podcast, "k-fresh")
+            db.episodeStateDao().upsert(
+                episodeStateEntity(freshPlayed, playedAt = clock.now() - 1_000, updatedAt = 44L),
+            )
+            val tombstone = seedEpisode(podcast, "k-tomb")
+            db.episodeStateDao().upsert(
+                episodeStateEntity(tombstone, updatedAt = 45L) { copy(downloadDismissedAt = clock.now() - 1_000) },
+            )
+            val downloaded = seedEpisode(podcast, "k-dl")
+            db.downloadDao().insert(downloadEntity(episodeId = downloaded, state = DownloadState.COMPLETED))
+            db.playSessionDao().ensureNow(1L)
+            db.useWriterConnection {
+                it.execSql("UPDATE play_session SET currentEpisodeId = $current WHERE id = 0")
+            }
+
+            assertIs<Outcome.Success<*>>(
+                newWriter().write(
+                    BackupKind.AUTO_SNAPSHOT,
+                    target(),
+                    includeCredentials = false,
+                    level = SnapshotLevel.ACTIVE_ONLY,
+                ),
+            )
+            reader(target()).use { reader ->
+                val lines = reader.lines()
+                assertEquals(
+                    setOf("k-current", "k-queued", "k-started", "k-posonly", "k-fav"),
+                    lines.map { it.k }.toSet(),
+                )
+                // Protected refs keep the stub hints a restore needs on an empty database.
+                assertEquals("https://cdn.example.com/cur.mp3", lines.single { it.k == "k-current" }.u)
+                assertEquals(0L, lines.single { it.k == "k-current" }.ts)
+                assertEquals(8_000L, lines.single { it.k == "k-posonly" }.pos)
+                val queue = reader.queue()
+                assertEquals("k-queued", queue.upNext.single().k)
+                assertEquals("k-current", queue.session?.current?.k)
+                val manifest = reader.manifest()
+                assertEquals(3, manifest.snapshotLevel)
+                assertEquals(lines.size, manifest.counts.episodeLines)
+                assertEquals(lines.count { it.pl != null }, manifest.counts.played)
+                assertEquals(lines.count { it.pl == null && it.st != null }, manifest.counts.inProgress)
+            }
+        }
+
+    @Test
+    fun compressedCapRejectsTheClosedStageBeforeReplacingAnExistingTarget() =
+        runTest {
+            val podcast = seedPodcast()
+            val episode = seedEpisode(podcast)
+            db.episodeStateDao().upsert(episodeStateEntity(episode, playedAt = 10L))
+            val target = target()
+            val writer = newWriter()
+            assertIs<Outcome.Success<*>>(writer.write(BackupKind.AUTO_SNAPSHOT, target, includeCredentials = false))
+            val before = fileSystem.read(target) { readByteArray() }
+            val size = before.size.toLong()
+
+            // A cap below the staged ZIP's size rejects the closed stage; the previous
+            // target survives byte-for-byte and no stage is left behind.
+            assertEquals(
+                Outcome.Failure(BackupError.TooLarge),
+                writer.write(
+                    BackupKind.AUTO_SNAPSHOT,
+                    target,
+                    includeCredentials = false,
+                    maxCompressedBytes = size - 1,
+                ),
+            )
+            fileSystem.read(target) { assertContentEquals(before, readByteArray()) }
+            assertFalse(fileSystem.exists("$target.tmp".toPath()))
+
+            // The cap is inclusive: exactly the staged size still publishes.
+            assertIs<Outcome.Success<*>>(
+                writer.write(BackupKind.AUTO_SNAPSHOT, target, includeCredentials = false, maxCompressedBytes = size),
+            )
+            fileSystem.read(target) { assertContentEquals(before, readByteArray()) }
+        }
+
+    @Test
+    fun nonSnapshotKindsRefuseHistoryLevels() =
+        runTest {
+            seedPodcast()
+            val writer = newWriter()
+
+            assertFailsWith<IllegalArgumentException> {
+                writer.write(
+                    BackupKind.MANUAL,
+                    target(),
+                    includeCredentials = false,
+                    level = SnapshotLevel.DROP_HISTORY,
+                )
+            }
+            assertFailsWith<IllegalArgumentException> {
+                writer.write(
+                    BackupKind.SCHEDULED,
+                    target(),
+                    includeCredentials = false,
+                    level = SnapshotLevel.SLIM_HISTORY,
+                )
+            }
+            assertFalse(fileSystem.exists(target()))
+            assertFalse(fileSystem.exists("${target()}.tmp".toPath()))
+
+            // FULL is the default and stays a normal write — `snapshotLevel` remains 0.
+            assertIs<Outcome.Success<*>>(
+                writer.write(BackupKind.MANUAL, target(), includeCredentials = false, level = SnapshotLevel.FULL),
+            )
+            reader(target()).use { reader -> assertEquals(0, reader.manifest().snapshotLevel) }
+        }
+
     // --- Failure atomicity and the write mutex (05 Writing; AC10/AC11) --------------------------
 
     @Test
@@ -520,6 +832,34 @@ class BackupWriterTest {
             assertEquals(Outcome.Failure(BackupError.Io), outcome)
             fileSystem.read(target) { assertContentEquals(before, readByteArray()) }
             assertFalse(fileSystem.exists("$target.tmp".toPath()))
+        }
+
+    @Test
+    fun cancellationAfterArchiveCloseCannotPublishTheStage() =
+        runTest {
+            seedPodcast()
+            val target = target()
+            assertIs<Outcome.Success<*>>(newWriter().write(BackupKind.AUTO_SNAPSHOT, target, false))
+            val before = fileSystem.read(target) { readByteArray() }
+            seedPodcast()
+            val staged = "$target.tmp".toPath()
+            val caller = Job()
+            val cancelling =
+                object : ForwardingFileSystem(fileSystem) {
+                    override fun metadataOrNull(path: Path): FileMetadata? {
+                        val metadata = super.metadataOrNull(path)
+                        if (path == staged) caller.cancel()
+                        return metadata
+                    }
+                }
+            val write =
+                async(Dispatchers.IO + caller) {
+                    newWriter(fileSystem = cancelling).write(BackupKind.AUTO_SNAPSHOT, target, false)
+                }
+
+            assertFailsWith<CancellationException> { write.await() }
+            fileSystem.read(target) { assertContentEquals(before, readByteArray()) }
+            assertFalse(fileSystem.exists(staged))
         }
 
     @Test
@@ -762,5 +1102,8 @@ class BackupWriterTest {
         const val CREDENTIAL_PASS = "s3cret"
         const val REPEATED_TITLE_BYTES = 8 * 1024
         const val DB_BIND_CHUNK = 500
+
+        /** 05's "older than 365 days" bound, in milliseconds. */
+        const val YEAR_MS: Long = 365L * 24 * 60 * 60 * 1000
     }
 }
