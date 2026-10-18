@@ -13,9 +13,11 @@ import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.domain.ExportRepository
 import ch.lkmc.neutrodyne.core.domain.NewEpisodePoster
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.domain.SnapshotScheduler
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.NewEpisodeNotice
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
@@ -72,6 +74,16 @@ interface DesktopAppGraph {
 
     /** What `AuthInterceptor` injects: the same singleton as [secretStore]. */
     val credentialLookup: CredentialLookup
+
+    /**
+     * M3 C3a: resolving it proves the desktop `ExportDestination`/`FileExportDestination`
+     * binding is real — the repository is `internal`, so the graph test asserts the resolved
+     * class name instead.
+     */
+    val exportRepository: ExportRepository
+
+    /** M3 C3a: D34's no-op scheduler — the desktop has no Auto Backup. */
+    val snapshotScheduler: SnapshotScheduler
 
     /**
      * The runner the shutdown stops (11 Shutdown step 2). Resolving pulls the lane chain through

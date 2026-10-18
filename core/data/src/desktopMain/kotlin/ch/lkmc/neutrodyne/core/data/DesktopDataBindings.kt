@@ -3,17 +3,33 @@
 package ch.lkmc.neutrodyne.core.data
 
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.data.backup.NoSnapshotScheduler
+import ch.lkmc.neutrodyne.core.data.exporting.ExportRepositoryImpl
+import ch.lkmc.neutrodyne.core.domain.ExportRepository
+import ch.lkmc.neutrodyne.core.domain.SnapshotScheduler
+import ch.lkmc.neutrodyne.feeds.backup.ArchiveReaderFactory
+import ch.lkmc.neutrodyne.feeds.backup.ArchiveWriterFactory
 import ch.lkmc.neutrodyne.feeds.html.ShowNotesSanitizer
+import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipArchiveWriter
+import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipGuard
 import ch.lkmc.neutrodyne.feeds.jvm.html.JsoupShowNotesSanitizer
+import ch.lkmc.neutrodyne.feeds.jvm.opml.XmlPullOpmlReader
 import ch.lkmc.neutrodyne.feeds.jvm.parse.PullParserFactory
 import ch.lkmc.neutrodyne.feeds.jvm.parse.XmlPullFeedParser
+import ch.lkmc.neutrodyne.feeds.opml.OpmlReader
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.SingleIn
 
-/** `:core:data`'s desktop bindings (03): the JVM parser pair (kxml2 via service discovery). */
+/**
+ * `:core:data`'s desktop bindings (03): the JVM parser pair (kxml2 via service discovery) and,
+ * from M3 row C3a, the JVM import/export factories. `PayloadSource`/`ExportDestination` join
+ * through `@ContributesBinding` on `FilePayloadSource`/`FileExportDestination`; the
+ * import-backup lane's `ImportWorkScheduler` stays unbound until row C3b needs it — the
+ * import repository is not exposed from the desktop graph before then.
+ */
 @BindingContainer
 @ContributesTo(AppScope::class)
 object DesktopDataBindings {
@@ -28,4 +44,28 @@ object DesktopDataBindings {
     @Provides
     @SingleIn(AppScope::class)
     fun showNotesSanitizer(): ShowNotesSanitizer = JsoupShowNotesSanitizer()
+
+    /** The OPML import reader (05 Sniff and parse) — kxml2-backed on the desktop. */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun opmlReader(factory: PullParserFactory): OpmlReader = XmlPullOpmlReader(factory)
+
+    /** The capped ZIP reader (05 Archive guard) for backup/Takeout imports. */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun archiveReaderFactory(): ArchiveReaderFactory = ZipGuard()
+
+    /** The deterministic backup ZIP writer (05 Writing); callers stage and move atomically. */
+    @Provides
+    @SingleIn(AppScope::class)
+    fun archiveWriterFactory(): ArchiveWriterFactory = ZipArchiveWriter()
+
+    /** D34: the desktop has no Auto Backup — the scheduler does nothing. */
+    @Provides
+    fun snapshotScheduler(): SnapshotScheduler = NoSnapshotScheduler
+
+    /** The impl type is `internal` to this module, so the provider is too. */
+    @Provides
+    @SingleIn(AppScope::class)
+    internal fun exportRepository(impl: ExportRepositoryImpl): ExportRepository = impl
 }
