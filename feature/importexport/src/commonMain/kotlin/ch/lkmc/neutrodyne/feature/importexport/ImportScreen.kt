@@ -30,6 +30,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -43,10 +44,14 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.PagingData
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemContentType
 import androidx.paging.compose.itemKey
+import androidx.paging.insertSeparators
+import androidx.paging.map
+import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
 import ch.lkmc.neutrodyne.core.designsystem.components.NdActionRole
 import ch.lkmc.neutrodyne.core.designsystem.components.NdAssistChip
 import ch.lkmc.neutrodyne.core.designsystem.components.NdBanner
@@ -62,6 +67,9 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.components.rememberMonogramPainter
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.domain.GroupError
+import ch.lkmc.neutrodyne.core.model.ArtworkRef
+import ch.lkmc.neutrodyne.core.model.BasicCredentials
+import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.GroupProposal
 import ch.lkmc.neutrodyne.core.model.ImportFormat
@@ -69,10 +77,15 @@ import ch.lkmc.neutrodyne.core.model.ImportItemFilter
 import ch.lkmc.neutrodyne.core.model.ImportItemKind
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
 import ch.lkmc.neutrodyne.core.model.ImportItemView
+import ch.lkmc.neutrodyne.core.model.ImportReportSection
 import ch.lkmc.neutrodyne.core.model.ImportSessionView
 import ch.lkmc.neutrodyne.core.model.ImportState
+import ch.lkmc.neutrodyne.core.model.reportSection
 import ch.lkmc.neutrodyne.core.ui.EmptyState
+import ch.lkmc.neutrodyne.core.ui.FeedErrorText
 import ch.lkmc.neutrodyne.core.ui.NavBackButton
+import ch.lkmc.neutrodyne.core.ui.UiText
+import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.NotificationPermissionNotice
 import ch.lkmc.neutrodyne.core.ui.rememberMonogram
@@ -154,6 +167,8 @@ import ch.lkmc.neutrodyne.core.ui.resources.import_youtube_count
 import ch.lkmc.neutrodyne.core.ui.resources.import_youtube_later
 import ch.lkmc.neutrodyne.core.ui.resources.selection_select_all
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
@@ -164,7 +179,7 @@ private val MONOGRAM = 40.dp
  * The `ImportKey` screen (05 Preview contract, 08 Import): one route body for the session's
  * whole lifecycle — PREVIEW shows header/warnings/groups/options over the selectable paged
  * rows, COMMITTED/FETCHING swaps the editing chrome for progress, DONE/CANCELLED shows the
- * basic report. Every rendered value comes from [ImportUiState] plus the repository-paged
+ * report with fix-ups. Every rendered value comes from [ImportUiState] plus the repository-paged
  * [items]; nothing here touches storage, files or the network.
  */
 @Composable
@@ -187,7 +202,14 @@ internal fun ImportScreen(
     onCancelPreview: () -> Unit,
     onStopImport: () -> Unit,
     onBack: () -> Unit,
+    onRetry: (ImportItemView) -> Unit = {},
+    onRemove: (ImportItemView) -> Unit = {},
+    onRemoveAll: () -> Unit = {},
+    onEditUrl: suspend (ImportItemView, String) -> UiText? = { _, _ -> null },
+    onPassword: suspend (ImportItemView, BasicCredentials) -> UiText? = { _, _ -> null },
+    artworkFor: (Long) -> Flow<ArtworkRef?> = { flowOf(null) },
 ) {
+    var fixUpFor by remember { mutableStateOf<Pair<ImportItemView, ImportFixUp>?>(null) }
     val session = state.session
     val editable = state.previewEditable
     val backupPending =
@@ -259,6 +281,22 @@ internal fun ImportScreen(
                         onNotify = onNotify,
                         onConfirm = onConfirm,
                         onStop = { showStopDialog = true },
+                        onRetry = onRetry,
+                        onRemove = onRemove,
+                        onRemoveAll = onRemoveAll,
+                        onEditUrl = { fixUpFor = it to ImportFixUp.URL },
+                        onPassword = { fixUpFor = it to ImportFixUp.PASSWORD },
+                        artworkFor = artworkFor,
+                    )
+                }
+            }
+            fixUpFor?.let { (item, kind) ->
+                key(item.ordinal, kind) {
+                    ImportFixUpDialog(
+                        kind = kind,
+                        onUrl = { onEditUrl(item, it) },
+                        onPassword = { onPassword(item, it) },
+                        onDismiss = { fixUpFor = null },
                     )
                 }
             }
@@ -328,9 +366,35 @@ private fun SessionBody(
     onNotify: (Boolean) -> Unit,
     onConfirm: () -> Unit,
     onStop: () -> Unit,
+    onRetry: (ImportItemView) -> Unit,
+    onRemove: (ImportItemView) -> Unit,
+    onRemoveAll: () -> Unit,
+    onEditUrl: (ImportItemView) -> Unit,
+    onPassword: (ImportItemView) -> Unit,
+    artworkFor: (Long) -> Flow<ArtworkRef?>,
 ) {
-    val paging = items.collectAsLazyPagingItems()
     val preview = session.state == ImportState.PREVIEW
+    val rowsEnabled = !state.busy && session.state != ImportState.CANCELLED
+    val rows =
+        remember(items, preview) {
+            items.map { data ->
+                val entries = data.map<ImportItemView, ImportListRow> { ImportListRow.Entry(it) }
+                if (preview) {
+                    entries
+                } else {
+                    entries.insertSeparators { before, after ->
+                        val next = (after as? ImportListRow.Entry)?.item
+                        val previous = (before as? ImportListRow.Entry)?.item
+                        if (next != null && next.reportSection() != previous?.reportSection()) {
+                            ImportListRow.Header(next.reportSection(), next.ordinal)
+                        } else {
+                            null
+                        }
+                    }
+                }
+            }
+        }
+    val paging = rows.collectAsLazyPagingItems()
     val fetching = session.state == ImportState.COMMITTED || session.state == ImportState.FETCHING
     var renameFor by remember { mutableStateOf<GroupProposal?>(null) }
     var showTargetPicker by rememberSaveable { mutableStateOf(false) }
@@ -405,16 +469,38 @@ private fun SessionBody(
             }
             items(
                 count = paging.itemCount,
-                key = paging.itemKey { it.ordinal },
-                contentType = paging.itemContentType { "row" },
+                key =
+                    paging.itemKey {
+                        when (it) {
+                            is ImportListRow.Entry -> "row-${it.item.ordinal}"
+                            is ImportListRow.Header -> "section-${it.section}-${it.firstOrdinal}"
+                        }
+                    },
+                contentType = paging.itemContentType { if (it is ImportListRow.Header) "section" else "row" },
             ) { index ->
-                val item = paging[index] ?: return@items
-                ImportRow(
-                    item = item,
-                    preview = preview,
-                    enabled = !state.busy,
-                    onToggle = onToggle,
-                )
+                when (val row = paging[index]) {
+                    null -> {
+                        Unit
+                    }
+
+                    is ImportListRow.Header -> {
+                        ImportSectionHeader(row.section, session, rowsEnabled, onRemoveAll)
+                    }
+
+                    is ImportListRow.Entry -> {
+                        ImportRow(
+                            item = row.item,
+                            preview = preview,
+                            enabled = rowsEnabled,
+                            onToggle = onToggle,
+                            artworkFor = artworkFor,
+                            onRetry = { onRetry(row.item) },
+                            onRemove = { onRemove(row.item) },
+                            onEditUrl = { onEditUrl(row.item) },
+                            onPassword = { onPassword(row.item) },
+                        )
+                    }
+                }
             }
             if (paging.itemCount == 0 && preview) {
                 item(key = "empty", contentType = "header") {
@@ -748,16 +834,36 @@ private fun ImportRow(
     preview: Boolean,
     enabled: Boolean,
     onToggle: (Int, Boolean) -> Unit,
+    artworkFor: (Long) -> Flow<ArtworkRef?>,
+    onRetry: () -> Unit,
+    onRemove: () -> Unit,
+    onEditUrl: () -> Unit,
+    onPassword: () -> Unit,
 ) {
     val title = displayMetadata(item.title)
     val selectionLabel = stringResource(Res.string.import_select_item, title)
     ListItem(
         leadingContent = {
-            Image(
-                painter = rememberMonogramPainter(rememberMonogram(title)),
-                contentDescription = null,
-                modifier = Modifier.size(MONOGRAM).clip(RoundedCornerShape(8.dp)),
-            )
+            val podcastId = item.podcastId
+            if (!preview && podcastId != null) {
+                val art by remember(podcastId, artworkFor) { artworkFor(podcastId) }
+                    .collectAsStateWithLifecycle(initialValue = null)
+                CoverArt(
+                    ref = art,
+                    monogram = rememberMonogram(title),
+                    modifier = Modifier.size(MONOGRAM).testTag("import-cover-${item.ordinal}"),
+                )
+            } else {
+                Image(
+                    painter = rememberMonogramPainter(rememberMonogram(title)),
+                    contentDescription = null,
+                    modifier =
+                        Modifier
+                            .size(MONOGRAM)
+                            .clip(RoundedCornerShape(8.dp))
+                            .testTag("import-monogram-${item.ordinal}"),
+                )
+            }
         },
         headlineContent = {
             Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -766,9 +872,21 @@ private fun ImportRow(
             Column {
                 Text(displayMetadata(item.host), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 StatusChips(item, preview)
+                if (!preview && item.reportSection() == ImportReportSection.ATTENTION) {
+                    val fallback =
+                        when (item.status) {
+                            ImportItemStatus.NOT_A_FEED -> FeedErrorKind.NOT_A_FEED
+                            ImportItemStatus.AUTH_REQUIRED -> FeedErrorKind.HTTP_AUTH
+                            ImportItemStatus.GONE -> FeedErrorKind.HTTP_GONE
+                            else -> FeedErrorKind.UNKNOWN
+                        }
+                    val errorKind = FeedErrorKind.entries.firstOrNull { it.name == item.errorDetail } ?: fallback
+                    Text(FeedErrorText.describe(errorKind).asString(), style = MaterialTheme.typography.bodySmall)
+                }
                 statusDescription(item)?.let {
                     Text(it, style = MaterialTheme.typography.bodySmall)
                 }
+                if (!preview) ImportRowActions(item, enabled, onRetry, onEditUrl, onPassword, onRemove)
             }
         },
         trailingContent = {
@@ -940,7 +1058,7 @@ private fun ProgressHeader(session: ImportSessionView) {
     }
 }
 
-/** DONE/CANCELLED tallies (05's basic report; rich fix-ups are D2). */
+/** DONE/CANCELLED tallies, excluding deferred channels from the attention total. */
 @Composable
 private fun ReportHeader(session: ImportSessionView) {
     val counts = session.counts
@@ -965,7 +1083,10 @@ private fun ReportHeader(session: ImportSessionView) {
             counts[ImportItemStatus.ALREADY_SUBSCRIBED] ?: 0,
         )
         val attention =
-            counts.entries.filter { it.key.needsAttention() }.sumOf { it.value }
+            (counts.entries.filter { it.key.needsAttention() }.sumOf { it.value } - session.deferredCount)
+                .coerceAtLeast(
+                    0,
+                )
         if (attention > 0) {
             Text(
                 pluralStringResource(Res.plurals.import_done_attention, attention, attention),
@@ -1219,7 +1340,7 @@ private val FETCH_OUTCOMES =
 private val DISPLAY_URL = Regex("""(?i)[a-z][a-z0-9+.-]*://[^\s<>"{}|\\^`]+""")
 
 /** Imported labels can contain private URLs; show only their host without altering stored data. */
-private fun displayMetadata(value: String): String =
+internal fun displayMetadata(value: String): String =
     DISPLAY_URL.replace(value) { match ->
         val authority =
             match.value

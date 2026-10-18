@@ -48,6 +48,7 @@ import ch.lkmc.neutrodyne.core.model.FeedMove
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.PodcastDetail
 import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.ui.CredentialFields
 import ch.lkmc.neutrodyne.core.ui.FeedDates
 import ch.lkmc.neutrodyne.core.ui.FeedErrorText
 import ch.lkmc.neutrodyne.core.ui.LocalUiClock

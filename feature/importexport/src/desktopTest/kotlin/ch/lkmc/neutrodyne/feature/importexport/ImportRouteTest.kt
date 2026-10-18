@@ -8,10 +8,15 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -30,11 +35,15 @@ import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
+import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.domain.ImportScreenVisibility
+import ch.lkmc.neutrodyne.core.domain.ImportSessionOperations
+import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.GroupProposal
 import ch.lkmc.neutrodyne.core.model.ImportFormat
+import ch.lkmc.neutrodyne.core.model.ImportItemFilter
 import ch.lkmc.neutrodyne.core.model.ImportItemKind
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
 import ch.lkmc.neutrodyne.core.model.ImportItemView
@@ -45,6 +54,7 @@ import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeImportRepository
+import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.navigation.RecordingAppNavigator
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
@@ -70,17 +80,18 @@ import kotlin.test.assertTrue
  * explicit preview cancel deletes then pops the key, while plain Back on a committed session
  * only pops. Everything the screen shows comes through the fake's flows, not call logs.
  */
-@OptIn(ExperimentalTestApi::class)
+@OptIn(ExperimentalTestApi::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ImportRouteTest {
     private lateinit var previousLocale: Locale
     private val imports = FakeImportRepository()
+    private val podcasts = FakePodcastRepository()
     private val groups = FakeGroupRepository()
     private val visibility = ImportScreenVisibility()
     private val navigator = RecordingAppNavigator()
     private val host = SnackbarHostState()
 
     /** The VM's injected `@ApplicationScope` stand-in — confirm/cancel outlive the route. */
-    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val appScope = CoroutineScope(SupervisorJob() + kotlinx.coroutines.test.UnconfinedTestDispatcher())
 
     private val actions =
         object : PlatformActions {
@@ -117,6 +128,334 @@ class ImportRouteTest {
         appScope.cancel()
         Locale.setDefault(previousLocale)
     }
+
+    @Test
+    fun reportShowsCountedSectionsAndFeedErrorText() =
+        runComposeUiTest {
+            val id =
+                kotlinx.coroutines.runBlocking {
+                    seed(
+                        listOf(
+                            item(0, status = ImportItemStatus.SUBSCRIBED),
+                            item(1, status = ImportItemStatus.FETCH_FAILED).copy(
+                                errorDetail = "TIMEOUT",
+                                podcastId = 12,
+                            ),
+                        ),
+                    )
+                }
+            setState(id, ImportState.DONE)
+            setRouteContent(ImportKey(id.toString()))
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasText("The server didn't answer in time"))
+            onNodeWithText("The server didn't answer in time").assertIsDisplayed()
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-section-DONE"))
+            onNodeWithTag("import-section-DONE").assertExists()
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-section-ATTENTION"))
+            onNodeWithTag("import-section-ATTENTION").assertExists()
+        }
+
+    @Test
+    fun resolvedReportRowsUseCoversAndPreviewRowsKeepMonograms() =
+        runComposeUiTest {
+            val id = kotlinx.coroutines.runBlocking { seed(listOf(item(0).copy(podcastId = 12))) }
+            setRouteContent(ImportKey(id.toString()))
+            onNodeWithTag("import-monogram-0", useUnmergedTree = true).assertExists()
+            setState(id, ImportState.DONE)
+            waitUntil {
+                onAllNodes(hasTestTag("import-cover-0"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            onNodeWithTag("import-cover-0", useUnmergedTree = true).assertExists()
+        }
+
+    @Test
+    fun needAttentionOffersRepositoryFixUps() =
+        runComposeUiTest {
+            val id =
+                kotlinx.coroutines.runBlocking {
+                    seed(listOf(item(0, status = ImportItemStatus.GONE).copy(podcastId = 12)))
+                }
+            setState(id, ImportState.DONE)
+            setRouteContent(ImportKey(id.toString()))
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-retry-0"))
+            onNodeWithTag("import-retry-0").performClick()
+            waitUntil { imports.calls.contains("retry($id, [0])") }
+        }
+
+    @Test fun everyStatusHasTheDocumentedSectionAndCount() =
+        runComposeUiTest {
+            val rows =
+                ImportItemStatus.entries.mapIndexed { index, status ->
+                    item(index, status = status).copy(podcastId = index + 1L)
+                } + item(99, status = ImportItemStatus.FETCH_FAILED).copy(errorDetail = "DEFERRED", podcastId = 100)
+            val id = kotlinx.coroutines.runBlocking { seed(rows) }
+            setState(id, ImportState.DONE)
+            setRouteContent(ImportKey(id.toString()))
+            val expected =
+                mapOf(
+                    "QUEUED" to "Queued · 1",
+                    "DONE" to "Done · 1",
+                    "ATTENTION" to "Need attention · 4",
+                    "ALREADY" to "Already subscribed (groups updated) · 1",
+                    "MERGED" to "Merged with existing · 1",
+                    "NO_MEDIA" to "No audio or video found · 1",
+                    "LATER" to "Will load later · 1",
+                    "NOT_IMPORTED" to "Not imported · 4",
+                )
+            for ((section, text) in expected) {
+                onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-section-$section"))
+                onNodeWithText(text).assertExists()
+            }
+        }
+
+    @Test fun protectedAndDeferredRowsNeverOfferFixUps() {
+        val cases =
+            listOf(
+                item(0, status = ImportItemStatus.ALREADY_SUBSCRIBED),
+                item(0, status = ImportItemStatus.MERGED),
+                item(0, status = ImportItemStatus.SUBSCRIBED),
+                item(0, status = ImportItemStatus.FETCH_FAILED).copy(errorDetail = "DEFERRED"),
+            )
+        for (row in cases) {
+            runComposeUiTest {
+                val id = kotlinx.coroutines.runBlocking { seed(listOf(row.copy(podcastId = 12))) }
+                setState(id, ImportState.DONE)
+                setRouteContent(ImportKey(id.toString()))
+                onNodeWithTag("import-remove-0").assertDoesNotExist()
+                onNodeWithTag("import-edit-0").assertDoesNotExist()
+                onNodeWithTag("import-password-0").assertDoesNotExist()
+                onNodeWithTag("import-retry-0").assertDoesNotExist()
+            }
+        }
+    }
+
+    @Test fun removeAllReachesRowsOutsideTheLoadedPage() =
+        runComposeUiTest {
+            val rows = (0 until 100).map { item(it, status = ImportItemStatus.NO_MEDIA).copy(podcastId = it + 1L) }
+            val id = kotlinx.coroutines.runBlocking { seed(rows) }
+            setState(id, ImportState.DONE)
+            val repo =
+                object : ImportRepository by imports {
+                    override fun pagedItems(
+                        sessionId: Long,
+                        filter: ImportItemFilter,
+                    ) = kotlinx.coroutines.flow.flowOf(androidx.paging.PagingData.from(rows.take(1)))
+                }
+            val vm =
+                ImportViewModel(id, repo, groups, visibility, appScope, podcasts, ImportSessionOperations(appScope))
+            setRouteContent(ImportKey(id.toString()), vm)
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Remove all"))
+            onNodeWithText("Remove all").performClick()
+            waitUntil { imports.items.value[id].isNullOrEmpty() }
+            assertTrue(imports.calls.any { it.startsWith("remove($id,") && "99" in it })
+        }
+
+    @Test fun editUrlShowsRepositoryValidationAndKeepsFailuresInline() =
+        runComposeUiTest {
+            val row = item(0, status = ImportItemStatus.GONE).copy(podcastId = 12)
+            val id = kotlinx.coroutines.runBlocking { seed(listOf(row)) }
+            setState(id, ImportState.DONE)
+            val submitted = mutableListOf<String>()
+            var fail = true
+            val repo =
+                object : ImportRepository by imports {
+                    override suspend fun editUrl(
+                        sessionId: Long,
+                        ordinal: Int,
+                        input: String,
+                    ): Outcome<Unit, AddPodcastError> {
+                        submitted += input
+                        if (input.isBlank()) return Outcome.Failure(AddPodcastError.InvalidUrl)
+                        return if (fail) {
+                            Outcome.Failure(AddPodcastError.Http(503))
+                        } else {
+                            Outcome.Success(Unit)
+                        }
+                    }
+                }
+            val vm =
+                ImportViewModel(id, repo, groups, visibility, appScope, podcasts, ImportSessionOperations(appScope))
+            setRouteContent(ImportKey(id.toString()), vm)
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-edit-0"))
+            onNodeWithTag("import-edit-0").performClick()
+            onNodeWithText("Save").performClick()
+            onNodeWithText("That doesn't look like a feed address").assertExists()
+            assertEquals(listOf(""), submitted)
+            onNodeWithTag("import-url-input").performTextReplacement("https://new.example/feed")
+            onNodeWithText("Save").performClick()
+            waitUntil { submitted.size == 2 }
+            onNodeWithText("The server answered 503").assertExists()
+            onNodeWithTag("import-url-input").assertExists()
+            fail = false
+            onNodeWithText("Save").performClick()
+            waitUntil { submitted.size == 3 }
+            waitUntil { onAllNodes(hasTestTag("import-url-input")).fetchSemanticsNodes().isEmpty() }
+        }
+
+    @Test fun passwordValidatesMasksAndPassesOnlyToRepository() =
+        runComposeUiTest {
+            val row = item(0, status = ImportItemStatus.AUTH_REQUIRED).copy(podcastId = 12)
+            val id = kotlinx.coroutines.runBlocking { seed(listOf(row)) }
+            setState(id, ImportState.DONE)
+            val submitted = mutableListOf<BasicCredentials>()
+            var fail = true
+            val repo =
+                object : ImportRepository by imports {
+                    override suspend fun enterPassword(
+                        sessionId: Long,
+                        ordinal: Int,
+                        credentials: BasicCredentials,
+                    ): Outcome<Unit, AddPodcastError> {
+                        submitted += credentials
+                        return if (fail) {
+                            Outcome.Failure(AddPodcastError.AuthRequired("private"))
+                        } else {
+                            Outcome.Success(Unit)
+                        }
+                    }
+                }
+            val vm =
+                ImportViewModel(id, repo, groups, visibility, appScope, podcasts, ImportSessionOperations(appScope))
+            setRouteContent(ImportKey(id.toString()), vm)
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-password-0"))
+            onNodeWithTag("import-password-0").performClick()
+            onNodeWithText("Save").performClick()
+            assertTrue(submitted.isEmpty())
+            onAllNodes(hasSetTextAction())[0].performTextReplacement("alice")
+            val password = onAllNodes(hasSetTextAction())[1]
+            password.performTextReplacement("opaque-secret")
+            password.assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+            onNodeWithText("Save").performClick()
+            waitUntil { submitted.size == 1 }
+            onNodeWithText("This feed needs a password").assertExists()
+            assertFalse(
+                vm.uiState.value
+                    .toString()
+                    .contains("opaque-secret"),
+            )
+            fail = false
+            onNodeWithText("Save").performClick()
+            waitUntil { submitted.size == 2 }
+            assertEquals(BasicCredentials("alice", "opaque-secret"), submitted.last())
+        }
+
+    @Test fun retryFailureShowsSnackbarAndKeepsTheRow() =
+        runComposeUiTest {
+            val row = item(0, status = ImportItemStatus.GONE).copy(podcastId = 12)
+            val id = kotlinx.coroutines.runBlocking { seed(listOf(row)) }
+            setState(id, ImportState.DONE)
+            val repo =
+                object : ImportRepository by imports {
+                    override suspend fun retry(
+                        sessionId: Long,
+                        ordinals: Set<Int>,
+                    ) = error("unreadable storage")
+                }
+            setRouteContent(
+                ImportKey(id.toString()),
+                ImportViewModel(id, repo, groups, visibility, appScope, podcasts, ImportSessionOperations(appScope)),
+            )
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-retry-0"))
+            onNodeWithTag("import-retry-0").performClick()
+            waitUntil { host.currentSnackbarData != null }
+            assertEquals("Couldn't save the change", host.currentSnackbarData!!.visuals.message)
+            assertEquals(
+                ImportItemStatus.GONE,
+                imports.items.value[id]!!
+                    .single()
+                    .status,
+            )
+        }
+
+    @Test fun removeFailureShowsSnackbarAndKeepsTheRow() =
+        runComposeUiTest {
+            val row = item(0, status = ImportItemStatus.GONE).copy(podcastId = 12)
+            val id = kotlinx.coroutines.runBlocking { seed(listOf(row)) }
+            setState(id, ImportState.DONE)
+            val repo =
+                object : ImportRepository by imports {
+                    override suspend fun remove(
+                        sessionId: Long,
+                        ordinals: Set<Int>,
+                    ) = error("unreadable storage")
+                }
+            setRouteContent(
+                ImportKey(id.toString()),
+                ImportViewModel(id, repo, groups, visibility, appScope, podcasts, ImportSessionOperations(appScope)),
+            )
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-remove-0"))
+            onNodeWithTag("import-remove-0").performClick()
+            waitUntil { host.currentSnackbarData != null }
+            assertEquals("Couldn't save the change", host.currentSnackbarData!!.visuals.message)
+            assertEquals(listOf(row), imports.items.value[id])
+        }
+
+    @Test fun removeOneUsesTheRepositoryAndPreservesExistingSubscriptions() =
+        runComposeUiTest {
+            val row = item(0, status = ImportItemStatus.GONE).copy(podcastId = 12)
+            val existing = item(1, status = ImportItemStatus.ALREADY_SUBSCRIBED).copy(podcastId = 13)
+            val id = kotlinx.coroutines.runBlocking { seed(listOf(row, existing)) }
+            setState(id, ImportState.DONE)
+            setRouteContent(ImportKey(id.toString()))
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-remove-0"))
+            onNodeWithTag("import-remove-0").performClick()
+            waitUntil { imports.items.value[id] == listOf(existing) }
+            assertTrue(imports.calls.contains("remove($id, [0])"))
+        }
+
+    @Test fun removeNamesItsPodcastForScreenReaders() =
+        runComposeUiTest {
+            val row = item(0, title = "News Hour", status = ImportItemStatus.GONE).copy(podcastId = 12)
+            val id = seed(sessionItems = listOf(row))
+            setState(id, ImportState.DONE)
+            setRouteContent(ImportKey(id.toString()))
+
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-remove-0"))
+            onNodeWithTag("import-remove-0").assert(hasContentDescription("Remove News Hour"))
+        }
+
+    @Test fun removeNamesItsPodcastForScreenReadersInGerman() =
+        runComposeUiTest {
+            Locale.setDefault(Locale.GERMAN)
+            val row = item(0, title = "News Hour", status = ImportItemStatus.GONE).copy(podcastId = 12)
+            val id = seed(sessionItems = listOf(row))
+            setState(id, ImportState.DONE)
+            setRouteContent(ImportKey(id.toString()))
+
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-remove-0"))
+            onNodeWithTag("import-remove-0").assert(hasContentDescription("News Hour entfernen"))
+        }
+
+    @Test fun attentionFilterKeepsNoMediaAndDeferredSections() =
+        runComposeUiTest {
+            val rows =
+                listOf(
+                    item(0, status = ImportItemStatus.SUBSCRIBED),
+                    item(1, status = ImportItemStatus.NO_MEDIA).copy(podcastId = 12),
+                    item(2, status = ImportItemStatus.FETCH_FAILED).copy(errorDetail = "DEFERRED", podcastId = 13),
+                )
+            val id = kotlinx.coroutines.runBlocking { seed(rows) }
+            setState(id, ImportState.DONE)
+            setRouteContent(ImportKey(id.toString()))
+            onNodeWithText("Needs attention").performClick()
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-section-NO_MEDIA"))
+            onNodeWithText("No audio or video found · 1").assertExists()
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-section-LATER"))
+            onNodeWithText("Will load later · 1").assertExists()
+            onNodeWithTag("import-section-DONE").assertDoesNotExist()
+        }
+
+    @Test fun cancelledReportDisablesFixUps() =
+        runComposeUiTest {
+            val row = item(0, status = ImportItemStatus.QUEUED).copy(podcastId = 12)
+            val id = kotlinx.coroutines.runBlocking { seed(listOf(row)) }
+            setState(id, ImportState.CANCELLED)
+            setRouteContent(ImportKey(id.toString()))
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-remove-0"))
+            onNodeWithTag("import-remove-0").assertIsNotEnabled()
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-remove-0"))
+            onNodeWithTag("import-remove-0").performClick()
+            assertTrue(imports.calls.none { it.startsWith("remove") })
+        }
 
     private fun item(
         ordinal: Int,
@@ -166,7 +505,17 @@ class ImportRouteTest {
         viewModel: ImportViewModel? = null,
     ) {
         val sessionId = key.sessionId.toLongOrNull() ?: -1L
-        val vm = viewModel ?: ImportViewModel(sessionId, imports, groups, visibility, appScope)
+        val vm =
+            viewModel
+                ?: ImportViewModel(
+                    sessionId,
+                    imports,
+                    groups,
+                    visibility,
+                    appScope,
+                    podcasts,
+                    ImportSessionOperations(appScope),
+                )
         setContent {
             CompositionLocalProvider(LocalLifecycleOwner provides ResumedLifecycleOwner()) {
                 CompositionLocalProvider(
@@ -260,7 +609,8 @@ class ImportRouteTest {
                         error("disk failed")
                     }
                 }
-            val vm = ImportViewModel(id, repo, groups, visibility, appScope)
+            val vm =
+                ImportViewModel(id, repo, groups, visibility, appScope, podcasts, ImportSessionOperations(appScope))
             setRouteContent(ImportKey(id.toString()), vm)
             onNodeWithText("Cancel").performClick()
             waitUntil(timeoutMillis = 5_000) { attempted.get() && !vm.uiState.value.busy }
@@ -439,7 +789,10 @@ class ImportRouteTest {
             setState(id, ImportState.DONE)
             setRouteContent(ImportKey(id.toString()))
 
-            onNodeWithText("Feed no longer available. Check its address or remove it.").assertExists()
+            onNode(hasScrollToIndexAction()).performScrollToNode(
+                hasText("Feed no longer available. Check its address or remove it."),
+            )
+            onNodeWithText("Feed no longer available. Check its address or remove it.").assertIsDisplayed()
         }
 
     @Test fun queuedRowShowsPendingFetch() =
@@ -448,7 +801,7 @@ class ImportRouteTest {
             setState(id, ImportState.FETCHING)
             setRouteContent(ImportKey(id.toString()))
 
-            onNodeWithText("Queued").assertExists()
+            assertDisplayedWhenReady("Queued")
         }
 
     @Test fun unsupportedYoutubeDoesNotPromiseLaterRefresh() =
@@ -466,7 +819,7 @@ class ImportRouteTest {
 
             val deferredHint = "YouTube isn't responding; this channel loads with a later refresh"
             onNodeWithText(deferredHint).assertDoesNotExist()
-            onNodeWithText("YouTube channel — supported in a later build").assertExists()
+            assertDisplayedWhenReady("YouTube channel — supported in a later build")
         }
 
     @Test fun deferredFetchAlonePromisesLaterRefresh() =
@@ -487,7 +840,7 @@ class ImportRouteTest {
 
             val description = "YouTube isn't responding; this channel loads with a later refresh"
             assertDisplayedWhenReady(description)
-            onNodeWithText("Will load later").assertExists()
+            assertDisplayedWhenReady("Will load later")
         }
 
     @Test fun mergedSubscriptionsAreReportedSeparatelyFromAdded() =
@@ -523,7 +876,19 @@ class ImportRouteTest {
     @Test
     fun aMissingSessionShowsTheUnavailableBody() =
         runComposeUiTest {
-            setRouteContent(ImportKey("99"), viewModel = ImportViewModel(99L, imports, groups, visibility, appScope))
+            setRouteContent(
+                ImportKey("99"),
+                viewModel =
+                    ImportViewModel(
+                        99L,
+                        imports,
+                        groups,
+                        visibility,
+                        appScope,
+                        podcasts,
+                        ImportSessionOperations(appScope),
+                    ),
+            )
 
             onNodeWithText("This import is no longer available").assertExists()
             onNodeWithText("Back").assertExists()
@@ -532,7 +897,8 @@ class ImportRouteTest {
     @Test
     fun aNonNumericKeyShowsTheUnavailableBody() =
         runComposeUiTest {
-            val vm = ImportViewModel(1L, imports, groups, visibility, appScope)
+            val vm =
+                ImportViewModel(1L, imports, groups, visibility, appScope, podcasts, ImportSessionOperations(appScope))
             setRouteContent(ImportKey("not-a-number"), viewModel = vm)
 
             onNodeWithText("This import is no longer available").assertExists()
