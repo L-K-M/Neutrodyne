@@ -18,8 +18,10 @@ import okio.Path.Companion.toPath
  */
 internal interface ExportDestination {
     /**
-     * The URI the platform share sheet hands out for the prepared cache file — Android's
-     * FileProvider `export/{fileName}` path; `null` where there is no share sheet (the desktop).
+     * The URI identifying the prepared cache file — Android's FileProvider
+     * `export/{fileName}` `content://` URI for the share sheet; the desktop's escaped `file:`
+     * URI of the minted `<cache>/export` leaf (no share sheet, but "Show in folder" and
+     * callers identify the file through it). `null` where nothing can be handed out.
      */
     fun shareUri(fileName: String): String?
 
