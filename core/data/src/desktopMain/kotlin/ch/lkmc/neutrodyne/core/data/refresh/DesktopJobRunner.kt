@@ -339,8 +339,13 @@ class DesktopJobRunner
             const val BACKOFF_CAP_MINUTES = 30
             const val ARTWORK_PARALLELISM = 2
 
-            /** 11 Tick step 6's network-regained set. */
-            private val NETWORK_LANES = setOf("refresh", "downloads-manual", "downloads-auto", "sync")
+            /**
+             * 11 Tick step 6's network-regained set. `import-backup` joins although it is a
+             * mixed lane — a regain only pokes it; the lane itself still runs its local
+             * restore and cleanup work while offline.
+             */
+            private val NETWORK_LANES =
+                setOf("refresh", "import-backup", "downloads-manual", "downloads-auto", "sync")
 
             /** 11's fixed per-tick lane order; unknown lanes append by name for determinism. */
             val LANE_ORDER =

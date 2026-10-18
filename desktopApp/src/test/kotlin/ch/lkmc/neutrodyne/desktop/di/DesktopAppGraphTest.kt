@@ -216,6 +216,22 @@ class DesktopAppGraphTest {
         assertThat(graph.snapshotScheduler::class.simpleName).isEqualTo("NoSnapshotScheduler")
     }
 
+    /**
+     * M3 C3b: the session host resolves to the real `ImportRepositoryImpl`/`BackupRepositoryImpl`,
+     * which proves the `ImportWorkScheduler` provider chain (`LaneImportWorkScheduler` over a lazy
+     * `JobLanePoker`, so the runner→lane→runner edge never cycles) — and resolving `jobRunner`
+     * lists the `import-backup` lane in its status, so the lane really joined the runner's set.
+     */
+    @Test
+    fun theImportBackupHostAndItsLaneAreTheRealDesktopBindings() {
+        runBlocking { graph.databaseOpener.awaitOpen() }
+
+        assertThat(graph.importRepository::class.simpleName).isEqualTo("ImportRepositoryImpl")
+        assertThat(graph.backupRepository::class.simpleName).isEqualTo("BackupRepositoryImpl")
+        assertThat(graph.bannerNotifier::class.simpleName).isEqualTo("DesktopBannerNotifier")
+        assertThat(graph.jobRunner.status.value.keys).contains("import-backup")
+    }
+
     private companion object {
         const val FIRST_BAND = 0
 

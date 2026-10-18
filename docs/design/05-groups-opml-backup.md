@@ -1280,6 +1280,8 @@ Status derivation, from the `FeedOutcome` ([03 API](03-feeds-and-discovery.md#ap
 
 The progress screen observes `ImportDao.observeProgress` ("Fetched 87 of 139"). At `DONE` the runner posts one notification, "139 added, 3 need attention", whose click opens `neutrodyne://open/import/{sessionId}` through 01's `IntentRouter` ([01 Intent routing](01-foundation.md#intent-routing)); it is skipped while that session's screen is visible. Android: channel `import_backup` (ID 3001, tag `import-{sessionId}`), skipped when `POST_NOTIFICATIONS` is not granted (never requested for imports). Desktop: `DesktopNotifier` through the OS notification centre ([11 Notifications](11-desktop.md#notifications)).
 
+Implementation note (2026-10-18, M3 C3b): the desktop `import-backup` lane runs local restores and cleanup offline, isolating a failed import session so later imports and cleanup still run. A user fix-up starts a fresh `laneAttempts` campaign, matching Android's new work request. Until MD2 supplies OS-centre delivery, the bound notifier uses 11's in-app banner fallback with a bounded pending queue. Replacing or cancelling pending notices keeps an already-visible banner's original Open action usable; discarded unshown callbacks are released. The added count includes newly subscribed items, not existing or merged subscriptions.
+
 | Action | Effect |
 |---|---|
 | Retry | `PodcastRepository.retry(podcastId, refresh = false)` (03: clears `gone`/`needsCredentials`/backoff without its own refresh), items → `QUEUED`, `attemptMarkerAt = now`, state `FETCHING`, `ImportWorkScheduler.schedule` (Android `import-{sessionId}` with `APPEND_OR_REPLACE`; desktop: lane poke) |
