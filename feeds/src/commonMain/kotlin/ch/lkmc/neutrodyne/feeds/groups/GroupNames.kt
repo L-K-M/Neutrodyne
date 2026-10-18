@@ -35,6 +35,25 @@ public object GroupNames {
         return Validation.Valid(name, name.nfc().lowercase().nfc())
     }
 
+    /**
+     * [input] normalised and, when over [MAX_CODE_POINTS] code points, cut to a code-point-safe
+     * prefix: the "too long → truncated" rule sync apply, restore and import proposals use
+     * where [validate] rejects instead. Null when the normalised input is empty.
+     */
+    public fun truncate(input: String): Validation.Valid? {
+        val name = normalize(input)
+        if (name.isEmpty()) return null
+        var index = 0
+        var count = 0
+        while (index < name.length && count < MAX_CODE_POINTS) {
+            val char = name[index++]
+            if (char.isHighSurrogate() && index < name.length && name[index].isLowSurrogate()) index++
+            count++
+        }
+        val fitted = name.substring(0, index)
+        return Validation.Valid(fitted, fitted.nfc().lowercase().nfc())
+    }
+
     public fun suggestsOldestFirst(name: String): Boolean {
         val key = normalize(name).lowercase().nfc()
         return oldestFirstWords.any { it in key }

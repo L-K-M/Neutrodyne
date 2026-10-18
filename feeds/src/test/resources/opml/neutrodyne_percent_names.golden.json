@@ -1,0 +1,77 @@
+{
+  "entries": [
+    {
+      "categories": [
+        "a,b"
+      ],
+      "folderId": 0,
+      "ndSource": "rss",
+      "ordinal": 0,
+      "text": "Feed A",
+      "type": "rss",
+      "url": "https://a.example.com/rss"
+    },
+    {
+      "categories": [
+        "c/d"
+      ],
+      "folderId": 1,
+      "ndSource": "rss",
+      "ordinal": 1,
+      "text": "Feed B",
+      "type": "rss",
+      "url": "https://b.example.com/rss"
+    },
+    {
+      "categories": [
+        "100%"
+      ],
+      "folderId": 2,
+      "ndSource": "rss",
+      "ordinal": 2,
+      "text": "Feed C",
+      "type": "rss",
+      "url": "https://c.example.com/rss"
+    },
+    {
+      "categories": [
+        "a%2Cb"
+      ],
+      "folderId": 3,
+      "ndSource": "rss",
+      "ordinal": 3,
+      "text": "Feed D",
+      "type": "rss",
+      "url": "https://d.example.com/rss"
+    }
+  ],
+  "folders": [
+    {
+      "colorArgb": -15658735,
+      "iconKey": "comma",
+      "id": 0,
+      "name": "a,b"
+    },
+    {
+      "colorArgb": -14540254,
+      "iconKey": "slash",
+      "id": 1,
+      "name": "c/d"
+    },
+    {
+      "colorArgb": -13421773,
+      "iconKey": "percent",
+      "id": 2,
+      "name": "100%"
+    },
+    {
+      "colorArgb": -12303292,
+      "iconKey": "literal",
+      "id": 3,
+      "name": "a%2Cb"
+    }
+  ],
+  "headTitle": "Neutrodyne",
+  "mode": "STRICT",
+  "neutrodyne": true
+}

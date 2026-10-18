@@ -1,0 +1,14 @@
+{
+  "entries": [
+    {
+      "ordinal": 0,
+      "text": "Café",
+      "title": "CafÃ©",
+      "type": "rss",
+      "url": "https://cafe.example.com/rss"
+    }
+  ],
+  "folders": [],
+  "headTitle": "iso8859-1 café",
+  "mode": "STRICT"
+}
