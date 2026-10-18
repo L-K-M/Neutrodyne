@@ -58,6 +58,7 @@ import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdAssistChip
 import ch.lkmc.neutrodyne.core.designsystem.components.NdFilterChip
@@ -70,6 +71,9 @@ import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.settings.LibrarySegment
 import ch.lkmc.neutrodyne.core.ui.GroupMosaic
+import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
+import ch.lkmc.neutrodyne.core.ui.resources.group_export_opml
+import ch.lkmc.neutrodyne.core.ui.resources.group_share_opml
 import ch.lkmc.neutrodyne.feature.library.resources.Res
 import ch.lkmc.neutrodyne.feature.library.resources.add_to_group
 import ch.lkmc.neutrodyne.feature.library.resources.all
@@ -89,6 +93,7 @@ import ch.lkmc.neutrodyne.feature.library.resources.selection_actions
 import ch.lkmc.neutrodyne.feature.library.resources.ungrouped
 import ch.lkmc.neutrodyne.feature.library.resources.unsubscribe
 import org.jetbrains.compose.resources.stringResource
+import ch.lkmc.neutrodyne.core.ui.resources.Res as UiRes
 
 internal enum class SelectionGesture { OPEN, TOGGLE, RANGE }
 
@@ -140,12 +145,22 @@ internal fun LibraryGroupsGrid(
     onEditGroup: (Long) -> Unit,
     onManageGroups: () -> Unit,
     onNewGroup: () -> Unit,
+    onExportGroup: (Long) -> Unit,
 ) {
     val grid = rememberLazyGridState()
     val scrollbars = LocalScrollbars.current
     val scrollbarColor = ndScrollbarColor(scrollbars)
     val editLabel = stringResource(Res.string.edit_group)
     val manageLabel = stringResource(Res.string.manage_groups)
+    // 05 Group actions: "Share as OPML" on Android, "Export group as OPML…" on the desktop.
+    val exportLabel =
+        stringResource(
+            if (LocalPlatformKind.current == PlatformKind.ANDROID) {
+                UiRes.string.group_share_opml
+            } else {
+                UiRes.string.group_export_opml
+            },
+        )
     LazyVerticalGrid(
         columns = GridCells.Adaptive(CELL_MIN),
         state = grid,
@@ -198,6 +213,10 @@ internal fun LibraryGroupsGrid(
                                             onManageGroups()
                                             true
                                         },
+                                        CustomAccessibilityAction(exportLabel) {
+                                            onExportGroup(group.id)
+                                            true
+                                        },
                                     )
                             }.combinedClickable(onClick = { onOpenGroup(group.id) }, onLongClick = { menuOpen = true }),
                 )
@@ -217,6 +236,10 @@ internal fun LibraryGroupsGrid(
                     DropdownMenuItem(text = { Text(manageLabel) }, onClick = {
                         menuOpen = false
                         onManageGroups()
+                    })
+                    DropdownMenuItem(text = { Text(exportLabel) }, onClick = {
+                        menuOpen = false
+                        onExportGroup(group.id)
                     })
                 }
             }

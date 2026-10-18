@@ -21,6 +21,7 @@ import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.AddToGroupsKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
+import ch.lkmc.neutrodyne.core.navigation.ExportKey
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
 import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
 import ch.lkmc.neutrodyne.core.navigation.GroupsManageKey
@@ -127,6 +128,8 @@ internal fun LibraryRoute(
         onNewGroup = { navigator.push(GroupEditKey(null)) },
         onEditGroup = { navigator.push(GroupEditKey(it)) },
         onManageGroups = { navigator.push(GroupsManageKey) },
+        onExportGroup = { navigator.push(ExportKey(it)) },
+        onExportSubscriptions = { navigator.push(ExportKey(null)) },
         onOpenGroup = { id ->
             scope.launch {
                 if (viewModel.selectGroup(id)) {

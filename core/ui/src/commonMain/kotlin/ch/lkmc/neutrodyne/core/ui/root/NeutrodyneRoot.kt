@@ -22,6 +22,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
@@ -106,6 +107,7 @@ public fun NeutrodyneRoot(
 ) {
     val navigation = rememberNavigationState(initialTab)
     val snackbarHost = remember { SnackbarHostState() }
+    val rootScope = rememberCoroutineScope()
 
     val dark =
         when (prefs.theme) {
@@ -120,6 +122,7 @@ public fun NeutrodyneRoot(
             LocalAppNavigator provides navigation,
             LocalSnackbarHost provides snackbarHost,
             LocalSettingsBadge provides state.settingsBadge,
+            LocalRootScope provides rootScope,
         ) {
             when (val gate = state.startup) {
                 StartupGateState.Pending, is StartupGateState.Failed -> {

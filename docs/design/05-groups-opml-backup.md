@@ -117,7 +117,7 @@ All repository functions are main-safe (`suspend` or `Flow`), follow [01 Corouti
 | DAO calls | Room query context (`@Dispatcher(IO)`) | Batch sizes and transaction rules of [02 Conventions](02-data-model.md#conventions): import commit 500 items, restore 1,000 lines per transaction |
 | Copying payloads, OPML/JSON/CSV parsing, ZIP reading and writing | `@Dispatcher(IO)` (blocking streams) | Caps enforced while streaming; no `ContentResolver` or other platform file call inside a transaction |
 | Group proposals of a 10,000-item preview, OPML document building | `@Dispatcher(Default)` | Debounced 100 ms on item changes |
-| Manual OPML and backup export | `@ApplicationScope` | Leaving the dialog does not cancel; result reported as a `UserMessage` |
+| Manual OPML export | `@ApplicationScope` for prepare and the accepted destination copy; the route's composition scope owns the pick/share calls | `export`/`confirmWarning` are `suspend` ops the route launches and only awaits — leaving or recreating the dialog cancels the caller, never an accepted save; the UI calls run inside the caller's captured context so dead seams are never invoked, and `busy` clears in the job's own `finally`; errors post as a `UserMessage`. Backup export keeps `@ApplicationScope` when it lands |
 | Delete-group undo window | `@ApplicationScope`, `delay(10_000)` | Process death within the window makes the delete final |
 | `ImportFetchWorker`, `RestoreWorker`, `AutoSnapshotWorker` (Android) | `CoroutineWorker` created by `MetroWorkerFactory` ([01 Dependency injection](01-foundation.md#dependency-injection)) | Idempotent, resumable, 8-min soft deadline ([N2](../PLAN.md#22-non-functional-requirements)); the first two host the common `ImportFetchRunner` and `RestoreRunner` |
 | `import-backup` lane (desktop) | `DesktopJobRunner` lane on `Dispatchers.IO` ([11 Background work](11-desktop.md#background-work)) | The same runners without a soft deadline; a quit stops the lane and the next start resumes from the persisted session state |
@@ -925,6 +925,43 @@ any other `file://host/` is rejected everywhere, so Windows can never turn it
 into a UNC write. `FilePayloadSource` likewise refuses every symlink — the
 "no … link" half of [Acquire step 7](#1-acquire)'s regular-file rule — since
 the metadata stat describes the link itself, not its target.
+
+**Implementation note (2026-10-18, M3 D3).** The export dialog lands in
+`:feature:importexport`: `ExportKey(groupId)` renders through
+`NdSceneMetadata.dialog()` into a `Dialog` window whose body draws the
+options — or, once `prepare` returns an artifact with `privateLinks > 0` or
+`passwords > 0`, the R1.9 counts — and the ViewModel retains that exact
+`PreparedExport` so Continue delivers it unregenerated. The route supplies
+the platform seams (`FileSaver.create` / `ShareSheet.shareFile`), so the
+controller never touches a picker or an `Intent`. Two seam details shipped
+differently from the sketch above: `ShareSheet.shareFile` takes the display
+name as a third parameter (`EXTRA_TITLE` plus the `ClipData` label — the
+grant alone does not carry the name through the chooser), and the desktop
+`FileSaver.create` returns the escaped local `file:` URI after applying the
+extension rule while the AWT `FileDialog` stays the dialog on every OS —
+the XDG portal `SaveFile` is not part of this slice and remains with D5's
+per-OS split. The group action surface wired is the Library group tile's
+menu ("Share as OPML" on Android, "Export group as OPML…" on the desktop)
+plus the Library overflow's "Export subscriptions…"; the feed-header
+overflow variant stays with the group-feed row that owns that menu.
+
+**Implementation note (2026-10-18, M3 D3 review fix).** The dialog's
+lifetime splits UI from data: `export`/`confirmWarning` are `suspend`
+operations the route launches on its composition scope and only awaits,
+while prepare and the accepted destination copy ride one `@ApplicationScope`
+job — a pop or an Activity recreation cancels the caller, never an accepted
+write. The pick/share calls run inside the caller's captured context, which
+is checked again after each await, so a disposed route's dead seams are
+never invoked and a picker answer that reaches only a dead owner writes
+nothing. The pending warning keeps only the immutable `PreparedExport` plus
+its action and Continue receives the live route's destinations; a confirm
+whose owner dies mid-delivery re-arms the same warning, and `busy` clears
+in the data job's own `finally` so a recreated route cannot start a second
+same-name run while an orphaned one still writes. The post-save "Saved"
+snackbar launches on the root-owned `LocalRootScope` so it survives the pop
+but ends with the root. On the desktop, `awaitEdt` bridges the file
+dialogs: an AWT throw resumes the awaiting coroutine exceptionally, and a
+cancelled caller's still-queued or modal dialog is disposed on the EDT.
 
 File names: OPML `neutrodyne-subscriptions-{yyyy-MM-dd}.opml`, MIME `text/x-opml`; a group `neutrodyne-{slug}-{yyyy-MM-dd}.opml` (slug = `nameKey` with non-`[a-z0-9]` runs → `-`, trimmed, ≤ 40 chars, fallback `group`); NewPipe JSON `neutrodyne-youtube-{yyyy-MM-dd}.json`, MIME `application/json` ([04 NewPipe subscriptions JSON](04-youtube.md#newpipe-subscriptions-json-import-and-export)).
 
