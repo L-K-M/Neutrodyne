@@ -4,7 +4,6 @@ package ch.lkmc.neutrodyne
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.model.ContextType
@@ -27,14 +26,12 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Assert.fail
 import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
-import java.security.MessageDigest
-import java.util.zip.ZipFile
+import java.util.concurrent.TimeUnit
 
 /**
  * The genuine first-launch restore gate (05 First-launch restore; M3's `FirstLaunchRestoreTest`
@@ -161,24 +158,15 @@ class FirstLaunchRestoreDeviceTest {
      */
     private suspend fun awaitRestoreSucceeded(): Long {
         val workManager = WorkManager.getInstance(app)
-        val deadline = System.currentTimeMillis() + RESTORE_TIMEOUT_MS
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(RESTORE_TIMEOUT_MS)
         while (true) {
-            val infos = workManager.getWorkInfosForUniqueWork(RESTORE_WORK_NAME).get()
-            var sawTerminalFailure: String? = null
-            for (info in infos) {
-                if (info.state == WorkInfo.State.FAILED || info.state == WorkInfo.State.CANCELLED) {
-                    sawTerminalFailure = "${info.state} after ${info.runAttemptCount} attempts"
-                }
-                if (info.state == WorkInfo.State.SUCCEEDED) {
-                    val tag = info.tags.firstOrNull { it.startsWith(SESSION_TAG_PREFIX) }
-                    checkNotNull(tag) { "the restore work must carry its session tag" }
-                    return checkNotNull(tag.removePrefix(SESSION_TAG_PREFIX).toLongOrNull()) {
-                        "the session tag must carry a numeric id"
-                    }
-                }
-            }
-            check(sawTerminalFailure == null) { "restore work reached $sawTerminalFailure" }
-            check(System.currentTimeMillis() < deadline) {
+            val infos =
+                FirstLaunchRestoreChecks.awaitRestoreQuery(
+                    workManager.getWorkInfosForUniqueWork(RESTORE_WORK_NAME),
+                    deadline - System.nanoTime(),
+                )
+            FirstLaunchRestoreChecks.restoreSessionId(infos)?.let { return it }
+            check(System.nanoTime() < deadline) {
                 "backup-restore did not reach SUCCEEDED within ${RESTORE_TIMEOUT_MS} ms" +
                     " (states: ${infos.joinToString { it.state.name }})"
             }
@@ -283,71 +271,38 @@ class FirstLaunchRestoreDeviceTest {
     /**
      * Success retires `auto-snapshot.zip` to `restored-{epochMs}.zip`; an already-scheduled
      * periodic write may legitimately have replaced it afterwards — accept the matching retired
-     * hash or a valid, non-empty, different archive carrying a different installation ID, and
-     * never an empty overwrite.
+     * hash or a valid replacement from the current installation. Resample if the writer's
+     * cleanup removes a listed retired file.
      */
-    private fun assertSnapshotEndState(marker: SeedMarker) {
+    private suspend fun assertSnapshotEndState(marker: SeedMarker) {
         val backupDir = File(app.filesDir, "backup")
         val auto = File(backupDir, "auto-snapshot.zip")
-        val retired =
-            backupDir
-                .listFiles { file -> file.name.startsWith("restored-") && file.name.endsWith(".zip") }
-                .orEmpty()
 
-        val retiredMatch = retired.firstOrNull { sha256Hex(it) == marker.snapshotSha256 }
-        when {
-            retiredMatch != null -> {
-                // Every surviving retired copy must be non-empty; the original must be among them.
-                for (file in retired) {
-                    assertTrue("retired snapshot ${file.name} must never be empty", file.length() > 0)
-                }
-                if (auto.isFile) assertReplacementSnapshot(auto, marker)
-            }
-
-            auto.isFile -> {
-                assertReplacementSnapshot(auto, marker)
-            }
-
-            else -> {
-                fail(
-                    "the original snapshot is neither retired nor replaced: backup dir holds " +
-                        backupDir.list().orEmpty().joinToString(),
+        FirstLaunchRestoreChecks.assertSnapshotEndState(
+            seededHash = marker.snapshotSha256,
+            sample = {
+                val retired =
+                    backupDir
+                        .listFiles { file ->
+                            file.name.startsWith("restored-") && file.name.endsWith(".zip")
+                        }.orEmpty()
+                FirstLaunchRestoreChecks.SnapshotSample(
+                    retired.map { FirstLaunchRestoreChecks.readRetiredSnapshot(it) },
+                    auto.isFile,
                 )
-            }
-        }
-    }
-
-    /** A replacement `auto-snapshot.zip` is valid, non-empty and from this installation. */
-    private fun assertReplacementSnapshot(
-        file: File,
-        marker: SeedMarker,
-    ) {
-        assertTrue("a replacement snapshot must never be empty", file.length() > 0)
-        assertNotEquals(
-            "a replacement snapshot must differ from the seeded archive",
-            marker.snapshotSha256,
-            sha256Hex(file),
+            },
+            validateReplacement = {
+                FirstLaunchRestoreChecks.assertReplacementSnapshot(
+                    auto,
+                    marker.snapshotSha256,
+                    marker.installationId,
+                    app.graph.settingsRepository.get(BackupSettingKeys.INSTALLATION_ID),
+                )
+            },
         )
-        ZipFile(file).use { zip ->
-            val manifest =
-                checkNotNull(zip.getEntry("manifest.json")) {
-                    "a replacement snapshot must be a backup archive"
-                }
-            val installationId =
-                JSONObject(zip.getInputStream(manifest).reader().readText())
-                    .getString("installationId")
-            assertNotEquals(
-                "a replacement snapshot must belong to the new installation",
-                marker.installationId,
-                installationId,
-            )
-        }
     }
 
-    private fun sha256Hex(file: File): String =
-        MessageDigest.getInstance("SHA-256").digest(file.readBytes()).joinToString("") {
-            "%02x".format(it)
-        }
+    private fun sha256Hex(file: File): String = FirstLaunchRestoreChecks.sha256Hex(file.readBytes())
 
     /** The seed's `files/first-launch-seed.json` record. */
     private class SeedMarker(
@@ -371,7 +326,6 @@ class FirstLaunchRestoreDeviceTest {
     private companion object {
         /** 05's work table — the unique-work name, spelled out so no internal constant is needed. */
         const val RESTORE_WORK_NAME = "backup-restore"
-        const val SESSION_TAG_PREFIX = "restore-session-"
         const val RESTORE_TIMEOUT_MS = 180_000L
         const val OPEN_TIMEOUT_MS = 60_000L
         const val POLL_MS = 500L

@@ -29,6 +29,7 @@ import ch.lkmc.neutrodyne.feeds.identity.KeyInput
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import dev.zacsweers.metro.createGraphFactory
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
@@ -75,6 +76,8 @@ internal object FirstLaunchRestoreSeed {
     val PORTABLE_VALUE_IN_SNAPSHOT = ExportLayout.GROUPED
     val PORTABLE_VALUE_KEPT = ExportLayout.FLAT
 
+    private const val SEED_TIMEOUT_MS = 120_000L
+
     /** Deterministic timestamps — the restored row must carry these, not restore-time values. */
     private const val T_BASE = 1_730_000_000_000L
     private const val T_STATE_PLAYED = T_BASE + 10_000
@@ -88,64 +91,70 @@ internal object FirstLaunchRestoreSeed {
      * Seeds, snapshots and tears down the pre-start fixture. Runs before production `onCreate`;
      * blocking the launch sequence on the app process's main thread is the point of the seam.
      */
-    fun run(app: NeutrodyneApplication) {
+    fun run(app: NeutrodyneApplication) = FirstLaunchRestoreChecks.runSeedWithinDeadline(SEED_TIMEOUT_MS) { seed(app) }
+
+    private fun seed(app: NeutrodyneApplication) {
         val graph = createGraphFactory<AndroidAppGraph.Factory>().create(app)
-        runBlocking(Dispatchers.IO) {
-            val opened = graph.databaseOpener.awaitOpen()
-            check(opened.created) { "the seed must open a created database" }
-            val db = graph.databaseOpener.requireDatabase()
-            seedLibrary(db)
+        try {
+            runBlocking(Dispatchers.IO) {
+                val opened = graph.databaseOpener.awaitOpen()
+                check(opened.created) { "the seed must open a created database" }
+                val db = graph.databaseOpener.requireDatabase()
+                seedLibrary(db)
 
-            // The snapshot's settings.json must carry the pre-snapshot value; Auto Backup's
-            // restored PB keeps the post-snapshot one — the pair proves SETTINGS is skipped.
-            checkOutcome(
-                "portable setting before snapshot",
-                graph.settingsRepository.set(BackupSettingKeys.OPML_LAYOUT, PORTABLE_VALUE_IN_SNAPSHOT),
-            )
-            checkOutcome(
-                "snapshot enable flag",
-                graph.settingsRepository.set(BackupSettingKeys.AUTO_SNAPSHOT_ENABLED, true),
-            )
-            check(
-                graph.backupRepository.writeSnapshotNow() is Outcome.Success,
-            ) { "the seed snapshot write must succeed through the public repository" }
-            checkOutcome(
-                "portable setting after snapshot",
-                graph.settingsRepository.set(BackupSettingKeys.OPML_LAYOUT, PORTABLE_VALUE_KEPT),
-            )
+                // The snapshot's settings.json must carry the pre-snapshot value; Auto Backup's
+                // restored PB keeps the post-snapshot one — the pair proves SETTINGS is skipped.
+                checkOutcome(
+                    "portable setting before snapshot",
+                    graph.settingsRepository.set(BackupSettingKeys.OPML_LAYOUT, PORTABLE_VALUE_IN_SNAPSHOT),
+                )
+                checkOutcome(
+                    "snapshot enable flag",
+                    graph.settingsRepository.set(BackupSettingKeys.AUTO_SNAPSHOT_ENABLED, true),
+                )
+                check(
+                    graph.backupRepository.writeSnapshotNow() is Outcome.Success,
+                ) { "the seed snapshot write must succeed through the public repository" }
+                checkOutcome(
+                    "portable setting after snapshot",
+                    graph.settingsRepository.set(BackupSettingKeys.OPML_LAYOUT, PORTABLE_VALUE_KEPT),
+                )
 
-            // The writer mints `backup.installation_id` into the DEVICE store at write time —
-            // capture it for the marker before the device file is deleted.
-            val installationId = graph.settingsRepository.get(BackupSettingKeys.INSTALLATION_ID)
-            check(installationId.isNotEmpty()) { "the written snapshot must mint an installation ID" }
+                // The writer mints `backup.installation_id` into the DEVICE store at write time —
+                // capture it for the marker before the device file is deleted.
+                val installationId = graph.settingsRepository.get(BackupSettingKeys.INSTALLATION_ID)
+                check(installationId.isNotEmpty()) { "the written snapshot must mint an installation ID" }
 
-            db.close()
-            // The seed scope owns the DataStore actors; joining it is what releases both
-            // `*.preferences_pb` files so the production graph can open them cleanly.
-            graph.appScope.coroutineContext.job
-                .cancelAndJoin()
+                db.close()
+                // The seed scope owns the DataStore actors; joining it is what releases both
+                // `*.preferences_pb` files so the production graph can open them cleanly.
+                graph.appScope.coroutineContext.job
+                    .cancelAndJoin()
 
-            val snapshot = File(app.filesDir, "backup/auto-snapshot.zip")
-            check(snapshot.isFile && snapshot.length() > 0) { "the seed snapshot must exist on disk" }
-            writeMarker(app, snapshot, installationId)
+                val snapshot = File(app.filesDir, "backup/auto-snapshot.zip")
+                check(snapshot.isFile && snapshot.length() > 0) { "the seed snapshot must exist on disk" }
+                writeMarker(app, snapshot, installationId)
 
-            // Reinstall side: the DB family and the device DataStore are what a fresh install
-            // lacks; the snapshot and the portable DataStore are what Auto Backup delivers.
-            check(app.deleteDatabase(NeutrodyneDatabase.FILE_NAME)) { "seed database delete failed" }
-            check(
-                File(app.filesDir, "datastore/${SettingsFile.DEVICE.storeName}.preferences_pb").delete(),
-            ) { "the device DataStore file must be deleted" }
-            check(
-                File(app.filesDir, "datastore/${SettingsFile.PORTABLE.storeName}.preferences_pb")
-                    .isFile,
-            ) { "the portable DataStore file must survive the simulated reinstall" }
+                // Reinstall side: the DB family and the device DataStore are what a fresh install
+                // lacks; the snapshot and the portable DataStore are what Auto Backup delivers.
+                check(app.deleteDatabase(NeutrodyneDatabase.FILE_NAME)) { "seed database delete failed" }
+                check(
+                    File(app.filesDir, "datastore/${SettingsFile.DEVICE.storeName}.preferences_pb").delete(),
+                ) { "the device DataStore file must be deleted" }
+                check(
+                    File(app.filesDir, "datastore/${SettingsFile.PORTABLE.storeName}.preferences_pb")
+                        .isFile,
+                ) { "the portable DataStore file must survive the simulated reinstall" }
 
-            // WorkManager's Configuration.Provider may already have materialised the production
-            // graph during the snapshot write; its opener must still be unopened — band 100 of
-            // the real launch does the open that decides OpenResult.created.
-            check(
-                app.graph.databaseOpener.openState.value is DatabaseOpenState.Pending,
-            ) { "the production database must not be opened before its real start-up" }
+                // WorkManager's Configuration.Provider may already have materialised the production
+                // graph during the snapshot write; its opener must still be unopened — band 100 of
+                // the real launch does the open that decides OpenResult.created.
+                check(
+                    app.graph.databaseOpener.openState.value is DatabaseOpenState.Pending,
+                ) { "the production database must not be opened before its real start-up" }
+            }
+        } finally {
+            graph.appScope.cancel()
         }
     }
 
