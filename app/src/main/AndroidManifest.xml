@@ -43,6 +43,41 @@
       </intent-filter>
     </activity>
 
+    <activity
+      android:name=".ExternalImportActivity"
+      android:exported="true"
+      android:excludeFromRecents="true"
+      android:noHistory="true"
+      android:theme="@style/Theme.Neutrodyne.Translucent"
+      android:label="@string/import_into_neutrodyne">
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <action android:name="android.intent.action.SEND" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <data android:mimeType="text/x-opml" />
+        <data android:mimeType="text/xml" />
+        <data android:mimeType="application/xml" />
+        <data android:mimeType="application/zip" />
+      </intent-filter>
+      <intent-filter>
+        <action android:name="android.intent.action.SEND" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <data android:mimeType="application/octet-stream" />
+      </intent-filter>
+    </activity>
+
+    <activity-alias
+      android:name=".OpmlByExtensionAlias"
+      android:targetActivity=".ExternalImportActivity"
+      android:enabled="@bool/neutrodyne_api31_or_newer"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <data android:scheme="content" android:host="*" android:mimeType="*/*" android:pathSuffix=".opml" />
+      </intent-filter>
+    </activity-alias>
+
     <!-- 05 Testing with bmgr: shell-only snapshot trigger. No intent filter: only an explicit
          broadcast from a sender holding DUMP reaches it; the shell user holds DUMP. -->
     <receiver

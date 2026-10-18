@@ -40,10 +40,12 @@ import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.ExportKey
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
+import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
+import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import ch.lkmc.neutrodyne.core.ui.platform.ExternalUrlOpener
@@ -56,7 +58,10 @@ import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.nav_feeds
 import ch.lkmc.neutrodyne.core.ui.resources.nav_library
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.StringResource
@@ -87,6 +92,25 @@ class NeutrodyneRootTest {
     fun tearDown() {
         Locale.setDefault(previousLocale)
     }
+
+    @Test
+    fun importRoutesWaitForStartupAndWarmDeliveryReplacesThePreview() =
+        runComposeUiTest {
+            val pending = Channel<Route>(Channel.UNLIMITED)
+            val routes = pending.receiveAsFlow()
+            var startup by mutableStateOf<StartupGateState>(StartupGateState.Pending)
+            pending.trySend(Route.Navigate(LibraryKey, listOf(ImportKey("42"))))
+            setContent { TestRoot(startup, routes) }
+            onNodeWithText("import-42").assertDoesNotExist()
+
+            runOnIdle { startup = StartupGateState.Ready }
+            onNodeWithText("import-42").assertIsDisplayed()
+            runOnIdle { pending.trySend(Route.Navigate(LibraryKey, listOf(ImportKey("43")))) }
+            onNodeWithText("import-43").assertIsDisplayed()
+            onNodeWithText("import-42").assertDoesNotExist()
+            pressEscape()
+            onNodeWithText("count:0").assertIsDisplayed()
+        }
 
     @Test
     fun fiveDestinationsAreLabelled() =
@@ -334,10 +358,14 @@ private val TestSlots = RootSlots(player = {}, userMessages = emptyFlow())
  * composes it.
  */
 @Composable
-private fun TestRoot() {
+private fun TestRoot(
+    startup: StartupGateState = StartupGateState.Ready,
+    routes: Flow<Route> = emptyFlow(),
+) {
     CompositionLocalProvider(LocalPlatformActions provides TestPlatformActions) {
         NeutrodyneRoot(
-            state = RootUiState.READY,
+            state = RootUiState.READY.copy(startup = startup),
+            routes = routes,
             actions = testActions(),
             slots = TestSlots,
             installers = TestInstallers,
@@ -366,6 +394,7 @@ private val TestInstallers: Set<EntryProviderInstaller> =
                 TabStub("discover-content", NdIcons.Explore)
             }
         }
+        add { entry<ImportKey>(metadata = NdSceneMetadata.paneDetail()) { Text("import-${it.sessionId}") } }
         add { entry<SettingsHomeKey>(metadata = NdSceneMetadata.paneList()) { Text("settings-home") } }
         add {
             entry<PodcastKey>(metadata = NdSceneMetadata.paneDetail()) { key ->

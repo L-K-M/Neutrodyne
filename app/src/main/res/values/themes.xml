@@ -9,6 +9,13 @@
     <item name="android:windowBackground">@android:color/transparent</item>
   </style>
 
+  <style name="Theme.Neutrodyne.Translucent" parent="Theme.Neutrodyne">
+    <item name="android:windowIsTranslucent">true</item>
+    <item name="android:windowBackground">@android:color/transparent</item>
+    <item name="android:windowNoTitle">true</item>
+    <item name="android:windowAnimationStyle">@null</item>
+  </style>
+
   <style name="Theme.Neutrodyne.Starting" parent="Theme.SplashScreen">
     <item name="windowSplashScreenBackground">@color/brand_navy</item>
     <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_neutrodyne</item>
