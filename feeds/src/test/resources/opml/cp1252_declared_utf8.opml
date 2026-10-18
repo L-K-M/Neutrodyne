@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="1.0">
+  <head><title>cp1252 “quote”</title></head>
+  <body>
+    <outline type="rss" text="Café" title="CafÃ©" xmlUrl="https://cafe.example.com/rss"/>
+  </body>
+</opml>

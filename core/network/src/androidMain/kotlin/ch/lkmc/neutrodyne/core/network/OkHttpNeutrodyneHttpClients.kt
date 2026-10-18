@@ -23,10 +23,15 @@ import io.ktor.serialization.kotlinx.json.json
  * derives `newBuilder()` from it, so the island's pool, dispatcher, DNS and interceptors apply.
  * S12 validated this arrangement; `expectSuccess` stays off so status codes reach the caller,
  * and redirects stay in the caller's hands for FEED.
+ *
+ * `public` (not `internal`) so other modules' `androidHostTest` suites construct the real client
+ * stack — the desktop twin made the same call for `desktopTest` — and `checkBannedApis` keeps
+ * `HttpClient` construction inside `:core:network`. `close()` lets them release the engines;
+ * the graph never calls it.
  */
 @SingleIn(AppScope::class)
 @ContributesBinding(AppScope::class)
-internal class OkHttpNeutrodyneHttpClients
+public class OkHttpNeutrodyneHttpClients
     @Inject
     constructor(
         networkClients: NetworkClients,
@@ -57,4 +62,9 @@ internal class OkHttpNeutrodyneHttpClients
             }
 
         override fun client(kind: HttpClientKind): HttpClient = clients.getValue(kind)
+
+        /** Releases the engines — for tests that construct the class directly; the graph never calls it. */
+        fun close() {
+            clients.values.forEach { it.close() }
+        }
     }

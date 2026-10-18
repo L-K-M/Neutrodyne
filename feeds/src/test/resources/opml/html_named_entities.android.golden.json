@@ -1,0 +1,19 @@
+{
+  "entries": [
+    {
+      "htmlUrl": "https://e.example.com",
+      "ordinal": 0,
+      "text": "Caf&eacute; & Tea&nbsp;Time",
+      "type": "rss",
+      "url": "https://e.example.com/rss"
+    },
+    {
+      "ordinal": 1,
+      "text": "Fish & Chips &copy; 2026",
+      "type": "rss",
+      "url": "https://f.example.com/rss"
+    }
+  ],
+  "folders": [],
+  "mode": "STRICT"
+}

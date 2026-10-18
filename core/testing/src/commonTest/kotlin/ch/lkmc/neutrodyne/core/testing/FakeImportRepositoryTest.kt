@@ -200,6 +200,7 @@ class FakeImportRepositoryTest {
                     redownloadIds = listOf(1L),
                     fromAndroidBackup = true,
                     sourceGroups = listOf(SourceGroup("news", "News", null, null, null)),
+                    itemCustomTitles = mapOf(1 to "Parser Title"),
                 )
             repo.sessions.value = mapOf(id to preview.copy(options = options))
 
@@ -228,7 +229,10 @@ class FakeImportRepositoryTest {
         runTest {
             val repo = FakeImportRepository()
             val id = repo.createWith(item(0, ImportItemStatus.PREVIEW))
-            val options = repo.observeSession(id).first()!!.options
+            val preview = repo.sessions.value.getValue(id)
+            val options =
+                preview.options.copy(itemCustomTitles = mapOf(1 to "Parser Title"))
+            repo.sessions.value = mapOf(id to preview.copy(options = options))
 
             repo.updateOptions(id) {
                 it.copy(
@@ -238,6 +242,7 @@ class FakeImportRepositoryTest {
                     restoreRequestedAt = 123L,
                     laneAttempts = 2,
                     sourceGroups = listOf(SourceGroup("news", "News", null, null, null)),
+                    itemCustomTitles = mapOf(9 to "Forged Title"),
                     committedAt = 456L,
                     attemptMarkerAt = 789L,
                 )

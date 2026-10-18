@@ -5,6 +5,8 @@ package ch.lkmc.neutrodyne.core.testing.database
 import ch.lkmc.neutrodyne.core.database.DownloadEntity
 import ch.lkmc.neutrodyne.core.database.EpisodeEntity
 import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
+import ch.lkmc.neutrodyne.core.database.ImportItemEntity
+import ch.lkmc.neutrodyne.core.database.ImportSessionEntity
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
 import ch.lkmc.neutrodyne.core.database.PodcastGroupMemberEntity
@@ -12,6 +14,10 @@ import ch.lkmc.neutrodyne.core.database.QueueEntryEntity
 import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.DownloadLane
 import ch.lkmc.neutrodyne.core.model.DownloadState
+import ch.lkmc.neutrodyne.core.model.ImportFormat
+import ch.lkmc.neutrodyne.core.model.ImportItemKind
+import ch.lkmc.neutrodyne.core.model.ImportItemStatus
+import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceKind
 import ch.lkmc.neutrodyne.core.model.SourceType
@@ -112,6 +118,41 @@ fun memberEntity(
     addedAt: Long = 1_700_000_000_000L,
 ): PodcastGroupMemberEntity =
     PodcastGroupMemberEntity(groupId = groupId, podcastId = podcastId, orderKey = orderKey, addedAt = addedAt)
+
+fun importSessionEntity(
+    createdAt: Long = 1_700_000_000_000L,
+    finishedAt: Long? = null,
+    sourceName: String? = "feeds.opml",
+    sourceFormat: ImportFormat = ImportFormat.OPML,
+    state: ImportState = ImportState.PREVIEW,
+    block: ImportSessionEntity.() -> ImportSessionEntity = { this },
+): ImportSessionEntity =
+    ImportSessionEntity(
+        createdAt = createdAt,
+        finishedAt = finishedAt,
+        sourceName = sourceName,
+        sourceFormat = sourceFormat,
+        state = state,
+    ).block()
+
+fun importItemEntity(
+    sessionId: Long,
+    ordinal: Int,
+    originalUrl: String = "https://example.com/feed-$ordinal.xml",
+    kind: ImportItemKind = ImportItemKind.RSS,
+    selected: Boolean = true,
+    status: ImportItemStatus = ImportItemStatus.PREVIEW,
+    block: ImportItemEntity.() -> ImportItemEntity = { this },
+): ImportItemEntity =
+    ImportItemEntity(
+        sessionId = sessionId,
+        ordinal = ordinal,
+        originalUrl = originalUrl,
+        kind = kind,
+        groupNamesJson = "[]",
+        selected = selected,
+        status = status,
+    ).block()
 
 fun downloadEntity(
     episodeId: Long,
