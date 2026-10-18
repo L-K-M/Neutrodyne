@@ -11,6 +11,7 @@ import android.widget.ProgressBar
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.IntentCompat
+import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
@@ -73,7 +74,7 @@ class ExternalImportActivity : AppCompatActivity() {
                 when (result) {
                     is Outcome.Success -> {
                         handoff.action = Intent.ACTION_VIEW
-                        handoff.data = Uri.parse("neutrodyne://open/import/${result.value}")
+                        handoff.data = "neutrodyne://open/import/${result.value}".toUri()
                     }
 
                     is Outcome.Failure -> {
