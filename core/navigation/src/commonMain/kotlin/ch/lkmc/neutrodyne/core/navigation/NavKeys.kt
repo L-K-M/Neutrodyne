@@ -114,6 +114,10 @@ public data class AddPodcastKey(
     val input: String?,
 ) : NavKey
 
+/** Opens the unfiltered import picker before navigating to a persisted session. */
+@Serializable
+public data object ImportFileKey : NavKey
+
 /** An import session: preview, progress, report or restore preview. */
 @Serializable
 public data class ImportKey(

@@ -27,6 +27,7 @@ import androidx.compose.ui.window.rememberWindowState
 import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.designsystem.components.DesktopScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
@@ -110,6 +111,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
         onKeyEvent = { event -> windowShortcut(event) { requestClose(onQuitRequest) { hidden = it } } },
     ) {
         WindowEffects(activator = activator, background = background)
+        DesktopMenuBar(menuActions, enabled = openState is DatabaseOpenState.Opened)
         DesktopApplicationMenu(menuActions = menuActions, onQuit = onQuitRequest)
         NeutrodyneWindowContent(
             installers = installers,
@@ -214,9 +216,9 @@ private fun androidx.compose.ui.window.FrameWindowScope.WindowEffects(
 
 /**
  * The macOS application menu (11 Menus): About, Settings… (Cmd+,) and Quit (Cmd+Q) arrive
- * through `java.awt.Desktop`'s handlers — AWT builds and labels those items itself, so a
- * Compose `MenuBar` here would duplicate them; the in-window menu bar of Windows and Linux is
- * MD4 (11 Desktop UX). On the other OSes this composes nothing.
+ * through `java.awt.Desktop` handlers. AWT builds and labels these items.
+ * The File menu stays separate; the remaining menus arrive in MD4 (11 Desktop UX).
+ * On the other OSes this composes nothing.
  */
 @Composable
 private fun DesktopApplicationMenu(

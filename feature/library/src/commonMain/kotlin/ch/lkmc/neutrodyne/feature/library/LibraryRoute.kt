@@ -25,6 +25,7 @@ import ch.lkmc.neutrodyne.core.navigation.ExportKey
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
 import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
 import ch.lkmc.neutrodyne.core.navigation.GroupsManageKey
+import ch.lkmc.neutrodyne.core.navigation.ImportFileKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
@@ -130,6 +131,7 @@ internal fun LibraryRoute(
         onManageGroups = { navigator.push(GroupsManageKey) },
         onExportGroup = { navigator.push(ExportKey(it)) },
         onExportSubscriptions = { navigator.push(ExportKey(null)) },
+        onImportSubscriptions = { navigator.push(ImportFileKey) },
         onOpenGroup = { id ->
             scope.launch {
                 if (viewModel.selectGroup(id)) {

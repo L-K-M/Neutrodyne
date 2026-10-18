@@ -68,6 +68,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_more
 import ch.lkmc.neutrodyne.core.ui.resources.export_subscriptions
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_add_url
+import ch.lkmc.neutrodyne.core.ui.resources.feeds_import
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_mark_all_played
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_onboarding_title
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_refresh
@@ -145,6 +146,7 @@ internal fun LibraryScreen(
     onManageGroups: () -> Unit = {},
     onExportGroup: (Long) -> Unit = {},
     onExportSubscriptions: () -> Unit = {},
+    onImportSubscriptions: () -> Unit = {},
     onSelect: (Long, SelectionGesture) -> Unit = { _, _ -> },
     onExitSelection: () -> Unit = {},
     onSelectionAction: (SelectionAction) -> Unit = {},
@@ -192,7 +194,13 @@ internal fun LibraryScreen(
                 title = stringResource(Res.string.nav_library),
                 actions = {
                     SortMenu(state.sort, onSort)
-                    OverflowMenu(state.showTitles, onToggleTitles, onManageGroups, onExportSubscriptions)
+                    OverflowMenu(
+                        state.showTitles,
+                        onToggleTitles,
+                        onManageGroups,
+                        onExportSubscriptions,
+                        onImportSubscriptions,
+                    )
                     SettingsGearButton()
                 },
             )
@@ -223,14 +231,14 @@ internal fun LibraryScreen(
             }
 
             state.tiles.isEmpty() -> {
-                // 08's no-subscriptions state; the Import subscriptions secondary is deferred
-                // with the Import flow, so Add by URL fills the tertiary slot (recorded in 08).
                 EmptyState(
                     icon = NdIcons.GridView,
                     title = stringResource(Res.string.feeds_onboarding_title),
                     body = stringResource(Res.string.library_empty_body),
                     actionLabel = stringResource(Res.string.feeds_search),
                     onAction = onSearchPodcasts,
+                    secondaryLabel = stringResource(Res.string.feeds_import),
+                    onSecondary = onImportSubscriptions,
                     tertiaryLabel = stringResource(Res.string.feeds_add_url),
                     onTertiary = onAddPodcast,
                 )
@@ -443,6 +451,7 @@ private fun OverflowMenu(
     onToggleTitles: (Boolean) -> Unit,
     onManageGroups: () -> Unit,
     onExportSubscriptions: () -> Unit,
+    onImportSubscriptions: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
@@ -474,6 +483,10 @@ private fun OverflowMenu(
             DropdownMenuItem(text = { Text(stringResource(LibraryRes.string.manage_groups)) }, onClick = {
                 open = false
                 onManageGroups()
+            })
+            DropdownMenuItem(text = { Text(stringResource(Res.string.feeds_import)) }, onClick = {
+                open = false
+                onImportSubscriptions()
             })
             DropdownMenuItem(text = { Text(stringResource(Res.string.export_subscriptions)) }, onClick = {
                 open = false

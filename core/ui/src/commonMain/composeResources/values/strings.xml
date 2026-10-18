@@ -639,4 +639,13 @@
     <string name="export_subscriptions">Export subscriptions…</string>
     <string name="group_export_opml">Export group as OPML…</string>
     <string name="group_share_opml">Share as OPML</string>
+    <string name="import_err_title">Couldn’t import this file</string>
+    <string name="import_err_unreadable">Couldn’t open this file. Try choosing it from inside Neutrodyne.</string>
+    <string name="import_err_unreadable_desktop">Couldn’t open this file. Check that Neutrodyne may read it. On macOS, allow access in System Settings › Privacy &amp; Security › Files and Folders.</string>
+    <string name="import_err_too_large">This file is too large to be a subscription list (limit 50 MB).</string>
+    <string name="import_err_storage">Not enough storage space.</string>
+    <string name="import_err_hostile">This file can’t be imported safely.</string>
+    <string name="import_err_empty">No podcasts found in this file.</string>
+    <string name="import_err_single_feed">This is a podcast feed, not a list of subscriptions.</string>
+    <string name="import_err_unsupported">This file format is not supported.</string>
 </resources>

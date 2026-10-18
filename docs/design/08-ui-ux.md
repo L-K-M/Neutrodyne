@@ -68,7 +68,8 @@ Every module below is Kotlin Multiplatform with its code in `commonMain` unless 
 }
 fun interface ExternalUrlOpener { fun open(url: String): OpenResult }            // OPENED, NO_HANDLER
 interface ShareSheet { fun shareText(text: String, subject: String?); fun shareFile(uri: String, mimeType: String) }
-interface FilePicker { suspend fun pickFile(mimeTypes: List<String>, extensions: List<String>): String?   // content: or file: URI
+interface FilePicker { suspend fun openFile(): String?   // unfiltered import dialog; null when cancelled
+                       suspend fun pickFile(mimeTypes: List<String>, extensions: List<String>): String?   // content: or file: URI
                        suspend fun pickFolder(): String? }                                                 // desktop only; null on Android
 fun interface FileSaver { suspend fun create(suggestedName: String, mimeType: String): String? }         // URI to write, or null (cancelled)
 fun interface RevealInFolder { fun reveal(path: String): Boolean }
@@ -2959,7 +2960,7 @@ Serves N1, N4, N6. Expected failures arrive as values (01 [Errors](01-foundation
 7. The Library tile menu's "Mark all as played…" confirmation is a plain confirm/cancel `NdDialog`: the dialog table's "All" / "Older than 1 week / 1 month / 3 months" options and `countUnplayed` arrive with M2's group data (`FeedRepository.countUnplayed` does not exist yet; `markFeedPlayed(source, sortDateBefore)` already takes the cutoff). Confirming marks the whole feed via `markFeedPlayed(source, null)` (UI review round 2, P2).
 8. `PodcastKey`, `PodcastSettingsKey` and `AddPodcastKey` resolved to M1a placeholder screens — `:feature:podcast` served the two detail panes and `:feature:discover` the bottom sheet — because the Library pushed all three before their owning slices landed; nav3's entry provider crashes on a key no module contributes. The Podcast slice (#96) replaced the podcast routes and the add-podcast flow (#95) the sheet, so every pushed key now resolves to its real screen.
 9. The cover-tile menu keeps the catalogue order (Refresh, Podcast settings, Mark all as played…, Unsubscribe last) but shows no separator before the destructive item: `TileMenuAction` carries no divider marker and the menu model lives in `:core:ui`, which PR #93 was changing in the same round. The separator lands when the model grows one.
-10. The no-subscriptions empty state is the documented "Your feeds live here" with "Search podcasts" (→ the Discover tab) and "Add by URL or YouTube link" (`AddPodcastKey(null)`). The "Import subscriptions" secondary is deferred with the Import flow — `ImportKey(sessionId)` needs a session the flow owns — and the first-start brand mark above the text waits on `EmptyState` growing an illustration slot (`:core:ui`; the M10 illustrations deliver it).
+10. The no-subscriptions empty state is the documented "Your feeds live here" with "Search podcasts" (→ the Discover tab) and "Add by URL or YouTube link" (`AddPodcastKey(null)`). M3 D5 adds the "Import subscriptions" secondary and Library overflow action: a transient `ImportFileKey` dialog owns the unfiltered `FilePicker.openFile()` request, then replaces itself with `ImportKey(sessionId)` after `ImportRepository.create`. Cancel simply closes that transient entry; picker and acquisition failures show the import error dialog. The first-start brand mark above the text waits on `EmptyState` growing an illustration slot (`:core:ui`; the M10 illustrations deliver it).
 
 ### Implementation deviations (2026-10-12, M1a Feeds slice)
 
