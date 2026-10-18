@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0" xmlns:nd="urn:neutrodyne:opml:1">
+  <head>
+    <title>Neutrodyne subscriptions</title>
+    <dateCreated>Sun, 04 Oct 2026 21:30:00 GMT</dateCreated>
+    <docs>http://opml.org/spec2.opml</docs>
+  </head>
+  <body>
+    <outline text="a,b" title="a,b">
+      <outline type="rss" text="Apple" title="Apple" xmlUrl="https://example.com/b" category="a%2Cb" nd:source="rss"/>
+      <outline type="rss" text="apple" title="apple" xmlUrl="https://example.com/a" category="a%2Cb,100%25" nd:source="rss"/>
+    </outline>
+    <outline text="c/d" title="c/d">
+      <outline type="rss" text="Line&#10;Break&#9;Tab" title="Quoted &quot;Title&quot; &amp; &lt;more&gt;" xmlUrl="https://example.com/x?a=1&amp;b=2" htmlUrl="https://example.com/x?a=1&amp;b=2" language="en-GB" category="c%2Fd,a%252Cb" nd:source="rss"/>
+    </outline>
+    <outline text="100%" title="100%"/>
+    <outline text="a%2Cb" title="a%2Cb"/>
+    <outline text="Rock &amp; Roll &lt;&quot;quotes&quot;&gt; 'single'" title="Rock &amp; Roll &lt;&quot;quotes&quot;&gt; 'single'" nd:groupColor="#FFFFFF" nd:groupIcon="star">
+      <outline type="rss" text="Private" title="Private" xmlUrl="https://user:p%40ss@example.com/rss" category="Rock &amp; Roll &lt;&quot;quotes&quot;&gt; 'single'" nd:source="rss"/>
+    </outline>
+    <outline type="rss" text="🎧 Commute 👩‍💻 ❤️" title="Commute" xmlUrl="https://example.com/emoji" nd:source="rss"/>
+  </body>
+</opml>

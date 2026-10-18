@@ -7,7 +7,6 @@ import ch.lkmc.neutrodyne.feeds.jvm.opml.XmlPullOpmlReader
 import ch.lkmc.neutrodyne.feeds.jvm.parse.PullParserFactory
 import ch.lkmc.neutrodyne.feeds.opml.OpmlReadResult
 import ch.lkmc.neutrodyne.feeds.opml.OpmlReader
-import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -66,7 +65,7 @@ class AndroidOpmlReaderGoldenTest {
                 .orEmpty()
                 .sortedBy { it.name }
 
-        assertThat(fixtures).isNotEmpty()
+        assertWithMessage("no .opml fixtures under ${FIXTURES_DIR.absolutePath}").that(fixtures).isNotEmpty()
         for (fixture in fixtures) {
             val name = fixture.name.removeSuffix(".opml")
             val result = reader.read({ Buffer().write(fixture.readBytes()) })

@@ -12,9 +12,9 @@ public interface OpmlReader {
      * Reads the document [open] yields. [open] is invoked once per cascade pass and must return a
      * fresh, readable source; the reader consumes and closes it. A throw from [open] or the read
      * itself (an I/O failure, not malformed input) propagates to the caller — [OpmlFailure]
-     * deliberately has no reason for it. Cap violations ([OpmlFailure] values other than
-     * [OpmlFailure.MALFORMED] and [OpmlFailure.NO_OUTLINES]) are terminal: they never fall through
-     * to a later pass.
+     * deliberately has no reason for it. Only [OpmlFailure.MALFORMED] falls through to a later
+     * pass; cap violations and [OpmlFailure.NO_OUTLINES] (a well-formed document without outlines)
+     * are terminal.
      */
     public fun read(
         open: () -> okio.Source,

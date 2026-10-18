@@ -56,4 +56,11 @@ class OpmlCategoriesTest {
         assertEquals(listOf("a%20b"), OpmlCategories.decode("a%20b"))
         assertEquals(listOf("a+b"), OpmlCategories.decode("a+b"))
     }
+
+    /** Hex digits are ASCII only: a fullwidth or Arabic-Indic digit never forms a triplet. */
+    @Test
+    fun nonAsciiHexDigitsStayLiteral() {
+        assertEquals(listOf("a%2\uFF23b"), OpmlCategories.decode("a%2\uFF23b"))
+        assertEquals(listOf("a%\u0662Cb"), OpmlCategories.decode("a%\u0662Cb"))
+    }
 }

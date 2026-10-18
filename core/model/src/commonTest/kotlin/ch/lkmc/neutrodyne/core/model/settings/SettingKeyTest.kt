@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.model.settings
 
+import ch.lkmc.neutrodyne.core.model.ExportLayout
 import ch.lkmc.neutrodyne.core.model.MediaFilter
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentSetOf
@@ -106,6 +107,32 @@ class SettingKeyTest {
         assertEquals(MediaFilter.entries.toList(), GroupsSettingKeys.UNGROUPED_MEDIA_FILTER.values)
         assertEquals(0L, GroupsSettingKeys.ALL_LAST_VIEWED_AT.default)
         assertEquals(0L, GroupsSettingKeys.UNGROUPED_LAST_VIEWED_AT.default)
+    }
+
+    /**
+     * 05 Settings: export-dialog memories and `auto_snapshot_enabled` are portable (they
+     * travel in backups) but never synced; the snapshot bookkeeping and `installation_id`
+     * stay on the device — `installation_id` is the foreign-snapshot guard.
+     */
+    @Test fun backupKeysHaveDesignDefaultsAndClassification() {
+        val backupKeys = BackupSettingKeys.ALL
+        assertEquals(9, backupKeys.size)
+        assertTrue(AllSettingKeys.list.containsAll(backupKeys))
+        val portableNames =
+            setOf("backup.opml_layout", "backup.opml_include_youtube", "backup.auto_snapshot_enabled")
+        for (key in backupKeys) {
+            assertEquals(
+                if (key.name in portableNames) SettingsFile.PORTABLE else SettingsFile.DEVICE,
+                key.file,
+            )
+            assertEquals(false, key.synced)
+        }
+        assertEquals(ExportLayout.GROUPED, BackupSettingKeys.OPML_LAYOUT.default)
+        assertEquals(listOf(ExportLayout.GROUPED, ExportLayout.FLAT), BackupSettingKeys.OPML_LAYOUT.values)
+        assertEquals(true, BackupSettingKeys.OPML_INCLUDE_YOUTUBE.default)
+        assertEquals(true, BackupSettingKeys.AUTO_SNAPSHOT_ENABLED.default)
+        assertEquals("", BackupSettingKeys.INSTALLATION_ID.default)
+        assertEquals(SettingsFile.DEVICE, BackupSettingKeys.INSTALLATION_ID.file)
     }
 
     @Test fun selectionKeysAreRegisteredAndDeviceLocal() {

@@ -43,6 +43,7 @@ import dev.zacsweers.metro.Inject
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -86,7 +87,18 @@ internal class FeedIngestor(
         intervalMinutes: Int?,
     ): IngestResult {
         val prepared = withContext(defaultDispatcher) { prepare(parsed, ctx) }
-        return db.withWriteTransaction { ingestPrepared(podcast, parsed, ctx, prepared, intervalMinutes) }
+
+        // Room re-checks cancellation as the transaction returns. A block that ran to its end has
+        // committed by then, so its result goes back to the caller, which announces it (03 step 10).
+        // Cancellation inside the block leaves no result and still rolls back.
+        var committed: IngestResult? = null
+        try {
+            return db.withWriteTransaction {
+                ingestPrepared(podcast, parsed, ctx, prepared, intervalMinutes).also { committed = it }
+            }
+        } catch (cancelled: CancellationException) {
+            return committed ?: throw cancelled
+        }
     }
 
     /**

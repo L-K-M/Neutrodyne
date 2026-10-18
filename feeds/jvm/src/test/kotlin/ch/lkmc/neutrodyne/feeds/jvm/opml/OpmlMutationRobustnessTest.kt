@@ -39,12 +39,12 @@ class OpmlMutationRobustnessTest {
     ) {
         val original = fixture.readBytes()
         val random = Random(fixture.name.hashCode().toLong())
-        repeat(iterations) {
+        repeat(iterations) { iteration ->
             for (mutant in mutator.mutantsOf(original, random)) {
                 try {
                     readWithTimeout(mutant)
                 } catch (e: Throwable) {
-                    throw AssertionError("mutation of ${fixture.name} failed", e)
+                    throw AssertionError("mutation of ${fixture.name} failed at iteration $iteration", e)
                 }
             }
         }

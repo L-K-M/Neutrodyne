@@ -41,6 +41,18 @@ Since the scope revision ([D81](../PLAN.md#3-key-decisions)) all of it is common
 | `:app` (Android only) | `ExternalImportActivity`, its manifest entries, the shell-only `SnapshotNowReceiver` and its manifest entry ([Testing with bmgr](#testing-with-bmgr)), `res/xml/data_extraction_rules.xml`, `res/xml/backup_rules.xml`, `res/xml-v28/backup_rules.xml`, the `cache/export/` entry of `res/xml/file_paths.xml` |
 | `:desktopApp` | nothing of its own: OS hand-offs and drops reach the import pipeline through 11's `DesktopOpenHandler` and the shared `IntentRouter` ([Desktop inputs](#desktop-inputs)) |
 
+**Implementation note (2026-10-17, M3).** The A1 contract row lands the types above with
+three placement adjustments: `RestoreProgress` sits in `:core:domain` beside `BackupError`
+— its `Failed` case carries a `BackupError`, and `:core:model` cannot see domain types;
+`SnapshotScheduler` sits in `:core:domain` with the other repository ports rather than
+`:core:data` `commonMain` (the platform hosts `WorkManagerSnapshotScheduler` and
+`NoSnapshotScheduler` still live in `:core:data`); and `:playback:api` gets a minimal
+`PlaybackController` with only `pause()` plus the `NoPlaybackController` no-op binding —
+06's full surface arrives with M4.
+`ImportError.Unsupported` and `ImportError.Hostile` carry the enums `UnsupportedSource`
+and `HostileInput` instead of the reason strings of the `ImportError` sketch under OPML
+import, with the same values.
+
 ```mermaid
 flowchart LR
   subgraph FEAT["Feature modules (common)"]
@@ -370,7 +382,12 @@ registration, so a concurrent sweep cannot see a deleted group without its
 token. Create, rename, delete, successful undo, group settings writes and
 `GroupMerger` invoke the domain port after commit and outside that mutex.
 Channel reconciliation runs `NonCancellable` after commit, like refresh
-rescheduling, so caller cancellation cannot skip either effect. Channel failures
+rescheduling, so caller cancellation cannot skip either effect. Since
+2026-10-17 each write and its effects run as one `NonCancellable` unit: Room
+re-checks cancellation as a transaction returns, so a caller cancelled at
+COMMIT would otherwise skip them. The sweep reads groups, then tokens, then
+groups again, so an undo's restore and token drop cannot both fall between
+its reads. Channel failures
 are logged and retried by later sweeps; committed writes remain successful. Import commit, restore and sync-page callers do not exist
 on this branch and remain with their owning milestones. UUID transfer copies
 the app-settable settings in the table; Android retains user settings if the
@@ -463,6 +480,17 @@ three-entry LRU. The existing `FeedRepository.pagedFeed(source)` helper owns
 the ViewModel adds day headers and caches in each entry's child scope.
 Changing filters replaces that source's pager inside its entry. Visit and
 play-order writes keep the current generation.
+
+**Implementation note (2026-10-16, M2):** D11 derives effective filters in the
+feature layer using the shared milestone capability set. Downloaded (M6) and
+In progress (M4) predicates and stored flags remain intact, but gated flags
+are ignored by page queries and chip state. Reads do not clear persisted or
+synced preferences; an explicit filter edit writes the effective selection.
+The Feeds ViewModel observes preferences and compares the resulting filters
+and order before calling `pagedFeed(source, filters, order)`, preserving the
+three-entry cache and avoiding pager replacement for gated-only changes.
+Podcast's transient filters use the same capability set. This qualifies the
+full filter table above until the corresponding producers ship.
 
 ### Counts and new since last visit
 
@@ -1051,7 +1079,7 @@ Walk rules (strict and relaxed):
 - `OpmlFailure` gains `MALFORMED` for "the document is not well-formed XML" — the sketch's enum has no reason a strict-pass `XmlPullParserException` can map to, and the fall-through rule needs one. A well-formed document whose root is not `<opml>` still reports `NO_OUTLINES`.
 - `OpmlDocument` gains `warnings: List<OpmlWarning>` (`code`, `count`; `OpmlWarningCode` = `ATTRIBUTE_TOO_LONG`, `IGNORED_OUTLINES`, `LINKED_LISTS`, `SALVAGED`), so the preview's "12 entries were ignored" warnings survive from the read without the classifier re-walking the file.
 - `OpmlLimits` gains `maxMarkupGapBytes` (the documented 1 MiB bound, as a limit) and `maxTagAttributes` (default 1,000).
-- `MarkupGapGuard` folds the `PrologGuard` prolog scan into the byte stream (a push-model transliteration of the same `PrologLexer` construct boundaries over encoding-aware units), because reading through an `okio.Source` without materialising the document means there is no decoded string for `PrologGuard` to scan. While the prolog walk is open it additionally bounds the `<?xml` declaration's attribute count — kxml2 grows its attribute array a few slots at a time per attribute, so a flooded declaration is a quadratic copy storm even under the gap bound (measured: a ~1 MiB tag of ~105,000 one-byte attributes costs 15–20 s inside kxml2). The same `maxTagAttributes` is checked post-delivery on every start tag (`parser.attributeCount`), which cannot preempt kxml2's in-tag growth — the gap bound still owns buffer size — but keeps an over-bound tag terminal instead of feeding the walk.
+- `MarkupGapGuard` folds the `PrologGuard` prolog scan into the byte stream (a push-model transliteration of the same `PrologLexer` construct boundaries over encoding-aware units), because reading through an `okio.Source` without materialising the document means there is no decoded string for `PrologGuard` to scan. The walk keeps running through the body and bounds every tag's attribute count, the `<?xml` declaration's included, before the parser receives the bytes that would exceed it — kxml2 grows its attribute array a few slots at a time per attribute, so a flooded tag is a quadratic copy storm even under the gap bound (measured: a ~1 MiB tag of ~105,000 one-byte attributes costs 15–20 s inside kxml2). The reader repeats the check post-delivery on every start tag (`parser.attributeCount`) as a backstop for any tag the byte lexer and the parser cut differently.
 
 **Implementation note (2026-10-17, M3).** A4 ships the relaxed and salvage legs plus `ImportDocuments.fromOpml`, and the shipped behavior differs from the text above in named, additive ways:
 
@@ -1110,6 +1138,8 @@ data class SourceGroup(val nameKey: String, val name: String, val colorArgb: Int
 Neutrodyne exports: folder `nd:groupColor`/`nd:groupIcon` are applied to **newly created** groups only (existing groups keep their look). Formats without groups (NewPipe, Takeout, URL list) pre-fill the target group per 04's rule ([04 Pipeline rules for YouTube items](04-youtube.md#pipeline-rules-for-youtube-items-05-implements)). "Import OPML into this group" sets `targetGroupId` and `importGroups = false`.
 
 ### 5. Preview contract
+
+**Implementation note (2026-10-17, M3):** `updateOptions` applies changes to the latest PREVIEW row in one transaction using `ImportOptions.withUserChanges`. Parser metadata and worker bookkeeping are preserved, and edits after a commit or restore request are ignored. Restore intent is written only by `BackupRepository.restore`, so a stale preview cannot reset or alter a queued operation.
 
 `ImportKey(sessionId)` (`:feature:importexport`, visuals: [08 Screens](08-ui-ux.md#screens)) renders these models; everything survives process death because it is in `import_session`/`import_item`.
 
@@ -1218,6 +1248,8 @@ Serves R1.6, R1.7, R8.1. Delivered in [M3](../PLAN.md#m3-import-export-and-backu
 
 `ImportSourceSniffer.sniff(open: () -> okio.Source, archives: ArchiveReaderFactory): SniffResult` (`:feeds`, common) checks the magic bytes first, then reads at most the first 64 KiB as text: a UTF-8 BOM is skipped; a UTF-16 BOM, or first bytes `3C 00`/`00 3C` without BOM, decode the text as UTF-16 LE/BE (only XML is accepted in UTF-16); leading whitespace is skipped and the first non-whitespace character decides. ZIPs are inspected through their central directory by the bound `ArchiveReaderFactory` ([Archive guard](#archive-guard)):
 
+Implementation note (2026-10-17, M3): the signature is `sniff(open: () -> okio.Source, archivePath: okio.Path, archives: ArchiveReaderFactory? = null)` — `ArchiveReaderFactory` opens `okio.Path`s (ZIP needs random access), so the payload's path rides along and is used only when the magic says ZIP; `open` covers every byte-level check and a caller without a bound factory passes null and gets `Unsupported("zip")`. JSON markers are searched inside the 64 KiB window (the ≤ 10 MB figure is the downstream parser's cap); a non-XML UTF-16 payload lands on `Unsupported("unknown")`.
+
 | First bytes / content | Result |
 |---|---|
 | `PK\x03\x04` | ZIP: an entry named exactly `manifest.json` whose `format` is `neutrodyne-backup` → `NEUTRODYNE_BACKUP`; else any entry ending `.csv` (case-insensitive) → `TAKEOUT_CSV`; else `Unsupported("zip")` |
@@ -1227,6 +1259,8 @@ Serves R1.6, R1.7, R8.1. Delivered in [M3](../PLAN.md#m3-import-export-and-backu
 | text, first line 3 comma-separated columns, second line starts `UC` | `TAKEOUT_CSV` |
 | text, ≥ 80 % of non-empty non-`#` lines are URLs, `UC…` IDs or `@handles` | `URL_LIST` (M8; [04 URL list](04-youtube.md#url-list-import)) |
 | anything else | `Unsupported("unknown")` → "This doesn't look like a podcast list" |
+
+Implementation note (2026-10-18, M3): explicit LibreTube/Piped markers take precedence over the NewPipe array shape. An empty `subscriptions` array occurs in both formats; without those markers it remains NewPipe, but an empty Piped export must route to LibreTube.
 
 ### Adapters
 
@@ -1278,6 +1312,8 @@ class ZipArchiveWriter : ArchiveWriterFactory  // java.util.zip.ZipOutputStream,
 ```
 
 `ZipGuard` wraps `java.util.zip.ZipFile` over the local payload copy (random access; never extracts to disk, so entry names are never paths — no zip-slip). Entry names containing `..`, starting with `/` or containing `\` reject the archive (`ArchiveException(HOSTILE, "zip_path")`, surfaced as `Hostile("zip_path")`); on devices the `ZipFile` constructor already throws `ZipException` for the first two (apps targeting 34+), which `ZipGuard` maps to the same error, so JVM tests, the desktop and Android devices agree. Any other `ZipException` → `ArchiveException(CORRUPT)`, surfaced as `Corrupt("zip")` (backups) or `Unsupported("zip")`. The sync server reads and writes its per-account ZIPs with its own `java.util.zip` code and the same `BackupCodec`, because it may depend only on `:sync:protocol` and `:feeds` ([PLAN 5.1](../PLAN.md#51-module-graph) rule 7).
+
+*Implementation note (2026-10-17, M3):* four points the code fixes that the prose above leaves open. A central directory listing one name twice is rejected as `Hostile("zip_entries")` — the name→entry lookup would be ambiguous. The platform `ZipException` (Android's `SafeZipPathValidatorCallback`, target 34+) is recognised by its "Invalid zip entry path" message prefix, because the name checks below are the cross-platform rule and that message is the constructor's only such failure. The ratio check divides the counted inflated bytes by the central directory's declared *compressed* size: `ZipFile` bounds the inflater's input to that size, so the declaration cannot hide a bomb behind a smaller real stream (a bigger one merely delays rejection to the byte caps, which remain authoritative). The Takeout column's MB are decimal — 5,000,000 and 250,000,000 bytes — where the Backup column's MiB are binary.
 
 | Cap | Backup | Takeout ZIP |
 |---|---|---|
@@ -1383,6 +1419,8 @@ The manifest is written last because it carries the hashes; readers open the loc
 @Serializable data class SettingValueV1(val key: String, val type: String,   // SettingKey subclass name
                                         val value: JsonPrimitive? = null, val values: List<String>? = null)
 ```
+
+Implementation note (2026-10-17, M3): `BackupManifest.format`, `formatVersion` and `minReaderVersion` carry `@EncodeDefault`, so they are always written — under `encodeDefaults = false` a defaulted field never reaches the wire, and the [Sniffing](#sniffing) rule's `format` check could then never recognise our own archives. `EpisodeLineV1.fc` stays in the DTO for 10's staging files; `BackupCodec`'s ARCHIVE mode (the default) strips it on encode, STAGING mode keeps it.
 
 **Line timestamps (`ts`, `posAt`, `pl`, `lp`, `fc`).** `ts` is the last user-state change (`episode_state.updatedAt`); `ts = 0` is the no-state-change sentinel for lines exported only as queue, download, current-episode or stub hints, which have no `episode_state` row (02 writes no NULL into the required field and never synthesises now). Such a line carries no state: `pl`, `st`, `lp`, `dis`, `md` are null and `pc = 0`, `fav = false`. `posAt` is independent (`episode_position.updatedAt`): a line with `ts = 0` but `pos > 0` still merges its position by the position rule. Expected combinations: `pl = null` with `pos > 0` (and usually `st` set) is in progress, never played. In a restore **Merge** a null `pl` never clears a locally played mark (played merges by OR/max); Replace takes the backup's state, and the First-link column (`LINK_MERGE`) decides by clock, so there a newer remote "unplayed" does clear it ([Merge and Replace rules](#merge-and-replace-rules), MS2 acceptance 3). On merge, a `ts = 0` line writes no state fields and captures none — but its stub (unmatched, with `u` or `yt`), its queue reference and its position are still honoured per the rules below: when the merged position is non-zero and the merged result unplayed, the in-progress proxy is derived with `EpisodeStateDao.ensure(id, posAt)` and `startedAt = COALESCE(startedAt, posAt)` — stamped `posAt`, as 06's position save would have stamped it, never now and never 0; an existing row keeps its `updatedAt` ([02 Restore matching](02-data-model.md#restore-matching)). `fc` (2026-10-06) exists only in 10's first-link staging files, never in archives: the clock milliseconds of each state field the server record actually carries (`played`, `fav`, `playCount`, `lastPlayedAt`, `measuredDurationMs`, `pos`), so the First-link column compares a field's own clock and leaves a field the record lacks untouched. A staged line's `ts` is the newest of its non-`pos` state clocks, or 0 when the record has none of them (only `pos` or an Up next reference); the server's per-account ZIPs use the same `ts` mapping without `fc` ([10 Merge](10-sync.md#merge) step 2, [10 Backups](10-sync.md#backups)).
 
@@ -1960,6 +1998,14 @@ Serves N1, N9, N11. Infrastructure, runners, golden-update switch and CI wiring 
 | `bmgr` procedure | 09's nightly `bmgr` job on the published release APK (`SnapshotNowReceiver` trigger) and by hand, 09 checklist | [Testing with bmgr](#testing-with-bmgr) (M3 acceptance 6; M6 acceptance 7 for `Podcasts/`); M11b: a second device set up from the first one's Google backup, then the published APK downloaded from the GitHub release page and installed, gets the library back at install (open question 17) | M3, M6, M11b |
 
 Fixtures (`feeds/src/test/resources/opml/`): `antennapod_flat_atom.opml` (`type="atom"`), `pocketcasts_feeds_wrapper.opml` (OPML 1.0, `feeds` wrapper, no `title`), `overcast_basic.opml`, `overcast_extended.opml` (playlists, nested episodes, `subscribed="0"`), `gpodder_sections.opml` (Audio/Video sections, `text` = description, `url` fallback), `freshrss_nested.opml` (nested folders and `category`), `google_broken.opml` (raw `&`, missing `/>`, `&nbsp;` → salvage), `neutrodyne_hybrid.opml`, `neutrodyne_flat.opml`, `neutrodyne_group_share.opml`, `neutrodyne_percent_names.opml` (groups `a,b`, `c/d`, `100%` and the literal `a%2Cb`: export encodes, import decodes exactly once), `iscomment_subtree.opml`, `include_and_link.opml`; encodings `utf8_bom.opml`, `utf16le_bom.opml`, `iso8859_1_declared.opml`, `leading_newline.opml`, `cp1252_declared_utf8.opml` (replacement characters, no crash). `feeds/src/test/resources/backup/`: directories `v1_minimal/`, `v1_full/`, `v1_without_sync_fields/` (written before the scope revision), `v1_android/`, `v1_desktop/`, `future_minreader2/`, `sha_mismatch/` holding the archive entries as plain files; a test helper zips each at test time (no committed binary archives, so every fixture stays a reviewable text diff). YouTube format fixtures are 04's (`feeds/src/test/resources/import/`). Hostile inputs are generated, never committed.
+
+**Implementation note (2026-10-17, M3):** `OpmlWriterGoldenTest` runs in `:feeds:jvm`'s
+`test` source set rather than `:feeds` `commonTest`, where the table above places it: its
+goldens are files (`feeds/src/test/resources/opml/writer/`, read through the existing
+`Goldens` helper) and `commonTest` cannot read files portably. The writer itself is common
+code in `:feeds` (`ch.lkmc.neutrodyne.feeds.opml`), so both the apps and the sync server
+write identical bytes. The writer goldens stay separate from the reader fixtures
+(`neutrodyne_*.opml`) in the same corpus directory.
 
 ---
 

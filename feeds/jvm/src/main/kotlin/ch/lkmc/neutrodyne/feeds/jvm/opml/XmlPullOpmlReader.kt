@@ -367,7 +367,7 @@ private class ReadSession(
                 XmlPullParser.START_TAG -> {
                     onStartTag()
                     if (parser.name.equals("title", ignoreCase = true) && headTitle == null) {
-                        headTitle = readElementText(parser.depth)
+                        headTitle = readElementText(parser.depth).trim()
                     } else {
                         ignoreSubtree()
                     }
