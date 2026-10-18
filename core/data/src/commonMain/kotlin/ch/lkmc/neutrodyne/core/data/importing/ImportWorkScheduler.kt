@@ -32,6 +32,45 @@ internal interface ImportWorkScheduler {
      * best effort — the `CANCELLED` write is the durable half.
      */
     suspend fun cancel(sessionId: Long)
+
+    /**
+     * Whether the host's restore work is enqueued, blocked or running — the auto-snapshot's
+     * "restore owns the lane" guard (05 Snapshot production step 2). Android asks WorkManager
+     * for unique work `backup-restore`; the desktop asks the `import-backup` lane. Callers
+     * treat a thrown error as "cannot prove idle" — fail closed, never best-guess overwrite.
+     */
+    suspend fun hasRestoreWork(): Boolean
+
+    /**
+     * Enqueues the durable restore request of [sessionId] — Android's unique work
+     * `backup-restore` under `KEEP`, the desktop's `import-backup` lane poke. Unlike fetch
+     * [schedule], the caller must know whether the request actually landed: WorkManager
+     * `KEEP` silently ignores a new request while a finishing worker still holds the name,
+     * so the answer distinguishes [RestoreEnqueue.ENQUEUED] from
+     * [RestoreEnqueue.ALREADY_RUNNING]. [auto] is the session's `fromAndroidBackup` flag —
+     * the worker needs it to pick the first-launch restore's notification wording.
+     *
+     * Implementation contract (native, C2/C3): report [RestoreEnqueue.ALREADY_RUNNING] only
+     * when the platform *definitively* kept the existing request — an ambiguous answer must
+     * surface as a thrown failure instead, because the caller then keeps the durable intent
+     * for start-up reconciliation: a native host must re-scan `PREVIEW` backup sessions for
+     * `restoreRequestedAt` at start-up and enqueue whatever the last claim could not.
+     */
+    suspend fun scheduleRestore(
+        sessionId: Long,
+        auto: Boolean,
+    ): RestoreEnqueue
+}
+
+/**
+ * What the restore enqueue did (05 Restore algorithm): [ENQUEUED] means the new request is
+ * or will be running; [ALREADY_RUNNING] means the existing request definitively kept the
+ * work name — the caller's just-written durable intent is provably unused and is rolled
+ * back, answering the requester `RestoreRunning` like any second request.
+ */
+internal enum class RestoreEnqueue {
+    ENQUEUED,
+    ALREADY_RUNNING,
 }
 
 /** How an enqueue positions itself against a possibly-running fetch worker (05 §7). */

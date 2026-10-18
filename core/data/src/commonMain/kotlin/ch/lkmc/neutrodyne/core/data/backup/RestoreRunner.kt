@@ -43,7 +43,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okio.FileSystem
-import okio.Path.Companion.toPath
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
@@ -97,10 +96,10 @@ internal class RestoreRunner(
     private val progressFlow = MutableStateFlow<RestoreProgress?>(null)
 
     /** The staging lane: restore-owned directories under the import cache (`StagingRoot`). */
-    private val stagingRoot = storagePaths.cacheDir.toPath() / "restore"
+    private val stagingRoot = restoreStagingDirOf(storagePaths)
 
     /** The app-private auto-snapshot a `fromAndroidBackup` session was adopted from. */
-    private val autoSnapshotDir = storagePaths.filesDir.toPath() / "backup"
+    private val autoSnapshotDir = backupDirOf(storagePaths)
     private val autoSnapshot = autoSnapshotDir / AUTO_SNAPSHOT_FILE
 
     /** The flow B12c's `BackupRepositoryImpl.observeRestore()` exposes (05). */
@@ -394,7 +393,7 @@ internal class RestoreRunner(
         withContext(io) {
             suspendRunCatching {
                 if (fileSystem.exists(autoSnapshot)) {
-                    fileSystem.atomicMove(autoSnapshot, autoSnapshotDir / "restored-${clock.now()}.zip")
+                    fileSystem.atomicMove(autoSnapshot, autoSnapshotDir / restoredSnapshotName(clock.now()))
                 }
             }.onFailure { Log.w(TAG, it) { "auto-snapshot retirement failed" } }
                 .isSuccess
@@ -428,9 +427,6 @@ internal class RestoreRunner(
         const val PHASE_VALIDATE = "validate"
         const val PHASE_LIBRARY = "library"
         const val PHASE_EPISODES = "episodes"
-
-        /** `files/backup/`'s pending snapshot (05 Auto Backup; the install-ID guard's file). */
-        const val AUTO_SNAPSHOT_FILE = "auto-snapshot.zip"
     }
 }
 

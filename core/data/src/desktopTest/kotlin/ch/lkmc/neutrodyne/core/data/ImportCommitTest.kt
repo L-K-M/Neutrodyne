@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.data.importing.ImportSessions
 import ch.lkmc.neutrodyne.core.data.importing.ImportWorkPolicy
 import ch.lkmc.neutrodyne.core.data.importing.ImportWorkScheduler
 import ch.lkmc.neutrodyne.core.data.importing.PayloadStore
+import ch.lkmc.neutrodyne.core.data.importing.RestoreEnqueue
 import ch.lkmc.neutrodyne.core.database.ImportItemEntity
 import ch.lkmc.neutrodyne.core.database.ImportSessionEntity
 import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
@@ -1144,6 +1145,19 @@ class ImportCommitTest {
         override suspend fun cancel(sessionId: Long) {
             if (fail) error("scheduler unavailable")
             cancelled += sessionId
+        }
+
+        override suspend fun hasRestoreWork(): Boolean {
+            if (fail) error("scheduler unavailable")
+            return false
+        }
+
+        override suspend fun scheduleRestore(
+            sessionId: Long,
+            auto: Boolean,
+        ): RestoreEnqueue {
+            if (fail) error("scheduler unavailable")
+            return RestoreEnqueue.ENQUEUED
         }
     }
 
