@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.database
 
 import androidx.room3.Dao
 import androidx.room3.Query
+import androidx.room3.Update
 import androidx.room3.withReadTransaction
 import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.FeedOrder
@@ -363,6 +364,72 @@ interface BackupDao {
 
     @Query("DELETE FROM episode_position WHERE episodeId IN (SELECT id FROM episode WHERE podcastId = :podcastId)")
     suspend fun deletePositionsOfPodcast(podcastId: Long): Int
+
+    // --- Restore Up next/session writes (05 transaction C) -------------------------------------
+
+    /**
+     * The merged-played set transaction C consults (05 Up next): backup refs to a played
+     * episode are skipped, and Merge sweeps locally queued episodes that became played.
+     */
+    @Query("SELECT episodeId FROM episode_state WHERE playedAt IS NOT NULL")
+    suspend fun playedEpisodeIds(): List<Long>
+
+    /** 05 Up next (Merge): a locally queued episode that became played leaves the queue (06's invariant). */
+    @Query(
+        "DELETE FROM queue_entry WHERE episodeId IN" +
+            " (SELECT episodeId FROM episode_state WHERE playedAt IS NOT NULL)",
+    )
+    suspend fun deletePlayedQueueEntries(): Int
+
+    // --- Restore library writes (05 transaction A) ---------------------------------------------
+
+    /**
+     * 05 transaction A, Replace: matched groups first park their `nameKey` as
+     * `char(31) || '~restore~' || id`, so a pair of groups swapping names cannot hit the
+     * unique index mid-rewrite. The unit-separator character is a control character, which
+     * `GroupNames` never emits — no staged name can collide with a parked key. Chunked at
+     * the bind limit like every ID list (02).
+     */
+    suspend fun parkGroupNameKeys(groupIds: Collection<Long>) {
+        groupIds.distinct().chunked(BIND_CHUNK).forEach { parkGroupNameKeysChunk(it) }
+    }
+
+    /** Room primitive behind [parkGroupNameKeys]; callers must chunk at the bind limit. */
+    @Query("UPDATE podcast_group SET nameKey = char(31) || '~restore~' || id WHERE id IN (:ids)")
+    suspend fun parkGroupNameKeysChunk(ids: List<Long>)
+
+    /**
+     * 05 transaction A, Replace: a matched group row takes the backup's values verbatim —
+     * the caller supplies the stored entity's `copy`, so `lastViewedAt` (never backed up)
+     * survives and a `nameKey` match's adopted backup `uuid` rides along. Runs after
+     * [parkGroupNameKeys] freed every real nameKey.
+     */
+    @Update
+    suspend fun updateGroup(row: PodcastGroupEntity): Int
+
+    /**
+     * 05 transaction A, Replace's "exactly the backup's" membership rule: the join table is
+     * rebuilt from the staged groups, so every surviving member row goes first (local-only
+     * groups' rows already cascaded with the pre-step's deletes).
+     */
+    @Query("DELETE FROM podcast_group_member")
+    suspend fun clearGroupMembers(): Int
+
+    /**
+     * 05 transaction A, Replace's "backup wins" on the four user columns of a matched
+     * podcast; feed-derived and fetch-state columns stay local — the next refresh owns them.
+     */
+    @Query(
+        "UPDATE podcast SET customTitle = :customTitle, includeInAll = :includeInAll," +
+            " episodeOrder = :episodeOrder, youtubeVariants = :youtubeVariants WHERE id = :podcastId",
+    )
+    suspend fun replacePodcastUserFields(
+        podcastId: Long,
+        customTitle: String?,
+        includeInAll: Boolean,
+        episodeOrder: FeedOrder?,
+        youtubeVariants: Int,
+    )
 
     companion object {
         /** 02 Backup export: episodes stream in keyset chunks of 1,000. */
