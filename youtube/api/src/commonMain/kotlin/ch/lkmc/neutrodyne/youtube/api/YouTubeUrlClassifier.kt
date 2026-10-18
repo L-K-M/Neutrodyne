@@ -259,25 +259,29 @@ private fun playlistOrChannel(playlistId: String): YtRef {
 
 /**
  * Decodes every valid `%XX` escape; invalid escapes stay literal and `+` is never a space (the same
- * lenient rule 03's URL normalizer uses). Malformed UTF-8 decodes to U+FFFD instead of throwing.
+ * lenient rule 03's URL normalizer uses). Each unescaped span is encoded whole so a supplementary
+ * character's UTF-16 surrogate pair stays one UTF-8 sequence; malformed UTF-8 decodes to U+FFFD
+ * instead of throwing.
  */
 private fun percentDecode(text: String): String {
     if (!text.contains('%')) return text
 
     val bytes = ArrayList<Byte>(text.length)
+    var rawStart = 0
     var i = 0
     while (i < text.length) {
-        val c = text[i]
         val high = hexValue(text.getOrNull(i + 1))
         val low = hexValue(text.getOrNull(i + 2))
-        if (c == '%' && high >= 0 && low >= 0) {
+        if (text[i] == '%' && high >= 0 && low >= 0) {
+            for (byte in text.substring(rawStart, i).encodeToByteArray()) bytes.add(byte)
             bytes.add(((high shl 4) or low).toByte())
             i += 3
+            rawStart = i
         } else {
-            for (byte in c.toString().encodeToByteArray()) bytes.add(byte)
             i++
         }
     }
+    for (byte in text.substring(rawStart).encodeToByteArray()) bytes.add(byte)
     return bytes.toByteArray().decodeToString()
 }
 
