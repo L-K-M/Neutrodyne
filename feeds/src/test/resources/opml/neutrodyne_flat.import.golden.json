@@ -1,0 +1,37 @@
+{
+  "entries": [
+    {
+      "customTitle": "ATP",
+      "groupNames": [
+        "tech",
+        "news"
+      ],
+      "htmlUrl": "https://atp.fm",
+      "ordinal": 0,
+      "title": "Accidental Tech Podcast",
+      "url": "https://atp.fm/rss"
+    },
+    {
+      "groupNames": [
+        "news"
+      ],
+      "ordinal": 1,
+      "title": "The Daily",
+      "url": "https://feeds.example.com/daily"
+    },
+    {
+      "ordinal": 2,
+      "title": "Some Show",
+      "url": "https://example.com/rss"
+    }
+  ],
+  "format": "OPML",
+  "groups": [
+    {
+      "name": "tech"
+    },
+    {
+      "name": "news"
+    }
+  ]
+}

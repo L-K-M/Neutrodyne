@@ -11,7 +11,9 @@ kotlin {
     // Host (Robolectric) tests: the WorkManager test-driver suite, the foreground observer and the
     // golden corpus on the platform parser (03 corpus leg b). The task is `testAndroidHostTest`.
     targets.named("android") {
-        (this as KotlinMultiplatformAndroidLibraryTarget).withHostTest { }
+        // includeAndroidResources so src/androidHostTest/AndroidManifest.xml + res (the test
+        // FileProvider that ExportShareUrisTest resolves through) reach Robolectric.
+        (this as KotlinMultiplatformAndroidLibraryTarget).withHostTest { isIncludeAndroidResources = true }
     }
 
     sourceSets {

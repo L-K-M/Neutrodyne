@@ -28,4 +28,15 @@ interface PlaySessionDao {
     /** 07's deferral check and the now-playing sources (02 Downloads): low-churn observation. */
     @Query("SELECT currentEpisodeId FROM play_session WHERE id = 0")
     fun observeCurrentEpisodeId(): Flow<Long?>
+
+    /**
+     * 05 Replace pre-step (UP_NEXT): the local context is cleared before the backup's session
+     * is written. Same shape as the scoped `clear*Context` statements — `generation + 1`, so a
+     * session write elsewhere is never clobbered.
+     */
+    @Query(
+        "UPDATE play_session SET contextType = NULL, contextId = NULL, contextAnchorEpisodeId = NULL," +
+            " contextAnchorSortDate = NULL, generation = generation + 1, updatedAt = :now WHERE id = 0",
+    )
+    suspend fun clearContext(now: Long): Int
 }
