@@ -2,7 +2,9 @@
 
 package ch.lkmc.neutrodyne.core.data.importing
 
+import ch.lkmc.neutrodyne.core.database.ImportSessionEntity
 import ch.lkmc.neutrodyne.core.model.ImportOptions
+import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.ImportWarning
 import ch.lkmc.neutrodyne.core.model.LinkedRestoreReach
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
@@ -112,6 +114,19 @@ internal data class ImportOptionsJson(
         private fun linkedRestoreReach(name: String): LinkedRestoreReach? =
             LinkedRestoreReach.entries.firstOrNull { it.name == name }
     }
+}
+
+/**
+ * 05's durable restore intent: a `PREVIEW` `NEUTRODYNE_BACKUP` session whose options carry a
+ * committed `restoreRequestedAt`. The restore host owns such a session — nothing else may
+ * write over, sweep or supersede it. Fails closed: an undecodable `optionsJson` may hide the
+ * intent, so it reports `true` rather than exposing the row to overwrite or cleanup.
+ */
+internal fun ImportSessionEntity.hasRestoreIntent(): Boolean {
+    if (state != ImportState.PREVIEW) return false
+    val encoded = optionsJson ?: return false
+    val options = ImportOptionsJson.decodeOrNull(encoded) ?: return true
+    return options.restoreRequestedAt != null
 }
 
 /** The `SourceGroup` mirror (05 §4: proposals ride in `optionsJson` — empty folders have no item rows). */

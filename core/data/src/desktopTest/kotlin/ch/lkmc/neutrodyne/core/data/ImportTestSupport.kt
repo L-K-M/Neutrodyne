@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.data.importing.ImportOptionsJson
 import ch.lkmc.neutrodyne.core.data.importing.ImportWorkPolicy
 import ch.lkmc.neutrodyne.core.data.importing.ImportWorkScheduler
 import ch.lkmc.neutrodyne.core.data.importing.PayloadSource
+import ch.lkmc.neutrodyne.core.data.importing.RestoreEnqueue
 import ch.lkmc.neutrodyne.core.database.ImportItemEntity
 import ch.lkmc.neutrodyne.core.database.ImportSessionEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
@@ -227,6 +228,16 @@ internal suspend fun NeutrodyneDatabase.requestImportRestore(
 internal class FakeImportWorkScheduler : ImportWorkScheduler {
     val scheduled = mutableListOf<Pair<Long, ImportWorkPolicy>>()
     val cancelled = mutableListOf<Long>()
+
+    /** `(sessionId, auto)` of each [scheduleRestore] call, in order. */
+    val restores = mutableListOf<Pair<Long, Boolean>>()
+
+    /** [hasRestoreWork]'s answer. */
+    var restoreWork = false
+
+    /** [scheduleRestore]'s acknowledgement. */
+    var restoreAck = RestoreEnqueue.ENQUEUED
+
     var fail = false
 
     override suspend fun schedule(
@@ -235,6 +246,20 @@ internal class FakeImportWorkScheduler : ImportWorkScheduler {
     ) {
         if (fail) error("scheduler unavailable")
         scheduled += sessionId to policy
+    }
+
+    override suspend fun hasRestoreWork(): Boolean {
+        if (fail) error("scheduler unavailable")
+        return restoreWork
+    }
+
+    override suspend fun scheduleRestore(
+        sessionId: Long,
+        auto: Boolean,
+    ): RestoreEnqueue {
+        if (fail) error("scheduler unavailable")
+        restores += sessionId to auto
+        return restoreAck
     }
 
     override suspend fun cancel(sessionId: Long) {

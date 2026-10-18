@@ -1807,6 +1807,22 @@ Algorithm:
 
 *Implementation note (2026-10-18, M3 C4a):* `BackupWriter.write` takes the level as a `SnapshotLevel` (`FULL`, `SLIM_HISTORY`, `DROP_HISTORY`, `ACTIVE_ONLY`) plus an optional compressed-size cap; the numeric `snapshotLevel` enters only at the manifest and `SnapshotStatus` boundaries, and a non-`AUTO_SNAPSHOT` write refuses a non-`FULL` level rather than dropping lines silently. The protected ("queue reference") set is read inside the one export read transaction just before the `episodes.jsonl` stream — every Up next ref plus the play session's `current`, whether or not that episode is queued — so a referenced line is never slimmed or dropped and still restores or stubs on an empty database. The session `anchor` is not protected: it is a resume hint, not user state, and a dropped anchor line simply restores without an anchor. "Older than 365 days" is judged on `pl` (played lines) or the tombstone's own `dis` against the write time; "tombstone-only" means `dis` is the line's sole state — any played, started, last-played, play-count, favourite, measured-duration or live-position/download mark keeps it.
 
+*Implementation note (2026-10-18, M3 C4b):* `AutoSnapshotProducer` (`:core:data`
+`commonMain`) owns the Android-only algorithm and status/control lifecycle. Native
+restore work and fail-closed durable preview intents guard the lane. A bounded,
+manifest-only probe protects unreadable/newer/mismatched or missing-ID snapshots as
+foreign; status reads neither mint an installation ID nor swallow cancellation.
+Writes, disable and discard serialize on one mutex, and writer staging preserves the
+previous snapshot through every failed level. Foreign-pending disable requires the
+explicit discard ordering. An owned file is deleted before recording disabled, so a
+failed delete cannot leave a supposedly-disabled file in the OS backup include path;
+that file/preference/work-cancellation step finishes non-cancellably once started.
+A failed deletion retains the preference and records an IO error. Enable requests a
+debounced write; disable cancels
+both work names. Status observes settings, backup previews and control changes without
+polling. Desktop automatic operations remain unsupported/no-op without IO. Native
+worker/initializer/receiver registration follows in C2/C4/C5/C6b.
+
 ### First-launch restore
 
 `FirstLaunchRestoreInitializer` (`AppInitializer`, order 110, `:core:data` `androidMain`):

@@ -245,14 +245,10 @@ internal class ImportRepositoryImpl(
     ) = fixUps.remove(sessionId, ordinals)
 
     /**
-     * A `PREVIEW` session is cancel's only while its options decode cleanly and carry no
-     * restore request — an unreadable `optionsJson` could hide one, so corrupt rows stay.
+     * A `PREVIEW` session is cancel's only while it carries no restore intent — the shared
+     * fail-closed predicate keeps an unreadable `optionsJson` (which may hide one).
      */
-    private fun ImportSessionEntity.previewOwned(): Boolean {
-        val encoded = optionsJson ?: return true
-        val options = ImportOptionsJson.decodeOrNull(encoded) ?: return false
-        return options.restoreRequestedAt == null
-    }
+    private fun ImportSessionEntity.previewOwned(): Boolean = !hasRestoreIntent()
 
     // --- Mapping -------------------------------------------------------------------------------
 
