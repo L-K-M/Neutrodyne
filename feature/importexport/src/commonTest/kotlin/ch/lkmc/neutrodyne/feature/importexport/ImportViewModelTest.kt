@@ -31,6 +31,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.import_err_gone
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -128,6 +129,222 @@ class ImportViewModelTest : MainDispatcherTest() {
     }
 
     private fun session(id: Long) = imports.sessions.value[id]
+
+    @Test fun newTargetNameWaitsForStorageBeforeReturningSuccess() =
+        runTest {
+            val id = seed()
+            val gate = CompletableDeferred<Unit>()
+            val repo =
+                object : ImportRepository by imports {
+                    override suspend fun updateOptions(
+                        sessionId: Long,
+                        change: (ImportOptions) -> ImportOptions,
+                    ) {
+                        gate.await()
+                        imports.updateOptions(sessionId, change)
+                    }
+                }
+            val vm = ImportViewModel(id, repo, groups, visibility, appScope())
+            advanceUntilIdle()
+            val rename = launch { assertNull(vm.setTargetGroupName("News")) }
+            runCurrent()
+
+            assertFalse(rename.isCompleted, "Target name must await its persisted write")
+            gate.complete(Unit)
+            advanceUntilIdle()
+            assertEquals("News", session(id)!!.options.targetGroupName)
+        }
+
+    @Test fun acceptedRenameAndConfirmSurviveClearingTheViewModel() =
+        runTest {
+            val id = seed()
+            val gate = CompletableDeferred<Unit>()
+            val repo =
+                object : ImportRepository by imports {
+                    override suspend fun updateOptions(
+                        sessionId: Long,
+                        change: (ImportOptions) -> ImportOptions,
+                    ) {
+                        gate.await()
+                        imports.updateOptions(sessionId, change)
+                    }
+                }
+            val vm = ImportViewModel(id, repo, groups, visibility, appScope())
+            val store = ViewModelStore()
+            store.put("import", vm)
+            advanceUntilIdle()
+            val owner = Job(coroutineContext.job)
+            val routeScope = CoroutineScope(coroutineContext + owner)
+            routeScope.launch { vm.renameGroup("tech", "News") }
+            runCurrent()
+            routeScope.launch { vm.confirm() }
+            runCurrent()
+            owner.cancel()
+            store.clear()
+            gate.complete(Unit)
+            advanceUntilIdle()
+
+            assertEquals(ImportState.COMMITTED, session(id)!!.state)
+            assertEquals(mapOf("tech" to "News"), session(id)!!.options.renamedGroups)
+            assertFalse(vm.uiState.value.busy)
+        }
+
+    @Test fun terminalReportFiltersRemainAvailable() =
+        runTest {
+            val sessionItems =
+                listOf(
+                    item(0, status = ImportItemStatus.SUBSCRIBED),
+                    item(1, status = ImportItemStatus.FETCH_FAILED),
+                    item(2, status = ImportItemStatus.INVALID_URL, selected = false),
+                    item(3, selected = false),
+                )
+            val id = seed(sessionItems = sessionItems, state = ImportState.DONE)
+            val vm = viewModel(id)
+            advanceUntilIdle()
+            vm.setFilter(ImportItemFilter.NEEDS_ATTENTION)
+            advanceUntilIdle()
+            assertEquals(
+                listOf(1),
+                vm.items
+                    .take(1)
+                    .asSnapshot()
+                    .map { it.ordinal },
+            )
+            vm.setFilter(ImportItemFilter.NOT_IMPORTED)
+            advanceUntilIdle()
+            assertEquals(
+                listOf(2, 3),
+                vm.items
+                    .take(1)
+                    .asSnapshot()
+                    .map { it.ordinal },
+            )
+        }
+
+    @Test fun renameWaitsForStorageBeforeReturningSuccess() =
+        runTest {
+            val id = seed(sessionProposals = listOf(proposal("tech")))
+            val gate = CompletableDeferred<Unit>()
+            val repo =
+                object : ImportRepository by imports {
+                    override suspend fun updateOptions(
+                        sessionId: Long,
+                        change: (ImportOptions) -> ImportOptions,
+                    ) {
+                        gate.await()
+                        imports.updateOptions(sessionId, change)
+                    }
+                }
+            val vm = ImportViewModel(id, repo, groups, visibility, appScope())
+            advanceUntilIdle()
+            val rename = launch { assertNull(vm.renameGroup("tech", "News")) }
+            runCurrent()
+
+            assertFalse(rename.isCompleted, "Rename must await its persisted write")
+            gate.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(mapOf("tech" to "News"), session(id)!!.options.renamedGroups)
+        }
+
+    @Test fun confirmWaitsForAcceptedPreviewEditsInOrder() =
+        runTest {
+            val id = seed(sessionProposals = listOf(proposal("tech")))
+            val gate = CompletableDeferred<Unit>()
+            val repo =
+                object : ImportRepository by imports {
+                    override suspend fun updateOptions(
+                        sessionId: Long,
+                        change: (ImportOptions) -> ImportOptions,
+                    ) {
+                        gate.await()
+                        imports.updateOptions(sessionId, change)
+                    }
+                }
+            val vm = ImportViewModel(id, repo, groups, visibility, appScope())
+            advanceUntilIdle()
+            vm.setTreatExistingAsPlayed(true)
+            launch { vm.renameGroup("tech", "News") }
+            vm.toggleItem(1, false)
+            runCurrent()
+            launch { vm.confirm() }
+            runCurrent()
+
+            assertEquals(ImportState.PREVIEW, session(id)!!.state, "Confirm must wait for accepted edits")
+            gate.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(ImportState.COMMITTED, session(id)!!.state)
+            assertEquals(mapOf("tech" to "News"), session(id)!!.options.renamedGroups)
+            assertTrue(session(id)!!.options.treatExistingAsPlayed)
+            assertEquals(
+                ImportItemStatus.PREVIEW,
+                imports.items.value
+                    .getValue(id)[1]
+                    .status,
+            )
+            assertTrue(imports.calls.indexOf("updateOptions($id)") < imports.calls.indexOf("confirm($id)"))
+        }
+
+    @Test fun confirmClearsBusyWhenCancelledBeforeDispatch() =
+        runTest {
+            val id = seed()
+            val appJob = SupervisorJob()
+            val vm = ImportViewModel(id, imports, groups, visibility, CoroutineScope(coroutineContext + appJob))
+            advanceUntilIdle()
+            val caller = launch(start = CoroutineStart.UNDISPATCHED) { vm.confirm() }
+            assertTrue(vm.uiState.value.busy)
+            appJob.cancel()
+            runCurrent()
+
+            assertTrue(caller.isCancelled)
+            assertFalse(vm.uiState.value.busy, "Confirm completion must clear busy even before dispatch")
+            assertTrue(imports.calls.none { it.startsWith("confirm") })
+        }
+
+    @Test fun cancelClearsBusyWhenCancelledBeforeDispatch() =
+        runTest {
+            val id = seed()
+            val appJob = SupervisorJob()
+            val vm = ImportViewModel(id, imports, groups, visibility, CoroutineScope(coroutineContext + appJob))
+            advanceUntilIdle()
+            val caller = launch(start = CoroutineStart.UNDISPATCHED) { vm.cancelSession() }
+            assertTrue(vm.uiState.value.busy)
+            appJob.cancel()
+            runCurrent()
+
+            assertTrue(caller.isCancelled)
+            assertFalse(vm.uiState.value.busy, "Cancel completion must clear busy even before dispatch")
+            assertTrue(imports.calls.none { it.startsWith("cancel") })
+        }
+
+    @Test fun committedAndFetchingIgnoreEveryPreviewFilter() =
+        runTest {
+            val sessionItems = listOf(item(0), item(1, status = ImportItemStatus.INVALID_URL, selected = false))
+            val id = seed(sessionItems = sessionItems)
+            val vm = viewModel(id)
+            advanceUntilIdle()
+            vm.setFilter(ImportItemFilter.NOT_IMPORTED)
+            vm.confirm()
+            advanceUntilIdle()
+
+            assertEquals(
+                listOf(0, 1),
+                vm.items
+                    .take(1)
+                    .asSnapshot()
+                    .map { it.ordinal },
+            )
+            for (state in listOf(ImportState.COMMITTED, ImportState.FETCHING)) {
+                imports.sessions.update { it + (id to it.getValue(id).copy(state = state)) }
+                for (filter in ImportItemFilter.entries) {
+                    // Use a fresh paging cache for each filter instead of replaying the prior page.
+                    val progress = viewModel(id)
+                    advanceUntilIdle()
+                    progress.setFilter(filter)
+                    val rows = progress.items.take(1).asSnapshot()
+                    assertEquals(listOf(0, 1), rows.map { it.ordinal }, "$state / $filter")
+                }
+            }
+        }
 
     @Test fun theSessionProposalsAndSelectionsFlowFromTheRepository() =
         runTest {

@@ -71,8 +71,7 @@ internal fun ImportSessionRoute(
         onConfirm = { scope.launch { viewModel.confirm() } },
         onCancelPreview = {
             scope.launch {
-                viewModel.cancelSession()
-                navigator.pop(key)
+                if (viewModel.cancelSession()) navigator.pop(key)
             }
         },
         onStopImport = { scope.launch { viewModel.cancelSession() } },

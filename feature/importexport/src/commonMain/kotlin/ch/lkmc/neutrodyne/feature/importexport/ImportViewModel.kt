@@ -41,7 +41,9 @@ import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metrox.viewmodel.ManualViewModelAssistedFactory
 import dev.zacsweers.metrox.viewmodel.ManualViewModelAssistedFactoryKey
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -75,11 +77,11 @@ internal data class ImportUiState(
  * raw key string. The session, proposals, persisted options/selections and counts all flow from
  * `ImportRepository`; `GroupRepository` supplies the target-group choices and the shared name
  * validation. The paged stream re-reads on every filter change, so a stale preview-only filter
- * can never hide a committed session's rows — past PREVIEW the ephemeral "Only new" chip and the
- * search query collapse to "everything".
+ * cannot hide committed work: progress always uses ALL, while terminal reports retain their
+ * filters. The preview-only search and "Only new" chip do not apply to reports.
  *
- * Preview edits (`setSelected`, `updateOptions`) are cheap single writes on the ViewModel scope;
- * only [confirm] and [cancelSession] ride one `@ApplicationScope` job each, so a disappearing
+ * Preview edits (`setSelected`, `updateOptions`) are serialized in acceptance order;
+ * accepted edits, [confirm] and [cancelSession] run on `@ApplicationScope`, so a disappearing
  * route cannot take them down and the job itself owns `busy`. A `NEUTRODYNE_BACKUP` PREVIEW
  * session renders the unavailable body (the restore preview is D4) and no path here calls the
  * normal import [ImportRepository.confirm] for it — the committer would reject it anyway.
@@ -94,6 +96,9 @@ internal class ImportViewModel
         @ApplicationScope private val appScope: CoroutineScope,
     ) : ViewModel() {
         private val state = MutableStateFlow(ImportUiState())
+
+        // The UI dispatcher owns this tail; accepted edits survive leaving the route.
+        private var pendingEdit: Job? = null
         val uiState = state.asStateFlow()
         private val userMessages = UserMessages()
         val messages = userMessages.flow
@@ -120,17 +125,17 @@ internal class ImportViewModel
 
         /**
          * The session's rows for the current effective filter. "Only new" and the search text
-         * exist for the preview; once the session is committed the report pages every row (05's
-         * report is the same session's items, not a remembered preview subset).
+         * exist for the preview. Progress pages every row; terminal reports allow their own
+         * filters over the same session's items.
          */
         @OptIn(ExperimentalCoroutinesApi::class)
         val items: Flow<PagingData<ImportItemView>> =
             state
                 .map {
-                    if (it.session?.state == ImportState.PREVIEW) {
-                        it.filter to it.query
-                    } else {
-                        effectiveFilter(it.filter) to ""
+                    when (it.session?.state) {
+                        ImportState.PREVIEW -> it.filter to it.query
+                        ImportState.COMMITTED, ImportState.FETCHING -> ImportItemFilter.ALL to ""
+                        else -> effectiveFilter(it.filter) to ""
                     }
                 }.distinctUntilChanged()
                 .flatMapLatest { (filter, query) ->
@@ -196,15 +201,15 @@ internal class ImportViewModel
             requester: NotificationPermissionRequester?,
         ) {
             if (!editable()) return
-            viewModelScope.launch {
-                val wrote =
+            val write =
+                enqueueEdit {
                     suspendRunCatching {
                         imports.updateOptions(sessionId) { it.copy(notifyNewEpisodes = enabled) }
-                    }.isSuccess
-                if (!wrote) {
-                    postWriteFailed()
-                    return@launch
+                    }.onFailure { postWriteFailed() }.isSuccess
                 }
+            viewModelScope.launch {
+                if (!write.await()) return@launch
+
                 state.update { it.copy(notificationsBlocked = enabled && requester?.granted == false) }
                 if (enabled && requester != null && !requester.granted) {
                     requester.request { allowed ->
@@ -249,36 +254,33 @@ internal class ImportViewModel
             store: suspend (String) -> Unit,
         ): GroupError? {
             if (!editable()) return null
-            val outcome =
-                suspendRunCatching { groups.checkName(name) }.getOrElse {
-                    Log.w(TAG, it) { "import group name check failed" }
-                    postWriteFailed()
-                    return null
-                }
-            return when (outcome) {
-                is Outcome.Success -> {
-                    runEdit { store(outcome.value) }
-                    null
-                }
-
-                is Outcome.Failure -> {
-                    when (val error = outcome.error) {
-                        is GroupError.NameTaken -> {
-                            runEdit { store(name.trim()) }
-                            null
+            return enqueueEdit {
+                val outcome =
+                    suspendRunCatching { groups.checkName(name) }.getOrElse {
+                        Log.w(TAG, it) { "import group name check failed" }
+                        postWriteFailed()
+                        return@enqueueEdit null
+                    }
+                val validated =
+                    when (outcome) {
+                        is Outcome.Success -> {
+                            outcome.value
                         }
 
-                        else -> {
-                            error
+                        is Outcome.Failure -> {
+                            if (outcome.error !is GroupError.NameTaken) return@enqueueEdit outcome.error
+
+                            name.trim()
                         }
                     }
-                }
-            }
+                writeEdit { store(validated) }
+                null
+            }.await()
         }
 
         /**
          * 05 §6 commit: the write runs on an [appScope] job the route only awaits — leaving the
-         * screen never cancels an accepted commit, and `busy` clears in the job's own `finally`
+         * screen never cancels an accepted commit, and `busy` clears on job completion
          * so a recreated route cannot double-confirm while an orphaned job still writes. Only a
          * non-backup PREVIEW session may confirm; `selectedCount = 0` stays confirmable because
          * member-only (ALREADY_SUBSCRIBED) items still apply their groups.
@@ -293,37 +295,37 @@ internal class ImportViewModel
                 return
             }
             state.update { it.copy(busy = true) }
-            // An already-cancelled application scope would drop the job's whole block — including
-            // the finally that owns busy — so that case is reported instead of launched.
+            // Report an unavailable application scope before accepting the operation.
             if (!appScope.coroutineContext.isActive) {
                 state.update { it.copy(busy = false) }
                 userMessages.post(UiText.Res(Res.string.import_err_confirm))
                 return
             }
+            val edits = pendingEdit
             appScope
                 .async {
-                    try {
-                        val outcome =
-                            suspendRunCatching { imports.confirm(sessionId) }.getOrElse {
-                                Log.w(TAG, it) { "import confirm failed" }
-                                userMessages.post(UiText.Res(Res.string.import_err_confirm))
-                                return@async
-                            }
-                        if (outcome is Outcome.Failure) {
-                            userMessages.post(errorText(outcome.error))
+                    edits?.join()
+                    val outcome =
+                        suspendRunCatching { imports.confirm(sessionId) }.getOrElse {
+                            Log.w(TAG, it) { "import confirm failed" }
+                            userMessages.post(UiText.Res(Res.string.import_err_confirm))
+                            return@async
                         }
-                    } finally {
-                        state.update { it.copy(busy = false) }
+                    if (outcome is Outcome.Failure) {
+                        userMessages.post(errorText(outcome.error))
                     }
+                }.also { job ->
+                    // Completion also runs if cancellation prevents dispatching the body.
+                    job.invokeOnCompletion { state.update { it.copy(busy = false) } }
                 }.await()
         }
 
         /**
-         * 05: PREVIEW cancel deletes the session (the route pops after this returns); on a
-         * COMMITTED/FETCHING session it stops the fetch and the report shows CANCELLED.
+         * 05: PREVIEW cancel deletes the session; only success permits the route to pop.
+         * COMMITTED/FETCHING cancellation stops the fetch and the report shows CANCELLED.
          */
-        suspend fun cancelSession() {
-            val session = state.value.session ?: return
+        suspend fun cancelSession(): Boolean {
+            val session = state.value.session ?: return false
             if (
                 state.value.busy ||
                 (
@@ -332,23 +334,25 @@ internal class ImportViewModel
                         session.state != ImportState.FETCHING
                 )
             ) {
-                return
+                return false
             }
             state.update { it.copy(busy = true) }
             if (!appScope.coroutineContext.isActive) {
                 state.update { it.copy(busy = false) }
-                return
+                postWriteFailed()
+                return false
             }
-            appScope
+            val edits = pendingEdit
+            return appScope
                 .async {
-                    try {
-                        suspendRunCatching { imports.cancel(sessionId) }.onFailure {
+                    edits?.join()
+                    suspendRunCatching { imports.cancel(sessionId) }
+                        .onFailure {
                             Log.w(TAG, it) { "import cancel failed" }
                             postWriteFailed()
-                        }
-                    } finally {
-                        state.update { it.copy(busy = false) }
-                    }
+                        }.isSuccess
+                }.also { job ->
+                    job.invokeOnCompletion { state.update { it.copy(busy = false) } }
                 }.await()
         }
 
@@ -364,16 +368,23 @@ internal class ImportViewModel
 
         private fun edit(block: suspend () -> Unit) {
             if (!editable()) return
-            runEdit(block)
+            enqueueEdit { writeEdit(block) }
         }
 
-        private fun runEdit(block: suspend () -> Unit) {
-            viewModelScope.launch {
-                suspendRunCatching { block() }.onFailure {
-                    Log.w(TAG, it) { "import edit failed" }
-                    postWriteFailed()
-                }
+        private suspend fun writeEdit(block: suspend () -> Unit) {
+            suspendRunCatching { block() }.onFailure {
+                Log.w(TAG, it) { "import edit failed" }
+                postWriteFailed()
             }
+        }
+
+        private fun <T> enqueueEdit(block: suspend () -> T): Deferred<T> {
+            val previous = pendingEdit
+            return appScope
+                .async {
+                    previous?.join()
+                    block()
+                }.also { pendingEdit = it }
         }
 
         private fun postWriteFailed() {

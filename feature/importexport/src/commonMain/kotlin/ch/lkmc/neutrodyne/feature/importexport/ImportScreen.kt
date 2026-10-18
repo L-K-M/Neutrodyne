@@ -39,6 +39,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.paging.PagingData
@@ -89,35 +91,48 @@ import ch.lkmc.neutrodyne.core.ui.resources.import_deferred_hint
 import ch.lkmc.neutrodyne.core.ui.resources.import_done_added
 import ch.lkmc.neutrodyne.core.ui.resources.import_done_attention
 import ch.lkmc.neutrodyne.core.ui.resources.import_done_title
+import ch.lkmc.neutrodyne.core.ui.resources.import_failure_address_hint
+import ch.lkmc.neutrodyne.core.ui.resources.import_failure_retry_hint
 import ch.lkmc.neutrodyne.core.ui.resources.import_filter_attention
 import ch.lkmc.neutrodyne.core.ui.resources.import_filter_new
 import ch.lkmc.neutrodyne.core.ui.resources.import_filter_not_imported
+import ch.lkmc.neutrodyne.core.ui.resources.import_group_excluded_default
 import ch.lkmc.neutrodyne.core.ui.resources.import_group_excluded_section
 import ch.lkmc.neutrodyne.core.ui.resources.import_group_excluded_wrapper
 import ch.lkmc.neutrodyne.core.ui.resources.import_group_existing
+import ch.lkmc.neutrodyne.core.ui.resources.import_group_include
 import ch.lkmc.neutrodyne.core.ui.resources.import_group_members
 import ch.lkmc.neutrodyne.core.ui.resources.import_group_rename
 import ch.lkmc.neutrodyne.core.ui.resources.import_group_rename_title
 import ch.lkmc.neutrodyne.core.ui.resources.import_groups_master
 import ch.lkmc.neutrodyne.core.ui.resources.import_groups_section
 import ch.lkmc.neutrodyne.core.ui.resources.import_header_in
+import ch.lkmc.neutrodyne.core.ui.resources.import_no_media_hint
 import ch.lkmc.neutrodyne.core.ui.resources.import_opt_notify
 import ch.lkmc.neutrodyne.core.ui.resources.import_opt_treat_played
 import ch.lkmc.neutrodyne.core.ui.resources.import_options_section
 import ch.lkmc.neutrodyne.core.ui.resources.import_podcast_count
+import ch.lkmc.neutrodyne.core.ui.resources.import_private_feed
 import ch.lkmc.neutrodyne.core.ui.resources.import_progress
 import ch.lkmc.neutrodyne.core.ui.resources.import_report_already
+import ch.lkmc.neutrodyne.core.ui.resources.import_report_merged
+import ch.lkmc.neutrodyne.core.ui.resources.import_report_merged_count
 import ch.lkmc.neutrodyne.core.ui.resources.import_restore_pending_body
 import ch.lkmc.neutrodyne.core.ui.resources.import_restore_pending_title
 import ch.lkmc.neutrodyne.core.ui.resources.import_search
+import ch.lkmc.neutrodyne.core.ui.resources.import_select_item
 import ch.lkmc.neutrodyne.core.ui.resources.import_select_none
 import ch.lkmc.neutrodyne.core.ui.resources.import_source_unknown
+import ch.lkmc.neutrodyne.core.ui.resources.import_status_already
+import ch.lkmc.neutrodyne.core.ui.resources.import_status_auth
 import ch.lkmc.neutrodyne.core.ui.resources.import_status_done
 import ch.lkmc.neutrodyne.core.ui.resources.import_status_failed
-import ch.lkmc.neutrodyne.core.ui.resources.import_status_merged
+import ch.lkmc.neutrodyne.core.ui.resources.import_status_gone
+import ch.lkmc.neutrodyne.core.ui.resources.import_status_later
 import ch.lkmc.neutrodyne.core.ui.resources.import_status_no_media
 import ch.lkmc.neutrodyne.core.ui.resources.import_status_not_a_feed
 import ch.lkmc.neutrodyne.core.ui.resources.import_status_not_imported
+import ch.lkmc.neutrodyne.core.ui.resources.import_status_queued
 import ch.lkmc.neutrodyne.core.ui.resources.import_stop
 import ch.lkmc.neutrodyne.core.ui.resources.import_stop_body
 import ch.lkmc.neutrodyne.core.ui.resources.import_stop_keep
@@ -136,6 +151,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.import_warn_linked
 import ch.lkmc.neutrodyne.core.ui.resources.import_warn_salvaged
 import ch.lkmc.neutrodyne.core.ui.resources.import_warn_truncated
 import ch.lkmc.neutrodyne.core.ui.resources.import_youtube_count
+import ch.lkmc.neutrodyne.core.ui.resources.import_youtube_later
 import ch.lkmc.neutrodyne.core.ui.resources.selection_select_all
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
@@ -418,7 +434,7 @@ private fun SessionBody(
         renameFor?.let { proposal ->
             NameDialog(
                 title = stringResource(Res.string.import_group_rename_title),
-                initial = proposal.name,
+                initial = displayMetadata(proposal.name),
                 onDismiss = { renameFor = null },
             ) { name ->
                 val error = onRenameGroup(proposal.nameKey, name)
@@ -467,7 +483,7 @@ private fun SessionHeader(session: ImportSessionView) {
                 stringResource(
                     Res.string.import_header_in,
                     counts,
-                    session.sourceName ?: stringResource(Res.string.import_source_unknown),
+                    session.sourceName?.let(::displayMetadata) ?: stringResource(Res.string.import_source_unknown),
                 ),
                 style = MaterialTheme.typography.titleMedium,
             )
@@ -512,7 +528,7 @@ private fun Warnings(session: ImportSessionView) {
                     }
 
                     else -> {
-                        warning.detail ?: continue
+                        warning.detail?.let(::displayMetadata) ?: continue
                     }
                 }
             NdBanner(
@@ -540,11 +556,17 @@ private fun GroupsBlock(
     onIncludeGroup: (String, Boolean) -> Unit,
     onRename: (GroupProposal) -> Unit,
 ) {
+    val masterLabel = stringResource(Res.string.import_groups_master)
     Column {
         ListItem(
-            headlineContent = { Text(stringResource(Res.string.import_groups_master)) },
+            headlineContent = { Text(masterLabel) },
             trailingContent = {
-                Switch(checked = importGroups, enabled = enabled, onCheckedChange = onImportGroups)
+                Switch(
+                    checked = importGroups,
+                    enabled = enabled,
+                    onCheckedChange = onImportGroups,
+                    modifier = Modifier.semantics { contentDescription = masterLabel },
+                )
             },
         )
         if (importGroups) {
@@ -563,23 +585,23 @@ private fun GroupProposalRow(
     onRename: (GroupProposal) -> Unit,
 ) {
     val reason = proposal.excludedReason
+    val name = displayMetadata(proposal.name)
+    val includeLabel = stringResource(Res.string.import_group_include, name)
     ListItem(
         headlineContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(proposal.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (reason == null) {
-                    Spacer(Modifier.width(8.dp))
-                    NdTextButton(
-                        label = stringResource(Res.string.import_group_rename),
-                        enabled = enabled,
-                        onClick = { onRename(proposal) },
-                    )
-                }
+                Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.width(8.dp))
+                NdTextButton(
+                    label = stringResource(Res.string.import_group_rename),
+                    enabled = enabled,
+                    onClick = { onRename(proposal) },
+                )
             }
         },
         supportingContent = {
             if (reason != null) {
-                Text(excludedReasonText(reason, proposal.name))
+                Text(excludedReasonText(reason, name))
             } else {
                 Text(
                     pluralStringResource(
@@ -596,13 +618,12 @@ private fun GroupProposalRow(
             }
         },
         trailingContent = {
-            if (reason == null) {
-                Switch(
-                    checked = proposal.included,
-                    enabled = enabled,
-                    onCheckedChange = { onIncludeGroup(proposal.nameKey, it) },
-                )
-            }
+            Switch(
+                checked = proposal.included,
+                enabled = enabled,
+                onCheckedChange = { onIncludeGroup(proposal.nameKey, it) },
+                modifier = Modifier.semantics { contentDescription = includeLabel },
+            )
         },
     )
 }
@@ -613,9 +634,9 @@ private fun excludedReasonText(
     name: String,
 ): String =
     when (reason) {
-        "WRAPPER" -> stringResource(Res.string.import_group_excluded_wrapper, name)
-        "GPODDER_SECTION" -> stringResource(Res.string.import_group_excluded_section, name)
-        else -> reason
+        EXCLUDED_WRAPPER -> stringResource(Res.string.import_group_excluded_wrapper, name)
+        EXCLUDED_GPODDER_SECTION -> stringResource(Res.string.import_group_excluded_section, name)
+        else -> stringResource(Res.string.import_group_excluded_default)
     }
 
 @Composable
@@ -631,31 +652,35 @@ private fun OptionsBlock(
         session.options.targetGroupId?.let { id ->
             state.existingGroups.firstOrNull { it.id == id }?.name
         } ?: session.options.targetGroupName
+    val treatPlayedLabel = stringResource(Res.string.import_opt_treat_played)
+    val notifyLabel = stringResource(Res.string.import_opt_notify)
     Column {
         ListItem(
             headlineContent = { Text(stringResource(Res.string.import_target_label)) },
             supportingContent = {
-                Text(targetLabel ?: stringResource(Res.string.import_target_none))
+                Text(targetLabel?.let(::displayMetadata) ?: stringResource(Res.string.import_target_none))
             },
             modifier = Modifier.clickable(enabled = enabled, onClick = onPickTarget),
         )
         ListItem(
-            headlineContent = { Text(stringResource(Res.string.import_opt_treat_played)) },
+            headlineContent = { Text(treatPlayedLabel) },
             trailingContent = {
                 Switch(
                     checked = session.options.treatExistingAsPlayed,
                     enabled = enabled,
                     onCheckedChange = onTreatExisting,
+                    modifier = Modifier.semantics { contentDescription = treatPlayedLabel },
                 )
             },
         )
         ListItem(
-            headlineContent = { Text(stringResource(Res.string.import_opt_notify)) },
+            headlineContent = { Text(notifyLabel) },
             trailingContent = {
                 Switch(
                     checked = session.options.notifyNewEpisodes,
                     enabled = enabled,
                     onCheckedChange = onNotify,
+                    modifier = Modifier.semantics { contentDescription = notifyLabel },
                 )
             },
         )
@@ -724,21 +749,26 @@ private fun ImportRow(
     enabled: Boolean,
     onToggle: (Int, Boolean) -> Unit,
 ) {
+    val title = displayMetadata(item.title)
+    val selectionLabel = stringResource(Res.string.import_select_item, title)
     ListItem(
         leadingContent = {
             Image(
-                painter = rememberMonogramPainter(rememberMonogram(item.title)),
+                painter = rememberMonogramPainter(rememberMonogram(title)),
                 contentDescription = null,
                 modifier = Modifier.size(MONOGRAM).clip(RoundedCornerShape(8.dp)),
             )
         },
         headlineContent = {
-            Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
         },
         supportingContent = {
             Column {
-                Text(item.host, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(displayMetadata(item.host), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 StatusChips(item, preview)
+                statusDescription(item)?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall)
+                }
             }
         },
         trailingContent = {
@@ -747,7 +777,10 @@ private fun ImportRow(
                     checked = item.selected,
                     enabled = enabled,
                     onCheckedChange = { onToggle(item.ordinal, it) },
-                    modifier = Modifier.testTag("import-toggle-${item.ordinal}"),
+                    modifier =
+                        Modifier.testTag("import-toggle-${item.ordinal}").semantics {
+                            contentDescription = selectionLabel
+                        },
                 )
             }
         },
@@ -767,44 +800,16 @@ private fun StatusChips(
         if (item.isPrivate) {
             Icon(
                 NdIcons.Key,
-                contentDescription = null,
+                contentDescription = stringResource(Res.string.import_private_feed),
                 modifier = Modifier.size(16.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        when (item.status) {
-            ImportItemStatus.YOUTUBE_UNSUPPORTED_YET -> {
-                NdAssistChip(
-                    onClick = {},
-                    label = stringResource(Res.string.import_chip_youtube),
-                    leadingIcon = NdIcons.SmartDisplay,
-                    enabled = false,
-                )
-            }
-
-            ImportItemStatus.DUPLICATE_IN_FILE -> {
-                NdAssistChip(
-                    onClick = {},
-                    label = stringResource(Res.string.import_chip_duplicate),
-                    enabled = false,
-                )
-            }
-
-            ImportItemStatus.INVALID_URL -> {
-                NdAssistChip(
-                    onClick = {},
-                    label = stringResource(Res.string.import_chip_invalid),
-                    enabled = false,
-                )
-            }
-
-            else -> {
-                if (!preview) ReportChip(item)
-            }
+        val label = statusLabel(item, preview)
+        if (label != null) {
+            NdAssistChip(onClick = {}, label = label, enabled = false)
         }
-        if (item.kind == ImportItemKind.YOUTUBE &&
-            item.status != ImportItemStatus.YOUTUBE_UNSUPPORTED_YET
-        ) {
+        if (item.kind == ImportItemKind.YOUTUBE) {
             NdAssistChip(
                 onClick = {},
                 label = stringResource(Res.string.import_chip_youtube),
@@ -815,35 +820,116 @@ private fun StatusChips(
     }
 }
 
-/** The report's per-row result chip (05's report table rows). */
+/** Every persisted status has an explicit display label (05's session/item table). */
 @Composable
-private fun ReportChip(item: ImportItemView) {
-    val label =
-        when (item.status) {
-            ImportItemStatus.SUBSCRIBED -> stringResource(Res.string.import_status_done)
-            ImportItemStatus.MERGED -> stringResource(Res.string.import_status_merged)
-            ImportItemStatus.ALREADY_SUBSCRIBED -> null
-            ImportItemStatus.NOT_A_FEED -> stringResource(Res.string.import_status_not_a_feed)
-            ImportItemStatus.NO_MEDIA -> stringResource(Res.string.import_status_no_media)
-            ImportItemStatus.FETCH_FAILED -> stringResource(Res.string.import_status_failed)
-            else -> stringResource(Res.string.import_status_not_imported)
-        } ?: return
-    NdAssistChip(onClick = {}, label = label, enabled = false)
-}
+private fun statusLabel(
+    item: ImportItemView,
+    preview: Boolean,
+): String? =
+    when (item.status) {
+        ImportItemStatus.PREVIEW -> {
+            if (preview) null else stringResource(Res.string.import_status_not_imported)
+        }
+
+        ImportItemStatus.QUEUED -> {
+            stringResource(Res.string.import_status_queued)
+        }
+
+        ImportItemStatus.SUBSCRIBED -> {
+            stringResource(Res.string.import_status_done)
+        }
+
+        ImportItemStatus.ALREADY_SUBSCRIBED -> {
+            stringResource(if (preview) Res.string.import_status_already else Res.string.import_report_already)
+        }
+
+        ImportItemStatus.MERGED -> {
+            stringResource(Res.string.import_report_merged)
+        }
+
+        ImportItemStatus.DUPLICATE_IN_FILE -> {
+            stringResource(Res.string.import_chip_duplicate)
+        }
+
+        ImportItemStatus.INVALID_URL -> {
+            stringResource(Res.string.import_chip_invalid)
+        }
+
+        ImportItemStatus.YOUTUBE_UNSUPPORTED_YET -> {
+            stringResource(Res.string.import_status_not_imported)
+        }
+
+        ImportItemStatus.NOT_A_FEED -> {
+            stringResource(Res.string.import_status_not_a_feed)
+        }
+
+        ImportItemStatus.NO_MEDIA -> {
+            stringResource(Res.string.import_status_no_media)
+        }
+
+        ImportItemStatus.AUTH_REQUIRED, ImportItemStatus.GONE -> {
+            stringResource(Res.string.import_filter_attention)
+        }
+
+        ImportItemStatus.FETCH_FAILED -> {
+            stringResource(
+                if (item.errorDetail ==
+                    DEFERRED
+                ) {
+                    Res.string.import_status_later
+                } else {
+                    Res.string.import_status_failed
+                },
+            )
+        }
+    }
+
+@Composable
+private fun statusDescription(item: ImportItemView): String? =
+    when (item.status) {
+        ImportItemStatus.YOUTUBE_UNSUPPORTED_YET -> {
+            stringResource(Res.string.import_youtube_later)
+        }
+
+        ImportItemStatus.NOT_A_FEED -> {
+            stringResource(Res.string.import_failure_address_hint)
+        }
+
+        ImportItemStatus.NO_MEDIA -> {
+            stringResource(Res.string.import_no_media_hint)
+        }
+
+        ImportItemStatus.AUTH_REQUIRED -> {
+            stringResource(Res.string.import_status_auth)
+        }
+
+        ImportItemStatus.GONE -> {
+            stringResource(Res.string.import_status_gone)
+        }
+
+        ImportItemStatus.FETCH_FAILED -> {
+            stringResource(
+                if (item.errorDetail ==
+                    DEFERRED
+                ) {
+                    Res.string.import_deferred_hint
+                } else {
+                    Res.string.import_failure_retry_hint
+                },
+            )
+        }
+
+        else -> {
+            null
+        }
+    }
 
 /** COMMITTED/FETCHING: determinate "Fetched X of Y" while the worker runs (05 §7). */
 @Composable
 private fun ProgressHeader(session: ImportSessionView) {
     val counts = session.counts
-    val total = counts.values.sum()
-    val settled =
-        ImportItemStatus.entries
-            .filter {
-                it != ImportItemStatus.PREVIEW &&
-                    it != ImportItemStatus.QUEUED &&
-                    it != ImportItemStatus.DUPLICATE_IN_FILE &&
-                    it != ImportItemStatus.INVALID_URL
-            }.sumOf { counts[it] ?: 0 }
+    val settled = FETCH_OUTCOMES.sumOf { counts[it] ?: 0 }
+    val total = settled + (counts[ImportItemStatus.QUEUED] ?: 0)
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         Text(
             stringResource(Res.string.import_progress, settled, total),
@@ -868,11 +954,12 @@ private fun ReportHeader(session: ImportSessionView) {
             style = MaterialTheme.typography.titleMedium,
         )
         Spacer(Modifier.height(4.dp))
-        val added = (counts[ImportItemStatus.SUBSCRIBED] ?: 0) + (counts[ImportItemStatus.MERGED] ?: 0)
+        val added = counts[ImportItemStatus.SUBSCRIBED] ?: 0
         Text(
             pluralStringResource(Res.plurals.import_done_added, added, added),
             style = MaterialTheme.typography.bodyMedium,
         )
+        ReportLine(Res.string.import_report_merged_count, counts[ImportItemStatus.MERGED] ?: 0)
         ReportLine(
             Res.string.import_report_already,
             counts[ImportItemStatus.ALREADY_SUBSCRIBED] ?: 0,
@@ -883,14 +970,6 @@ private fun ReportHeader(session: ImportSessionView) {
             Text(
                 pluralStringResource(Res.plurals.import_done_attention, attention, attention),
                 style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-        val deferred = counts[ImportItemStatus.YOUTUBE_UNSUPPORTED_YET] ?: 0
-        if (deferred > 0) {
-            Text(
-                stringResource(Res.string.import_deferred_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -1042,7 +1121,7 @@ private fun TargetGroupDialog(
     if (naming) {
         NameDialog(
             title = stringResource(Res.string.import_target_new),
-            initial = selectedName ?: "",
+            initial = selectedName?.let(::displayMetadata) ?: "",
             onDismiss = onDismiss,
         ) { name ->
             val error = onNewName(name)
@@ -1090,7 +1169,7 @@ private fun TargetGroupList(
             items(count = groups.size, key = { groups[it].id }) { index ->
                 val group = groups[index]
                 ListItem(
-                    headlineContent = { Text(group.name) },
+                    headlineContent = { Text(displayMetadata(group.name)) },
                     trailingContent = {
                         if (selectedId == group.id) Icon(NdIcons.Check, contentDescription = null)
                     },
@@ -1101,7 +1180,7 @@ private fun TargetGroupList(
                 ListItem(
                     headlineContent = {
                         Text(
-                            selectedName?.let { "$it" }
+                            selectedName?.let(::displayMetadata)
                                 ?: stringResource(Res.string.import_target_new),
                         )
                     },
@@ -1120,4 +1199,34 @@ private fun groupErrorText(error: GroupError): String =
     when (error) {
         is GroupError.NameTooLong -> stringResource(Res.string.group_edit_name_long, error.max)
         else -> stringResource(Res.string.group_edit_name_empty)
+    }
+
+private const val EXCLUDED_WRAPPER = "wrapper"
+private const val EXCLUDED_GPODDER_SECTION = "gpodder_section"
+private const val DEFERRED = "DEFERRED"
+
+private val FETCH_OUTCOMES =
+    setOf(
+        ImportItemStatus.SUBSCRIBED,
+        ImportItemStatus.MERGED,
+        ImportItemStatus.NOT_A_FEED,
+        ImportItemStatus.NO_MEDIA,
+        ImportItemStatus.AUTH_REQUIRED,
+        ImportItemStatus.GONE,
+        ImportItemStatus.FETCH_FAILED,
+    )
+
+private val DISPLAY_URL = Regex("""(?i)[a-z][a-z0-9+.-]*://[^\s<>"{}|\\^`]+""")
+
+/** Imported labels can contain private URLs; show only their host without altering stored data. */
+private fun displayMetadata(value: String): String =
+    DISPLAY_URL.replace(value) { match ->
+        val authority =
+            match.value
+                .substringAfter("://")
+                .substringBefore('/')
+                .substringBefore('?')
+                .substringBefore('#')
+        val hostPort = authority.substringAfterLast('@')
+        if (hostPort.startsWith('[')) hostPort.substringBefore(']') + "]" else hostPort.substringBefore(':')
     }

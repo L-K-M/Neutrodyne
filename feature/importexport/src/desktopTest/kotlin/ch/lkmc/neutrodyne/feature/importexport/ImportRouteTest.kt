@@ -4,13 +4,22 @@ package ch.lkmc.neutrodyne.feature.importexport
 
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.v2.runComposeUiTest
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -21,12 +30,15 @@ import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
+import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.domain.ImportScreenVisibility
 import ch.lkmc.neutrodyne.core.model.GroupDraft
+import ch.lkmc.neutrodyne.core.model.GroupProposal
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportItemKind
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
 import ch.lkmc.neutrodyne.core.model.ImportItemView
+import ch.lkmc.neutrodyne.core.model.ImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportSource
 import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.navigation.ImportKey
@@ -43,6 +55,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -175,6 +188,317 @@ class ImportRouteTest {
         waitUntil(timeoutMillis = 5_000) { vm.uiState.value.loaded }
         waitForIdle()
     }
+
+    private fun androidx.compose.ui.test.ComposeUiTest.assertDisplayedWhenReady(text: String) {
+        waitUntil(timeoutMillis = 5_000) {
+            onAllNodesWithText(text, useUnmergedTree = true).fetchSemanticsNodes().size == 1
+        }
+        onNodeWithText(text, useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    @Test fun importedUrlMetadataIsSanitizedAcrossLabelsAndSemantics() =
+        runComposeUiTest {
+            val privateUrl = "https://alice:secret@private.example/feed?token=private-token"
+            imports.createProposals = listOf(GroupProposal("private", privateUrl, 1, null, true, null))
+            val title = "Listen at ftp://alice:secret@private.example/feed?token=private-token"
+            val id = seed(sessionItems = listOf(item(0, title = title)), sourceName = "feeds from $privateUrl")
+            setRouteContent(ImportKey(id.toString()))
+
+            onAllNodesWithText("secret", substring = true, useUnmergedTree = true).assertCountEquals(0)
+            onAllNodesWithText("private-token", substring = true, useUnmergedTree = true).assertCountEquals(0)
+            onAllNodesWithContentDescription("secret", substring = true, useUnmergedTree = true).assertCountEquals(0)
+            onNodeWithContentDescription("Include group private.example").assertExists()
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-toggle-0"))
+            onNodeWithText("Listen at private.example").assertExists()
+            onAllNodesWithText("secret", substring = true, useUnmergedTree = true).assertCountEquals(0)
+            onNodeWithContentDescription("Select Listen at private.example").assertExists()
+            assertEquals(
+                title,
+                imports.items.value
+                    .getValue(id)
+                    .single()
+                    .title,
+            )
+            assertEquals(
+                privateUrl,
+                imports.proposals.value
+                    .getValue(id)
+                    .single()
+                    .name,
+            )
+            assertEquals(
+                "feeds from $privateUrl",
+                imports.sessions.value
+                    .getValue(id)
+                    .sourceName,
+            )
+        }
+
+    @Test fun excludedFoldersAndControlsHaveGermanLabels() =
+        runComposeUiTest {
+            Locale.setDefault(Locale.GERMAN)
+            imports.createProposals = listOf(GroupProposal("feeds", "feeds", 2, null, false, "wrapper"))
+            val id = seed(sessionItems = listOf(item(0).copy(isPrivate = true)))
+            setRouteContent(ImportKey(id.toString()))
+
+            onNodeWithText("feeds sieht eher wie ein Ordner aus, nicht wie eine Gruppe").assertExists()
+            onNodeWithContentDescription("Gruppe feeds einbeziehen").assertExists()
+            onNodeWithContentDescription("Ordner als Gruppen importieren").assertExists()
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("import-toggle-0"))
+            onNodeWithContentDescription("Show 0 auswählen").assertExists()
+            onNodeWithContentDescription("Privater Feed").assertExists()
+        }
+
+    @Test fun failedPreviewCancellationKeepsRouteAndShowsError() =
+        runComposeUiTest {
+            val id = seed()
+            val attempted = AtomicBoolean()
+            val repo =
+                object : ImportRepository by imports {
+                    override suspend fun cancel(sessionId: Long) {
+                        attempted.set(true)
+                        error("disk failed")
+                    }
+                }
+            val vm = ImportViewModel(id, repo, groups, visibility, appScope)
+            setRouteContent(ImportKey(id.toString()), vm)
+            onNodeWithText("Cancel").performClick()
+            waitUntil(timeoutMillis = 5_000) { attempted.get() && !vm.uiState.value.busy }
+            waitForIdle()
+
+            assertEquals(emptyList(), navigator.calls, "Failed deletion must keep the preview route open")
+            assertEquals(ImportState.PREVIEW, imports.sessions.value[id]!!.state)
+            waitUntil(timeoutMillis = 5_000) { host.currentSnackbarData != null }
+            assertEquals("Couldn't save the change", host.currentSnackbarData!!.visuals.message)
+        }
+
+    @Test fun credentialBearingImportedTitleDisplaysHostOnly() =
+        runComposeUiTest {
+            val privateUrl = "https://alice:secret@host0.example.com/feed?token=private-token"
+            val id = seed(sessionItems = listOf(item(0, title = "Listen at $privateUrl")))
+            setRouteContent(ImportKey(id.toString()))
+
+            onNodeWithText("Listen at $privateUrl").assertDoesNotExist()
+            onNodeWithText("Listen at host0.example.com").assertExists()
+            assertEquals(
+                "Listen at $privateUrl",
+                imports.items.value
+                    .getValue(id)
+                    .single()
+                    .title,
+            )
+        }
+
+    @Test fun excludedWrapperCanBeIncludedAndRenamedWithLocalizedExplanation() =
+        runComposeUiTest {
+            imports.createProposals = listOf(GroupProposal("feeds", "feeds", 2, null, false, "wrapper"))
+            imports.createOptions = { ImportOptions(excludedGroupKeys = setOf("feeds")) }
+            val id = seed()
+            setRouteContent(ImportKey(id.toString()))
+
+            onNodeWithText("feeds looks like a container, not a group").assertExists()
+            onNodeWithContentDescription("Include group feeds").performClick()
+            waitUntil(timeoutMillis = 5_000) {
+                imports.sessions.value[id]!!
+                    .options.excludedGroupKeys
+                    .isEmpty()
+            }
+            onNodeWithText("Rename").performClick()
+            onNodeWithText("Group name").performTextReplacement("News")
+            onNodeWithText("Save").performClick()
+            waitUntil(timeoutMillis = 5_000) {
+                imports.sessions.value[id]!!
+                    .options.renamedGroups["feeds"] == "News"
+            }
+        }
+
+    @Test fun excludedGpodderSectionShowsLocalizedExplanation() =
+        runComposeUiTest {
+            imports.createProposals = listOf(GroupProposal("audio", "audio", 2, null, false, "gpodder_section"))
+            val id = seed()
+            setRouteContent(ImportKey(id.toString()))
+
+            onNodeWithText("audio is a gPodder section, not a group").assertExists()
+            onNodeWithContentDescription("Include group audio").assertExists()
+            onNodeWithText("Rename").assertExists()
+        }
+
+    @Test fun selectionAndOptionControlsHaveAccessibleNames() =
+        runComposeUiTest {
+            val id = seed()
+            setRouteContent(ImportKey(id.toString()))
+            val checkbox = onNodeWithTag("import-toggle-0").fetchSemanticsNode()
+            assertTrue(
+                checkbox.config
+                    .getOrElseNullable(
+                        SemanticsProperties.ContentDescription,
+                    ) { null }
+                    ?.any(String::isNotBlank) ==
+                    true,
+                "Selection checkbox must have an accessible name",
+            )
+            val switches =
+                onAllNodes(
+                    SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Switch),
+                ).fetchSemanticsNodes()
+            assertEquals(3, switches.size)
+            for (node in switches) {
+                assertTrue(
+                    node.config
+                        .getOrElseNullable(
+                            SemanticsProperties.ContentDescription,
+                        ) { null }
+                        ?.any(String::isNotBlank) ==
+                        true,
+                    "Every option switch must have an accessible name",
+                )
+            }
+            onNodeWithContentDescription("Select Show 0").assertExists()
+            onNodeWithContentDescription("Import folders as groups").assertExists()
+            val treatPlayedLabel = "Treat existing episodes as played (except the newest per podcast)"
+            onNodeWithContentDescription(treatPlayedLabel).assertExists()
+            onNodeWithContentDescription("Notify me about new episodes for these podcasts").assertExists()
+        }
+
+    @Test fun privateFeedIconHasLocalizedAccessibleName() =
+        runComposeUiTest {
+            val id = seed(sessionItems = listOf(item(0).copy(isPrivate = true)))
+            setRouteContent(ImportKey(id.toString()))
+
+            onNodeWithContentDescription("Private feed").assertExists()
+        }
+
+    @Test fun progressCountsOnlyCommittedWorkAndAttemptedOutcomes() =
+        runComposeUiTest {
+            val id =
+                seed(
+                    sessionItems =
+                        listOf(
+                            item(0, status = ImportItemStatus.QUEUED),
+                            item(1, status = ImportItemStatus.ALREADY_SUBSCRIBED, selected = false),
+                            item(2, status = ImportItemStatus.INVALID_URL, selected = false),
+                            item(3, selected = false),
+                            item(4, status = ImportItemStatus.YOUTUBE_UNSUPPORTED_YET, selected = false),
+                            item(5, status = ImportItemStatus.DUPLICATE_IN_FILE, selected = false),
+                        ),
+                )
+            setState(id, ImportState.COMMITTED)
+            setRouteContent(ImportKey(id.toString()))
+
+            assertDisplayedWhenReady("Fetched 0 of 1")
+            imports.items.value = imports.items.value + (
+                id to
+                    imports.items.value.getValue(id).map {
+                        if (it.ordinal == 0) it.copy(status = ImportItemStatus.SUBSCRIBED) else it
+                    }
+            )
+            waitForIdle()
+            assertDisplayedWhenReady("Fetched 1 of 1")
+            val outcomes =
+                listOf(
+                    ImportItemStatus.SUBSCRIBED,
+                    ImportItemStatus.MERGED,
+                    ImportItemStatus.NOT_A_FEED,
+                    ImportItemStatus.NO_MEDIA,
+                    ImportItemStatus.AUTH_REQUIRED,
+                    ImportItemStatus.GONE,
+                    ImportItemStatus.FETCH_FAILED,
+                )
+            imports.items.value = imports.items.value + (
+                id to (
+                    outcomes.mapIndexed { index, status -> item(index, status = status, selected = false) } +
+                        item(7, status = ImportItemStatus.QUEUED, selected = false)
+                )
+            )
+            waitForIdle()
+            assertDisplayedWhenReady("Fetched 7 of 8")
+        }
+
+    @Test fun alreadySubscribedHasPreviewBadge() =
+        runComposeUiTest {
+            val existing = item(0, status = ImportItemStatus.ALREADY_SUBSCRIBED, selected = false)
+            val id = seed(sessionItems = listOf(existing))
+            setRouteContent(ImportKey(id.toString()))
+
+            onNodeWithText("Already subscribed").assertExists()
+        }
+
+    @Test fun authenticationFailureExplainsPasswordIsRequired() =
+        runComposeUiTest {
+            val id = seed(sessionItems = listOf(item(0, status = ImportItemStatus.AUTH_REQUIRED)))
+            setState(id, ImportState.DONE)
+            setRouteContent(ImportKey(id.toString()))
+
+            val description = "Password required. Enter the feed password to continue."
+            assertDisplayedWhenReady(description)
+        }
+
+    @Test fun goneFeedExplainsAddressNeedsChecking() =
+        runComposeUiTest {
+            val id = seed(sessionItems = listOf(item(0, status = ImportItemStatus.GONE)))
+            setState(id, ImportState.DONE)
+            setRouteContent(ImportKey(id.toString()))
+
+            onNodeWithText("Feed no longer available. Check its address or remove it.").assertExists()
+        }
+
+    @Test fun queuedRowShowsPendingFetch() =
+        runComposeUiTest {
+            val id = seed(sessionItems = listOf(item(0, status = ImportItemStatus.QUEUED)))
+            setState(id, ImportState.FETCHING)
+            setRouteContent(ImportKey(id.toString()))
+
+            onNodeWithText("Queued").assertExists()
+        }
+
+    @Test fun unsupportedYoutubeDoesNotPromiseLaterRefresh() =
+        runComposeUiTest {
+            val unsupported =
+                item(
+                    0,
+                    status = ImportItemStatus.YOUTUBE_UNSUPPORTED_YET,
+                    selected = false,
+                    kind = ImportItemKind.YOUTUBE,
+                )
+            val id = seed(sessionItems = listOf(unsupported))
+            setState(id, ImportState.DONE)
+            setRouteContent(ImportKey(id.toString()))
+
+            val deferredHint = "YouTube isn't responding; this channel loads with a later refresh"
+            onNodeWithText(deferredHint).assertDoesNotExist()
+            onNodeWithText("YouTube channel — supported in a later build").assertExists()
+        }
+
+    @Test fun deferredFetchAlonePromisesLaterRefresh() =
+        runComposeUiTest {
+            val id =
+                seed(
+                    sessionItems =
+                        listOf(
+                            item(
+                                0,
+                                status = ImportItemStatus.FETCH_FAILED,
+                                kind = ImportItemKind.YOUTUBE,
+                            ).copy(errorDetail = "DEFERRED"),
+                        ),
+                )
+            setState(id, ImportState.DONE)
+            setRouteContent(ImportKey(id.toString()))
+
+            val description = "YouTube isn't responding; this channel loads with a later refresh"
+            assertDisplayedWhenReady(description)
+            onNodeWithText("Will load later").assertExists()
+        }
+
+    @Test fun mergedSubscriptionsAreReportedSeparatelyFromAdded() =
+        runComposeUiTest {
+            val id = seed(sessionItems = listOf(item(0, status = ImportItemStatus.MERGED)))
+            setState(id, ImportState.DONE)
+            setRouteContent(ImportKey(id.toString()))
+
+            onNodeWithText("0 added").assertExists()
+            onNodeWithText("1 merged with existing subscriptions").assertExists()
+        }
 
     @Test
     fun thePreviewRendersThePersistedSessionAndRowTogglesPersist() =
