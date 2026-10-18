@@ -414,7 +414,7 @@ class BackupCrossPlatformTest {
         assertEquals(MediaFilter.AUDIO, session.contextMediaFilter)
         assertEquals(99L, session.contextMinSortDate)
 
-        // Portable settings replay; device-only keys stay at their defaults.
+        // Portable settings replay.
         assertEquals(true, target.settings.get(AppearanceSettingKeys.LIBRARY_TITLES))
         assertEquals(LibrarySort.MOST_UNPLAYED, target.settings.get(AppearanceSettingKeys.LIBRARY_SORT))
         assertEquals(true, target.settings.get(GroupsSettingKeys.SHOW_UNGROUPED_TAB))
@@ -520,7 +520,11 @@ class BackupCrossPlatformTest {
                         ).single()
                 db
                     .episodeStateDao()
-                    .upsert(episodeStateEntity(localPlayed, playedAt = 7L, updatedAt = 8L))
+                    .upsert(
+                        episodeStateEntity(localPlayed, playedAt = 7L, updatedAt = 8L) {
+                            copy(playCount = 5, lastPlayedAt = 70L)
+                        },
+                    )
                 // Newer position wins: local stamp (200) beats the backup's posAt (25).
                 db.positionDao().upsert(EpisodePositionEntity(localPlayed, 5_000L, null, PositionSource.DOWNLOAD, 200L))
                 // Favourite = OR on the unmatched line: backup ep-a-2 is not favourite, local is.
@@ -576,6 +580,8 @@ class BackupCrossPlatformTest {
                 val e1 = assertNotNull(db.episodeDao().byIdentityKey(a.id, "ep-a-1"))
                 val e1State = assertNotNull(db.episodeStateDao().byEpisode(e1.id))
                 assertEquals(111L, e1State.playedAt, "playedAt merges as MAX")
+                assertEquals(5, e1State.playCount, "playCount keeps the larger local count")
+                assertEquals(111L, e1State.lastPlayedAt, "lastPlayedAt keeps the larger backup stamp")
                 assertTrue(e1State.isFavorite, "favourite OR lands the backup's mark")
                 assertEquals(112L, e1State.updatedAt, "a backup-won field stamps the line's ts")
                 val pos = assertNotNull(db.positionDao().byEpisode(e1.id))

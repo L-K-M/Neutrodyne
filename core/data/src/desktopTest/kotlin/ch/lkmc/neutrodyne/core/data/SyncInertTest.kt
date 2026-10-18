@@ -314,7 +314,12 @@ class SyncInertTest {
                     harness,
                     opmlBytes(
                         groups = listOf("news", "tech"),
-                        feeds = listOf(FEED_ONE to listOf("news"), FEED_TWO to listOf("news", "tech")),
+                        feeds =
+                            listOf(
+                                FEED_ONE to listOf("news"),
+                                FEED_TWO to listOf("news", "tech"),
+                                FEED_THREE to listOf("news"),
+                            ),
                     ),
                 )
 
@@ -323,10 +328,16 @@ class SyncInertTest {
                 assertEquals(existing, matched.id)
                 assertEquals(LOCAL_SYNC_ID, matched.syncId)
 
-                // The one inserted podcast got a fresh, unique, lowercase UUIDv4.
-                val inserted = assertNotNull(harness.db.podcastDao().byFeedKey(feedKey(FEED_TWO)))
-                assertTrue(inserted.syncId.matches(UUID_V4), "syncId ${inserted.syncId} is not a lowercase UUIDv4")
-                assertNotEquals(LOCAL_SYNC_ID, inserted.syncId)
+                // Every inserted podcast gets its own fresh, lowercase UUIDv4.
+                val inserted =
+                    listOf(FEED_TWO, FEED_THREE).map {
+                        assertNotNull(harness.db.podcastDao().byFeedKey(feedKey(it))).syncId
+                    }
+                assertEquals(2, inserted.toSet().size, "a confirm must not reuse a generated syncId")
+                for (syncId in inserted) {
+                    assertTrue(syncId.matches(UUID_V4), "syncId $syncId is not a lowercase UUIDv4")
+                    assertNotEquals(LOCAL_SYNC_ID, syncId)
+                }
 
                 // The membership landed on the group the file named.
                 val tech =
@@ -409,6 +420,7 @@ class SyncInertTest {
         const val OPML_URI = "file:///feeds.opml"
         const val FEED_ONE = "https://one.example.com/feed.xml"
         const val FEED_TWO = "https://two.example.com/feed.xml"
+        const val FEED_THREE = "https://three.example.com/feed.xml"
         const val LOCAL_SYNC_ID = "bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb"
         const val STAGED_SYNC_ID = "dddddddd-2222-4222-8222-dddddddddddd"
         val UUID_V4 = Regex("[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
