@@ -104,6 +104,10 @@ internal class BackupRepositoryImpl(
     /** Serialises the whole manual write → destination copy → cache cleanup (05 Writing step 5). */
     private val backupMutex = Mutex()
 
+    // Reference identity proves issuance even though Kotlin internal constructors are public on JVM.
+    // All registration and consumption happens under backupMutex.
+    private val preparedBackups = mutableSetOf<PreparedBackupFile>()
+
     private val exportDir: Path = exportDirOf(storagePaths)
     private val stagingRoot: Path = restoreStagingDirOf(storagePaths)
 
@@ -130,6 +134,7 @@ internal class BackupRepositoryImpl(
                     is Outcome.Success -> Outcome.Success(prepared.summary)
                 }
             } finally {
+                preparedBackups.remove(prepared)
                 deleteOwned(prepared.source)
             }
         }
@@ -170,7 +175,7 @@ internal class BackupRepositoryImpl(
                         summary = written.value.summary,
                         privacy = written.value.privacy,
                         source = source,
-                    ),
+                    ).also { preparedBackups.add(it) },
                 )
             }
         }
@@ -189,9 +194,20 @@ internal class BackupRepositoryImpl(
         destinationUri: String,
     ): Outcome<Unit, BackupError> {
         val owned = prepared as? PreparedBackupFile ?: return Outcome.Failure(BackupError.PreparedExpired)
-        val sourceExists =
-            withContext(io) { suspendRunCatching { fileSystem.exists(owned.source) }.getOrNull() } == true
-        if (!sourceExists) return Outcome.Failure(BackupError.PreparedExpired)
+        if (owned !in preparedBackups) return Outcome.Failure(BackupError.PreparedExpired)
+
+        val sourceIsPrivate =
+            withContext(io) {
+                suspendRunCatching {
+                    // Resolve against the cache parent so an export-directory symlink cannot escape it.
+                    val privateDir = fileSystem.canonicalize(checkNotNull(exportDir.parent)) / exportDir.name
+                    fileSystem.canonicalize(owned.source).parent == privateDir
+                }.getOrDefault(false)
+            }
+        if (!sourceIsPrivate) {
+            preparedBackups.remove(owned)
+            return Outcome.Failure(BackupError.PreparedExpired)
+        }
 
         // A throw from the platform seam (provider quirks beyond its own Outcome cases)
         // reports "couldn't write" rather than crashing — ExportRepositoryImpl's rule.
@@ -203,16 +219,22 @@ internal class BackupRepositoryImpl(
             is Outcome.Success -> Unit
         }
 
-        // The timestamp is bookkeeping for "Last backup: …" — a failed set is logged, not
-        // reported: the destination copy already landed.
-        val stamped =
-            suspendRunCatching {
-                settings.set(BackupSettingKeys.LAST_MANUAL_BACKUP_AT, clock.now())
+        // A landed copy consumes consent before any suspension, even if cleanup fails.
+        preparedBackups.remove(owned)
+        withContext(NonCancellable) {
+            try {
+                // Timestamp failure cannot undo the completed destination copy.
+                val stamped =
+                    suspendRunCatching {
+                        settings.set(BackupSettingKeys.LAST_MANUAL_BACKUP_AT, clock.now())
+                    }
+                if (stamped.getOrNull() !is Outcome.Success) {
+                    Log.w(TAG, stamped.exceptionOrNull()) { "last_manual_backup_at write failed" }
+                }
+            } finally {
+                deleteOwned(owned.source)
             }
-        if (stamped.getOrNull() !is Outcome.Success) {
-            Log.w(TAG, stamped.exceptionOrNull()) { "last_manual_backup_at write failed" }
         }
-        deleteOwned(owned.source)
         return Outcome.Success(Unit)
     }
 

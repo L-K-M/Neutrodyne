@@ -9,9 +9,9 @@ import okio.Path
 
 /**
  * The only `PreparedBackup` `BackupRepositoryImpl.savePreparedBackup` accepts (05
- * Writing): it privately owns [source], the unique cache leaf `prepareBackup` wrote,
- * so a descriptor made anywhere else — fake or foreign — is refused before any
- * destination I/O, and no caller can point the save at a file it did not prepare.
+ * Writing). The issuing repository registers its reference under the backup mutex;
+ * this type alone does not prove ownership because its JVM constructor is public.
+ * [source] is the unique cache leaf `prepareBackup` wrote.
  */
 internal class PreparedBackupFile(
     override val fileName: String,

@@ -36,6 +36,8 @@ import ch.lkmc.neutrodyne.core.domain.BackupError
 import ch.lkmc.neutrodyne.core.domain.ExportError
 import ch.lkmc.neutrodyne.core.domain.RestoreProgress
 import ch.lkmc.neutrodyne.core.domain.SecretStore
+import ch.lkmc.neutrodyne.core.domain.SettingsError
+import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.StoredSecret
 import ch.lkmc.neutrodyne.core.model.BackupPreview
 import ch.lkmc.neutrodyne.core.model.BackupSummary
@@ -52,6 +54,7 @@ import ch.lkmc.neutrodyne.core.model.RestoreMode
 import ch.lkmc.neutrodyne.core.model.RestoreRequest
 import ch.lkmc.neutrodyne.core.model.SnapshotWrite
 import ch.lkmc.neutrodyne.core.model.settings.BackupSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
@@ -86,6 +89,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import okio.FileSystem
+import okio.ForwardingFileSystem
 import okio.IOException
 import okio.Path
 import okio.Path.Companion.toPath
@@ -228,6 +232,8 @@ class BackupRepositoryImplTest {
     private fun repositoryOf(
         producer: AutoSnapshotProducer = producerOf(),
         scheduler: ImportWorkScheduler = workScheduler,
+        repositoryFileSystem: FileSystem = fileSystem,
+        repositorySettings: SettingsRepository = settings,
     ) = BackupRepositoryImpl(
         db = db,
         writer = writer,
@@ -237,11 +243,11 @@ class BackupRepositoryImplTest {
         producer = producer,
         destination = destination,
         payloads = payloads,
-        settings = settings,
+        settings = repositorySettings,
         workScheduler = scheduler,
         clock = clock,
         storagePaths = storagePaths,
-        fileSystem = fileSystem,
+        fileSystem = repositoryFileSystem,
         io = Dispatchers.IO,
     )
 
@@ -461,6 +467,160 @@ class BackupRepositoryImplTest {
                 repository.savePreparedBackup(foreign, "dest://never"),
             )
             assertTrue(destination.sources.isEmpty(), "the destination seam is never reached")
+        }
+
+    @Test
+    fun saveRejectsForgedJvmDescriptorBeforeAnyFilesystemAccess() =
+        runTest {
+            val outside = root.absolutePath.toPath() / "outside-cache.txt"
+            fileSystem.write(outside) { writeUtf8("private file, not a backup") }
+            val constructor =
+                Class
+                    .forName("ch.lkmc.neutrodyne.core.data.backup.PreparedBackupFile")
+                    .constructors
+                    .single()
+            val forged =
+                constructor.newInstance(
+                    "harmless.zip",
+                    BackupSummary(0, 0, 0),
+                    PrivacyCounts(0, 0),
+                    outside,
+                ) as PreparedBackup
+            val accessed = mutableListOf<Path>()
+            val tracking =
+                object : ForwardingFileSystem(fileSystem) {
+                    override fun onPathParameter(
+                        path: Path,
+                        functionName: String,
+                        parameterName: String,
+                    ): Path {
+                        accessed += path
+                        return path
+                    }
+                }
+            val repo = repositoryOf(repositoryFileSystem = tracking)
+
+            assertEquals(
+                Outcome.Failure(BackupError.PreparedExpired),
+                repo.savePreparedBackup(forged, "dest://forged"),
+                "an unissued JVM descriptor must expire",
+            )
+            assertTrue(accessed.isEmpty(), "unknown descriptors must not reach the filesystem")
+            assertTrue(destination.sources.isEmpty())
+            assertEquals("private file, not a backup", fileSystem.read(outside) { readUtf8() })
+            assertEquals(0L, settings.get(BackupSettingKeys.LAST_MANUAL_BACKUP_AT))
+        }
+
+    @Test
+    fun saveRejectsAnotherRepositorysDescriptorBeforeAnyFilesystemAccess() =
+        runTest {
+            val prepared = assertIs<Outcome.Success<PreparedBackup>>(repository.prepareBackup(false)).value
+            val accessed = mutableListOf<Path>()
+            val tracking =
+                object : ForwardingFileSystem(fileSystem) {
+                    override fun onPathParameter(
+                        path: Path,
+                        functionName: String,
+                        parameterName: String,
+                    ): Path {
+                        accessed += path
+                        return path
+                    }
+                }
+            val other = repositoryOf(repositoryFileSystem = tracking)
+
+            assertEquals(
+                Outcome.Failure(BackupError.PreparedExpired),
+                other.savePreparedBackup(prepared, "dest://foreign"),
+                "only the issuing repository may save a descriptor",
+            )
+            assertTrue(accessed.isEmpty(), "foreign descriptors must not reach the filesystem")
+            assertTrue(destination.sources.isEmpty())
+            assertIs<Outcome.Success<*>>(repository.savePreparedBackup(prepared, "dest://issuer"))
+        }
+
+    @Test
+    fun saveRejectsAnIssuedLeafSymlinkOutsideThePrivateCache() =
+        runTest {
+            val prepared = assertIs<Outcome.Success<PreparedBackup>>(repository.prepareBackup(false)).value
+            val source = (prepared as PreparedBackupFile).source
+            val outside = root.absolutePath.toPath() / "outside-cache.txt"
+            fileSystem.write(outside) { writeUtf8("private file, not a backup") }
+            fileSystem.delete(source)
+            fileSystem.createSymlink(source, outside)
+
+            assertEquals(
+                Outcome.Failure(BackupError.PreparedExpired),
+                repository.savePreparedBackup(prepared, "dest://symlink"),
+                "the resolved source must stay inside the private cache",
+            )
+            assertTrue(destination.sources.isEmpty())
+            assertEquals("private file, not a backup", fileSystem.read(outside) { readUtf8() })
+            assertEquals(0L, settings.get(BackupSettingKeys.LAST_MANUAL_BACKUP_AT))
+        }
+
+    @Test
+    fun successfulSaveConsumesDescriptorEvenWhenLeafDeletionFails() =
+        runTest {
+            val failing =
+                object : ForwardingFileSystem(fileSystem) {
+                    override fun delete(
+                        path: Path,
+                        mustExist: Boolean,
+                    ): Unit = throw IOException("delete denied")
+                }
+            val repo = repositoryOf(repositoryFileSystem = failing)
+            val prepared = assertIs<Outcome.Success<PreparedBackup>>(repo.prepareBackup(false)).value
+            val source = (prepared as PreparedBackupFile).source
+            assertIs<Outcome.Success<*>>(repo.savePreparedBackup(prepared, "dest://first"))
+            assertTrue(fileSystem.exists(source), "exercise failed deletion, not missing-source expiry")
+
+            assertEquals(
+                Outcome.Failure(BackupError.PreparedExpired),
+                repo.savePreparedBackup(prepared, "dest://second"),
+                "a successful descriptor must expire independently of deletion",
+            )
+            assertEquals(1, destination.copied.size)
+            assertEquals(1, settings.calls.count { it == "set(${BackupSettingKeys.LAST_MANUAL_BACKUP_AT.name})" })
+        }
+
+    @Test
+    fun cancellationAfterTimestampCommitStillCleansAndConsumesDescriptor() =
+        runTest {
+            val committed = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            var pauseNextStamp = true
+            val gated =
+                object : SettingsRepository by settings {
+                    override suspend fun <T : Any> set(
+                        key: SettingKey<T>,
+                        value: T,
+                    ): Outcome<Unit, SettingsError> {
+                        val result = settings.set(key, value)
+                        if (key.name == BackupSettingKeys.LAST_MANUAL_BACKUP_AT.name && pauseNextStamp) {
+                            pauseNextStamp = false
+                            committed.complete(Unit)
+                            release.await()
+                        }
+                        return result
+                    }
+                }
+            val repo = repositoryOf(repositorySettings = gated)
+            val prepared = assertIs<Outcome.Success<PreparedBackup>>(repo.prepareBackup(false)).value
+            val source = (prepared as PreparedBackupFile).source
+            val first = launch { repo.savePreparedBackup(prepared, "dest://first") }
+            committed.await()
+            first.cancel()
+            release.complete(Unit)
+            first.join()
+
+            assertFalse(fileSystem.exists(source), "cancellation after timestamp commit must still clean the leaf")
+            assertEquals(
+                Outcome.Failure(BackupError.PreparedExpired),
+                repo.savePreparedBackup(prepared, "dest://second"),
+            )
+            assertEquals(1, destination.copied.size)
+            assertEquals(1, settings.calls.count { it == "set(${BackupSettingKeys.LAST_MANUAL_BACKUP_AT.name})" })
         }
 
     @Test
