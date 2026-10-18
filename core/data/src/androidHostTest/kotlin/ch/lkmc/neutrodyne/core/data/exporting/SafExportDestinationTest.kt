@@ -164,14 +164,22 @@ class SafExportDestinationTest {
         }
 
     @Test
-    fun missingPreparedFileIsIoAndClosesTheStream() =
+    fun missingPreparedFileDoesNotOpenOrTruncateTheDestination() =
         runBlocking<Unit> {
-            provider.onOpen = { _, _ -> ParcelFileDescriptor.open(received, ParcelFileDescriptor.MODE_READ_WRITE) }
+            val oldBytes = "previous document".toByteArray()
+            received.writeBytes(oldBytes)
+            provider.onOpen = { _, _ ->
+                ParcelFileDescriptor.open(
+                    received,
+                    ParcelFileDescriptor.MODE_READ_WRITE or ParcelFileDescriptor.MODE_TRUNCATE,
+                )
+            }
 
             val outcome = destination.save(File(app.cacheDir, "gone.bin").toOkio(), destinationUri())
 
             assertThat(assertIs<Outcome.Failure<ExportError>>(outcome).error).isEqualTo(ExportError.Io)
-            assertThat(provider.lastPfd!!.fileDescriptor.valid()).isFalse()
+            assertThat(provider.modes).isEmpty()
+            assertThat(received.readBytes()).isEqualTo(oldBytes)
         }
 
     @Test

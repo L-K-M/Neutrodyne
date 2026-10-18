@@ -18,6 +18,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okio.Buffer
+import okio.BufferedSource
 import okio.FileSystem
 import okio.Path
 import okio.buffer
@@ -51,13 +52,22 @@ internal class SafExportDestination(
         destinationUri: String,
     ): Outcome<Unit, ExportError> =
         withContext(io) {
-            val destination =
-                openDestination(Uri.parse(destinationUri))
-                    ?: return@withContext Outcome.Failure(ExportError.DestinationUnavailable)
+            val prepared =
+                try {
+                    fileSystem.source(source).buffer()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    return@withContext Outcome.Failure(ExportError.Io)
+                }
             try {
-                // `use` owns the provider stream: a missing source, a cut mid-copy and a
-                // cancellation all close it before their outcome leaves.
-                destination.use { out -> copyPrepared(source, out) }
+                // Open the source first: a missing cache file must not truncate the destination.
+                prepared.use { src ->
+                    val destination =
+                        openDestination(Uri.parse(destinationUri))
+                            ?: return@withContext Outcome.Failure(ExportError.DestinationUnavailable)
+                    destination.use { out -> copyPrepared(src, out) }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -76,6 +86,8 @@ internal class SafExportDestination(
     private fun openDestination(uri: Uri): OutputStream? {
         try {
             return resolver.openOutputStream(uri, MODE_TRUNCATE)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: IllegalArgumentException) {
             // Mode unknown to this provider — fall through to "w".
         } catch (e: FileNotFoundException) {
@@ -85,6 +97,8 @@ internal class SafExportDestination(
         }
         return try {
             resolver.openOutputStream(uri, MODE_WRITE)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             null
         }
@@ -96,45 +110,39 @@ internal class SafExportDestination(
      * between chunks propagates through [ensureActive] and still closes everything.
      */
     private suspend fun copyPrepared(
-        source: Path,
+        source: BufferedSource,
         destination: OutputStream,
     ): Outcome<Unit, ExportError> {
-        val prepared =
-            try {
-                fileSystem.source(source).buffer()
-            } catch (e: Exception) {
-                return Outcome.Failure(ExportError.Io)
-            }
-        return prepared.use { src ->
-            destination.sink().buffer().use { sink ->
-                val chunk = Buffer()
-                while (true) {
-                    currentCoroutineContext().ensureActive()
-                    val read =
-                        try {
-                            src.read(chunk, CHUNK_BYTES.toLong())
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (e: Exception) {
-                            return Outcome.Failure(ExportError.Io)
-                        }
-                    if (read == -1L) break
+        destination.sink().buffer().use { sink ->
+            val chunk = Buffer()
+            while (true) {
+                currentCoroutineContext().ensureActive()
+                val read =
                     try {
-                        sink.write(chunk, read)
+                        source.read(chunk, CHUNK_BYTES.toLong())
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
-                        return Outcome.Failure(ExportError.DestinationUnavailable)
+                        return Outcome.Failure(ExportError.Io)
                     }
-                }
+                if (read == -1L) break
                 try {
-                    sink.flush()
+                    sink.write(chunk, read)
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     return Outcome.Failure(ExportError.DestinationUnavailable)
                 }
             }
-            Outcome.Success(Unit)
+            try {
+                sink.flush()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                return Outcome.Failure(ExportError.DestinationUnavailable)
+            }
         }
+        return Outcome.Success(Unit)
     }
 
     private companion object {
