@@ -4,8 +4,10 @@ package ch.lkmc.neutrodyne.core.data.exporting
 
 import android.content.ContentResolver
 import android.net.Uri
+import android.provider.DocumentsContract
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Dispatcher
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.ExportError
@@ -14,6 +16,7 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -24,6 +27,7 @@ import okio.Path
 import okio.buffer
 import okio.sink
 import java.io.FileNotFoundException
+import java.io.IOException
 import java.io.OutputStream
 
 /**
@@ -34,7 +38,9 @@ import java.io.OutputStream
  *
  * A failed or skipped save is never reported as success: open failures are
  * [ExportError.DestinationUnavailable], reading the prepared file is [ExportError.Io], and a
- * cancellation still propagates after both streams are closed.
+ * cancellation still propagates after both streams are closed. Failed or cancelled copies
+ * delete the fresh `CreateDocument` target best-effort after closing the streams; cleanup
+ * failures are logged without document URIs or cache paths and preserve the original error.
  */
 @SingleIn(AppScope::class)
 @ContributesBinding(AppScope::class)
@@ -60,20 +66,27 @@ internal class SafExportDestination(
                 } catch (_: Exception) {
                     return@withContext Outcome.Failure(ExportError.Io)
                 }
-            try {
-                // Open the source first: a missing cache file must not truncate the destination.
-                prepared.use { src ->
-                    val destination =
-                        openDestination(Uri.parse(destinationUri))
-                            ?: return@withContext Outcome.Failure(ExportError.DestinationUnavailable)
-                    destination.use { out -> copyPrepared(src, out) }
+            val document = Uri.parse(destinationUri)
+            var opened = false
+            val outcome =
+                try {
+                    // Open the source first: a missing cache file must not truncate the destination.
+                    prepared.use { src ->
+                        val destination =
+                            openDestination(document)
+                                ?: return@withContext Outcome.Failure(ExportError.DestinationUnavailable)
+                        opened = true
+                        destination.use { out -> copyPrepared(src, out) }
+                    }
+                } catch (e: CancellationException) {
+                    if (opened) deleteFailure(document)?.let(e::addSuppressed)
+                    throw e
+                } catch (_: Exception) {
+                    // What is left to fail: closing the provider stream.
+                    Outcome.Failure(ExportError.DestinationUnavailable)
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                // What is left to fail: closing the provider stream.
-                Outcome.Failure(ExportError.DestinationUnavailable)
-            }
+            if (opened && outcome is Outcome.Failure) deleteFailure(document)
+            outcome
         }
 
     /**
@@ -145,7 +158,28 @@ internal class SafExportDestination(
         return Outcome.Success(Unit)
     }
 
+    /** Cleanup must finish even when cancellation interrupted the copy. */
+    private suspend fun deleteFailure(document: Uri): Exception? =
+        withContext(NonCancellable) {
+            val failure =
+                try {
+                    if (DocumentsContract.deleteDocument(resolver, document)) {
+                        null
+                    } else {
+                        IOException("Provider kept the partial document")
+                    }
+                } catch (e: Exception) {
+                    e
+                }
+            if (failure != null) {
+                Log.w(TAG) { "Partial export document cleanup failed: ${failure::class.simpleName}" }
+            }
+            failure
+        }
+
     private companion object {
+        const val TAG = "SafExportDestination"
+
         /** `ContentResolver` write mode: truncate before write; the documented fallback is "w". */
         const val MODE_TRUNCATE = "wt"
         const val MODE_WRITE = "w"
