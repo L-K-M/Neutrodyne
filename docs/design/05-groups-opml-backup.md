@@ -1805,6 +1805,8 @@ Algorithm:
 | 2 | those lines dropped; tombstone-only lines older than 365 days dropped | extreme |
 | 3 | only in-progress, favourite, queued and current lines | last resort |
 
+*Implementation note (2026-10-18, M3 C4a):* `BackupWriter.write` takes the level as a `SnapshotLevel` (`FULL`, `SLIM_HISTORY`, `DROP_HISTORY`, `ACTIVE_ONLY`) plus an optional compressed-size cap; the numeric `snapshotLevel` enters only at the manifest and `SnapshotStatus` boundaries, and a non-`AUTO_SNAPSHOT` write refuses a non-`FULL` level rather than dropping lines silently. The protected ("queue reference") set is read inside the one export read transaction just before the `episodes.jsonl` stream — every Up next ref plus the play session's `current`, whether or not that episode is queued — so a referenced line is never slimmed or dropped and still restores or stubs on an empty database. The session `anchor` is not protected: it is a resume hint, not user state, and a dropped anchor line simply restores without an anchor. "Older than 365 days" is judged on `pl` (played lines) or the tombstone's own `dis` against the write time; "tombstone-only" means `dis` is the line's sole state — any played, started, last-played, play-count, favourite, measured-duration or live-position/download mark keeps it.
+
 ### First-launch restore
 
 `FirstLaunchRestoreInitializer` (`AppInitializer`, order 110, `:core:data` `androidMain`):
