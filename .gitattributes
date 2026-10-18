@@ -8,3 +8,4 @@
 *.so binary
 *.webp binary
 signing/*.keystore binary
+feeds/src/test/resources/opml/leading_newline.opml -text
