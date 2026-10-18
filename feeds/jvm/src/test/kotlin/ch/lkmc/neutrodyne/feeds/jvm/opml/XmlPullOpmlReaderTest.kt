@@ -233,6 +233,89 @@ class XmlPullOpmlReaderTest {
         assertEquals(3, opens)
     }
 
+    @Test
+    fun malformedNumericReferencesStayLiteralDuringSalvage() {
+        val literal = "&#-1; &#x-1; &#+65; &#x+41; &#١; &#xＦ; &#; &#x;"
+        val xml =
+            """<opml version="1.0" note="&#xZZZZ;"><body>
+                <outline xmlUrl="https://a.example/feed" text="$literal &#65; &#x41; &#X1F3A7;"/>
+                <outline xmlUrl="https://b.example/feed"/>
+                </body></opml>"""
+        val result = read(xml)
+        val doc = assertIs<OpmlReadResult.Ok>(result, "salvage result: $result").document
+
+        assertEquals(ParseMode.SALVAGE, doc.mode)
+        assertEquals(listOf("https://a.example/feed", "https://b.example/feed"), doc.entries.map { it.url })
+        assertEquals("$literal A A 🎧", doc.entries.first().text)
+    }
+
+    @Test
+    fun strayApostropheDoesNotSwallowLaterSalvageOutlines() {
+        val xml =
+            """<opml version="1.0" note="&#xZZZZ;"><body>
+                <outline text=Bob's xmlUrl="https://a.example/feed"/>
+                <outline xmlUrl="https://b.example/feed"/>
+                <outline xmlUrl="https://c.example/feed"/>
+                <outline xmlUrl="https://d.example/feed"/>
+                </body></opml>"""
+        val doc = assertIs<OpmlReadResult.Ok>(read(xml)).document
+
+        assertEquals(ParseMode.SALVAGE, doc.mode)
+        assertEquals(
+            listOf(
+                "https://a.example/feed",
+                "https://b.example/feed",
+                "https://c.example/feed",
+                "https://d.example/feed",
+            ),
+            doc.entries.map { it.url },
+        )
+    }
+
+    @Test
+    fun strayQuoteAfterClosedValueDoesNotSwallowLaterSalvageOutlines() {
+        val xml =
+            """<opml version="1.0" note="&#xZZZZ;"><body>
+                <outline xmlUrl="https://a.example/feed" 'oops/>
+                <outline xmlUrl="https://b.example/feed"/>
+                <outline xmlUrl="https://c.example/feed"/>
+                </body></opml>"""
+        val doc = assertIs<OpmlReadResult.Ok>(read(xml)).document
+
+        assertEquals(ParseMode.SALVAGE, doc.mode)
+        assertEquals(
+            listOf("https://a.example/feed", "https://b.example/feed", "https://c.example/feed"),
+            doc.entries.map { it.url },
+        )
+    }
+
+    @Test
+    fun strayApostropheDoesNotExtendSalvageTagCapIntoFollowingText() {
+        // The text exceeds the 64 KiB tag cap, but stays below the markup-gap cap.
+        val xml =
+            """<opml version="1.0" note="&#xZZZZ;"><body>
+                <outline text=Bob's xmlUrl="https://a.example/feed"/>""" +
+                "x".repeat(70 * 1024) +
+                """<outline xmlUrl="https://b.example/feed"/></body></opml>"""
+        val result = read(xml)
+        val doc = assertIs<OpmlReadResult.Ok>(result, "salvage result: $result").document
+
+        assertEquals(ParseMode.SALVAGE, doc.mode)
+        assertEquals(listOf("https://a.example/feed", "https://b.example/feed"), doc.entries.map { it.url })
+    }
+
+    @Test
+    fun duplicateSalvageAttributesKeepFirstOccurrence() {
+        val xml =
+            """<opml version="1.0" note="&#xZZZZ;"><body>
+                <outline xmlUrl="https://a.example/feed" xmlUrl="https://b.example/feed"/>
+                </body></opml>"""
+        val doc = assertIs<OpmlReadResult.Ok>(read(xml)).document
+
+        assertEquals(ParseMode.SALVAGE, doc.mode)
+        assertEquals("https://a.example/feed", doc.entries.single().url)
+    }
+
     /**
      * The misdeclared-encoding repair re-opens the source at most once per tolerant leg
      * (`EncodingReparse`): the `misdeclared_cp1252_relaxed` fixture fails strict, decodes to
@@ -327,7 +410,9 @@ class XmlPullOpmlReaderTest {
     fun salvageScannerSourceIsPlainText() {
         val source =
             File(
-                checkNotNull(System.getProperty("neutrodyne.rootDir")),
+                checkNotNull(System.getProperty("neutrodyne.rootDir")) {
+                    "neutrodyne.rootDir is unset; run tests through Gradle (TestConventions sets it)"
+                },
                 "feeds/jvm/src/main/kotlin/ch/lkmc/neutrodyne/feeds/jvm/opml/SalvageOpmlScanner.kt",
             )
         assertTrue(source.isFile, "missing $source")
