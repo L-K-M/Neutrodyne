@@ -61,6 +61,7 @@ data class ImportOptions(
         if (committedAt != null || restoreRequestedAt != null) return this
 
         return change(this).copy(
+            redownloadIds = redownloadIds,
             fromAndroidBackup = fromAndroidBackup,
             restoreRequestedAt = restoreRequestedAt,
             laneAttempts = laneAttempts,

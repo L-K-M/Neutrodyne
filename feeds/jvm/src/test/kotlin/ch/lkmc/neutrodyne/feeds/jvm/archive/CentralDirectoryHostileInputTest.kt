@@ -19,6 +19,16 @@ class CentralDirectoryHostileInputTest {
         rejectsCorrupt(ZipTestFiles.zip64EndBomb(DECLARED_ENTRIES.toLong(), DECLARED_CENTRAL_BYTES))
     }
 
+    @Test
+    fun overflowingZip64LocatorKeepsTheTypedClassicFallback() {
+        val path = ZipTestFiles.tempZip(ZipTestFiles.zip64EndBomb(1, locatorOffset = Long.MAX_VALUE - 1))
+        val failure =
+            assertFailsWith<ArchiveException> { ZipGuard().open(path, ArchiveCaps.BACKUP).close() }
+
+        assertEquals(ArchiveException.Kind.HOSTILE, failure.kind)
+        assertEquals("zip_entries", failure.reason)
+    }
+
     private fun rejectsCorrupt(bytes: ByteArray) {
         val path = ZipTestFiles.tempZip(bytes)
         val failure =
