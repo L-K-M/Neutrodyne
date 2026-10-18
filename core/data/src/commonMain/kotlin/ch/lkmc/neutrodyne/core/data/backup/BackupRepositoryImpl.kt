@@ -34,6 +34,7 @@ import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.PrivacyCounts
 import ch.lkmc.neutrodyne.core.model.RestoreRequest
 import ch.lkmc.neutrodyne.core.model.SnapshotStatus
+import ch.lkmc.neutrodyne.core.model.SnapshotWrite
 import ch.lkmc.neutrodyne.core.model.settings.BackupSettingKeys
 import ch.lkmc.neutrodyne.feeds.backup.BackupKind
 import dev.zacsweers.metro.Inject
@@ -379,22 +380,24 @@ internal class BackupRepositoryImpl(
 
     /**
      * 05's "Write snapshot now" (`SnapshotNowReceiver`, debug row): the receiver maps the
-     * returned [SnapshotStatus] — `enabled = false` → "disabled", a held guard →
-     * "guarded" — so every non-fatal [SnapshotResult] answers with the live status and only
-     * writer failures and the desktop lane surface as errors.
+     * returned pair — `after.enabled = false` → "disabled", no publication move →
+     * "guarded" — so every non-fatal [SnapshotResult] answers with the before/after
+     * statuses and only writer failures and the desktop lane surface as errors.
      */
-    override suspend fun writeSnapshotNow(): Outcome<SnapshotStatus, BackupError> =
-        when (val result = producer.produce()) {
+    override suspend fun writeSnapshotNow(): Outcome<SnapshotWrite, BackupError> {
+        val report = producer.produceReport()
+        return when (val result = report.result) {
             is SnapshotResult.Written,
             SnapshotResult.Disabled,
             SnapshotResult.GuardedRestore,
             SnapshotResult.GuardedForeign,
-            -> Outcome.Success(producer.status())
+            -> Outcome.Success(SnapshotWrite(report.before, report.after))
 
             is SnapshotResult.Failed -> Outcome.Failure(result.error)
 
             SnapshotResult.Unsupported -> Outcome.Failure(BackupError.Unsupported)
         }
+    }
 
     // --- Mapping and helpers ------------------------------------------------------------------------
 

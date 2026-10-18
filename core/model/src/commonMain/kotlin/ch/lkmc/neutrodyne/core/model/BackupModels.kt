@@ -81,6 +81,18 @@ data class SnapshotStatus(
     val foreignPending: Boolean,
 )
 
+/**
+ * One `writeSnapshotNow` attempt's status pair (05 Testing with bmgr): the producer reads
+ * both halves inside its write mutex, so [after] differing from [before] in the
+ * publication fields (`lastWrittenAt`, `bytes`, `level`) proves this pass published:
+ * `SnapshotNowReceiver`'s `ok` line can neither invent a write nor be raced by a second
+ * one.
+ */
+data class SnapshotWrite(
+    val before: SnapshotStatus,
+    val after: SnapshotStatus,
+)
+
 /** The R1.9 private-links/passwords warning counts before `createBackup` (05 Writing). */
 data class PrivacyCounts(
     val privateLinks: Int,
