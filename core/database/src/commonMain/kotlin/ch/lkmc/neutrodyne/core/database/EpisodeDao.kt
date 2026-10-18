@@ -20,10 +20,13 @@ private const val NOTIFICATION_BIND_CHUNK = 500
 @Dao
 interface EpisodeDao {
     /**
-     * Restore's stub insertion (05): `inFeed = 0` rows a later refresh matches by `identityKey`.
+     * Restore's stub insertion (05 `Stubs and matching`, 02's `INSERT OR IGNORE`): `inFeed = 0`
+     * rows a later refresh matches by `identityKey`. OR IGNORE because a `(podcastId,
+     * identityKey)` collision — a repeated line or a row refresh just committed — is not an
+     * error: the caller resolves a -1 return by `byIdentityKey` and treats it as matched.
      * Ingest's own inserts go through `IngestDao.insertEpisodes` (descending `feedOrder` there).
      */
-    @Insert
+    @Insert(onConflict = androidx.room3.OnConflictStrategy.IGNORE)
     suspend fun insertStub(row: EpisodeEntity): Long
 
     @Query("SELECT * FROM episode WHERE id = :id")
