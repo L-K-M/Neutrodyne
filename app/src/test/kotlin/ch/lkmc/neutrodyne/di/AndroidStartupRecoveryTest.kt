@@ -146,6 +146,9 @@ class AndroidStartupRecoveryTest {
          */
         val POST_OPEN_INITIALIZERS =
             listOf(
+                // 05 First-launch restore sits at 110: its Provider deps dereference the
+                // open result only inside `run`, which must wait on Opened.
+                "FirstLaunchRestoreInitializer",
                 "CredentialLoadInitializer",
                 "PeriodicRefreshInitializer",
                 "RefreshForegroundObserverInitializer",

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<opml version="1.0">
+  <head><title>iso8859-1 café</title></head>
+  <body>
+    <outline type="rss" text="Café" title="CafÃ©" xmlUrl="https://cafe.example.com/rss"/>
+  </body>
+</opml>

@@ -1,0 +1,17 @@
+{
+  "entries": [
+    {
+      "htmlUrl": "https://a.example.com",
+      "ordinal": 0,
+      "title": "Tom & Jerry",
+      "url": "https://a.example.com/rss"
+    },
+    {
+      "ordinal": 1,
+      "title": "Tom & Jerry",
+      "url": "https://b.example.com/rss"
+    }
+  ],
+  "format": "OPML",
+  "groups": []
+}

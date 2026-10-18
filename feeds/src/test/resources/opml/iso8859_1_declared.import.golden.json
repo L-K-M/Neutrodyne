@@ -1,0 +1,11 @@
+{
+  "entries": [
+    {
+      "ordinal": 0,
+      "title": "CafÃ©",
+      "url": "https://cafe.example.com/rss"
+    }
+  ],
+  "format": "OPML",
+  "groups": []
+}

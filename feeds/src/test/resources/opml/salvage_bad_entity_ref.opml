@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="1.0"><body>
+  <outline text="Tech"><outline text="Broken ref" type="rss" xmlUrl="https://b.example.com/rss" note="&#xZZZZ;"/></outline>
+  <outline text="Fine" type="rss" xmlUrl="https://f.example.com/rss" category="News/Tech"/>
+  <outline text="Also bad" type="rss" xmlUrl="https://a2.example.com/rss" note="&#;"/>
+</body></opml>

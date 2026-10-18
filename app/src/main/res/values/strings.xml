@@ -10,4 +10,5 @@
   <string name="crash_mail_body">The crash report is attached. Add anything that helps reproduce the problem.</string>
   <string name="channel_group_new_episodes">New episodes</string>
   <string name="channel_new_episodes_default">Other podcasts</string>
+  <string name="channel_import_backup">Import and backup</string>
 </resources>

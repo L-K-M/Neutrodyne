@@ -1,0 +1,33 @@
+{
+  "entries": [
+    {
+      "ordinal": 0,
+      "text": "Broken ref",
+      "type": "rss",
+      "url": "https://b.example.com/rss"
+    },
+    {
+      "categories": [
+        "Tech"
+      ],
+      "ordinal": 1,
+      "text": "Fine",
+      "type": "rss",
+      "url": "https://f.example.com/rss"
+    },
+    {
+      "ordinal": 2,
+      "text": "Also bad",
+      "type": "rss",
+      "url": "https://a2.example.com/rss"
+    }
+  ],
+  "folders": [],
+  "ignoredOutlines": 1,
+  "mode": "SALVAGE",
+  "warnings": [
+    {
+      "code": "SALVAGED"
+    }
+  ]
+}

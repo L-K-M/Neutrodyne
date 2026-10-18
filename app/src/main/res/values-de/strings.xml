@@ -3,4 +3,5 @@
 <resources>
   <string name="channel_group_new_episodes">Neue Episoden</string>
   <string name="channel_new_episodes_default">Andere Podcasts</string>
+  <string name="channel_import_backup">Import und Sicherung</string>
 </resources>

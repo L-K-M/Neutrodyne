@@ -1,0 +1,16 @@
+{
+  "entries": [
+    {
+      "ordinal": 0,
+      "title": "Café & Tea Time",
+      "url": "https://e.example.com/rss"
+    },
+    {
+      "ordinal": 1,
+      "title": "Rocks &amp; hard",
+      "url": "https://r.example.com/rss"
+    }
+  ],
+  "format": "OPML",
+  "groups": []
+}

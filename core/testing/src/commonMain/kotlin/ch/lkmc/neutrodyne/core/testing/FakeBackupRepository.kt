@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.model.BackupSummary
 import ch.lkmc.neutrodyne.core.model.PrivacyCounts
 import ch.lkmc.neutrodyne.core.model.RestoreRequest
 import ch.lkmc.neutrodyne.core.model.SnapshotStatus
+import ch.lkmc.neutrodyne.core.model.SnapshotWrite
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
@@ -45,6 +46,9 @@ class FakeBackupRepository : BackupRepository {
     var preflightCounts = PrivacyCounts(0, 0)
     var androidBackupOutcome: Outcome<Long, BackupError> = Outcome.Success(0L)
     var snapshotNowError: BackupError? = null
+
+    /** Runs between [writeSnapshotNow]'s before and after reads — seed the write's effects here. */
+    var onWriteSnapshotNow: suspend () -> Unit = {}
 
     val calls = mutableListOf<String>()
 
@@ -106,9 +110,11 @@ class FakeBackupRepository : BackupRepository {
         snapshotStatus.update { it.copy(foreignPending = false) }
     }
 
-    override suspend fun writeSnapshotNow(): Outcome<SnapshotStatus, BackupError> {
+    override suspend fun writeSnapshotNow(): Outcome<SnapshotWrite, BackupError> {
         calls += "writeSnapshotNow()"
         snapshotNowError?.let { return Outcome.Failure(it) }
-        return Outcome.Success(snapshotStatus.value)
+        val before = snapshotStatus.value
+        onWriteSnapshotNow()
+        return Outcome.Success(SnapshotWrite(before, snapshotStatus.value))
     }
 }
