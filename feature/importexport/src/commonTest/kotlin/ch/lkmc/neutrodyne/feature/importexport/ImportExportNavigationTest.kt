@@ -30,7 +30,7 @@ class ImportExportNavigationTest {
         assertEquals(NdSceneMetadata.paneDetail(), provider(ImportKey("7")).metadata)
     }
 
-    @Test fun theBackupKeyStaysOnItsPendingPlaceholder() {
+    @Test fun theBackupKeyResolvesAsADetailPane() {
         val pending = entryProvider<NavKey> { ImportExportPendingNavigation.entries().invoke(this) }
         assertEquals(NdSceneMetadata.paneDetail(), pending(BackupKey).metadata)
         // ImportKey must not stay registered twice — D1's real entry lives beside ExportKey.

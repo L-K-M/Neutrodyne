@@ -130,8 +130,6 @@ import ch.lkmc.neutrodyne.core.ui.resources.import_progress
 import ch.lkmc.neutrodyne.core.ui.resources.import_report_already
 import ch.lkmc.neutrodyne.core.ui.resources.import_report_merged
 import ch.lkmc.neutrodyne.core.ui.resources.import_report_merged_count
-import ch.lkmc.neutrodyne.core.ui.resources.import_restore_pending_body
-import ch.lkmc.neutrodyne.core.ui.resources.import_restore_pending_title
 import ch.lkmc.neutrodyne.core.ui.resources.import_search
 import ch.lkmc.neutrodyne.core.ui.resources.import_select_item
 import ch.lkmc.neutrodyne.core.ui.resources.import_select_none
@@ -212,10 +210,6 @@ internal fun ImportScreen(
     var fixUpFor by remember { mutableStateOf<Pair<ImportItemView, ImportFixUp>?>(null) }
     val session = state.session
     val editable = state.previewEditable
-    val backupPending =
-        state.loaded &&
-            session?.format == ImportFormat.NEUTRODYNE_BACKUP &&
-            session.state == ImportState.PREVIEW
     var showStopDialog by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
@@ -223,10 +217,6 @@ internal fun ImportScreen(
             NdTopAppBar(
                 title =
                     when {
-                        backupPending -> {
-                            stringResource(Res.string.import_restore_pending_title)
-                        }
-
                         session?.state == ImportState.CANCELLED -> {
                             stringResource(Res.string.import_cancelled_title)
                         }
@@ -256,10 +246,6 @@ internal fun ImportScreen(
 
                 session == null -> {
                     ImportUnavailableBody(onBack)
-                }
-
-                backupPending -> {
-                    ImportRestorePendingBody(onBack)
                 }
 
                 else -> {
@@ -330,18 +316,6 @@ internal fun ImportUnavailableBody(onBack: () -> Unit) {
         icon = NdIcons.LinkOff,
         title = stringResource(Res.string.import_unavailable_title),
         body = stringResource(Res.string.import_unavailable_body),
-        actionLabel = stringResource(Res.string.back),
-        onAction = onBack,
-    )
-}
-
-/** A `NEUTRODYNE_BACKUP` PREVIEW: restore lands with D4, so the preview itself is staged. */
-@Composable
-private fun ImportRestorePendingBody(onBack: () -> Unit) {
-    EmptyState(
-        icon = NdIcons.Info,
-        title = stringResource(Res.string.import_restore_pending_title),
-        body = stringResource(Res.string.import_restore_pending_body),
         actionLabel = stringResource(Res.string.back),
         onAction = onBack,
     )

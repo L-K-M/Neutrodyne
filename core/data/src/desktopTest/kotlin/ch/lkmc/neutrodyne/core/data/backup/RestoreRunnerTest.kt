@@ -310,7 +310,7 @@ class RestoreRunnerTest {
             assertEquals(RestoreRunResult.Failed(sessionId, BackupError.Unsupported), result)
             assertEquals(ImportState.CANCELLED, db.importDao().sessionById(sessionId)?.state)
             assertNull(db.podcastDao().allForExport().singleOrNull())
-            assertEquals(RestoreProgress.Failed(BackupError.Unsupported), runner.progress.first())
+            assertEquals(RestoreProgress.Failed(sessionId, BackupError.Unsupported), runner.progress.first())
         }
 
     // --- Validation failures ---------------------------------------------------------------------
@@ -332,7 +332,7 @@ class RestoreRunnerTest {
             assertTrue(db.importDao().itemsOf(sessionId).isEmpty())
             assertNull(db.podcastDao().allForExport().singleOrNull())
             assertTrue(settings.calls.none { it.startsWith("set(") })
-            assertEquals(RestoreProgress.Failed(failed.error), runner.progress.first())
+            assertEquals(RestoreProgress.Failed(sessionId, failed.error), runner.progress.first())
         }
 
     @Test
