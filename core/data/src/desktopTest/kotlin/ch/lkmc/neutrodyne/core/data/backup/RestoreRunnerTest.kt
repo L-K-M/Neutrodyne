@@ -32,6 +32,7 @@ import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.RestoreMode
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.GroupsSettingKeys
 import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
@@ -70,6 +71,8 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
 import okio.ByteString.Companion.toByteString
 import okio.FileSystem
+import okio.ForwardingFileSystem
+import okio.IOException
 import okio.Path
 import okio.Path.Companion.toPath
 import okio.buffer
@@ -104,7 +107,20 @@ class RestoreRunnerTest {
     private val workScheduler = FakeImportWorkScheduler()
     private val refresh = FakeRefreshController()
     private val snapshots = FakeSnapshotScheduler()
-    private val fileSystem = FileSystem.SYSTEM
+
+    @Volatile private var failSnapshotRetirement = false
+    private val fileSystem =
+        object : ForwardingFileSystem(FileSystem.SYSTEM) {
+            override fun atomicMove(
+                source: Path,
+                target: Path,
+            ) {
+                if (failSnapshotRetirement && source.name == "auto-snapshot.zip") {
+                    throw IOException("snapshot retirement failed")
+                }
+                super.atomicMove(source, target)
+            }
+        }
     private val root = createTempDirectory("nd-restore-runner").toFile()
     private val storagePaths = storagePathsFor(root)
     private val payloads =
@@ -370,6 +386,8 @@ class RestoreRunnerTest {
                         SettingValueV1("madeup.key", "Bool", value = JsonPrimitive(true)),
                         SettingValueV1("appearance.library_titles", "Text", value = JsonPrimitive("yes")),
                         SettingValueV1("appearance.theme", "Choice", value = JsonPrimitive("ULTRAVIOLET")),
+                        SettingValueV1("appearance.library_titles", "Bool", value = JsonPrimitive("false")),
+                        SettingValueV1("groups.all_hide_older_than_days", "Int32", value = JsonPrimitive("10")),
                     ),
                 )
             val entries = archivePayloads(settings = staged)
@@ -380,8 +398,9 @@ class RestoreRunnerTest {
 
             val completed = assertIs<RestoreRunResult.Completed>(result)
             assertEquals(1, completed.settingsApplied)
-            assertEquals(4, completed.settingsSkipped)
+            assertEquals(6, completed.settingsSkipped)
             assertEquals(true, settings.get(AppearanceSettingKeys.LIBRARY_TITLES))
+            assertEquals(0, settings.get(GroupsSettingKeys.ALL_HIDE_OLDER_THAN_DAYS))
             assertEquals(
                 listOf("set(appearance.library_titles)"),
                 settings.calls.filter { it.startsWith("set(") },
@@ -409,6 +428,15 @@ class RestoreRunnerTest {
 
             assertIs<RestoreRunResult.Completed>(runner.run(sessionId))
             assertEquals(true, settings.get(AppearanceSettingKeys.LIBRARY_TITLES))
+            assertEquals(
+                ImportItemStatus.QUEUED,
+                db
+                    .importDao()
+                    .itemsOf(sessionId)
+                    .single()
+                    .status,
+                "a replay must still fetch the pending podcast inserted by its first attempt",
+            )
         }
 
     // --- Finish: items, redownload ids, snapshot retirement ---------------------------------------
@@ -486,6 +514,58 @@ class RestoreRunnerTest {
             assertRetired()
         }
 
+    @Test
+    fun aFailedSnapshotRetirementKeepsTheRestoreReplayable() =
+        runTest {
+            seedAutoSnapshot()
+            seedSourcePodcast(FEED_A)
+            val sessionId = session(writeArchive(), fromAndroidBackup = true)
+            failSnapshotRetirement = true
+
+            assertIs<RestoreRunResult.Retry>(runner.run(sessionId))
+
+            assertEquals(ImportState.PREVIEW, db.importDao().sessionById(sessionId)?.state)
+            assertTrue(fileSystem.exists(autoSnapshot()))
+            assertTrue(workScheduler.scheduled.isEmpty(), "unfinished restore must not start feed work")
+            failSnapshotRetirement = false
+
+            assertIs<RestoreRunResult.Completed>(runner.run(sessionId))
+            assertRetired()
+        }
+
+    @Test
+    fun aCorruptSnapshotWhoseRetirementFailsIsRetriedBeforeCancellation() =
+        runTest {
+            seedAutoSnapshot()
+            val payloadPath = stash("import/bad.bin") { writeUtf8("not a zip") }
+            val sessionId = backupSession(payloadPath, fromAndroidBackup = true)
+            failSnapshotRetirement = true
+
+            assertIs<RestoreRunResult.Retry>(runner.run(sessionId))
+
+            assertEquals(ImportState.PREVIEW, db.importDao().sessionById(sessionId)?.state)
+            assertTrue(fileSystem.exists(autoSnapshot()))
+            failSnapshotRetirement = false
+
+            assertIs<RestoreRunResult.Failed>(runner.run(sessionId))
+            assertEquals(ImportState.CANCELLED, db.importDao().sessionById(sessionId)?.state)
+            assertRetired()
+        }
+
+    @Test
+    fun aFailedCancellationMarkerKeepsTheRequestReplayable() =
+        runTest {
+            val payloadPath = stash("import/bad.bin") { writeUtf8("not a zip") }
+            val sessionId = backupSession(payloadPath)
+            driver.armOnStep("UPDATE import_session SET state") { throw IOException("cancel marker failed") }
+
+            assertIs<RestoreRunResult.Retry>(runner.run(sessionId))
+
+            assertEquals(ImportState.PREVIEW, db.importDao().sessionById(sessionId)?.state)
+            assertIs<RestoreRunResult.Failed>(runner.run(sessionId))
+            assertEquals(ImportState.CANCELLED, db.importDao().sessionById(sessionId)?.state)
+        }
+
     // --- Cancellation ------------------------------------------------------------------------------
 
     @Test
@@ -505,6 +585,14 @@ class RestoreRunnerTest {
 
             assertIs<RestoreRunResult.Completed>(runner.run(sessionId))
             assertEquals(ImportState.COMMITTED, db.importDao().sessionById(sessionId)?.state)
+            assertEquals(
+                ImportItemStatus.QUEUED,
+                db
+                    .importDao()
+                    .itemsOf(sessionId)
+                    .single()
+                    .status,
+            )
         }
 
     @Test
@@ -528,6 +616,14 @@ class RestoreRunnerTest {
 
             assertIs<RestoreRunResult.Completed>(runner.run(sessionId))
             assertEquals(ImportState.COMMITTED, db.importDao().sessionById(sessionId)?.state)
+            assertEquals(
+                ImportItemStatus.QUEUED,
+                db
+                    .importDao()
+                    .itemsOf(sessionId)
+                    .single()
+                    .status,
+            )
         }
 
     @Test

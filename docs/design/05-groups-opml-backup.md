@@ -1557,10 +1557,12 @@ sequenceDiagram
   end
 ```
 
-**M3 limit (2026-10-22):** a restore requested while `sync_state.linkedAt` is set is
+**M3 limit (2026-10-18):** a restore requested while `sync_state.linkedAt` is set is
 rejected before any write — the session goes `CANCELLED`, progress reports
 `BackupError.Unsupported` — because linked execution (unlink first, `withApplying`
 capture, the ALL_DEVICES steps) lands with MS2. The linked branches below describe MS2.
+
+**Implementation note (2026-10-18, B12b):** a replay still queues a matched podcast awaiting its first fetch, including one inserted by an interrupted attempt. Auto-snapshot retirement finishes before a terminal session marker; a failed rename or cancellation-marker write leaves durable work for retry. Settings restore requires the declared JSON primitive type rather than coercing strings into booleans or numbers.
 
 1. **Validate** again (the cache copy is ours, but cheap to re-check); failure → session `CANCELLED`, `RestoreProgress.Failed`, notification (ID 3003 on Android; `DesktopNotifier` on the desktop). For `auto` restores (Android) a `Corrupt` or `NotABackup` snapshot is renamed to `restored-{epochMs}.zip` as well, so the installation-ID guard of [Snapshot production](#snapshot-production) stops protecting a file that can never be restored; `NewerFormat` keeps it ([First-launch restore](#first-launch-restore)).
 2. **Replace pre-step** (skipped on an empty database): on a linked device with reach `THIS_DEVICE`, 10's unlink runs first ([10 Unlink and Delete my data](10-sync.md#unlink-and-delete-my-data)); with reach `ALL_DEVICES` (confirmed after 10's pull, with `linkedAt` already cleared, [Restore while linked](#restore-while-linked)) every write of steps 2–7 runs with `applying = 1`. Then local podcasts matched by no backup podcast → `UnsubscribeUseCase(ids)` (03: pauses playback of them, deletes download files, D24); local groups matched by no backup group → deleted without undo (channels deleted immediately on Android); for every matched podcast, delete its `episode_state` and `episode_position` rows (only when HISTORY is selected; one transaction per podcast); clear `queue_entry` and the `play_session` context (UP_NEXT).

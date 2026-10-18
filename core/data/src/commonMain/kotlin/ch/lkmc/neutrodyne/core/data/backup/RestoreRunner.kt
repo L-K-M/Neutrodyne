@@ -28,6 +28,7 @@ import ch.lkmc.neutrodyne.core.model.ImportItemStatus
 import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.MergePolicy
 import ch.lkmc.neutrodyne.core.model.MergeSummary
+import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.RestoreMode
 import ch.lkmc.neutrodyne.core.model.SourceType
@@ -259,7 +260,8 @@ internal class RestoreRunner(
      * the `PREVIEW` → `COMMITTED` marker carrying `committedAt`/`attemptMarkerAt` and the
      * worker-owned `redownloadIds` merged into the latest options — then the effects the
      * committed state owes: the session's fetch work, a periodic reschedule, the channel
-     * sweep, the snapshot poke and the auto-snapshot's retirement. Cancellation surfacing
+     * sweep and the snapshot poke. Auto-snapshot retirement precedes the marker so a failed
+     * rename retains a request the host can retry. Cancellation surfacing
      * at the Room COMMIT still runs every effect (the CommitCancellationTest regression).
      */
     private suspend fun finish(
@@ -278,6 +280,7 @@ internal class RestoreRunner(
                     val options =
                         session.optionsJson?.let(ImportOptionsJson::decodeOrNull)
                             ?: return@withWriteTransaction false
+                    if (auto && !retireAutoSnapshot()) return@withWriteTransaction false
 
                     val items =
                         library.podcasts.distinctBy { it.key }.mapIndexedNotNull { ordinal, podcast ->
@@ -300,9 +303,22 @@ internal class RestoreRunner(
                                 selected = false,
                                 status =
                                     when {
-                                        row?.needsCredentials == true -> ImportItemStatus.AUTH_REQUIRED
-                                        podcastId in settled.insertedPodcastIds -> ImportItemStatus.QUEUED
-                                        else -> ImportItemStatus.ALREADY_SUBSCRIBED
+                                        row?.needsCredentials == true -> {
+                                            ImportItemStatus.AUTH_REQUIRED
+                                        }
+
+                                        podcastId in settled.insertedPodcastIds -> {
+                                            ImportItemStatus.QUEUED
+                                        }
+
+                                        // Earlier attempts may have inserted it before cancellation.
+                                        row?.status == PodcastStatus.PENDING_FIRST_FETCH && row.initialFetch -> {
+                                            ImportItemStatus.QUEUED
+                                        }
+
+                                        else -> {
+                                            ImportItemStatus.ALREADY_SUBSCRIBED
+                                        }
                                     },
                                 podcastId = podcastId,
                             )
@@ -330,7 +346,6 @@ internal class RestoreRunner(
                 .onFailure { Log.w(TAG, it) { "group channel sync failed after restore commit" } }
             suspendRunCatching { snapshots.requestSoon() }
                 .onFailure { Log.w(TAG, it) { "snapshot scheduling failed after restore commit" } }
-            if (auto) retireAutoSnapshot()
             true
         }
 
@@ -346,13 +361,25 @@ internal class RestoreRunner(
         error: BackupError,
         auto: Boolean,
     ): RestoreRunResult {
-        withContext(NonCancellable) {
-            suspendRunCatching { db.importDao().setState(sessionId, ImportState.CANCELLED) }
-                .onFailure { Log.w(TAG, it) { "restore session $sessionId could not be cancelled" } }
-            if (auto && (error is BackupError.Corrupt || error is BackupError.NotABackup)) {
-                retireAutoSnapshot()
+        val cancelled =
+            withContext(NonCancellable) {
+                suspendRunCatching {
+                    db.withWriteTransaction {
+                        val dao = db.importDao()
+                        val session = dao.sessionById(sessionId) ?: return@withWriteTransaction true
+                        if (session.state != ImportState.PREVIEW) return@withWriteTransaction true
+                        if (auto && (error is BackupError.Corrupt || error is BackupError.NotABackup) &&
+                            !retireAutoSnapshot()
+                        ) {
+                            return@withWriteTransaction false
+                        }
+                        dao.setState(sessionId, ImportState.CANCELLED)
+                        true
+                    }
+                }.onFailure { Log.w(TAG, it) { "restore session $sessionId could not be cancelled" } }
+                    .getOrDefault(false)
             }
-        }
+        if (!cancelled) return RestoreRunResult.Retry(sessionId, BackupError.Storage)
         progressFlow.value = RestoreProgress.Failed(error)
         return RestoreRunResult.Failed(sessionId, error)
     }
@@ -360,18 +387,18 @@ internal class RestoreRunner(
     /**
      * The auto-snapshot's end state after an adopted restore (05 First-launch restore):
      * rename `files/backup/auto-snapshot.zip` to `restored-{epochMs}.zip` — the app-private
-     * file the session's `adopt` copied from. Best effort: the COMMITTED marker already
-     * landed; a failed rename leaves the guard's file in place for the next chance.
+     * file the session's `adopt` copied from. A failed rename keeps the durable PREVIEW
+     * request, so a host retries rather than permanently stranding the foreign-file guard.
      */
-    private suspend fun retireAutoSnapshot() {
+    private suspend fun retireAutoSnapshot(): Boolean =
         withContext(io) {
             suspendRunCatching {
                 if (fileSystem.exists(autoSnapshot)) {
                     fileSystem.atomicMove(autoSnapshot, autoSnapshotDir / "restored-${clock.now()}.zip")
                 }
             }.onFailure { Log.w(TAG, it) { "auto-snapshot retirement failed" } }
+                .isSuccess
         }
-    }
 
     /** What [gateLocked] read: the durable request, or why it isn't one. */
     private sealed interface Gate {

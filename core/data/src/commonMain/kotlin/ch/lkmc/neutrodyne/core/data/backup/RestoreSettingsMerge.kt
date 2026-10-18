@@ -66,21 +66,32 @@ internal class RestoreSettingsMerge(
     ): Applied =
         when {
             key is SettingKey.Bool && entry.type == TYPE_BOOL -> {
-                entry.value?.booleanOrNull?.let { setOrSkip(key, it) } ?: Applied.SKIPPED
+                entry.value
+                    ?.takeIf { !it.isString }
+                    ?.booleanOrNull
+                    ?.let { setOrSkip(key, it) } ?: Applied.SKIPPED
             }
 
             key is SettingKey.Int32 && entry.type == TYPE_INT32 -> {
-                entry.value?.intOrNull?.let { setOrSkip(key, it) } ?: Applied.SKIPPED
+                entry.value
+                    ?.takeIf { !it.isString }
+                    ?.intOrNull
+                    ?.let { setOrSkip(key, it) } ?: Applied.SKIPPED
             }
 
             key is SettingKey.Int64 && entry.type == TYPE_INT64 -> {
-                entry.value?.longOrNull?.let { setOrSkip(key, it) } ?: Applied.SKIPPED
+                entry.value
+                    ?.takeIf { !it.isString }
+                    ?.longOrNull
+                    ?.let { setOrSkip(key, it) } ?: Applied.SKIPPED
             }
 
             key is SettingKey.Float32 && entry.type == TYPE_FLOAT32 -> {
                 entry.value
+                    ?.takeIf { !it.isString }
                     ?.doubleOrNull
                     ?.toFloat()
+                    ?.takeIf { it.isFinite() }
                     ?.let { setOrSkip(key, it) } ?: Applied.SKIPPED
             }
 
