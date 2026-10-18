@@ -13,12 +13,13 @@ import dev.zacsweers.metro.Inject
 
 /**
  * The `import_backup` channel and its stable notification IDs (05 §8, Restore): 3001 is the
- * import DONE report, 3003 the restore failure, 3004 the foreign snapshot's pending offer.
- * ID 3002 — the ready-to-review notice — is D7's and deliberately absent here.
+ * import DONE report, 3002 the ready-to-review notice, 3003 the restore failure,
+ * 3004 the foreign snapshot's pending offer.
  */
 internal object ImportBackupChannels {
     const val CHANNEL = "import_backup"
     const val ID_IMPORT_DONE = 3001
+    const val ID_IMPORT_READY = 3002
     const val ID_RESTORE_FAILED = 3003
     const val ID_FOREIGN_SNAPSHOT = 3004
 

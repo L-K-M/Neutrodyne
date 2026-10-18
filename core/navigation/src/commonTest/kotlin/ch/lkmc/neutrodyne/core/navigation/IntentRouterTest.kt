@@ -65,6 +65,15 @@ class IntentRouterTest {
     }
 
     @Test
+    fun numericImportSessionFromAndroidNavigatesOnlyForInternalDelivery() {
+        val uri = "NEUTRODYNE://open/import/42"
+        assertEquals(Route.Navigate(LibraryKey, listOf(ImportKey("42"))), IntentRouter.route(internalView(uri)))
+        assertEquals(Route.None, IntentRouter.route(RouteInput(Action.VIEW, uri)))
+        assertEquals(Route.None, IntentRouter.route(internalView("neutrodyne://open/import/")))
+        assertEquals(Route.None, IntentRouter.route(internalView("neutrodyne://open/import/42/extra")))
+    }
+
+    @Test
     fun settingsRoutesPushSettingsKey() {
         assertEquals(
             Route.Push(SettingsKey(SettingsPage.ABOUT)),
