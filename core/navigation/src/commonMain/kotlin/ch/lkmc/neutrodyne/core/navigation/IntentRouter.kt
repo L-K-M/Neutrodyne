@@ -198,6 +198,7 @@ public object IntentRouter {
         if (page.lowercase() == SYNC_SEGMENT) {
             return Route.Push(SyncSettingsKey)
         }
+        if (page.lowercase() == "backup") return Route.Push(BackupKey)
 
         val match = SettingsPage.entries.firstOrNull { it.name == page.uppercase() } ?: return Route.None
 

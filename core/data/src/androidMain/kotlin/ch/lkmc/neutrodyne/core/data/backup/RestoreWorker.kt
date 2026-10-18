@@ -9,7 +9,7 @@ import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.data.importing.ImportOptionsJson
 import ch.lkmc.neutrodyne.core.data.importing.WorkManagerImportWorkScheduler
-import ch.lkmc.neutrodyne.core.data.importing.hasRestoreIntent
+import ch.lkmc.neutrodyne.core.data.importing.hasRunnableRestoreIntent
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.ImportReportPoster
 import dev.zacsweers.metro.Assisted
@@ -88,7 +88,7 @@ class RestoreWorker
         private suspend fun enqueueFollowUp() {
             val next =
                 suspendRunCatching {
-                    db.importDao().backupPreviewSessions().firstOrNull { it.hasRestoreIntent() }
+                    db.importDao().backupPreviewSessions().firstOrNull { it.hasRunnableRestoreIntent() }
                 }.getOrElse {
                     Log.w(TAG, it) { "restore follow-up probe failed" }
                     return

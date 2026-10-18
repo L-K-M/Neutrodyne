@@ -500,4 +500,6 @@
     <string name="notification_snapshot_pending_title">Backup found</string>
     <string name="notification_snapshot_pending">A Neutrodyne backup is ready to restore.</string>
     <string name="notification_snapshot_needs_newer">Your backup needs a newer version of Neutrodyne</string>
+    <string name="import_backup_title">Import and backup</string>
+    <string name="import_backup_pending">Import and backup details are not available in this build yet.</string>
 </resources>

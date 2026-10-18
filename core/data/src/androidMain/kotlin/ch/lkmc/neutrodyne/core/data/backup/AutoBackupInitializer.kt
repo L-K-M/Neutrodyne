@@ -11,7 +11,7 @@ import ch.lkmc.neutrodyne.core.data.importing.ImportOptionsJson
 import ch.lkmc.neutrodyne.core.data.importing.ImportSessionCleaner
 import ch.lkmc.neutrodyne.core.data.importing.ImportWorkPolicy
 import ch.lkmc.neutrodyne.core.data.importing.WorkManagerImportWorkScheduler
-import ch.lkmc.neutrodyne.core.data.importing.hasRestoreIntent
+import ch.lkmc.neutrodyne.core.data.importing.hasRunnableRestoreIntent
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.BackupSettingKeys
@@ -101,7 +101,7 @@ internal class AutoBackupInitializer
         private suspend fun reconcileDurableWork() {
             val dao = db().importDao()
             for (session in dao.backupPreviewSessions()) {
-                if (!session.hasRestoreIntent()) continue
+                if (!session.hasRunnableRestoreIntent()) continue
                 val auto =
                     session.optionsJson?.let(ImportOptionsJson::decodeOrNull)?.fromAndroidBackup == true
                 suspendRunCatching {

@@ -24,6 +24,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.suspendCancellableCoroutine
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 /**
@@ -35,8 +36,8 @@ import java.util.concurrent.TimeUnit
  * [scheduleRestore] owns 05's typed acknowledgment. WorkManager `KEEP` silently drops a new
  * request while an unfinished spec holds the name, and the enqueue `Operation` cannot say
  * which side won — so the request carries a `restore-session-{id}` tag and the stored
- * `WorkInfo` proves the answer: an unfinished (or already-succeeded) spec for *this* session
- * is `ENQUEUED`, a name held by a different session's spec is `ALREADY_RUNNING`, and anything
+ * `WorkInfo` proves the answer: an unfinished spec for this session or this exact request's
+ * success is `ENQUEUED`, a name held by a different session's spec is `ALREADY_RUNNING`, and anything
  * else — a vanished request, a failed/cancelled spec — throws so the caller keeps the durable
  * intent for start-up reconciliation.
  */
@@ -79,13 +80,14 @@ internal class WorkManagerImportWorkScheduler
             auto: Boolean,
         ): RestoreEnqueue {
             // A failed Operation is ambiguous — throw and keep the durable intent.
+            val request = restoreRequest(sessionId, auto)
             workManager
                 .enqueueUniqueWork(
                     RestoreWorkData.WORK_RESTORE,
                     ExistingWorkPolicy.KEEP,
-                    restoreRequest(sessionId, auto),
+                    request,
                 ).await()
-            return restoreAdmission(sessionId)
+            return restoreAdmission(sessionId, request.id)
         }
 
         /**
@@ -108,7 +110,10 @@ internal class WorkManagerImportWorkScheduler
          * The admission proof behind [scheduleRestore]: which session the surviving spec(s)
          * belong to, from their `restore-session-{id}` tags.
          */
-        private suspend fun restoreAdmission(sessionId: Long): RestoreEnqueue {
+        private suspend fun restoreAdmission(
+            sessionId: Long,
+            requestId: UUID,
+        ): RestoreEnqueue {
             val infos =
                 workManager
                     .getWorkInfosForUniqueWork(RestoreWorkData.WORK_RESTORE)
@@ -116,7 +121,7 @@ internal class WorkManagerImportWorkScheduler
             val sessionTag = RestoreWorkData.sessionTag(sessionId)
             val ours = infos.filter { sessionTag in it.tags }
             if (ours.any { !it.state.isFinished }) return RestoreEnqueue.ENQUEUED
-            if (ours.any { it.state == WorkInfo.State.SUCCEEDED }) return RestoreEnqueue.ENQUEUED
+            if (ours.any { it.id == requestId && it.state == WorkInfo.State.SUCCEEDED }) return RestoreEnqueue.ENQUEUED
             if (ours.isNotEmpty()) {
                 throw IllegalStateException(
                     "restore spec for session $sessionId finished as ${ours.first().state} — admission unknown",
@@ -125,7 +130,7 @@ internal class WorkManagerImportWorkScheduler
             // No spec of ours: KEEP dropped the request because another session's spec held the
             // name at enqueue time — or the request vanished entirely, which must not be
             // reported as a definitive decline.
-            if (infos.isNotEmpty()) return RestoreEnqueue.ALREADY_RUNNING
+            if (infos.any { !it.state.isFinished }) return RestoreEnqueue.ALREADY_RUNNING
             throw IllegalStateException("restore request for session $sessionId left no spec")
         }
 

@@ -480,4 +480,6 @@
     <string name="notification_snapshot_pending_title">Backup gefunden</string>
     <string name="notification_snapshot_pending">Ein Neutrodyne-Backup kann wiederhergestellt werden.</string>
     <string name="notification_snapshot_needs_newer">Dieses Backup erfordert eine neuere Version von Neutrodyne.</string>
+    <string name="import_backup_title">Import und Backup</string>
+    <string name="import_backup_pending">Import- und Backup-Details sind in dieser Version noch nicht verfügbar.</string>
 </resources>
