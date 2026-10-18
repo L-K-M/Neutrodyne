@@ -59,5 +59,7 @@ internal class PlaybackMediaLookupImpl(
             playedAt = playedAt,
             sortDate = sortDate,
             podcastArtwork = ArtworkRef(podcastArtworkKey, podcastArtworkUrl, podcastArtworkVersion),
+            podcastAuthor = author,
+            pubDate = pubDate,
         )
 }
