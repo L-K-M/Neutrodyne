@@ -4,8 +4,10 @@ package ch.lkmc.neutrodyne.di
 import android.app.Application
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
+import ch.lkmc.neutrodyne.SnapshotNowReceiver
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenInitializer
+import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.model.ExportRequest
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
@@ -195,6 +197,16 @@ class AndroidAppGraphTest {
                 graph.databaseOpener.requireDatabase().close()
             }
         }
+
+    @Test
+    fun snapshotReceiverInjectionKeepsTheRepositoryLazyBeforeDatabaseOpen() {
+        val receiver = SnapshotNowReceiver()
+
+        graph.inject(receiver)
+
+        assertThat(receiver.backupRepository.isInitialized()).isFalse()
+        assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+    }
 
     private companion object {
         val STARTUP_BANDS =

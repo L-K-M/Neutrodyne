@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.GraphHolder
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.BackupError
@@ -17,6 +18,7 @@ import ch.lkmc.neutrodyne.core.model.SnapshotWrite
 import ch.lkmc.neutrodyne.di.AndroidAppGraph
 import dev.zacsweers.metro.Inject
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -47,23 +49,44 @@ class SnapshotNowReceiver : BroadcastReceiver() {
         intent: Intent,
     ) {
         val pendingResult = goAsync()
-        val graph = (context.applicationContext as GraphHolder).graph as AndroidAppGraph
-        graph.inject(this)
-        val write = appScope.async { backupRepository.value.writeSnapshotNow() }
-        appScope.launch {
-            val outcome =
-                suspendRunCatching { withTimeoutOrNull(AWAIT_MS) { write.await() } }
-                    .getOrElse { Outcome.Failure(BackupError.Io) }
-            val (code, data) = report(outcome)
+        val write =
             try {
-                pendingResult.setResult(code, data, null)
+                val graph = (context.applicationContext as GraphHolder).graph as AndroidAppGraph
+                graph.inject(this)
+                appScope.async { backupRepository.value.writeSnapshotNow() }
+            } catch (error: Exception) {
+                Log.e(TAG, error) { "snapshot trigger initialization failed" }
+                complete(pendingResult, report(Outcome.Failure(BackupError.Io)))
+                return
+            }
+        // Enter the finalizer even if the application scope has already been cancelled.
+        appScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            var reply = report(Outcome.Failure(BackupError.Io))
+            try {
+                val outcome =
+                    suspendRunCatching { withTimeoutOrNull(AWAIT_MS) { write.await() } }
+                        .getOrElse { Outcome.Failure(BackupError.Io) }
+                reply = report(outcome)
             } finally {
-                pendingResult.finish()
+                complete(pendingResult, reply)
             }
         }
     }
 
+    private fun complete(
+        pendingResult: PendingResult,
+        reply: Pair<Int, String>,
+    ) {
+        try {
+            pendingResult.setResult(reply.first, reply.second, null)
+        } finally {
+            pendingResult.finish()
+        }
+    }
+
     internal companion object {
+        private const val TAG = "SnapshotNowReceiver"
+
         /** A shell receiver must finish under 10 s even with `goAsync()`; the write is not bounded. */
         const val AWAIT_MS = 8_000L
 

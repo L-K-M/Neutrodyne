@@ -20,10 +20,12 @@ import ch.lkmc.neutrodyne.core.model.SnapshotStatus
 import ch.lkmc.neutrodyne.core.model.SnapshotWrite
 import ch.lkmc.neutrodyne.di.AndroidAppGraph
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -127,6 +129,50 @@ class SnapshotNowReceiverTest {
         }
 
     @Test
+    fun `a cancelled write still finishes the broadcast`() =
+        runTest {
+            application.repository = StubBackupRepository { throw CancellationException("write cancelled") }
+
+            val pending = receive()
+
+            assertThat(pending.isFinished()).isTrue()
+            assertThat(pending.resultCode).isEqualTo(Activity.RESULT_CANCELED)
+            assertThat(pending.resultData).isEqualTo("error io")
+        }
+
+    @Test
+    fun `an already cancelled application scope still finishes the broadcast`() =
+        runTest {
+            var writeStarted = false
+            application.repository =
+                StubBackupRepository {
+                    writeStarted = true
+                    Outcome.Success(SnapshotWrite(status(), status()))
+                }
+            val stopped = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+            stopped.cancel()
+
+            val pending = receive(stopped)
+
+            assertThat(pending.isFinished()).isTrue()
+            assertThat(pending.resultCode).isEqualTo(Activity.RESULT_CANCELED)
+            assertThat(writeStarted).isFalse()
+        }
+
+    @Test
+    fun `an injection failure answers error and finishes the broadcast`() =
+        runTest {
+            application.repository = StubBackupRepository { error("write must not start") }
+            application.injectionFailure = IllegalStateException("graph unavailable")
+
+            val pending = receive()
+
+            assertThat(pending.isFinished()).isTrue()
+            assertThat(pending.resultCode).isEqualTo(Activity.RESULT_CANCELED)
+            assertThat(pending.resultData).isEqualTo("error io")
+        }
+
+    @Test
     fun `the eight second wait answers pending without cancelling the write`() =
         runTest {
             val gate = CompletableDeferred<Outcome<SnapshotWrite, BackupError>>()
@@ -165,11 +211,13 @@ class SnapshotNowReceiverTest {
      * returns it, the launched report sets the ordered-broadcast line, and `finish()` completes
      * its shadow's future. `wentAsync` proves the broadcast stayed alive for the launch.
      */
-    private suspend fun TestScope.receive(): BroadcastReceiver.PendingResult {
+    private suspend fun TestScope.receive(
+        scope: CoroutineScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler)),
+    ): BroadcastReceiver.PendingResult {
         // The bound `@ApplicationScope` is a SupervisorJob scope (CoreBindings): a failed
         // write stays inside its Deferred for `await` to report — it never cancels the
         // reporting launch. Mirror that here on the shared test scheduler.
-        application.scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
+        application.scope = scope
         val pending = newPendingResult()
         val receiver = SnapshotNowReceiver()
         // `setPendingResult` is framework-hidden; the real dispatch calls it before onReceive.
@@ -250,6 +298,7 @@ class SnapshotNowReceiverTest {
         Application(),
         GraphHolder {
         var repository: BackupRepository? = null
+        var injectionFailure: RuntimeException? = null
         lateinit var scope: CoroutineScope
 
         override val graph: Any by lazy {
@@ -259,6 +308,7 @@ class SnapshotNowReceiverTest {
             ) { _, method, args ->
                 when (method.name) {
                     "inject" -> {
+                        injectionFailure?.let { throw it }
                         (args[0] as SnapshotNowReceiver).apply {
                             appScope = scope
                             backupRepository = lazyOf(checkNotNull(repository))

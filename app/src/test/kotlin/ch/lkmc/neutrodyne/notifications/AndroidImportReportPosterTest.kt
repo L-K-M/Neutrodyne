@@ -127,4 +127,21 @@ class AndroidImportReportPosterTest {
             assertThat(channel.name.toString()).isEqualTo("Import and backup")
             assertThat(channel.importance).isEqualTo(NotificationManager.IMPORTANCE_DEFAULT)
         }
+
+    @Test
+    fun newerSnapshotsUseThePendingOfferIdAndKeepManualFailuresOnTheirReport() =
+        runBlocking<Unit> {
+            poster.postRestoreFailed(10L, auto = true, error = BackupError.NewerFormat(2))
+            poster.postRestoreFailed(11L, auto = false, error = BackupError.NewerFormat(2))
+
+            val byId = manager.activeNotifications.associateBy { it.id }
+            val auto = byId.getValue(ImportBackupChannels.ID_FOREIGN_SNAPSHOT).notification
+            assertThat(auto.extras.getString(Notification.EXTRA_TEXT)).contains("newer version")
+            assertThat(shadowOf(auto.contentIntent).savedIntent.data)
+                .isEqualTo("neutrodyne://open/settings/backup".toUri())
+            val manual = byId.getValue(ImportBackupChannels.ID_RESTORE_FAILED).notification
+            assertThat(manual.extras.getString(Notification.EXTRA_TEXT)).contains("newer version")
+            assertThat(shadowOf(manual.contentIntent).savedIntent.data)
+                .isEqualTo("neutrodyne://open/import/11".toUri())
+        }
 }

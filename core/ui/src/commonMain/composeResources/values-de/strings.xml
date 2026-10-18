@@ -479,4 +479,5 @@
     <string name="notification_restore_failed_auto">Die gesicherte Bibliothek konnte nicht wiederhergestellt werden.</string>
     <string name="notification_snapshot_pending_title">Backup gefunden</string>
     <string name="notification_snapshot_pending">Ein Neutrodyne-Backup kann wiederhergestellt werden.</string>
+    <string name="notification_snapshot_needs_newer">Dieses Backup erfordert eine neuere Version von Neutrodyne.</string>
 </resources>
