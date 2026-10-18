@@ -243,6 +243,10 @@ abstract class GroupDao {
     @Query("SELECT podcastId, groupId FROM podcast_group_member")
     abstract fun observeMembershipPairs(): Flow<List<MembershipPair>>
 
+    /** The suspend variant of [observeMembershipPairs] for one-transaction export reads (05). */
+    @Query("SELECT podcastId, groupId FROM podcast_group_member")
+    abstract suspend fun membershipPairs(): List<MembershipPair>
+
     /** 05 Delete and undo: the row delete; memberships and settings rows cascade (02 FK). */
     @Query("DELETE FROM podcast_group WHERE id = :groupId")
     abstract suspend fun deleteGroup(groupId: Long): Int

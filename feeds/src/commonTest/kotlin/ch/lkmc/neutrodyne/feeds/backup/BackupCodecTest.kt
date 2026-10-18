@@ -16,6 +16,12 @@ class BackupCodecTest {
     private val codec = BackupCodec()
     private val stagingCodec = BackupCodec(BackupCodec.Mode.STAGING)
 
+    /**
+     * 50,000 nested arrays (~100 KiB): far beyond any recursive tree reader's stack, yet
+     * cheap — unknown-member skipping stays iterative at any depth.
+     */
+    private val deepArray = "[".repeat(DEEP_ARRAYS) + "0" + "]".repeat(DEEP_ARRAYS)
+
     private val overrides =
         OverridesV1(1.5f, true, 2f, 100L, 200L, true, 3, "WIFI_ONLY", true, "ON_PLAYED", false, true, 60)
 
@@ -243,6 +249,78 @@ class BackupCodecTest {
     }
 
     @Test
+    fun deepUnknownFieldsAreSkippedNotMaterialised() {
+        // Forward compatibility (05 Archive): unknown members skip iteratively, so a field
+        // nested beyond any recursive reader's reach is still ignored — never a crash.
+        val withDeep = codec.encodeManifest(manifest()).dropLast(1) + ",\"future\":" + deepArray + "}"
+        assertEquals(manifest(), codec.decodeManifest(sourceOf(withDeep)))
+        // The version gate still decides before the v1 decode reaches the unknown field.
+        val newer =
+            assertFailsWith<BackupCodecException.NewerFormat> {
+                codec.decodeManifest(sourceOf(withDeep.replace("\"minReaderVersion\":1", "\"minReaderVersion\":2")))
+            }
+        assertEquals(2, newer.minReaderVersion)
+        assertEquals(
+            LibraryV1(emptyList(), emptyList()),
+            codec.decodeLibrary(sourceOf("{\"podcasts\":[],\"groups\":[],\"future\":$deepArray}")),
+        )
+        assertEquals(
+            QueueV1(emptyList()),
+            codec.decodeQueue(sourceOf("{\"upNext\":[],\"future\":$deepArray}")),
+        )
+        assertEquals(
+            SettingsV1(emptyList()),
+            codec.decodeSettings(sourceOf("{\"values\":[],\"future\":$deepArray}")),
+        )
+    }
+
+    @Test
+    fun manifestFormatReadsFormatPastDeepUnknownFields() {
+        assertEquals(
+            BackupCodec.FORMAT,
+            codec.manifestFormat(sourceOf("{\"format\":\"${BackupCodec.FORMAT}\",\"future\":$deepArray}")),
+        )
+        // A `format` that is itself a deep container is "no string format", not a crash.
+        assertNull(codec.manifestFormat(sourceOf("{\"format\":$deepArray}")))
+        assertFailsWith<BackupCodecException.NotABackup> {
+            codec.decodeManifest(sourceOf("{\"format\":$deepArray}"))
+        }
+    }
+
+    @Test
+    fun elementFieldsBeyondTheTreeReadersDepthAreCorrupt() {
+        // `rule` and `value` stay JsonElement/JsonPrimitive typed: their values still pass
+        // through the tree reader, so a container beyond its stack depth is a shape the
+        // DTOs reject — Corrupt, never the Error.
+        assertFailsWith<BackupCodecException.Corrupt> {
+            codec.decodeSettings(
+                sourceOf("{\"values\":[{\"key\":\"k\",\"type\":\"Bool\",\"value\":$deepArray}]}"),
+            )
+        }
+        assertFailsWith<BackupCodecException.Corrupt> {
+            codec.decodeLibrary(
+                sourceOf(
+                    "{\"podcasts\":[],\"groups\":[{\"uuid\":\"u\",\"name\":\"g\",\"sortOrder\":0,\"rule\":$deepArray}]}",
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun manifestGateOrderHoldsForScalarsAndMalformedInput() {
+        // A well-formed non-object has no `format` member (NotABackup); malformed JSON is
+        // Corrupt (05 Versioning's gate order).
+        assertFailsWith<BackupCodecException.NotABackup> { codec.decodeManifest(sourceOf("123")) }
+        assertFailsWith<BackupCodecException.NotABackup> { codec.decodeManifest(sourceOf("true")) }
+        assertFailsWith<BackupCodecException.Corrupt> { codec.decodeManifest(sourceOf("[1,")) }
+        assertFailsWith<BackupCodecException.Corrupt> {
+            codec.decodeManifest(
+                sourceOf("{\"format\":\"neutrodyne-backup\""),
+            )
+        }
+    }
+
+    @Test
     fun libraryRejectsOversizeAndCorruptInput() {
         val big = " ".repeat(BackupCodec.LIBRARY_MAX_BYTES.toInt() + 1)
         assertFailsWith<BackupCodecException.TooLarge> { codec.decodeLibrary(sourceOf(big)) }
@@ -443,6 +521,10 @@ class BackupCodecTest {
         md = 61L,
         ts = ts,
     )
+
+    private companion object {
+        const val DEEP_ARRAYS = 50_000
+    }
 
     private fun decodeAll(text: String): List<EpisodeLineV1> {
         val out = mutableListOf<EpisodeLineV1>()

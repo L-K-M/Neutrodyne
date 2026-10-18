@@ -6,6 +6,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class GroupNamesTest {
@@ -52,6 +53,25 @@ class GroupNamesTest {
     @Test fun lowercaseUsesTheInvariantLocaleAndFinalNfc() {
         assertEquals("i\u0307", valid("İ").nameKey)
         assertEquals("i", valid("I").nameKey)
+    }
+
+    @Test fun truncateCutsTheNormalizedNameAtTheCodePointCap() {
+        assertEquals("a".repeat(40), GroupNames.truncate("a".repeat(41))?.name)
+        assertEquals("🎧".repeat(40), GroupNames.truncate("🎧".repeat(41))?.name)
+        // A surrogate pair never splits: 20 supplementary chars plus 20 ASCII = 40 code points.
+        assertEquals(
+            "🎧".repeat(20) + "a".repeat(20),
+            GroupNames.truncate("🎧".repeat(20) + "a".repeat(21))?.name,
+        )
+        // The cap applies after normalization, matching validate's own counting.
+        assertEquals("a".repeat(40), GroupNames.truncate("  " + "a".repeat(41))?.name)
+    }
+
+    @Test fun truncatePassesShortNamesThroughNormalizedAndDropsEmpty() {
+        assertEquals("Tech", GroupNames.truncate("  Tech  ")?.name)
+        assertEquals(valid("Tech").nameKey, GroupNames.truncate("  Tech  ")?.nameKey)
+        assertEquals("a".repeat(40), GroupNames.truncate("a".repeat(40))?.name)
+        assertNull(GroupNames.truncate("   "))
     }
 
     @Test fun oldestFirstIsOnlyASuggestionForTheDocumentedWords() {

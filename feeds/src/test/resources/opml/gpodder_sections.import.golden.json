@@ -1,0 +1,46 @@
+{
+  "entries": [
+    {
+      "groupNames": [
+        "Audio"
+      ],
+      "ordinal": 0,
+      "title": "Audiopod",
+      "url": "https://audio.example.com/feed"
+    },
+    {
+      "groupNames": [
+        "Audio"
+      ],
+      "ordinal": 1,
+      "title": "Fallback",
+      "url": "https://fallback.example.com/feed"
+    },
+    {
+      "groupNames": [
+        "Video"
+      ],
+      "ordinal": 2,
+      "title": "Videopod",
+      "url": "https://video.example.com/feed"
+    }
+  ],
+  "format": "OPML",
+  "groups": [
+    {
+      "excludedReason": "gpodder_section",
+      "name": "Audio"
+    },
+    {
+      "excludedReason": "gpodder_section",
+      "name": "Video"
+    }
+  ],
+  "ignoredOutlines": 1,
+  "warnings": [
+    {
+      "code": "LINKED_LISTS",
+      "count": 1
+    }
+  ]
+}

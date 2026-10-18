@@ -182,6 +182,18 @@ class ImportSourceSnifferTest {
     }
 
     @Test
+    fun aManifestWithADeepUnknownFieldIsStillABackup() {
+        // The format probe reads `format` without a document tree: an unknown field nested
+        // beyond any recursive reader's stack must not keep the archive off the backup row.
+        val deep = "[".repeat(DEEP_ARRAYS) + "0" + "]".repeat(DEEP_ARRAYS)
+        val archives =
+            FakeArchives(
+                mapOf("manifest.json" to """{"format":"neutrodyne-backup","future":$deep}""".encodeToByteArray()),
+            )
+        assertEquals(SniffedFormat.NEUTRODYNE_BACKUP, recognized(sniff(zip, archives)))
+    }
+
+    @Test
     fun aDamagedManifestEntryStillReachesTheCsvFallback() {
         // The manifest entry exists but its data is damaged: the backup row does not
         // apply, so the .csv row still decides (05 Sniffing's else-if table).
@@ -213,6 +225,10 @@ class ImportSourceSnifferTest {
     @Test
     fun gzipAndUnknownBytes() {
         assertUnsupported("tgz", sniff(byteArrayOf(0x1F, 0x8B.toByte(), 0x08)))
+    }
+
+    private companion object {
+        const val DEEP_ARRAYS = 50_000
     }
 
     private fun assertUnsupported(

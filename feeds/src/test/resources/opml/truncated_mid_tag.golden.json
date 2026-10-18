@@ -1,0 +1,18 @@
+{
+  "entries": [
+    {
+      "ordinal": 0,
+      "text": "Whole",
+      "type": "rss",
+      "url": "https://w.example.com/rss"
+    },
+    {
+      "ordinal": 1,
+      "text": "Partial",
+      "type": "rss",
+      "url": "https://p.example.com/rss"
+    }
+  ],
+  "folders": [],
+  "mode": "RELAXED"
+}
