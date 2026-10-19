@@ -63,6 +63,8 @@ android {
     // Exercise the device gate's decisions on the host without copying its implementation.
     sourceSets["androidTest"].kotlin.srcDir("src/restoreTest/kotlin")
     sourceSets["test"].kotlin.srcDir("src/restoreTest/kotlin")
+    sourceSets["androidTest"].kotlin.srcDir("src/deviceSelectionTest/kotlin")
+    sourceSets["test"].kotlin.srcDir("src/deviceSelectionTest/kotlin")
 }
 
 dependencies {
@@ -161,6 +163,7 @@ dependencies {
 
     // S11's worker-side getString test resolves Res strings on the JVM.
     testImplementation(libs.cmp.resources)
+    testImplementation(libs.androidx.test.runner)
     // Startup recovery verifies the real periodic work against WorkManager's host backend.
     testImplementation(libs.androidx.work.testing)
     testImplementation(project(":feeds:jvm"))

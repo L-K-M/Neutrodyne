@@ -14,6 +14,11 @@ android {
     }
 }
 
+extensions.configure<com.android.build.api.dsl.LibraryExtension> {
+    sourceSets["androidTest"].kotlin.directories += "src/deviceSelectionTest/kotlin"
+    sourceSets["test"].kotlin.directories += "src/deviceSelectionTest/kotlin"
+}
+
 chaquopy {
     defaultConfig {
         version = "3.14" // fallback "3.13" (01 S7)
@@ -44,6 +49,7 @@ dependencies {
     implementation(project(":core:network:okhttp"))
 
     androidTestImplementation(libs.androidx.test.runner)
+    testImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.junit4)
     androidTestImplementation(libs.truth)
