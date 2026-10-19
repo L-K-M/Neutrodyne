@@ -1103,6 +1103,9 @@ private class PagerFixture {
                     FakePlaybackStateSource(),
                     testPlatformInfo,
                     Dispatchers.Unconfined,
+                    downloadController =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeDownloadController(),
                 ).also {
                     model = it
                     store.put("feeds", it)

@@ -344,6 +344,14 @@ The engine-backed implementations also serve the `armeabi-v7a` APK and the off o
 
 ### Capability consumers
 
+Implementation note (2026-10-19, M8): I3 integrates the landed M6a/M6b
+code without changing adopted resolution 1. Requests and AUTO insertion
+remain RSS-only, Download all uses the false downloads capability, restore
+re-download selects RSS only, and runtime claims disable YouTube candidates.
+The low-level DAO claim trusts its caller's candidate/source admission;
+W8 must assess direct-claim and malformed/restored-row coverage. Its external
+action hiding and integrated safety tests are not implemented by this merge.
+
 | Flag | Consumers |
 |---|---|
 | `inAppPlayback` | 06 `EpisodeResolver` YouTube branch, `QueueProjector`, Auto browse tree; 11 `DesktopEpisodeSourceResolver` and `DesktopQueueProjector`; 05/02 context tail (`youtubePlayable`); `QueueRepository` rejects YouTube adds when false; 08 row primary action |

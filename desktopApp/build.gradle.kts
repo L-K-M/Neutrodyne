@@ -110,6 +110,7 @@ dependencies {
     // The desktop graph test and the window-content Compose UI test (01 Testing, 11 Testing)
     testImplementation(project(":core:testing"))
     testImplementation(libs.junit4)
+    testImplementation(libs.okhttp.mockwebserver3)
     testImplementation(libs.truth)
     testImplementation(libs.cmp.ui.test)
     // Skiko natives so runComposeUiTest can render on this machine's OS

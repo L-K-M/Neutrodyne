@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: Unlicense
 #
 # nightly.yml — 09's overnight jobs. M0a carries `instrumented-full` (debug
-# leg), `api37-16k`, `release-build-smoke` and the report-only `repro`; M1a
+# leg), `api37-16k`, `release-build-smoke` and the report-only `repro`; M6b
+# adds `system-tests` and the out-of-process smoke legs; M1a
 # adds `mutation-full`. The other jobs land with their milestones
-# (`system-tests` M6b, `no-engine-build` M9a, `desktop-matrix` M0b,
+# (`no-engine-build` M9a, `desktop-matrix` M0b,
 # `sync-convergence` MS0, `server-image-smoke` MS1, `benchmark-dryrun` M10,
 # `screenshots-full` M10, `live-canary`, `youtube-canary` and
 # `engine-nightly-canary` M9a).
@@ -26,7 +27,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: "full | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | desktop (M0b) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36)"
+        description: "full | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | downloads (M6a journeys on API26/33/34/36) | desktop (M0b) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36)"
         default: full
 
 permissions:
@@ -43,11 +44,11 @@ env:
 jobs:
   instrumented-full:
     runs-on: ubuntu-24.04
-    timeout-minutes: 105
+    timeout-minutes: 150
     permissions:
       contents: read
       issues: write # report-nightly.sh
-    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'youtube-smoke'
+    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'youtube-smoke' || inputs.scope == 'downloads'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -83,17 +84,30 @@ jobs:
               -Pneutrodyne.testScope=nightly \
               -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
               -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest,ch.lkmc.neutrodyne.SmokeTest
+          elif [ "${{ inputs.scope }}" = "downloads" ]; then
+            ./gradlew --max-workers=2 :app:nightlyGroupDebugAndroidTest \
+              -Pneutrodyne.testScope=nightly \
+              -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.DownloadJourneyTest \
+              -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
           else
             ./gradlew --max-workers=2 nightlyGroupDebugAndroidTest nightlyGroupAndroidDeviceTest \
               -Pneutrodyne.testScope=nightly \
               -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
               -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
           fi
-      - name: Require M5 playback, listening timer and API 34 continuity
-        if: inputs.scope != 'youtube-smoke'
+      - name: Require M7 discovery on every nightly device
+        if: ${{ !cancelled() && inputs.scope != 'youtube-smoke' && inputs.scope != 'downloads' }}
+        run: python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api26 --device api33 --device api34 --device api36
+      - name: Require M5 playback and M6a download evidence
+        if: inputs.scope != 'youtube-smoke' && inputs.scope != 'downloads'
         run: python3 scripts/ci/assert-playback-tests.py nightly app/build/outputs/androidTest-results --device api26 --device api33 --device api34 --device api36 --apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-      # TODO (M6b): release leg — :benchmark's out-of-process release smoke
-      # journeys and E10's companions against :app release on api36 (09).
+      - name: Out-of-process smoke on api36 (benchmarkRelease fallback)
+        if: inputs.scope != 'youtube-smoke'
+        timeout-minutes: 40
+        run: scripts/ci/system-tests.sh smoke api36
+      - name: Require explicitly selected M6a journeys
+        if: inputs.scope == 'downloads'
+        run: python3 scripts/ci/assert-playback-tests.py downloads app/build/outputs/androidTest-results --device api26 --device api33 --device api34 --device api36 --apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
       - name: Report failure
         if: ${{ !success() }}
         env:
@@ -111,6 +125,62 @@ jobs:
           path: |
             **/build/outputs/androidTest-results/
             **/build/reports/androidTests/
+            benchmark/build/reports/system-tests/
+          if-no-files-found: error
+
+  system-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: write # report-nightly.sh
+    if: inputs.scope == '' || inputs.scope == 'full'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk /opt/ghc /usr/local/.ghcup
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm trigger --name-match=kvm || true
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+          cache-read-only: true
+      # The runner image no longer ships the emulator package; GMD needs it to boot devices
+      - name: Install the Android emulator
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools > /dev/null
+      - name: E10 on bench34 (benchmarkRelease fallback)
+        timeout-minutes: 45
+        run: scripts/ci/system-tests.sh process-death bench34
+      - name: Report failure
+        if: ${{ !success() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh system-tests
+      - name: Report recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh system-tests --close
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: system-tests-results
+          path: |
+            benchmark/build/outputs/androidTest-results/
+            benchmark/build/reports/androidTests/
+            benchmark/build/reports/system-tests/
+          if-no-files-found: error
 
   api37-16k:
     runs-on: ubuntu-24.04
@@ -156,6 +226,7 @@ jobs:
         run: |
           ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true assembleDebug assembleDebugAndroidTest :core:database:assembleAndroidDeviceTest
           ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true :app:assembleRelease :app:assembleReleaseAndroidTest
+          ./gradlew --max-workers=2 -Pneutrodyne.systemTests=true :benchmark:assembleBenchmarkRelease :app:assembleBenchmarkRelease
           # The safeguard only holds if every APK the emulator scripts install exists now -
           # a task left out above compiles, dexes and packages inside the booted 4-core
           # emulator and starves system_server the same way.
@@ -210,6 +281,7 @@ jobs:
             ! grep -q 'hasReadColorBufferDma' "$RUNNER_TEMP/logcat-api37-debug.txt" || { echo "::error::goldfish mapper aborted on color-buffer DMA"; exit 1; }
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true connectedDebugAndroidTest
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly connectedAndroidDeviceTest
+            python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/debug --device connected
             python3 scripts/ci/assert-playback-tests.py api37 app/build/outputs/androidTest-results/connected/debug --device connected --apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
       - name: Release smoke on API 37
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
@@ -253,9 +325,10 @@ jobs:
             test -r "$RUNNER_TEMP/logcat-api37-release.txt" && test -s "$RUNNER_TEMP/logcat-api37-release.txt" || { echo "::error::logcat capture missing, empty or unreadable"; exit 1; }
             ! grep -q 'hasReadColorBufferDma' "$RUNNER_TEMP/logcat-api37-release.txt" || { echo "::error::goldfish mapper aborted on color-buffer DMA"; exit 1; }
             ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true :app:connectedReleaseAndroidTest
+            python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/release --device connected
             python3 scripts/ci/assert-playback-tests.py release app/build/outputs/androidTest-results/connected/release --device connected --apk app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
             python3 scripts/ci/playback-reboot.py --hardening
-            # TODO (M6b): :benchmark's out-of-process release smoke journeys join here.
+            scripts/ci/system-tests.sh smoke connected
       # The device log of both emulator steps, for diagnosing a failed run (system_server state).
       - name: Upload the emulator logs
         if: ${{ !success() }}
@@ -273,6 +346,9 @@ jobs:
             app/build/outputs/androidTest-results/
             app/build/reports/androidTests/
             app/build/reports/playback-reboot/
+            benchmark/build/outputs/androidTest-results/
+            benchmark/build/reports/androidTests/
+            benchmark/build/reports/system-tests/
             ${{ runner.temp }}/logcat-api37-*.txt
           if-no-files-found: error
       - name: Build the release APKs for the alignment check
@@ -325,6 +401,9 @@ jobs:
       # the release variant's tests (PLAN M0 AC4).
       - name: api36 release smoke
         run: ./gradlew -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true api36ReleaseAndroidTest
+      - name: Require M7 discovery in optimized release
+        if: ${{ !cancelled() }}
+        run: python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api36
       - name: Require real release playback smoke
         run: python3 scripts/ci/assert-playback-tests.py release app/build/outputs/androidTest-results --device api36 --apk app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -530,3 +609,62 @@ jobs:
           path: |
             **/build/reports/tests/
             **/build/test-results/
+
+  bmgr-download-exclusion:
+    permissions:
+      contents: read
+      issues: write
+    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'downloads'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [29, 36]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+          cache-read-only: true
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm trigger --name-match=kvm || true
+      - name: Build release and seed APKs before boot
+        run: ./gradlew --max-workers=2 -PtestBuildType=release :app:assembleRelease :app:assembleReleaseAndroidTest
+      - name: Inspect backup transport with completed internal and external media
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: ${{ matrix.api }}
+          target: default
+          arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            adb install $(find app/build/outputs/apk/release -name '*x86_64*release.apk' -print -quit)
+            adb install -t app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
+            scripts/ci/bmgr-check.sh ch.lkmc.neutrodyne
+      - name: Report failure
+        if: ${{ !success() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh bmgr-download-exclusion-api${{ matrix.api }}
+      - name: Report recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh bmgr-download-exclusion-api${{ matrix.api }} --close
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: bmgr-download-exclusion-api${{ matrix.api }}
+          path: build/bmgr-evidence/

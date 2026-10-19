@@ -271,6 +271,13 @@ internal class LifecycleHarness(
                 ch.lkmc.neutrodyne.core.testing
                     .FakeChapterRepository()
             },
+            local,
+            Provider {
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeMissingLocalMediaReporter()
+            },
+            ch.lkmc.neutrodyne.core.testing
+                .FakeLocalMediaReadiness(),
         )
     val connection =
         PlayerConnection(

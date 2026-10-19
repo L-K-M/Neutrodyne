@@ -15,9 +15,12 @@ import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.domain.StartGate
 import ch.lkmc.neutrodyne.core.domain.StartMembership
 import ch.lkmc.neutrodyne.core.model.Availability
+import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
+import ch.lkmc.neutrodyne.core.model.FilterFlagBits
+import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.core.model.PlayContextSpec
 import ch.lkmc.neutrodyne.core.model.PlaybackMediaInfo
 import ch.lkmc.neutrodyne.core.model.QueueItem
@@ -46,6 +49,11 @@ sealed interface StartRequest {
         val startEpisodeId: Long? = null,
         val positionMs: Long? = null,
         val membership: StartMembership = StartMembership.ANY,
+    ) : StartRequest
+
+    data class Downloads(
+        val startEpisodeId: Long? = null,
+        val positionMs: Long? = null,
     ) : StartRequest
 
     data object Resume : StartRequest
@@ -150,6 +158,38 @@ class PlayStarter(
                         if (queued == null) id else null,
                         request.positionMs,
                         membership = request.membership,
+                    )
+                }
+
+                is StartRequest.Downloads -> {
+                    require(request.positionMs == null || request.positionMs >= 0)
+                    val spec =
+                        PlayContextSpec(
+                            ContextType.DOWNLOADS,
+                            null,
+                            FeedOrder.NEWEST_FIRST,
+                            FilterFlagBits.UNPLAYED,
+                            MediaFilter.ALL,
+                            null,
+                            false,
+                        )
+                    val queued = if (request.startEpisodeId == null) firstPlayable(queue) else null
+                    val id = request.startEpisodeId ?: queued ?: contexts.startItem(spec)
+                    if (id == null) return nothingToPlay(queue, spec)
+                    Selection(
+                        id,
+                        spec,
+                        ContextRetention.REPLACE,
+                        if (queued == null) id else null,
+                        request.positionMs,
+                        membership =
+                            if (request.startEpisodeId ==
+                                null
+                            ) {
+                                StartMembership.ANY
+                            } else {
+                                StartMembership.CONTEXT
+                            },
                     )
                 }
 

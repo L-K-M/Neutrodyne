@@ -1695,6 +1695,12 @@ artwork requests are disclosed separately in Settings › Privacy and
 
 ## Deep links and share targets
 
+**Implementation note (2026-10-19, M7):** The Apple HTTPS filter declares
+`android:autoVerify="false"` explicitly. Release lint requires an explicit
+choice for a browsable HTTPS filter; false preserves the adopted rule of no
+automatic domain verification. Browser delivery on API 31+ still requires
+user approval, and Share remains the documented path.
+
 Serves R3.1 (links), R8.3, onboarding. Delivered in M7 (Android filters; M1 handles the same schemes only when typed into the add sheet), MD2 (desktop URL schemes, 11). Routing: [01 Intent routing](01-foundation.md#intent-routing) maps every match to `AddPodcastKey(input)` on both platforms; nothing subscribes without the user tapping Subscribe. The XML below is Android's; the desktop's inputs follow it.
 
 ```xml
@@ -1712,7 +1718,7 @@ Serves R3.1 (links), R8.3, onboarding. Delivered in M7 (Android filters; M1 hand
   <category android:name="android.intent.category.BROWSABLE" />
   <data android:scheme="neutrodyne" android:host="subscribe" />
 </intent-filter>
-<intent-filter>   <!-- Apple Podcasts web links; not App Links (no autoVerify): active on API 31+ only after the user adds the domain -->
+<intent-filter android:autoVerify="false">   <!-- Apple web links: user approval required on API 31+ -->
   <action android:name="android.intent.action.VIEW" />
   <category android:name="android.intent.category.DEFAULT" />
   <category android:name="android.intent.category.BROWSABLE" />

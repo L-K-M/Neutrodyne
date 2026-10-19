@@ -23,8 +23,10 @@ import ch.lkmc.neutrodyne.core.model.PlaybackSettingChange
 import ch.lkmc.neutrodyne.core.model.ScopedSettingsView
 import ch.lkmc.neutrodyne.core.model.SettingOverrides
 import ch.lkmc.neutrodyne.core.model.SettingScope
+import ch.lkmc.neutrodyne.core.model.hasSupportedKeepLatest
 import ch.lkmc.neutrodyne.core.model.hasSupportedPlaybackSpeed
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
+import ch.lkmc.neutrodyne.core.model.withGroupAutoDownloadGating
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.Provider
@@ -67,6 +69,11 @@ internal class ScopeSettingsRepositoryImpl(
             val next = change(previous.toModel())
             if (!next.hasSupportedRefreshInterval()) return@write invalidRefresh()
             if (!next.hasSupportedPlaybackSpeed()) return@write invalidSpeed()
+            if (!next.hasSupportedKeepLatest()) {
+                return@write Outcome.Failure(
+                    SettingsError.OutOfRange("autoDownloadKeepLatest"),
+                )
+            }
             val stored = previous.withEditableFields(next)
             if (stored == ScopeOverrides()) {
                 dao.deletePodcast(podcastId)
@@ -88,9 +95,14 @@ internal class ScopeSettingsRepositoryImpl(
         write(afterCommit = ::syncGroupChannels) {
             if (db.groupDao().groupById(groupId) == null) return@write Outcome.Success(ScopeWrite.UNCHANGED)
             val previous = dao.forGroup(groupId)?.o ?: ScopeOverrides()
-            val next = change(previous.toModel())
+            val next = change(previous.toModel()).withGroupAutoDownloadGating()
             if (!next.hasSupportedRefreshInterval()) return@write invalidRefresh()
             if (!next.hasSupportedPlaybackSpeed()) return@write invalidSpeed()
+            if (!next.hasSupportedKeepLatest()) {
+                return@write Outcome.Failure(
+                    SettingsError.OutOfRange("autoDownloadKeepLatest"),
+                )
+            }
             val stored = previous.withEditableFields(next)
             if (stored == ScopeOverrides()) {
                 dao.deleteGroup(groupId)
@@ -268,6 +280,12 @@ internal class ScopeSettingsRepositoryImpl(
             notifyNewEpisodes,
             playbackSpeed?.takeIf(PlaybackSettingKeys::isValidSpeed),
             skipSilence,
+            autoDownload = autoDownload,
+            autoDownloadKeepLatest = autoDownloadKeepLatest,
+            autoDownloadNetwork = autoDownloadNetwork,
+            autoDownloadRequireCharging = autoDownloadRequireCharging,
+            includeVideoInAutoDownload = includeVideoInAutoDownload,
+            deleteAfterPlayed = deleteAfterPlayed,
         )
 
     private fun ScopeOverrides.withEditableFields(value: SettingOverrides): ScopeOverrides =
@@ -276,6 +294,12 @@ internal class ScopeSettingsRepositoryImpl(
             notifyNewEpisodes = value.notifyNewEpisodes,
             playbackSpeed = value.playbackSpeed,
             skipSilence = value.skipSilence,
+            autoDownload = value.autoDownload,
+            autoDownloadKeepLatest = value.autoDownloadKeepLatest,
+            autoDownloadNetwork = value.autoDownloadNetwork,
+            autoDownloadRequireCharging = value.autoDownloadRequireCharging,
+            includeVideoInAutoDownload = value.includeVideoInAutoDownload,
+            deleteAfterPlayed = value.deleteAfterPlayed,
         )
 
     private fun invalidSpeed(): Outcome<Nothing, SettingsError> =

@@ -36,7 +36,7 @@ public fun Modifier.onSecondaryClick(onSecondaryClick: () -> Unit): Modifier =
 
 /** Consume modified pointer clicks before combinedClickable can also open the episode. */
 @Composable
-internal fun Modifier.onEpisodePointerGesture(
+public fun Modifier.onEpisodePointerGesture(
     onFocus: () -> Unit,
     onMenu: () -> Unit,
     onSelect: () -> Unit,

@@ -23,6 +23,7 @@ import ch.lkmc.neutrodyne.core.model.PodcastDetail
 import ch.lkmc.neutrodyne.core.model.ScopedSettingsView
 import ch.lkmc.neutrodyne.core.model.SettingField
 import ch.lkmc.neutrodyne.core.model.SettingOverrides
+import ch.lkmc.neutrodyne.core.ui.DownloadSettingEdit
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.UserMessages
@@ -107,6 +108,10 @@ public class PodcastSettingsViewModel
 
         public fun setVariants(variants: Int) {
             write { channels.setVariants(podcastId, variants) }
+        }
+
+        public fun editDownload(edit: DownloadSettingEdit) {
+            writeScope(edit.field, edit::applyTo)
         }
 
         public fun setRefreshIntervalMinutes(minutes: Int?) {

@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
+import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -23,10 +24,12 @@ import kotlinx.coroutines.flow.update
  */
 class FakeSettingsRepository : SettingsRepository {
     private val values = MutableStateFlow<Map<SettingsFile, Map<String, Any>>>(emptyMap())
-    private val loggedCalls = mutableListOf<String>()
+
+    // Directory providers read settings concurrently; retain an immutable snapshot per append.
+    private val loggedCalls = MutableStateFlow(persistentListOf<String>())
 
     /** Every call so far, e.g. `set(playback.skip_back_ms)`. */
-    val calls: List<String> get() = loggedCalls.toList()
+    val calls: List<String> get() = loggedCalls.value
 
     /** Returned by the next [set] instead of writing; one-shot, cleared after use. */
     var failNextSet: SettingsError? = null
@@ -35,7 +38,7 @@ class FakeSettingsRepository : SettingsRepository {
         values.map { stored -> stored.storedValue(key) }.distinctUntilChanged()
 
     override suspend fun <T : Any> get(key: SettingKey<T>): T {
-        loggedCalls += "get(${key.name})"
+        loggedCalls.update { it.add("get(${key.name})") }
         return values.value.storedValue(key)
     }
 
@@ -43,7 +46,7 @@ class FakeSettingsRepository : SettingsRepository {
         key: SettingKey<T>,
         value: T,
     ): Outcome<Unit, SettingsError> {
-        loggedCalls += "set(${key.name})"
+        loggedCalls.update { it.add("set(${key.name})") }
         if (!AllSettingKeys.acceptsValue(key, value)) {
             return Outcome.Failure(SettingsError.OutOfRange(key.name))
         }
@@ -60,7 +63,7 @@ class FakeSettingsRepository : SettingsRepository {
     }
 
     override suspend fun reset(key: SettingKey<*>) {
-        loggedCalls += "reset(${key.name})"
+        loggedCalls.update { it.add("reset(${key.name})") }
         values.update { current ->
             current + (key.file to (current[key.file].orEmpty() - key.name))
         }

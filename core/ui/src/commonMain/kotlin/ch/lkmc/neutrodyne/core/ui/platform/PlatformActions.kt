@@ -12,6 +12,9 @@ import androidx.compose.runtime.staticCompositionLocalOf
  * action; screens hide the corresponding control then.
  */
 public interface PlatformActions {
+    /** Android system settings for download waits/notices; absent on desktop. */
+    public val settings: SystemSettingsOpener? get() = null
+
     /** Every link, "Watch on YouTube", update and help links. */
     public val urls: ExternalUrlOpener
 
@@ -112,4 +115,10 @@ public val LocalPlatformActions: androidx.compose.runtime.ProvidableCompositionL
 /** Opens Android's app-specific Open by default preferences after an explicit tap. */
 public fun interface AppleLinkSettings {
     public fun openSettings(): OpenResult
+}
+
+public enum class SystemSettingsTarget { STORAGE, BACKGROUND_DATA, APP_DETAILS }
+
+public fun interface SystemSettingsOpener {
+    public fun open(target: SystemSettingsTarget): Boolean
 }

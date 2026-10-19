@@ -2,12 +2,12 @@
 
 package ch.lkmc.neutrodyne.core.model
 
-/** Filters whose producers arrive after M2; Unplayed, media and age filters are always available. */
+/** Filters backed by live producers; Unplayed, media and age filters are always available. */
 enum class FeedFilterCapability { IN_PROGRESS, DOWNLOADED }
 
-/** IN_PROGRESS ships with M4 positions (W10); DOWNLOADED stays off until M6 downloads. */
+/** IN_PROGRESS ships with M4 positions; DOWNLOADED with M6 downloads. */
 val AVAILABLE_FEED_FILTER_CAPABILITIES: Set<FeedFilterCapability> =
-    setOf(FeedFilterCapability.IN_PROGRESS)
+    setOf(FeedFilterCapability.IN_PROGRESS, FeedFilterCapability.DOWNLOADED)
 
 /** Derive effective filters without rewriting stored or synced preferences. */
 fun FeedFilters.withCapabilities(available: Set<FeedFilterCapability>): FeedFilters =

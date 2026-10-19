@@ -17,6 +17,26 @@ import org.junit.Test
  */
 class SmokeModeTest {
     @Test
+    fun `stops graph jobs and watchdog before removing smoke files`() {
+        lateinit var startedGraph: ch.lkmc.neutrodyne.desktop.di.DesktopAppGraph
+        val exit =
+            SmokeMode(
+                output = {},
+                windowStep = { graph ->
+                    startedGraph = graph
+                    FIRST_FRAME_MS
+                },
+            ).run()
+        assertThat(exit).isEqualTo(0)
+        assertThat(startedGraph.appScope.coroutineContext[kotlinx.coroutines.Job]?.isCompleted).isTrue()
+        assertThat(
+            java.nio.file.Files
+                .exists(startedGraph.dirs.data),
+        ).isFalse()
+        assertThat(Thread.getAllStackTraces().keys.any { it.name == "smoke-watchdog" && it.isAlive }).isFalse()
+    }
+
+    @Test
     fun `prints one SMOKE json line and exits 0`() {
         val lines = mutableListOf<String>()
         val exitCode =

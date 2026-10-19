@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.SleepTimerState
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
+import ch.lkmc.neutrodyne.core.navigation.DirectoryKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
@@ -25,6 +26,7 @@ import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
+import ch.lkmc.neutrodyne.core.navigation.PodcastPreviewKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastSettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
@@ -71,6 +73,31 @@ class DesktopAppGraphTest {
     }
 
     @Test
+    fun discoveryEntriesResolveWithTheirIntendedScenes() {
+        val provider = entryProvider<NavKey> { graph.entryInstallers.forEach { it() } }
+        assertThat(provider(DiscoverKey).metadata[NdSceneMetadata.KEY_PANE])
+            .isEqualTo(NdSceneMetadata.PANE_LIST)
+        for (key in listOf(
+            DirectoryKey("news", null),
+            DirectoryKey("", null),
+            DirectoryKey("", "1318"),
+            PodcastPreviewKey("https://example.test/feed"),
+        )) {
+            assertThat(provider(key).metadata[NdSceneMetadata.KEY_PANE]).isEqualTo(NdSceneMetadata.PANE_DETAIL)
+        }
+        assertThat(provider(AddPodcastKey(null)).metadata[NdSceneMetadata.KEY_OVERLAY])
+            .isEqualTo(NdSceneMetadata.OVERLAY_SHEET)
+        for (page in listOf(SettingsPage.DISCOVER, SettingsPage.PRIVACY)) {
+            assertThat(provider(SettingsKey(page)).contentKey).isNotNull()
+        }
+        assertThat(graph.searchRepository::class.simpleName).isEqualTo("SearchRepositoryImpl")
+        assertThat(graph.searchRepository).isSameInstanceAs(graph.searchRepository)
+        assertThat(graph.autodiscovery::class.simpleName).isEqualTo("JsoupAutodiscovery")
+        assertThat(graph.metroViewModelFactory).isNotNull()
+        assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+    }
+
+    @Test
     fun durablePlaybackPortsResolveToSingleProductionBindings() =
         runBlocking {
             graph.databaseOpener.awaitOpen()
@@ -87,6 +114,9 @@ class DesktopAppGraphTest {
                 for ((binding, expectedName) in bindings) {
                     assertThat(binding::class.simpleName).isEqualTo(expectedName)
                 }
+                assertThat(graph.downloadController()::class.simpleName).isEqualTo("DownloadControllerImpl")
+                assertThat(graph.downloadProgress()::class.simpleName).isEqualTo("DownloadProgressHub")
+                assertThat(graph.downloadController()).isSameInstanceAs(graph.downloadController())
                 assertThat(graph.queueRepository()).isSameInstanceAs(graph.queueRepository())
                 assertThat(graph.playContextResolver()).isSameInstanceAs(graph.playContextResolver())
                 assertThat(graph.playSessionStore()).isSameInstanceAs(graph.playSessionStore())
@@ -134,6 +164,8 @@ class DesktopAppGraphTest {
             assertThat(graph.playbackMaintenance.streamingCacheBytes()).isEqualTo(0)
             graph.playbackMaintenance.clearStreamingCache()
             assertThat(graph.localMediaIndex.localUriOrNull(1)).isNull()
+            assertThat(graph.localMediaIndex::class.simpleName).isEqualTo("LocalMediaIndexImpl")
+            assertThat(graph.localMediaChanges).isSameInstanceAs(graph.localMediaIndex)
             assertThat(graph.youtubeCapabilities).isSameInstanceAs(graph.youtubeCapabilities)
             assertThat(graph.youtubeCapabilities.capabilities.value.inAppPlayback).isFalse()
             assertThat(
@@ -284,7 +316,13 @@ class DesktopAppGraphTest {
                 .single()
                 .order
         assertThat(dbOrder).isLessThan(orders.getValue("CredentialLoadInitializer"))
+        assertThat(orders.getValue("DesktopDownloadIndexInitializer")).isEqualTo(130)
+        assertThat(orders.getValue("DesktopDeferredDeletesInitializer")).isEqualTo(310)
+        assertThat(orders.getValue("DesktopDownloadAlerts")).isEqualTo(310)
+        assertThat(orders.getValue("DesktopDownloadObservers")).isEqualTo(310)
         assertThat(orders.getValue("CredentialLoadInitializer"))
+            .isLessThan(orders.getValue("DesktopDownloadIndexInitializer"))
+        assertThat(orders.getValue("DesktopDownloadIndexInitializer"))
             .isLessThan(orders.getValue("DesktopRunnerInitializer"))
     }
 
@@ -331,6 +369,36 @@ class DesktopAppGraphTest {
         assertThat(graph.jobRunner.status.value.keys).contains("import-backup")
     }
 
+    @Test
+    fun collectingInitializersBeforeDatabaseOpenIsSafeOnTheEventThread() {
+        java.awt.EventQueue.invokeAndWait {
+            assertThat(graph.initializers).isNotEmpty()
+        }
+        assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+    }
+
+    @Test
+    fun desktopAutomaticDownloadsAndMoveLanesResolveWithSharedOwners() =
+        runBlocking {
+            graph.databaseOpener.awaitOpen()
+            try {
+                assertThat(graph.autoDownloadPlanner()::class.simpleName).isEqualTo("AutoDownloadPlannerImpl")
+                assertThat(graph.cleanupPlanner()::class.simpleName).isEqualTo("CleanupPlannerImpl")
+                assertThat(graph.downloadMover()::class.simpleName).isEqualTo("DownloadMoverImpl")
+                assertThat(graph.autoDownloadPlanner()).isSameInstanceAs(graph.autoDownloadPlanner())
+                assertThat(graph.cleanupPlanner()).isSameInstanceAs(graph.cleanupPlanner())
+                assertThat(graph.downloadMover()).isSameInstanceAs(graph.downloadMover())
+                assertThat(graph.jobRunner.status.value.keys).containsAtLeast(
+                    "downloads-manual",
+                    "downloads-auto",
+                    "downloads-move",
+                )
+                assertThat(graph.initializers.count { it::class.simpleName == "DesktopDownloadObservers" }).isEqualTo(1)
+            } finally {
+                graph.databaseOpener.requireDatabase().close()
+            }
+        }
+
     private companion object {
         const val FIRST_BAND = 0
 
@@ -346,6 +414,9 @@ class DesktopAppGraphTest {
                 SleepTimerKey,
                 DownloadsKey,
                 DiscoverKey,
+                DirectoryKey("news", null),
+                DirectoryKey("", "1318"),
+                PodcastPreviewKey("https://example.test/feed"),
                 SettingsHomeKey,
                 SettingsKey(SettingsPage.ABOUT),
                 LicencesKey,

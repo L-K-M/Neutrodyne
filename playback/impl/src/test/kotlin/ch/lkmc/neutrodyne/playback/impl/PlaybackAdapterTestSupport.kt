@@ -134,6 +134,7 @@ internal class AdapterFixture(
             failures::add,
             boundaryCompleted = { events += PlaybackEvent.MarkedPlayed(it) },
             smartResume = { smartResume },
+            localChanges = local,
         )
 
     fun attach() {
@@ -222,6 +223,11 @@ internal class RecordingPlayer(
     ) {
         calls += "metadata"
         super.replaceMediaItem(index, mediaItem)
+    }
+
+    override fun removeMediaItem(index: Int) {
+        calls += "remove"
+        super.removeMediaItem(index)
     }
 
     override fun prepare() {

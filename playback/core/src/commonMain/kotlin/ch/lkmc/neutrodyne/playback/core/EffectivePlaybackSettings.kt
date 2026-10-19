@@ -150,6 +150,7 @@ class EffectivePlaybackSettings(
                 SettingSource.PodcastOverride -> SettingScope.PODCAST
                 is SettingSource.Group -> SettingScope.GROUP
                 SettingSource.AppDefault -> SettingScope.GLOBAL
+                SettingSource.NotSupported -> error("Playback resolution cannot be unsupported")
                 is SettingSource.Groups -> error("Playback resolution cannot merge context groups")
             }
         return writeScope(target, PlaybackSettingChange.Speed(next), scope)

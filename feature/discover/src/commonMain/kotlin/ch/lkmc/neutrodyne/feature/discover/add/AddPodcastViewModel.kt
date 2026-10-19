@@ -96,6 +96,7 @@ public sealed interface AddSheetStep {
     public data class Input(
         val error: UiText? = null,
         val auth: Boolean = false,
+        val searchQuery: String? = null,
         /** W5 renders the explicit consent action; it must never silently retry. */
         val lookupRequired: AddResolution.LookupRequired? = null,
     ) : AddSheetStep
@@ -226,6 +227,11 @@ public class AddPodcastViewModel(
     }
 
     /** The `AuthRequired` retry (03 Basic auth): the same input, now with credentials. */
+    public fun lookupOnce() {
+        val required = (mutableState.value.step as? AddSheetStep.Input)?.lookupRequired ?: return
+        runResolve { resolver.lookupOnce(required.input) }
+    }
+
     public fun resolveWithCredentials(credentials: BasicCredentials) {
         val input = resolvedInput ?: return
         runResolve { resolver.resolve(input, credentials) }
@@ -453,6 +459,7 @@ public class AddPodcastViewModel(
                             AddSheetStep.Input(
                                 error = AddPodcastText.describe(resolution.error),
                                 auth = resolution.error is AddPodcastError.AuthRequired,
+                                searchQuery = (resolution.error as? AddPodcastError.NotAUrl)?.query,
                             )
                         }
                     },

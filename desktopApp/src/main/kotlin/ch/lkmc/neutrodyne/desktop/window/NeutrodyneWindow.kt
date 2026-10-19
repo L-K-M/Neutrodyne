@@ -97,6 +97,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     onQuitRequest: () -> Unit,
     openHandler: DesktopOpenHandler? = null,
     rowArt: YouTubeRowArt = YouTubeRowArt.VIDEO_THUMBNAIL,
+    failedDownloads: kotlinx.coroutines.flow.Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
 ) {
     val state = rememberNeutrodyneWindowState()
     val icon = remember { WindowIcons.windowIconPainter() }
@@ -132,6 +133,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
                 dataDir = dataDir,
                 viewModelFactory = viewModelFactory,
                 openHandler = openHandler,
+                failedDownloads = failedDownloads,
             )
         }
         if (openHandler == null) content() else DesktopDropTarget(openHandler, content)
@@ -289,6 +291,7 @@ internal fun NeutrodyneWindowContent(
     dataDir: Path? = null,
     openHandler: DesktopOpenHandler? = null,
     rowArt: YouTubeRowArt = YouTubeRowArt.VIDEO_THUMBNAIL,
+    failedDownloads: kotlinx.coroutines.flow.Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
 ) {
     val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
     val platformActions = rememberDesktopPlatformActions()
@@ -337,6 +340,7 @@ internal fun NeutrodyneWindowContent(
         LocalMetroViewModelFactory provides viewModelFactory,
     ) {
         NeutrodyneRoot(
+            failedDownloads = failedDownloads,
             state = RootUiState.READY.copy(startup = startup),
             actions = actions,
             slots = slots,

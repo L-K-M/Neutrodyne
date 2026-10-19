@@ -13,6 +13,7 @@ are redistributed. Artwork URLs are parser data and are never fetched in tests.
 - fyyd.json: https://api.fyyd.de/0.2/search/podcast?title=news&count=2
 - podcast-index.json: authored spec-derived example, NOT a live authenticated recording.
   https://podcastindex-org.github.io/docs-api/pi_api.json
+- journey-feed.xml: authored Unlicense feed for confirmation, episode and group-membership journeys; never fetched from a publisher.
 - HTML: authored minimal structural fixtures, Unlicense. They reproduce the
   alternate/base, Apple-anchor-only, WordPress and multiple-feed AC3 shapes.
 

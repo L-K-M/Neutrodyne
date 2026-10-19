@@ -536,7 +536,7 @@ PYEOF
             if grep -q "$desc" <<< "$dout"; then
                 fail "$apkname: class from a non-published source set in $dexname: $desc ($src)"
             fi
-        done < <(find "$REPO_ROOT/app/src/debug" "$REPO_ROOT/app/src/benchmarkRelease" -name '*.kt' 2>/dev/null)
+        done < <(find "$REPO_ROOT/app/src/debug" "$REPO_ROOT/app/src/benchmarkRelease" "$REPO_ROOT/download/impl/src/systemTest" -name '*.kt' 2>/dev/null)
         grep -q 'Lch/lkmc/neutrodyne/youtube/ytdlp/' <<< "$dout" && engine_found=1
     done < <(cd "$ND_TMP" && python3 - "$apk" <<'PYEOF'
 import sys, zipfile, os

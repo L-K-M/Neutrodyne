@@ -22,6 +22,7 @@ object AllSettingKeys {
             YouTubeSettingKeys.ALL +
             GroupsSettingKeys.ALL +
             PlaybackSettingKeys.ALL +
+            DownloadSettingKeys.ALL +
             BackupSettingKeys.ALL +
             DesktopSettingKeys.ALL
 
@@ -38,7 +39,8 @@ object AllSettingKeys {
     ): Boolean =
         acceptsStoredType(key, value) &&
             PlaybackSettingKeys.acceptsRange(key, value) &&
-            DiscoverSettingKeys.acceptsValue(key, value)
+            DiscoverSettingKeys.acceptsValue(key, value) &&
+            DownloadSettingKeys.acceptsRange(key, value)
 }
 
 /** The stored-type half of [AllSettingKeys.acceptsValue]; one branch per [SettingKey] subclass. */

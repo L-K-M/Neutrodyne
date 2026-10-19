@@ -748,6 +748,38 @@ In progress is enabled; Downloaded remains gated until M6.
 
 ### Downloads
 
+**Implementation note (2026-10-19, M6a).** The manual Downloads screen exposes
+new-download storage selection, manual mobile-data policy and the current wait
+reasons. The empty state links to "Download settings". Automatic admission,
+cleanup/caps, root moves, Download all and desktop folder registration remain
+M6b controls and are hidden. Existing completed files retain their recorded
+roots when you select a location for new downloads. Desktop Share file is
+hidden. The background-restriction notice refers to downloads generally while
+automatic downloads are unavailable. Queued episode buttons open the current
+wait reason's actions and Cancel; completed buttons open a delete confirmation.
+Progress is an overlay for visible IDs and never invalidates paging membership.
+
+**Implementation note (2026-10-19, M6b).** W9 is integrated with M6a's
+real Downloads screen, preserving selection, playback, visible live progress,
+manual consent and deletion confirmation. Its duplicate overview is replaced
+by shared ordered notices and the orphan-confirmation dialog on that screen.
+Settings combines M6a's manual mobile-data/root controls with W9's automatic
+policy, cleanup and cap controls. Android root rows and desktop folder changes
+use the same move-or-leave confirmation and W4's implemented controller.
+Desktop completed rows reveal their indexed file URI through RevealInFolder;
+Share file remains Android-only. Episode DownloadToggle uses M6a's real request
+handler, including the entry point used by the benchmark smoke journey.
+Bulk requests also hand notification consent to that contextual handler,
+including its blocked-permission guidance. Storage actions resolve the selected
+root instead of assuming the desktop default folder.
+`DownloadsOverview` has no move counters, so MOVE_IN_PROGRESS reads
+"Moving downloads…" without invented counts. Scoped choosers retain M2's
+"Inherit" label because ScopedSettingsView has no underlying overridden value.
+Group dependents require explicit opt-in, and external-mode cleanup remains
+editable. No YouTube transfer behavior is added. These controls supersede the
+M6a-only hiding described in the preceding historical note.
+
+
 `DownloadsKey`, `:feature:downloads`, M6 (empty state from M0). Data: 07's `DownloadController.observeAll(): Flow<DownloadsOverview>` (in progress, completed and failed `DownloadEntry` lists, `StorageUsage`, `notices`) with live bytes from `DownloadProgressSource` for the visible in-progress rows ([07 Engine architecture](07-downloads.md#engine-architecture), [07 Notices](07-downloads.md#notices)); texts are [`DownloadStatusText`](#download-status-text).
 
 ```
@@ -1604,6 +1636,12 @@ All in `:core:ui`, returning `UiText` (01) so ViewModels stay resource-free; eac
 `EpisodeRowSummary.describe(row, live)`: "{title}. {podcast}. {date}. {duration}[, {n} minutes left][. Played][. New][. Downloaded | Downloading, {p} percent | {wait text} | Download failed][. Video][. Opens in YouTube][. Unavailable: {reason}][. Now playing]".
 
 #### Download status text
+
+**Implementation note (2026-10-19, M6a).** Desktop `SYSTEM` waits use
+"Interrupted, resumes automatically", following 07's quit/crash recovery
+semantics. The earlier statement below that `SYSTEM` never occurs on desktop
+does not apply to M6a recovery rows.
+
 
 07 owns the meaning of each state ([07 Wait reasons](07-downloads.md#wait-reasons), [07 Errors](07-downloads.md#errors)); this is the final wording, including 07's refinements (marked ‡). Context needed beyond the enum value: `lastError` (for `STORAGE` and `MISSING`), `nextAttemptAt` (both in `RowLive` and `DownloadStatus`), the row's `sourceType`, `YouTubeHealth.state` (YouTube gate) and `YouTubeCapabilities.externalReason` (YouTube rows in external mode). All texts, the YouTube ones included, are ordinary string resources, identical in every APK and desktop build ([Capability differences in UI](#capability-differences-in-ui)); on the desktop `STORAGE` with `lastError = STORAGE_UNAVAILABLE` reads ‡ "Waiting for the download folder", and `UNMETERED_NETWORK`, `CHARGING`, `SYSTEM` and `NEEDS_FOREGROUND` do not occur ([07 Desktop runners](07-downloads.md#desktop-runners)).
 
@@ -2778,6 +2816,14 @@ Shown at the top of Feeds and Manage groups when `PodcastRepository.observeCateg
 
 ### Permission prompts
 
+**Implementation note (2026-10-19, M6a).** Download consent and notification
+permission use the shared contextual dialog handler. After a notification
+denial, the contextual prompt shows "Notifications are blocked" and an explicit
+"Open settings" action. It never opens system settings automatically or retries
+the system dialog after a denial. This prompt replaces the inline blocked row
+for the M6a download entry points.
+
+
 **Android.** `POST_NOTIFICATIONS` (API 33+) is never requested at launch ([01 P22](01-foundation.md#platform-compliance)). `PlatformActions.notifications` (`NotificationPermissionRequester`, [Modules](#modules)) wraps `rememberLauncherForActivityResult(RequestPermission())` and is invoked only:
 
 1. when the user switches a new-episode notification setting on (global, group, podcast, or the import preview's "Notify me about new episodes"; 03's permission rule),
@@ -2794,6 +2840,16 @@ Denied → no repeated system dialog; the relevant screen shows an inline row "N
 ---
 
 ## Capability differences in UI
+
+**Implementation note (2026-10-19, M6b).** Adopted resolution 5 applies the
+global delete-after-played policy to completed YouTube files even while the
+channel is NotSupported; cleanup is still the user's chosen policy. External-mode
+copy must not imply that unavailable playback protects a file from cleanup.
+Adopted resolution 6 retains the M6a RevealInFolder mechanism; W9 owns the new
+Downloads-screen surface and settings row, without a second reveal mechanism.
+Adopted resolution 7 adds only the visible group/podcast "Download all unplayed…"
+action and confirmation, creating MANUAL rows; the restore offer remains M6a.
+
 
 Serves R3.7, R3.5, R3.6, R3.9 (display), R8.6, N8. Delivered in M8 (every APK and desktop build in external mode, reason `NOT_YET_AVAILABLE`), M9a (the engine on the 64-bit APKs; reason texts for `NOT_IN_THIS_APK`, `DISABLED_BY_USER`, `ENGINE_FAILED`; engine rows), M9b (engine-update rows) and MD3 (the engine on every desktop build). Honours [D2](../PLAN.md#3-key-decisions), [D51](../PLAN.md#3-key-decisions), [D77](../PLAN.md#3-key-decisions), [D90](../PLAN.md#3-key-decisions), [PO-2](../PLAN.md#po-2-distribution-channels). There is one Android product (build types only, [D2](../PLAN.md#3-key-decisions)) and one desktop configuration per target, and the UI never reads the ABI, the platform, `BuildConfig` or the no-engine build switch to decide what YouTube can do (only `ExternalReasonText` picks a desktop wording through `PlatformInfo`, below): every difference is driven by 04's `YouTubeCapabilitiesSource.capabilities` (`StateFlow<YouTubeCapabilities>` from `:youtube:api`, observed by ViewModels and never snapshotted), so every APK before M9a, every desktop build before MD3, the `armeabi-v7a` APK, the emergency builds without the engine and an app whose engine is off or failed all render the same **external mode** ([04 Capability matrix](04-youtube.md#capability-matrix), [04 Capability consumers](04-youtube.md#capability-consumers)). Capabilities can flip while a screen is visible (the switch, a third failed start, "Try again"): rows, Discover and Settings re-render at once; the queue and downloads follow 06 and 07.
 

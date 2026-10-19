@@ -19,6 +19,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -93,6 +94,34 @@ class NeutrodyneRootTest {
     fun tearDown() {
         Locale.setDefault(previousLocale)
     }
+
+    @Test fun downloadsBadgeWaitsForTheStartupGate() =
+        runComposeUiTest {
+            var subscribed = false
+            var startup by mutableStateOf<StartupGateState>(StartupGateState.Pending)
+            val counts =
+                kotlinx.coroutines.flow.flow {
+                    subscribed = true
+                    emit(3)
+                }
+            setContent { TestRoot(startup = startup, failedDownloads = counts) }
+            runOnIdle { kotlin.test.assertFalse(subscribed) }
+
+            runOnIdle { startup = StartupGateState.Ready }
+            onAllNodesWithContentDescription("3 failed downloads").onFirst().assertIsDisplayed()
+            runOnIdle { kotlin.test.assertTrue(subscribed) }
+        }
+
+    @Test
+    fun downloadsBadgeTracksOnlyTheFailureCountFlow() =
+        runComposeUiTest {
+            val count = kotlinx.coroutines.flow.MutableStateFlow(3)
+            setContent { TestRoot(failedDownloads = count) }
+            onAllNodesWithContentDescription("3 failed downloads").onFirst().assertIsDisplayed()
+            count.value = 0
+            waitForIdle()
+            onAllNodesWithContentDescription("3 failed downloads").assertCountEquals(0)
+        }
 
     @Test
     fun restoredExpandedPlayerMeasuresBeforeHidingSuite() =
@@ -585,10 +614,12 @@ private fun TestRoot(
     selectFeedSource: suspend (String?) -> Boolean = { true },
     slots: RootSlots = TestSlots,
     state: RootUiState = RootUiState.READY.copy(startup = startup),
+    failedDownloads: Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
 ) {
     CompositionLocalProvider(LocalPlatformActions provides TestPlatformActions) {
         NeutrodyneRoot(
             state = state,
+            failedDownloads = failedDownloads,
             routes = routes,
             actions = testActions(selectFeedSource),
             slots = slots,

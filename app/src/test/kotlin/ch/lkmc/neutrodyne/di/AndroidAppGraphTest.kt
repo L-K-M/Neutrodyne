@@ -19,6 +19,7 @@ import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.SleepTimerState
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.BackupKey
+import ch.lkmc.neutrodyne.core.navigation.DirectoryKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
@@ -29,6 +30,7 @@ import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
+import ch.lkmc.neutrodyne.core.navigation.PodcastPreviewKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastSettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
@@ -64,6 +66,47 @@ import java.io.File
 @Config(application = Application::class, sdk = [34])
 class AndroidAppGraphTest {
     private val graph = createGraphFactory<AndroidAppGraph.Factory>().create(RuntimeEnvironment.getApplication())
+
+    @Test
+    fun downloadComponentsInjectBeforeDatabaseOpen() {
+        graph.inject(
+            ch.lkmc.neutrodyne.download.impl
+                .ManualDownloadJobService(),
+        )
+        graph.inject(
+            ch.lkmc.neutrodyne.download.impl
+                .DownloadActionReceiver(),
+        )
+        assertThat(graph.localMediaIndex::class.simpleName).isEqualTo("LocalMediaIndexImpl")
+        assertThat(graph.localMediaIndex.localUriOrNull(1)).isNull()
+        assertThat(graph.databaseOpener.openState.value).isEqualTo(DatabaseOpenState.Pending)
+        assertThat(graph.initializers.map { it.order }).containsAtLeast(10, 130, 210, 310)
+    }
+
+    @Test
+    fun discoveryEntriesResolveWithTheirIntendedScenes() {
+        val provider = entryProvider<NavKey> { graph.entryInstallers.forEach { it() } }
+        assertThat(provider(DiscoverKey).metadata[NdSceneMetadata.KEY_PANE])
+            .isEqualTo(NdSceneMetadata.PANE_LIST)
+        for (key in listOf(
+            DirectoryKey("news", null),
+            DirectoryKey("", null),
+            DirectoryKey("", "1318"),
+            PodcastPreviewKey("https://example.test/feed"),
+        )) {
+            assertThat(provider(key).metadata[NdSceneMetadata.KEY_PANE]).isEqualTo(NdSceneMetadata.PANE_DETAIL)
+        }
+        assertThat(provider(AddPodcastKey(null)).metadata[NdSceneMetadata.KEY_OVERLAY])
+            .isEqualTo(NdSceneMetadata.OVERLAY_SHEET)
+        for (page in listOf(SettingsPage.DISCOVER, SettingsPage.PRIVACY)) {
+            assertThat(provider(SettingsKey(page)).contentKey).isNotNull()
+        }
+        assertThat(graph.searchRepository::class.simpleName).isEqualTo("SearchRepositoryImpl")
+        assertThat(graph.searchRepository).isSameInstanceAs(graph.searchRepository)
+        assertThat(graph.autodiscovery::class.simpleName).isEqualTo("JsoupAutodiscovery")
+        assertThat(graph.metroViewModelFactory).isNotNull()
+        assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+    }
 
     @Test
     fun durablePlaybackPortsResolveToSingleProductionBindings() =
@@ -360,6 +403,12 @@ class AndroidAppGraphTest {
                 "PlaybackPrefsInitializer" to 300..300,
                 "PlayerConnectionInitializer" to 300..300,
                 "PlaybackChannels" to 10..10,
+                "DownloadChannelsInitializer" to 10..10,
+                "DownloadIndexInitializer" to 130..130,
+                "DeferredDeletesInitializer" to 310..310,
+                "DownloadCleanupInitializer" to 200..200,
+                "DownloadReconcileInitializer" to 210..210,
+                "DownloadObserversInitializer" to 310..310,
             )
 
         /** The five destinations and the Settings screens M0a renders (01 M0 checklist step 16). */
@@ -372,6 +421,9 @@ class AndroidAppGraphTest {
                 SleepTimerKey,
                 DownloadsKey,
                 DiscoverKey,
+                DirectoryKey("news", null),
+                DirectoryKey("", "1318"),
+                PodcastPreviewKey("https://example.test/feed"),
                 SettingsHomeKey,
                 SettingsKey(SettingsPage.ABOUT),
                 LicencesKey,

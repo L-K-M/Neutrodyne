@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -17,6 +18,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlin.test.Test
@@ -24,6 +29,39 @@ import kotlin.test.assertEquals
 
 @OptIn(ExperimentalTestApi::class)
 class ReportVisibleEpisodeIdsTest {
+    @Test fun stoppingTheLifecycleReleasesAndResumingRestoresTheWindow() =
+        runDesktopComposeUiTest(
+            width =
+            200,
+            height = 200,
+        ) {
+            var reported = emptySet<Long>()
+            val owner =
+                object : LifecycleOwner {
+                    override val lifecycle =
+                        LifecycleRegistry.createUnsafe(this).apply {
+                            currentState = Lifecycle.State.RESUMED
+                        }
+                }
+            setContent {
+                CompositionLocalProvider(LocalLifecycleOwner provides owner) {
+                    val list = rememberLazyListState()
+                    ReportVisibleEpisodeIds(list, { 20 }, { it + 1L }, { reported = it }, margin = 0)
+                    LazyColumn(state = list, modifier = Modifier.height(60.dp).width(200.dp)) {
+                        items(20) { Box(Modifier.height(20.dp).width(200.dp)) }
+                    }
+                }
+            }
+            waitForIdle()
+            val beforeStop = reported
+            kotlin.test.assertTrue(beforeStop.isNotEmpty())
+            runOnIdle { owner.lifecycle.currentState = Lifecycle.State.CREATED }
+            runOnIdle { assertEquals(emptySet(), reported) }
+            runOnIdle { owner.lifecycle.currentState = Lifecycle.State.RESUMED }
+            waitForIdle()
+            assertEquals(beforeStop, reported)
+        }
+
     @Test
     fun visibleWindowIncludesTenItemMarginAndMovesOnScroll() =
         runDesktopComposeUiTest(width = 200, height = 200) {

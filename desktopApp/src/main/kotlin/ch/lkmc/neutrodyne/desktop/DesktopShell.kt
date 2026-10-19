@@ -272,6 +272,11 @@ internal object DesktopShell {
             NeutrodyneWindow(
                 rowArt = rowArt.value,
                 installers = graph.entryInstallers,
+                failedDownloads =
+                    kotlinx.coroutines.flow.flow {
+                        graph.databaseOpener.awaitOpen()
+                        graph.downloadController().observeFailedCount().collect { emit(it) }
+                    },
                 openHandler = openHandler,
                 menuActions = menuActions,
                 banners = graph.bannerNotifier,

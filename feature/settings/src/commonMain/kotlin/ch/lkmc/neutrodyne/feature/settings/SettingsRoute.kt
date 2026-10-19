@@ -30,6 +30,8 @@ internal fun SettingsRoute(
         SettingsPage.PLAYBACK -> PlaybackPage(platform)
         SettingsPage.DISCOVER -> DiscoverPage()
         SettingsPage.PRIVACY -> PrivacyPage()
+        SettingsPage.DOWNLOADS -> DownloadsSettingsPage(platform)
+        SettingsPage.DESKTOP -> DownloadsSettingsPage(platform, page = SettingsPage.DESKTOP)
         SettingsPage.ABOUT -> AboutPage(buildInfo)
         else -> AppearancePage(settings, dynamicColorSupport, platform, hasChannels)
     }

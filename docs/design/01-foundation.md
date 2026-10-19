@@ -703,6 +703,15 @@ It does not access the cache implementation or database.
 
 ## Dependency rules
 
+**Implementation note (2026-10-19, M6a).** Adopted resolution 10 places
+DownloadLifecycle, MissingLocalMediaReporter and EmbeddedChapterReader in
+core:domain. Downloads implements the lifecycle/missing-file ports; platform
+playback supplies the embedded reader. core:data orchestrates lifecycle calls
+before unsubscribe cascades, episode merges and restore Replace, awaiting durable
+journaling and stop acknowledgement. It does not acquire a download:impl edge or
+consume DownloadController directly. core:domain's existing download:api edge
+remains allowed; no implementation-to-implementation dependency is introduced.
+
 Serves N11, N8. Delivered in M0a (enforced from the first commit; the desktop and server rules apply from the stubs on). Source: [PLAN 5.1](../PLAN.md#51-module-graph) rules 1–8. Rules 1–9 expand PLAN rules 1–4 module by module; rules 10–13 (marked ⊕) make explicit the edges the PLAN graph implies; rules 14–18 expand PLAN rules 5–8. The numbers of rules 7, 8, 10 and 11 keep their pre-revision meaning because other documents cite them.
 
 **Implementation note (2026-10-18, M4).** Rule 7 also permits `:core:ui` to

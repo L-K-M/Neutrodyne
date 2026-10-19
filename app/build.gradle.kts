@@ -63,9 +63,17 @@ android {
     // Corpus leg c (03 Testing): the shared fixture/golden tree reaches the device through the
     // test APK's assets under `feeds/`; the production APK's source sets stay untouched.
     sourceSets["androidTest"].assets.srcDir(rootProject.layout.projectDirectory.dir("feeds/src/test/resources"))
+    // The very same assertions run on desktop, Robolectric and the real Android runtime.
+    sourceSets["androidTest"].kotlin.srcDir("../feeds/src/replay/kotlin")
     // Exercise the device gate's decisions on the host without copying its implementation.
     sourceSets["androidTest"].kotlin.srcDir("src/restoreTest/kotlin")
     sourceSets["test"].kotlin.srcDir("src/restoreTest/kotlin")
+}
+
+// Opt-in fixtures enter the single-variant KMP download library, so disable every
+// app variant except the disposable target. A release task with the flag must fail.
+if (providers.gradleProperty("neutrodyne.systemTests").orNull == "true") {
+    androidComponents.beforeVariants { it.enable = it.buildType == "benchmarkRelease" }
 }
 
 dependencies {

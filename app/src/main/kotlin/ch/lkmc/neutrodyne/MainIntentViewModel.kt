@@ -63,9 +63,11 @@ internal class MainIntentViewModel(
         val action =
             when (intent.action) {
                 Intent.ACTION_VIEW -> RouteInput.Action.VIEW
+                Intent.ACTION_SEND -> RouteInput.Action.SEND
                 else -> RouteInput.Action.LAUNCH
             }
-        val route = IntentRouter.route(RouteInput(action, uri = intent.dataString, internal = internal))
+        val text = if (action == RouteInput.Action.SEND) sharedText(intent) ?: return else null
+        val route = IntentRouter.route(RouteInput(action, uri = intent.dataString, text = text, internal = internal))
         if (route == Route.None) return
 
         val importKey = (route as? Route.Navigate)?.stack?.singleOrNull() as? ImportKey
@@ -73,10 +75,25 @@ internal class MainIntentViewModel(
         pending.trySend(route)
     }
 
+    private fun sharedText(intent: Intent): String? {
+        if (intent.type != "text/plain") return null
+        // Only text crosses this boundary. Streams, ClipData, subjects and sender extras
+        // neither grant internal access nor start an import or a subscription.
+        return try {
+            val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT) ?: return null
+            if (text.length > MAX_SHARE_BYTES) return null
+            text.toString().takeIf { it.encodeToByteArray().size <= MAX_SHARE_BYTES && it.isNotBlank() }
+        } catch (_: RuntimeException) {
+            // Foreign bundles may contain a malformed or incorrectly typed Parcelable.
+            null
+        }
+    }
+
     private fun errorCode(name: String?): ImportAcquisitionError? =
         ImportAcquisitionError.entries.firstOrNull { it.name == name }
 
     private companion object {
+        const val MAX_SHARE_BYTES = 4 * 1024
         const val PENDING_SESSION = "pendingImportSession"
         const val PENDING_ERROR = "pendingImportError"
     }

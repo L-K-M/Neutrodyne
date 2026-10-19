@@ -1123,6 +1123,21 @@ Writers replace all rows of one `(episodeId, source)` pair per transaction ([02 
 
 ### Embedded chapters
 
+**Implementation note (2026-10-19, M6a).** The frozen W1 API separates JSON
+`ensureLoaded(id)` from local `ensureLocalLoaded(id, fileUri)`. Completion starts
+local inspection in application scope before attempting JSON, including offline
+and absent-URL cases. Android uses Media3 inspector 1.11.1 and the same metadata
+mapping as playback; the repository retains JSON > PSC > ID3 > MP4 priority.
+A progressive source factory retains the MP4 sample tables the inspector default
+omits, and local inspection has a 15-second bound.
+Desktop extraction, source adaptation and audible offline acceptance wait for MD1.
+The projector observes `LocalMediaChanges` as well as database metadata and reloads
+only changed non-current sources. Service startup awaits `LocalMediaReadiness`
+outside the synchronous index lookup, including starts before initializer130.
+A current-episode merge increments the existing session generation so the winner
+loads paused while committed local ownership is published.
+
+
 **Implementation note (2026-10-19, M5).** The chapter adapters reuse PSC ingestion and bind the JSON repository in core data. Persisted JSON rows are reused, including hidden-only lists; successful empty responses finish the current occurrence without a persistent marker. Service-owned chapter jobs are cancelled on item changes and teardown. Track callbacks must match the player's current tracks, and writes capture the episode and occurrence. Boundary scheduling includes explicit ends so current-chapter state clears during gaps; it never seeks automatically. The synthetic fixture suite covers ID3, Nero, QuickTime and QuickTime preference when both MP4 forms exist.
 
 In `onTracksChanged(tracks)` for the current item: iterate `tracks.groups` → `getTrackFormat(i).metadata` entries that implement Media3's `androidx.media3.extractor.metadata.Chapter` (`@UnstableApi`; `ChapterFrame` for ID3 → `ID3`; MP4 Nero/QuickTime entries → `MP4`) and map `getStartTimeMs()` (`C.TIME_UNSET` → entry dropped), `getEndTimeMs()` (`C.TIME_UNSET` → null), `getTitle()?.value` (a `Label`, not a `String`) and `isHidden()`. Times are offsets from the period start; for progressive media the window offset (`Timeline.Window.positionInFirstPeriodUs`) is 0, so they are used as-is. For downloads, `ChapterRepository.ensureLoaded(episodeId, localFileUri)` (M6, `@ApplicationScope`, IO) reads the same metadata without a player through `EmbeddedChapterReader`, whose Android implementation `MetadataRetrieverChapterReader` (`:playback:impl`) runs `MetadataRetriever.Builder(ctx, MediaItem.fromUri(localFileUri)).build().use { it.retrieveTrackGroups().await() }` (`androidx.media3.inspector.MetadataRetriever`, moved to `media3-inspector` in 1.11; `AutoCloseable`), so chapters exist offline before first play. A call with `localFileUri == null` only fetches the Podcasting 2.0 JSON.

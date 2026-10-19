@@ -65,6 +65,10 @@ class FakePlaybackController(
         val minutes: Int,
     ) : Call
 
+    data class Downloads(
+        val startEpisodeId: Long?,
+    ) : Call
+
     enum class Action {
         PLAY,
         PAUSE,
@@ -93,6 +97,11 @@ class FakePlaybackController(
     ): PlayResult {
         calls +=
             Call.Episode(episodeId, positionMs)
+        return playResult
+    }
+
+    override suspend fun playDownloads(startEpisodeId: Long?): PlayResult {
+        calls += Downloads(startEpisodeId)
         return playResult
     }
 

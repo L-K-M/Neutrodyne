@@ -38,6 +38,44 @@ import java.io.IOException
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [34])
 class QueueProjectorTest {
+    @Test fun completionAndDeletionReloadOnlyNonCurrentPins() =
+        runTest {
+            val f = AdapterFixture(this)
+            try {
+                val ids = f.seed(2)
+                f.attach()
+                f.start(ids, 42_000)
+                awaitAdapter { f.player.ids() == ids }
+                for (id in ids) f.resolver.resolveDataSpec(DataSpec.Builder().setUri(episodeUri(id)).build())
+                val current = f.player.currentMediaItem!!.localConfiguration
+                runCurrent()
+                f.player.calls.clear()
+                f.local.publish(ids.associateWith { "file:///episode-$it.mp3" })
+                awaitAdapter { f.player.calls.contains("remove") }
+                assertEquals(ch.lkmc.neutrodyne.playback.api.StreamKind.STREAM, f.resolver.streamKind(ids[0]))
+                assertEquals(current, f.player.currentMediaItem!!.localConfiguration)
+                assertEquals(42_000L, f.player.currentPosition)
+                assertEquals(
+                    "file",
+                    f.resolver
+                        .resolveDataSpec(DataSpec.Builder().setUri(episodeUri(ids[1])).build())
+                        .uri.scheme,
+                )
+                f.player.calls.clear()
+                f.local.publish(emptyMap())
+                awaitAdapter { f.player.calls.contains("remove") }
+                assertEquals(
+                    "https",
+                    f.resolver
+                        .resolveDataSpec(DataSpec.Builder().setUri(episodeUri(ids[1])).build())
+                        .uri.scheme,
+                )
+                assertEquals(0, f.player.calls.count { it == "set" })
+            } finally {
+                f.close()
+            }
+        }
+
     @Test fun startConvergesAndReorderKeepsCurrentSource() =
         runTest {
             val f = AdapterFixture(this)
@@ -122,7 +160,6 @@ class QueueProjectorTest {
                         f.clock.now(),
                     )
                 f.queue.addLast(ids.drop(1))
-                val items = f.projector.prepareExternalStart(StartOutcome.Committed(f.sessions.virtualQueue(20), 0))
                 assertEquals(
                     ids[0],
                     f.sessions
@@ -130,6 +167,9 @@ class QueueProjectorTest {
                         .current!!
                         .episodeId,
                 )
+                // Do not suspend on Room after arming the virtual-time external-apply timeout.
+                val committed = f.sessions.virtualQueue(20)
+                val items = f.projector.prepareExternalStart(StartOutcome.Committed(committed, 0))
                 runCurrent()
                 assertEquals(0, f.player.mediaItemCount)
                 f.player.setMediaItems(items, 0, 0)

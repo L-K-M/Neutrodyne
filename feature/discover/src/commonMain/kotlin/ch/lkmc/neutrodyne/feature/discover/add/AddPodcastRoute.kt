@@ -9,6 +9,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
+import ch.lkmc.neutrodyne.core.navigation.DirectoryKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import ch.lkmc.neutrodyne.core.ui.resources.Res
@@ -70,6 +71,10 @@ internal fun AddPodcastRoute(
         onSubscribeOwner = viewModel::subscribeOwner,
         onCredentials = viewModel::resolveWithCredentials,
         onCancelResolve = viewModel::cancelResolve,
+        onLookupOnce = viewModel::lookupOnce,
+        onSearch = { query ->
+            if (navigator.pop(key)) navigator.pushDetail(DirectoryKey(query, null))
+        },
         onInputChange = viewModel::onInputChanged,
         onCandidate = viewModel::resolve,
         onSubscribe = viewModel::subscribe,

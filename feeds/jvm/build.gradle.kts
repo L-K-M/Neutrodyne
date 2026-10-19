@@ -7,6 +7,7 @@ plugins {
 // test resources here so the same fixtures also feed the Android parser tests from :core:data.
 sourceSets.test {
     kotlin.srcDir(rootProject.file("feeds/src/test/kotlin"))
+    kotlin.srcDir(rootProject.file("feeds/src/replay/kotlin"))
     resources.srcDir(rootProject.layout.projectDirectory.dir("feeds/src/test/resources"))
 }
 

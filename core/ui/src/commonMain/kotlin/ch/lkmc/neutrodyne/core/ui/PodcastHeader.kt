@@ -237,6 +237,15 @@ private fun Description(notes: ShowNotes) {
     }
 }
 
+/** The preview reuses description expansion while owning its surrounding header layout. */
+@Composable
+public fun PodcastDescription(
+    notes: ShowNotes,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) { Description(notes) }
+}
+
 /** "{n} episodes · Updated {relative} · Private". */
 @Composable
 private fun MetaLine(

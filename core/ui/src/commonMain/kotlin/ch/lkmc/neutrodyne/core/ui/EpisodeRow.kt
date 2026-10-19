@@ -85,6 +85,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_resume_download
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry_download
 import ch.lkmc.neutrodyne.core.ui.resources.action_select
 import ch.lkmc.neutrodyne.core.ui.resources.action_watch_on_youtube
+import ch.lkmc.neutrodyne.core.ui.resources.downloads_options
 import ch.lkmc.neutrodyne.core.ui.resources.episode_minutes_left
 import ch.lkmc.neutrodyne.core.ui.resources.episode_offline_row
 import ch.lkmc.neutrodyne.core.ui.resources.episode_opens_youtube
@@ -323,7 +324,7 @@ private fun rowMenuActions(
             // while queued is 07's `promote`, which one toggle cannot express next to Cancel;
             // it arrives with M6's download actions.
             DownloadState.QUEUED -> {
-                actions += stringResource(Res.string.action_cancel_download) to
+                actions += stringResource(Res.string.downloads_options) to
                     EpisodeAction.DownloadToggle(row.id)
             }
 

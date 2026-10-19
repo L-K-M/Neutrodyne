@@ -4,6 +4,127 @@ This file lets another person or agent take over the work at any point. **Last u
 
 ## 0. Implementation status
 
+### M8 I3 download integration (2026-10-19)
+
+`impl/m8-p1` integrates M6a/M6b through the requested `8ab74ff0`, over
+M8 W1–W7 at `e1ebc114`. The starting checkout lacked M7's completed
+Discover/link-entry and evidence work; those existing changes through
+`025cebff` are included to retain the discovery evidence gate alongside
+all download jobs, selectors and assertions. M6b W11 is not included.
+Both shells remain external YouTube mode (`NOT_YET_AVAILABLE`).
+
+The [integration report](.nd-context/m8-i3-report.md) records conflict
+resolutions, command receipts and per-task counts. M8 W8 remains separate:
+request/planner/bulk/restore gates are present, while direct DAO claim
+hardening and end-to-end capability/action evidence need W8 assessment.
+No schema, entity or index was changed. No push, PR, remote CI, external
+review, device run or packaged desktop acceptance is claimed.
+
+### M6b I2 local integration (2026-10-19)
+
+`impl/m6b-p1` integrates completed M6a (`38f139e2`) and M6b W9
+(`f17a9f4d`) through local merges `138053e3` and `9d6c1e9d`.
+M6a's playback/cascade cleanup, Downloads selection, live progress and manual
+consent coexist with M6b's planner, cleanup, moves and automatic lanes.
+W9 uses that Downloads screen and manual settings controls, shared notices,
+root move confirmation and notification prompts. Desktop file reveal uses
+the recorded local URI; storage actions use the selected root.
+Both W10 workflow job sets and evidence assertions are retained.
+
+The full gate ran once with cache restoration disabled. Its only failure was
+`SmartResumeTest.coldProjectionAndArrivalsReadTheLiveSmartResumeSetting`
+("Adapter did not converge"). The unchanged case passed alone, then all
+161 playback adapter tests passed serially. No playback code or timing
+threshold was changed. This observation is consistent with scheduling
+sensitivity; it does not establish a production root cause. Focused regressions
+first exposed the default-folder and bulk-prompt integration errors, then
+verified their fixes. The [integration report](.nd-context/m6b-i2-report.md)
+contains final per-task counts, command receipts, conflicts and file list.
+
+W6 is deliberately excluded; its pre-reset seam is preserved for the parallel
+branch. No schema, entity, index or dependency is changed by this integration.
+No device, physical radio/storage/Share, optimized-release journey, bmgr or
+packaged desktop run is claimed. MD1 still gates audible desktop acceptance.
+Work remains local only: no push, PR, CI execution or external review
+(0 review rounds), as the owner requested.
+
+### M6a W10 integration evidence (2026-10-19)
+
+Work is local on `impl/m6a-p1`, following W1–W9 at `bfa3ce48`.
+The owner requires local commits only, with no push or PR: CI and review
+have not run (0 review rounds). M6a acceptance remains open. The final
+local command/counts and measured P1/P2/P3 patch sizes are recorded in
+`.nd-context/m6a-w10-report.md`; that ignored operator report is retained
+in this worktree. Host tests do not establish the device/manual columns.
+No emulator existed before this run. An API30 default x86_64 software
+emulator connected but did not complete boot within 909 seconds; the host
+has no KVM. Only that instance was stopped. Instrumentation: 0 executed.
+No API33/34/36/37, release, bmgr or packaged desktop run is claimed.
+
+Current host reports after the gate repairs: `allTests` 6,268 passed / 1
+skipped, `test` 790 passed / 2 skipped, `mutationTest` 40 passed / 0 skipped.
+The initial full run found a stale queue-shortcut assertion which still
+removed the now-supported Downloaded filter; it now requires preservation.
+`BackupWorkHostTest.a library change after start-up pokes the debounced write`
+timed out in the loaded full run and passed unchanged in the serial rerun
+of all 139 data Android host cases. The 19 queue cases also passed.
+The three skips are Windows DPAPI and two desktop file-menu picker cases.
+The sync protocol mutation task has no cases and supplies no mutation proof.
+Per-task counts, final command status and patch sizes are in the report.
+
+All device method names below are in `ch.lkmc.neutrodyne.DownloadJourneyTest`.
+`downloadServerOffPlaysLocalArtworkChaptersAndDefersDelete` is E4 and
+`@ReleaseSmoke`: it throttles a generated enclosure above 5 MiB, observes
+on-disk progress, and uses the real graph, HTTP client, scheduler, files,
+index, chapters, session and deferred deletion. The cover is generated
+locally and pre-pinned, so this proves offline availability rather than
+remote artwork acquisition. Media are the existing generated fixtures
+packaged only in the test APK through `app/build.gradle.kts`.
+Server-off proof does not establish airplane-mode radio behavior.
+
+| M6 AC | Host evidence (exact class/method; desktopTest unless stated) | Device or manual evidence still required |
+|---|---|---|
+| 1 | `RssTransferSourceTest.cutAtHalfResumesWithStrongValidatorAndActualLength`, `weakOrAbsentValidatorsRestartSameLengthReplacement`, `range416VerifiesWholeFileOrRestarts`, `htmlAndHlsAreRejectedBeforeAnyWrite`; actual-client suite also covers redirects/encoding | Real captive portal and radio/network transitions |
+| 2 | `DownloadReconcilerTest.processDeathTrimsOnlyTheTornTailBeforeResume`, `crashAfterRenameBeforeCompletionIsAdoptedWithoutTransfer`, `staleTokensResetOnceAndRegisteredOwnersSurviveParallelPasses` | External reboot mid-transfer on API33 worker and API34/36 UIDT; package update mid-transfer; in-process tests cannot kill themselves and prove recovery |
+| 3 | `DownloadWorkersTest.visiblePromotionAllowedOnlyBefore34` and `ManualDownloadJobServiceTest.notificationIsSynchronousWhileDatabaseOpenIsHeldAndPermissionDenied` (`testAndroidHostTest`) | `visibleApi33DownloadUsesDataSyncForegroundWorker` on API33; `backgroundUidtBesidePlaybackForTwentyMinutes` on both API34 and API36, with screen off, two notifications, continuing bytes and audio positions |
+| 6 | `DownloadReconcilerTest.controllerDeletesRowAndIndexButKeepsCurrentFileUntilSessionChanges`; `ChapterRepositoryTest` and playback adapter suites | E4 on API26/36, API37 and optimized release; physical airplane-mode sound/artwork and actual Share consumer grant |
+| 7 | `BackupRulesXmlTest.modernAndroidIncludesOnlySnapshotsAndPortableSettingsInBothModes` (`:app:testDebugUnitTest`) plus Python transport-archive fixtures | `seedCompletedDownloadsForBackupTransport` followed by `scripts/ci/bmgr-check.sh` on rootable API29/36 release builds; transport inspection, not static XML, closes exclusion |
+| 8 | `DownloadsScreenTest.offlineWaitAndFailureRowsHaveActionsAndDesktopHidesShare` and `DownloadsViewModelTest.allSectionCommandsAndDownloadsPlaybackUseThePublicController` (`:feature:downloads:desktopTest`) | Real accessibility, keyboard, denied notification permission and mounted/removable-root actions |
+| 9 | `DownloadEngineTest.freshSuccessHasExactlyThreeSqlWritesAndMemoryVerification`, `twoParallelDrainsNeverDoubleClaimAndInitializeOnce` and `progressTicksNeverWriteTheDatabase` | No extra platform claim from the host write/slot invariants |
+| 10 | `AndroidDownloadSchedulerTest.visibilityAndApiChooseUidtOrWorker`, `emptyAndBackoffQueuesNeverStartIdleRunner` and `runningUidtNeverReschedulesWhenNeedsChange` (`:download:impl:testAndroidHostTest`) | UIDT device soak plus invisible enqueue, restricted bucket, Data Saver, Wi-Fi/mobile/VPN and assigned-versus-default-network experiment |
+| 12 | `RssTransferSourceTest.onlyUnvalidatedAndroidHtmlWaitsForNetwork`; `DownloadReconcilerTest.missingLengthAndUnavailableRootsRemoveIndexThenRemountRewritesUri`; engine/filesystem faults | Physical SD unmount/remount, full disk, MTP/Files visibility, API26–29 `.nomedia` and keep-data uninstall |
+| 14 | `DesktopDownloadRestartTest.gracefulQuitAtHalfResumesWithoutTornTailTrimming` and `staleDesktopTokenAtHalfResetsAndTrimsTheTornTail` (`:desktopApp:test`) and `DesktopDownloadLaneTest.cancellationUsesQuitReasonKeepsPartAndUnregistersOnlyAfterCommit`, shared transfer suite | MD1 blocks audible offline desktop acceptance. Packaged Windows/macOS/Linux quit/restart, sleep/wake, cable loss, long/non-ASCII paths, ENOSPC and antivirus/rename behavior remain unexecuted |
+
+AC4/5/11/13/15 belong to M6b. Historical Task Manager inference, AUTO,
+cleanup/quota, root moves and out-of-process system tests remain there.
+Rename durability under power loss requires empirical evidence.
+
+CI with `run-instrumented` requires the named E4 result on API26/36.
+Nightly full runs API26/33/34/36 and requires worker33 plus 20-minute
+UIDT on34/36. Dispatch `scope=downloads` selects the app download class
+explicitly on that group, including API33. API37 and release smoke require
+E4 too. `bmgr-download-exclusion` runs a separate release matrix29/36,
+seeds real completed internal and external media without Orchestrator
+clearing data, triggers the M3 snapshot receiver and inspects LocalTransport.
+This exclusion job does not replace M3's reinstall/library restoration proof.
+Evidence gates require one non-skipped, non-failed result per named case
+and device, a finite soak duration of at least 1,200 seconds, and all nine
+nonempty media fixtures in the test APK. API-specific skips on other SDKs
+are not counted as evidence for the SDK under test.
+### M7 local integration (2026-10-19)
+
+Branch `impl/m7-p1` integrates W1–W7 through `c23d7140`, with W8 adding shared
+replay, Android/desktop screenshots, CI execution assertions and the
+[M7 acceptance ledger](docs/evidence/m7-discovery.md). W1 already recorded
+all adopted §4 resolutions in 03, 08, 09 and PLAN; W8 updates the stale
+implementation status and fixes 09's contradictory directory-fixture prose.
+No schema, index, entity or production dependency changed in W8.
+The owner requested local commits only: no push, PR, CI dispatch, review or
+merge (0 review rounds). M7 stays open for the ledger's device, cross-OS,
+network-capture, provider terms/key-permission and release evidence. Final
+local counts and the bounded emulator result appear in that ledger and
+`.nd-context/m7-w8-report.md`; earlier milestone gates remain open.
+
 ### M5 local integration (2026-10-19)
 
 Branch `impl/m5-p1` integrates the M5 features on baseline `30eef445`.

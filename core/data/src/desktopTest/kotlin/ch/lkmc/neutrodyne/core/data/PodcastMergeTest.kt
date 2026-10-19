@@ -34,9 +34,11 @@ import ch.lkmc.neutrodyne.core.model.MemberSource
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.SourceKind
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.feeds.jvm.html.JsoupShowNotesSanitizer
+import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -56,7 +58,20 @@ class PodcastMergeTest {
     private val clock = TestClock(NOW)
     private val db = newDb(clock)
     private val coordinator = FakeCredentialCommitCoordinator()
-    private val merger = PodcastMerger(db, coordinator, clock)
+    private val downloads =
+        FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }.apply {
+            mergeEffect = { loser, winner ->
+                if (db.downloadDao().byEpisode(winner) != null) db.downloadDao().removeUnclaimed(listOf(loser))
+            }
+        }
+    private val merger =
+        PodcastMerger(
+            db,
+            coordinator,
+            clock,
+            downloads =
+                Provider { downloads },
+        )
 
     @AfterTest
     fun close() = db.close()
@@ -401,9 +416,18 @@ class PodcastMergeTest {
                 db.queueDao().entries(),
             )
             assertEquals(movedDownload.copy(episodeId = w1), db.downloadDao().byEpisode(w1))
+            assertTrue(downloads.mergeCompletions.single().containsAll(listOf(l1, w1)))
             assertEquals(winnerDownload, db.downloadDao().byEpisode(w2))
             assertNull(db.downloadDao().byEpisode(l2))
-            assertEquals(session.copy(currentEpisodeId = w1, contextId = winner), db.playSessionDao().get())
+            assertEquals(
+                session.copy(
+                    currentEpisodeId = w1,
+                    contextId = winner,
+                    generation = session.generation + 1,
+                    updatedAt = NOW,
+                ),
+                db.playSessionDao().get(),
+            )
             assertEquals(listOf(item.copy(podcastId = winner)), db.importDao().itemsOf(importSession))
         }
 
@@ -623,7 +647,15 @@ class PodcastMergeTest {
                 }
             val pending =
                 async(Dispatchers.Default) {
-                    PodcastMerger(db, gate, clock).merge(
+                    PodcastMerger(
+                        db,
+                        gate,
+                        clock,
+                        downloads =
+                            Provider {
+                                FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                            },
+                    ).merge(
                         loser,
                         winner,
                         ChangeOrigin.LOCAL,
@@ -663,6 +695,10 @@ class PodcastMergeTest {
                     FakeCredentialCommitCoordinator(),
                     unusedProbeFetcher,
                     scratchTempFiles("merge"),
+                    downloads =
+                        Provider {
+                            FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                        },
                 )
 
             repository.merge(loser, winner, ChangeOrigin.SYNC)

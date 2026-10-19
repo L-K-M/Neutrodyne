@@ -76,6 +76,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.add_field_label
 import ch.lkmc.neutrodyne.core.ui.resources.add_helper
 import ch.lkmc.neutrodyne.core.ui.resources.add_last_episode
 import ch.lkmc.neutrodyne.core.ui.resources.add_looking_up
+import ch.lkmc.neutrodyne.core.ui.resources.add_lookup_once
 import ch.lkmc.neutrodyne.core.ui.resources.add_might_be_subscribed
 import ch.lkmc.neutrodyne.core.ui.resources.add_open
 import ch.lkmc.neutrodyne.core.ui.resources.add_paste
@@ -83,6 +84,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.add_private
 import ch.lkmc.neutrodyne.core.ui.resources.add_subscribe
 import ch.lkmc.neutrodyne.core.ui.resources.add_subscribing
 import ch.lkmc.neutrodyne.core.ui.resources.add_title
+import ch.lkmc.neutrodyne.core.ui.resources.discovery_search_for
 import ch.lkmc.neutrodyne.core.ui.resources.membership_add_to
 import ch.lkmc.neutrodyne.core.ui.resources.membership_create
 import ch.lkmc.neutrodyne.core.ui.resources.membership_name
@@ -124,6 +126,8 @@ internal fun AddPodcastSheet(
     onSubscribeOwner: () -> Unit = {},
     onCredentials: (BasicCredentials) -> Unit,
     onCancelResolve: () -> Unit,
+    onSearch: (String) -> Unit = {},
+    onLookupOnce: () -> Unit = {},
     onInputChange: (String) -> Unit,
     onCandidate: (String) -> Unit,
     onSubscribe: (Set<Long>) -> Unit,
@@ -242,6 +246,15 @@ internal fun AddPodcastSheet(
 
         when (step) {
             is AddSheetStep.Input -> {
+                if (step.lookupRequired != null) {
+                    NdTextButton(stringResource(Res.string.add_lookup_once), onLookupOnce)
+                }
+                if (step.searchQuery != null) {
+                    NdTextButton(
+                        stringResource(Res.string.discovery_search_for, step.searchQuery),
+                        { onSearch(step.searchQuery) },
+                    )
+                }
                 if (step.auth) {
                     AuthFields(
                         username = username,

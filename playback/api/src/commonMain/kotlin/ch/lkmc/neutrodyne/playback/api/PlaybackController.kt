@@ -26,6 +26,9 @@ interface PlaybackController {
         positionMs: Long,
     ): PlayResult
 
+    /** Completed downloads, newest first; implementation arrives with M6 playback integration. */
+    suspend fun playDownloads(startEpisodeId: Long? = null): PlayResult
+
     /**
      * Explicit row preserves that item and anchors there. Without a row, select the first playable
      * Up next entry (keep refused rows), then eligible context. Queue starts use a null anchor.

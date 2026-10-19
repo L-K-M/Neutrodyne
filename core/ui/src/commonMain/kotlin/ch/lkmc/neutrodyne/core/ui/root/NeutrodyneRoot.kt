@@ -53,6 +53,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.navigation3.runtime.NavKey
 import androidx.navigationevent.NavigationEvent
@@ -89,6 +90,7 @@ import ch.lkmc.neutrodyne.core.ui.navigation.rememberNavigationState
 import ch.lkmc.neutrodyne.core.ui.platform.testTagsAsResourceId
 import ch.lkmc.neutrodyne.core.ui.resolve
 import ch.lkmc.neutrodyne.core.ui.resources.Res
+import ch.lkmc.neutrodyne.core.ui.resources.downloads_failed_badge
 import ch.lkmc.neutrodyne.core.ui.resources.nav_discover
 import ch.lkmc.neutrodyne.core.ui.resources.nav_downloads
 import ch.lkmc.neutrodyne.core.ui.resources.nav_feeds
@@ -98,6 +100,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import org.jetbrains.compose.resources.getString
+import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -130,6 +133,7 @@ public fun NeutrodyneRoot(
     platform: BuildInfo.Platform = BuildInfo.Platform.ANDROID,
     initialTab: TopLevelKey = FeedsKey,
     routes: Flow<Route> = emptyFlow(),
+    failedDownloads: Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
 ) {
     val rootViewModelOwner = LocalViewModelStoreOwner.current
     val backOwner = LocalNavigationEventDispatcherOwner.current ?: rememberNavigationEventDispatcherOwner()
@@ -206,6 +210,7 @@ public fun NeutrodyneRoot(
                         modifier,
                         expandRequest,
                         collapseRequest,
+                        failedDownloads,
                     )
                 }
             }
@@ -226,7 +231,9 @@ private fun ReadyRoot(
     modifier: Modifier = Modifier,
     expandRequest: Int = 0,
     collapseRequest: Int = 0,
+    failedDownloads: Flow<Int> = emptyFlow(),
 ) {
+    val failedDownloadCount by failedDownloads.collectAsStateWithLifecycle(initialValue = 0)
     var expandedSettled by remember { mutableStateOf(false) }
     var playerNavigationRequests by rememberSaveable { mutableIntStateOf(0) }
     var lastPlayerTab by remember { mutableStateOf(navigation.selectedTab) }
@@ -310,8 +317,10 @@ private fun ReadyRoot(
     }
 
     val importContentFocus = remember { FocusRequester() }
+    val discoverSearchFocus = remember { DiscoverSearchFocus() }
     val miniInset = if (!layout.playerPanel && state.hasNowPlaying) MINI_PLAYER_HEIGHT else 0.dp
     CompositionLocalProvider(
+        LocalDiscoverSearchFocus provides discoverSearchFocus,
         LocalPaneLayout provides layout,
         LocalMiniPlayerInset provides miniInset,
     ) {
@@ -321,23 +330,32 @@ private fun ReadyRoot(
                     .fillMaxSize()
                     .testTagsAsResourceId()
                     .onKeyEvent { event ->
-                        dispatchRootKey(
-                            event = event,
-                            platform = platform,
-                            navigation = navigation,
-                            desktopBack = {
-                                if (eventDispatcher != null && backInput.hasEnabledHandlers) {
-                                    backInput.triggerBack()
-                                } else {
-                                    navigation.pop()
-                                }
-                            },
-                            dispatch = actions.playbackKey,
-                        )
+                        if (platform == BuildInfo.Platform.DESKTOP && navigation.selectedTab == DiscoverKey &&
+                            event.type == KeyEventType.KeyDown && event.key == Key.F &&
+                            (event.isCtrlPressed || event.isMetaPressed) &&
+                            !event.isAltPressed && !event.isShiftPressed &&
+                            discoverSearchFocus.request()
+                        ) {
+                            true
+                        } else {
+                            dispatchRootKey(
+                                event = event,
+                                platform = platform,
+                                navigation = navigation,
+                                desktopBack = {
+                                    if (eventDispatcher != null && backInput.hasEnabledHandlers) {
+                                        backInput.triggerBack()
+                                    } else {
+                                        navigation.pop()
+                                    }
+                                },
+                                dispatch = actions.playbackKey,
+                            )
+                        }
                     },
         ) {
             NdNavigationSuiteScaffold(
-                items = navItems(),
+                items = navItems(failedDownloadCount),
                 selected = navigation.tabs.indexOf(navigation.selectedTab),
                 onSelect = { index -> navigation.selectTab(navigation.tabs[index]) },
                 suiteType = suiteType,
@@ -436,7 +454,7 @@ private fun isRailSuite(suiteType: NavigationSuiteType): Boolean =
     }
 
 @Composable
-private fun navItems(): List<NdNavItem> =
+private fun navItems(failedDownloads: Int): List<NdNavItem> =
     listOf(
         NdNavItem(
             label = stringResource(Res.string.nav_feeds),
@@ -461,6 +479,13 @@ private fun navItems(): List<NdNavItem> =
             icon = NdIcons.Download,
             iconSelected = NdIcons.DownloadFilled,
             testTag = "nav_downloads",
+            badgeCount = failedDownloads,
+            badgeDescription =
+                pluralStringResource(
+                    Res.plurals.downloads_failed_badge,
+                    failedDownloads,
+                    failedDownloads,
+                ),
         ),
         NdNavItem(
             label = stringResource(Res.string.nav_discover),

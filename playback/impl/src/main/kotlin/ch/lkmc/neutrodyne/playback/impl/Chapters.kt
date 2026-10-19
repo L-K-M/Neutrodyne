@@ -162,35 +162,37 @@ internal class Chapters(
     companion object {
         private const val TAG = "Chapters"
 
-        internal fun fromTracks(tracks: Tracks): Map<ChapterSource, List<EpisodeChapter>> {
+        internal fun fromTracks(tracks: Tracks): Map<ChapterSource, List<EpisodeChapter>> =
+            fromFormats(tracks.groups.flatMap { group -> (0 until group.length).map(group::getTrackFormat) })
+
+        internal fun fromFormats(
+            formats: List<androidx.media3.common.Format>,
+        ): Map<ChapterSource, List<EpisodeChapter>> {
             val rows = mutableListOf<EpisodeChapter>()
-            for (group in tracks.groups) {
-                for (track in 0 until group.length) {
-                    val format = group.getTrackFormat(track)
-                    val metadata = format.metadata ?: continue
-                    for (entry in 0 until metadata.length()) {
-                        val chapter = metadata[entry] as? Chapter ?: continue
-                        if (chapter.startTimeMs == C.TIME_UNSET || chapter.startTimeMs < 0) continue
-                        val source =
-                            when {
-                                chapter is ChapterFrame -> ChapterSource.ID3
+            for (format in formats) {
+                val metadata = format.metadata ?: continue
+                for (entry in 0 until metadata.length()) {
+                    val chapter = metadata[entry] as? Chapter ?: continue
+                    if (chapter.startTimeMs == C.TIME_UNSET || chapter.startTimeMs < 0) continue
+                    val source =
+                        when {
+                            chapter is ChapterFrame -> ChapterSource.ID3
 
-                                format.containerMimeType == MimeTypes.AUDIO_MP4 ||
-                                    format.containerMimeType == MimeTypes.VIDEO_MP4 -> ChapterSource.MP4
+                            format.containerMimeType == MimeTypes.AUDIO_MP4 ||
+                                format.containerMimeType == MimeTypes.VIDEO_MP4 -> ChapterSource.MP4
 
-                                else -> continue
-                            }
-                        rows +=
-                            EpisodeChapter(
-                                chapter.startTimeMs,
-                                chapter.endTimeMs.takeUnless { it == C.TIME_UNSET },
-                                chapter.title?.value,
-                                null,
-                                null,
-                                source,
-                                chapter.isHidden,
-                            )
-                    }
+                            else -> continue
+                        }
+                    rows +=
+                        EpisodeChapter(
+                            chapter.startTimeMs,
+                            chapter.endTimeMs.takeUnless { it == C.TIME_UNSET },
+                            chapter.title?.value,
+                            null,
+                            null,
+                            source,
+                            chapter.isHidden,
+                        )
                 }
             }
             return rows.groupBy { it.source }.mapValues { (_, list) -> ChapterSource.normalize(list) }

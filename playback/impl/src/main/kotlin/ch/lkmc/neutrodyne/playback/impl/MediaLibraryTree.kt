@@ -85,18 +85,12 @@ internal class MediaLibraryTree(
                     }
                 }
 
-                // M6 replaces this source with completed, verified files and enables Downloads starts.
-                DOWNLOADS -> {
-                    emptyList()
-                }
-
                 PODCASTS -> {
                     db.podcastDao().listForBrowse(youtubePlayable()).map(::podcastFolder)
                 }
 
                 else -> {
-                    val request = contextRequest(parentId)
-                    val spec = request.spec()
+                    val spec = browseSpec(parentId)
                     val ids =
                         db
                             .feedDao()
@@ -189,6 +183,10 @@ internal class MediaLibraryTree(
                 StartRequest.Episode(selected.id, position)
             }
 
+            DOWNLOADS -> {
+                StartRequest.Downloads(selected.id, position)
+            }
+
             else -> {
                 contextRequest(
                     selected.parent,
@@ -231,7 +229,7 @@ internal class MediaLibraryTree(
             ) { "Episode left Up next" }
             return
         }
-        val spec = contextRequest(parent).spec()
+        val spec = browseSpec(parent)
         require(
             database()
                 .feedDao()
@@ -242,6 +240,21 @@ internal class MediaLibraryTree(
             "Episode is outside the requested context"
         }
     }
+
+    private suspend fun browseSpec(parent: String): PlayContextSpec =
+        if (parent == DOWNLOADS) {
+            PlayContextSpec(
+                ContextType.DOWNLOADS,
+                null,
+                FeedOrder.NEWEST_FIRST,
+                FeedFilters(unplayedOnly = true).toFlags(),
+                ch.lkmc.neutrodyne.core.model.MediaFilter.ALL,
+                null,
+                false,
+            )
+        } else {
+            contextRequest(parent).spec()
+        }
 
     private suspend fun contextRequest(parent: String): StartRequest.Feed {
         val db = database()
@@ -400,7 +413,7 @@ internal class MediaLibraryTree(
             val match =
                 requireNotNull(
                     Regex(
-                        "episode:([1-9][0-9]*)(?:@(upnext|group:[1-9][0-9]*|podcast:[1-9][0-9]*))?",
+                        "episode:([1-9][0-9]*)(?:@(upnext|downloads|group:[1-9][0-9]*|podcast:[1-9][0-9]*))?",
                     ).matchEntire(value),
                 ) {
                     "Invalid episode identity"

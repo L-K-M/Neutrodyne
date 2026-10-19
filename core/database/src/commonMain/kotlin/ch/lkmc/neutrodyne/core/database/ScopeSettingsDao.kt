@@ -5,6 +5,9 @@ package ch.lkmc.neutrodyne.core.database
 import androidx.room3.Dao
 import androidx.room3.Query
 import androidx.room3.Upsert
+import ch.lkmc.neutrodyne.core.model.DeleteAfter
+import ch.lkmc.neutrodyne.core.model.NetworkPolicy
+import ch.lkmc.neutrodyne.core.model.SourceType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
@@ -16,7 +19,19 @@ private const val PODCAST_SCOPES = """
         ps.playbackSpeed AS podcastSpeed, ps.skipSilence AS podcastSkipSilence,
         g.id AS groupId, g.uuid AS groupUuid, g.name AS groupName,
         gs.refreshIntervalMinutes AS groupRefresh, gs.notifyNewEpisodes AS groupNotify,
-        gs.playbackSpeed AS groupSpeed, gs.skipSilence AS groupSkipSilence
+        gs.playbackSpeed AS groupSpeed, gs.skipSilence AS groupSkipSilence, p.sourceType,
+        ps.autoDownload AS podcastAutoDownload,
+        ps.autoDownloadKeepLatest AS podcastAutoDownloadKeepLatest,
+        ps.autoDownloadNetwork AS podcastAutoDownloadNetwork,
+        ps.autoDownloadRequireCharging AS podcastAutoDownloadRequireCharging,
+        ps.includeVideoInAutoDownload AS podcastIncludeVideoInAutoDownload,
+        ps.deleteAfterPlayed AS podcastDeleteAfterPlayed,
+        gs.autoDownload AS groupAutoDownload,
+        gs.autoDownloadKeepLatest AS groupAutoDownloadKeepLatest,
+        gs.autoDownloadNetwork AS groupAutoDownloadNetwork,
+        gs.autoDownloadRequireCharging AS groupAutoDownloadRequireCharging,
+        gs.includeVideoInAutoDownload AS groupIncludeVideoInAutoDownload,
+        gs.deleteAfterPlayed AS groupDeleteAfterPlayed
     FROM podcast p
     LEFT JOIN podcast_settings ps ON ps.podcastId = p.id
     LEFT JOIN podcast_group_member m ON m.podcastId = p.id
@@ -78,7 +93,8 @@ abstract class ScopeSettingsDao {
         """
         SELECT g.id AS groupId, g.uuid AS uuid, g.name AS name,
             gs.playbackSpeed AS playbackSpeed, gs.skipSilence AS skipSilence,
-            gs.refreshIntervalMinutes AS refreshIntervalMinutes, gs.notifyNewEpisodes AS notifyNewEpisodes
+            gs.refreshIntervalMinutes AS refreshIntervalMinutes, gs.notifyNewEpisodes AS notifyNewEpisodes,
+            gs.autoDownload, gs.autoDownloadKeepLatest, gs.autoDownloadNetwork, gs.autoDownloadRequireCharging, gs.includeVideoInAutoDownload, gs.deleteAfterPlayed
         FROM podcast_group g LEFT JOIN podcast_group_settings gs ON gs.groupId = g.id
         WHERE g.id = :groupId
     """,
@@ -88,7 +104,9 @@ abstract class ScopeSettingsDao {
     /** Channel reconciliation includes empty groups and groups without an override row. */
     @Query(
         "SELECT g.id AS groupId, g.uuid, g.name, gs.refreshIntervalMinutes, gs.notifyNewEpisodes," +
-            " gs.playbackSpeed, gs.skipSilence" +
+            " gs.playbackSpeed, gs.skipSilence, gs.autoDownload, gs.autoDownloadKeepLatest," +
+            " gs.autoDownloadNetwork, gs.autoDownloadRequireCharging," +
+            " gs.includeVideoInAutoDownload, gs.deleteAfterPlayed" +
             " FROM podcast_group g LEFT JOIN podcast_group_settings gs ON gs.groupId = g.id",
     )
     abstract suspend fun groupScopes(): List<GroupScopeRow>
@@ -112,6 +130,19 @@ data class PodcastScopeRow(
     val podcastSkipSilence: Boolean?,
     val groupSpeed: Float?,
     val groupSkipSilence: Boolean?,
+    val sourceType: SourceType = SourceType.RSS,
+    val podcastAutoDownload: Boolean? = null,
+    val podcastAutoDownloadKeepLatest: Int? = null,
+    val podcastAutoDownloadNetwork: NetworkPolicy? = null,
+    val podcastAutoDownloadRequireCharging: Boolean? = null,
+    val podcastIncludeVideoInAutoDownload: Boolean? = null,
+    val podcastDeleteAfterPlayed: DeleteAfter? = null,
+    val groupAutoDownload: Boolean? = null,
+    val groupAutoDownloadKeepLatest: Int? = null,
+    val groupAutoDownloadNetwork: NetworkPolicy? = null,
+    val groupAutoDownloadRequireCharging: Boolean? = null,
+    val groupIncludeVideoInAutoDownload: Boolean? = null,
+    val groupDeleteAfterPlayed: DeleteAfter? = null,
 )
 
 data class GroupScopeRow(
@@ -122,4 +153,10 @@ data class GroupScopeRow(
     val playbackSpeed: Float? = null,
     val skipSilence: Boolean? = null,
     val groupId: Long = 0,
+    val autoDownload: Boolean? = null,
+    val autoDownloadKeepLatest: Int? = null,
+    val autoDownloadNetwork: NetworkPolicy? = null,
+    val autoDownloadRequireCharging: Boolean? = null,
+    val includeVideoInAutoDownload: Boolean? = null,
+    val deleteAfterPlayed: DeleteAfter? = null,
 )

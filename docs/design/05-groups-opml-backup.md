@@ -401,6 +401,15 @@ The channel group `grp_new_episodes` and the default channel `new_episodes` are 
 
 ## Group feeds
 
+**Implementation note (2026-10-19, M6b).** Adopted resolution 8 places
+`DownloadAllEstimate(episodeIds, totalCandidates, knownBytes, unknownSizeCount,
+capped)` in `core:model`, following this document's fuller shape rather than the
+plan's abbreviated field list. W8 owns the repository operation and estimates.
+Adopted resolution 7 limits the new action to a visible group/podcast action;
+it creates MANUAL rows at priority 100, never implicit Downloads-screen requests.
+The restore re-download offer remains M6a.
+
+
 Serves R2.3, R2.4 (data side), R2.5, R2.8, R2.9, R3.4, R8.1. Delivered in [M1](../PLAN.md#m1-subscribe-and-ingest-rss) (All and Podcast sources) and [M2](../PLAN.md#m2-groups-and-group-feeds) (everything else), on both platforms from the same common code. Honours [D16](../PLAN.md#3-key-decisions), [D30](../PLAN.md#3-key-decisions). SQL, indices and EXPLAIN expectations: [02 Feed pages](02-data-model.md#feed-pages), [02 Feed counts](02-data-model.md#feed-counts).
 
 ```kotlin
@@ -533,6 +542,18 @@ confirmation retains the unchecked two-argument overload until its own PR.
 
 `downloadAllEstimate` ([02 Download all candidates](02-data-model.md#download-all-candidates), M6): the feed's source predicate, its view filters and `hideOlderThanDays` bound (as [Playing a group](#playing-a-group) rules 1, 3 and 5, no anchor), unplayed, without a `download` row in `QUEUED`…`COMPLETED` (`FAILED` and `MISSING` rows count as candidates), without a tombstone (`downloadDismissedAt IS NULL`; the user deleted those deliberately), and downloadable (`enclosureUrl IS NOT NULL`, or YouTube when `YouTubeCapabilitiesSource.capabilities.value.downloads` at call time, [04 Capability matrix](04-youtube.md#capability-matrix)); newest first, **capped at 200** (`capped = true` → "200 newest of 1,234"). Unlike the context tail, Up next items and the current episode are **not** excluded: downloading them is wanted (answers 02's open question 7). Size per episode follows [07 Estimates](07-downloads.md#estimates): `enclosureLength` when ≥ 100 KB (smaller values are placeholders), else `durationMs × 16 000 B/s` (128 kbit/s) when known, else counted in `unknownSizeCount`; no invented numbers.
 
+Implementation note (2026-10-19, M6b): W8 reads the candidate IDs and the full
+count in one read transaction. `knownBytes` and `unknownSizeCount` describe
+only the offered IDs (at most 200), while `totalCandidates` is uncapped. The
+source-only signature reads persisted feed filters and the current hour-rounded
+age bound. Podcast has no persisted filters, so it uses its default unfiltered
+view; transient screen filters cannot be supplied through this signature.
+The duration fallback uses 16 bytes per millisecond, as corrected in
+[07 Estimates](07-downloads.md#estimates), with positive durations and
+saturating arithmetic for large hints and totals. The 100 KB threshold means
+100,000 bytes, matching manual requests. The estimate creates no download rows;
+the visible caller submits the returned IDs to the existing MANUAL request API.
+
 ### Performance
 
 Budgets are [R2.9](../PLAN.md#21-functional-requirements): first page (COUNT + 80 rows) ≤ 60 ms for a group, ≤ 100 ms for All on the reference device with 300 podcasts, 50,000 episodes and 20 groups; counts for 20 groups ≤ 50 ms (recorded). They are measured by 02's `FeedQueryTimingTest`. If All misses its budget with LIMIT/OFFSET, only All switches to a keyset `PagingSource` keyed by `(sortDate, id)` behind `pagedFeed` (risk [T6](../PLAN.md#8-risks-and-mitigations)); callers do not change.
@@ -540,6 +561,17 @@ Budgets are [R2.9](../PLAN.md#21-functional-requirements): first page (COUNT + 8
 ---
 
 ## Effective settings resolution
+
+**Implementation note (2026-10-19, M6b).** Adopted resolution 4 freezes
+`core:model`'s `EffectiveAutoDownload(enabled, keepLatest, network,
+requireCharging, includeVideo, deleteAfterPlayed, source)`. `source` attributes
+the enabled decision using `SettingSource`, including `NotSupported`; this differs
+from a user disabling automatic downloads. The resolver emits the full distinct
+map immediately; its planner consumer owns the 2 s debounce. Group dependent
+fields clear atomically when auto-download is false or inherited. Policies and
+overrides are device-local for sync (PO-37), while portable settings and overrides
+remain eligible for manual backup with range/type validation.
+
 
 Serves R2.7, R3.7 (auto-download side), R4.4, R4.5, R7.3. Delivered in M2 (refresh interval, notifications), M4 (speed, skip silence), M6 (auto-download, delete after played), M9a (YouTube auto-download globals with the engine), MS2 (sync classification); the resolver is common code used by both platforms. Honours [D20](../PLAN.md#3-key-decisions), [D45](../PLAN.md#3-key-decisions), [D93](../PLAN.md#3-key-decisions), [PO-37](../PLAN.md#48-further-product-owner-decisions). Storage: `podcast_settings` and `podcast_group_settings` share 02's `ScopeOverrides` columns; `null` = inherit ([02 podcast_settings](02-data-model.md#podcast_settings)). There are no per-episode overrides in v1.
 
@@ -1842,6 +1874,15 @@ YouTube-engine and update-check keys (owned by 04 and 09; [D76](../PLAN.md#3-key
 The planned keys `updates.mode`, `updates.channel` and `updates.whats_new_version_code` were dropped before any build had them (PO-31, PO-33); like every unknown key they would be skipped by a restore ([Restore algorithm](#restore-algorithm) step 7). The existing `youtube.audio_quality`, `youtube.volume_levelling` and `youtube.auto_download*` keys stay portable and travel to every APK; they only take effect where the engine runs. A restored value is a preference, never a fact about the target device: run-time checks win. `youtube.engine_enabled = true` restored on the `armeabi-v7a` APK still yields `ExternalReason.NOT_IN_THIS_APK`; a restored `updates.check_enabled` is a preference too, and debug builds (`BuildInfo.debug`) stay `UpdateCheckState.Disabled(DEV_BUILD)` whatever it says ([09 Update check](09-quality-and-release.md#update-check)). The desktop reads the same `updates.*` keys. Because `updates.first_run_choice_done` is a `DEVICE` key, a new device may see 09's first-run update card again ([Open questions](#open-questions) 16).
 
 ### After restore
+
+**Implementation note (2026-10-19, M6a).** Restore Replace invokes the domain
+`DownloadLifecycle.beforeLibraryReplace` before its destructive pre-step, removing
+local download rows and journaling their files without dismissal tombstones.
+The existing visible Replace confirmation and playback pause remain required.
+The report's re-download offer filters missing episodes, completed downloads and
+YouTube hints, then calls MANUAL request only on a user tap. Metered ASK is answered
+through the same controller consent path; restore itself never starts transfers.
+
 
 - Restored podcasts fetch through `import-{sessionId}` with `initialFetch = 1`: no `isNew`, no notifications, no auto-download storm ([D66](../PLAN.md#3-key-decisions)); 07 sets `autoDownloadEligibleAfter` when policies resolve to enabled, so nothing is backfilled ([D67](../PLAN.md#3-key-decisions)).
 - The report is the import report of the restore session; podcasts with `AUTH_REQUIRED` show "Enter password" (stored credentials are bound to their device — an Android Keystore key, a DPAPI blob or a `0600` file — and never move, [03 Basic auth and CredentialStore](03-feeds-and-discovery.md#basic-auth-and-credentialstore)).

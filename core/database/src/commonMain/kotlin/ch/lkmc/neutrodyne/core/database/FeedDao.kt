@@ -76,6 +76,12 @@ interface FeedDao {
     @RawQuery
     suspend fun contextTail(query: RoomRawQuery): List<ContextItem>
 
+    @RawQuery
+    suspend fun downloadAllCandidates(query: RoomRawQuery): List<DownloadAllCandidate>
+
+    @RawQuery
+    suspend fun downloadAllCount(query: RoomRawQuery): Int
+
     /** Browse shares context eligibility but includes queued episodes and has no anchor. */
     @RawQuery
     suspend fun contextList(query: RoomRawQuery): List<ContextItem>
@@ -92,6 +98,19 @@ data class ContextItem(
     val episodeId: Long,
     val sortDate: Long,
     val podcastId: Long,
+)
+
+/** Size inputs for the capped bulk selection (02 Download all candidates, 07 Estimates). */
+data class DownloadAllCandidate(
+    val episodeId: Long,
+    val enclosureLength: Long?,
+    val durationMs: Long?,
+)
+
+/** Both queries carry exactly the same eligibility predicates; only candidates are limited. */
+data class DownloadAllQueries(
+    val candidates: RoomRawQuery,
+    val count: RoomRawQuery,
 )
 
 /**
@@ -290,19 +309,90 @@ object FeedQueryBuilder {
             "the keyset anchor is a (sortDate, id) pair: $anchorSortDate / $anchorEpisodeId"
         }
 
-        val where = mutableListOf<String>()
         val args = mutableListOf<Long>()
+        val where = contextPredicates(spec, args)
         val from =
             if (spec.type == ContextType.ALL) {
                 // As in page(): CROSS JOIN pins the ordered index_episode_sortDate scan.
                 where += "p.id = e.podcastId"
-                where += "p.includeInAll = 1"
                 "episode e CROSS JOIN podcast p"
             } else {
                 "episode e JOIN podcast p ON p.id = e.podcastId"
             }
+        if (selection == ContextSelection.TAIL) {
+            where += "NOT EXISTS (SELECT 1 FROM queue_entry q WHERE q.episodeId = e.id)"
+        }
+        if (episodeId != null) {
+            where += "e.id = ?"
+            args += episodeId
+        }
+        where += "(? = 1 OR p.sourceType = 'RSS')"
+        args += if (youtubePlayable) 1L else 0L
+        if (boundBySubscription && spec.type == ContextType.GROUP) {
+            where += "e.sortDate >= p.subscribedAt"
+        }
+        if (anchorSortDate != null && anchorEpisodeId != null) {
+            val op = if (spec.order == FeedOrder.NEWEST_FIRST) "<" else ">"
+            where += "(e.sortDate, e.id) $op (?, ?)"
+            args += anchorSortDate
+            args += anchorEpisodeId
+        }
+        val dir = if (spec.order == FeedOrder.NEWEST_FIRST) "DESC" else "ASC"
+        args += k.toLong()
+        return boundQuery(
+            "SELECT e.id AS episodeId, e.sortDate, e.podcastId FROM $from" +
+                " LEFT JOIN episode_state s ON s.episodeId = e.id" +
+                " LEFT JOIN download d ON d.episodeId = e.id" +
+                " WHERE ${where.joinToString(" AND ")}" +
+                " ORDER BY e.sortDate $dir, e.id $dir LIMIT ?",
+            args,
+        )
+    }
+
+    /** No keyset/subscription anchor or queue exclusion: bulk downloads include the whole view. */
+    fun downloadAll(
+        spec: PlayContextSpec,
+        youtubeDownloads: Boolean,
+    ): DownloadAllQueries {
+        val args = mutableListOf<Long>()
+        val where = contextPredicates(spec, args)
+        where += "s.downloadDismissedAt IS NULL"
+        where += "(d.episodeId IS NULL OR d.state IN ('FAILED', 'MISSING'))"
+        // Gate the source too: external-mode YouTube must stay excluded even with an enclosure.
+        where += "(? = 1 OR p.sourceType = 'RSS')"
+        args += if (youtubeDownloads) 1L else 0L
+        where += "(e.enclosureUrl IS NOT NULL OR (e.externalMediaId IS NOT NULL AND ? = 1))"
+        args += if (youtubeDownloads) 1L else 0L
+        val selection =
+            " FROM episode e JOIN podcast p ON p.id = e.podcastId" +
+                " LEFT JOIN episode_state s ON s.episodeId = e.id" +
+                " LEFT JOIN download d ON d.episodeId = e.id" +
+                " WHERE ${where.joinToString(" AND ")}"
+        return DownloadAllQueries(
+            candidates =
+                boundQuery(
+                    "SELECT e.id AS episodeId, e.enclosureLength," +
+                        " COALESCE(s.measuredDurationMs, e.durationMs) AS durationMs" + selection +
+                        " ORDER BY e.sortDate DESC, e.id DESC LIMIT ?",
+                    args + DOWNLOAD_ALL_LIMIT.toLong(),
+                ),
+            count = boundQuery("SELECT COUNT(*)" + selection, args),
+        )
+    }
+
+    // Source and carried view filters must agree between playback and download confirmation.
+    private fun contextPredicates(
+        spec: PlayContextSpec,
+        args: MutableList<Long>,
+    ): MutableList<String> {
+        require(spec.type != ContextType.EXTERNAL) { "EXTERNAL contexts have no feed selection (05)" }
+        val where = mutableListOf<String>()
         when (spec.type) {
-            ContextType.ALL, ContextType.DOWNLOADS, ContextType.EXTERNAL -> {
+            ContextType.ALL -> {
+                where += "p.includeInAll = 1"
+            }
+
+            ContextType.DOWNLOADS, ContextType.EXTERNAL -> {
                 Unit
             }
 
@@ -334,37 +424,12 @@ object FeedQueryBuilder {
         where += VISIBLE
         where += "e.availability = 'AVAILABLE'"
         where += "s.playedAt IS NULL"
-        if (selection == ContextSelection.TAIL) {
-            where += "NOT EXISTS (SELECT 1 FROM queue_entry q WHERE q.episodeId = e.id)"
-        }
-        if (episodeId != null) {
-            where += "e.id = ?"
-            args += episodeId
-        }
-        where += "(? = 1 OR p.sourceType = 'RSS')"
-        args += if (youtubePlayable) 1L else 0L
         where += "e.sortDate >= ?"
         args += spec.minSortDate ?: 0
-        if (boundBySubscription && spec.type == ContextType.GROUP) {
-            where += "e.sortDate >= p.subscribedAt"
-        }
-        if (anchorSortDate != null && anchorEpisodeId != null) {
-            val op = if (spec.order == FeedOrder.NEWEST_FIRST) "<" else ">"
-            where += "(e.sortDate, e.id) $op (?, ?)"
-            args += anchorSortDate
-            args += anchorEpisodeId
-        }
-        val dir = if (spec.order == FeedOrder.NEWEST_FIRST) "DESC" else "ASC"
-        args += k.toLong()
-        return boundQuery(
-            "SELECT e.id AS episodeId, e.sortDate, e.podcastId FROM $from" +
-                " LEFT JOIN episode_state s ON s.episodeId = e.id" +
-                " LEFT JOIN download d ON d.episodeId = e.id" +
-                " WHERE ${where.joinToString(" AND ")}" +
-                " ORDER BY e.sortDate $dir, e.id $dir LIMIT ?",
-            args,
-        )
+        return where
     }
+
+    private const val DOWNLOAD_ALL_LIMIT = 200
 
     // Only the projection differs: confirmation and the transactional write cannot drift.
     // Badge windows and AVAILABLE-only counting deliberately do not constrain this bulk action (02).

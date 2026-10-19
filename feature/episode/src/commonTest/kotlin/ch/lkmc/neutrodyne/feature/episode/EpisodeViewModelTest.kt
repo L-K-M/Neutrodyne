@@ -46,6 +46,12 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class EpisodeViewModelTest : MainDispatcherTest() {
+    private val downloads =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeDownloadController()
+    private val liveSource =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeEpisodeLiveStateSource()
     private val episodes = FakeEpisodeRepository()
     private val chapters =
         FakeChapterRepository()
@@ -66,11 +72,30 @@ class EpisodeViewModelTest : MainDispatcherTest() {
             playbackStates,
             testPlatformInfo,
             network,
+            downloadController = downloads,
+            liveStateSource = liveSource,
         )
 
     private fun TestScope.collect(viewModel: EpisodeViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
     }
+
+    @Test fun progressWindowTracksVisibilityAndClearsDuringTheSharingGrace() =
+        runTest {
+            val model = viewModel()
+            val subscription = backgroundScope.launch { model.uiState.collect {} }
+            runCurrent()
+            assertEquals(emptySet(), liveSource.lastVisibleIds.value)
+
+            model.onVisible()
+            runCurrent()
+            assertEquals(setOf(5L), liveSource.lastVisibleIds.value)
+
+            subscription.cancel()
+            model.onHidden()
+            runCurrent()
+            assertEquals(emptySet(), liveSource.lastVisibleIds.value)
+        }
 
     @Test fun timestampSeeksCurrentAndStartsOtherEpisodeAtExactPosition() =
         runTest {
@@ -431,5 +456,17 @@ class EpisodeViewModelTest : MainDispatcherTest() {
             advanceUntilIdle()
             assertNull(viewModel.pendingCredentials.value)
             assertEquals(listOf("setCredentials(7, user)"), podcasts.calls)
+        }
+
+    @Test fun downloadToggleReachesTheManualRequestHandler() =
+        runTest {
+            val vm = viewModel()
+            vm.onAction(EpisodeAction.DownloadToggle(5))
+            runCurrent()
+            assertEquals(
+                ch.lkmc.neutrodyne.core.testing.FakeDownloadController.Action.REQUEST,
+                downloads.calls.single().action,
+            )
+            assertEquals(listOf(5L), downloads.calls.single().ids)
         }
 }

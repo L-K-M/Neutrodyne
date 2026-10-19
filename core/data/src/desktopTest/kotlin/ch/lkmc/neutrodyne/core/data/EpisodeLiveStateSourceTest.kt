@@ -51,6 +51,49 @@ import kotlin.time.Duration.Companion.seconds
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class EpisodeLiveStateSourceTest {
+    @Test
+    fun progressOnlyOverlaysVisibleActiveRowsAndTerminalDatabaseStateWins() =
+        runTest {
+            val db = newDb(queryContext = StandardTestDispatcher(testScheduler))
+            try {
+                val podcast = db.podcastDao().insertPodcast(podcastEntity())
+                val active = insertEpisode(db, podcast, "g:active")
+                val completed = insertEpisode(db, podcast, "g:done")
+                db.downloadDao().insert(
+                    downloadEntity(active, state = DownloadState.DOWNLOADING).copy(downloadedBytes = 10),
+                )
+                db.downloadDao().insert(
+                    downloadEntity(
+                        completed,
+                        state = DownloadState.COMPLETED,
+                    ).copy(downloadedBytes = 100, totalBytes = 100),
+                )
+                val progress =
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeDownloadProgressSource()
+                progress.progress.value =
+                    mapOf(
+                        active to
+                            ch.lkmc.neutrodyne.download.api
+                                .LiveProgress(DownloadState.DOWNLOADING, 70, 100, 20),
+                        completed to
+                            ch.lkmc.neutrodyne.download.api
+                                .LiveProgress(DownloadState.DOWNLOADING, 20, 100, 20),
+                        9999L to
+                            ch.lkmc.neutrodyne.download.api
+                                .LiveProgress(DownloadState.DOWNLOADING, 30, 100, 20),
+                    )
+                val source = EpisodeLiveStateSourceImpl(db, StandardTestDispatcher(testScheduler), progress = progress)
+                val rows = source.observe(flowOf(setOf(active, completed))).first { it[active]?.downloadedBytes == 70L }
+                assertEquals(setOf(active, completed), rows.keys)
+                assertEquals(DownloadState.COMPLETED, rows[completed]?.downloadState)
+                assertEquals(100L, rows[completed]?.downloadedBytes)
+                assertEquals(10L, db.downloadDao().byEpisode(active)?.downloadedBytes)
+            } finally {
+                db.close()
+            }
+        }
+
     private fun source(
         db: NeutrodyneDatabase,
         scope: TestScope,
