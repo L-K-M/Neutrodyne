@@ -14,6 +14,8 @@ import ch.lkmc.neutrodyne.core.domain.ChapterRepository
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.ArtworkColors
+import ch.lkmc.neutrodyne.core.domain.YouTubeExternalOpen
+import ch.lkmc.neutrodyne.core.domain.YouTubeOpenContext
 import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.CurrentChapter
 import ch.lkmc.neutrodyne.core.model.EffectivePlayback
@@ -27,10 +29,12 @@ import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.ShowNotesImages
 import ch.lkmc.neutrodyne.core.ui.AvailabilityText
+import ch.lkmc.neutrodyne.core.ui.ExternalOpenHandler
 import ch.lkmc.neutrodyne.core.ui.ShowNotesImageMode
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.UserMessages
+import ch.lkmc.neutrodyne.core.ui.resources.action_watch_on_youtube
 import ch.lkmc.neutrodyne.feature.player.resources.Res
 import ch.lkmc.neutrodyne.feature.player.resources.player_audio_gone
 import ch.lkmc.neutrodyne.feature.player.resources.player_auth_required
@@ -73,6 +77,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -80,7 +85,7 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-public enum class PlayerMessageAction { RETRY, PLAYBACK_SETTINGS }
+public enum class PlayerMessageAction { RETRY, PLAYBACK_SETTINGS, WATCH_ON_YOUTUBE }
 
 public data class PlayerUiState(
     val now: NowPlaying? = null,
@@ -118,9 +123,19 @@ public class PlayerViewModel(
     private val episodes: Provider<EpisodeRepository>,
     private val network: NetworkMonitor,
     private val artwork: ArtworkRepository,
+    externalOpenService: Provider<YouTubeExternalOpen>,
 ) : ViewModel() {
     private val messages = UserMessages()
+    public val externalOpen =
+        ExternalOpenHandler(
+            viewModelScope,
+            messages,
+            mark = { externalOpenService().onOpened(it, YouTubeOpenContext.EXTERNAL_OR_UNPLAYABLE) },
+            undo = { externalOpenService().undo(it) },
+            onFailure = { writeFailed() },
+        )
     private val messageActions = mutableMapOf<Long, PlayerMessageAction>()
+    private val watchEpisodes = mutableMapOf<Long, Long>()
     private val locallyPendingConsent = MutableStateFlow<PlayResult.NeedsMeteredConsent?>(null)
     private val ignoredConsent = MutableStateFlow<PlayResult.NeedsMeteredConsent?>(null)
     private val scopeWrite = MutableStateFlow<ScopeWriteResult?>(null)
@@ -420,11 +435,21 @@ public class PlayerViewModel(
     }
 
     public fun onMessageShown(id: Long) {
+        externalOpen.shown(id)
         messages.shown(id)
         messageActions.remove(id)
+        watchEpisodes.remove(id)
     }
 
     public fun onMessageAction(id: Long): PlayerMessageAction? = messageActions[id]
+
+    public fun watchEpisode(messageId: Long): Long? = watchEpisodes[messageId]
+
+    public suspend fun watchLink(episodeId: Long): String? =
+        episodes().observeEpisode(episodeId).first()?.externalMediaId?.let {
+            ch.lkmc.neutrodyne.core.ui.YouTubeLinks
+                .watch(it)
+        }
 
     private fun report(result: PlayResult) {
         if (result is PlayResult.NeedsMeteredConsent) {
@@ -466,18 +491,51 @@ public class PlayerViewModel(
             }
         val action =
             when (result) {
-                PlayResult.ServiceUnavailable -> PlayerMessageAction.RETRY
-                PlayResult.MeteredBlocked -> PlayerMessageAction.PLAYBACK_SETTINGS
-                else -> null
+                PlayResult.ServiceUnavailable -> {
+                    PlayerMessageAction.RETRY
+                }
+
+                PlayResult.MeteredBlocked -> {
+                    PlayerMessageAction.PLAYBACK_SETTINGS
+                }
+
+                is PlayResult.NotPlayable -> {
+                    if (result.reason is UnplayableReason.YouTubeExternal) {
+                        PlayerMessageAction.WATCH_ON_YOUTUBE
+                    } else {
+                        null
+                    }
+                }
+
+                else -> {
+                    null
+                }
             }
         val label =
             when (action) {
-                PlayerMessageAction.RETRY -> UiText.Res(Res.string.player_retry)
-                PlayerMessageAction.PLAYBACK_SETTINGS -> UiText.Res(Res.string.player_settings)
-                null -> null
+                PlayerMessageAction.RETRY -> {
+                    UiText.Res(Res.string.player_retry)
+                }
+
+                PlayerMessageAction.PLAYBACK_SETTINGS -> {
+                    UiText.Res(Res.string.player_settings)
+                }
+
+                PlayerMessageAction.WATCH_ON_YOUTUBE -> {
+                    UiText.Res(
+                        ch.lkmc.neutrodyne.core.ui.resources.Res.string.action_watch_on_youtube,
+                    )
+                }
+
+                null -> {
+                    null
+                }
             }
         val message = messages.post(text, label)
         if (action != null) messageActions[message.id] = action
+        if (action == PlayerMessageAction.WATCH_ON_YOUTUBE && result is PlayResult.NotPlayable) {
+            watchEpisodes[message.id] = result.episodeId
+        }
     }
 
     private fun unplayableText(reason: UnplayableReason): UiText =

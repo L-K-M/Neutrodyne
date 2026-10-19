@@ -18,6 +18,8 @@ import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.ArtworkColors
+import ch.lkmc.neutrodyne.core.domain.YouTubeExternalOpen
+import ch.lkmc.neutrodyne.core.domain.YouTubeOpenContext
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.CurrentChapter
 import ch.lkmc.neutrodyne.core.model.EpisodeChapter
@@ -32,7 +34,9 @@ import ch.lkmc.neutrodyne.core.model.settings.ShowNotesImages
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
 import ch.lkmc.neutrodyne.core.ui.DownloadRequestHandler
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
+import ch.lkmc.neutrodyne.core.ui.ExternalOpenHandler
 import ch.lkmc.neutrodyne.core.ui.PlaybackActions
+import ch.lkmc.neutrodyne.core.ui.RowCaps
 import ch.lkmc.neutrodyne.core.ui.ShowNotesImageMode
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
@@ -45,6 +49,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import ch.lkmc.neutrodyne.download.api.DownloadController
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import dev.zacsweers.metro.Assisted
 import dev.zacsweers.metro.AssistedFactory
 import dev.zacsweers.metro.AssistedInject
@@ -80,6 +85,14 @@ public data class EpisodeUiState(
     val episode: EpisodeDetail? = null,
     val notes: ShowNotes? = null,
     val loaded: Boolean = false,
+    val rowCaps: RowCaps =
+        RowCaps(
+            false,
+            false,
+            false,
+            null,
+            false,
+        ),
     val offline: Boolean = false,
     val imageMode: ShowNotesImageMode = ShowNotesImageMode.TAP_TO_LOAD,
     val messages: ImmutableList<UserMessage> = persistentListOf(),
@@ -114,9 +127,19 @@ public class EpisodeViewModel
         downloadController: DownloadController,
         liveStateSource: EpisodeLiveStateSource,
         private val artwork: ArtworkRepository,
+        externalOpenService: YouTubeExternalOpen,
+        capabilities: YouTubeCapabilitiesSource,
     ) : ViewModel() {
         private val visibleDownloadIds = MutableStateFlow<Set<Long>>(emptySet())
         private val userMessages = UserMessages()
+        public val externalOpen =
+            ExternalOpenHandler(
+                viewModelScope,
+                userMessages,
+                mark = { externalOpenService.onOpened(it, YouTubeOpenContext.EXTERNAL_OR_UNPLAYABLE) },
+                undo = { externalOpenService.undo(it) },
+                onFailure = ::reportWriteFailed,
+            )
         public val downloads =
             DownloadRequestHandler(
                 viewModelScope,
@@ -207,6 +230,17 @@ public class EpisodeViewModel
                                     state.episode?.let { Triple(it.id, it.artwork.key, it.podcastId) }
                             },
                     )
+                }.combine(capabilities.capabilities) { state, caps ->
+                    state.copy(
+                        rowCaps =
+                            RowCaps(
+                                caps.inAppPlayback,
+                                caps.downloads,
+                                caps.enrichment,
+                                null,
+                                state.offline,
+                            ),
+                    )
                 }.stateIn(viewModelScope, SHARING, EpisodeUiState())
 
         init {
@@ -253,7 +287,7 @@ public class EpisodeViewModel
                     playback.playLast(listOf(action.episodeId))
                 }
 
-                // Availability checks need the YouTube engine (M8).
+                // Availability checks need the YouTube engine (M9a / MD3).
                 else -> {
                     Unit
                 }
@@ -299,6 +333,7 @@ public class EpisodeViewModel
         public fun onMessageShown(id: Long) {
             failedLinks.remove(id)
             playback.onMessageShown(id)
+            externalOpen.shown(id)
             userMessages.shown(id)
         }
 

@@ -61,9 +61,11 @@ import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.FeedDates
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.NavBackButton
+import ch.lkmc.neutrodyne.core.ui.RowCaps
 import ch.lkmc.neutrodyne.core.ui.ShowNotesImageMode
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.YouTubeLinks
+import ch.lkmc.neutrodyne.core.ui.YouTubeWatchMode
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.offlineBannerItem
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
@@ -120,7 +122,7 @@ internal fun EpisodeScreen(
             title = "",
             navigation = { NavBackButton() },
             actions = {
-                episode?.let { EpisodeChrome(it, onAction, onFavorite, onOpenLink) }
+                episode?.let { EpisodeChrome(it, state.rowCaps, onAction, onFavorite, onOpenLink) }
             },
         )
         when {
@@ -192,6 +194,7 @@ internal fun EpisodeScreen(
 @Composable
 private fun EpisodeChrome(
     episode: EpisodeDetail,
+    caps: RowCaps,
     onAction: (EpisodeAction) -> Unit,
     onFavorite: (Boolean) -> Unit,
     onOpenLink: (String) -> Unit,
@@ -255,7 +258,19 @@ private fun EpisodeChrome(
                     text = { Text(stringResource(Res.string.action_watch_on_youtube)) },
                     onClick = {
                         menuOpen = false
-                        onAction(EpisodeAction.WatchOnYouTube(episode.id, externalMediaId!!))
+                        onAction(
+                            EpisodeAction.WatchOnYouTube(
+                                episode.id,
+                                externalMediaId!!,
+                                if (caps.inAppPlayback &&
+                                    episode.availability == ch.lkmc.neutrodyne.core.model.Availability.AVAILABLE
+                                ) {
+                                    YouTubeWatchMode.PLAYABLE_OVERFLOW
+                                } else {
+                                    YouTubeWatchMode.EXTERNAL_OR_UNPLAYABLE
+                                },
+                            ),
+                        )
                     },
                 )
             }
@@ -416,7 +431,7 @@ private fun metaLine(episode: EpisodeDetail): UiText {
 
 /**
  * The action row (08 Episode detail): the primary play affordance — "Watch on YouTube" for
- * YouTube sources while external mode is the only mode (M8 adds the engine's Play), the
+ * YouTube sources while external mode is the only mode (M9a / MD3 add the engine's Play), the
  * offline-undownloaded state shows `cloud_off` "Offline" and dispatches the playback intent — plus Download, Up
  * next and the played toggle as icon-label buttons. `FlowRow` wraps them onto extra lines so
  * every action stays reachable at 200 % text on a compact width (08's fontScale ≥ 1.5 rule).
@@ -439,9 +454,9 @@ private fun ActionRow(
         modifier = Modifier.padding(top = BUTTONS_TOP),
     ) {
         val mediaId = episode.externalMediaId
-        if (isYouTube && mediaId != null) {
-            NdButton(onClick = {
-                onAction(EpisodeAction.WatchOnYouTube(episode.id, mediaId))
+        if (isYouTube && !state.rowCaps.inAppPlayback) {
+            NdButton(enabled = mediaId != null, onClick = {
+                mediaId?.let { onAction(EpisodeAction.WatchOnYouTube(episode.id, it)) }
             }) {
                 Text(stringResource(Res.string.action_watch_on_youtube))
             }
@@ -480,60 +495,64 @@ private fun ActionRow(
             }
         }
 
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.clickable { onAction(EpisodeAction.DownloadToggle(episode.id)) },
-        ) {
-            ch.lkmc.neutrodyne.core.ui.DownloadStateButton(
-                state = state.downloadLive?.downloadState ?: episode.downloadState,
-                waitReason = state.downloadLive?.waitReason,
-                progress = state.downloadLive?.downloadProgress(),
-                onClick = { onAction(EpisodeAction.DownloadToggle(episode.id)) },
-                modifier = Modifier.clearAndSetSemantics {},
-            )
-            val status =
-                ch.lkmc.neutrodyne.core.ui.DownloadStatusText.describe(
-                    state.downloadLive?.downloadState ?: episode.downloadState,
-                    state.downloadLive?.waitReason,
-                    state.downloadLive?.downloadProgress(),
-                    state.downloadLive?.lastError,
-                    state.downloadLive?.nextAttemptAt,
-                    ch.lkmc.neutrodyne.core.ui.LocalUiClock.current
-                        .now(),
-                    LocalPlatformKind.current,
+        if (!isYouTube || state.rowCaps.downloads) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.clickable { onAction(EpisodeAction.DownloadToggle(episode.id)) },
+            ) {
+                ch.lkmc.neutrodyne.core.ui.DownloadStateButton(
+                    state = state.downloadLive?.downloadState ?: episode.downloadState,
+                    waitReason = state.downloadLive?.waitReason,
+                    progress = state.downloadLive?.downloadProgress(),
+                    onClick = { onAction(EpisodeAction.DownloadToggle(episode.id)) },
+                    modifier = Modifier.clearAndSetSemantics {},
                 )
-            Text(
-                status?.asString() ?: stringResource(
-                    if (downloaded) {
-                        Res.string.summary_downloaded
-                    } else {
-                        Res.string.action_download
-                    },
-                ),
-            )
+                val status =
+                    ch.lkmc.neutrodyne.core.ui.DownloadStatusText.describe(
+                        state.downloadLive?.downloadState ?: episode.downloadState,
+                        state.downloadLive?.waitReason,
+                        state.downloadLive?.downloadProgress(),
+                        state.downloadLive?.lastError,
+                        state.downloadLive?.nextAttemptAt,
+                        ch.lkmc.neutrodyne.core.ui.LocalUiClock.current
+                            .now(),
+                        LocalPlatformKind.current,
+                    )
+                Text(
+                    status?.asString() ?: stringResource(
+                        if (downloaded) {
+                            Res.string.summary_downloaded
+                        } else {
+                            Res.string.action_download
+                        },
+                    ),
+                )
+            }
         }
 
-        Box {
-            IconLabelButton(
-                icon = NdIcons.QueueMusic,
-                label = stringResource(Res.string.action_up_next),
-                onClick = { upNextMenu = true },
-            )
-            DropdownMenu(expanded = upNextMenu, onDismissRequest = { upNextMenu = false }) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(Res.string.action_play_next)) },
-                    onClick = {
-                        upNextMenu = false
-                        onAction(EpisodeAction.PlayNext(episode.id))
-                    },
+        if (!isYouTube || state.rowCaps.inAppPlayback) {
+            Box {
+                IconLabelButton(
+                    icon = NdIcons.QueueMusic,
+                    label = stringResource(Res.string.action_up_next),
+                    onClick = { upNextMenu = true },
                 )
-                DropdownMenuItem(
-                    text = { Text(stringResource(Res.string.action_play_last)) },
-                    onClick = {
-                        upNextMenu = false
-                        onAction(EpisodeAction.PlayLast(episode.id))
-                    },
-                )
+                DropdownMenu(expanded = upNextMenu, onDismissRequest = { upNextMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(Res.string.action_play_next)) },
+                        onClick = {
+                            upNextMenu = false
+                            onAction(EpisodeAction.PlayNext(episode.id))
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(Res.string.action_play_last)) },
+                        onClick = {
+                            upNextMenu = false
+                            onAction(EpisodeAction.PlayLast(episode.id))
+                        },
+                    )
+                }
             }
         }
 

@@ -32,6 +32,7 @@ import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.UserMessages
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
+import ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metrox.viewmodel.ViewModelKey
@@ -66,7 +67,14 @@ public class LibraryViewModel(
     private val groups: GroupRepository,
     feedRepository: FeedRepository,
     clock: Clock,
+    private val youTubeHealth: YouTubeHealth,
 ) : ViewModel() {
+    public val feedHealth = youTubeHealth.state
+
+    public fun retryYouTubeFeeds() {
+        youTubeHealth.retryNow()
+    }
+
     private val userMessages = UserMessages()
 
     private data class GroupFilter(

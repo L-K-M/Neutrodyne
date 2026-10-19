@@ -209,10 +209,40 @@ public fun PlayerRoute(
     }
     Box(modifier) {
         ShowUserMessages(ui.messages, vm::onMessageShown) { id ->
+            vm.externalOpen.onAction(id)
             when (vm.onMessageAction(id)) {
-                PlayerMessageAction.RETRY -> vm.togglePlayPause()
-                PlayerMessageAction.PLAYBACK_SETTINGS -> slot.navigate(SettingsKey(SettingsPage.PLAYBACK))
-                null -> Unit
+                PlayerMessageAction.RETRY -> {
+                    vm.togglePlayPause()
+                }
+
+                PlayerMessageAction.PLAYBACK_SETTINGS -> {
+                    slot.navigate(SettingsKey(SettingsPage.PLAYBACK))
+                }
+
+                PlayerMessageAction.WATCH_ON_YOUTUBE -> {
+                    // Capture before acknowledgement clears the snackbar's action mapping.
+                    val episodeId = vm.watchEpisode(id)
+                    if (episodeId != null) {
+                        routeScope.launch {
+                            vm.watchLink(episodeId)?.let { url ->
+                                if (urls.open(url) == OpenResult.OPENED) {
+                                    vm.externalOpen.opened(episodeId)
+                                } else if (snackbar.showSnackbar(noHandler, copyLabel) ==
+                                    androidx.compose.material3.SnackbarResult.ActionPerformed
+                                ) {
+                                    clipboard.setText(
+                                        androidx.compose.ui.text
+                                            .AnnotatedString(url),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                null -> {
+                    Unit
+                }
             }
         }
         PlayerSheet(

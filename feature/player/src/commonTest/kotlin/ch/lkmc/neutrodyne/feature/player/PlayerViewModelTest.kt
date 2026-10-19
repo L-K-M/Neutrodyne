@@ -10,12 +10,14 @@ import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.Effective
 import ch.lkmc.neutrodyne.core.model.EffectivePlayback
 import ch.lkmc.neutrodyne.core.model.EpisodeChapter
+import ch.lkmc.neutrodyne.core.model.ExternalReason
 import ch.lkmc.neutrodyne.core.model.SettingScope
 import ch.lkmc.neutrodyne.core.model.SettingSource
 import ch.lkmc.neutrodyne.core.model.ShowNoteBlock
 import ch.lkmc.neutrodyne.core.model.ShowNoteSpan
 import ch.lkmc.neutrodyne.core.model.ShowNotes
 import ch.lkmc.neutrodyne.core.model.SleepTimerMode
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeArtworkRepository
 import ch.lkmc.neutrodyne.core.testing.FakeChapterRepository
@@ -25,8 +27,10 @@ import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackController.Action
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackController.Call
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeYouTubeExternalOpen
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.testing.testEpisodeDetail
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.feature.player.resources.Res
 import ch.lkmc.neutrodyne.feature.player.resources.player_audio_gone
@@ -75,6 +79,7 @@ class PlayerViewModelTest : MainDispatcherTest() {
                 Provider { episodeRepo },
                 FakeNetworkMonitor(),
                 artwork = artwork,
+                externalOpenService = Provider { FakeYouTubeExternalOpen() },
             )
         backgroundScope.launch { vm.uiState.collect {} }
         backgroundScope.launch { vm.position.collect {} }
@@ -116,6 +121,31 @@ class PlayerViewModelTest : MainDispatcherTest() {
             controller.state.nowPlaying.value = null
             runCurrent()
             assertNull(vm.uiState.value.colors)
+        }
+
+    @Test fun externalFallbackUsesRefusedEpisodeEvenWithoutCurrentPlayback() =
+        runTest {
+            episodes.episodes.value =
+                mapOf(
+                    8L to
+                        testEpisodeDetail(
+                            id = 8,
+                            sourceType = SourceType.YOUTUBE_CHANNEL,
+                            externalMediaId = "dQw4w9WgXcQ",
+                        ),
+                )
+            val vm = player()
+            val reason = UnplayableReason.YouTubeExternal(ExternalReason.NOT_YET_AVAILABLE)
+            controller.state.events.emit(PlaybackEvent.StartRefused(PlayResult.NotPlayable(8, reason)))
+            runCurrent()
+            val message =
+                vm.uiState.value.messages
+                    .single()
+            assertEquals(PlayerMessageAction.WATCH_ON_YOUTUBE, vm.onMessageAction(message.id))
+            val episodeId = vm.watchEpisode(message.id)
+            assertEquals(8L, episodeId)
+            vm.onMessageShown(message.id)
+            assertEquals("https://www.youtube.com/watch?v=dQw4w9WgXcQ", vm.watchLink(requireNotNull(episodeId)))
         }
 
     @Test fun sleepPersistsOnlyValidMinuteChoicesAndReportsWriteFailure() =

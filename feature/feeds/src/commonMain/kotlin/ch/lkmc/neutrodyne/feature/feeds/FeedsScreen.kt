@@ -64,6 +64,7 @@ import ch.lkmc.neutrodyne.core.ui.LocalDrawnReporter
 import ch.lkmc.neutrodyne.core.ui.ReportVisibleEpisodeIds
 import ch.lkmc.neutrodyne.core.ui.RowCaps
 import ch.lkmc.neutrodyne.core.ui.asString
+import ch.lkmc.neutrodyne.core.ui.forSource
 import ch.lkmc.neutrodyne.core.ui.offlineBannerItem
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_more
@@ -283,7 +284,7 @@ private fun FeedList(
                             live = rowLive,
                             style = EpisodeRowStyle.FEED,
                             caps =
-                                RowCaps.FULL.copy(
+                                state.rowCaps.forSource(item.row.sourceType).copy(
                                     offline = state.offline,
                                     swipe = state.swipe.takeIf { selectedIds.isEmpty() },
                                 ),
