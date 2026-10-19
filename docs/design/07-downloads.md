@@ -1287,7 +1287,7 @@ to W5/W8.
 
 `LocalMediaIndexImpl` (common) mirrors `episodeId → finalUri` for `COMPLETED` rows (02's load query) for 06's `EpisodeResolver` (Android) and 11's `DesktopEpisodeSourceResolver` (desktop); both read `file:` URIs ([Verification and finalisation](#verification-and-finalisation)).
 
-- Loaded by an `AppInitializer` (order 130, after the database open at 100) and fully reloaded by reconcile.
+- Loaded by an `AppInitializer` (order 130, after the database open at 100); reconcile refreshes checked entries individually.
 - `localUriOrNull(id)` returns the current memory snapshot immediately on every thread, including loader threads. It performs no storage access or blocking fallback; an early lookup may return null.
 - Ordering rules: `put` only after the `COMPLETED` commit; `remove` before a row is deleted or set `MISSING`; a root change (`download-move`, `downloads-move`, a re-pointed desktop root) updates the entry after the row update.
 
@@ -1500,6 +1500,17 @@ During reconcile and the daily cleanup:
 Serves N1, N2, R4.2, R3.7, R7.3, R8.2 (downloads kept across desktop updates and uninstalls). Delivered in M6 (common reconciler, both platforms); the engine-absent reconcile step in M9a (MD3 on the desktop); the sync interplay in MS2. Lessons applied: DB/file drift after restores and storage changes (Pocket Casts ships a `FixDownloadsWorker` for it, [pocket-casts-android](https://github.com/Automattic/pocket-casts-android)).
 
 ### DownloadReconciler
+
+**Implementation note (2026-10-19, M6a).** W5 serializes reset, claims,
+controller removal and journal drains with the common claim mutex. Runner tokens
+remain registered through their final commits; a newly registered runner cannot
+claim during reset. This provides the ownership barrier without holding an
+Android scheduler mutex across disk IO. Only startup replaces the complete index;
+later reconciliation updates individual checked entries, so a concurrent transfer
+completion cannot be erased by an older snapshot. Startup drains the journal at
+band 130 before playback can restore a file pin; later drains respect the current
+session. W3 performs torn-tail trimming and rename-before-commit adoption on the
+next prepare. No schema change is needed.
 
 `DownloadReconciler` is common code. `resetOrphanedRunners()` runs once per process at the first `drain` and in the start-up reconcile (`DownloadReconcileWorker` on Android, the desktop lanes' start-up pass), before any claim:
 

@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.download.impl
 
+import android.Manifest
 import android.app.ActivityManager
 import android.app.Application
 import android.app.usage.UsageStatsManager
+import android.content.pm.PackageManager
 import android.os.Build
+import androidx.core.content.FileProvider
 import androidx.work.WorkerParameters
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
@@ -14,12 +17,22 @@ import ch.lkmc.neutrodyne.core.common.WorkerKey
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.datastore.DeviceSettingsStore
+import ch.lkmc.neutrodyne.core.domain.DownloadLifecycle
+import ch.lkmc.neutrodyne.core.domain.MissingLocalMediaReporter
+import ch.lkmc.neutrodyne.core.model.DownloadLane
+import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
+import ch.lkmc.neutrodyne.download.api.DownloadController
+import ch.lkmc.neutrodyne.download.api.DownloadProgressSource
+import ch.lkmc.neutrodyne.download.api.LocalMediaChanges
+import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.IntoMap
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.flow.first
+import java.io.File
 
 @ContributesTo(AppScope::class)
 @BindingContainer
@@ -39,18 +52,77 @@ object AndroidDownloadBindings {
         clock: Clock,
     ): DownloadNotifications = DownloadNotifications(application, clock)
 
-    /** W4/W5 replace this provider when integrating their common engine/reconciler/controller.
-     * Fail explicitly until then: persisted requests must not report successful no-op downloads. */
     @Provides
     @SingleIn(AppScope::class)
-    internal fun runtime(): AndroidDownloadRuntime =
+    internal fun runtime(
+        components: Lazy<DownloadComponents>,
+        scheduler: Lazy<AndroidDownloadScheduler>,
+    ): AndroidDownloadRuntime =
         AndroidDownloadRuntime(
-            drain = { error("W4 DownloadRunner is not integrated") },
-            reconcile = { error("W5 DownloadReconciler is not integrated") },
-            stop = { _, _ -> error("W4 runner stops are not integrated") },
-            wake = { error("W4 runner wake is not integrated") },
-            controller = { error("W4/W5 DownloadController composition is not integrated") },
+            drain = { components.value.engine.drain(it) },
+            reconcile = {
+                components.value.reconciler.reconcile()
+                scheduler.value.ensureScheduled(DownloadLane.MANUAL)
+            },
+            stop = { token, intent -> components.value.engine.stopRunner(token, intent) },
+            wake = { components.value.engine.wake(it) },
+            controller = { components.value.controller },
         )
+
+    @Provides
+    @SingleIn(AppScope::class)
+    internal fun roots(
+        application: Application,
+        device: DeviceSettingsStore,
+    ): StorageRoots = AndroidStorageRoots(application, device)
+
+    @Provides
+    internal fun host(
+        application: Application,
+        registry: LaneRegistry,
+        device: DeviceSettingsStore,
+    ): DownloadHost =
+        DownloadHost(
+            registry::liveTokens,
+            {
+                val denied =
+                    Build.VERSION.SDK_INT >= 33 &&
+                        application.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+                        PackageManager.PERMISSION_GRANTED
+                val key = DownloadSettingKeys.NOTIFICATION_PROMPTED
+                if (denied && !device.get(key)) {
+                    device.set(key, true)
+                    true
+                } else {
+                    false
+                }
+            },
+            { root, path ->
+                if (root.startsWith("ext:") && root != "ext:primary") {
+                    null
+                } else {
+                    FileProvider
+                        .getUriForFile(
+                            application,
+                            "${application.packageName}.fileprovider",
+                            File(path),
+                        ).toString()
+                }
+            },
+        )
+
+    @Provides internal fun index(impl: LocalMediaIndexImpl): LocalMediaIndex = impl
+
+    @Provides internal fun changes(impl: LocalMediaIndexImpl): LocalMediaChanges = impl
+
+    @Provides internal fun controller(components: DownloadComponents): DownloadController = components.controller
+
+    @Provides internal fun progress(components: DownloadComponents): DownloadProgressSource = components.progress
+
+    @Provides internal fun lifecycle(components: DownloadComponents): DownloadLifecycle = components.lifecycle
+
+    @Provides internal fun missing(components: DownloadComponents): MissingLocalMediaReporter =
+        MissingLocalMediaReporter { components.controller.reportFileMissing(it) }
 
     @Provides
     @SingleIn(AppScope::class)

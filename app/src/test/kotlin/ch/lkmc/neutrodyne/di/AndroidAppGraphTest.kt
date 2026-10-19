@@ -74,8 +74,10 @@ class AndroidAppGraphTest {
             ch.lkmc.neutrodyne.download.impl
                 .DownloadActionReceiver(),
         )
+        assertThat(graph.localMediaIndex::class.simpleName).isEqualTo("LocalMediaIndexImpl")
+        assertThat(graph.localMediaIndex.localUriOrNull(1)).isNull()
         assertThat(graph.databaseOpener.openState.value).isEqualTo(DatabaseOpenState.Pending)
-        assertThat(graph.initializers.map { it.order }).containsAtLeast(10, 210, 310)
+        assertThat(graph.initializers.map { it.order }).containsAtLeast(10, 130, 210, 310)
     }
 
     @Test
@@ -368,6 +370,8 @@ class AndroidAppGraphTest {
                 "PlayerConnectionInitializer" to 300..300,
                 "PlaybackChannels" to 10..10,
                 "DownloadChannelsInitializer" to 10..10,
+                "DownloadIndexInitializer" to 130..130,
+                "DeferredDeletesInitializer" to 310..310,
                 "DownloadReconcileInitializer" to 210..210,
                 "DownloadObserversInitializer" to 310..310,
             )

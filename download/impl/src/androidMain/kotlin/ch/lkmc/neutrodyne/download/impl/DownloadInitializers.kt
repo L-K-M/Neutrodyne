@@ -28,6 +28,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 @ContributesIntoSet(AppScope::class)
@@ -135,6 +136,38 @@ internal class DownloadObserversInitializer(
             awaitCancellation()
         } finally {
             withContext(NonCancellable + Dispatchers.Main) { manager.unregisterStorageVolumeCallback(callback) }
+        }
+    }
+}
+
+/** Await the memory snapshot before playback restoration at band 300. */
+@ContributesIntoSet(AppScope::class)
+@Inject
+internal class DownloadIndexInitializer(
+    private val components: Lazy<DownloadComponents>,
+) : AppInitializer {
+    override val order = 130
+
+    override suspend fun run() = components.value.reconciler.initialLoad()
+}
+
+@ContributesIntoSet(AppScope::class)
+@Inject
+internal class DeferredDeletesInitializer(
+    private val components: Lazy<DownloadComponents>,
+    private val db: Lazy<NeutrodyneDatabase>,
+    @param:ApplicationScope private val scope: CoroutineScope,
+) : AppInitializer {
+    override val order = 310
+
+    override suspend fun run() {
+        scope.launch {
+            db.value.playSessionDao().observeCurrentEpisodeId().collect {
+                val downloads = components.value
+                suspendRunCatching {
+                    downloads.claimMutex.withLock { downloads.deletes.drain(it) }
+                }.onFailure { Log.e("Downloads", it) { "Deferred download deletion failed" } }
+            }
         }
     }
 }
