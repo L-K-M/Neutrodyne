@@ -13,6 +13,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
@@ -290,6 +291,24 @@ class EpisodeScreenTest {
             assertEquals(listOf<EpisodeAction>(EpisodeAction.WatchOnYouTube(9, "abc123")), actions)
         }
 
+    @Test fun externalEpisodeWithoutVideoIdCannotFallBackToNativePlay() =
+        runComposeUiTest {
+            setEpisode(
+                loadedState(
+                    episode =
+                        testEpisodeDetail(
+                            9,
+                            sourceType = SourceType.YOUTUBE_CHANNEL,
+                            externalMediaId = null,
+                        ),
+                ),
+            )
+            onNodeWithText("Watch on YouTube").assertIsNotEnabled()
+            onNodeWithText("Play").assertDoesNotExist()
+            onNodeWithText("Download").assertDoesNotExist()
+            onNodeWithText("Up next").assertDoesNotExist()
+        }
+
     @Test
     fun overflowGoToPodcastDispatches() =
         runComposeUiTest {
@@ -489,6 +508,12 @@ class EpisodeScreenTest {
                 liveStateSource =
                     ch.lkmc.neutrodyne.core.testing
                         .FakeEpisodeLiveStateSource(),
+                externalOpenService =
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeYouTubeExternalOpen(),
+                capabilities =
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeYouTubeCapabilitiesSource(),
             )
         val owner =
             object : LifecycleOwner {

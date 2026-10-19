@@ -18,6 +18,7 @@ public data class UserMessage(
     val id: Long,
     val text: UiText,
     val action: UiText? = null,
+    val durationMs: Long? = null,
 )
 
 /**
@@ -37,8 +38,9 @@ public class UserMessages {
     public fun post(
         text: UiText,
         action: UiText? = null,
+        durationMs: Long? = null,
     ): UserMessage {
-        val message = UserMessage(nextId++, text, action)
+        val message = UserMessage(nextId++, text, action, durationMs)
         pending.update { (it + message).toImmutableList() }
         return message
     }

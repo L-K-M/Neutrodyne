@@ -300,9 +300,11 @@ private fun rowMenuActions(
         actions += stringResource(Res.string.action_mark_unplayed) to
             EpisodeAction.SetPlayed(row.id, played = false)
     }
-    actions += stringResource(Res.string.action_play_next) to EpisodeAction.PlayNext(row.id)
-    actions += stringResource(Res.string.action_play_last) to EpisodeAction.PlayLast(row.id)
-    if (caps.downloads) {
+    if (row.sourceType == SourceType.RSS || caps.inAppPlayback) {
+        actions += stringResource(Res.string.action_play_next) to EpisodeAction.PlayNext(row.id)
+        actions += stringResource(Res.string.action_play_last) to EpisodeAction.PlayLast(row.id)
+    }
+    if (caps.downloads && (row.sourceType == SourceType.RSS || caps.inAppPlayback)) {
         when (downloadState) {
             null -> {
                 actions += stringResource(Res.string.action_download) to
@@ -360,7 +362,7 @@ private fun rowMenuActions(
     // playback slot above already carries it.
     if (row.sourceType != SourceType.RSS && videoId != null && caps.inAppPlayback) {
         actions += stringResource(Res.string.action_watch_on_youtube) to
-            EpisodeAction.WatchOnYouTube(row.id, videoId)
+            EpisodeAction.WatchOnYouTube(row.id, videoId, YouTubeWatchMode.PLAYABLE_OVERFLOW)
     }
     actions += stringResource(Res.string.action_go_to_podcast) to
         EpisodeAction.OpenPodcast(row.id, row.podcastId)

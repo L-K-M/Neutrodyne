@@ -280,6 +280,12 @@ class FakeYouTubeChannelMetadata : YouTubeChannelMetadata {
 }
 
 class FakeYouTubeExternalOpen : YouTubeExternalOpen {
+    val undos = mutableListOf<Long>()
+
+    override suspend fun undo(episodeId: Long) {
+        undos += episodeId
+    }
+
     val calls = mutableListOf<Pair<Long, YouTubeOpenContext>>()
     var onOpened: suspend (Long, YouTubeOpenContext) -> Boolean = { _, _ -> false }
 

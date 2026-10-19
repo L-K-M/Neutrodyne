@@ -52,6 +52,30 @@ import ch.lkmc.neutrodyne.core.model.DownloadState as State
 import ch.lkmc.neutrodyne.core.model.WaitReason as Wait
 
 class DownloadControllerImplTest {
+    @Test fun externalChannelRequestsRefuseEvenExistingRssTaggedRows() =
+        runTest {
+            fixture { f ->
+                val channel =
+                    f.db.podcastDao().insertPodcast(
+                        podcastEntity {
+                            copy(sourceType = SourceType.YOUTUBE_CHANNEL, youtubeChannelId = "UCBR8-60-B28hp2BmDPdntcQ")
+                        },
+                    )
+                val id =
+                    f.db.episodeDao().insertStub(
+                        episodeEntity(podcastId = channel) {
+                            copy(enclosureUrl = "https://example.com/restored.mp3", enclosureType = "audio/mpeg")
+                        },
+                    )
+                val before = f.insert(id)
+                val result = assertIs<RequestResult.Queued>(f.controller.request(listOf(id), Lane.MANUAL, true))
+                assertEquals(mapOf(id to RejectReason.YOUTUBE_NOT_SUPPORTED), result.rejected)
+                assertEquals(0, result.queued)
+                assertEquals(before, f.row(id))
+                assertEquals(0, f.db.downloadDao().claim(id, "direct"))
+            }
+        }
+
     @Test fun requestStatesAndTombstones() =
         runTest {
             fixture { f ->

@@ -45,6 +45,7 @@ import kotlinx.coroutines.launch
 internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
     DownloadDialogs(viewModel.downloads)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val feedHealth by viewModel.feedHealth.collectAsStateWithLifecycle()
     val suggestions by viewModel.suggestedGroups.state.collectAsStateWithLifecycle()
     DownloadAllDialogs(viewModel.downloadAll)
     val markPlayed by viewModel.markPlayed.state.collectAsStateWithLifecycle()
@@ -60,6 +61,12 @@ internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
     BindEpisodeSelection(viewModel.episodeSelection)
 
     FeedsScreen(
+        outageBanner = {
+            if (feedHealth.feedOutageLevel > 0) {
+                ch.lkmc.neutrodyne.core.ui
+                    .YouTubeFeedBanner(viewModel::retryYouTubeFeeds)
+            }
+        },
         selection = viewModel.episodeSelection,
         onPlayEpisode = viewModel::playEpisode,
         onPlaySelectionNext = viewModel::playSelectionNext,
@@ -80,7 +87,14 @@ internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
         onAction = { action ->
             if (action is EpisodeAction.Open || action is EpisodeAction.OpenPodcast) viewModel.episodeSelection.clear()
             when (dispatchEpisodeRoute(action, navigator, urls)) {
-                EpisodeRouteResult.HANDLED -> {}
+                EpisodeRouteResult.HANDLED -> {
+                    if (action is EpisodeAction.WatchOnYouTube) {
+                        viewModel.externalOpen.opened(
+                            action.episodeId,
+                            action.mode,
+                        )
+                    }
+                }
 
                 // NO_HANDLER only comes back from WatchOnYouTube; the message carries the
                 // watch URL it failed to open for the "Copy link" action (08).
@@ -151,6 +165,7 @@ internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
         // clipboard is a composition concern the platform-free ViewModel never sees. Playback
         // actions (Retry/Settings/Enter/Watch on YouTube) resolve through the helper.
         onMessageAction = { id ->
+            viewModel.externalOpen.onAction(id)
             viewModel.undoSwipe(id)
             viewModel.consumeCopyLink(id)?.let { clipboard.setText(AnnotatedString(it)) }
             when (val action = viewModel.playback.onMessageAction(id)) {
@@ -171,6 +186,8 @@ internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
                         val url = viewModel.youtubeWatchUrl(action.episodeId)
                         if (url == null || urls.open(url) == OpenResult.NO_HANDLER) {
                             if (url != null) viewModel.onNoHandler(url)
+                        } else {
+                            viewModel.externalOpen.opened(action.episodeId)
                         }
                     }
                 }

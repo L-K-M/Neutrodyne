@@ -21,12 +21,16 @@ import ch.lkmc.neutrodyne.core.domain.SnapshotScheduler
 import ch.lkmc.neutrodyne.core.model.PlaybackScopeWrite
 import ch.lkmc.neutrodyne.core.model.PlaybackSettingChange
 import ch.lkmc.neutrodyne.core.model.ScopedSettingsView
+import ch.lkmc.neutrodyne.core.model.SettingField
 import ch.lkmc.neutrodyne.core.model.SettingOverrides
 import ch.lkmc.neutrodyne.core.model.SettingScope
+import ch.lkmc.neutrodyne.core.model.SettingSource
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.hasSupportedKeepLatest
 import ch.lkmc.neutrodyne.core.model.hasSupportedPlaybackSpeed
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.withGroupAutoDownloadGating
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.Provider
@@ -35,6 +39,8 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
 @Inject
@@ -46,12 +52,26 @@ internal class ScopeSettingsRepositoryImpl(
     private val refresh: Provider<RefreshController>,
     private val channelSync: GroupChannelSync,
     private val snapshots: SnapshotScheduler,
+    private val capabilities: YouTubeCapabilitiesSource,
 ) : ScopeSettingsRepository {
     private val dao get() = db.scopeSettingsDao()
 
     override fun observePodcast(podcastId: Long): Flow<ScopedSettingsView?> =
-        combine(dao.observePodcastScope(podcastId), settings.observeScopeDefaults()) { rows, defaults ->
-            rows.takeIf { it.isNotEmpty() }?.resolvePodcast(defaults)
+        combine(
+            dao.observePodcastScope(podcastId),
+            settings.observeScopeDefaults(),
+            capabilities.capabilities.map { it.downloads },
+        ) { rows, defaults, downloads ->
+            rows.takeIf { it.isNotEmpty() }?.resolvePodcast(defaults)?.let { view ->
+                if (rows.first().sourceType != SourceType.YOUTUBE_CHANNEL || downloads) {
+                    view
+                } else {
+                    view.copy(
+                        effective = view.effective.copy(autoDownload = false),
+                        sources = view.sources + AUTO_FIELDS.associateWith { SettingSource.NotSupported },
+                    )
+                }
+            }
         }.distinctUntilChanged()
 
     override fun observeGroup(groupId: Long): Flow<ScopedSettingsView?> =
@@ -64,9 +84,24 @@ internal class ScopeSettingsRepositoryImpl(
         change: (SettingOverrides) -> SettingOverrides,
     ): Outcome<Unit, SettingsError> =
         write {
-            if (db.podcastDao().byId(podcastId) == null) return@write Outcome.Success(ScopeWrite.UNCHANGED)
+            val podcast = db.podcastDao().byId(podcastId) ?: return@write Outcome.Success(ScopeWrite.UNCHANGED)
             val previous = dao.forPodcast(podcastId)?.o ?: ScopeOverrides()
-            val next = change(previous.toModel())
+            val edited = change(previous.toModel())
+            val next =
+                if (podcast.sourceType == SourceType.YOUTUBE_CHANNEL &&
+                    !capabilities.capabilities.value.downloads
+                ) {
+                    edited.copy(
+                        autoDownload = previous.autoDownload,
+                        autoDownloadKeepLatest = previous.autoDownloadKeepLatest,
+                        autoDownloadNetwork = previous.autoDownloadNetwork,
+                        autoDownloadRequireCharging = previous.autoDownloadRequireCharging,
+                        includeVideoInAutoDownload = previous.includeVideoInAutoDownload,
+                    )
+                } else {
+                    edited
+                }
+            if (next != edited) return@write Outcome.Failure(SettingsError.OutOfRange("autoDownload"))
             if (!next.hasSupportedRefreshInterval()) return@write invalidRefresh()
             if (!next.hasSupportedPlaybackSpeed()) return@write invalidSpeed()
             if (!next.hasSupportedKeepLatest()) {
@@ -308,3 +343,12 @@ internal class ScopeSettingsRepositoryImpl(
     private fun invalidRefresh(): Outcome<Nothing, SettingsError> =
         Outcome.Failure(SettingsError.OutOfRange("refreshIntervalMinutes"))
 }
+
+private val AUTO_FIELDS =
+    setOf(
+        SettingField.AUTO_DOWNLOAD,
+        SettingField.AUTO_DOWNLOAD_KEEP_LATEST,
+        SettingField.AUTO_DOWNLOAD_NETWORK,
+        SettingField.AUTO_DOWNLOAD_REQUIRE_CHARGING,
+        SettingField.INCLUDE_VIDEO_IN_AUTO_DOWNLOAD,
+    )

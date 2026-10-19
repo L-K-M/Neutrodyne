@@ -95,7 +95,12 @@ internal fun PodcastRoute(key: PodcastKey) {
             if (action is EpisodeAction.Open || action is EpisodeAction.OpenPodcast) viewModel.episodeSelection.clear()
             when (dispatchEpisodeRoute(action, navigator, urls)) {
                 EpisodeRouteResult.HANDLED -> {
-                    Unit
+                    if (action is EpisodeAction.WatchOnYouTube) {
+                        viewModel.externalOpen.opened(
+                            action.episodeId,
+                            action.mode,
+                        )
+                    }
                 }
 
                 // Only `WatchOnYouTube` can fail today: offer its watch URL for copying.
@@ -186,6 +191,7 @@ internal fun PodcastRoute(key: PodcastKey) {
         viewModel::onMessageShown,
         // Membership Undo stays in the ViewModel; playback actions resolve through the helper.
         onMessageAction = { id ->
+            viewModel.externalOpen.onAction(id)
             viewModel.onMessageAction(id)
             when (val action = viewModel.playback.onMessageAction(id)) {
                 is PlaybackMessageAction.RetryStart -> {
@@ -203,8 +209,12 @@ internal fun PodcastRoute(key: PodcastKey) {
                 is PlaybackMessageAction.WatchOnYouTube -> {
                     scope.launch {
                         val url = viewModel.youtubeWatchUrl(action.episodeId)
-                        if (url != null && urls.open(url) == OpenResult.NO_HANDLER) {
-                            noHandler(url)
+                        if (url != null) {
+                            if (urls.open(url) == OpenResult.NO_HANDLER) {
+                                noHandler(url)
+                            } else {
+                                viewModel.externalOpen.opened(action.episodeId)
+                            }
                         }
                     }
                 }

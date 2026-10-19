@@ -38,10 +38,12 @@ import ch.lkmc.neutrodyne.core.model.FeedInfo
 import ch.lkmc.neutrodyne.core.model.FeedMove
 import ch.lkmc.neutrodyne.core.model.LibraryTile
 import ch.lkmc.neutrodyne.core.model.PodcastDetail
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import ch.lkmc.neutrodyne.feeds.html.ShowNotesSanitizer
 import ch.lkmc.neutrodyne.feeds.identity.PrivateFeedUrls
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+import ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.Provider
@@ -77,6 +79,7 @@ internal class PodcastRepositoryImpl(
     private val fetcher: Provider<FeedFetcher>,
     private val tempFiles: FeedTempFiles,
     private val downloads: Provider<DownloadLifecycle>,
+    private val youTubeHealth: YouTubeHealth,
 ) : PodcastRepository {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -87,7 +90,7 @@ internal class PodcastRepositoryImpl(
             // The window is fixed at subscription time — a long-lived collector doesn't re-anchor
             // it (self-corrects on resubscribe).
             .observeLibraryTiles(clock.now() - TILE_COUNTS_WINDOW_MS, groupId)
-            .map { rows ->
+            .combine(youTubeHealth.state) { rows, health ->
                 rows
                     .map { row ->
                         LibraryTile(
@@ -105,6 +108,8 @@ internal class PodcastRepositoryImpl(
                                     row.lastSuccessAt,
                                     row.lastErrorKind,
                                     row.subscribedAt,
+                                    row.sourceType,
+                                    health.feedOutageLevel > 0,
                                 ),
                             latestEpisodeAt = row.latestEpisodeAt,
                             subscribedAt = row.subscribedAt,
@@ -117,8 +122,9 @@ internal class PodcastRepositoryImpl(
         combine(
             db.podcastDao().observeById(podcastId),
             db.podcastDao().observeEpisodeCount(podcastId),
-        ) { entity, count ->
-            entity?.let { detailOf(it, count) }
+            youTubeHealth.state,
+        ) { entity, count, health ->
+            entity?.let { detailOf(it, count, health.feedOutageLevel > 0) }
         }
 
     override fun observeFeedInfo(podcastId: Long): Flow<FeedInfo?> =
@@ -382,6 +388,7 @@ internal class PodcastRepositoryImpl(
     private suspend fun detailOf(
         p: PodcastEntity,
         episodeCount: Int,
+        outage: Boolean = false,
     ): PodcastDetail =
         PodcastDetail(
             id = p.id,
@@ -401,7 +408,16 @@ internal class PodcastRepositoryImpl(
             latestEpisodeAt = p.latestEpisodeAt,
             status = p.status,
             health =
-                healthOf(p.gone, p.needsCredentials, p.failureCount, p.lastSuccessAt, p.lastErrorKind, p.subscribedAt),
+                healthOf(
+                    p.gone,
+                    p.needsCredentials,
+                    p.failureCount,
+                    p.lastSuccessAt,
+                    p.lastErrorKind,
+                    p.subscribedAt,
+                    p.sourceType,
+                    outage,
+                ),
             isPrivate = PrivateFeedUrls.looksPrivate(p.feedUrl),
             episodeOrder = p.episodeOrder,
             showType = p.showType,
@@ -418,15 +434,18 @@ internal class PodcastRepositoryImpl(
         lastSuccessAt: Long?,
         lastErrorKind: FeedErrorKind?,
         subscribedAt: Long,
+        sourceType: SourceType,
+        outage: Boolean,
     ): FeedHealth =
         FeedHealth(
-            gone = gone,
-            needsCredentials = needsCredentials,
-            failureCount = failureCount,
+            gone = gone && sourceType == SourceType.RSS,
+            needsCredentials = needsCredentials && sourceType == SourceType.RSS,
+            failureCount = if (sourceType == SourceType.YOUTUBE_CHANNEL && outage) 0 else failureCount,
             lastSuccessAt = lastSuccessAt,
-            lastErrorKind = lastErrorKind,
+            lastErrorKind = lastErrorKind.takeUnless { sourceType == SourceType.YOUTUBE_CHANNEL && outage },
             possiblyDead =
-                !gone && failureCount >= DEAD_FAILURE_COUNT &&
+                !(sourceType == SourceType.YOUTUBE_CHANNEL && outage) && !(gone && sourceType == SourceType.RSS) &&
+                    failureCount >= DEAD_FAILURE_COUNT &&
                     (lastSuccessAt ?: subscribedAt) < clock.now() - DEAD_WINDOW_MS,
         )
 

@@ -1232,6 +1232,18 @@ Row shape: `sourceKind = YOUTUBE`, `sourceRef = videoId`, `formatPref = AudioQua
 
 ### Engine absent or disabled
 
+Implementation note (2026-10-19, M8): W8 gates channel scoped auto-download
+presentation with the live downloads capability and refuses hidden policy
+edits. Cleanup of existing files remains available. M8 has only an RSS transfer
+source: both candidates and direct claims join the parent podcast and refuse
+channels even when a restored download is tagged RSS. A non-null channel ID
+also prevents an RSS-tagged parent from bypassing the controller or claim
+boundary. Runnable summaries use the same parent-source guard, preventing
+restored rows from repeatedly rearming a runner that cannot claim them.
+This changes queries and projections only, without a schema change;
+M9a / MD3 must extend this guard with their engine-backed transfer source.
+
+
 YouTube rows are created only while `capabilities.value.downloads` is true: otherwise `request` rejects YouTube IDs (`YOUTUBE_NOT_SUPPORTED`) and the planner gets no YouTube candidates, so before M9a no YouTube row exists on any APK and before MD3 none on the desktop (`NOT_YET_AVAILABLE`). Rows created with the engine meet external mode when the user turns the engine off, it fails three starts, or a build without the engine is installed over one with it. Sync carries no download rows, so a YouTube row never arrives on a device in external mode from elsewhere ([Sync interplay](#sync-interplay)). `YouTubeEngineRules` applies 04's rules ([04 Engine absent or disabled](04-youtube.md#engine-absent-or-disabled)) by `ExternalReason`:
 
 | `externalReason` | Queued, running and paused rows | `.part` | Completed files |

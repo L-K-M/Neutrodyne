@@ -45,6 +45,7 @@ import ch.lkmc.neutrodyne.feature.settings.resources.settings_licences_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_playback
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_playback_summary_off
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_playback_summary_on
+import ch.lkmc.neutrodyne.feature.settings.resources.youtube_title
 import org.jetbrains.compose.resources.stringResource
 import ch.lkmc.neutrodyne.feature.settings.resources.Res as SettingsRes
 
@@ -100,6 +101,9 @@ internal fun SettingsHomeRoute(settings: SettingsRepository) {
                     ),
                 onClick = { navigator.push(SettingsKey(SettingsPage.PLAYBACK)) },
             )
+            SettingsRow(NdIcons.OpenInNew, stringResource(SettingsRes.string.youtube_title), null, {
+                navigator.push(SettingsKey(SettingsPage.YOUTUBE))
+            })
             SettingsRow(NdIcons.Download, stringResource(Res.string.downloads_settings), null, {
                 navigator.push(SettingsKey(SettingsPage.DOWNLOADS))
             })

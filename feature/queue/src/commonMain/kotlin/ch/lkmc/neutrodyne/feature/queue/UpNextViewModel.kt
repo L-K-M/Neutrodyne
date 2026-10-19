@@ -16,6 +16,8 @@ import ch.lkmc.neutrodyne.core.domain.GroupRepository
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.QueueRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.domain.YouTubeExternalOpen
+import ch.lkmc.neutrodyne.core.domain.YouTubeOpenContext
 import ch.lkmc.neutrodyne.core.model.AVAILABLE_FEED_FILTER_CAPABILITIES
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedSource
@@ -28,6 +30,7 @@ import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
 import ch.lkmc.neutrodyne.core.model.withCapabilities
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
+import ch.lkmc.neutrodyne.core.ui.ExternalOpenHandler
 import ch.lkmc.neutrodyne.core.ui.PlaybackActions
 import ch.lkmc.neutrodyne.core.ui.PlaybackMessageAction
 import ch.lkmc.neutrodyne.core.ui.RowCaps
@@ -93,10 +96,19 @@ internal class UpNextViewModel(
     private val settings: SettingsRepository,
     platform: PlatformInfo,
     private val podcasts: PodcastRepository,
+    externalOpenService: YouTubeExternalOpen,
 ) : ViewModel() {
     private val state = MutableStateFlow(UpNextUiState())
     val uiState = state.asStateFlow()
     private val messages = UserMessages()
+    public val externalOpen =
+        ExternalOpenHandler(
+            viewModelScope,
+            messages,
+            mark = { externalOpenService.onOpened(it, YouTubeOpenContext.EXTERNAL_OR_UNPLAYABLE) },
+            undo = { externalOpenService.undo(it) },
+            onFailure = { messages.post(UiText.Res(Res.string.write_failed)) },
+        )
     val playbackActions =
         PlaybackActions(
             viewModelScope,
@@ -303,6 +315,7 @@ internal class UpNextViewModel(
         playbackActions.onMessageShown(id)
         copyLinks.remove(id)
         undos.remove(id)
+        externalOpen.shown(id)
         messages.shown(id)
     }
 
