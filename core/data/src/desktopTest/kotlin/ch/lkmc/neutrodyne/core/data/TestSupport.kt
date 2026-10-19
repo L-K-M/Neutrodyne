@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.data
 
+import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.add.AddPodcastResolverImpl
@@ -175,13 +176,13 @@ internal object TestOrderKeys : OrderKeys {
 // --- Database / engine builders --------------------------------------------------------------------
 
 internal fun newDb(
-    clock: TestClock = TestClock(),
+    clock: Clock = TestClock(),
     queryContext: CoroutineContext = Dispatchers.Default,
 ): NeutrodyneDatabase = TestDb.inMemory(clock = clock, queryContext = queryContext)
 
 internal fun newIngestor(
     db: NeutrodyneDatabase,
-    clock: TestClock,
+    clock: Clock,
     settings: SettingsRepository = FakeSettingsRepository(),
     sanitizer: ShowNotesSanitizer = JsoupShowNotesSanitizer(),
     defaultDispatcher: CoroutineDispatcher = Dispatchers.Default,
@@ -692,7 +693,7 @@ internal fun newUnsubscribe(
 
 private fun newFeedMoves(
     db: NeutrodyneDatabase,
-    clock: TestClock,
+    clock: Clock,
     coordinator: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
 ) = FeedMoveCommitter(
     db,

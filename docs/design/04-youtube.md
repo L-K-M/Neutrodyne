@@ -156,11 +156,18 @@ class YouTubeFormatChangedException(val videoId: String, val oldFormatId: String
 ```kotlin
 // :youtube:api — enrichment, health
 interface YouTubeEnricher {
+    suspend fun facts(videoId: String): VideoFactsResult
     suspend fun enrich(channelId: String, videoIds: Set<String>, variants: Int): EnrichResult
     suspend fun uploadsPage(channelId: String, variant: Int, cursor: UploadsCursor?): UploadsPageResult
 }
 data class VideoFacts(val videoId: String, val title: String?, val publishedAtMs: Long?, val publishedApprox: Boolean,
-                      val durationMs: Long?, val availability: Availability?, val isShort: Boolean?, val description: String?)
+                      val durationMs: Long?, val availability: Availability?, val isShort: Boolean?, val description: String?,
+                      val descriptionTruncated: Boolean = false)
+sealed interface VideoFactsResult {
+    data class Ok(val facts: VideoFacts) : VideoFactsResult
+    data object Unsupported : VideoFactsResult
+    data class Failed(val kind: TransientKind, val cause: Throwable?) : VideoFactsResult
+}
 sealed interface EnrichResult {
     data class Ok(val facts: List<VideoFacts>) : EnrichResult
     data object Unsupported : EnrichResult
@@ -815,10 +822,53 @@ an enricher, extractor or back-catalogue engine. Canonical fallback cannot
 reliably identify live, premiere or members-only uploads, and disabling LIVE
 only changes future polls. No guessed availability or new row flag is added.
 
+Implementation note (2026-10-19, local M9a W9): the portable enricher reuses
+W5's admitted composite operation for tab calls and completes one W6 reservation
+in `finally`, including `Inconclusive` on cancellation. Missing live/premiere
+checks are separate bounded facts operations after the tab operation, sharing the
+channel deadline and the app-wide check budget. No caller reserves another trial
+or repeats extraction health reports. Storage failures occur after extraction
+completion and cannot become breaker parse failures.
+
+The data coordinator owns candidate selection, the 20-second channel deadline,
+concurrency and sliding budgets. Refresh cancellation reaches extraction; only
+the committed event and its final `isNew`/`VISIBLE`/`AVAILABLE` filter are shielded.
+An `Unchanged` response can emit a promotion. INITIAL rows retain `isNew = 0`;
+IMPORT and RESTORE suppress YouTube announcements. The partial writer updates
+only changed duration, availability and sticky Shorts, plus absent descriptions
+and snippets. It cannot revise Atom identity, hash, dates or user state.
+
+`YouTubeDescriptionLoader.load` is the data-layer seam for W7's current
+chapter request: waiters requesting absent notes share one 45-second facts call
+and the last waiter cancels it. Only complete plain text (up to the frozen
+32 KiB UTF-8 bound) reaches the existing codec/blob/snippet. The loader returns
+that immutable complete text; W7 must parse this snapshot, rather than re-read
+a blob that a later Atom ingest could replace. Truncated facts remain absent.
+There is no eager per-video description refresh or schema addition. W7 owns
+requesting these notes from its cancellable current-item scope and parsing/
+persisting description chapters.
+
+**Parent contract gap before chapter reuse/activation:** stored Atom blobs carry
+text and format but no completeness provenance. The real parser can emit
+`TEXT_TRUNCATED` and trim the retained prefix to a short string; ingestion does
+not carry that warning into the blob. W9 therefore leaves existing nonempty
+notes unchanged and returns no chapter text from them. Reusing a known full
+Atom description requires the parent to freeze completeness on the description
+read boundary, including UNKNOWN for legacy/unmarked blobs, and propagate the
+producer's completeness through the existing codec. No new wire field is
+needed for W3 facts (`descriptionTruncated` already exists). W9 does not invent
+a competing schema or waive complete-chapter requirements.
+
+These services remain behind ordinary external `NOT_YET_AVAILABLE` bindings.
+W4 transport, W6 lifecycle/health integration, W7/W8 consumers, W10 lookup/search,
+W11 activation and the reference-device spike remain separate owner work.
+Portable controlled-transport/database evidence is not live or Android-host
+acceptance. No startup Python work, runtime update or JS provider is enabled.
+
 With the engine, M9a. Runs in `YouTubeSourceAdapter.afterIngest`, i.e. inside the same refresh run (`RefreshWorker` on Android, the `refresh` lane on the desktop, [03 Desktop refresh](03-feeds-and-discovery.md#desktop-refresh)), after the channel's ingest transaction (or after `Unchanged`, so pending premieres of quiet channels are still re-checked).
 
 1. Skip when `capabilities.enrichment` is false or `extractionGate` denies. The whole step runs under `withTimeoutOrNull(20 s)`; 03's refresh deadline (8 min on Android; none on the desktop, where the 20 s bound alone applies) cancels it like any in-flight feed. Unfinished candidates are picked up next run.
-2. Candidates (`EpisodeDao.youtubeEnrichmentCandidates(podcastId, now)`): episodes of the channel with (`durationMs IS NULL AND availability = 'AVAILABLE' AND firstSeenAt > now − 7 d`) or (`availability IN ('UPCOMING','LIVE') AND firstSeenAt > now − 30 d`). None → skip.
+2. Candidates (`EpisodeDao.youTubeCandidates(podcastId, now)`): episodes of the channel with (`(durationMs IS NULL OR durationMs <= 0) AND availability = 'AVAILABLE' AND firstSeenAt > now − 7 d`) or (`availability IN ('UPCOMING','LIVE') AND firstSeenAt > now − 30 d`). None → skip.
 3. `enrich(channelId, ids, variantsOfCandidates)`: `YtDlpEnricher` calls the engine's `tab_open` once per needed bit — `LONG_FORM` → `https://www.youtube.com/channel/{UC}/videos`, `SHORTS` → `/shorts`, `LIVE` → `/streams` — which returns the first page (~30 flat entries; one InnerTube browse request per tab) and drops the cursor. `UPCOMING`/`LIVE` candidates not on the first page are checked one by one with `facts` (at most 5 per channel and 20 per 10-min window); other IDs missing from the page get no facts.
 4. Fact mapping per item (flat tab entry or `facts` result): `duration` > 0 → `durationMs`; `availability` `subscriber_only` or `premium_only` → `MEMBERS_ONLY`; `live_status` `is_upcoming` → `UPCOMING`, `is_live` or `post_live` → `LIVE` (overrides `AVAILABLE`), `was_live` or `not_live` → `AVAILABLE` (a processed recording is an ordinary video); missing fields → unchanged; an entry of the `/shorts` tab → `isShort = true` (sticky). A per-video check that ends in an error code maps through [Exception classification](#exception-classification) (per-video reasons are recorded, `Transient` results change nothing).
 5. Rate: 2 channels concurrently, 0.5–1.5 s jitter between channels, a 6–12 s pause after every 50 channels (NewPipe's feed-update precedent), at most 100 channels per 10-min window.
@@ -860,6 +910,7 @@ With the engine, M9a; `YouTubeChannelRepository.loadOlder(podcastId)` from the p
 - Pages the tab of the channel's lowest set variant bit (`videos` for `LONG_FORM`, else `shorts`, else `streams`) through `YouTubeEnricher.uploadsPage`: `tab_open` for the first page, `tab_next(cursor)` afterwards. The `UploadsCursor` is the token of a lazy yt-dlp entry generator held in the engine host; `YouTubeChannelRepositoryImpl` keeps one per podcast in a `@Singleton` (survives screen recreation, not the death of either process). `CURSOR_EXPIRED` (`:ytx` restarted, cursor evicted or idle for 10 min) and main-process death both restart paging at page 1; pages whose IDs are all stored are skipped forward within the same call (they count against the page cap below).
 - Each call fetches one page (~30) and ingests it through 03's `FeedIngestor` in `OLDER_PAGE` mode (identity keys, `sortDate`, `feedOrder` as for Atom entries; `isNew = 0`, `inFeed = 1`, never flips absence, never updates existing rows' feed fields), then writes the page's facts with `applyYouTubeFacts`. Back-catalogue rows never emit `NewEpisodes` and are never auto-downloaded ([D66](../PLAN.md#3-key-decisions), [D67](../PLAN.md#3-key-decisions)).
 - Tab entries carry only relative dates ("3 years ago"), so yt-dlp's `timestamp` for them (the shim's fixed options always include `extractor_args` `youtubetab.approximate_date`) is an estimate: `pubDate` is truncated to the UTC day with `rawPubDate = "approx"`. A missing date uses the previous item's date (keeps order).
+- W9 keeps cursor, page count and approximate-date state only in memory. Loads coalesce per podcast; the last waiter cancels extraction. Variant changes invalidate/cancel old work and preserve the process page count. A restart returns the first page; duplicate-only pages advance within the same cap. Every write rechecks channel identity and variants in its transaction. Only newly inserted rows receive older-page facts; matched Atom rows and podcast metadata stay unchanged.
 - At most 20 pages per podcast per process; `hasMore = false` when the generator ends. Gate denied → `Failed(BREAKER_OPEN or RATE_LIMITED)`; engine host gone → `Failed(ENGINE_UNAVAILABLE)`; external mode → `Unsupported`; 08 shows the failure text.
 
 ---
@@ -918,7 +969,7 @@ Serves R3.2, R3.7, R3.8. Delivered in M8 (Shorts, `VISIBLE`), M9a (enrichment an
 
 Enrichment re-checks `UPCOMING` and `LIVE` items for 30 days; a premiere or finished live stream becomes `AVAILABLE` (processed post-live recordings are ordinary videos) and is then announced ([Enrichment step](#enrichment-step)). Resolve-time reasons are persisted with `YouTubeAvailabilityRecorder.record(episodeId, reason)` (implemented in `:core:data` with `EpisodeDao.setAvailability`, which writes only `availability`), called by 06 and 07; this is a write to `episode` outside the refresh pipeline (exception to [D15](../PLAN.md#3-key-decisions), see [Open questions](#open-questions)).
 
-**Check again** (with the engine; overflow of a greyed row with `REGION_BLOCKED`, `PRIVATE` or `UNAVAILABLE`, which can change): `YouTubeChannelRepository.recheckAvailability(episodeId)` calls `invalidate(videoId)`, then `resolveAudio`, and records `AVAILABLE` on `Ok` or the new reason on `Unavailable`; `Transient` records nothing and returns null (snackbar "Couldn't check — try again later"). This is also the recovery path for items wrongly marked during an engine breakage.
+**Check again** (with the engine; overflow of a greyed row with `REGION_BLOCKED`, `PRIVATE` or `UNAVAILABLE`, which can change): `YouTubeChannelRepository.recheckAvailability(episodeId)` uses the bounded 45-second `facts` path without requiring an audio format, and records its known availability through the shared `YouTubeAvailabilityRecorder`; missing availability, unsupported extraction and transient failures write nothing and return null (snackbar "Couldn't check — try again later"). This is also the recovery path for items wrongly marked during an engine breakage.
 
 ### Participation matrix
 

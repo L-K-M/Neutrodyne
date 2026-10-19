@@ -121,12 +121,36 @@ interface EpisodeDao : DownloadSourceQueries {
     @Query(
         "SELECT e.id FROM episode e JOIN podcast p ON p.id = e.podcastId" +
             " WHERE e.podcastId = :podcastId AND e.id IN (:ids)" +
-            " AND e.availability = 'AVAILABLE' AND " + FeedQueryBuilder.VISIBLE,
+            " AND e.isNew = 1 AND e.availability = 'AVAILABLE' AND " + FeedQueryBuilder.VISIBLE,
     )
     suspend fun youTubeAnnounceable(
         podcastId: Long,
         ids: List<Long>,
     ): List<Long>
+
+    @Query("SELECT * FROM episode WHERE podcastId = :podcastId AND externalMediaId = :videoId LIMIT 1")
+    suspend fun youTubeByVideoId(
+        podcastId: Long,
+        videoId: String,
+    ): EpisodeEntity?
+
+    @Query("SELECT html FROM episode_description WHERE episodeId = :episodeId")
+    suspend fun description(episodeId: Long): ByteArray?
+
+    /** Refresh never scans an unbounded history or individually fetches every unknown video. */
+    @Query(
+        "SELECT e.id, e.externalMediaId, e.availability, e.isShort FROM episode e" +
+            " JOIN podcast p ON p.id = e.podcastId WHERE e.podcastId = :podcastId" +
+            " AND p.sourceType = 'YOUTUBE_CHANNEL' AND e.externalMediaId IS NOT NULL AND (" +
+            " (e.availability = 'AVAILABLE' AND (e.durationMs IS NULL OR e.durationMs <= 0)" +
+            " AND e.firstSeenAt > :now - 604800000 AND " + FeedQueryBuilder.VISIBLE + ") OR" +
+            " (e.availability IN ('LIVE', 'UPCOMING') AND e.firstSeenAt > :now - 2592000000))" +
+            " ORDER BY e.sortDate DESC, e.id DESC LIMIT 90",
+    )
+    suspend fun youTubeCandidates(
+        podcastId: Long,
+        now: Long,
+    ): List<YouTubeCandidate>
 
     // --- Episode detail and show notes (03, added 2026-10-07) -------------------------------------
 
@@ -248,4 +272,12 @@ data class NewEpisodeRow(
     val groupName: String?,
     val groupOrderKey: String?,
     val groupNotify: Boolean?,
+)
+
+/** Narrow refresh selection; identity, Atom hash and user state are intentionally absent. */
+data class YouTubeCandidate(
+    val id: Long,
+    val externalMediaId: String,
+    val availability: Availability,
+    val isShort: Boolean,
 )

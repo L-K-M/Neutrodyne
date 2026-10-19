@@ -614,19 +614,73 @@ class YouTubeSourceAdapterTest {
             }
         }
 
+    @Test fun unchangedResponsePromotesNewPremiereButInitialAndQuietChannelsStaySilent() =
+        runTest {
+            fixture().use { f ->
+                val id = f.channel()
+                val refresher = newRefresher(f.db, mapOf(SourceType.YOUTUBE_CHANNEL to f.adapter), f.clock)
+                val xml = atom(listOf(video(1)))
+                f.engine.enrich = { _, ids, _ ->
+                    ch.lkmc.neutrodyne.youtube.api.EnrichResult.Ok(
+                        ids.map {
+                            fact(it, availability = ch.lkmc.neutrodyne.core.model.Availability.UPCOMING)
+                        },
+                    )
+                }
+                server.enqueue(mockResponse(body = xml))
+                assertTrue(refresher.run(request(id)).newEpisodes.isEmpty())
+                val row = f.db.episodeDao().youTubeByVideoId(id, vid(1))!!
+                val before = row.copy(availability = ch.lkmc.neutrodyne.core.model.Availability.AVAILABLE)
+                f.engine.enrich = { _, ids, _ ->
+                    ch.lkmc.neutrodyne.youtube.api.EnrichResult.Ok(
+                        ids.map {
+                            fact(it, availability = ch.lkmc.neutrodyne.core.model.Availability.AVAILABLE)
+                        },
+                    )
+                }
+                server.enqueue(mockResponse(body = xml))
+                val promoted = refresher.run(request(id))
+                assertIs<FeedOutcome.Unchanged>(promoted.outcomes[id])
+                assertEquals(listOf(row.id), promoted.newEpisodes.single().episodeIds)
+                assertEquals(before, f.db.episodeDao().byId(row.id))
+                // Refreshing an already available row must not promote it again.
+                server.enqueue(mockResponse(body = xml))
+                assertTrue(refresher.run(request(id)).newEpisodes.isEmpty())
+                f.db.useWriterConnection {
+                    it.execSql(
+                        "UPDATE episode SET availability = 'UPCOMING' WHERE id = ${row.id}",
+                    )
+                }
+                server.enqueue(mockResponse(body = xml))
+                assertTrue(refresher.run(request(id).copy(origin = RefreshOrigin.RESTORE)).newEpisodes.isEmpty())
+                val initial = f.channel(initial = true, suffix = 7)
+                server.enqueue(mockResponse(body = xml))
+                val first = refresher.run(request(initial))
+                assertTrue(first.newEpisodes.all { it.initialFetch })
+                f.db.useWriterConnection {
+                    it.execSql(
+                        "UPDATE episode SET availability = 'UPCOMING' WHERE podcastId = $initial",
+                    )
+                }
+                server.enqueue(mockResponse(body = xml))
+                assertTrue(refresher.run(request(initial)).newEpisodes.isEmpty())
+            }
+        }
+
     private suspend fun TestScope.fixture(): Fixture = Fixture(this)
 
     private inner class Fixture(
         scope: TestScope,
     ) : AutoCloseable {
         val clock = TestClock(NOW)
-        val db = newDb(clock)
+        val db = newDb(clock, kotlinx.coroutines.test.StandardTestDispatcher(scope.testScheduler))
         val root =
             kotlin.io.path
                 .createTempDirectory("nd-youtube-adapter")
                 .toFile()
         val monitor = FakeYouTubeFeedOutageMonitor()
         val metadata = FakeYouTubeChannelMetadata()
+        val engine = ControlledEnricher(clock)
         val health = DefaultYouTubeHealth(FakeSettingsRepository(), clock, scope.backgroundScope) {}
         private val clients =
             NetworkClients(
@@ -662,6 +716,18 @@ class YouTubeSourceAdapterTest {
                 monitor,
                 metadata,
                 clock,
+                ch.lkmc.neutrodyne.core.data.youtube.YouTubeEnrichment(
+                    db,
+                    engine,
+                    ch.lkmc.neutrodyne.core.data.youtube.YouTubeFactsWriterImpl(
+                        db,
+                        ch.lkmc.neutrodyne.feeds.jvm.html
+                            .JsoupShowNotesSanitizer(),
+                    ),
+                    clock,
+                    kotlin.random.Random(1),
+                    enabledYouTubeCapabilities(),
+                ),
                 Dispatchers.IO,
             )
 
