@@ -1024,6 +1024,8 @@ Unselected `PREVIEW` items are never committed and stay `PREVIEW` (shown under "
 6. `FirstLaunchRestoreInitializer` and the "Restore Android backup" action ([Auto Backup](#auto-backup), Android) use the internal `PayloadStore.adopt(path)`, which copies an app-private file the same way; `ImportSource` never points at app-private files.
 7. `file://` (desktop: the import dialog, a drop onto the window, the `.opml` association or a second launch's hand-off, [Desktop inputs](#desktop-inputs)): only a regular file (no directory, device or link to one); its size from the file system must be ≤ 50 MiB (`TooLarge`; 11's 64 MiB pre-check runs first); copied through the same counting stream to `<cache>/import/` ([11 AppDirs](11-desktop.md#appdirs)), so the user may move or delete the original at once. A permission error — including a refused macOS folder-privacy prompt ([11 macOS folder privacy](11-desktop.md#macos-folder-privacy)) — is `Unreadable`.
 
+**Implementation note (2026-10-17, M3 B4).** Step 2's GET follows the redirect chain by hand — the FEED client's own redirect support stays off ([03 Request rules](03-feeds-and-discovery.md#request-rules)): each `Location` resolves against the hop URL (RFC 3986) and must stay a credential-free `http(s)` target, within `MAX_REDIRECT_FOLLOWUPS` (20) follow-ups and never revisiting a URL (both bound breaches are `redirect_loop`). A 3xx whose `Location` is missing or unusable is the final response (`http_3xx`), the 50 MiB cap applies to the final body only, and a failure to create `<cache>/import/` is `ImportError.Storage` on every entry point.
+
 ### 2. Sniff and parse
 
 `ImportSourceSniffer` (`:feeds`, common) decides the format from bytes, never from MIME type or extension ([Sniffing](#sniffing)). For `OPML`, the bound `OpmlReader` — `XmlPullOpmlReader` from the `:feeds:jvm` island on both platforms, over Android's platform `XmlPullParser` or kxml2 2.3.0 on the desktop ([03 Package layout](03-feeds-and-discovery.md#package-layout)) — runs a cascade over the payload file (re-opened per pass):
@@ -1097,7 +1099,7 @@ Walk rules (strict and relaxed):
 2. Otherwise 03's `AddInputNormalizer.normalize(url)` ([03 Input normalisation](03-feeds-and-discovery.md#input-normalisation)): `feed:`/`itpc:`/`pcast:`/`podcast:` schemes, scheme-less → `https://`, subscribe-page wrappers unwrapped; anything not http(s) → `INVALID_URL`. Userinfo stays in `originalUrl` until commit (the payload file holds it anyway); `normalizedUrl` never contains it.
 3. Identity = `UrlNormalizer.forIdentity(normalizedUrl)` ([03 URL normalisation](03-feeds-and-discovery.md#url-normalisation)); an unresolved YouTube ref uses its lowercased handle or path as identity. Within the file, a repeated identity → `DUPLICATE_IN_FILE`, its group names unioned into the first entry (exports that repeat feeds per folder).
 4. Already subscribed: identity against `podcast.feedKey` and `podcast_url_alias.url` → `ALREADY_SUBSCRIBED` with `podcastId`, unselected.
-5. Title for display and for the pending row: Neutrodyne files: `title`, and `text` becomes `customTitle` when it differs; other files: `title ?: text ?: host` (gPodder writes the description into `text`).
+5. Title for display and for the pending row: Neutrodyne files: `title`, and `text` becomes `customTitle` when it differs; other files: `title ?: text ?: host` (gPodder writes the description into `text`). The classified item retains the parsed `customTitle`, but `import_item` has no column for it — the parse step writes it into `ImportOptions.itemCustomTitles` (item ordinal → rename) beside `sourceGroups`, and commit copies it onto the pending podcast row. A `DUPLICATE_IN_FILE` row keeps its own ordinal, so the map never loses alignment: the winner's ordinal carries the winner's rename.
 6. Pre-selection: `PREVIEW` items are selected unless `preselect = false`. The preview never loads covers (10,000 rows would hit the network); rows show monograms.
 
 ### 4. Group mapping
@@ -1129,6 +1131,7 @@ data class ImportOptions(
     val linkedReach: LinkedRestoreReach? = null,                // backup sessions on a linked device, Replace only (Restore while linked)
     val laneAttempts: Int = 0,                                  // desktop: runs of the import-backup lane that ended in retry while online
     val sourceGroups: List<SourceGroup> = emptyList(),          // written at parse time, proposal order
+    val itemCustomTitles: Map<Int, String> = emptyMap(),        // written at parse time: item ordinal → parsed rename
     val committedAt: Long? = null, val attemptMarkerAt: Long? = null,   // worker bookkeeping
 )
 data class SourceGroup(val nameKey: String, val name: String, val colorArgb: Int?, val iconKey: String?,
@@ -1167,9 +1170,9 @@ Header: "142 podcasts and 3 YouTube channels in *antennapod-feeds-2026-10-01.opm
 
 `confirm(sessionId)` ([R1.3](../PLAN.md#21-functional-requirements): pending podcasts in the library within 2 s for 300 feeds):
 
-1. Outside any Room transaction but inside `CredentialCommitCoordinator.withCredentialCommit` (03; held through step 3's commit chunks): for selected items whose `originalUrl` has userinfo, `SecretStore.put(origin, user, secret)` ([03 Basic auth and CredentialStore](03-feeds-and-discovery.md#basic-auth-and-credentialstore); Android Keystore, desktop per [PO-44](../PLAN.md#48-further-product-owner-decisions)).
+1. Outside any Room transaction but inside `CredentialCommitCoordinator.withCredentialCommit` (03; held through step 3's commit chunks): for selected items, `AddInputNormalizer` re-parses `originalUrl` and a carried `UrlUserInfo` is `SecretStore.put` against the normalized clean URL's origin — so `feed:`/`pcast:`/`podcast:`/`itpc:` wrappers store the secret under the wrapped http(s) host, never the wrapper scheme ([03 Basic auth and CredentialStore](03-feeds-and-discovery.md#basic-auth-and-credentialstore); Android Keystore, desktop per [PO-44](../PLAN.md#48-further-product-owner-decisions)). A put that throws or a cancellation mid-loop removes the earlier puts whose referencing insert never landed; a committed chunk's references stay.
 2. Resolve the final group set: included proposals (renamed) when `importGroups`, plus the target group (created if `targetGroupName`).
-3. Chunks of 500 items, each one write transaction (02's `ImportDao.commitChunk`): create missing groups (`nameKey` conflict = reuse; `uuid = Uuid.random()`, `orderKey = OrderKey.after(last)`; colour/icon per [Palette](#palette) or `nd:` attributes; `createdAt = now`, `lastViewedAt = now`); insert `PENDING_FIRST_FETCH` podcasts with a new `syncId` (M1 acceptance 11), `initialFetch = 1`, `nextRefreshAt = now`, `subscribedAt = now`, `title`, `customTitle`, `artworkKey = ArtworkKeys.monogram(feedKey)` ([08 Keys and versions](08-ui-ux.md#keys-and-versions)), `credentialId`, YouTube columns; aliases (reason `IMPORT`) for an original identity that differs from `feedKey`; memberships with `orderKey = OrderKey.after(last)` for new **and** already-subscribed items (M3 acceptance 7); `podcast_settings.notifyNewEpisodes = true` when the option is on; item → `QUEUED` with `podcastId`; `originalUrl` rewritten to `Redactor.url(originalUrl)` (01) so no password stays in the table.
+3. Chunks of 500 items, each one write transaction (02's `ImportDao.commitChunk`) that first re-checks the session still exists in `PREVIEW` — a cancel/delete or the expiry sweep between chunks aborts the whole commit as `SessionGone` (earlier chunks stand, the current one rolls back, no commit marker or scheduling): create missing groups (`nameKey` conflict = reuse; `uuid = Uuid.random()`, `orderKey = OrderKey.after(last)`; colour/icon per [Palette](#palette) or `nd:` attributes; `createdAt = now`, `lastViewedAt = now`); insert `PENDING_FIRST_FETCH` podcasts with a new `syncId` (M1 acceptance 11), `initialFetch = 1`, `nextRefreshAt = now`, `subscribedAt = now`, `title`, `customTitle` from `itemCustomTitles[ordinal]`, `artworkKey = ArtworkKeys.monogram(feedKey)` ([08 Keys and versions](08-ui-ux.md#keys-and-versions)), `credentialId`, YouTube columns; aliases (reason `IMPORT`) for an original identity that differs from `feedKey`; memberships with `orderKey = OrderKey.after(last)` for new **and** already-subscribed items (M3 acceptance 7); `podcast_settings.notifyNewEpisodes = true` when the option is on; item → `QUEUED` with `podcastId`; `originalUrl` rewritten to `Redactor.url(originalUrl)` (01) so no password stays in the table.
 4. `options.committedAt = attemptMarkerAt = now`; state `COMMITTED`; `ImportWorkScheduler.schedule(sessionId)` (Android: unique work `import-{sessionId}`; desktop: pokes the `import-backup` lane); `RefreshController.reschedulePeriodic()`; `GroupChannelSync.sync()`.
 5. Items needing YouTube resolution (M8) stay `QUEUED` without `podcastId`; the fetch runner inserts them ([04 Pipeline rules](04-youtube.md#pipeline-rules-for-youtube-items-05-implements)).
 
@@ -1289,6 +1292,13 @@ object ImportDocuments {                    // pure adapters; OPML applies the f
 | `TAKEOUT_CSV` | `TakeoutSubscriptionsParser` (04), CSV or ZIP | none → "YouTube" pre-filled | RFC 4180; localised header skipped |
 | `URL_LIST` (M8) | `UrlListParser` (04) | none → "YouTube" pre-filled only if every item is YouTube | ≤ 1 MB, ≤ 5,000 lines |
 | `NEUTRODYNE_BACKUP` | `BackupCodec` | from the archive | creates a session without `import_item` rows (the restore adds them when it finishes) and routes to the restore preview ([Full backup and restore](#full-backup-and-restore)) |
+
+**Implementation note (2026-10-17, M3).** The M3 `ImportSessions` handles only `OPML` (this table's
+first row) and `NEUTRODYNE_BACKUP` (the session-without-items row). A payload the sniffer already
+recognises as `NEWPIPE_JSON`, `LIBRETUBE_JSON`, `TAKEOUT_CSV` or `URL_LIST` — formats whose parsers
+are M8 work — is answered with `ImportError.Unsupported(UnsupportedSource.UNKNOWN)`, the same
+taxonomy entry an unrecognised payload gets; the UI copy stays "This doesn't look like a podcast
+list", which is honest for M3 because no parser could consume it anyway.
 
 ### Archive guard
 

@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.database
 import androidx.room3.Dao
 import androidx.room3.Delete
 import androidx.room3.Insert
+import androidx.room3.OnConflictStrategy
 import androidx.room3.Query
 import androidx.room3.Update
 import androidx.room3.withWriteTransaction
@@ -28,8 +29,20 @@ abstract class PodcastDao(
     @Insert
     abstract suspend fun insertPodcast(row: PodcastEntity): Long
 
+    /**
+     * 02 Import commit: `INSERT OR IGNORE` — `-1` means a unique index raced the insert; the
+     * caller re-reads `feedKey`/aliases inside its transaction to tell a concurrent subscription
+     * apart from a `syncId` collision (which it retries with a fresh UUIDv4).
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    abstract suspend fun insertPodcastOrIgnore(row: PodcastEntity): Long
+
     @Insert
     abstract suspend fun insertAlias(row: PodcastUrlAliasEntity)
+
+    /** 02 Import commit: `INSERT OR IGNORE` — an existing alias row simply stands (idempotent). */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    abstract suspend fun insertAliasOrIgnore(row: PodcastUrlAliasEntity): Long
 
     @Insert
     abstract suspend fun insertAliases(rows: List<PodcastUrlAliasEntity>)
@@ -72,6 +85,14 @@ abstract class PodcastDao(
     /** The podcast owning the alias `url` (`feedKey` is checked separately by the caller). */
     @Query("SELECT podcastId FROM podcast_url_alias WHERE url = :url")
     abstract suspend fun aliasOwner(url: String): Long?
+
+    /**
+     * 05 §7 derive: the winner of a merge that consumed the feed `url` was last fetched as —
+     * the `MERGE` alias the merger leaves on the surviving podcast. Other reasons (REDIRECT,
+     * IMPORT, …) say nothing about an import item's fate and are not returned.
+     */
+    @Query("SELECT podcastId FROM podcast_url_alias WHERE url = :url AND reason = 'MERGE'")
+    abstract suspend fun mergeAliasOwner(url: String): Long?
 
     /** Subscribe-time soft dedupe (03): real `podcastGuid`s only, never derived ones. */
     @Query("SELECT * FROM podcast WHERE podcastGuid = :guid AND podcastGuidDerived = 0")

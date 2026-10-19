@@ -213,6 +213,14 @@ abstract class ImportDao {
     ): Int
 
     /**
+     * 05 §7 runner entry: `COMMITTED` → `FETCHING`. The conditional write is the atomic side of
+     * the transition — a `cancel` that commits first (or an already `FETCHING` resume) leaves the
+     * row untouched, so the runner never resurrects a cancelled session.
+     */
+    @Query("UPDATE import_session SET state = 'FETCHING' WHERE id = :sessionId AND state = 'COMMITTED'")
+    abstract suspend fun markFetching(sessionId: Long): Int
+
+    /**
      * 05 §7 finish: `DONE` stamps `finishedAt`, which opens the 7-day cleanup window (02). Only
      * COMMITTED/FETCHING may complete — when a `cancel` commits first the write loses and the
      * 0 return tells the caller to skip the done notification.
@@ -224,6 +232,21 @@ abstract class ImportDao {
     abstract suspend fun markDone(
         sessionId: Long,
         finishedAt: Long,
+    ): Int
+
+    /**
+     * 05 §6 step 4: the one `PREVIEW` → `COMMITTED` transition, carrying the options row's
+     * `committedAt`/`attemptMarkerAt` bookkeeping in the same write. The `state` guard makes the
+     * transition atomic against a racing `cancel` (CANCELLED wins; 0 tells the caller its commit
+     * writes stand but the session moved on) and makes a replayed confirm a no-op.
+     */
+    @Query(
+        "UPDATE import_session SET state = 'COMMITTED', optionsJson = :optionsJson" +
+            " WHERE id = :sessionId AND state = 'PREVIEW'",
+    )
+    abstract suspend fun markCommitted(
+        sessionId: Long,
+        optionsJson: String,
     ): Int
 
     /** `updateOptions` and the commit/fetch bookkeeping inside `optionsJson` (05). */
@@ -279,6 +302,21 @@ abstract class ImportDao {
         sessionId: Long,
         ordinal: Int,
         podcastId: Long?,
+    ): Int
+
+    /**
+     * 02 Import commit: the in-transaction feedKey/alias re-check found the item's feed already
+     * subscribed — the item is "continued as already subscribed" (02), carrying the existing
+     * podcast id rather than becoming a QUEUED fetch candidate.
+     */
+    @Query(
+        "UPDATE import_item SET status = 'ALREADY_SUBSCRIBED', podcastId = :podcastId" +
+            " WHERE sessionId = :sessionId AND ordinal = :ordinal",
+    )
+    abstract suspend fun markAlreadySubscribed(
+        sessionId: Long,
+        ordinal: Int,
+        podcastId: Long,
     ): Int
 
     /**
