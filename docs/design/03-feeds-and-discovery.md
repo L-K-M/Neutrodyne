@@ -1397,6 +1397,20 @@ flowchart TD
 4. **Verification:** up to 5 candidates are fetched (2 in parallel) and parsed to obtain titles and episode counts; non-feeds are dropped. One survivor → preview it; several → `Choose`; none → `NotAFeed`.
 5. **WordPress blog feeds:** if a parsed feed has items but no accepted item and its path ends with `/feed`, probe `<path>/podcast` (the usual podcast feed) before returning `NoMedia`.
 
+**Implementation note (2026-10-19, M7):** W2/W3 implement the shared API-client
+lookups and the FEED-client Add pipeline. Candidate verification is direct-only
+(no recursive HTML), with a separate one-shot WordPress fallback. The five
+sequential root probes share a 15-second coroutine deadline, read at most 64 KiB
+per response (including error/redirect bodies), and refetch the first feed for a
+full preview. The existing 20-follow-up redirect limit also bounds Add fetches. Add/edit fetches opt into a
+2 MiB HTML transport prefix after sniffing; normal refresh retains 32 MiB.
+`LookupRequired`/`lookupOnce` carry explicit Apple consent; the button is W5.
+Directory metadata supplies missing preview title/author and last-resort artwork
+(`ArtworkSource.DIRECTORY`) without preview database writes. A shared 150-hit,
+30-minute metadata cache carries search/chart covers into direct previews and
+Subscribe refetches; its configuration generation prevents stale provider replay. All URL handoffs,
+including redirect targets, reject YouTube before a request in M7.
+
 ### Preview and dedupe
 
 - Parse in memory with the same `FeedParser`; never persisted ([D24](../PLAN.md#3-key-decisions)). The parsed feed, fetch metadata (final and permanent URL, validators, SHA-256), pending credentials and the directory cover fallback go into `PreviewCache` (`:core:data`, in memory): at most 2 entries, 15-min TTL, keyed by `previewId`; eviction drops the credentials.
@@ -1573,6 +1587,19 @@ internal interface PodcastSearchProvider {
 ```
 
 The ViewModel debounces: search fires 600 ms after typing stops with ≥ 3 characters, or immediately on the IME search action (Enter on the desktop). All providers use the Ktor client of kind API (8 s call timeout, [01](01-foundation.md#one-client-family)) and parse with kotlinx.serialization in `:feeds`' common directory parsers; no cookies are stored.
+
+**Implementation note (2026-10-19, M7):** Directory responses are capped at
+2 MiB before JSON parsing. Search rejects URL-like/private input at the repository
+boundary, including mixed text containing a URL. Success-only bounded caches are
+partitioned by configuration generation; changes cancel search and suppress stale
+results. The subscription annotation uses existing feed-key/alias indexes in one
+query, with no schema change. Provider recording provenance and live-verification
+limits are in [the shared fixture metadata](../../feeds/src/test/resources/discovery/README.md).
+Apple search/lookup, US/DE/CH overall charts, US technology charts, all 19 genre
+IDs and fyyd v0.2 were live-checked; other country/per-genre availability, fyyd
+terms and authenticated PI remain unverified. PI
+fixtures are explicitly spec-derived. Provider permission risks L3/PO-3 remain
+open; builds remain keyless by default, with no release-secret injection.
 
 ### Apple iTunes Search
 

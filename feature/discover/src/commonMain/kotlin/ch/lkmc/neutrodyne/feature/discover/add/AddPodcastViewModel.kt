@@ -76,6 +76,8 @@ public sealed interface AddSheetStep {
     public data class Input(
         val error: UiText? = null,
         val auth: Boolean = false,
+        /** W5 renders the explicit consent action; it must never silently retry. */
+        val lookupRequired: AddResolution.LookupRequired? = null,
     ) : AddSheetStep
 
     /** "Looking up…" — the progress line; `cancelResolve` returns to [Input]. */
@@ -313,6 +315,10 @@ public class AddPodcastViewModel(
             state.copy(
                 step =
                     when (resolution) {
+                        is AddResolution.LookupRequired -> {
+                            AddSheetStep.Input(lookupRequired = resolution)
+                        }
+
                         is AddResolution.Feed -> {
                             AddSheetStep.Preview(resolution.preview)
                         }

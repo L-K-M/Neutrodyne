@@ -6,9 +6,13 @@ import androidx.room3.useReaderConnection
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.LocalNetworkAccess
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.data.FakeRefreshScheduler
 import ch.lkmc.neutrodyne.core.data.fakePlatform
 import ch.lkmc.neutrodyne.core.data.mockResponse
 import ch.lkmc.neutrodyne.core.data.newDb
+import ch.lkmc.neutrodyne.core.data.newResolver
+import ch.lkmc.neutrodyne.core.data.newSubscribe
+import ch.lkmc.neutrodyne.core.data.rssBody
 import ch.lkmc.neutrodyne.core.data.seedPodcast
 import ch.lkmc.neutrodyne.core.data.testBuildInfo
 import ch.lkmc.neutrodyne.core.data.testClassifier
@@ -20,6 +24,7 @@ import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.ChartGenre
 import ch.lkmc.neutrodyne.core.model.DirectoryAccess
 import ch.lkmc.neutrodyne.core.model.DirectoryKeySource
+import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.model.ProviderFailure
 import ch.lkmc.neutrodyne.core.model.ProviderId
@@ -480,6 +485,47 @@ class SearchRepositoryTest {
             assertTrue(plan.any { "sqlite_autoindex_podcast_url_alias" in it }, plan.toString())
             val ids = Json.parseToJsonElement(fixture("apple-genres.json")).jsonObject.keys
             assertEquals(ids, ChartGenre.entries.map { it.id }.toSet())
+        }
+
+    @Test fun searchArtworkReachesPreviewRefetchAndSubscribeWithoutStaleProviderReplay() =
+        runBlocking {
+            prefs.set(Keys.FYYD_ENABLED, false)
+            val feedUrl = server.url("/publisher").toString()
+            route = { request ->
+                if (request.target == "/publisher") {
+                    mockResponse(body = rssBody(title = "Publisher"))
+                } else {
+                    mockResponse(
+                        body =
+                            """{"results":[{"feedUrl":"$feedUrl","collectionName":"Directory","artworkUrl600":
+                            |"https://art.example/cover"}]}
+                            """.trimMargin(),
+                    )
+                }
+            }
+            repo.search("news").toList()
+            val root =
+                kotlin.io.path
+                    .createTempDirectory("nd-directory-preview")
+                    .toFile()
+            try {
+                newResolver(root, db, clock, metadata = metadata).use { bundle ->
+                    val preview = assertIs<Outcome.Success<FeedPreview>>(bundle.resolver.preview(feedUrl)).value
+                    assertEquals("Publisher", preview.title)
+                    assertEquals("https://art.example/cover", preview.artworkUrl)
+                    assertTrue(db.podcastDao().allForExport().isEmpty())
+                    clock.advanceBy(16.minutes)
+                    val subscribe =
+                        newSubscribe(db, bundle.cache, bundle.resolver, FakeRefreshScheduler(), prefs, clock)
+                    val id = assertIs<Outcome.Success<Long>>(subscribe.useCase(preview.previewId, emptySet())).value
+                    assertEquals("https://art.example/cover", db.podcastDao().byId(id)?.artworkUrl)
+                    prefs.set(Keys.APPLE_ENABLED, false)
+                    val fresh = assertIs<Outcome.Success<FeedPreview>>(bundle.resolver.preview(feedUrl)).value
+                    assertNull(fresh.artworkUrl)
+                }
+            } finally {
+                root.deleteRecursively()
+            }
         }
 
     @Test fun directoryWorkLeavesCollectorThread() =
