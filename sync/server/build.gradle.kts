@@ -28,6 +28,7 @@ val generateServerVersionResource =
     tasks.register("generateServerVersionResource", WriteProperties::class) {
         description = "Writes neutrodyne-server.properties carrying neutrodyne.versionName."
         property(serverVersionKey, providers.gradleProperty(versionNameProperty))
+        property("repoUrl", providers.gradleProperty("neutrodyne.repoUrl"))
         destinationFile = layout.buildDirectory.file("generated/server-version/$serverPropertiesFile")
     }
 

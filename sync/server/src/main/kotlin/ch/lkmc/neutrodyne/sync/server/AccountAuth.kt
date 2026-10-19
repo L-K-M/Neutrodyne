@@ -70,15 +70,16 @@ internal class AccountAuth(
         username: String,
         password: String,
         device: DeviceInfoDto,
+        ip: String? = null,
     ): TokenResponse {
-        val account = verifyPassword(username, password)
+        val account = verifyPassword(username, password, ip)
         val raw = secrets.secret("nds_")
         return store.writeAuth {
             val current = account(account.id) ?: unauthorized()
             // Hashing must not hold the writer; reject a concurrent password change/disable.
             if (current.passwordHash != account.passwordHash) unauthorized()
             val result = issueDevice(current, device, raw, inputs.wallMs())
-            audit(current.id, "login", inputs.wallMs())
+            audit(current.id, "login", inputs.wallMs(), ip)
             result
         }
     }
@@ -87,8 +88,9 @@ internal class AccountAuth(
         username: String,
         password: String,
         label: String?,
+        ip: String? = null,
     ): String {
-        val account = verifyPassword(username, password)
+        val account = verifyPassword(username, password, ip)
         val raw = secrets.secret("ndw_")
         return store.writeAuth {
             val current = account(account.id) ?: unauthorized()
@@ -98,13 +100,14 @@ internal class AccountAuth(
                 raw,
                 inputs.wallMs(),
                 label?.take(64),
-            ).also { audit(current.id, "login", inputs.wallMs()) }
+            ).also { audit(current.id, "login", inputs.wallMs(), ip) }
         }
     }
 
     private suspend fun verifyPassword(
         username: String,
         password: String,
+        ip: String?,
     ): AuthAccount {
         // Invalid names use a single anonymous bucket and still do dummy password work.
         val name = runCatching { AuthSecrets.username(username) }.getOrDefault("")
@@ -113,7 +116,7 @@ internal class AccountAuth(
         val matches = passwords.verify(password, account?.passwordHash)
         if (!matches || account == null) {
             attempts.failed(name)
-            store.writeAuth { audit(account?.id, "login_failed", inputs.wallMs()) }
+            store.writeAuth { audit(account?.id, "login_failed", inputs.wallMs(), ip) }
             unauthorized()
         }
         if (account.disabledAt != null) forbidden()
@@ -151,18 +154,20 @@ internal class AccountAuth(
         }
     }
 
-    /** Used by W8's web/CLI; authorization belongs to those authenticated entry points. */
+    /** Web callers pass their actor for a transactional recheck; CLI callers hold the OS lease. */
     suspend fun createAccount(
         username: String,
         role: AccountRole,
         password: String? = null,
         quota: Long = defaultQuota,
+        actor: AccountPrincipal? = null,
     ): AuthAccount {
         val name = AuthSecrets.username(username)
         val hash = password?.let { passwords.hash(it) }
         val epoch = secrets.epoch()
         val account =
             store.writeAuth {
+                actor?.let { requireWebAdmin(it, inputs.wallMs()) }
                 if (account(name) != null) invalidAuth()
                 createAccount(
                     name,
@@ -197,10 +202,14 @@ internal class InviteService(
 ) {
     private val secrets = AuthSecrets(inputs)
 
-    suspend fun create(accountId: Long): String {
+    suspend fun create(
+        accountId: Long,
+        actor: AccountPrincipal? = null,
+    ): String {
         val code = secrets.code(16)
         val now = inputs.wallMs()
         store.writeAuth {
+            actor?.let { requireWebAdmin(it, now) }
             val account = account(accountId) ?: missingAuth()
             if (account.disabledAt != null) forbidden()
             save(AuthToken(AuthSecrets.hash(code), accountId, null, TokenKind.INVITE, now, expiresAt = now + DAY_MS))

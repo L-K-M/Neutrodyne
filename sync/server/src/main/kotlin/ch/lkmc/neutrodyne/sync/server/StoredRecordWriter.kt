@@ -175,6 +175,7 @@ internal class StoredRecordWriter(
             if (account.cursor.seq != firstSequence) {
                 emit(ServerEvent.Changed(principal.accountId, account.cursor.wire(), principal.deviceId))
             }
+            audit("account_reset", now)
             account.cursor.wire()
         }
     }

@@ -497,6 +497,13 @@ private class JdbcWrite(
         events += event
     }
 
+    override fun audit(
+        event: String,
+        now: Long,
+    ) {
+        connection.update("INSERT INTO audit(account_id,at,event) VALUES (?,?,?)", accountId, now, event)
+    }
+
     override fun acknowledge(
         deviceId: String,
         appliedSince: String?,

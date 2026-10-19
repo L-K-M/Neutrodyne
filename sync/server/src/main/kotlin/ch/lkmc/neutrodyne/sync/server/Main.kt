@@ -36,6 +36,7 @@ internal fun serve(config: ServerConfig) {
     EventBus({ services.tokens.valid(it) }, config.sseMaxPerAccount).use { events ->
         ServerStorage.open(config.dataDir, events::publish).use { storage ->
             services = ServerServices(storage.store, config, events)
+            logger.info("Storage ready: schema {}", Migrator.SCHEMA_VERSION)
             runBlocking { services.setup.initialize() }?.let {
                 logger.info("Setup token file: {}", it.toAbsolutePath())
             }
@@ -51,6 +52,7 @@ internal fun serve(config: ServerConfig) {
                                 writeProbe = storage.store::writeProbe,
                                 services = services,
                             ).install(this)
+                            services.updates.start(this)
                             monitor.subscribe(ServerReady) { ready.set(true) }
                         }
                     },
@@ -62,9 +64,11 @@ internal fun serve(config: ServerConfig) {
                         }
                     connectionIdleTimeoutSeconds = CIO_IDLE_TIMEOUT_SECONDS
                 }
+            val metricsListener = config.metricsListen?.let { services.metrics.listen(it) }
             logger.info("neutrodyne-server {} listening on {}", ServerVersion.current(), config.listen)
             val shutdownHook =
                 Thread({
+                    metricsListener?.close()
                     server.stop(SHUTDOWN_GRACE_MS, SHUTDOWN_TIMEOUT_MS)
                     if (ready.get()) storage.finishGracefully()
                 }, "neutrodyne-shutdown")
@@ -74,6 +78,7 @@ internal fun serve(config: ServerConfig) {
                 // CIO's wait may return before the stop hook finishes closing the application.
                 shutdownHook.join()
             } finally {
+                metricsListener?.close()
                 try {
                     Runtime.getRuntime().removeShutdownHook(shutdownHook)
                 } catch (_: IllegalStateException) {
@@ -88,6 +93,10 @@ internal fun serve(config: ServerConfig) {
 private fun configureSimpleLogging(level: LogLevel) {
     System.setProperty(SIMPLE_LOGGER_PREFIX + "defaultLogLevel", level.wire)
     System.setProperty(SIMPLE_LOGGER_PREFIX + "showDateTime", "true")
+    System.setProperty(SIMPLE_LOGGER_PREFIX + "logFile", "System.out")
+    // Framework events can include raw requests; only our structured logger is request-aware.
+    System.setProperty(SIMPLE_LOGGER_PREFIX + "log.io.ktor", "off")
+    System.setProperty(SIMPLE_LOGGER_PREFIX + "log.ktor", "off")
 }
 
 private const val LOGGER_NAME = "ch.lkmc.neutrodyne.sync.server"

@@ -81,6 +81,13 @@ internal open class JdbcAuthRead(
                 SyncCollection.fromWire(it.getString(1)) to it.getInt(2)
             }.toMap()
 
+    override fun recentAudit(limit: Int): List<AuditEntry> =
+        connection.query("SELECT account_id,at,event,ip FROM audit ORDER BY id DESC LIMIT ?", limit.coerceIn(1, 200)) {
+            AuditEntry(it.nullableLong("account_id"), it.getLong("at"), it.getString("event"), it.getString("ip"))
+        }
+
+    override fun storedRecordCount(): Long = connection.query("SELECT COUNT(*) FROM record") { it.getLong(1) }.single()
+
     override fun pendingLinks(now: Long): Int =
         connection
             .query(
@@ -202,6 +209,12 @@ internal class JdbcAuthWrite(
         connection.update("DELETE FROM identity_redirect WHERE account_id=?", accountId)
         connection.update("UPDATE account SET epoch=?,seq=0,min_cursor=0 WHERE id=?", epoch, accountId)
         connection.update("UPDATE device SET last_cursor=NULL WHERE account_id=?", accountId)
+    }
+
+    override fun deleteAccount(accountId: Long) {
+        // Link requests reference approver tokens; drop them before the account cascades.
+        connection.update("DELETE FROM link_request WHERE account_id=?", accountId)
+        connection.update("DELETE FROM account WHERE id=?", accountId)
     }
 
     override fun audit(

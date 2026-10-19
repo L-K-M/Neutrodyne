@@ -43,7 +43,9 @@ internal class AuthRoutes(
         route.rateLimit(RateLimits.LOGIN) {
             post("/api/v1/auth/login") {
                 val request = call.receive<LoginRequest>()
-                call.respond(services.auth.login(request.username, request.password, request.device))
+                call.respond(
+                    services.auth.login(request.username, request.password, request.device, call.clientIp(config)),
+                )
             }
             post("/api/v1/auth/invite/redeem") {
                 val request = call.receive<InviteRedeemRequest>()

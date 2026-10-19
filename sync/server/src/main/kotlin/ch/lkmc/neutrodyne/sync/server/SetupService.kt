@@ -55,6 +55,18 @@ internal class SetupService(
             }
         }
 
+    suspend fun available(): Boolean = store.readAuth { accounts().none { it.role == AccountRole.ADMIN } }
+
+    suspend fun createAdminWeb(
+        code: String,
+        username: String,
+        password: String?,
+    ): String {
+        val owner = createAdmin(code, username, password)
+        val raw = secrets.secret("ndw_")
+        return store.writeAuth { issueWeb(checkNotNull(account(owner.id)), raw, inputs.wallMs(), "Web browser") }
+    }
+
     suspend fun createAdmin(
         code: String,
         username: String,

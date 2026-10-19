@@ -104,6 +104,8 @@ internal class RequestGuards {
         private val BODY = AttributeKey<ByteArray>("bounded-request-body")
         private const val BUFFER_BYTES = 8_192
 
+        fun bodySize(call: ApplicationCall): Int = call.attributes[BODY].size
+
         fun syncRequest(call: ApplicationCall): SyncRequest =
             call.attributes.getOrNull(SYNC_REQUEST) ?: ProtocolCodec.decodeRequest(utf8(call.attributes[BODY]))
 

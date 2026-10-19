@@ -17,6 +17,11 @@ internal class ServerServices(
     val sessions = WebSessions(tokens, config, inputs)
     val devices = DeviceService(store, inputs)
     val accounts = AccountService(store, store, inputs)
+    val admin = AdminService(store, store, inputs)
+    val audit = AuditLog(store, inputs)
+    val metrics = ServerMetrics(store, config.dataDir)
+    val updates =
+        ServerUpdateNotice(if (config.updateCheck) UpdateCheckMode.ENABLED else UpdateCheckMode.DISABLED, inputs)
     val records = StoredRecordWriter(store, inputs, config.retentionUnsubscribedDays)
 
     suspend fun features(): List<String> =

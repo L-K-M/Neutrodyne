@@ -149,6 +149,12 @@ internal interface SyncWrite : SyncRead {
     /** Delivered only after successful commit, in commit order. */
     fun emit(event: ServerEvent)
 
+    /** Security event committed with a library reset. Only fixed event identifiers. */
+    fun audit(
+        event: String,
+        now: Long,
+    )
+
     /** Persist request.since, never the response cursor, for retention acknowledgements. */
     fun acknowledge(
         deviceId: String,

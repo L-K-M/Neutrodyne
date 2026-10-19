@@ -43,12 +43,17 @@ internal class DeviceRoutes(
 
 internal class SyncRoutes(
     private val writer: StoredRecordWriter,
+    private val metrics: ServerMetrics = ServerMetrics(),
 ) {
     fun install(route: Route) {
         route.rateLimit(RateLimits.SYNC_IP) {
             rateLimit(RateLimits.SYNC_ACCOUNT) {
                 post("/api/v1/sync") {
                     val result = writer.push(call.principal(), RequestGuards.syncRequest(call))
+                    call.attributes.put(RequestLogger.PUSHED, result.results.size)
+                    call.attributes.put(RequestLogger.RETURNED, result.page.records.size + result.page.extras.size)
+                    metrics.changes(result.results.map { it.status })
+                    metrics.returned(result.page.records.size + result.page.extras.size)
                     call.respond(
                         SyncResponse(
                             result.results,
@@ -67,6 +72,7 @@ internal class SyncRoutes(
 internal class ChangesRoutes(
     private val writer: StoredRecordWriter,
     private val inputs: ServerInputs,
+    private val metrics: ServerMetrics = ServerMetrics(),
 ) {
     fun install(route: Route) {
         route.rateLimit(RateLimits.SYNC_IP) {
@@ -81,6 +87,8 @@ internal class ChangesRoutes(
                             call.request.queryParameters["since"],
                             limit.coerceIn(1, ProtocolLimits.MAX_RECORDS),
                         )
+                    call.attributes.put(RequestLogger.RETURNED, page.records.size + page.extras.size)
+                    metrics.returned(page.records.size + page.extras.size)
                     call.respond(
                         ChangesPage(
                             page.wireRecords(),

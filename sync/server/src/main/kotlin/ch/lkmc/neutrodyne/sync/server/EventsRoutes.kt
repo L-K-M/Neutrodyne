@@ -18,6 +18,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 internal class EventsRoutes(
     private val events: EventBus,
+    private val metrics: ServerMetrics = ServerMetrics(),
+    private val valid: suspend (AccountPrincipal) -> Boolean = { true },
 ) {
     fun install(route: Route) {
         route.get("/api/v1/events") {
@@ -32,6 +34,7 @@ internal class EventsRoutes(
                 ).coerceIn(30, 120)
             // Reserve and recheck before sending headers, so stream-limit failures are real 429s.
             val stream = events.open(call.principal())
+            metrics.streamOpened()
             try {
                 call.response.headers.append("X-Accel-Buffering", "no")
                 call.respondTextWriter(ContentType.Text.EventStream) {
@@ -51,6 +54,10 @@ internal class EventsRoutes(
                                                     open = false
                                                     return@onReceiveCatching
                                                 }
+                                                if (!valid(call.principal())) {
+                                                    open = false
+                                                    return@onReceiveCatching
+                                                }
                                                 if (event is ServerEvent.Changed) {
                                                     val data =
                                                         SyncJson.encodeToString(
@@ -62,8 +69,13 @@ internal class EventsRoutes(
                                                 }
                                             }
                                             onTimeout(heartbeat * 1000) {
-                                                write(": hb\n\n")
-                                                flush()
+                                                // CLI writes occur in another process and cannot publish on this bus.
+                                                if (valid(call.principal())) {
+                                                    write(": hb\n\n")
+                                                    flush()
+                                                } else {
+                                                    open = false
+                                                }
                                             }
                                         }
                                     }
@@ -77,6 +89,8 @@ internal class EventsRoutes(
             } catch (failure: Throwable) {
                 stream.close()
                 throw failure
+            } finally {
+                metrics.streamClosed()
             }
         }
     }

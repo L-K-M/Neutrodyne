@@ -11,6 +11,7 @@ import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
@@ -85,9 +86,18 @@ internal object LogRedactionProbe {
                 )
                 testApplication {
                     application {
-                        f.install(this)
+                        ServerModule(
+                            f.config.copy(logFormat = LogFormat.JSON),
+                            TEST_SERVER_VERSION,
+                            services = f.services,
+                        ).install(this)
                         routing { get("/hostile/{secret}") { error("$payload $url ${grant.token}") } }
                     }
+                    client.get("/devices") {
+                        header(HttpHeaders.Cookie, "nds_session=$web")
+                        header("X-Request-Id", grant.token)
+                    }
+                    client.get("/admin/server?secret=$password") { header(HttpHeaders.Cookie, "nds_session=$web") }
                     client.get("/hostile/$payload?token=${grant.token}") {
                         header("X-Request-Id", grant.token + "/bad")
                     }
@@ -106,6 +116,11 @@ internal object LogRedactionProbe {
                         setBody("{\"$payload\":\"$url\"")
                     }
                 }
+                ServerCli(
+                    arrayOf("serve"),
+                    emptyMap(),
+                    serverStarter = { error("$password $url ${grant.token}") },
+                ).run()
                 LoggerFactory.getLogger("redaction-probe").info("Redaction scenario completed")
             }
         }

@@ -25,7 +25,7 @@ internal enum class LogLevel(
     }
 }
 
-/** `NEUTRODYNE_SERVER_LOG_FORMAT` / `log.format` (10 Configuration). The JSON formatter arrives with MS1. */
+/** `NEUTRODYNE_SERVER_LOG_FORMAT` / `log.format` (10 Configuration). Request lines use the selected text or JSON format. */
 internal enum class LogFormat(
     val wire: String,
 ) {

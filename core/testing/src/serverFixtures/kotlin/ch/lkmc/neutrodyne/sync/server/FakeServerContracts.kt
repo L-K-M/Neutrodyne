@@ -114,6 +114,15 @@ internal class FakeSyncTransaction : SyncWrite {
         events += event
     }
 
+    val auditEvents = mutableListOf<Pair<String, Long>>()
+
+    override fun audit(
+        event: String,
+        now: Long,
+    ) {
+        auditEvents += event to now
+    }
+
     override fun acknowledge(
         deviceId: String,
         appliedSince: String?,

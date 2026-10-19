@@ -1567,6 +1567,21 @@ deletion with purge/export before exposing exports.
 
 ### Web UI
 
+**Implementation note (2026-10-19, MS1).** W8 uses the existing auth services
+and escaped kotlinx.html text/attributes. Setup signs the new administrator into
+a browser session. Forms are capped at 16 KiB before parameter decoding.
+Anonymous setup/login forms also require an HttpOnly SameSite cookie, an exact
+Origin and a synchronizer token. Browser code sign-in
+keeps its polling secret in an HttpOnly cookie and consumes only `web` requests;
+the HTML contains only the human approval code. Library titles are paged over
+1,000 stored records at a time and never include feed URL fields. Password reset
+by invite atomically clears the password, revokes credentials and issues the
+invite,
+including when an administrator resets their own account. Live CLI revocations
+are rechecked before SSE events and heartbeats; in-process revocations close
+streams immediately. Backup controls await W7 and are not advertised before its
+export/purge hooks exist.
+
 Server-rendered HTML through kotlinx.html; no JavaScript; English only (N10); every page sends the headers of [Web sessions and CSRF](#web-sessions-and-csrf).
 
 | Page | Who | Content |
@@ -1599,6 +1614,16 @@ A red banner "This server is not using HTTPS" appears on every page in insecure 
 | `doctor` | check configuration, the listen rule, data-directory ownership and mode, `PRAGMA integrity_check`, free space, the last backup age, Java version, and print the system time with a reminder to keep NTP on |
 
 ### Observability
+
+**Implementation note (2026-10-19, MS1).** W9 emits request lines directly to
+stdout in the selected format, with fixed route labels (`unmatched` for unknown
+paths) and hashed request IDs, including syntactically valid IDs supplied by a
+client. Framework request logging stays disabled. Exception text
+never enters request logs or serve-failure output. Auth audit reads and account
+deletions extend the DB-only contracts without a schema change; library-reset
+audit writes share the record transaction. Metrics are registered only on the
+separate configured listener. Backup/GC metric hooks are available for W7;
+unavailable backup time is represented as age `-1`, with success `0`.
 
 - **Logs:** one line per request to stdout (`NEUTRODYNE_SERVER_LOG_FORMAT=text` or `json`): time, request ID, account ID (numeric), route template (never the raw path or query), status, duration, changes pushed, records returned. Startup, migrations, backups and GC log one line each. Never logged: tokens, invite and link codes, setup codes, passwords, feed URLs, request or response bodies, record contents (`LogRedactionTest`). Level via `NEUTRODYNE_SERVER_LOG_LEVEL`.
 - **Health:** `/healthz`, `/readyz` ([Account and health endpoints](#account-and-health-endpoints)); the image's `HEALTHCHECK` runs `HealthCheck`.
@@ -1950,6 +1975,17 @@ Supported: 64-bit OS on Raspberry Pi 3, 4, 5 and Zero 2 W (arm64), the JAR on Ja
 Covered in [Backups](#backups). The README's "Run the server" section (09 owns the text) tells administrators to copy `<data>/backups/` and `<data>/account-backups/` off the machine (the nightly copies protect against bad upgrades and corruption, not against losing the disk), and that a lost server is also recoverable from any device: link the devices to a new server and Merge re-uploads every library.
 
 ### Update notice
+
+**Implementation note (2026-10-19, MS1).** W9 bounds each manifest attempt to
+10 seconds, 64 KiB per response and three redirects. Destinations are HTTPS on
+port 443 only: this repository's GitHub manifest release paths, then
+`release-assets.githubusercontent.com` (signed queries are allowed only there).
+The parser validates and rebuilds this repository's release/JAR links and checks
+the image digest reference and minimum Java version. No JAR or image is fetched.
+The first check has up to one hour of jitter; later attempts, including failures,
+are at least 24 hours apart with up to one hour of jitter. Disabling checks
+creates no job or HTTP client and makes no request. Tests inject transport;
+production retains the boolean configuration and JDK HttpClient.
 
 `ServerUpdateNotice` (on unless `NEUTRODYNE_SERVER_UPDATE_CHECK=false`) fetches `https://github.com/{owner}/Neutrodyne/releases/latest/download/neutrodyne-update.json` once a day (jittered, JDK `HttpClient`, redirects followed only to GitHub's release-asset hosts), reads `versionName`, the release page URL and the additive `server` entry (`jar`, `image`, `minJava`) of the update manifest ([D78](../PLAN.md#3-key-decisions), [09 Update check](09-quality-and-release.md#update-check)), and shows "Neutrodyne Sync X.Y.Z is available" with the release link on `/admin/server`. It never downloads or installs anything. This is the server's only outbound request (network inventory ID `server-updates`, [09 Network inventory](09-quality-and-release.md#network-inventory)); the nightly `server-image-smoke` capture shows no other.
 

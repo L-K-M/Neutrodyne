@@ -1,0 +1,6 @@
+/* SPDX-License-Identifier: Unlicense */
+body { font-family: sans-serif; max-width: 60rem; margin: 2rem auto; padding: 0 1rem; color: #18202e; }
+nav, form, label { display: block; margin: 1rem 0; }
+input, button, select { font: inherit; padding: .4rem; }
+.warning { color: #fff; background: #a40000; padding: 1rem; font-weight: bold; }
+li { overflow-wrap: anywhere; }

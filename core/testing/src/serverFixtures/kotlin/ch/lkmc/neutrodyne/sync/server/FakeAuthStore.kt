@@ -18,6 +18,7 @@ internal class FakeAuthTransaction : AuthWrite {
     val installations = mutableMapOf<String, AuthDevice>()
     val requests = mutableMapOf<String, AuthLink>()
     val events = mutableListOf<ServerEvent>()
+    val auditEntries = mutableListOf<AuditEntry>()
     val auditEvents = mutableListOf<String>()
     val counts = mutableMapOf<Long, Map<SyncCollection, Int>>()
     val purges = mutableListOf<Pair<Long, String>>()
@@ -49,6 +50,10 @@ internal class FakeAuthTransaction : AuthWrite {
     override fun linkByUserHash(userHash: String): AuthLink? = requests.values.singleOrNull { it.userHash == userHash }
 
     override fun liveCounts(accountId: Long): Map<SyncCollection, Int> = counts[accountId].orEmpty()
+
+    override fun recentAudit(limit: Int): List<AuditEntry> = auditEntries.asReversed().take(limit.coerceIn(1, 200))
+
+    override fun storedRecordCount(): Long = counts.values.sumOf { it.values.sum().toLong() }
 
     override fun pendingLinks(now: Long): Int =
         requests.values.count {
@@ -99,6 +104,14 @@ internal class FakeAuthTransaction : AuthWrite {
         purges += accountId to epoch
     }
 
+    override fun deleteAccount(accountId: Long) {
+        owners.remove(accountId)
+        credentials.entries.removeAll { it.value.accountId == accountId }
+        installations.entries.removeAll { it.value.accountId == accountId }
+        requests.entries.removeAll { it.value.accountId == accountId }
+        counts.remove(accountId)
+    }
+
     override fun audit(
         accountId: Long?,
         event: String,
@@ -106,6 +119,7 @@ internal class FakeAuthTransaction : AuthWrite {
         ip: String?,
     ) {
         auditEvents += event
+        auditEntries += AuditEntry(accountId, now, event, ip)
     }
 
     override fun emit(event: ServerEvent) {

@@ -10,6 +10,11 @@ import java.util.Properties
  * then `dev` for plain `run` and tests.
  */
 internal object ServerVersion {
+    fun repository(): String =
+        ServerVersion::class.java.getResourceAsStream(RESOURCE)?.use {
+            Properties().apply { load(it) }.getProperty("repoUrl")
+        } ?: "https://github.com/L-K-M/Neutrodyne"
+
     fun current(): String = fromResource() ?: fromManifest() ?: DEV_VERSION
 
     private fun fromResource(): String? =

@@ -34,8 +34,8 @@ import kotlin.time.Clock
 
 /**
  * Ktor application module (10 Server architecture, Module and classes): installs the request
- * pipeline's insecure-transport guard and the routes. The M0b skeleton carries health and
- * discovery; the API, web and event routes and the body guards arrive with MS1.
+ * pipeline, transport guard, health/discovery, authenticated API, web and event routes.
+ * Metrics belong exclusively to the separately configured listener.
  */
 internal class ServerModule(
     private val config: ServerConfig,
@@ -43,9 +43,17 @@ internal class ServerModule(
     private val clock: Clock = Clock.System,
     private val writeProbe: suspend () -> Boolean = { true },
     private val services: ServerServices? = null,
+    private val requestLog: ((String) -> Unit)? = null,
 ) {
     fun install(application: Application) {
         with(application) {
+            RequestLogger(config.logFormat, services?.metrics ?: ServerMetrics()) { line ->
+                if (requestLog != null) {
+                    requestLog.invoke(line)
+                } else if (config.logLevel in setOf(LogLevel.TRACE, LogLevel.DEBUG, LogLevel.INFO)) {
+                    println(line)
+                }
+            }.install(this)
             install(CallId) {
                 retrieveFromHeader("X-Request-Id")
                 generate { UUID.randomUUID().toString() }
@@ -120,10 +128,11 @@ internal class ServerModule(
                 if (services != null) {
                     authRoutes?.install(this)
                     DeviceRoutes(services.devices).install(this)
-                    SyncRoutes(services.records).install(this)
-                    ChangesRoutes(services.records, services.inputs).install(this)
+                    SyncRoutes(services.records, services.metrics).install(this)
+                    ChangesRoutes(services.records, services.inputs, services.metrics).install(this)
                     AccountRoutes(services.accounts, services.records).install(this)
-                    EventsRoutes(services.events).install(this)
+                    EventsRoutes(services.events, services.metrics, services.tokens::valid).install(this)
+                    AdminWeb(services, config, serverVersion).install(this)
                 }
             }
         }

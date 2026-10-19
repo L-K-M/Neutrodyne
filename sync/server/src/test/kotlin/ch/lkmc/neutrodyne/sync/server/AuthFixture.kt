@@ -19,9 +19,9 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import java.util.UUID
 
-internal class AuthFixture : AutoCloseable {
-    val config = loadValidConfig().copy(dataDir = tempDataDir())
-
+internal class AuthFixture(
+    val config: ServerConfig = loadValidConfig().copy(dataDir = tempDataDir()),
+) : AutoCloseable {
     @Volatile var now = FIXED_INSTANT.toEpochMilliseconds()
     private val secure = productionInputs()
     val inputs = ServerInputs({ now }, secure.randomBytes)
