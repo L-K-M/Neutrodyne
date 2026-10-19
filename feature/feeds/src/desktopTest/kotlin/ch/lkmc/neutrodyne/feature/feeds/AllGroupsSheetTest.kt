@@ -17,6 +17,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -30,10 +31,13 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.v2.runComposeUiTest
+import androidx.compose.ui.test.v2.runDesktopComposeUiTest
+import androidx.compose.ui.unit.Density
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -226,6 +230,27 @@ class AllGroupsSheetTest {
                 ),
                 fixture.recording.calls,
             )
+        }
+
+    @Test fun shortEmptySheetAtDoubleFontKeepsTextAndActionsReachable() =
+        runDesktopComposeUiTest(width = 360, height = 240) {
+            var created = 0
+            var managed = 0
+            setContent {
+                CompositionLocalProvider(
+                    LocalDensity provides Density(1f, 2f),
+                    LocalPlatformKind provides PlatformKind.DESKTOP,
+                ) {
+                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                        AllGroupsSheet(AllGroupsUiState(loaded = true), {}, { created++ }, { managed++ }, {})
+                    }
+                }
+            }
+            onNodeWithText("No groups yet").performScrollTo().assertIsDisplayed()
+            onNodeWithText("New group").performScrollTo().assertIsDisplayed().performClick()
+            onNodeWithText("Manage groups").performScrollTo().assertIsDisplayed().performClick()
+            assertEquals(1, created)
+            assertEquals(1, managed)
         }
 
     @Test

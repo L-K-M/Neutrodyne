@@ -107,6 +107,7 @@ internal fun FeedsScreen(
     onVisitStart: (FeedSource) -> Unit = {},
     onVisitEnd: (FeedSource) -> Unit = {},
     onAllGroups: () -> Unit = {},
+    onEditGroup: (Long) -> Unit = {},
     suggestedGroups: @Composable () -> Unit = {},
     outageBanner: @Composable () -> Unit = {},
     selection: EpisodeSelectionController? = null,
@@ -347,6 +348,12 @@ internal fun FeedsScreen(
                             },
                             onMarkAllPlayedClick = { onMarkAllPlayedClick(source) },
                             onDownloadAll = if (source is FeedSource.Group) ({ onDownloadAll(source) }) else null,
+                            emptyGroupName =
+                                entry.tab.title.takeIf {
+                                    (source as? FeedSource.Group)?.groupId in
+                                        state.emptyGroupIds
+                                },
+                            onEditEmptyGroup = { (source as? FeedSource.Group)?.let { onEditGroup(it.groupId) } },
                             onAddPodcast = onAddPodcast,
                             onSearch = onSearch,
                             onImport = onImport,

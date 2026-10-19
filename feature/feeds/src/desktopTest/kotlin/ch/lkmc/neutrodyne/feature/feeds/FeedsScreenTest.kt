@@ -260,6 +260,21 @@ class FeedsScreenTest {
             assertEquals(FeedFilters(), filters)
         }
 
+    @Test fun emptyGroupOffersMembershipEditorAndNotCaughtUp() =
+        runComposeUiTest {
+            var edited = false
+            setFeeds(
+                FeedsUiState(hasSubscriptions = true),
+                source = PagedListSource(listOf(emptyList())),
+                emptyGroupName = "tech",
+                onEditEmptyGroup = { edited = true },
+            )
+            onNodeWithText("No podcasts in 'tech' yet").assertIsDisplayed()
+            onNodeWithText("You're all caught up").assertDoesNotExist()
+            onNodeWithText("Add podcasts").performClick()
+            assertTrue(edited)
+        }
+
     @Test
     fun refreshErrorShowsRetry() =
         runComposeUiTest {
@@ -852,6 +867,8 @@ class FeedsScreenTest {
         onMarkAllPlayed: () -> Unit = {},
         onAddPodcast: () -> Unit = {},
         onSearch: () -> Unit = {},
+        emptyGroupName: String? = null,
+        onEditEmptyGroup: () -> Unit = {},
         wrapScreen: @Composable (@Composable () -> Unit) -> Unit = { it() },
     ): LazyPagingItems<FeedItem> {
         lateinit var pagingItems: androidx.paging.compose.LazyPagingItems<FeedItem>
@@ -881,7 +898,30 @@ class FeedsScreenTest {
                     cachedFeed.collectAsLazyPagingItems().also { pagingItems = it }
                     wrapScreen {
                         FeedsScreen(
-                            state = state.copy(tabs = persistentListOf(allTab())),
+                            state =
+                                if (emptyGroupName ==
+                                    null
+                                ) {
+                                    state.copy(tabs = persistentListOf(allTab()))
+                                } else {
+                                    state.copy(
+                                        tabs =
+                                            persistentListOf(
+                                                FeedTabUi(
+                                                    FeedTab(
+                                                        FeedSource.Group(999),
+                                                        emptyGroupName,
+                                                        null,
+                                                        null,
+                                                        "00000000-0000-4000-8000-000000000999",
+                                                    ),
+                                                    FeedSourceRef.Group("00000000-0000-4000-8000-000000000999"),
+                                                ),
+                                            ),
+                                        selected = FeedSourceRef.Group("00000000-0000-4000-8000-000000000999"),
+                                        emptyGroupIds = kotlinx.collections.immutable.persistentSetOf(999L),
+                                    )
+                                },
                             selection = selection,
                             live = live,
                             onVisibleIds = { _, ids -> onVisibleIds(ids) },
@@ -893,6 +933,7 @@ class FeedsScreenTest {
                             onMarkAllPlayedClick = { onMarkAllPlayed() },
                             onAddPodcast = onAddPodcast,
                             onSearch = onSearch,
+                            onEditGroup = { onEditEmptyGroup() },
                         )
                     }
                 }

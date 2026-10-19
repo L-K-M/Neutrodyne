@@ -14,6 +14,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
+import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.ChartGenre
 import ch.lkmc.neutrodyne.core.model.DirectoryHit
@@ -24,12 +25,14 @@ import ch.lkmc.neutrodyne.core.model.SearchResults
 import ch.lkmc.neutrodyne.core.navigation.AppNavigator
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastPreviewKey
+import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.FeedDates
 import ch.lkmc.neutrodyne.core.ui.rememberMonogram
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry
 import ch.lkmc.neutrodyne.core.ui.resources.add_episodes_count
 import ch.lkmc.neutrodyne.core.ui.resources.add_last_episode
+import ch.lkmc.neutrodyne.core.ui.resources.discover_add_url
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_busy
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_disabled
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_empty
@@ -118,6 +121,7 @@ internal fun SearchStatus(
     results: SearchResults,
     retry: () -> Unit,
     settings: () -> Unit,
+    addByUrl: (() -> Unit)? = null,
 ) {
     Column {
         val active = results.statuses.filterValues { it != ProviderStatus.Disabled }
@@ -139,7 +143,13 @@ internal fun SearchStatus(
             }
 
             results.hits.isEmpty() -> {
-                Text(stringResource(Res.string.discovery_empty, results.query))
+                EmptyState(
+                    NdIcons.Search,
+                    stringResource(Res.string.discovery_empty, results.query),
+                    "",
+                    actionLabel = if (addByUrl != null) stringResource(Res.string.discover_add_url) else null,
+                    onAction = addByUrl,
+                )
             }
         }
         if (failed.isNotEmpty() && failed.size < active.size) {

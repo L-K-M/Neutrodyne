@@ -36,6 +36,7 @@ import ch.lkmc.neutrodyne.core.navigation.DirectoryKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
+import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry
 import ch.lkmc.neutrodyne.core.ui.resources.back
@@ -79,9 +80,17 @@ internal fun DirectoryScreen(
                     }
 
                     state.results != null -> {
-                        SearchStatus(state.results, retry) {
-                            navigator.pushDetail(SettingsKey(SettingsPage.DISCOVER))
-                        }
+                        SearchStatus(
+                            state.results,
+                            retry,
+                            settings = { navigator.pushDetail(SettingsKey(SettingsPage.DISCOVER)) },
+                            addByUrl = {
+                                navigator.push(
+                                    ch.lkmc.neutrodyne.core.navigation
+                                        .AddPodcastKey(null),
+                                )
+                            },
+                        )
                     }
 
                     state.loading -> {
@@ -111,16 +120,17 @@ internal fun DirectoryScreen(
                     }
 
                     state.hits.isEmpty() -> {
-                        Text(stringResource(Res.string.discovery_empty, key.query))
+                        EmptyState(
+                            NdIcons.Search,
+                            stringResource(Res.string.discovery_empty, key.query),
+                            "",
+                            actionLabel = stringResource(Res.string.discover_add_url),
+                            onAction = { navigator.push(AddPodcastKey(null)) },
+                        )
                     }
                 }
             }
             items(state.hits, key = { it.feedUrl }) { hit -> DirectoryRow(hit) { navigator.openHit(hit) } }
-            if (state.hits.isEmpty()) {
-                item {
-                    NdTextButton(stringResource(Res.string.discover_add_url), { navigator.push(AddPodcastKey(null)) })
-                }
-            }
         }
     }
 }

@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.feature.feeds
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,6 +15,8 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -38,6 +41,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
+import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.GroupMosaic
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.asString
@@ -67,8 +72,10 @@ internal fun AllGroupsSheet(
         initialFocus.requestFocus()
     }
 
+    val emptyScroll = rememberScrollState()
+    val emptyScrolling = if (state.loaded && state.groups.isEmpty()) Modifier.verticalScroll(emptyScroll) else Modifier
     Column(
-        modifier.fillMaxWidth().testTag("all-groups-sheet").onPreviewKeyEvent { event ->
+        modifier.fillMaxWidth().then(emptyScrolling).testTag("all-groups-sheet").onPreviewKeyEvent { event ->
             if (event.key == Key.Escape && event.type == KeyEventType.KeyDown) {
                 onDismiss()
                 true
@@ -82,7 +89,7 @@ internal fun AllGroupsSheet(
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.padding(horizontal = 16.dp).semantics { heading() },
         )
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        FlowRow(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             NdTextButton(
                 label = stringResource(Res.string.groups_new),
                 onClick = onNewGroup,
@@ -108,9 +115,10 @@ internal fun AllGroupsSheet(
             }
 
             state.groups.isEmpty() -> {
-                Text(
+                EmptyState(
+                    NdIcons.GridView,
                     stringResource(Res.string.groups_empty),
-                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(24.dp),
+                    "",
                 )
             }
 

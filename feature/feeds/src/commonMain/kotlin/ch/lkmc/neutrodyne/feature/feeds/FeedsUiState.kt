@@ -20,8 +20,10 @@ import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.ImmutableMap
+import kotlinx.collections.immutable.ImmutableSet
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentMapOf
+import kotlinx.collections.immutable.persistentSetOf
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -50,6 +52,7 @@ public data class FeedsUiState(
     val refreshing: Boolean = false,
     val hasSubscriptions: Boolean = true,
     val hasGroups: Boolean = false,
+    val emptyGroupIds: ImmutableSet<Long> = persistentSetOf(),
     val messages: ImmutableList<UserMessage> = persistentListOf(),
 )
 

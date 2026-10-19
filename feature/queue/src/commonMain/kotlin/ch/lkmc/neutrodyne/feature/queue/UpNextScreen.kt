@@ -124,18 +124,22 @@ internal fun UpNextScreen(
                                         null
                                     },
                                 onAction = onDiscover,
+                                footer = {
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.padding(horizontal = 16.dp),
+                                    ) {
+                                        state.groups.take(3).forEach { group ->
+                                            AssistChip(
+                                                onClick = { onPlayGroup(group.id) },
+                                                label = {
+                                                    Text(stringResource(Res.string.queue_play_group, group.name))
+                                                },
+                                            )
+                                        }
+                                    }
+                                },
                             )
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.padding(horizontal = 16.dp),
-                            ) {
-                                state.groups.forEach { group ->
-                                    AssistChip(
-                                        onClick = { onPlayGroup(group.id) },
-                                        label = { Text(stringResource(Res.string.queue_play_group, group.name)) },
-                                    )
-                                }
-                            }
                         }
                     },
                 )

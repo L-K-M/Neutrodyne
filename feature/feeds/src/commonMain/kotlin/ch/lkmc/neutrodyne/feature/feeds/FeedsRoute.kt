@@ -79,6 +79,12 @@ internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
         onVisitStart = viewModel::onVisitStart,
         onVisitEnd = viewModel::onVisitEnd,
         onAllGroups = { navigator.push(AllGroupsKey) },
+        onEditGroup = {
+            navigator.push(
+                ch.lkmc.neutrodyne.core.navigation
+                    .GroupEditKey(it),
+            )
+        },
         live = live,
         onVisibleIds = { ref, ids -> viewModel.onVisibleIds(ref, ids) },
         onRefresh = viewModel::onRefresh,

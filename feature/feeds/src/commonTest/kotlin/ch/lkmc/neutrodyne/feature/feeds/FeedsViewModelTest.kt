@@ -750,6 +750,21 @@ class FeedsViewModelTest : MainDispatcherTest() {
             assertNull(viewModel.markPlayed.state.value)
         }
 
+    @Test fun emptyGroupStateTracksMembershipCounts() =
+        viewModelTest {
+            val group = group()
+            val vm = viewModel()
+            collect(vm)
+            runCurrent()
+            assertEquals(setOf(group.id), vm.uiState.value.emptyGroupIds)
+            groups.members.value = mapOf(group.id to setOf(1L))
+            runCurrent()
+            assertTrue(
+                vm.uiState.value.emptyGroupIds
+                    .isEmpty(),
+            )
+        }
+
     private suspend fun group(showAsTab: Boolean = true): Group {
         val id = (groups.create(GroupDraft("tech", showAsTab = showAsTab)) as Outcome.Success).value
         val group = groups.groups.value.single { it.id == id }

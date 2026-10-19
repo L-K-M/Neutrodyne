@@ -7,20 +7,29 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.v2.runComposeUiTest
+import androidx.compose.ui.test.v2.runDesktopComposeUiTest
+import androidx.compose.ui.unit.Density
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.NdScrollbarStyle
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
@@ -217,6 +226,86 @@ class DiscoveryScreenTest {
             }
             onNodeWithText("You're offline").assertIsDisplayed()
             onNodeWithText("Retry").assertIsDisplayed()
+        }
+
+    @Test fun emptyResultsOfferAddByUrlWhileErrorsKeepRetry() =
+        runComposeUiTest {
+            val result =
+                androidx.compose.runtime.mutableStateOf(
+                    SearchResults(
+                        "no such show",
+                        persistentListOf(),
+                        persistentMapOf(ProviderId.APPLE to ProviderStatus.Ok),
+                        true,
+                    ),
+                )
+            setContent {
+                CompositionLocalProvider(LocalAppNavigator provides navigator) {
+                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                        DirectoryScreen(
+                            DirectoryKey("no such show", null),
+                            DirectoryState(loading = false, results = result.value),
+                            {},
+                            navigator,
+                        )
+                    }
+                }
+            }
+            onNodeWithText("Add by URL").performClick()
+            assertEquals(RecordingAppNavigator.Call.Push(AddPodcastKey(null)), navigator.calls.last())
+            result.value =
+                result.value.copy(
+                    statuses = persistentMapOf(ProviderId.APPLE to ProviderStatus.Failed(NetError.Offline)),
+                )
+            waitForIdle()
+            onNodeWithText("Add by URL").assertDoesNotExist()
+            onNodeWithText("Retry").assertIsDisplayed()
+        }
+
+    @Test fun discoverStaysUnfocusedAndScrollsAtDoubleFont() =
+        runDesktopComposeUiTest(width = 360, height = 300) {
+            setContent {
+                CompositionLocalProvider(
+                    LocalAppNavigator provides navigator,
+                    LocalDensity provides Density(1f, 2f),
+                ) {
+                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                        DiscoverScreen(DiscoverState(), {}, {}, navigator)
+                    }
+                }
+            }
+            onNode(hasSetTextAction()).assertIsNotFocused()
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Add YouTube channel"))
+            onNodeWithText("Add YouTube channel").performClick()
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Import"))
+            onNodeWithText("Import").performClick()
+            assertEquals<List<RecordingAppNavigator.Call>>(
+                listOf(
+                    RecordingAppNavigator.Call.Push(AddPodcastKey(null)),
+                    RecordingAppNavigator.Call.Push(ImportFileKey),
+                ),
+                navigator.calls,
+            )
+        }
+
+    @Test fun searchShortcutReturnsToSearchAfterScrolling() =
+        runDesktopComposeUiTest(width = 360, height = 400) {
+            setContent {
+                CompositionLocalProvider(LocalAppNavigator provides navigator) {
+                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                        DiscoverScreen(DiscoverState(), {}, {}, navigator)
+                    }
+                }
+            }
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasText("TV & film"))
+            onNodeWithText("TV & film").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+            onNodeWithText("TV & film").assertIsFocused()
+            onRoot().performKeyInput {
+                keyDown(Key.CtrlLeft)
+                pressKey(Key.F)
+                keyUp(Key.CtrlLeft)
+            }
+            onNode(hasSetTextAction()).assertIsDisplayed().assertIsFocused()
         }
 
     @Test

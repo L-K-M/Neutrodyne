@@ -2537,13 +2537,18 @@ seed is null or the average is transparent zero. Repository fallback follows
 podcast key changes and clears obsolete observations. No Room schema change or
 desktop raster adapter is introduced; production desktop sampling remains MD1.
 
-**Integration follow-up (2026-10-19, M10 I1):** Import report covers observe only
-`ArtworkRef`, and Downloads entry covers do not pass a persisted average to
-`CoverArt`. W7's surface completion must carry the available average through
-these projections and calls, with W2/W3 retaining ownership of colour mechanics.
-W5 preserves it through transitions; W9 supplies the missing loading/failure
-placeholder cases and W11 tracks closure. The local W1–W4 integration does not
-claim average-colour placeholders on every surface or complete M10 acceptance.
+**Implementation note (2026-10-19, M10 W7):** The I1 Import/Downloads gaps now
+carry existing persisted averages to `CoverArt`. Podcast detail observes one
+podcast/artwork join, so publication and colour-only backfill invalidate Import
+report covers without a podcast write. `PodcastDetail.artworkAvgArgb` and
+`DownloadEntry.artworkAvgArgb` remain nullable; transparent zero stays a value.
+Downloads adds the existing artwork column to its read projection, preserving
+lane ordering, counts and version identity. Preview rows retain monograms.
+A state-backed placeholder painter repaints average-only changes during an
+in-flight request without changing its key/version or W5's cached THUMB handoff.
+No schema, extraction, cache, worker or network work is added. W2/W3 retain
+colour ownership, W5 retains transition mechanics, W9 owns the full placeholder
+matrix and W11 tracks acceptance. Local tests do not close M10 acceptance.
 
 ### Monograms and mosaics
 
@@ -2907,6 +2912,23 @@ Illustrations are single-colour Material Symbols at 96 dp in `primary` (the bran
 amber/navy mark and symbol empty states. Supplied fonts/illustrations remain optional;
 no Expressive migration.
 
+**Implementation note (2026-10-19, M10 W7):** Feeds and Library onboarding show
+the generated in-app mark plus the existing 96 dp symbol. `EmptyState` scrolls
+when height is bounded; inside lazy lists it uses the parent's scrolling.
+Library's empty Groups segment offers New group. All groups wraps its empty
+content and scrolls the title/actions together in short windows, retaining the
+existing half-sheet navigation. Empty Feed groups offer the
+existing membership editor, while filtered-empty and paging-error states retain
+their own reset/retry actions. Discover's search and entry chips scroll with its
+content, never focus automatically, and use the existing Add podcast and Import
+routes. Top charts opens the existing directory; Categories scrolls to the
+existing category chips. Explicit search shortcuts return to the search field
+before requesting focus. Empty directory results offer Add by URL; provider errors keep Retry or
+Settings. Up next keeps the first three Play group chips in its empty content.
+Downloads retains its storage summary and Download settings route. Podcast's
+M8 no-long-form state and Import's preview/progress/fix-up flow remain distinct.
+No empty Settings page, sync/engine route, permission prompt or wizard is added.
+
 ### Suggested groups card
 
 **Implementation note (2026-10-19, M7):** W4 uses one screen-owned
@@ -3122,8 +3144,15 @@ Swipe actions `REMOVE_FROM_UP_NEXT` and `DELETE_DOWNLOAD` are fixed on Up next a
 
 **Implementation note (2026-10-19, M10):** W1 registers tint=true, pure black=false,
 density=MEDIUM (72/100/152 dp), panel hidden=false. Appearance is
-portable/backup-eligible but unsynced; panel is device-only. W3 wires keys; W7 applies
-density.
+portable/backup-eligible but unsynced; panel is device-only. W3 wires keys. W7
+applies SMALL/MEDIUM/LARGE immediately to both Library grids through the existing
+repository and overflow chooser. Adaptive minimums are 72/100/152 dp, default
+MEDIUM. Density is not a composition key: selection, filter and the grid's saved
+scroll anchor stay in place. Existing title/monogram rules and tile actions remain.
+At large fonts, monogram labels use one ellipsized line if two would overlap the
+initials; the 96 dp label threshold, platform typography, 38 % initials and
+12 sp minimum stay unchanged. This is bounded shared-renderer proof, not device
+or nonlinear-font acceptance.
 
 ### Widgets (v1.x)
 
@@ -3302,7 +3331,7 @@ Serves N1, N4, N6. Expected failures arrive as values (01 [Errors](01-foundation
 7. The Library tile menu's "Mark all as played…" confirmation is a plain confirm/cancel `NdDialog`: the dialog table's "All" / "Older than 1 week / 1 month / 3 months" options and `countUnplayed` arrive with M2's group data (`FeedRepository.countUnplayed` does not exist yet; `markFeedPlayed(source, sortDateBefore)` already takes the cutoff). Confirming marks the whole feed via `markFeedPlayed(source, null)` (UI review round 2, P2).
 8. `PodcastKey`, `PodcastSettingsKey` and `AddPodcastKey` resolved to M1a placeholder screens — `:feature:podcast` served the two detail panes and `:feature:discover` the bottom sheet — because the Library pushed all three before their owning slices landed; nav3's entry provider crashes on a key no module contributes. The Podcast slice (#96) replaced the podcast routes and the add-podcast flow (#95) the sheet, so every pushed key now resolves to its real screen.
 9. The cover-tile menu keeps the catalogue order (Refresh, Podcast settings, Mark all as played…, Unsubscribe last) but shows no separator before the destructive item: `TileMenuAction` carries no divider marker and the menu model lives in `:core:ui`, which PR #93 was changing in the same round. The separator lands when the model grows one.
-10. The no-subscriptions empty state is the documented "Your feeds live here" with "Search podcasts" (→ the Discover tab) and "Add by URL or YouTube link" (`AddPodcastKey(null)`). M3 D5 adds the "Import subscriptions" secondary and Library overflow action: a transient `ImportFileKey` dialog owns the unfiltered `FilePicker.openFile()` request, then replaces itself with `ImportKey(sessionId)` after `ImportRepository.create`. Cancel simply closes that transient entry; picker and acquisition failures show the import error dialog. The first-start brand mark above the text waits on `EmptyState` growing an illustration slot (`:core:ui`; the M10 illustrations deliver it).
+10. The no-subscriptions empty state is the documented "Your feeds live here" with "Search podcasts" (→ the Discover tab) and "Add by URL or YouTube link" (`AddPodcastKey(null)`). M3 D5 adds the "Import subscriptions" secondary and Library overflow action: a transient `ImportFileKey` dialog owns the unfiltered `FilePicker.openFile()` request, then replaces itself with `ImportKey(sessionId)` after `ImportRepository.create`. Cancel simply closes that transient entry; picker and acquisition failures show the import error dialog. M10 W7 now supplies the generated brand mark above the text through `EmptyState`.
 
 ### Implementation deviations (2026-10-12, M1a Feeds slice)
 

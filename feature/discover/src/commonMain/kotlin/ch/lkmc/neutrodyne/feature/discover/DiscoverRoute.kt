@@ -31,6 +31,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -67,6 +68,7 @@ import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.discover_add_url
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_add_link
+import ch.lkmc.neutrodyne.core.ui.resources.discovery_add_youtube
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_categories
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_disabled
 import ch.lkmc.neutrodyne.core.ui.resources.discovery_disclosure
@@ -79,6 +81,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.nav_discover
 import ch.lkmc.neutrodyne.core.ui.root.LocalDiscoverSearchFocus
 import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
 import dev.zacsweers.metrox.viewmodel.metroViewModel
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 
 @Composable
@@ -102,14 +105,24 @@ internal fun DiscoverScreen(
     onChartVisible: (ChartGenre?) -> Unit = {},
 ) {
     val focus = remember { FocusRequester() }
+    val list = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val requestSearchFocus: () -> Unit =
+        remember(list, focus, scope) {
+            {
+                scope.launch {
+                    list.scrollToItem(0)
+                    focus.requestFocus()
+                }
+                Unit
+            }
+        }
     val searchFocus = LocalDiscoverSearchFocus.current
-    DisposableEffect(searchFocus, focus) {
-        val action: () -> Unit = { focus.requestFocus() }
-        searchFocus?.register(action)
-        onDispose { searchFocus?.unregister(action) }
+    DisposableEffect(searchFocus, requestSearchFocus) {
+        searchFocus?.register(requestSearchFocus)
+        onDispose { searchFocus?.unregister(requestSearchFocus) }
     }
     val currentOnChartVisible by rememberUpdatedState(onChartVisible)
-    val list = rememberLazyListState()
     val bars = LocalScrollbars.current
     val barColor = ndScrollbarColor(bars)
     val settings = { navigator.pushDetail(SettingsKey(SettingsPage.DISCOVER)) }
@@ -126,7 +139,7 @@ internal fun DiscoverScreen(
     Column(
         Modifier.fillMaxSize().onPreviewKeyEvent {
             if (it.type == KeyEventType.KeyDown && it.key == Key.F && (it.isCtrlPressed || it.isMetaPressed)) {
-                focus.requestFocus()
+                requestSearchFocus()
                 true
             } else {
                 false
@@ -134,56 +147,72 @@ internal fun DiscoverScreen(
         },
     ) {
         NdTopAppBar(stringResource(Res.string.nav_discover), actions = { SettingsGearButton() })
-        OutlinedTextField(
-            value = state.input,
-            onValueChange = onInput,
-            label = { Text(stringResource(Res.string.discovery_search)) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { submit() }),
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .focusRequester(focus)
-                    .onPreviewKeyEvent {
-                        if (it.type == KeyEventType.KeyDown && it.key == Key.Enter) {
-                            submit()
-                            true
-                        } else {
-                            false
-                        }
-                    },
-        )
-        val recipients = state.providers.filter { it.effective }.joinToString(", ") { it.id.displayName() }
-        Text(
-            if (recipients.isEmpty()) {
-                stringResource(Res.string.discovery_disabled)
-            } else {
-                stringResource(Res.string.discovery_disclosure, recipients)
-            },
-            modifier = Modifier.padding(horizontal = 16.dp),
-        )
-        FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            NdAssistChip(
-                onClick = { navigator.push(AddPodcastKey(null)) },
-                label = stringResource(Res.string.discover_add_url),
-            )
-            NdAssistChip(
-                onClick = { navigator.push(ImportFileKey) },
-                label = stringResource(Res.string.discovery_import),
-            )
-            if (isLinkInput(
-                    state.input,
-                )
-            ) {
-                NdAssistChip(onClick = ::submit, label = stringResource(Res.string.discovery_add_link))
-            }
-        }
         LazyColumn(state = list, modifier = Modifier.weight(1f).ndScrollbar(list, bars, barColor)) {
+            item(key = "search") {
+                OutlinedTextField(
+                    value = state.input,
+                    onValueChange = onInput,
+                    label = { Text(stringResource(Res.string.discovery_search)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { submit() }),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .focusRequester(focus)
+                            .onPreviewKeyEvent {
+                                if (it.type == KeyEventType.KeyDown && it.key == Key.Enter) {
+                                    submit()
+                                    true
+                                } else {
+                                    false
+                                }
+                            },
+                )
+                val recipients = state.providers.filter { it.effective }.joinToString(", ") { it.id.displayName() }
+                Text(
+                    if (recipients.isEmpty()) {
+                        stringResource(Res.string.discovery_disabled)
+                    } else {
+                        stringResource(Res.string.discovery_disclosure, recipients)
+                    },
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+                FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (state.input.isBlank()) {
+                        NdAssistChip(
+                            onClick = { navigator.pushDetail(DirectoryKey("", null)) },
+                            label = stringResource(Res.string.discovery_top),
+                        )
+                        NdAssistChip(
+                            onClick = { scope.launch { list.scrollToItem(state.charts.size + 1) } },
+                            label = stringResource(Res.string.discovery_categories),
+                        )
+                    }
+                    NdAssistChip(
+                        onClick = { navigator.push(AddPodcastKey(null)) },
+                        label = stringResource(Res.string.discover_add_url),
+                    )
+                    NdAssistChip(
+                        onClick = { navigator.push(ImportFileKey) },
+                        label = stringResource(Res.string.discovery_import),
+                    )
+                    NdAssistChip(
+                        onClick = { navigator.push(AddPodcastKey(null)) },
+                        label = stringResource(Res.string.discovery_add_youtube),
+                    )
+                    if (isLinkInput(
+                            state.input,
+                        )
+                    ) {
+                        NdAssistChip(onClick = ::submit, label = stringResource(Res.string.discovery_add_link))
+                    }
+                }
+            }
             if (state.input.isNotBlank() && !isLinkInput(state.input)) {
                 state.results?.let { results ->
-                    item { SearchStatus(results, retry, settings) }
+                    item { SearchStatus(results, retry, settings, { navigator.push(AddPodcastKey(null)) }) }
                     items(results.hits.take(INLINE_LIMIT), key = { it.feedUrl }) { hit ->
                         DirectoryRow(hit) { navigator.openHit(hit) }
                     }
@@ -242,7 +271,7 @@ internal fun DiscoverScreen(
                         }
                     }
                 }
-                item {
+                item(key = "categories") {
                     Text(stringResource(Res.string.discovery_categories), Modifier.padding(16.dp))
                     FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ChartGenre.entries.forEach { genre ->

@@ -79,6 +79,7 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metrox.viewmodel.ViewModelKey
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.collections.immutable.toImmutableMap
+import kotlinx.collections.immutable.toPersistentSet
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -282,6 +283,7 @@ public class FeedsViewModel(
                         tabs = if (selectedTab?.transient == true) visible + selectedTab else visible,
                         selected = resolved,
                         hasGroups = allGroups.isNotEmpty(),
+                        emptyGroupIds = allGroups.filter { it.memberCount == 0 }.map { it.id }.toSet(),
                     )
                 if (needsFallback) persistSelection(resolved)
 
@@ -365,6 +367,7 @@ public class FeedsViewModel(
                 tabs = selected.tabs.toImmutableList(),
                 selected = selected.selected,
                 hasGroups = selected.hasGroups,
+                emptyGroupIds = selected.emptyGroupIds.toPersistentSet(),
                 prefs = prefs.takeIf { selected.tabs.isNotEmpty() && prefsSource == selected.source },
                 visitBaselines = visits.toImmutableMap(),
             )
@@ -753,6 +756,7 @@ public class FeedsViewModel(
         val tabs: List<FeedTabUi> = emptyList(),
         val selected: FeedSourceRef = FeedSourceRef.All,
         val hasGroups: Boolean = false,
+        val emptyGroupIds: Set<Long> = emptySet(),
     ) {
         val source: FeedSource get() = tabs.find { it.ref == selected }?.tab?.source ?: FeedSource.All
     }
