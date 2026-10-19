@@ -523,6 +523,16 @@ private fun Project.disableEmptyDeviceTests() = extensions.getByType<AndroidComp
 
 ### Out-of-process system tests
 
+**Implementation note (2026-10-19, M6b).** W11 preserves W10's fallback and
+records current workflow selection: `system-tests` runs E10 only for full
+nightlies; `instrumented-full` runs benchmark smoke on API36 (also for the
+downloads scope); `api37-16k` runs connected smoke. These are wired jobs, not
+executed evidence in this local worktree. The current workflows have no
+`desktop-matrix` job, so Windows/macOS/ARM lane and move coverage remains open.
+The [ledger](../evidence/m6b-acceptance.md) names tasks, receipts and gaps.
+Assembly does not close E10 or published-release acceptance. The release mapping
+below is the design target; current code enables only `benchmarkRelease`.
+
 **Implementation note (2026-10-19, M6b).** W10's self-instrumenting
 `:benchmark` producer uses the recorded `benchmarkRelease` fallback; published
 `release` mapping remains Unverified. `scripts/ci/system-tests.sh` runs E10 on

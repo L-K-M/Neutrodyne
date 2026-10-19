@@ -779,6 +779,13 @@ Group dependents require explicit opt-in, and external-mode cleanup remains
 editable. No YouTube transfer behavior is added. These controls supersede the
 M6a-only hiding described in the preceding historical note.
 
+W11's [acceptance ledger](../evidence/m6b-acceptance.md) records the exact
+settings, bulk-confirmation and string tests. Notice order is Data Saver,
+background restriction, notifications off, cap, low storage, unavailable root,
+YouTube paused, move, then orphan files; show at most two, with Android-only
+notices filtered on desktop. Native folder selection, settings navigation,
+accessibility and permission behavior still require device/packaged-app runs.
+
 
 `DownloadsKey`, `:feature:downloads`, M6 (empty state from M0). Data: 07's `DownloadController.observeAll(): Flow<DownloadsOverview>` (in progress, completed and failed `DownloadEntry` lists, `StorageUsage`, `notices`) with live bytes from `DownloadProgressSource` for the visible in-progress rows ([07 Engine architecture](07-downloads.md#engine-architecture), [07 Notices](07-downloads.md#notices)); texts are [`DownloadStatusText`](#download-status-text).
 
