@@ -1,15 +1,30 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.sync.server
 
+import ch.lkmc.neutrodyne.sync.protocol.ProtocolException
+import ch.lkmc.neutrodyne.sync.protocol.SyncErrorCode
+import ch.lkmc.neutrodyne.sync.protocol.SyncJson
+import ch.lkmc.neutrodyne.sync.protocol.dto.ProblemDto
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.call
+import io.ktor.server.application.install
+import io.ktor.server.plugins.BadRequestException
+import io.ktor.server.plugins.UnsupportedMediaTypeException
+import io.ktor.server.plugins.callid.CallId
+import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.server.plugins.defaultheaders.DefaultHeaders
+import io.ktor.server.plugins.ratelimit.rateLimit
+import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.path
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.routing
+import kotlinx.coroutines.CancellationException
+import java.util.UUID
 import kotlin.time.Clock
 
 /**
@@ -21,13 +36,62 @@ internal class ServerModule(
     private val config: ServerConfig,
     private val serverVersion: String,
     private val clock: Clock = Clock.System,
+    private val writeProbe: suspend () -> Boolean = { true },
 ) {
     fun install(application: Application) {
         with(application) {
+            install(CallId) {
+                retrieveFromHeader("X-Request-Id")
+                generate { UUID.randomUUID().toString() }
+                verify { id ->
+                    id.length in 1..64 &&
+                        id.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it in "._-" }
+                }
+                replyToHeader("X-Request-Id")
+            }
+            install(DefaultHeaders) {
+                header("X-Content-Type-Options", "nosniff")
+                header("Referrer-Policy", "no-referrer")
+                header("Cache-Control", "no-store")
+                header(
+                    "Content-Security-Policy",
+                    "default-src 'self'; script-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+                )
+            }
+            install(ContentNegotiation) { json(SyncJson) }
+            install(StatusPages) {
+                exception<BoundaryException> { call, failure -> call.problem(failure.status, failure.code) }
+                exception<ProtocolException> { call, failure ->
+                    val status =
+                        when (failure.code) {
+                            SyncErrorCode.PAYLOAD_TOO_LARGE -> HttpStatusCode.PayloadTooLarge
+                            SyncErrorCode.CURSOR_EXPIRED -> HttpStatusCode.Gone
+                            SyncErrorCode.PROTOCOL_TOO_OLD -> HttpStatusCode.UpgradeRequired
+                            SyncErrorCode.UNAUTHORIZED -> HttpStatusCode.Unauthorized
+                            SyncErrorCode.FORBIDDEN -> HttpStatusCode.Forbidden
+                            SyncErrorCode.RATE_LIMITED -> HttpStatusCode.TooManyRequests
+                            SyncErrorCode.NOT_FOUND -> HttpStatusCode.NotFound
+                            SyncErrorCode.INSECURE_TRANSPORT -> InsecureTransportGuard.MISDIRECTED_REQUEST
+                            else -> HttpStatusCode.BadRequest
+                        }
+                    call.problem(status, failure.code.wire)
+                }
+                exception<BadRequestException> { call, _ -> call.problem(HttpStatusCode.BadRequest, "invalid") }
+                exception<UnsupportedMediaTypeException> { call, _ ->
+                    call.problem(HttpStatusCode.UnsupportedMediaType, "invalid")
+                }
+                exception<Throwable> { call, failure ->
+                    if (failure is CancellationException) throw failure
+                    call.problem(HttpStatusCode.InternalServerError, "internal_error")
+                }
+                status(HttpStatusCode.TooManyRequests) { call, status -> call.problem(status, "rate_limited") }
+            }
+            RateLimits(config).install(this)
             InsecureTransportGuard(config).install(this)
+            RequestGuards().install(this)
             routing {
-                HealthRoutes(config.dataDir).install(this)
-                WellKnownRoutes(serverVersion, clock).install(this)
+                HealthRoutes(config.dataDir, writeProbe = writeProbe).install(this)
+                rateLimit(RateLimits.PUBLIC) { WellKnownRoutes(serverVersion, clock).install(this) }
             }
         }
     }
@@ -78,4 +142,19 @@ internal class InsecureTransportGuard(
         const val PROBLEM_BODY =
             """{"type":"urn:neutrodyne:sync:insecure_transport","title":"Insecure transport","status":421,"code":"insecure_transport"}"""
     }
+}
+
+/** Only fixed status/code text reaches clients; exception messages can contain secrets. */
+private suspend fun io.ktor.server.application.ApplicationCall.problem(
+    status: HttpStatusCode,
+    code: String,
+) {
+    respondText(
+        SyncJson.encodeToString(
+            ProblemDto.serializer(),
+            ProblemDto("urn:neutrodyne:sync:$code", status.description, status.value, code),
+        ),
+        InsecureTransportGuard.PROBLEM_JSON,
+        status,
+    )
 }

@@ -5,6 +5,7 @@ import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -35,21 +36,31 @@ class HealthCheckTest {
         }
 
     @Test
-    fun `readiness fails below the free-space floor`() {
-        val routes = HealthRoutes(tempDataDir(), usableSpace = { _ -> HealthRoutes.MIN_FREE_DISK_BYTES - 1 })
-        assertFalse(routes.isReady())
-    }
+    fun `readiness fails below the free-space floor`() =
+        runBlocking {
+            val routes = HealthRoutes(tempDataDir(), usableSpace = { _ -> HealthRoutes.MIN_FREE_DISK_BYTES - 1 })
+            assertFalse(routes.isReady())
+        }
 
     @Test
-    fun `readiness fails when the data directory is missing`() {
-        val missing = tempDataDir().resolve("missing")
-        val routes = HealthRoutes(missing)
-        assertFalse(routes.isReady())
-    }
+    fun `readiness fails when the data directory is missing`() =
+        runBlocking {
+            val missing = tempDataDir().resolve("missing")
+            val routes = HealthRoutes(missing)
+            assertFalse(routes.isReady())
+        }
 
     @Test
-    fun `readiness holds at the free-space floor`() {
-        val routes = HealthRoutes(tempDataDir(), usableSpace = { _ -> HealthRoutes.MIN_FREE_DISK_BYTES })
-        assertTrue(routes.isReady())
-    }
+    fun `readiness holds at the free-space floor`() =
+        runBlocking {
+            val routes = HealthRoutes(tempDataDir(), usableSpace = { _ -> HealthRoutes.MIN_FREE_DISK_BYTES })
+            assertTrue(routes.isReady())
+        }
+
+    @Test
+    fun `readiness fails on a database write failure`() =
+        runBlocking {
+            assertFalse(HealthRoutes(tempDataDir(), writeProbe = { false }).isReady())
+            assertFalse(HealthRoutes(tempDataDir(), writeProbe = { error("write failed") }).isReady())
+        }
 }

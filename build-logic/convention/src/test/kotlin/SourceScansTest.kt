@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Unlicense
+import org.gradle.api.GradleException
+import org.gradle.testfixtures.ProjectBuilder
+import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
@@ -9,6 +13,31 @@ import kotlin.test.assertTrue
  * authoritative; these cover the forms the regex can isolate).
  */
 class SourceScansTest {
+    @Test
+    fun `server process fixtures are allowed only in JVM test sources`() {
+        val root = Files.createTempDirectory("server-process-policy").toFile()
+        try {
+            val project = ProjectBuilder.builder().withProjectDir(root).build()
+            val task = project.tasks.create("scan", CheckBannedApisTask::class.java)
+            task.rootDir.set(root)
+            val source = "fun child() = ProcessBuilder(\"java\")"
+            val fixture = root.resolve("sync/server/src/test/kotlin/Child.kt")
+            fixture.parentFile.mkdirs()
+            fixture.writeText(source)
+            task.scannedFiles.setFrom(fixture)
+            task.check()
+            for (path in listOf("sync/server/src/main/kotlin/Child.kt", "app/src/test/kotlin/Child.kt")) {
+                val forbidden = root.resolve(path)
+                forbidden.parentFile.mkdirs()
+                forbidden.writeText(source)
+                task.scannedFiles.setFrom(forbidden)
+                assertFailsWith<GradleException> { task.check() }
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
     private fun island(name: String) = "implementation(project(\":$name\"))"
 
     @Test
