@@ -955,6 +955,19 @@ flowchart LR
 
 ### Shared engine module
 
+Implementation note (2026-10-19, M9a): W3 implements adopted resolutions
+1, 2, 3, 5, 10 and 11 in the shared Python package. `Bridge.call` returns
+wire-v1 JSON or a sanitized `ShimError.code`; host adapters pass an absolute
+Python-monotonic deadline, derived once from the remaining app budget.
+Worker-local extractors use fixed options; retained lazy cursors serialize
+against their creator's extractor even when resumed on another host thread.
+A full page reports `hasMore` without prefetching an extra item; an exact
+multiple can therefore end with an empty final page. Facts include at most
+32 KiB of UTF-8 description and an explicit truncation flag, independent of
+audio formats. No compilation, store, JS provider or production activation
+is performed here. Host selection and device acceptance remain **spike pending**.
+
+
 
 Implementation note (2026-10-19, M9a): Adopted resolutions 1, 2 and 11
 place shared contracts in `:youtube:engine` now; host selection/activation
@@ -969,7 +982,7 @@ plain description/truncation and format-independent 45 s `facts` to the API.
 W4 owns inert before-first-bind test arming, W3/W12 replay/provenance.
 
 
-One engine, two hosts. Everything that decides what YouTube does — the methods and their results, error mapping, format selection, caches, capabilities, the engine store, the update policy and the trust chain — is host-independent JVM code; a host only runs CPython with the shared shim and carries JSON between the app and the interpreter. Until MD3 the package `…youtube.engine` inside `:youtube:ytdlp` imports nothing from `android.*`, Chaquopy or the AIDL classes (a package rule of 01's `checkBannedApis`), so MD3's move is mechanical.
+One engine, two hosts. Everything that decides what YouTube does — the methods and their results, error mapping, format selection, caches, capabilities, the engine store, the update policy and the trust chain — is host-independent JVM code; a host only runs CPython with the shared shim and carries JSON between the app and the interpreter. Shared Kotlin code lives in `:youtube:engine` from M9a and imports nothing from `android.*`, Chaquopy or AIDL. MD3 adds the desktop host without moving shared code (adopted resolution 1).
 
 | Concern | Shared (`:youtube:engine`, shim) | Android host (`:youtube:ytdlp`) | Desktop host (`:youtube:ytdlp-desktop`, [11](11-desktop.md#desktop-youtube-engine-host)) |
 |---|---|---|---|
@@ -1055,7 +1068,7 @@ Chaquopy packages `youtube/engine/python/` as `:youtube:ytdlp`'s Python source d
 | `version` | — | `{ytDlp, ejs, shimApi, python, jsc, host}` | `yt_dlp.version` |
 | `selftest` | — | `{ok, missing[]}` | API probe without network ([Update flow](#update-flow)) |
 | `resolve` | `{videoId}` | `{videoId, duration, liveStatus, availability, ageLimit, releaseTs, formats[{formatId, url, ext, acodec, abr, tbr, filesize, language, languagePreference, formatNote, protocol, availableAt}]}`, audio-only formats (`vcodec == 'none'`) | `extract_info(watch URL, download=False, process=False)` |
-| `facts` | `{videoId}` | `{videoId, title, duration, liveStatus, availability, releaseTs}` | the same call; no formats returned |
+| `facts` | `{videoId}` | `{videoId, title, duration, liveStatus, availability, releaseTs, description, descriptionTruncated}` | the same call; no formats returned; description bounded to 32 KiB UTF-8 |
 | `lookup` | `{url}`: `/@handle`, `/c/…`, `/user/…`, `/{name}` or `/channel/UC…` | `{channelId, title, handle, description, followerCount, avatars[{url, w, h}], banners[{url, w, h}]}` | the channel URL with `process=False`; playlist-level fields only, `entries` never iterated |
 | `tab_open` | `{channelId, tab, pageSize: 30}`, `tab` ∈ `videos`, `shorts`, `streams` | `{cursor, items[{id, title, duration, liveStatus, availability, timestamp}], hasMore}` | `https://www.youtube.com/channel/{UC}/{tab}` with `process=False`; flat entries pulled lazily from yt-dlp's generator |
 | `tab_next` | `{cursor}` | as `tab_open` | next page of the same generator |
@@ -1149,6 +1162,17 @@ oneway interface IYtxCallback {
 
 ### Networking bridge
 
+Implementation note (2026-10-19, M9a): W3's Python/Java adapter contract is
+`PyHttp.execute(callId, method, url, headersJson, body, timeoutMs, ipFamily)`.
+The final argument explicitly carries the per-call family to W4's socket
+owner. The response exposes `status`, final `url`, decoded `body` and
+`headersJson` as a JSON array of header pairs, preserving repeated
+Set-Cookie fields. PyHttp owns redirect/gzip decoding and socket cancellation;
+Python applies the yt-dlp cookie jar and removes decoded gzip headers.
+Configuration/probe failure leaves no urllib fallback (adopted resolution 11).
+The host CPython java stub verifies this contract; Android execution is W4/W12.
+
+
 **Android host** ([D74](../PLAN.md#3-key-decisions)); the desktop host uses the Fallback row below — yt-dlp's urllib handler with `source_address` and the bundled CA file — as its primary rule ([11 Networking and TLS](11-desktop.md#networking-and-tls)). On Android every HTTP request yt-dlp makes goes through `NeutrodyneOkHttpRH`, a yt-dlp `RequestHandler` registered with `register_rh` (`yt_dlp.networking.common`): `RH_KEY = "NeutrodyneOkHttp"`, schemes `http` and `https`, no proxy schemes, and a `register_preference` of 1000, so it is always tried first (and, per Exclusivity below, is the only handler left). Its `_send` calls `PyHttp.execute(callId, method, url, headersJson, body, timeoutMs)` through Chaquopy's Java interop (`from java import jclass`) and wraps the answer in a yt-dlp `Response`; non-2xx statuses raise `HTTPError` and I/O failures `TransportError`, as yt-dlp's own handlers do.
 
 **Exclusivity.** The preference alone does not guarantee that every request uses the bridge: yt-dlp's `RequestDirector` silently tries the next registered handler when one raises `UnsupportedRequest` in `validate`, or any exception that is not a `RequestError` in `send` (it logs "Unexpected error" and continues; 2026.08.19 `networking/common.py`), and the built-in urllib handler is always registered. Such a fallback would bypass IP-family pinning (so googlevideo answers 403), cancellation, the User-Agent policy and Android's TLS stack. The shim therefore (1) pops all four extensions yt-dlp defines in `NeutrodyneOkHttpRH._check_extensions` — `cookiejar` and `timeout` are honoured, `legacy_ssl` and `keep_header_casing` ignored — because any extension left over raises `UnsupportedRequest`; (2) wraps every exception from the Java bridge in `TransportError` (statuses in `HTTPError`); (3) sets the `YoutubeDL` option `proxy = ''` (yt-dlp's "no proxy"), so no environment proxy reaches a handler with no proxy schemes; (4) removes every other entry from `yt_dlp.networking.common._REQUEST_HANDLERS` before building `YoutubeDL` unless the urllib fallback below is deliberately active — internal API, so the self-test probes it and risk M8r covers it; (5) `shimTest` fails when any request reaches a handler other than `NeutrodyneOkHttpRH` or `ReplayRH`.
@@ -1163,7 +1187,7 @@ oneway interface IYtxCallback {
 | IP family | `ctx.ipFamily` picks one of three clients that differ only in their `Dns`: system order (null), A records only (`V4`) or AAAA records only (`V6`), each falling back to all records when the host has none of that family. Every request of the call uses it, so the InnerTube requests — and therefore the `ip=` of the googlevideo URLs they return — have a known family. The main process sends its current `googlevideo.com` hint and updates the hint from each result's `ip=` ([IP-family matching](#ip-family-matching)) |
 | Hosts | `www.youtube.com` (watch page, `/youtubei/…`) from `:ytx` (desktop: from the child); `*.googlevideo.com` media requests come from the app process (06, 07; desktop 11's loader and download lanes). Listed as `youtube-streams` in 09's network inventory for both apps; Unverified: the complete host list (captured in M9a, re-checked in MD3) |
 | TLS | OkHttp on Android's TLS stack; CPython's bundled OpenSSL (3.0.18 in Chaquopy's 3.14.0 runtime, behind upstream patch releases) carries no traffic, because the bridge is the only registered handler (Exclusivity above). On the desktop the python-build-standalone OpenSSL does carry the engine's traffic, verified against the bundled certifi CA file, and is updated with each pinned PBS release (11) |
-| Fallback | A2 host, or a bridge the self-test finds broken: yt-dlp's built-in urllib handler with `source_address` `0.0.0.0` (V4) or `::` (V6), i.e. its `--force-ipv4`/`--force-ipv6` behaviour; no OkHttp interceptors, and a running request is cancelled only by killing the process (the shim's cancel flag still stops the next request). This is the desktop host's normal rule (urllib as the only handler, `proxy = ''`, `SSL_CERT_FILE` = the bundled certifi file; `shimTestStdio` fails when a request reaches another handler) |
+| Fallback | A2 host after a recorded host decision: yt-dlp's built-in urllib handler with `source_address` `0.0.0.0` (V4) or `::` (V6), i.e. its `--force-ipv4`/`--force-ipv6` behaviour; no OkHttp interceptors, and a running request is cancelled only by killing the process (the shim's cancel flag still stops the next request). A broken Android bridge fails selftest instead of falling back. This is the desktop host's normal rule (urllib as the only handler, `proxy = ''`, `SSL_CERT_FILE` = the bundled certifi file; `shimTestStdio` fails when a request reaches another handler) |
 
 ### JS challenge provider
 
@@ -1768,6 +1792,19 @@ Three paths, in order of preference. Path 1 needs nobody to install anything. Th
 
 ### Recorded responses
 
+Implementation note (2026-10-19, M9a): Adopted resolution 10 uses explicit
+host/live urllib only in the manual recording tool; it refuses CI and writes
+a new staging directory for review. JSON/bootstrap objects are minimized,
+prose replaced and cookies/visitor data/signatures/IP/expiry scrubbed before
+writing. Unsupported pages fail capture; inspect staging before promotion.
+Committed W3 scenarios are labelled synthetic, never successful live captures.
+The strict corpus and generated synthetic AC1 error vectors exercise the
+real official 2026.08.19 extractor. Generated vectors are parser coverage,
+not evidence of request stability or current server behavior. A replay miss
+poisons the whole call even if an extractor swallows its transport exception.
+Successful residential captures and Android host inventory remain pending.
+
+
 `scripts/youtube/record-responses.sh` (a developer machine on a residential connection, never CI) runs the shim on a host CPython of the target minor version with `RecordingRH`, a yt-dlp `RequestHandler` registered above every other handler's preference in tests that performs real requests and writes the request/response pairs of each [Testing](#testing) scenario to `youtube/engine/src/test/resources/recorded/{scenario}/` (moved 2026-10-05 from `youtube/ytdlp/src/test/resources/recorded/`; one set for both hosts), together with the shim's JSON result (`result.json`, the input of `FakeYtxTransport`). Scrubbing before commit: `ip=` values → `0.0.0.0`, `sig`/`lsig` → `X`, visitor data and cookies removed, `expire` rewritten to a fixed far-future value. `ReplayRH` replays them in `shimTest` and `shimTestStdio`, in the canary, (through `:ytx`) in the smoke test on the release and debug APKs, and (through the child) in the packaged desktop app's smoke test on every target. **Strict mode** (PR CI, the smoke tests, the canary's report) fails on any unrecorded request — the signal to re-record; **contract mode** (the canary's gate) matches by endpoint and InnerTube client and answers unrecorded ones with 404 ([Engine canary](#engine-canary)).
 
 ### Fallback engines
@@ -1824,7 +1861,7 @@ Changing variants calls `YouTubeChannelRepository.setVariants`, which refreshes 
 
 ## Testing
 
-Serves N11. No test in PR CI touches live YouTube (runners use data-centre IPs that YouTube bot-challenges). Strategy and infrastructure: [09 Test strategy](09-quality-and-release.md#test-strategy). Common code is tested in `commonTest` on the desktop JVM; the host-independent engine classes are tested on the JVM in `:youtube:ytdlp`'s unit tests from M9a and move with them to `:youtube:engine` in MD3 — the table names their final module. The desktop host's own tests are 11's (last row).
+Serves N11. No test in PR CI touches live YouTube (runners use data-centre IPs that YouTube bot-challenges). Strategy and infrastructure: [09 Test strategy](09-quality-and-release.md#test-strategy). Common code is tested in `commonTest` on the desktop JVM; the host-independent engine classes are tested on the JVM in `:youtube:engine` from M9a (adopted resolution 1). The desktop host's own tests are 11's (last row).
 
 | Test class | Module, runner | Cases | Milestone |
 |---|---|---|---|

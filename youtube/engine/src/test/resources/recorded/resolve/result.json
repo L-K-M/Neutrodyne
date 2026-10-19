@@ -1,0 +1,25 @@
+{
+  "videoId": "aaaaaaaaaaA",
+  "duration": 120,
+  "liveStatus": "not_live",
+  "availability": null,
+  "releaseTs": null,
+  "ageLimit": 0,
+  "formats": [
+    {
+      "formatId": "140",
+      "url": "https://media.example.invalid/audio?itag=140&clen=1000&lmt=123&ip=0.0.0.0&expire=4102444800&sig=X",
+      "ext": "m4a",
+      "acodec": "mp4a.40.2",
+      "abr": null,
+      "tbr": 128.0,
+      "filesize": 1000,
+      "language": null,
+      "languagePreference": -1,
+      "formatNote": "medium",
+      "protocol": "https",
+      "availableAt": 1792368000,
+      "xtags": null
+    }
+  ]
+}

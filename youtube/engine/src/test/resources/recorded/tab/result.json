@@ -1,0 +1,14 @@
+{
+  "cursor": null,
+  "items": [
+    {
+      "id": "aaaaaaaaaaA",
+      "title": "Synthetic episode",
+      "duration": 120,
+      "liveStatus": null,
+      "availability": null,
+      "timestamp": null
+    }
+  ],
+  "hasMore": false
+}

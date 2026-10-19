@@ -31,6 +31,7 @@ chaquopy {
             // The shared shim package neutrodyne_ytx (04 Shared engine module), compiled to .pyc
             // with buildPython and packaged as the chaquopy app asset.
             srcDir("../engine/python")
+            exclude("tests/**", "neutrodyne_ytx/record.py")
         }
     }
 }
@@ -47,4 +48,13 @@ dependencies {
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.junit4)
     androidTestImplementation(libs.truth)
+}
+
+// W3: host-only strict replay; package bootstrap remains W2's responsibility.
+tasks.register<Exec>("shimTest") {
+    group = "verification"
+    description = "Run Python shim tests against hash-verified yt-dlp with strict offline replay"
+    workingDir(rootProject.projectDir)
+    commandLine("python3", "-B", "youtube/engine/python/tests/run.py")
+    // Always run: the selected host interpreter and upstream API are part of this proof.
 }

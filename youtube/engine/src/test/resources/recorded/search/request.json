@@ -1,0 +1,12 @@
+{
+  "method": "search_open",
+  "payload": {
+    "ctx": {
+      "hl": "en",
+      "gl": "US",
+      "ua": "Neutrodyne synthetic test",
+      "ipFamily": "V4"
+    },
+    "query": "synthetic"
+  }
+}

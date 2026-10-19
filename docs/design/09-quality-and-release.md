@@ -576,6 +576,19 @@ Instrumented tests run inside the app's process, so killing the process (`am kil
 
 ### Recorded responses
 
+Implementation note (2026-10-19, M9a): W3 adds
+`:youtube:ytdlp:shimTest`, using stdlib unittest to avoid a new Python
+dependency. It prefers host CPython 3.14, otherwise records the available
+python3 version in `youtube/ytdlp/build/shim/python-runtime.txt`. The task
+uses W2's official pinned asset when present; before W2 lands it downloads
+that exact asset into ignored build output and verifies its pinned SHA-256.
+Dependency bootstrap precedes the suite; test sockets are disabled and
+ReplayRH is the exclusive handler. Committed method fixtures and generated
+AC1 error vectors are explicitly synthetic. Manual capture never runs in CI;
+host/live urllib evidence is distinct from Android PyHttp and MD3 acceptance
+(adopted resolutions 1, 2 and 10). Host/device selection remains spike pending.
+
+
 Implementation note (2026-10-19, M8): I3 retains M6's download/system-test
 jobs and M7's discovery evidence assertions together. The download-only
 nightly selector does not assert discovery cases it did not select. The

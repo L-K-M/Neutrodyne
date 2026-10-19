@@ -1,0 +1,12 @@
+{
+  "method": "lookup",
+  "payload": {
+    "ctx": {
+      "hl": "en",
+      "gl": "US",
+      "ua": "Neutrodyne synthetic test",
+      "ipFamily": "V4"
+    },
+    "url": "https://www.youtube.com/@synthetic"
+  }
+}
