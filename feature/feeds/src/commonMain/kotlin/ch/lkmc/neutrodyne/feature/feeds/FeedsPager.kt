@@ -65,7 +65,6 @@ import ch.lkmc.neutrodyne.core.ui.GroupTabLabel
 import ch.lkmc.neutrodyne.core.ui.LocalDrawnReporter
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.SelectionTopBar
-import ch.lkmc.neutrodyne.core.ui.SuggestedGroupsCard
 import ch.lkmc.neutrodyne.core.ui.episodeSelectionKeys
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_all
@@ -106,7 +105,7 @@ internal fun FeedsScreen(
     onVisitStart: (FeedSource) -> Unit = {},
     onVisitEnd: (FeedSource) -> Unit = {},
     onAllGroups: () -> Unit = {},
-    onCreateGroup: () -> Unit = {},
+    suggestedGroups: @Composable () -> Unit = {},
     selection: EpisodeSelectionController? = null,
     onPlayEpisode: ((FeedSource, Long) -> Unit)? = null,
     onPlaySelectionNext: (() -> Unit)? = null,
@@ -283,9 +282,7 @@ internal fun FeedsScreen(
                 )
             }
         }
-        if (state.hasSubscriptions && !state.hasGroups) {
-            SuggestedGroupsCard(onClick = onCreateGroup)
-        }
+        suggestedGroups()
         HorizontalPager(
             state = pager,
             beyondViewportPageCount = 1,

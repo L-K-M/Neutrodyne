@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="suggested_groups_title">Group podcasts into feeds</string>
+    <string name="suggested_groups_chip">%1$s (%2$d)</string>
+    <string name="suggested_groups_create">Create groups</string>
+    <string name="suggested_groups_dismiss">Not now</string>
+    <plurals name="suggested_groups_result">
+        <item quantity="one">Created %1$d group</item>
+        <item quantity="other">Created %1$d groups</item>
+    </plurals>
+    <string name="suggested_groups_partial">Groups created: %1$d; actions failed: %2$d. Try again.</string>
+    <string name="suggested_groups_open">Open</string>
+</resources>

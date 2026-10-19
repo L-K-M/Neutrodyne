@@ -23,6 +23,7 @@ import ch.lkmc.neutrodyne.core.domain.MarkFeedPlayedResult
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.domain.SuggestedGroups
 import ch.lkmc.neutrodyne.core.model.AVAILABLE_FEED_FILTER_CAPABILITIES
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedCounts
@@ -108,6 +109,8 @@ public class FeedsViewModel(
     platformInfo: PlatformInfo,
     @Dispatcher(Default) private val defaultDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
+    public val suggestedGroups = SuggestedGroups(podcasts, groups, settings, viewModelScope)
+
     // Accessed from Main, like the ViewModel's callbacks and Compose pagingFor calls.
     private val pages = linkedMapOf<FeedSource, PageEntry>()
     private val selection = MutableStateFlow(Selection())

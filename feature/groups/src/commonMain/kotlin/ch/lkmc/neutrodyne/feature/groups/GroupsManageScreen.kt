@@ -56,7 +56,6 @@ import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.ui.GroupMosaic
 import ch.lkmc.neutrodyne.core.ui.GroupMosaicLayout
-import ch.lkmc.neutrodyne.core.ui.SuggestedGroupsCard
 import ch.lkmc.neutrodyne.core.ui.onSecondaryClick
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_more
@@ -99,6 +98,7 @@ internal fun GroupsManageScreen(
     modifier: Modifier = Modifier,
     topBarActions: @Composable () -> Unit = {},
     onSettings: (Long) -> Unit = {},
+    suggestedGroups: @Composable () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val reorderState = rememberReorderableLazyListState(listState) { _, to -> onDragOver(to.key as Long) }
@@ -142,6 +142,7 @@ internal fun GroupsManageScreen(
             },
             actions = { topBarActions() },
         )
+        suggestedGroups()
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
                 state.loadFailed -> {
@@ -158,7 +159,6 @@ internal fun GroupsManageScreen(
 
                 state.groups.isEmpty() -> {
                     Column(Modifier.fillMaxSize()) {
-                        SuggestedGroupsCard(onClick = onNew)
                         NdEmptyState(
                             icon = NdIcons.GridView,
                             title = stringResource(Res.string.groups_manage_empty),

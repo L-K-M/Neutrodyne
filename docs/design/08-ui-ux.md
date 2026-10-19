@@ -675,7 +675,7 @@ and context-menu moves share the drop path. Delete reuses D4's ten-second
 Undo handler without popping the list. Another Delete is disabled until the
 pending Undo snackbar finishes, preserving each deletion's Undo window.
 D8b wires Group settings in the row overflow and context menu.
-The suggested-groups card awaits D11, as in the milestone split.
+The M7 suggested-groups card uses the subscribed feeds’ top-level categories.
 B1's permutation-only API cannot distinguish which row was dragged in an
 adjacent swap: its deterministic longest-increasing-subsequence tie-break
 may update the neighbour's key instead. D5 preserves that contract and the
@@ -2725,6 +2725,13 @@ Serves R1.1, R2.1, R3.1, R5.4, R6.2, R6.6, R7.7, R7.9, N4. Delivered in M1 (Feed
 Illustrations are single-colour Material Symbols at 96 dp in `primary` (the brand amber's role in the brand scheme) until PO-17 brand illustrations exist; the empty Feeds and Library state on first start also shows the in-app brand mark ([Brand assets](#brand-assets)) above the text. With a sync server configured but nothing synced yet, the empty state adds "Or link this device to your sync server" → `SyncSettingsKey`.
 
 ### Suggested groups card
+
+**Implementation note (2026-10-19, M7):** W4 uses one screen-owned
+`SuggestedGroups` workflow from both ViewModels. It snapshots selected categories,
+creates with atomic memberships through `GroupRepository`, counts committed
+writes only, keeps failed selections available, and persists only DEVICE
+dismissal on “Not now”. Suggestions react to category and group changes;
+invalid group names are omitted.
 
 Shown at the top of Feeds and Manage groups when `PodcastRepository.observeCategoryCounts()` (03, M7) returns suggestions and `discover.suggested_groups_dismissed` is false: "Group podcasts into feeds" + chips "Technology (5)", "News (3)", "Fiction (2)" (each toggles) + "Create groups" → `GroupRepository.create(draft, memberIds)` for each selected suggestion (colours per 05) → snackbar "Created 3 groups" with "Open" (selects the first in Feeds); "Not now" sets the dismiss flag. Before M7 the card shows only "Create your first group" → `GroupEditKey(null)`.
 

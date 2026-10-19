@@ -37,6 +37,7 @@ import ch.lkmc.neutrodyne.core.model.FeedInfo
 import ch.lkmc.neutrodyne.core.model.FeedMove
 import ch.lkmc.neutrodyne.core.model.LibraryTile
 import ch.lkmc.neutrodyne.core.model.PodcastDetail
+import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import ch.lkmc.neutrodyne.feeds.html.ShowNotesSanitizer
 import ch.lkmc.neutrodyne.feeds.identity.PrivateFeedUrls
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
@@ -346,18 +347,30 @@ internal class PodcastRepositoryImpl(
     }
 
     override fun observeCategoryCounts(): Flow<List<CategoryCount>> =
-        db.podcastDao().observeCategoryRows().map { rows ->
-            val byCategory = LinkedHashMap<String, MutableList<Long>>()
+        combine(db.podcastDao().observeCategoryRows(), db.groupDao().observeGroups()) { rows, groups ->
+            val existing = groups.map { it.group.nameKey }.toSet()
+            val names = mutableMapOf<String, String>()
+            val members = mutableMapOf<String, MutableSet<Long>>()
             for (row in rows) {
                 val categories =
                     runCatching {
                         json.decodeFromString<List<List<String>>>(row.categoriesJson ?: return@runCatching null)
                     }.getOrNull() ?: continue
                 for (path in categories) {
-                    byCategory.getOrPut(path.joinToString(" > ")) { mutableListOf() } += row.id
+                    val name =
+                        GroupNames.validate(path.firstOrNull() ?: continue) as? GroupNames.Validation.Valid ?: continue
+                    if (name.nameKey in existing) continue
+                    // Choose a stable display spelling regardless of DAO/category order.
+                    names[name.nameKey] = minOf(names[name.nameKey] ?: name.name, name.name)
+                    members.getOrPut(name.nameKey) { mutableSetOf() }.add(row.id)
                 }
             }
-            byCategory.map { (category, ids) -> CategoryCount(category, ids) }
+            members.entries
+                .filter { it.value.size >= MIN_SUGGESTED_MEMBERS }
+                .sortedWith(
+                    compareByDescending<Map.Entry<String, MutableSet<Long>>> { it.value.size }.thenBy { it.key },
+                ).take(MAX_SUGGESTED_GROUPS)
+                .map { (key, ids) -> CategoryCount(names.getValue(key), ids.sorted()) }
         }
 
     private suspend fun detailOf(
@@ -421,3 +434,6 @@ internal class PodcastRepositoryImpl(
         const val HTTP_FORBIDDEN = 403
     }
 }
+
+private const val MIN_SUGGESTED_MEMBERS = 2
+private const val MAX_SUGGESTED_GROUPS = 5

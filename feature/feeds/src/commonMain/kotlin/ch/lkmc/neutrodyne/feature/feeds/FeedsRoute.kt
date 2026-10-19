@@ -9,10 +9,10 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.lkmc.neutrodyne.core.model.FeedSourceRef
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.AllGroupsKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
-import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
 import ch.lkmc.neutrodyne.core.navigation.ImportFileKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
@@ -24,6 +24,8 @@ import ch.lkmc.neutrodyne.core.ui.EpisodeRouteResult
 import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedDialog
 import ch.lkmc.neutrodyne.core.ui.MeteredConsentDialog
 import ch.lkmc.neutrodyne.core.ui.PlaybackMessageAction
+import ch.lkmc.neutrodyne.core.ui.SuggestedGroupsCard
+import ch.lkmc.neutrodyne.core.ui.SuggestedGroupsFeedback
 import ch.lkmc.neutrodyne.core.ui.YouTubeLinks
 import ch.lkmc.neutrodyne.core.ui.dispatchEpisodeRoute
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
@@ -40,6 +42,7 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val suggestions by viewModel.suggestedGroups.state.collectAsStateWithLifecycle()
     val markPlayed by viewModel.markPlayed.state.collectAsStateWithLifecycle()
     val consent by viewModel.playback.meteredConsent.collectAsStateWithLifecycle()
     val credentials by viewModel.pendingCredentials.collectAsStateWithLifecycle()
@@ -92,7 +95,16 @@ internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
         onAddPodcast = { navigator.push(AddPodcastKey(null)) },
         onSearch = { navigator.selectTab(DiscoverKey) },
         onImport = { navigator.push(ImportFileKey) },
-        onCreateGroup = { navigator.push(GroupEditKey(null)) },
+        suggestedGroups = {
+            SuggestedGroupsCard(
+                suggestions.suggestions,
+                suggestions.selected,
+                suggestions.busy,
+                viewModel.suggestedGroups::toggle,
+                viewModel.suggestedGroups::create,
+                viewModel.suggestedGroups::dismiss,
+            )
+        },
     )
 
     markPlayed?.let { dialog ->
@@ -119,6 +131,14 @@ internal fun FeedsRoute(viewModel: FeedsViewModel = metroViewModel()) {
         )
     }
 
+    suggestions.result?.let { result ->
+        SuggestedGroupsFeedback(
+            result.created,
+            result.failed,
+            result.firstGroupUuid?.let { uuid -> { viewModel.onPageSettled(FeedSourceRef.Group(uuid)) } },
+            viewModel.suggestedGroups::consumeResult,
+        )
+    }
     ShowUserMessages(
         messages = state.messages,
         onAcknowledgeMessage = viewModel::onMessageShown,
