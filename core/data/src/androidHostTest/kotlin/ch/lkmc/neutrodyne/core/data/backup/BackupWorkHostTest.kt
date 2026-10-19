@@ -27,6 +27,7 @@ import ch.lkmc.neutrodyne.core.data.seedPodcast
 import ch.lkmc.neutrodyne.core.data.testClients
 import ch.lkmc.neutrodyne.core.data.testNetErrors
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportState
@@ -202,12 +203,11 @@ class BackupWorkHostTest {
             // The periodic UPDATE landed and the durable intents got their specs back.
             specOf(infoOf(RestoreWorkData.WORK_SNAPSHOT).id)
             awaitReal {
-                infoOf(RestoreWorkData.WORK_RESTORE).let {
-                    specOf(it.id).input.getLong("sessionId", -1L) ==
-                        restoreSession
-                }
+                latestInfoOrNull(RestoreWorkData.WORK_RESTORE)?.let {
+                    specOf(it.id).input.getLong("sessionId", -1L) == restoreSession
+                } == true
             }
-            awaitReal { infoOf("import-$fetchSession").state == WorkInfo.State.ENQUEUED }
+            awaitReal { latestInfoOrNull("import-$fetchSession")?.state == WorkInfo.State.ENQUEUED }
         }
 
     @Test
@@ -268,6 +268,17 @@ class BackupWorkHostTest {
         }
 
     @Test
+    fun `start-up completes when the auto-snapshot flag cannot be read`() =
+        runTest {
+            val db = openDb()
+
+            initializer(db, settings = Provider { error("settings store unavailable") }).run()
+            advanceUntilIdle()
+
+            assertThat(infoOf(RestoreWorkData.WORK_SNAPSHOT).state).isEqualTo(WorkInfo.State.ENQUEUED)
+        }
+
+    @Test
     fun `start-up completes when the database cannot be read`() =
         runTest {
             val db = openDb()
@@ -315,6 +326,7 @@ class BackupWorkHostTest {
     private fun TestScope.initializer(
         db: NeutrodyneDatabase,
         appScope: CoroutineScope = backgroundScope,
+        settings: Provider<SettingsRepository> = Provider { this@BackupWorkHostTest.settings },
     ): AutoBackupInitializer {
         val payloads =
             PayloadStore(
@@ -329,7 +341,7 @@ class BackupWorkHostTest {
             snapshots = Provider { snapshots },
             work = Provider { imports },
             db = Provider { db },
-            settings = Provider { settings },
+            settings = settings,
             cleaner = Provider { ImportSessionCleaner(db, payloads, clock, Dispatchers.IO) },
             appScope = appScope,
         )
@@ -412,6 +424,10 @@ class BackupWorkHostTest {
             }
             error("condition not met within ${AWAIT_MS}ms")
         }
+
+    /** [infoOf] for [awaitReal] polls: an empty answer means "not yet", not a failure. */
+    private fun latestInfoOrNull(uniqueName: String): WorkInfo? =
+        workManager.getWorkInfosForUniqueWork(uniqueName).get().lastOrNull()
 
     private fun infoOf(uniqueName: String): WorkInfo {
         val infos = workManager.getWorkInfosForUniqueWork(uniqueName).get()
