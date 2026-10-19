@@ -652,7 +652,7 @@ observable refresh/notification batch reads alongside the snapshot methods.
 
 ### Writing overrides
 
-**Implementation note (2026-10-18, M4).** W4 extends the existing M2 models
+**Implementation note (2026-10-18, M4).** The playback settings implementation extends the existing M2 models
 with `playbackSpeed`, `skipSilence`, their attributed sources and
 `GroupPlaybackHint`s. Podcast settings resolve playback without a context;
 member-group overrides are hints rather than inherited defaults. Playback
@@ -759,7 +759,7 @@ An episode is in the tail iff **all** hold (evaluated live on every projector qu
 
 ### Start rules
 
-**Implementation note (2026-10-18, M4).** The owner adopted playable-first automatic starts: retain unplayable queue rows, try the first playable Up next entry, then eligible context. Explicit row starts return the refusal for that row. An automatic queue start keeps a null context anchor; a context fallback anchors at the selected item. W1 freezes this policy in the contracts; W3 implements selection in `PlayStarter`, with W2 supplying eligible context queries.
+**Implementation note (2026-10-18, M4).** The owner adopted playable-first automatic starts: retain unplayable queue rows, try the first playable Up next entry, then eligible context. Explicit row starts return the refusal for that row. An automatic queue start keeps a null context anchor; a context fallback anchors at the selected item. The M4 contracts freeze this policy; `PlayStarter` implements selection, with `PlayContextResolver` supplying eligible context queries.
 
 1. **Row tapped (explicit start):** current = that episode, anchor = that episode; Up next is kept and plays next, then the tail continues after the anchor.
 2. **"Play" without a start and Up next non-empty:** current = the first playable Up next entry (06 moves it out of Up next per its rules; unplayable entries stay greyed in place), anchor = null, so after Up next the tail starts at the beginning of the order (M4 acceptance 6: two Up next items, then tech's unplayed episodes newest first).

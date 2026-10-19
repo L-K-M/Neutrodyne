@@ -1,0 +1,7 @@
+<resources>
+    <string name="channel_playback">Playback</string>
+    <string name="channel_alerts">App alerts</string>
+    <string name="playback_paused">Playback paused</string>
+    <string name="tap_to_resume">Android didn’t let Neutrodyne resume in the background. Tap to continue.</string>
+    <string name="resume_playback">Resume</string>
+</resources>

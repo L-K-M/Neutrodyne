@@ -80,6 +80,17 @@ class UpNextScreenTest {
 
     @AfterTest fun restoreLocale() = Locale.setDefault(previousLocale)
 
+    @Test fun playerSurfaceUsesTheSameQueueActionsWithoutDestinationChrome() =
+        runDesktopComposeUiTest(width = 650, height = 950) {
+            content(surface = UpNextSurface.PLAYER)
+            onNodeWithTag("upNextList").assertIsDisplayed()
+            onNodeWithText("Clear Up next").assertDoesNotExist()
+            onNodeWithText("Episode 3").performCustomAccessibilityActionWithLabel("Move to top")
+            onNodeWithText("Episode 2").performCustomAccessibilityActionWithLabel("Remove from Up next")
+            assertEquals(listOf(3L to 0), moves)
+            assertEquals(listOf(2L), removals)
+        }
+
     @Test fun currentIsFixedAndContextStopsWithoutClearingQueue() =
         runDesktopComposeUiTest(width = 650, height = 950) {
             content()
@@ -223,7 +234,10 @@ class UpNextScreenTest {
             onNodeWithText("Clear Up next").assertDoesNotExist()
         }
 
-    private fun ComposeUiTest.content(platform: PlatformKind = PlatformKind.DESKTOP) {
+    private fun ComposeUiTest.content(
+        platform: PlatformKind = PlatformKind.DESKTOP,
+        surface: UpNextSurface = UpNextSurface.DESTINATION,
+    ) {
         setContent {
             CompositionLocalProvider(LocalUiClock provides TestClock(), LocalPlatformKind provides platform) {
                 NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
@@ -238,6 +252,7 @@ class UpNextScreenTest {
                         { discovered++ },
                         {},
                         {},
+                        surface = surface,
                     )
                 }
             }

@@ -49,6 +49,7 @@ import ch.lkmc.neutrodyne.core.ui.root.StartupGateState
 import ch.lkmc.neutrodyne.di.AndroidAppGraph
 import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
 import ch.lkmc.neutrodyne.feature.player.PlayerRoute
+import ch.lkmc.neutrodyne.feature.queue.PlayerUpNextRoute
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
@@ -189,7 +190,7 @@ class MainActivity : AppCompatActivity() {
         /** Window player and import-resume content share the root slots. */
         val M0_ROOT_SLOTS =
             RootSlots(
-                player = { PlayerRoute(it) },
+                player = { PlayerRoute(it, upNext = { PlayerUpNextRoute(it.navigate) }) },
                 userMessages = emptyFlow(),
                 importResume = { available, open -> importResumeBanner(available, open) },
             )

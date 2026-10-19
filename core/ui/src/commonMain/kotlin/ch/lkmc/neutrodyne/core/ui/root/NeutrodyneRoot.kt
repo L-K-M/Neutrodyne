@@ -236,7 +236,7 @@ private fun ReadyRoot(
     }
     val navigateFromPlayer: (NavKey) -> Unit = { key ->
         if (key != SpeedKey) playerNavigationRequests++
-        navigation.push(key)
+        if (key is TopLevelKey) navigation.selectTab(key) else navigation.push(key)
     }
     var contentBottomPx by remember { mutableFloatStateOf(0f) }
     val suiteState = rememberNavigationSuiteScaffoldState()

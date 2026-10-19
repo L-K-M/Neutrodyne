@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.playback.impl
 
 import android.net.Uri
+import androidx.core.net.toUri
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Dispatcher
 import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
@@ -83,7 +84,7 @@ internal fun episodeId(uri: Uri): Long {
     return id
 }
 
-internal fun episodeUri(id: Long): Uri = Uri.parse("neutrodyne://episode/$id")
+internal fun episodeUri(id: Long): Uri = "neutrodyne://episode/$id".toUri()
 
 internal class EpisodeGoneException(
     val episodeId: Long,

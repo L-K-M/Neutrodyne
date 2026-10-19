@@ -34,6 +34,8 @@ import ch.lkmc.neutrodyne.core.ui.resources.up_next_empty_title
 import ch.lkmc.neutrodyne.core.ui.root.LocalMiniPlayerInset
 import org.jetbrains.compose.resources.stringResource
 
+internal enum class UpNextSurface { DESTINATION, PLAYER }
+
 @Composable
 internal fun UpNextScreen(
     state: UpNextUiState,
@@ -47,18 +49,21 @@ internal fun UpNextScreen(
     onRetry: () -> Unit,
     onVisibleIds: (Set<Long>) -> Unit,
     modifier: Modifier = Modifier,
+    surface: UpNextSurface = UpNextSurface.DESTINATION,
     topBarActions: @Composable () -> Unit = {},
 ) {
     Column(modifier.fillMaxSize()) {
-        NdTopAppBar(
-            title = stringResource(Res.string.nav_up_next),
-            actions = {
-                if (state.upNext.isNotEmpty()) {
-                    TextButton(onClick = onClear) { Text(stringResource(Res.string.queue_clear)) }
-                }
-                topBarActions()
-            },
-        )
+        if (surface == UpNextSurface.DESTINATION) {
+            NdTopAppBar(
+                title = stringResource(Res.string.nav_up_next),
+                actions = {
+                    if (state.upNext.isNotEmpty()) {
+                        TextButton(onClick = onClear) { Text(stringResource(Res.string.queue_clear)) }
+                    }
+                    topBarActions()
+                },
+            )
+        }
         when {
             state.loadFailed -> {
                 TextButton(onClick = onRetry) { Text(stringResource(Res.string.action_retry)) }
@@ -79,8 +84,27 @@ internal fun UpNextScreen(
                     onMove = onMove,
                     onRemove = onRemove,
                     onStopAfter = onStopAfter,
-                    modifier = Modifier.weight(1f).navigationBarsPadding(),
-                    contentPadding = PaddingValues(bottom = LocalMiniPlayerInset.current + 16.dp),
+                    modifier =
+                        Modifier.weight(1f).then(
+                            if (surface ==
+                                UpNextSurface.DESTINATION
+                            ) {
+                                Modifier.navigationBarsPadding()
+                            } else {
+                                Modifier
+                            },
+                        ),
+                    contentPadding =
+                        PaddingValues(
+                            bottom =
+                                if (surface ==
+                                    UpNextSurface.DESTINATION
+                                ) {
+                                    LocalMiniPlayerInset.current + 16.dp
+                                } else {
+                                    16.dp
+                                },
+                        ),
                     onVisibleIds = onVisibleIds,
                     emptyContent = {
                         Column(

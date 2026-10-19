@@ -148,7 +148,7 @@ import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 import kotlin.math.roundToInt
 
-/** Window/activity instance, outside NavDisplay. W10 supplies [upNext] without a feature dependency. */
+/** Window/activity instance, outside NavDisplay. The queue route supplies [upNext] without a feature dependency. */
 @Composable
 public fun PlayerRoute(
     slot: PlayerSlotState,
