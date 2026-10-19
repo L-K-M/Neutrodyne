@@ -52,6 +52,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTooltipIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.theme.ArtworkTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.AVAILABLE_FEED_FILTER_CAPABILITIES
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
@@ -239,13 +240,16 @@ internal fun PodcastScreen(
             // LazyColumn stays unmounted until the first page settles.
             items.loadState.refresh is LoadState.Loading && items.itemCount == 0 -> {
                 Column(Modifier.fillMaxSize()) {
-                    PodcastHeader(
-                        detail = detail,
-                        nowMs = nowMs,
-                        groups = state.groups,
-                        onRemoveGroup = onRemoveGroup,
-                        onAddToGroups = { navigator.push(AddToGroupsKey(listOf(detail.id))) },
-                    )
+                    ArtworkTheme(state.colors?.seedArgb) {
+                        PodcastHeader(
+                            detail = detail,
+                            colors = state.colors,
+                            nowMs = nowMs,
+                            groups = state.groups,
+                            onRemoveGroup = onRemoveGroup,
+                            onAddToGroups = { navigator.push(AddToGroupsKey(listOf(detail.id))) },
+                        )
+                    }
                     FeedStateBanner(
                         detail = detail,
                         nowMs = nowMs,
@@ -290,15 +294,18 @@ internal fun PodcastScreen(
                     offlineBannerItem(state.offline)
                     item(key = "header", contentType = "header") {
                         Column {
-                            PodcastHeader(
-                                detail = detail,
-                                nowMs = nowMs,
-                                groups = state.groups,
-                                onRemoveGroup = onRemoveGroup,
-                                onAddToGroups = {
-                                    navigator.push(AddToGroupsKey(listOf(detail.id)))
-                                },
-                            )
+                            ArtworkTheme(state.colors?.seedArgb) {
+                                PodcastHeader(
+                                    detail = detail,
+                                    colors = state.colors,
+                                    nowMs = nowMs,
+                                    groups = state.groups,
+                                    onRemoveGroup = onRemoveGroup,
+                                    onAddToGroups = {
+                                        navigator.push(AddToGroupsKey(listOf(detail.id)))
+                                    },
+                                )
+                            }
                             FeedStateBanner(
                                 detail = detail,
                                 nowMs = nowMs,

@@ -2214,6 +2214,15 @@ object BrandColors {
 the exact pure-black ramp including surfaceDim. Completed monochrome uses app scheme;
 clamp the container. MD1/MD4 native integrations remain separate.
 
+**Implementation note (2026-10-19, M10):** W3 implements resolutions 2, 3 and
+10: MCU amber palettes/navy neutrals, exact pure-black surfaces, platform
+fonts and the unchanged generated owner mark. Both shells observe tint and
+black after both settings files emit, with the one-second startup cap.
+W1's portable/unsynced appearance and device-only panel classification are
+retained; native desktop preference readers remain MD4. Seed fidelity
+(ΔE ≤10) applies at standard contrast; higher contrast follows MCU's tone
+curves and can move the container further from the seed.
+
 ### Artwork-scoped schemes
 
 ```kotlin
@@ -2237,6 +2246,23 @@ Algorithm of `ArtworkSchemeCache.build(seed, dark, contrast)` (LRU 16 entries, c
 5. Pure black applies afterwards to surfaces only.
 
 `ArtworkRoles` (animated; the other roles snap): `primary`, `onPrimary`, `primaryContainer`, `onPrimaryContainer`, `secondaryContainer`, `onSecondaryContainer`, `surface`, `onSurface`, `onSurfaceVariant`, `surfaceContainerHigh`, `surfaceContainerHighest`, `outlineVariant`. Text is never drawn on raw artwork: it sits on scheme surfaces or behind a ≥ 60 % scrim. Unverified (M10 day one): the exact `com.materialkolor` package names and constructor signatures of `SchemeContent`, `TonalPalette` and `MaterialDynamicColors` in 5.0.1 (the port may add a spec-version parameter).
+
+**Implementation note (2026-10-19, M10):** W3's 16-entry LRU caches seed,
+resolved darkness and contrast, with live fallback/black preferences.
+Cancelled computations cannot publish. Listed roles animate for 400 ms;
+intermediate foreground contrast is repaired, snapping pairs when necessary
+at high contrast. Reduced motion, null/monochrome art and disabled tint snap.
+The mini keeps its 12 percent component blend over app surfaces, including
+black mode. W6 uses the same theme seam for its panel; W2 supplies the
+required production repository binding. Tests use W1's fake.
+
+Header text stays on opaque scheme surfaces: the podcast gradient ends at
+70 percent of the artwork block rather than of the entire header, avoiding
+unreadable text on dark seeds in light mode. Header/player averages are
+wired. Audit: Discover/Add remote previews have no extraction metadata;
+import report and Downloads projections lack averages and retain monogram
+placeholders pending integration, without a schema change. System bars and
+shared frames remain W5; screenshot registration/references remain W9.
 
 ### ArtColors tones for monograms and groups
 

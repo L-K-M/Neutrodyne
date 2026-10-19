@@ -11,11 +11,13 @@ import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.domain.ArtworkRepository
 import ch.lkmc.neutrodyne.core.domain.ChapterRepository
 import ch.lkmc.neutrodyne.core.domain.EpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.model.ArtworkColors
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.CurrentChapter
 import ch.lkmc.neutrodyne.core.model.EpisodeChapter
@@ -51,12 +53,18 @@ import dev.zacsweers.metrox.viewmodel.ManualViewModelAssistedFactory
 import dev.zacsweers.metrox.viewmodel.ManualViewModelAssistedFactoryKey
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -80,6 +88,7 @@ public data class EpisodeUiState(
     val chapters: List<EpisodeChapter> = emptyList(),
     val currentChapter: CurrentChapter? = null,
     val downloadLive: RowLive? = null,
+    val colors: ArtworkColors? = null,
 ) {
     public val gone: Boolean
         get() = loaded && episode == null
@@ -104,6 +113,7 @@ public class EpisodeViewModel
         network: NetworkMonitor,
         downloadController: DownloadController,
         liveStateSource: EpisodeLiveStateSource,
+        private val artwork: ArtworkRepository,
     ) : ViewModel() {
         private val visibleDownloadIds = MutableStateFlow<Set<Long>>(emptySet())
         private val userMessages = UserMessages()
@@ -162,6 +172,24 @@ public class EpisodeViewModel
                 )
             }
 
+        @OptIn(ExperimentalCoroutinesApi::class)
+        private val artworkColors =
+            episodes
+                .observeEpisode(episodeId)
+                .map { item -> item?.let { Triple(it.id, it.artwork.key, it.podcastId) } }
+                .distinctUntilChanged()
+                .flatMapLatest { identity ->
+                    if (identity == null) {
+                        flowOf(null to null)
+                    } else {
+                        artwork
+                            .observeColors(identity.second, identity.third)
+                            .map { identity to it }
+                            .onStart { emit(identity to null) }
+                    }
+                }
+
+        @OptIn(ExperimentalCoroutinesApi::class)
         public val uiState: StateFlow<EpisodeUiState> =
             combine(screenState, playbackStates.nowPlaying) { state, now ->
                 val current = now?.episodeId == episodeId
@@ -171,6 +199,14 @@ public class EpisodeViewModel
                     state.copy(currentChapter = current?.takeIf { it.episodeId == episodeId })
                 }.combine(liveStateSource.observe(visibleDownloadIds)) { state, live ->
                     state.copy(downloadLive = live[episodeId])
+                }.combine(artworkColors) { state, result ->
+                    state.copy(
+                        colors =
+                            result.second.takeIf {
+                                result.first ==
+                                    state.episode?.let { Triple(it.id, it.artwork.key, it.podcastId) }
+                            },
+                    )
                 }.stateIn(viewModelScope, SHARING, EpisodeUiState())
 
         init {

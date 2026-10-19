@@ -246,6 +246,23 @@ class SettingsScreensTest {
             assertEquals(false, runBlocking { settings.get(AppearanceSettingKeys.DYNAMIC_COLOR) })
         }
 
+    @Test fun artworkAndBlackSwitchesPersistAndReportFailedWrites() =
+        runComposeUiTest {
+            val settings = FakeSettingsRepository()
+            setSettingsRoot(settingsRepository = settings)
+            openSettings()
+            onAllNodesWithText("Appearance").onFirst().performClick()
+            onNodeWithText("Use artwork colours").performClick()
+            onNodeWithText("Pure black").performClick()
+            waitForIdle()
+            assertEquals(false, runBlocking { settings.get(AppearanceSettingKeys.ARTWORK_TINT) })
+            assertEquals(true, runBlocking { settings.get(AppearanceSettingKeys.PURE_BLACK) })
+            settings.failNextSet = SettingsError.WriteFailed
+            onNodeWithText("Pure black").performClick()
+            onNodeWithText("Couldn’t save the setting").assertIsDisplayed()
+            assertEquals(true, runBlocking { settings.get(AppearanceSettingKeys.PURE_BLACK) })
+        }
+
     private fun ComposeUiTest.openSettings() {
         onAllNodesWithContentDescription("Settings").onFirst().performClick()
         onNodeWithText("About").assertExists()

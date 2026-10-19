@@ -9,9 +9,11 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.domain.ArtworkRepository
 import ch.lkmc.neutrodyne.core.domain.ChapterRepository
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.model.ArtworkColors
 import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.CurrentChapter
 import ch.lkmc.neutrodyne.core.model.EffectivePlayback
@@ -93,6 +95,7 @@ public data class PlayerUiState(
     val lastSleepMinutes: Int = PlaybackSettingKeys.SLEEP_LAST_MINUTES.default,
     val chapters: List<EpisodeChapter> = emptyList(),
     val currentChapter: CurrentChapter? = null,
+    val colors: ArtworkColors? = null,
 )
 
 public data class PlayerNotesState(
@@ -114,6 +117,7 @@ public class PlayerViewModel(
     private val chapters: Provider<ChapterRepository>,
     private val episodes: Provider<EpisodeRepository>,
     private val network: NetworkMonitor,
+    private val artwork: ArtworkRepository,
 ) : ViewModel() {
     private val messages = UserMessages()
     private val messageActions = mutableMapOf<Long, PlayerMessageAction>()
@@ -176,6 +180,23 @@ public class PlayerViewModel(
         notesVisible.value = visible
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val artworkColors =
+        source.nowPlaying
+            .map { item -> item?.let { Triple(it.episodeId, it.artwork.key, it.podcastId) } }
+            .distinctUntilChanged()
+            .flatMapLatest { identity ->
+                if (identity == null) {
+                    flowOf(null to null)
+                } else {
+                    artwork
+                        .observeColors(identity.second, identity.third)
+                        .map { identity to it }
+                        .onStart { emit(identity to null) }
+                }
+            }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
     public val uiState: StateFlow<PlayerUiState> =
         combine(
             source.nowPlaying,
@@ -203,7 +224,15 @@ public class PlayerViewModel(
             }.combine(source.currentChapter) { state, current ->
                 state.copy(currentChapter = current?.takeIf { it.episodeId == state.now?.episodeId })
             }.combine(messages.flow) { state, messages -> state.copy(messages = messages) }
-            .stateIn(viewModelScope, SHARING, PlayerUiState(now = source.nowPlaying.value))
+            .combine(artworkColors) { state, result ->
+                state.copy(
+                    colors =
+                        result.second.takeIf {
+                            result.first ==
+                                state.now?.let { Triple(it.episodeId, it.artwork.key, it.podcastId) }
+                        },
+                )
+            }.stateIn(viewModelScope, SHARING, PlayerUiState(now = source.nowPlaying.value))
 
     /** Only 1 Hz samples enter a flow. Frame interpolation belongs to the visible scrubber. */
     @OptIn(ExperimentalCoroutinesApi::class)

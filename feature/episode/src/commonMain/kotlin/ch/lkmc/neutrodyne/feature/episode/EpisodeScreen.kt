@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.feature.episode
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,6 +49,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdLoading
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTooltipIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.theme.ArtworkTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.DownloadState
@@ -138,7 +140,9 @@ internal fun EpisodeScreen(
                 LazyColumn(Modifier.fillMaxSize()) {
                     offlineBannerItem(state.offline)
                     item(key = "header", contentType = "header") {
-                        EpisodeHeader(episode, state, onAction)
+                        ArtworkTheme(state.colors?.seedArgb) {
+                            EpisodeHeader(episode, state, onAction)
+                        }
                     }
                     if (state.chapters.isNotEmpty()) {
                         item(key = "chapters", contentType = "chapters") {
@@ -299,7 +303,7 @@ private fun EpisodeHeader(
     onAction: (EpisodeAction) -> Unit,
 ) {
     val isYouTube = episode.sourceType != SourceType.RSS
-    Column(Modifier.fillMaxWidth().padding(horizontal = H_PADDING)) {
+    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = H_PADDING)) {
         if (isYouTube) {
             // 08: YouTube art is the 16:9 thumbnail full width above the title.
             CoverArt(
@@ -309,7 +313,7 @@ private fun EpisodeHeader(
                 tier = CoverTier.HERO,
                 aspect = CoverAspect.WIDE_16_9,
                 shape = NeutrodyneShapes.Tile,
-                avgArgb = null,
+                avgArgb = state.colors?.avgArgb,
                 modifier = Modifier.fillMaxWidth(),
             )
             Text(
@@ -328,7 +332,7 @@ private fun EpisodeHeader(
                     title = episode.podcastTitle,
                     tier = CoverTier.THUMB,
                     shape = NeutrodyneShapes.Tile,
-                    avgArgb = null,
+                    avgArgb = state.colors?.avgArgb,
                     modifier = Modifier.size(ART_SIZE),
                 )
                 Column(Modifier.weight(1f)) {

@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.feature.podcast
 
 import androidx.compose.runtime.Immutable
+import ch.lkmc.neutrodyne.core.model.ArtworkColors
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.Group
@@ -22,6 +23,7 @@ import kotlinx.collections.immutable.persistentListOf
 @Immutable
 public data class PodcastUiState(
     val detail: PodcastDetail? = null,
+    val colors: ArtworkColors? = null,
     val feedUrl: String? = null,
     val loaded: Boolean = false,
     val filters: FeedFilters = FeedFilters(),
