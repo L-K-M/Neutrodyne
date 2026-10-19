@@ -1594,7 +1594,16 @@ one per admitted operation, completed once including cancellation, visible
 before persistence. Resolver, enrichment and search own extraction reports; composite enrichment
 shares one reservation. Playback/download loaders alone report media 429/fresh-URL 403. Cache
 hits/claims reserve nothing; breaker opening invalidates URLs before gates.
-The current integration leaves feed-health behavior unchanged.
+W6 implements this portable state and lifecycle against the frozen ports;
+M8 feed-health behavior stays independent. The health constructor receives the
+app version and a synchronous cache `invalidateAll` callback. Admission is
+blocked during that callback. Snapshot revisions discard stale queued writes;
+the app-version key commits each multi-key snapshot last, with zero marking
+an interrupted write. Reservations and failure history stay in memory.
+Lifecycle waits for health loading before reporting the bundled version.
+W4 still supplies the settings/preflight/host adapters, W5 the cache callback,
+and W11 the application bindings and notices. Host selection and the device
+spike remain **PENDING**; this is no production activation or M9a acceptance.
 
 
 ```mermaid
@@ -1613,7 +1622,7 @@ stateDiagram-v2
 | Counted | `ExtractionOutcome.ParseFailure` from resolve, enrichment, search, back catalogue and `YtDlpChannelLookup` (including the "content not available" cluster rule of [Exception classification](#exception-classification)); at most one per `videoId` per 10 min (Media3 retries must not trip it alone). `ForbiddenFreshUrl` outcomes count like parse failures once 3 distinct videos produced one within 1 h (a new PO-token requirement looks like this; one or two are treated as per-video glitches; a 403 before `availableAtMs` never counts). Never counted: `Unavailable`, `Inconclusive` (network, timeout, rate limit, cancellation, `ENGINE_UNAVAILABLE`) |
 | Open duration | 6 h; 12 h when the previous opening was less than 24 h earlier (PLAN glossary "Circuit breaker": 6–12 h) |
 | While open | `extractionGate` returns `Deny(breakerOpenUntil, BREAKER_OPEN)` to resolve, enrichment, search, back catalogue and `YtDlpChannelLookup` (which then returns `null`, so the HTML fallback keeps subscribing working); `ResolvedUrlCache.invalidateAll()` on opening |
-| Half-open | Entered lazily: the first `extractionGate` call with `now ≥ breakerOpenUntil`, or `retryNow()`. Exactly one caller gets `AllowTrial` (any purpose); every other call gets `Deny(now + 60 s, BREAKER_OPEN)` until the trial reports. `Success` → CLOSED (failure history cleared); `ParseFailure`/counted `ForbiddenFreshUrl` → OPEN again (12 h rule); `Inconclusive` → the trial slot is released and the next call becomes the trial |
+| Half-open | Entered lazily: the first `extractionGate` call with `now ≥ breakerOpenUntil`, or `retryNow()`. Gate views return `AllowTrial` without reserving. Exactly one admitted operation reserves the trial (any purpose); other reservations get `Deny(now + 60 s, BREAKER_OPEN)` until it completes. `Success` → CLOSED (failure history cleared); `ParseFailure`/counted `ForbiddenFreshUrl` → OPEN again (12 h rule); `Inconclusive` → the trial slot is released and the next call becomes the trial |
 | Opening | From M9b also asks for a fix: `YtDlpEngine` observes `YouTubeHealth.state` and, on each transition to `OPEN`, calls `EngineUpdateScheduler.requestNow(BREAKER)` (Android `engine-update-now`; desktop a poke of the `engine-update` lane, from MD3) when the policy is not `OFF` and the last check is more than 3 h old ([Update flow](#update-flow)) |
 | Persisted (`device_settings`) | `youtube.breaker_open_until`, `youtube.breaker_last_opened_at`, `youtube.breaker_version_code`, `youtube.breaker_engine_version`; failure timestamps are memory-only |
 | Reset | A different `versionCode` at start, or a different active engine version (reported by `YtDlpEngine` through `reportEngineVersion` at load and after every activation, rollback or reset), closes the breaker: the fix is an engine update or, failing that, an app update |

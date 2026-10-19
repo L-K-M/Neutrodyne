@@ -1416,6 +1416,9 @@ D76's build-time signature/hash gate and the shared Python shim are integrated
 locally. The official 2026.08.19 pin is unchanged. Portable implementation and
 deterministic testing may precede the reference-device spike; host selection
 and production activation still require owner approval, **spike pending**.
+W6's portable lifecycle and synchronous extraction reservations now use the
+frozen host/settings/cache ports; Android adapters, consumer wiring and device
+proof remain pending. M8 feed health stays independent.
 Both shells remain external with `NOT_YET_AVAILABLE`. Status/preparation hooks
 and worker creators stay unbound; ordinary startup never compiles or imports
 Python. No runtime updater, JS provider or engine-backed playback is activated.
