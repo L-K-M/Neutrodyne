@@ -160,7 +160,7 @@ if srv is not None:
     else:
         fail("server.jar missing")
     img = srv.get("image", "")
-    pat = rf"ghcr\.io/{re.escape(repo.path.strip('/').split('/')[0])}/neutrodyne-server@sha256:[0-9a-f]{{64}}"
+    pat = rf"ghcr\.io/{re.escape(repo.path.strip('/').split('/')[0].lower())}/neutrodyne-server@sha256:[0-9a-f]{{64}}"
     if not re.fullmatch(pat, img):
         fail(f"server.image {img!r} is not this repo's digest reference")
     if srv.get("minJava") != 21:

@@ -101,6 +101,7 @@ jobs:
           scripts/ci/tests/install-android-sdk.test.sh
           python3 scripts/ci/tests/report-nightly.test.py
           python3 scripts/ci/tests/assert-playback-tests.test.py
+          python3 scripts/ci/test-server-image.py
 
   unit:
     runs-on: ubuntu-24.04
@@ -133,6 +134,17 @@ jobs:
         run: ./gradlew allTests test mutationTest -Proborazzi.test.verify=true --continue
       - name: Room schema drift
         run: test -z "$(git status --porcelain -- core/database/schemas)" || { echo "::error::Room schema changed without a committed version"; git status --porcelain -- core/database/schemas; exit 1; }
+      - name: Require real-server conformance and 1,000 convergence seeds
+        if: success()
+        run: python3 scripts/ci/assert-server-tests.py sync/server/build/test-results/test --seeds 1000
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: ms1-server-evidence
+          path: |
+            sync/server/build/test-results/test/
+            core/data/build/test-results/desktopTest/
+            sync/server/build/interop/server-export.zip
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
@@ -159,12 +171,12 @@ jobs:
         with:
           cache-provider: basic
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
-      # :sync:server:fatJar keeps the server's packaging task green from M0a.
+      # :sync:server:fatJar :sync:server:serverNotices keeps the server's packaging task green from M0a.
       # TODO(M0b): add :desktopApp:createDistributable — the desktop image needs
       # the runtime.lock/jlink setup that lands with the desktop package (it
       # fails at createRuntimeImage today).
       - name: Build the APKs and the server JAR
-        run: ./gradlew assembleRelease assembleDebug :sync:server:fatJar -Pneutrodyne.abiSplits=true
+        run: ./gradlew assembleRelease assembleDebug :sync:server:fatJar :sync:server:serverNotices -Pneutrodyne.abiSplits=true
       # PR builds are signed with the committed public key, so a PR build is
       # signed exactly like a release and needs no secret (09 Hardening).
       - name: Build-output checks on the release APKs
@@ -184,6 +196,11 @@ jobs:
         with:
           name: server-jar
           path: sync/server/build/libs/neutrodyne-server-*.jar
+          retention-days: 1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: server-notices
+          path: sync/server/build/legal/THIRD_PARTY_NOTICES.md
           retention-days: 1
 
   instrumented:
@@ -261,11 +278,12 @@ jobs:
       - name: Start the fat JAR and check the endpoints
         run: |
           jar="$(echo sync/server/build/libs/neutrodyne-server-*.jar)"
-          export NEUTRODYNE_SERVER_DATA="$(mktemp -d)"
+          server_data_dir="$(mktemp -d)"
+          export NEUTRODYNE_SERVER_DATA="$server_data_dir"
           java -jar "$jar" serve &
           pid=$!
           trap 'kill $pid 2>/dev/null || true' EXIT
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             sleep 1
             curl -fsS http://127.0.0.1:8787/healthz >/dev/null 2>&1 && break
           done
@@ -276,7 +294,8 @@ jobs:
       - name: A non-loopback listen is refused (PLAN M0 AC16)
         run: |
           jar="$(echo sync/server/build/libs/neutrodyne-server-*.jar)"
-          export NEUTRODYNE_SERVER_DATA="$(mktemp -d)" NEUTRODYNE_SERVER_LISTEN=0.0.0.0:8787
+          server_data_dir="$(mktemp -d)"
+          export NEUTRODYNE_SERVER_DATA="$server_data_dir" NEUTRODYNE_SERVER_LISTEN=0.0.0.0:8787
           set +e
           output="$(timeout 30 java -jar "$jar" serve 2>&1)"
           status=$?
@@ -294,3 +313,14 @@ jobs:
             echo "::error::server exited $status without the expected refusal message"
             exit 1
           fi
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: server-notices
+          path: legal
+      - name: Build and check the D95 image
+        run: |
+          version="$(sed -n 's/^neutrodyne.versionName=//p' gradle.properties)"
+          python3 scripts/ci/server-image.py prepare --version "$version" --directory context --jar "sync/server/build/libs/neutrodyne-server-$version.jar" --notices legal/THIRD_PARTY_NOTICES.md
+          docker build --build-arg VERSION="$version" -t neutrodyne-server:ci context
+          scripts/ci/check-server-image.sh --no-sources neutrodyne-server:ci

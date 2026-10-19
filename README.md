@@ -78,13 +78,62 @@ Updating means installing the newer file the same way; your library, settings an
 
 ### Run the server
 
-Neutrodyne Sync keeps subscriptions, groups, played state, positions and Up next in step across your phones and computers. It is optional and self-hosted: it stores only that state — never audio or feed contents — and never fetches anything itself. It holds your listening history and private feed links without end-to-end encryption, so run it on a machine you control and put it behind TLS.
+Neutrodyne Sync is optional and self-hosted. It stores library and listening
+state, including private feed links, without end-to-end encryption. It never
+fetches feeds or audio. Its only outbound request is the optional daily GitHub
+update notice. See [Privacy](PRIVACY.md).
 
-With Docker (Linux x86-64 or arm64): copy `compose.yaml` and `Caddyfile` from `sync/server/deploy/` at the release's tag, put your domain into both files and run `docker compose up -d`. The image is `ghcr.io/L-K-M/neutrodyne-server:{v}`; Caddy obtains the TLS certificate. Without Docker: install Java 21 or later, download `neutrodyne-server-{v}.jar` from the release, check it against `SHA256SUMS`, and install `neutrodyne-server.service` (systemd) from the same folder; put Caddy or nginx in front for TLS (`nginx.conf.example` keeps live updates working). The server listens only on loopback unless its public URL is `https://` (behind the proxy) or it is started with `--insecure-lan` for a trusted home network.
+With Docker on Linux x86-64 or arm64, copy
+[compose.yaml](sync/server/deploy/compose.yaml) and
+[Caddyfile](sync/server/deploy/Caddyfile) from the release tag. Set `SYNC_HOST`
+to your public domain and `NEUTRODYNE_SERVER_IMAGE` to
+`ghcr.io/l-k-m/neutrodyne-server:<version>`, then run `docker compose up -d`.
+Only Caddy publishes ports; it obtains the TLS certificate. The server runs as
+UID 65532 with a read-only root and a private writable `/data` volume.
 
-At its first start the server prints a one-time setup code; open `https://<your domain>/setup` and enter it, or run `java -jar neutrodyne-server-{v}.jar admin create`. Create an account, then link your devices in Settings › Sync of each app with a short code.
+Without Docker, install Java 21+, download `neutrodyne-server-<version>.jar`
+from [GitHub Releases](https://github.com/L-K-M/Neutrodyne/releases), verify
+`SHA256SUMS`, and install the
+[systemd unit](sync/server/deploy/neutrodyne-server.service). Adjust its public
+URL and JAR path, then enable and start it. Put Caddy or nginx in front for TLS;
+[nginx.conf.example](sync/server/deploy/nginx.conf.example) preserves live
+updates. A non-loopback listener requires an HTTPS public URL or the explicit
+`serve --insecure-lan` option. Insecure LAN mode sends tokens without encryption;
+use it only on a trusted home network. Android accepts system certificate
+authorities, so a private test CA is not a substitute for a public certificate.
 
-Upgrade by replacing the image tag or the JAR; the server backs up its database before it migrates and refuses to start on a newer database. Copy `backups/` and `account-backups/` from its data directory off the machine regularly. The admin page tells you when a newer version exists (one daily request to GitHub; `NEUTRODYNE_SERVER_UPDATE_CHECK=false` turns it off). The image bundles an unmodified OpenJDK runtime and Debian base packages; their sources are attached to every release and published next to the image as `ghcr.io/L-K-M/neutrodyne-server:{v}-sources`. Details: [10 Deployment](docs/design/10-sync.md#deployment).
+First start writes a private, one-time `setup-token` file and logs its path.
+Read that file as the server OS user, open `https://<your-domain>/setup`, and
+create the first administrator. Alternatively run
+`java -jar neutrodyne-server-<version>.jar admin create <username>` as that
+user. Passwords are prompted with `--password`, never passed in arguments.
+Create accounts and link devices with short codes from Settings > Sync.
+Client sync orchestration remains MS2 work.
+
+Upgrade by replacing the image version or JAR and restarting. Migrations make
+automatic pre-upgrade backups; a newer database refuses an older server.
+`migrate --check` is read-only and `doctor` checks configuration, integrity,
+permissions, disk space and time. Operational commands take the same config
+and must run as the server OS user. With systemd's dynamic user, use the
+[transient-unit command](docs/design/10-sync.md#jar-on-java-21-or-later).
+
+Nightly database backups keep seven daily copies; per-account app-readable
+ZIPs keep fourteen. Copy both `/data/backups/` and `/data/account-backups/`
+off-machine. Whole database copies may contain shared feed passwords; protect
+them like the live database. Stop the service before `restore <backup.db>`.
+Restore retains the replaced file, carries current credentials, revocations and
+identity authority forward, then expires every device cursor. If the current
+identity ledger is unreadable, ordinary restore refuses: recover it or start a
+fresh server and re-link devices after forgetting their old sync metadata.
+Account purge deletes account ZIPs; historical whole-server copies retain that
+data until their retention expires.
+
+The admin page only notifies about new releases. Set
+`NEUTRODYNE_SERVER_UPDATE_CHECK=false` to disable its daily GitHub request.
+Runtime and base sources accompany releases and are also available beside the
+image as `ghcr.io/l-k-m/neutrodyne-server:<version>-sources`; `/app/SOURCES.md`
+records the offer. Raspberry Pi performance acceptance still needs owner
+hardware evidence. More: [Deployment](docs/design/10-sync.md#deployment).
 
 ## Licence
 
@@ -93,7 +142,7 @@ The repository — own Kotlin code, the Python shim, the native glue, scripts an
 - **Permissive** components in every artefact (Apache-2.0, MIT, BSD, ISC, PSF, zlib, Unicode, public domain and similar; FreeType under the FTL, libpng, libjpeg-turbo under its IJG and BSD terms).
 - **LGPL, dynamically linked, with its source attached:** the minimal LGPL-2.1 FFmpeg build that the desktop audio engine loads as separate, replaceable shared libraries (`ffmpeg-{ffmpeg}-neutrodyne-src.tar.xz` on every release), and glibc in the server image.
 - **MPL-2.0 for unmodified files and data** (certifi's CA bundle, the Public Suffix List data), plus two named cases with their sources attached to each release, both proposed defaults awaiting the owner's answer to PO-48: python-build-standalone's MPL-2.0 build patches in the desktop YouTube engine's CPython, and the unmodified WiX components (MS-RL) inside the Windows MSI.
-- **The runtime exception:** the desktop installers and the server image bundle an unmodified, jlink-trimmed OpenJDK runtime (Temurin; GPL-2.0 with the Classpath Exception, the GCC runtime under its exception, Microsoft's VC++ redistributables), whose `legal/` notices are kept and whose exact source (`openjdk-{jdk}-temurin-sources.tar.gz`, `RUNTIME-SOURCES.md`) is attached to every release that ships it. The Android APKs and the server JAR contain no LGPL and no runtime.
+- **The runtime exception:** the desktop installers and the server image bundle an unmodified, jlink-trimmed OpenJDK runtime (Temurin; GPL-2.0 with the Classpath Exception, the GCC runtime under its exception, Microsoft's VC++ redistributables), whose `legal/` notices are kept and whose exact source (`openjdk-{jdk}-temurin-sources.tar.gz`, `RUNTIME-SOURCES.md`) is attached to every release that ships it. The exception also covers the server image's unmodified Debian base layers; their exact sources are attached as `neutrodyne-server-image-sources-{v}.tar.xz` and offered from the matching GHCR repository. The Android APKs and the server JAR contain no LGPL and no runtime.
 
 **No other GPL and no AGPL code anywhere**, and nothing GPL is linked into or derived from our code. Licensee (Gradle), the Python component locks of both engine hosts, `native-components.lock`, the APK, desktop-image and server-image scans, the embedded-native inventory and `check-runtime-sources.sh` enforce this in CI ([01 Licensing and dependency policy](docs/design/01-foundation.md#licensing-and-dependency-policy)). Each app's Licences screen and `THIRD_PARTY_NOTICES.md` list every component with its full licence text.
 

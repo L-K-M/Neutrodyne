@@ -57,9 +57,11 @@ module path).
   versions approved by our own canary.
 - **Licensing:** the repository is Unlicense.
   - Never add GPL or AGPL code or dependencies (Gradle, Python or native).
-    There is one exception: the unmodified OpenJDK runtime bundled with
-    desktop installers and the server image, with its exact source attached
-    to each release.
+    The D3 runtime exception covers unmodified OpenJDK bundled with desktop
+    installers and the server image, plus unmodified server base-image layers
+    (D95), with exact sources and retained notices for each release.
+    Implementation note (2026-10-19, MS1): this aligns the summary with PLAN D3;
+    no other GPL or AGPL code is allowed.
   - LGPL is allowed when dynamically linked, with its notices met and its
     exact source attached (for example the LGPL FFmpeg build used for
     desktop playback).

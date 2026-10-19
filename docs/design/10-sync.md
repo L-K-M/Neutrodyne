@@ -1811,6 +1811,17 @@ Ktor RateLimit token buckets, keyed by the client IP from `ClientAddress` and wh
 
 ## Deployment
 
+**Implementation note (2026-10-19, MS1).** W11 supplies the reference assets
+and image/release gates. SQLite JNI extraction uses the private executable
+`data/native` directory before JDBC initializes, including offline CLI paths;
+`/tmp` can remain `noexec`. Database backups are created with owner-only
+permissions before SQLite writes them, including destinations outside `data`.
+PR image checks use `--no-sources` only to omit release archive downloads;
+read-only, nonroot, no-shell, JNI, backup and live-restore checks still run.
+Nightly compose coverage exercises Caddy and nginx heartbeats for five minutes,
+backup/restore, token revocation and outbound capture. Docker, GHCR publication
+and both native image architectures still require their CI execution evidence.
+
 Serves R6.7, R7.8, N8, N12, N13. Delivered in M0b (JAR skeleton), MS1 (image, compose, systemd, README section), M11b (final guidance). Honours [D95](../PLAN.md#3-key-decisions), [D3](../PLAN.md#3-key-decisions), [D63](../PLAN.md#3-key-decisions), [D79](../PLAN.md#3-key-decisions). Release jobs: [09 `release.yml`](09-quality-and-release.md#releaseyml); channels: [09 Distribution channels](09-quality-and-release.md#distribution-channels).
 
 Every tag `vX.Y.Z` publishes `neutrodyne-server-{v}.jar` on the GitHub release and `ghcr.io/{owner}/neutrodyne-server:{v}` (then `{X.Y}` and `latest`, only after the release is published) for `linux/amd64` and `linux/arm64`; GHCR counts as GitHub ([PO-2](../PLAN.md#po-2-distribution-channels)). Files in `sync/server/deploy/`: `compose.yaml`, `Caddyfile`, `nginx.conf.example`, `neutrodyne-server.service`, `Dockerfile`.
@@ -2016,14 +2027,26 @@ production retains the boolean configuration and JDK HttpClient.
 
 ### Image sources and the runtime exception
 
-**Implementation note (2026-10-19, MS1).** Keep D95; W11 verifies pinned licences/
-exact sources early, adds a second runtime source if needed, blocks publication
-if unavailable. PLAN D3 permits unmodified base layers; align AGENTS before
-publication. Base/runtime changes require D95/D3 approval; PO-48 is unrelated.
+**Implementation note (2026-10-19, MS1).** D95 remains distroless Java 25 on
+Debian 13, pinned by the multi-platform index in
+[`image-sources.lock.json`](../../sync/server/deploy/image-sources.lock.json).
+Registry metadata for both architectures lists 25 Debian binary packages;
+19 distinct corresponding source packages are pinned by exact source filenames,
+versions, sizes and SHA-256s. The source collector verifies all bytes before
+publication and creates the base archive plus `RUNTIME-SOURCES.md`.
+The pinned Temurin 25.0.4.1+1 runtime matches `desktopApp/runtime.lock`, so one
+runtime archive currently covers both products. A future mismatch requires a
+second exact archive before publication. Base changes must update the inventory
+and pass the image/source gates together. PLAN D3 already permits these
+unmodified base layers; AGENTS and README now agree. PO-48 is unrelated.
+The release publishes source archives to the matching GHCR repository before
+moving image tags; no release tag moves while the GitHub release is a draft.
+The exact-source collector and negative fixtures passed locally. Image runtime
+and package-to-inventory checks remain CI evidence until Docker is available.
 
 The image bundles an unmodified OpenJDK runtime and Debian base layers under [D3](../PLAN.md#3-key-decisions)'s runtime exception (risk L5):
 
-- each release attaches `neutrodyne-server-image-sources-{v}.tar.xz` — the source packages of the base image's GPL and LGPL components, at the versions recorded in the image (Unverified: that distroless images carry dpkg status files listing them; `check-server-image.sh` reads whatever the image records and fails when a package lacks its source) — and the Temurin source tarball of the image's runtime version;
+- each release attaches `neutrodyne-server-image-sources-{v}.tar.xz` — the source packages of the base image's GPL and LGPL components, at the versions recorded in the image (the pinned distroless metadata carries dpkg status entries; `check-server-image.sh` compares the built image with the inventory and fails when a package lacks its source) — and the Temurin source tarball of the image's runtime version;
 - if the pinned base image's Temurin version differs from the desktop runtime of the same release (`desktopApp/runtime.lock`), the release attaches both source tarballs and `RUNTIME-SOURCES.md` lists both ([Open questions](#open-questions) 4);
 - the image keeps the runtime's `legal/` notices; our layer adds `/app/THIRD_PARTY_NOTICES.md` with the server classpath's licences (Licensee report);
 - **Source from the same place (2026-10-05).** The image is distributed from ghcr.io, while the release assets live on github.com; GPL-2.0 §3 counts network access to the source as distribution only when it is offered "from the same place" ([GPL-2.0](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html)), and LGPL-2.1 §6 is similar. So `image-tags` also pushes both source tarballs to the same GHCR repository as an OCI artefact under the tag `{v}-sources` (with [ORAS](https://github.com/oras-project/oras), Apache-2.0, a CI tool only; and, where GHCR serves the OCI referrers API, attached to the image index digest — Unverified, S17), before it moves `{v}`; the image carries `/app/SOURCES.md` and the label `ch.lkmc.neutrodyne.sources` naming `ghcr.io/{owner}/neutrodyne-server:{v}-sources` and the release page, plus a written offer, valid for three years, to provide the corresponding source on request as a fallback. This is the plan's reading of the licences, not legal advice.
@@ -2297,6 +2320,14 @@ Each scenario is a test; the property test generates the first four at random, t
 | S15 Convergence harness (MS0) | Do the field kinds and episode rules converge under skew, duplication and reordering? | [Convergence property test](#convergence-property-test) | MS0 acceptance 2 at 100,000 seeds | simplify field kinds (drop `MaxField` for `playCount`, make `lastPlayedAt` LWW) |
 | S16 Server on a Raspberry Pi (MS1) | Footprint and speed on the smallest supported hardware | Pi 4 (4 GB, 64-bit Raspberry Pi OS), the JAR on Temurin 21 and the image; the documented flags; idle RSS after 10 min; 50,000-record initial upload with `SyncLoadTool` (server test sources); start-up time; repeat on a Pi 3 or Zero 2 W (arm64) | PB30: idle ≤ 160 MB RSS, upload ≤ 60 s; recorded in the MS1 release issue | tighter flags (`-Xmx64m`, `-XX:ReservedCodeCacheSize=32m`, `-XX:MaxMetaspaceSize=64m`); recommend ≥ 2 GB devices; streaming record merge |
 | S17 Network paths (MS2–MS3) | Android 17 `ACCESS_LOCAL_NETWORK` for LAN servers; public names resolving to LAN addresses; a global IPv6 server on the same Wi-Fi (directly-connected route); a `10.x` server reached through a VPN; Tailscale `100.64.0.0/10`; SSE through Caddy and nginx (buffering, idle timeouts); no `502` from proxy keep-alive reuse against CIO's idle timeout (`/sync` calls spaced 40–200 s apart through both proxies); the macOS Local Network prompt with the ad-hoc identity, before and after an update | Physical Android 17 phone on Wi-Fi with a server on `192.168.x.x`; split-horizon DNS; a Tailscale node; `server-image-smoke` with the reference compose and a test certificate plus an nginx variant holding an SSE stream for 2 h; a desktop build updated over itself on macOS 15 | MS2 acceptance 5, MS3 acceptance 4; documented results for the unverified cases | polling-only mode for problematic paths; documentation of the macOS switch; treat CGNAT ranges as local in the gate if Android does |
+
+**Implementation note (2026-10-19, MS1).** S16 remains **open for owner
+hardware evidence**. Local x86-64 tests and CI image smoke do not close it.
+Record the Pi 4 JAR-on-Java-21 and arm64-image measurements with the documented
+flags: idle RSS after ten minutes (PB30 ≤ 160 MB), a 50,000-record initial
+upload with `SyncLoadTool` (≤ 60 seconds), startup time, then repeat on a Pi 3
+or Zero 2 W. Neither the physical devices nor their measurements are available
+in this worktree.
 
 **Implementation note (2026-10-19, MS0).** W3/W4 install all 24 triggers
 and the trigger-only 2→3 migration. Database-layer capture, replay, transaction,

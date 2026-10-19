@@ -50,7 +50,7 @@ jobs:
         id: verify
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: scripts/ci/verify-tag.sh "${{ github.ref_name }}" --products=android
+        run: scripts/ci/verify-tag.sh "${{ github.ref_name }}" --products=android,server,server-sources
 
   android:
     needs: verify-tag
@@ -106,7 +106,7 @@ jobs:
           PYEOF
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: android
+          name: release-android
           path: dist/
           retention-days: 5
 
@@ -114,11 +114,154 @@ jobs:
   # linux-arm64 with the two-attempt build loop and mac_kind from verify-tag)
   # and `sources` (openjdk-{jdk}-temurin-sources.tar.gz + RUNTIME-SOURCES.md;
   # MD1b ffmpeg sources; MD3 PBS sources; WiX sources with each MSI).
-  # TODO (MS1): `server-jar`, `server-image` (matrix, push-by-digest),
-  # `server-image-manifest`, and `image-tags` after publish.
+  server-jar:
+    needs: verify-tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-disabled: true
+      - run: ./gradlew --no-daemon --no-build-cache :sync:server:fatJar :sync:server:serverNotices
+      - name: Packaged JAR smoke
+        run: |
+          server_data_dir="$(mktemp -d)"
+          export NEUTRODYNE_SERVER_DATA="$server_data_dir" NEUTRODYNE_SERVER_UPDATE_CHECK=false
+          java -jar sync/server/build/libs/neutrodyne-server-*.jar migrate
+          java -jar sync/server/build/libs/neutrodyne-server-*.jar doctor
+          java -jar sync/server/build/libs/neutrodyne-server-*.jar serve &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:8787/readyz && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8787/readyz
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-server
+          path: sync/server/build/libs/neutrodyne-server-*.jar
+          retention-days: 5
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: server-notices
+          path: sync/server/build/legal/THIRD_PARTY_NOTICES.md
+          retention-days: 5
+
+  server-sources:
+    needs: verify-tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: scripts/ci/collect-server-sources.sh "${{ needs.verify-tag.outputs.version }}" dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-server-sources
+          path: dist/*
+          retention-days: 5
+
+  server-image:
+    needs: [verify-tag, server-jar]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: amd64, runner: ubuntu-24.04}
+          - {arch: arm64, runner: ubuntu-24.04-arm}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-server
+          path: jar
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: server-notices
+          path: legal
+      - name: Native digest build and smoke
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          V: ${{ needs.verify-tag.outputs.version }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/neutrodyne-server"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          python3 scripts/ci/server-image.py prepare --version "$V" --directory context --jar "jar/neutrodyne-server-$V.jar" --notices legal/THIRD_PARTY_NOTICES.md
+          docker buildx create --use
+          for attempt in 1 2; do
+            if docker buildx build --platform linux/${{ matrix.arch }} --build-arg VERSION="$V" --provenance=false \
+                --output "type=image,oci-mediatypes=true,name=$image,push-by-digest=true,name-canonical=true,push=true" --metadata-file metadata.json context; then break; fi
+            [ "$attempt" -lt 2 ] || exit 1
+          done
+          digest="$(python3 -c 'import json;print(json.load(open("metadata.json"))["containerimage.digest"])')"
+          scripts/ci/check-server-image.sh --no-sources "$image@$digest"
+          mkdir digests
+          echo "$digest" > digests/${{ matrix.arch }}.digest
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: server-digest-${{ matrix.arch }}
+          path: digests/
+          retention-days: 5
+
+  server-image-manifest:
+    needs: server-image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    outputs:
+      image: ${{ steps.index.outputs.image }}
+      digest: ${{ steps.index.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: server-digest-*
+          path: digests
+          merge-multiple: true
+      - run: scripts/ci/install-oras.sh
+      - name: Assemble native manifests into an index
+        id: index
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/neutrodyne-server"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          printf '%s' "$GH_TOKEN" | oras login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker buildx imagetools create --dry-run "$image@$(cat digests/amd64.digest)" "$image@$(cat digests/arm64.digest)" > index.json
+          digest="sha256:$(sha256sum index.json | cut -d' ' -f1)"
+          oras manifest push --media-type application/vnd.oci.image.index.v1+json "$image@$digest" index.json
+          [ "$(oras resolve "$image@$digest")" = "$digest" ]
+          {
+            echo "digest=$digest"
+            echo "image=$image@$digest"
+            echo "repository=$image"
+          } >> "$GITHUB_OUTPUT"
+          docker buildx imagetools inspect "$image@$digest" --raw > index.json
+          python3 -c 'import json; d=json.load(open("index.json")); assert d["mediaType"] == "application/vnd.oci.image.index.v1+json"; m=d["manifests"]; assert {x["platform"]["architecture"] for x in m} == {"amd64", "arm64"}'
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.index.outputs.repository }}
+          subject-digest: ${{ steps.index.outputs.digest }}
+          push-to-registry: true
+
 
   publish:
-    needs: [verify-tag, android]
+    needs: [verify-tag, android, server-jar, server-sources, server-image-manifest]
     environment: release # required reviewer; holds no signing secret (09)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -134,6 +277,7 @@ jobs:
       make_latest: ${{ steps.publish.outputs.make_latest }}
     permissions:
       contents: write        # gh release create/edit
+      packages: read         # verify the attested image against its exact sources
       id-token: write        # actions/attest
       attestations: write
       artifact-metadata: write
@@ -146,8 +290,17 @@ jobs:
           python-version: "3.14"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: android
+          pattern: release-*
+          merge-multiple: true
           path: dist
+      - name: Verify the image and exact sources before publication
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ${{ needs.server-image-manifest.outputs.image }}
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          gh attestation verify "oci://$IMAGE" -R "$GITHUB_REPOSITORY"
+          scripts/ci/check-server-image.sh "$IMAGE" dist
       - name: Compare the asset set with verify-tag's expected list
         env:
           EXPECTED: ${{ needs.verify-tag.outputs.expected_assets }}
@@ -160,7 +313,9 @@ jobs:
       - name: Update manifest + checksums
         env:
           TAG: ${{ github.ref_name }}
+          NEUTRODYNE_SERVER_IMAGE: ${{ needs.server-image-manifest.outputs.image }}
         run: |
+          python3 scripts/ci/server-image.py check-sources --version "${TAG#v}" --directory dist
           scripts/ci/make-update-json.sh "$TAG" dist
           scripts/ci/check-update-json.sh dist/neutrodyne-update.json dist "$TAG"
           (cd dist && sha256sum -- * > SHA256SUMS)
@@ -186,8 +341,13 @@ jobs:
 
           Guides: https://github.com/L-K-M/Neutrodyne#install-and-update
           EOF
-          # TODO (M0b/MS1): desktop-packages block, source bundles and the
-          # server block of 09's release-body template join with their assets.
+          cat >> body.md <<EOF
+
+          Self-hosted sync: neutrodyne-server-$V.jar (Java 21+) and
+          ${{ needs.server-image-manifest.outputs.image }} (Linux amd64/arm64).
+          Runtime/base sources and RUNTIME-SOURCES.md accompany this release.
+          Follow https://github.com/L-K-M/Neutrodyne#run-the-server
+          EOF
       - name: Attest every asset
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
@@ -229,3 +389,32 @@ jobs:
             # not the basename relative to the repository root
             gh release verify-asset "$TAG" "$f"
           done
+
+  image-tags:
+    needs: [verify-tag, publish, server-image-manifest]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    concurrency:
+      group: release-publish
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+      attestations: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-server-sources
+          path: sources
+      - run: scripts/ci/install-oras.sh
+      - name: Verify provenance, source OCI artifact and ordered tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUBLISH_MAKE_LATEST: ${{ needs.publish.outputs.make_latest }}
+          IMAGE: ${{ needs.server-image-manifest.outputs.image }}
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          printf '%s' "$GH_TOKEN" | oras login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          gh attestation verify "oci://$IMAGE" -R "$GITHUB_REPOSITORY"
+          scripts/ci/promote-server-image.sh "$GITHUB_REF_NAME" "$IMAGE" sources

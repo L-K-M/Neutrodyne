@@ -8,7 +8,9 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.DeviceRenameRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.LibraryCountsDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.SyncResponse
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.server.application.ApplicationCall
 import io.ktor.server.plugins.ratelimit.rateLimit
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
@@ -18,6 +20,7 @@ import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
+import kotlinx.coroutines.CompletableDeferred
 import java.nio.file.Files
 import kotlin.time.Instant
 
@@ -114,12 +117,7 @@ internal class AccountRoutes(
     fun install(route: Route) {
         route.rateLimit(RateLimits.ACCOUNT) {
             get("/api/v1/account/export") {
-                val principal = call.principal()
-                backups.authorizeDownload(principal)
-                call.response.headers.append("Content-Disposition", "attachment; filename=neutrodyne-backup.zip")
-                call.respondOutputStream(ContentType.Application.Zip) {
-                    backups.download(principal) { path -> Files.newInputStream(path).use { it.copyTo(this) } }
-                }
+                call.respondAccountBackup(backups, call.principal())
             }
             get("/api/v1/account") { call.respond(accounts.summary(call.principal())) }
             post("/api/v1/account/reset") {
@@ -146,3 +144,25 @@ internal class AccountRoutes(
 }
 
 private fun RecordPage.wireRecords() = (records + extras).map { it.raw.toDto(it.key.id, it.seq, it.byDevice) }
+
+/** An engine may schedule the producer after respond returns. Retain the input and account lease. */
+internal suspend fun ApplicationCall.respondAccountBackup(
+    backups: AccountBackups,
+    principal: AccountPrincipal,
+) {
+    backups.authorizeDownload(principal)
+    backups.download(principal) { path ->
+        Files.newInputStream(path).use { input ->
+            val completed = CompletableDeferred<Unit>()
+            response.headers.append(HttpHeaders.ContentDisposition, "attachment; filename=neutrodyne-backup.zip")
+            respondOutputStream(ContentType.Application.Zip) {
+                try {
+                    input.copyTo(this)
+                } finally {
+                    completed.complete(Unit)
+                }
+            }
+            completed.await()
+        }
+    }
+}

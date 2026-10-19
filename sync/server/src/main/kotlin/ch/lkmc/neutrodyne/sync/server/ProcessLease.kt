@@ -61,3 +61,13 @@ internal fun privateDirectory(directory: Path) {
         // Non-POSIX platforms rely on the administrator's directory ACL.
     }
 }
+
+/** Every CLI path must select an executable JNI directory before JDBC initializes. */
+internal fun prepareSqliteNative(dataDir: Path) {
+    privateDirectory(dataDir)
+    val native = dataDir.resolve("native")
+    privateDirectory(native)
+    if (System.getProperty("org.sqlite.tmpdir") == null) {
+        System.setProperty("org.sqlite.tmpdir", native.toAbsolutePath().toString())
+    }
+}

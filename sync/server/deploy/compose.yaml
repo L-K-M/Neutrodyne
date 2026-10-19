@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: Unlicense
+services:
+  neutrodyne-server:
+    image: ${NEUTRODYNE_SERVER_IMAGE:-ghcr.io/l-k-m/neutrodyne-server:latest}
+    restart: unless-stopped
+    environment:
+      NEUTRODYNE_SERVER_PUBLIC_URL: https://${SYNC_HOST:-sync.example.org}
+      NEUTRODYNE_SERVER_TRUSTED_PROXIES: 172.31.87.0/24
+      NEUTRODYNE_SERVER_UPDATE_CHECK: ${UPDATE_CHECK:-true}
+    volumes:
+      - neutrodyne-data:/data
+    networks: [sync]
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev,size=16m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 320m
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      SYNC_HOST: ${SYNC_HOST:-sync.example.org}
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [sync]
+networks:
+  sync:
+    ipam:
+      config: [{subnet: 172.31.87.0/24}]
+volumes:
+  neutrodyne-data: {}
+  caddy-data: {}
+  caddy-config: {}

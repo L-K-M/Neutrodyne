@@ -41,14 +41,7 @@ internal class SqliteSyncStore(
     private var closed = false
 
     init {
-        privateDirectory(dataDir)
-        val nativeDir = dataDir.resolve("native")
-        privateDirectory(nativeDir)
-        if (System.getProperty("org.sqlite.tmpdir") ==
-            null
-        ) {
-            System.setProperty("org.sqlite.tmpdir", nativeDir.toAbsolutePath().toString())
-        }
+        prepareSqliteNative(dataDir)
         var opened: Connection? = null
         try {
             opened = connect(database)

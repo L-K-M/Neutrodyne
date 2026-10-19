@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.sync.server
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.PosixFilePermissions
 import java.sql.Connection
 import java.sql.DriverManager
 import java.time.Instant
@@ -92,6 +93,15 @@ internal fun databaseBackup(
     Files.createDirectories(target.parent)
     val temporary = target.resolveSibling(".${target.fileName}.${UUID.randomUUID()}.tmp")
     try {
+        // VACUUM INTO accepts an empty file. Set private permissions before any secret is written.
+        try {
+            Files.createFile(
+                temporary,
+                PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")),
+            )
+        } catch (_: UnsupportedOperationException) {
+            Files.createFile(temporary)
+        }
         connection.createStatement().use {
             it.execute("VACUUM INTO '${temporary.toString().replace("'", "''")}'")
         }

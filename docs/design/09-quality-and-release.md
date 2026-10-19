@@ -607,6 +607,15 @@ The instrumented job's preamble (as AntennaPod does): `sudo rm -rf /usr/share/do
 
 ### `nightly.yml`
 
+**Implementation note (2026-10-19, MS1).** Real-server convergence uses sixteen
+disjoint 6,250-seed SQLite shards, with combined failure reporting and retained
+XML/seed traces, alongside the existing 100,000-seed fake run. Required server
+suites reject missing, skipped and zero-case results. The reference read-only
+compose smoke holds Caddy and nginx SSE streams for five minutes with test CA
+verification, exercises auth/sync/export and backup/restore after revocation,
+and captures the server namespace separately from Caddy's certificate traffic.
+The two-hour proxy and physical client-network gates remain MS3/S17.
+
 **Implementation note (2026-10-19, MS1).** Supersedes the stub-URL instruction
 below: UPDATE_CHECK stays boolean. Inject a test fetcher; capture zero packaged-
 server egress with checking disabled and separately prove enabled destination
@@ -652,6 +661,19 @@ and E12 joins in MS2 as above; neither is claimed by the MS0 simulator.
 Removed 2026-10-05 (scope revision): `dev-tools-build` (developer tooling lives in `debug`, which `assemble` builds on every PR) and the `instrumented-full` leg against the `benchmark` build type (the published `release` build is tested directly). The former `mirror` job was removed with [PO-34](../PLAN.md#48-further-product-owner-decisions) ([GitHub takedown](#github-takedown)).
 
 ### `release.yml`
+
+**Implementation note (2026-10-19, MS1).** The implemented release graph selects
+`android,server,server-sources`. Desktop packaging and the future `sources`
+group remain inactive until their build jobs exist. Server sources include only
+the pinned base packages, matching runtime archive and `RUNTIME-SOURCES.md`.
+The runtime filename comes from the server source lock; a differing future
+runtime requires its own verified source asset. Native amd64/arm64 manifests
+are combined with buildx dry-run and pushed directly by digest using ORAS,
+then attested. No release image tag exists before immutable GitHub publication.
+Image promotion shares publish's concurrency group, verifies the source OCI
+artifact first, and re-reads published release ordering for minor/latest tags.
+PR checks do not waive source checks at publication. GHCR visibility, actual
+release approval and an unauthenticated public pull remain owner gates.
 
 Trigger: `push: tags: ['v*']`. Top-level `permissions: contents: read`. The build jobs read no secret and need no approval, so they run while the maintainer approves the `release` environment, which only `publish` uses (required reviewer = a maintainer; the environment holds no signing secret — the APK key is committed, [Committed keystore](#committed-keystore), and the desktop builds carry no publisher signature — and only `PODCASTINDEX_*` once Podcast Index grants written permission, after which the `android` and `desktop` jobs join the environment to read it, [D26](../PLAN.md#3-key-decisions)). Every job uses `setup-gradle` with `cache-disabled: true` (no cache-poisoning surface for published builds). Job permissions are the minimum: `packages: write` only in `server-image`, `server-image-manifest` and `image-tags`; `id-token: write`, `attestations: write` and `artifact-metadata: write` only in `server-image-manifest` and `publish` (for `actions/attest`); `contents: write` only in `publish`.
 

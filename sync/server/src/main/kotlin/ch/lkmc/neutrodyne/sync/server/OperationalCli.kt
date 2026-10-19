@@ -57,6 +57,7 @@ internal class OperationalCli(
                     ProcessMode.LIVE_ADMIN
                 }
             ProcessLease.acquire(config.dataDir, mode).use {
+                prepareSqliteNative(config.dataDir)
                 val database = config.dataDir.resolve(SqliteSyncStore.DATABASE_FILE)
                 if (command == "restore") {
                     val replaced = runBlocking { ServerRecovery(config.dataDir).restore(Path.of(tokens.single())) }
@@ -113,8 +114,12 @@ internal class OperationalCli(
         }
         check("Java 21+") { Runtime.version().feature() >= 21 }
         check("Database integrity and schema") {
-            ServerRecovery.open(database).use(ServerRecovery::validate)
-            true
+            if (Files.isRegularFile(database)) {
+                ServerRecovery.open(database).use(ServerRecovery::validate)
+                true
+            } else {
+                false
+            }
         }
         check("Private data directory") {
             Files.getPosixFilePermissions(config.dataDir) == PosixFilePermissions.fromString("rwx------") &&
@@ -145,6 +150,11 @@ internal class OperationalCli(
                 )
             } ?: "none; run backup and copy it off-machine"}",
         )
+        latest?.let {
+            out.println(
+                "Last backup age: ${(System.currentTimeMillis() - it).coerceAtLeast(0) / 3_600_000} hours",
+            )
+        }
         out.println("System time: ${Instant.now()}; keep NTP enabled and verify this clock")
         out.println("Configuration and listen rule: ok")
         return if (okay) ExitCodes.OK else ExitCodes.ERROR

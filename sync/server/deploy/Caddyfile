@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: Unlicense
+{$SYNC_HOST:sync.example.org} {
+    header Strict-Transport-Security "max-age=31536000"
+    reverse_proxy neutrodyne-server:8787
+}

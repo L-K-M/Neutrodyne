@@ -19,6 +19,10 @@ internal class ServerRecovery(
     private val dataDir: Path,
     private val inputs: ServerInputs = productionInputs(),
 ) {
+    init {
+        prepareSqliteNative(dataDir)
+    }
+
     suspend fun restore(backup: Path): Path =
         withContext(Dispatchers.IO) {
             val database = dataDir.resolve(SqliteSyncStore.DATABASE_FILE)

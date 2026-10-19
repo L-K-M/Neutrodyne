@@ -2,7 +2,7 @@
 
 # Privacy
 
-v0 (M0a). The outline of 09's Privacy section; updated whenever a document adds
+Updated for MS1 server operation (2026-10-19). The outline of 09's Privacy section; updated whenever a document adds
 a network destination, final in M11b. The in-app "What Neutrodyne connects to"
 list uses the same IDs as the inventory below.
 
@@ -51,6 +51,26 @@ optional daily update check, and logs no tokens, passwords, feed URLs or
 payloads. You can unlink a device, revoke it from another device, and use
 "Delete my data on the server". A server on your home network needs Android's
 local-network permission (API 33+) / macOS's Local Network prompt.
+
+The server keeps account usernames, optional Argon2id password hashes, hashed
+authentication tokens, device names/platforms, link requests and a security audit
+trail with IP addresses. Request logs contain route templates, counts, status
+and timing, without credentials, library payloads or raw URLs. Server operators
+can inspect the database and any feed passwords you chose to share.
+
+The daily update check contacts this repository's GitHub release manifest and
+GitHub's release-asset host. Turn it off with
+`NEUTRODYNE_SERVER_UPDATE_CHECK=false`; the server then makes no outbound
+requests. Your TLS proxy may separately contact certificate authorities.
+No analytics or Neutrodyne-operated endpoint is involved.
+
+Database backups retain authentication hashes, audit history and any shared
+feed passwords. Per-account ZIP exports omit authentication state and feed
+passwords, but contain private feed URLs and listening history. Both stay on
+the operator's disk unless copied elsewhere. Account purge removes live library
+data and its account ZIPs, and revokes credentials. Whole-server historical
+backups still contain prior data until their configured retention expires.
+Operators choose where off-machine copies live and when to delete them.
 
 ## Desktop
 
