@@ -6,6 +6,7 @@ plugins {
 // The golden-corpus tree (03 Golden corpus) is a plain data directory of the :feeds project, added as
 // test resources here so the same fixtures also feed the Android parser tests from :core:data.
 sourceSets.test {
+    kotlin.srcDir(rootProject.file("feeds/src/test/kotlin"))
     resources.srcDir(rootProject.layout.projectDirectory.dir("feeds/src/test/resources"))
 }
 

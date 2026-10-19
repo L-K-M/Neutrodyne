@@ -1,0 +1,23 @@
+{
+  "status": true,
+  "feeds": [
+    {
+      "id": 1,
+      "url": "https://example.org/news.xml",
+      "title": "News",
+      "podcastGuid": "917393e3-1b1e-5cef-ace4-edaa54e1f810",
+      "dead": 0,
+      "medium": "podcast",
+      "newestItemPublishTime": 1791072000,
+      "episodeCount": 4,
+      "artwork": null,
+      "futureField": "ignored"
+    },
+    {
+      "id": 2,
+      "url": "javascript:alert(1)",
+      "title": null,
+      "dead": 1
+    }
+  ]
+}

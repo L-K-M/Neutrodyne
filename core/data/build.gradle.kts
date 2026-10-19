@@ -8,6 +8,7 @@ plugins {
 }
 
 kotlin {
+    sourceSets.named("desktopTest") { resources.srcDir(rootProject.file("feeds/src/test/resources")) }
     // Host (Robolectric) tests: the WorkManager test-driver suite, the foreground observer and the
     // golden corpus on the platform parser (03 corpus leg b). The task is `testAndroidHostTest`.
     targets.named("android") {
@@ -17,6 +18,11 @@ kotlin {
     }
 
     sourceSets {
+        named("androidHostTest") {
+            resources.srcDir(rootProject.file("feeds/src/test/resources"))
+            kotlin.srcDir(rootProject.file("feeds/src/test/kotlin"))
+        }
+
         commonMain.dependencies {
             implementation(project(":core:domain"))
             implementation(project(":core:model"))

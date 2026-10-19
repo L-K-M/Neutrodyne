@@ -1863,6 +1863,13 @@ All interceptors and the DNS chain live in the island and run identically on And
 
 **`UserAgentInterceptor`** sets `User-Agent: Neutrodyne/<versionName> (<platform>; +<REPO_URL>)` (from `UserAgentProvider`) **only when the request has none** (OkHttp-only callers: Media3, Coil, `HttpByteSource`, `PyHttp`), where `<platform>` comes from `PlatformInfo` (`Android 17`; `Windows 11; x64`; `macOS 15.1; arm64`; `Linux; x64`), so the client-specific User-Agents that yt-dlp sets per request (passed through `PyHttp` unchanged) and any 04-mandated UA survive. Non-ASCII characters are replaced with `?` (OkHttp rejects non-ASCII header values). Some hosts reject generic UAs, so the UA is never empty or the OkHttp default.
 
+**Implementation note (2026-10-19, M7):** Directory callers reuse the API
+client and pass an internal origin marker to the existing network auth
+interceptor. It removes the marker before transmission, suppresses publisher
+Basic auth on directory calls, and strips PI's three auth headers on a different
+scheme/host/port. Request tags preserve this scope through OkHttp redirects;
+the marker preserves it through Ktor redirects. No new HTTP client is created.
+
 **`AuthInterceptor`** (Basic auth for private feeds and their same-origin enclosures, [03](03-feeds-and-discovery.md#feed-moves-auth-and-paging)):
 
 ```kotlin

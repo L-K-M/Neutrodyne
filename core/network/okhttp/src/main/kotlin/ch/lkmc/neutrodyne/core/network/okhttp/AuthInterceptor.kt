@@ -35,9 +35,31 @@ class AuthInterceptor(
     private val lookup: Provider<CredentialLookup>,
 ) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
-        val request = chain.request()
+        var request = chain.request()
+        val directoryOrigin =
+            request.header(DIRECTORY_ORIGIN_HEADER)
+                ?: request.tag(DirectoryAuthOrigin::class.java)?.value
+        if (directoryOrigin != null) {
+            val builder =
+                request
+                    .newBuilder()
+                    .removeHeader(DIRECTORY_ORIGIN_HEADER)
+                    .tag(DirectoryAuthOrigin::class.java, DirectoryAuthOrigin(directoryOrigin))
+            if ("${request.url.scheme}://${request.url.host}:${request.url.port}" != directoryOrigin) {
+                builder.removeHeader("X-Auth-Key").removeHeader("X-Auth-Date").removeHeader("Authorization")
+            }
+            // Directory requests never borrow a publisher's stored Basic credentials.
+            return chain.proceed(builder.build())
+        }
         if (request.header("Authorization") != null) return chain.proceed(request)
         val value = lookup().basicAuthorization(Origin.of(request.url)) ?: return chain.proceed(request)
         return chain.proceed(request.newBuilder().header("Authorization", value).build())
     }
 }
+
+/** Internal Ktor→island marker, removed before the request reaches the wire. */
+private const val DIRECTORY_ORIGIN_HEADER = "X-Neutrodyne-Directory-Origin"
+
+private class DirectoryAuthOrigin(
+    val value: String,
+)
