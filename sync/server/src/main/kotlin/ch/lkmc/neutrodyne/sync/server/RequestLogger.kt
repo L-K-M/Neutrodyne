@@ -104,6 +104,8 @@ internal class RequestLogger(
                 "/sessions/revoke",
                 "/library",
                 "/account",
+                "/account/export",
+                "/api/v1/account/export",
                 "/account/password",
                 "/account/delete",
                 "/admin/accounts",

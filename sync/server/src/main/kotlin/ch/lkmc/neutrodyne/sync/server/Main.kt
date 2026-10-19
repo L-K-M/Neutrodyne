@@ -53,6 +53,7 @@ internal fun serve(config: ServerConfig) {
                                 services = services,
                             ).install(this)
                             services.updates.start(this)
+                            services.backupJob.start(this, services.gcJob)
                             monitor.subscribe(ServerReady) { ready.set(true) }
                         }
                     },

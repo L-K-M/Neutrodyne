@@ -7,15 +7,18 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.ChangesPage
 import ch.lkmc.neutrodyne.sync.protocol.dto.DeviceRenameRequest
 import ch.lkmc.neutrodyne.sync.protocol.dto.LibraryCountsDto
 import ch.lkmc.neutrodyne.sync.protocol.dto.SyncResponse
+import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.plugins.ratelimit.rateLimit
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondOutputStream
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
+import java.nio.file.Files
 import kotlin.time.Instant
 
 internal class DeviceRoutes(
@@ -106,9 +109,18 @@ internal class ChangesRoutes(
 internal class AccountRoutes(
     private val accounts: AccountService,
     private val writer: StoredRecordWriter,
+    private val backups: AccountBackups,
 ) {
     fun install(route: Route) {
         route.rateLimit(RateLimits.ACCOUNT) {
+            get("/api/v1/account/export") {
+                val principal = call.principal()
+                backups.authorizeDownload(principal)
+                call.response.headers.append("Content-Disposition", "attachment; filename=neutrodyne-backup.zip")
+                call.respondOutputStream(ContentType.Application.Zip) {
+                    backups.download(principal) { path -> Files.newInputStream(path).use { it.copyTo(this) } }
+                }
+            }
             get("/api/v1/account") { call.respond(accounts.summary(call.principal())) }
             post("/api/v1/account/reset") {
                 val request = call.receive<AccountResetRequest>()

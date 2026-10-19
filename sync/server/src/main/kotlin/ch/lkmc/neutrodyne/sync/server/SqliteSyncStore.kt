@@ -190,6 +190,15 @@ internal class SqliteSyncStore(
             }
         }
 
+    /** DB-only maintenance callback, serialized with requests. No connection escapes this scope. */
+    suspend fun <T> maintenance(block: Connection.() -> T): T =
+        withContext(writerDispatcher) {
+            lifetime.read {
+                check(!closed)
+                writer.block()
+            }
+        }
+
     /** A real rolled-back write checks the database, not merely the volume's free-space estimate. */
     suspend fun writeProbe(): Boolean =
         withContext(writerDispatcher) {
@@ -531,7 +540,7 @@ private fun key(
     rid: String,
 ) = RecordKey(collection, RecordId.fromRid(collection, rid))
 
-private fun ResultSet.storedRecord(): StoredRecord =
+internal fun ResultSet.storedRecord(): StoredRecord =
     StoredRecord(
         key(SyncCollection.fromWire(getString("coll")), getString("rid")),
         SyncJson.decodeFromString(RecordState.serializer(), getString("data")),
@@ -541,7 +550,7 @@ private fun ResultSet.storedRecord(): StoredRecord =
         getLong("dead_at").let { if (wasNull()) null else it },
     )
 
-private fun Connection.sql(sql: String) {
+internal fun Connection.sql(sql: String) {
     createStatement().use { it.execute(sql) }
 }
 
@@ -566,7 +575,7 @@ internal fun <T> Connection.query(
         statement.executeQuery().use { rows -> buildList { while (rows.next()) add(row(rows)) } }
     }
 
-private fun <T> transaction(
+internal fun <T> transaction(
     connection: Connection,
     block: () -> T,
 ): T {

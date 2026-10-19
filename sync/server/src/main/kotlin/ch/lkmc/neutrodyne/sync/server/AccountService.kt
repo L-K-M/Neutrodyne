@@ -10,6 +10,7 @@ internal class AccountService(
     private val auth: AuthStore,
     private val store: SyncStore,
     private val inputs: ServerInputs,
+    private val backups: AccountBackups? = null,
 ) {
     private val secrets = AuthSecrets(inputs)
 
@@ -38,12 +39,22 @@ internal class AccountService(
         }
     }
 
-    /** W7 must coordinate backup deletion/export with this operation before exposing export routes. */
     suspend fun purge(
         principal: AccountPrincipal,
         confirm: String,
     ) {
         if (confirm != "DELETE") invalidAuth()
+        if (backups != null) {
+            backups.locked(principal.accountId) {
+                purgeRecords(principal)
+                backups.deleteLocked(principal.accountId)
+            }
+        } else {
+            purgeRecords(principal)
+        }
+    }
+
+    private suspend fun purgeRecords(principal: AccountPrincipal) {
         val oldEpoch = store.read(principal.accountId) { account.cursor.epoch }
         var epoch = secrets.epoch()
         while (epoch == oldEpoch) epoch = secrets.epoch()

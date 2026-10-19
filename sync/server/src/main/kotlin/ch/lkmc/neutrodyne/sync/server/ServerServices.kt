@@ -16,12 +16,15 @@ internal class ServerServices(
     val links = LinkService(store, inputs, config.publicUrl?.resolve("/link")?.toString() ?: "/link")
     val sessions = WebSessions(tokens, config, inputs)
     val devices = DeviceService(store, inputs)
-    val accounts = AccountService(store, store, inputs)
-    val admin = AdminService(store, store, inputs)
+    val backups = AccountBackups(store, config, inputs)
+    val accounts = AccountService(store, store, inputs, backups)
+    val admin = AdminService(store, store, inputs, backups)
     val audit = AuditLog(store, inputs)
     val metrics = ServerMetrics(store, config.dataDir)
     val updates =
         ServerUpdateNotice(if (config.updateCheck) UpdateCheckMode.ENABLED else UpdateCheckMode.DISABLED, inputs)
+    val backupJob = BackupJob(store, config, backups, metrics, inputs)
+    val gcJob = GcJob(store, config, inputs, metrics)
     val records = StoredRecordWriter(store, inputs, config.retentionUnsubscribedDays)
 
     suspend fun features(): List<String> =

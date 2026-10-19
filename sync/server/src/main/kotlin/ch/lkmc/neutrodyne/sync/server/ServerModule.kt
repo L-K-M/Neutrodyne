@@ -130,7 +130,7 @@ internal class ServerModule(
                     DeviceRoutes(services.devices).install(this)
                     SyncRoutes(services.records, services.metrics).install(this)
                     ChangesRoutes(services.records, services.inputs, services.metrics).install(this)
-                    AccountRoutes(services.accounts, services.records).install(this)
+                    AccountRoutes(services.accounts, services.records, services.backups).install(this)
                     EventsRoutes(services.events, services.metrics, services.tokens::valid).install(this)
                     AdminWeb(services, config, serverVersion).install(this)
                 }

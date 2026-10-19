@@ -9,7 +9,7 @@ import kotlin.io.path.Path
 
 /**
  * The `neutrodyne-server` command line (10 CLI): serve, version and account administration.
- * W7 supplies backup, restore, migrate and doctor. Unknown or missing
+ * Includes backup, restore, migrate and doctor. Unknown or missing
  * commands print the usage and exit 2; configuration problems print one line per error and
  * exit 1.
  */
@@ -34,6 +34,10 @@ internal class ServerCli(
 
             SERVE_COMMAND -> {
                 serve()
+            }
+
+            "backup", "restore", "migrate", "doctor" -> {
+                OperationalCli(args, environment, out, err).run()
             }
 
             "admin", "user" -> {
@@ -277,7 +281,12 @@ internal class ServerCli(
               user disable <username> [--config <server.properties>]
               user list [--config <server.properties>]
                   Administer accounts as the server OS user. Passwords are prompted,
-                  never accepted as arguments. Backup/restore commands arrive with W7.
+                  never accepted as arguments.
+              backup <file> [--config <server.properties>]
+              restore <file> [--config <server.properties>]
+              migrate [--check] [--config <server.properties>]
+              doctor [--config <server.properties>]
+                  Restore requires all server/admin processes stopped. Keep backups off-machine.
             """.trimIndent() + "\n"
     }
 }

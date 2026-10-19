@@ -1531,6 +1531,21 @@ Every purge raises `account.min_cursor` to the highest purged `seq`, so only a d
 
 ### Backups
 
+**Implementation note (2026-10-19, MS1).** W7 stages a validated copy of the
+current database, imports backed-up content for matching current accounts,
+then applies the carried identity ledger before atomically replacing the file.
+The replaced WAL-consistent database is retained. Current credentials, devices,
+audit, installation identity and clock watermark survive; links are dropped and
+epochs rotate. Unreadable current authority refuses ordinary restore without
+modifying it: recover that database or initialize a fresh server and forget old
+sync metadata on every client before re-linking. There is no implicit recovery
+that trusts stale backup credentials. Daily exports replace the same date only
+after validation; file and process locks serialize export/download with purge.
+Purge removes per-account ZIPs, including temporary files, but existing whole
+server backups retain their historical content until retention removes them.
+Copy both backup directories off-machine and protect them like the live database.
+
+
 **Implementation note (2026-10-19, MS1).** Normal restore carries current auth and
 immutable redirect ledger forward, canonicalizes restored records/children,
 ignores obsolete backup assignments, preserves raw clocks/hints, maximum watermark,

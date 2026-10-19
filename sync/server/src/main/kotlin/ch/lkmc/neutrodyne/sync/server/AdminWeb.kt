@@ -10,6 +10,7 @@ import io.ktor.server.application.ApplicationCall
 import io.ktor.server.html.respondHtml
 import io.ktor.server.plugins.ratelimit.rateLimit
 import io.ktor.server.request.receiveParameters
+import io.ktor.server.response.respondOutputStream
 import io.ktor.server.response.respondRedirect
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
@@ -39,6 +40,7 @@ import kotlinx.html.p
 import kotlinx.html.select
 import kotlinx.html.title
 import kotlinx.html.ul
+import java.nio.file.Files
 import kotlin.time.Instant
 
 /** All untrusted strings use the HTML builder's text/attribute escaping; no unsafe HTML or script. */
@@ -95,6 +97,15 @@ internal class AdminWeb(
                     library.next?.let { a(href = "/library?after=$it") { +"Next page" } }
                 }
             }
+            get("/account/export") {
+                session(call)
+                val principal = call.principal()
+                services.backups.authorizeDownload(principal)
+                call.response.headers.append("Content-Disposition", "attachment; filename=neutrodyne-backup.zip")
+                call.respondOutputStream(io.ktor.http.ContentType.Application.Zip) {
+                    services.backups.download(principal) { path -> Files.newInputStream(path).use { it.copyTo(this) } }
+                }
+            }
             get("/account") {
                 val csrf = session(call)
                 val summary = services.accounts.summary(call.principal())
@@ -103,6 +114,7 @@ internal class AdminWeb(
                     p { +summary.username }
                     passwordAt?.let { p { +"Password set on ${date(it)}" } }
                     a(href = "/devices") { +"Review browser sessions" }
+                    a(href = "/account/export") { +"Download my data" }
                     formFor("/account/password", csrf, "Set password") {
                         field("current", "Current password", InputType.password)
                         field("password", "New password (10–256 characters)", InputType.password)

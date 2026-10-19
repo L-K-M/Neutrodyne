@@ -31,6 +31,7 @@ internal class AdminService(
     private val store: AuthStore,
     private val records: SyncStore,
     private val inputs: ServerInputs,
+    private val backups: AccountBackups? = null,
 ) {
     suspend fun accounts(actor: AccountPrincipal? = null): List<AccountListing> =
         store.readAuth {
@@ -56,6 +57,22 @@ internal class AdminService(
         action: AccountAction,
         confirmation: String = "",
         actor: AccountPrincipal? = null,
+    ) {
+        if (action == AccountAction.DELETE && backups != null) {
+            backups.locked(id) {
+                changeAccount(id, action, confirmation, actor)
+                backups.deleteLocked(id)
+            }
+        } else {
+            changeAccount(id, action, confirmation, actor)
+        }
+    }
+
+    private suspend fun changeAccount(
+        id: Long,
+        action: AccountAction,
+        confirmation: String,
+        actor: AccountPrincipal?,
     ) {
         val now = inputs.wallMs()
         store.writeAuth {
