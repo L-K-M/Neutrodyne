@@ -2317,6 +2317,15 @@ Never shipped (each would be a licence regression, risk L2; [D3](../PLAN.md#3-ke
 
 Tasks (all configuration-cache safe):
 
+Implementation note (2026-10-19, M9a): W2 activates both hosts' shared
+`verifyBundledYtDlp` gate, superseding its historical no-op status below.
+Missing/tampered inputs fail. The pinned v4 RSA/SHA-512 verifier uses JDK
+cryptography only; Android asset generation depends on it. Keys/signatures
+stay build-only. The Android lock and engine-only AboutLibraries entries
+inventory yt-dlp 2026.08.19, ejs 0.8.0, meriyah 6.1.4 and astring 1.9.0.
+
+
+
 | Task | Project | In `check` | Fails when |
 |---|---|---|---|
 | `checkPythonLicences` | `:youtube:ytdlp` | yes (from M0a, whatever S7 decides; the licence allow-list check is unconditional) | a component's licence is not on the allow-list (MPL-2.0 outside `kind = "data"` — the Android lock has no `pbs-patches` case; an `OR` expression without an allowed `elected`); the lockfile is not valid TOML, a `[[component]]` entry is not a table or lacks a required field (Tomlj's recoverable errors are rejected since 2026-10-06 — a duplicated key used to keep its first value and pass); only while `:youtube:ytdlp` applies Chaquopy (S7 go): the lockfile's `chaquopy`, `python` or `pip` differ from the build's Chaquopy plugin version, the exact resolved `com.chaquo.python:target` runtime version (`3.14.0-0`: the DSL's `3.14` selects `3.14.0`, so the lock must match the packaged runtime, not the selector — 2026-10-06) or pip requirements; the CPython component's `version`/`origin` differs from that runtime, or another component pins a different `com.chaquo.python:target` origin; the build declares any `install("-r", …)` requirement file or a `-r`/`--requirement`/`-e`/`--editable` `options(…)` flag — separate or with its argument attached (`-rFILE`, `-ePATH`, `--editable=PATH`); all bypass the lock's `pip` list and are rejected under the no-pip policy (2026-10-06; attached short-flag arguments were still accepted that day and are covered by negative fixtures); on a fallback host the lockfile's `python` entry is checked against the A2 package instead, and with the Kotlin port the CPython rows leave the lockfile; the vendored `bundled.json` version differs from the yt-dlp entry; the top-level packages inside the vendored `yt-dlp` are anything but `yt_dlp` and `yt_dlp_ejs`; a component has no AboutLibraries manual definition with its `aboutLibrariesId` (so the Licences screen and `THIRD_PARTY_NOTICES.md` cannot drift) |

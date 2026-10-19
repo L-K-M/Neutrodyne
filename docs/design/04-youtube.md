@@ -1085,6 +1085,35 @@ The vendored yt-dlp file (first bullet) is shared by both hosts; everything afte
 
 `EngineStore` extracts a version (zip-slip and size checks as in [Update flow](#update-flow)) before `:ytx` is first bound to it, on `@Dispatcher(IO)`. `YtxPython` compiles an uncompiled `lib/` on its first import (`compileall`, legacy layout; 1.4 s for the whole zip on a host CPU, device time measured by the spike), writes the marker and makes the files read-only; later imports read `.pyc` (host 0.13–0.16 s, against 0.5–0.6 s from the zip). So that this one-time cost — on top of Chaquopy's own first-start extraction — never lands on a playback resolve, the order-210 initializer enqueues the one-time work `engine-prepare` (`KEEP`, 30 s initial delay, no network) whenever the bundled version has no compile marker for this app version, i.e. after every install or app update: it extracts the bundled version and binds `:ytx` once to compile and import it while nothing waits on it, then lets the idle stop end `:ytx`. `YtxPython` runs `Python.start`, compilation and imports on a worker thread, never on `:ytx`'s main thread (`onCreate`/`onBind` return at once, so no service-start ANR), and `ping` answers `ready` only afterwards. A marker for another Python minor (an app update that changed CPython) makes `EngineStore` re-extract from the kept zip.
 
+Implementation note (2026-10-19, M9a): W2 implements adopted resolutions
+1, 2 and 11 in `:youtube:engine`; host selection/activation remain **spike
+pending**. The documented 2026.08.19 pin is unchanged: 3,072,469 bytes,
+SHA-256 `1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6`,
+1,053 files / 10,161,243 expanded bytes; ejs 0.8.0, meriyah 6.1.4, astring
+1.9.0. Signature/fingerprint/hash were verified in a fresh temporary directory
+before copying, without executing upstream code. Only ZIP/metadata enter APK
+assets; the key and verifier remain build-only.
+
+M9a `active.json` holds current/bundled/full compile identity only, written
+by the main process through synced temp plus atomic rename. Extraction limits
+are 10 MiB compressed, 40 MiB expanded, 8 MiB/entry, 4,096 entries, 512-byte
+paths and 200:1 expansion. It checks sizes/CRC and rejects traversal,
+duplicates/collisions, symlinks/special files, encryption/native/precompiled
+code and roots outside the documented allow-list. Extracted sources are
+read-only, with writable directories until W4 compiles legacy `.pyc`.
+
+Order 150 reads status only; order 210 schedules unique KEEP `engine-prepare`
+after 30 s with no network requirement. W11 owns wiring these hooks and the
+worker; shells remain external. Preparation publishes `hostLibDir` while
+status stays PREPARING. The worker pings W4's transport for worker-owned
+compile/import; W4 calls `EngineCompileMarkers.write` after success and source
+removal, sealing files and writing the full-identity `.compiled-<minor>`.
+Delayed work rechecks settings and platform preflight before binding.
+Worker success requires reloaded compiled status. Torn active/marker, missing
+required bytecode, app/Python changes or interrupted compile re-extract from
+the APK on explicit preparation. Playback never prepares inline; broken
+bridge fallback remains W3/W4's fail-closed responsibility.
+
 - **Sizes** (estimates from Chaquopy's 3.14.0 runtime artifacts, [runtime artifacts](https://repo1.maven.org/maven2/com/chaquo/python/target/), and the release asset):
 
 | Piece, per 64-bit ABI | Default native packaging | Legacy packaging (`useLegacyPackaging`) |

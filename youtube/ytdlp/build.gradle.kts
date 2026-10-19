@@ -35,6 +35,24 @@ chaquopy {
     }
 }
 
+// Package only data needed at runtime; upstream verification and its key remain build-only.
+val bundledAssetsDirectory = layout.buildDirectory.dir("generated/bundledEngineAssets")
+val bundledAssets =
+    tasks.register<Sync>("prepareBundledYtDlpAssets") {
+        dependsOn("verifyBundledYtDlp")
+        from(layout.projectDirectory.dir("engine")) {
+            include("yt-dlp", "bundled.json")
+            into("ytdlp")
+        }
+        into(bundledAssetsDirectory)
+    }
+// Chaquopy exposes legacy Kotlin DSL accessors; select AGP's actual source-set type explicitly.
+extensions.configure<com.android.build.api.dsl.LibraryExtension> {
+    // AGP rejects SourceSet providers; preBuild below supplies the producer dependency explicitly.
+    sourceSets.named("main") { assets.srcDir(bundledAssetsDirectory.get().asFile) }
+}
+tasks.named("preBuild") { dependsOn(bundledAssets) }
+
 dependencies {
     implementation(project(":youtube:engine"))
     implementation(project(":youtube:api"))
@@ -42,6 +60,14 @@ dependencies {
     implementation(project(":core:common"))
     implementation(project(":core:datastore"))
     implementation(project(":core:network:okhttp"))
+
+    implementation(libs.androidx.work.runtime)
+    implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.okio)
+    testImplementation(libs.kotlin.test)
+    testImplementation(libs.androidx.work.testing)
+    testImplementation(libs.androidx.room.runtime)
+    testImplementation(libs.kotlinx.coroutines.test)
 
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.ext.junit)

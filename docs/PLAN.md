@@ -1411,6 +1411,15 @@ No schema change is authorized here.
 
 #### M9: YouTube playback and downloads via the embedded yt-dlp engine
 
+Implementation note (2026-10-19, M9a): W2 supplies D72's verified bundle/store
+and D76's build-time trust gate, implementing adopted resolutions 1, 2 and
+11 now in the JVM island. Host selection/activation remain **spike pending**.
+The 2026.08.19 pin is unchanged. W11 owns startup wiring; W4 owns compile/import
+using W2's marker helper. No inline playback preparation or M9b machinery.
+See 04 Host and packaging for limits/recovery and 01/09 for licence gates.
+
+
+
 
 Implementation note (2026-10-19, M9a): Adopted resolution 2 permits portable
 contracts, implementations and deterministic tests before the reference-device

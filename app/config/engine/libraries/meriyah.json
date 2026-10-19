@@ -1,0 +1,12 @@
+{
+  "uniqueId": "neutrodyne:meriyah",
+  "name": "meriyah",
+  "description": "Bundled in yt_dlp_ejs/yt/solver/lib.min.js.",
+  "website": "https://github.com/meriyah/meriyah",
+  "developers": [],
+  "licenses": [
+    "isc-meriyah"
+  ],
+  "artifactVersion": "6.1.4",
+  "tag": "bundled"
+}
