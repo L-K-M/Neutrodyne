@@ -21,6 +21,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.After
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -349,6 +350,84 @@ class DownloadDaoTest {
             assertEquals(State.DOWNLOADING, dao.byEpisode(ids[2])?.state)
             assertEquals(Wait.SYSTEM, dao.byEpisode(ids[3])?.waitReason)
             assertEquals(State.PAUSED, dao.byEpisode(ids[4])?.state)
+        }
+
+    @Test fun taskManagerResetFiltersOwnersAndPreservesTransferProgress() =
+        runTest {
+            val ids = seed(11)
+            val original =
+                row(ids[0]).copy(
+                    state = State.VERIFYING,
+                    runnerToken = "uidt:1000:stopped",
+                    downloadedBytes = 2048,
+                    tempPath = ".partial/transfer.part",
+                    etag = "strong-etag",
+                    attempt = 2,
+                    nextAttemptAt = 5000,
+                )
+            dao.insert(original)
+            dao.insert(row(ids[1]).copy(waitReason = Wait.SYSTEM, nextAttemptAt = 9000))
+            dao.insert(row(ids[2]).copy(state = State.RESOLVING, runnerToken = "work:manual:stale"))
+            dao.insert(row(ids[3]).copy(state = State.DOWNLOADING, lane = Lane.AUTO, runnerToken = "uidt:1000"))
+            dao.insert(row(ids[4]).copy(state = State.DOWNLOADING, runnerToken = "uidt:2000:live"))
+            dao.insert(row(ids[5]).copy(state = State.RESOLVING, runnerToken = null))
+            dao.insert(row(ids[6]).copy(lane = Lane.AUTO))
+            dao.insert(row(ids[7]).copy(state = State.PAUSED))
+            dao.insert(row(ids[8]).copy(state = State.COMPLETED))
+            dao.insert(row(ids[9]).copy(state = State.QUEUED, runnerToken = "uidt:2000:live"))
+            dao.insert(row(ids[10]).copy(state = State.FAILED))
+            val before = dao.allRows().associateBy { it.episodeId }
+            val live = setOf("uidt:2000:live")
+
+            assertEquals(2, dao.resetTaskManagerStoppedRunners(live, -4))
+            assertEquals(0, dao.resetTaskManagerStoppedRunners(live, -4))
+            assertEquals(
+                original.copy(
+                    state = State.PAUSED,
+                    runnerToken = null,
+                    waitReason = Wait.NONE,
+                    lastError = Error.CANCELLED_BY_SYSTEM,
+                    lastStopReason = -4,
+                ),
+                dao.byEpisode(ids[0]),
+            )
+            assertEquals(
+                before.getValue(ids[1]).copy(state = State.PAUSED, waitReason = Wait.NONE, lastStopReason = -4),
+                dao.byEpisode(ids[1]),
+            )
+            // The dedicated transaction must not consume rows owned by other runners or final states.
+            for (id in ids.drop(2)) assertEquals(before.getValue(id), dao.byEpisode(id))
+
+            assertEquals(3, dao.resetOrphanedRunners(live, -1))
+            for (id in ids.slice(2..3) + ids[5]) {
+                assertEquals(State.QUEUED, dao.byEpisode(id)?.state)
+                assertEquals(Wait.SYSTEM, dao.byEpisode(id)?.waitReason)
+                assertEquals(-1, dao.byEpisode(id)?.lastStopReason)
+            }
+            assertEquals(State.PAUSED, dao.byEpisode(ids[0])?.state)
+            assertEquals(-4, dao.byEpisode(ids[1])?.lastStopReason)
+        }
+
+    @Test fun taskManagerResetRollsBackActivePauseIfQueuePauseFails() =
+        runTest {
+            val ids = seed(2)
+            dao.insert(row(ids[0]).copy(state = State.DOWNLOADING, runnerToken = "uidt:1000"))
+            dao.insert(row(ids[1]))
+            val before = dao.allRows()
+            // Fail the companion statement to prove both updates share one write transaction.
+            db.useWriterConnection { connection ->
+                connection.exec(
+                    "CREATE TEMP TRIGGER reject_queue_pause BEFORE UPDATE ON download" +
+                        " WHEN OLD.state = 'QUEUED' AND NEW.state = 'PAUSED'" +
+                        " BEGIN SELECT RAISE(ABORT, 'Queue pause rejected'); END",
+                )
+            }
+            assertFailsWith<androidx.sqlite.SQLiteException> {
+                dao.resetTaskManagerStoppedRunners(emptySet(), -4)
+            }
+            assertEquals(before, dao.allRows())
+            db.useWriterConnection { it.exec("DROP TRIGGER reject_queue_pause") }
+            assertEquals(2, dao.resetTaskManagerStoppedRunners(emptySet(), -4))
         }
 
     @Test fun autoCandidatesHonorWatermarkTombstoneAndExistingSlots() =

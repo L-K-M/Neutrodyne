@@ -25,6 +25,7 @@ import ch.lkmc.neutrodyne.core.domain.CleanupPlanner
 import ch.lkmc.neutrodyne.core.domain.DownloadLifecycle
 import ch.lkmc.neutrodyne.core.domain.DownloadMover
 import ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver
+import ch.lkmc.neutrodyne.core.domain.ExitReasonProbe
 import ch.lkmc.neutrodyne.core.domain.MissingLocalMediaReporter
 import ch.lkmc.neutrodyne.core.model.DownloadLane
 import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
@@ -94,11 +95,22 @@ object AndroidDownloadBindings {
     ): StorageRoots = AndroidStorageRoots(application, device)
 
     @Provides
+    @SingleIn(AppScope::class)
+    internal fun exitReasons(application: Application): ExitReasonProbe = AndroidExitReasonProbe(application)
+
+    @Provides
+    @SingleIn(AppScope::class)
+    internal fun jobs(application: Application): JobSchedulerFacade = JobSchedulerFacade(application)
+
+    @Provides
     internal fun host(
         application: Application,
         scheduler: Lazy<AndroidDownloadScheduler>,
         charging: DownloadChargingMonitor,
         device: DeviceSettingsStore,
+        db: Lazy<NeutrodyneDatabase>,
+        exitReasons: ExitReasonProbe,
+        jobs: JobSchedulerFacade,
     ): DownloadHost =
         DownloadHost(
             { scheduler.value.liveTokens() },
@@ -128,6 +140,9 @@ object AndroidDownloadBindings {
                 }
             },
             charging = charging.charging,
+            beforeRunnerReset = { live ->
+                AndroidTaskManagerReset(db.value.downloadDao(), exitReasons, jobs).reset(live)
+            },
         )
 
     @Provides internal fun index(impl: LocalMediaIndexImpl): LocalMediaIndex = impl
@@ -162,6 +177,7 @@ object AndroidDownloadBindings {
         notifications: DownloadNotifications,
         clock: Clock,
         registry: LaneRegistry,
+        jobs: JobSchedulerFacade,
     ): AndroidDownloadScheduler =
         AndroidDownloadScheduler(
             rows = {
@@ -181,7 +197,7 @@ object AndroidDownloadBindings {
             },
             visible = visibility::isVisible,
             backgroundLimited = { backgroundLimited(application) },
-            scheduleUidt = JobSchedulerFacade(application)::scheduleManual,
+            scheduleUidt = jobs::scheduleManual,
             enqueue = queue::lane,
             armWake = { lane, request -> if (request == null) queue.cancelWake(lane) else queue.wake(lane, request) },
             runtimeWake = { runtime.value.wake(it) },
