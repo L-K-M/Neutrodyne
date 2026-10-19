@@ -4,20 +4,26 @@ package ch.lkmc.neutrodyne.feature.importexport
 
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.v2.runComposeUiTest
@@ -25,16 +31,24 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.PagingSource
+import androidx.paging.PagingState
+import androidx.paging.testing.asPagingSourceFactory
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
+import ch.lkmc.neutrodyne.core.domain.GroupError
+import ch.lkmc.neutrodyne.core.domain.GroupRepository
 import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.domain.ImportScreenVisibility
 import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.GroupProposal
 import ch.lkmc.neutrodyne.core.model.ImportFormat
+import ch.lkmc.neutrodyne.core.model.ImportItemFilter
 import ch.lkmc.neutrodyne.core.model.ImportItemKind
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
 import ch.lkmc.neutrodyne.core.model.ImportItemView
@@ -50,12 +64,15 @@ import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.PlatformActions
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -164,6 +181,7 @@ class ImportRouteTest {
     private fun androidx.compose.ui.test.ComposeUiTest.setRouteContent(
         key: ImportKey,
         viewModel: ImportViewModel? = null,
+        visible: State<Boolean> = mutableStateOf(true),
     ) {
         val sessionId = key.sessionId.toLongOrNull() ?: -1L
         val vm = viewModel ?: ImportViewModel(sessionId, imports, groups, visibility, appScope)
@@ -176,10 +194,15 @@ class ImportRouteTest {
                     LocalPlatformActions provides actions,
                 ) {
                     NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
-                        if (key.sessionId.toLongOrNull() == null) {
-                            ImportRoute(key)
-                        } else {
-                            ImportSessionRoute(key, sessionId, vm)
+                        val saved = rememberSaveableStateHolder()
+                        if (visible.value) {
+                            saved.SaveableStateProvider("import") {
+                                if (key.sessionId.toLongOrNull() == null) {
+                                    ImportRoute(key)
+                                } else {
+                                    ImportSessionRoute(key, sessionId, vm)
+                                }
+                            }
                         }
                     }
                 }
@@ -652,6 +675,234 @@ class ImportRouteTest {
                 imports.sessions.value[id]
                     ?.options
                     ?.targetGroupId == groupId
+            }
+        }
+
+    private fun routeViewModel(
+        id: Long,
+        repository: ImportRepository = imports,
+        groupRepository: GroupRepository = groups,
+    ) = ImportViewModel(id, repository, groupRepository, visibility, appScope)
+
+    private fun optionsRepository(write: suspend (Long, (ImportOptions) -> ImportOptions) -> Unit) =
+        object : ImportRepository by imports {
+            override suspend fun updateOptions(
+                sessionId: Long,
+                change: (ImportOptions) -> ImportOptions,
+            ) = write(sessionId, change)
+        }
+
+    private fun options(id: Long) =
+        imports.sessions.value
+            .getValue(id)
+            .options
+
+    private fun androidx.compose.ui.test.ComposeUiTest.enterTargetName() {
+        onNodeWithText("Put everything into group…").performClick()
+        onNodeWithText("New group…").performClick()
+        onNodeWithText("Group name").performTextReplacement("News")
+    }
+
+    @Test fun settledNoMatchSearchAndFilterDoNotShowLoading() =
+        runComposeUiTest {
+            val id = seed()
+            val repo =
+                object : ImportRepository by imports {
+                    override fun pagedItems(
+                        sessionId: Long,
+                        filter: ImportItemFilter,
+                    ): kotlinx.coroutines.flow.Flow<androidx.paging.PagingData<ImportItemView>> {
+                        val rows = imports.createItems.filter { filter != ImportItemFilter.NEEDS_ATTENTION }
+                        return Pager(
+                            PagingConfig(pageSize = 40, enablePlaceholders = false),
+                            pagingSourceFactory = rows.asPagingSourceFactory(),
+                        ).flow
+                    }
+                }
+            val vm = routeViewModel(id, repo)
+            setRouteContent(ImportKey(id.toString()), vm)
+            vm.setQuery("absent title")
+            waitForIdle()
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasText("No matching podcasts"))
+            onNodeWithText("No matching podcasts").assertIsDisplayed()
+            onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo)).assertCountEquals(0)
+
+            vm.setQuery("")
+            vm.setFilter(ImportItemFilter.NEEDS_ATTENTION)
+            waitForIdle()
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasText("No matching podcasts"))
+            onNodeWithText("No matching podcasts").assertIsDisplayed()
+            onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo)).assertCountEquals(0)
+        }
+
+    @Test fun initialPageLoadingAndFailureAreDistinctAndRetryable() =
+        runComposeUiTest {
+            val id = seed()
+            val gate = CompletableDeferred<Unit>()
+            val fail = AtomicBoolean(true)
+            val repo =
+                object : ImportRepository by imports {
+                    override fun pagedItems(
+                        sessionId: Long,
+                        filter: ImportItemFilter,
+                    ) = Pager(PagingConfig(pageSize = 10, enablePlaceholders = false)) {
+                        object : PagingSource<Int, ImportItemView>() {
+                            override fun getRefreshKey(state: PagingState<Int, ImportItemView>): Int? = null
+
+                            override suspend fun load(params: LoadParams<Int>): LoadResult<Int, ImportItemView> {
+                                gate.await()
+                                if (fail.get()) return LoadResult.Error(IllegalStateException("read failed"))
+                                return LoadResult.Page(listOf(item(0)), null, null)
+                            }
+                        }
+                    }.flow
+                }
+            val vm = routeViewModel(id, repo)
+            setRouteContent(ImportKey(id.toString()), vm)
+            onNode(hasScrollToIndexAction()).performScrollToIndex(7)
+            onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo)).assertIsDisplayed()
+            onNodeWithText("No matching podcasts").assertDoesNotExist()
+            gate.complete(Unit)
+            waitUntil(timeoutMillis = 5_000) {
+                onAllNodesWithText("Couldn't load the import").fetchSemanticsNodes().isNotEmpty()
+            }
+            onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo)).assertCountEquals(0)
+            onNodeWithText("No matching podcasts").assertDoesNotExist()
+            fail.set(false)
+            onNodeWithText("Retry").performClick()
+            assertDisplayedWhenReady("Show 0")
+            onNodeWithText("Couldn't load the import").assertDoesNotExist()
+        }
+
+    @Test fun savingTwiceWhilePendingAcceptsOnlyOneMutation() =
+        runComposeUiTest {
+            val id = seed()
+            val gate = CompletableDeferred<Unit>()
+            val writes = AtomicInteger()
+            val repo =
+                optionsRepository { sessionId, change ->
+                    writes.incrementAndGet()
+                    gate.await()
+                    imports.updateOptions(sessionId, change)
+                }
+            val vm = routeViewModel(id, repo)
+            setRouteContent(ImportKey(id.toString()), vm)
+            enterTargetName()
+            onNodeWithText("Save").performClick()
+            waitUntil(timeoutMillis = 5_000) { writes.get() == 1 }
+            onNodeWithText("Save").performClick()
+            gate.complete(Unit)
+            runOnIdle { vm.toggleItem(0, false) }
+            waitUntil(timeoutMillis = 5_000) {
+                !imports.items.value
+                    .getValue(id)
+                    .first()
+                    .selected
+            }
+            waitForIdle()
+            assertEquals(1, writes.get())
+            onNodeWithText("Group name").assertDoesNotExist()
+            onNodeWithText("No group").assertDoesNotExist()
+        }
+
+    @Test fun failedNameWriteKeepsTheDialogAndAllowsRetry() =
+        runComposeUiTest {
+            val id = seed()
+            val fail = AtomicBoolean(true)
+            val repo =
+                optionsRepository { sessionId, change ->
+                    if (fail.get()) error("write failed")
+                    imports.updateOptions(sessionId, change)
+                }
+            val vm = routeViewModel(id, repo)
+            setRouteContent(ImportKey(id.toString()), vm)
+            enterTargetName()
+            onNodeWithText("Save").performClick()
+            waitUntil(timeoutMillis = 5_000) { host.currentSnackbarData != null }
+            onNodeWithText("Group name").assertExists()
+            assertNull(options(id).targetGroupName)
+            fail.set(false)
+            onNodeWithText("Save").performClick()
+            waitUntil(timeoutMillis = 5_000) {
+                options(id).targetGroupName == "News"
+            }
+            waitForIdle()
+            onNodeWithText("Group name").assertDoesNotExist()
+        }
+
+    @Test fun cancellingNewNameReturnsToTheExistingGroupChoices() =
+        runComposeUiTest {
+            groups.create(GroupDraft("Tech"))
+            val id = seed()
+            setRouteContent(ImportKey(id.toString()))
+            onNodeWithText("Put everything into group…").performClick()
+            onNodeWithText("New group…").performClick()
+            // Both the route and dialog have Cancel actions; the dialog is last.
+            onAllNodesWithText("Cancel")[1].performClick()
+            onNodeWithText("Tech").assertIsDisplayed()
+            assertNull(options(id).targetGroupName)
+        }
+
+    @Test fun recreatedTargetNameRetainsInputButNotCancelledSubmitState() =
+        runComposeUiTest {
+            val id = seed()
+            val gate = CompletableDeferred<Unit>()
+            val started = AtomicBoolean()
+            val repo =
+                optionsRepository { sessionId, change ->
+                    started.set(true)
+                    gate.await()
+                    imports.updateOptions(sessionId, change)
+                }
+            val vm = routeViewModel(id, repo)
+            val visible = mutableStateOf(true)
+            setRouteContent(ImportKey(id.toString()), vm, visible)
+            enterTargetName()
+            onNodeWithText("Save").performClick()
+            waitUntil(timeoutMillis = 5_000) { started.get() }
+            runOnIdle { visible.value = false }
+            waitForIdle()
+            gate.complete(Unit)
+            waitUntil(timeoutMillis = 5_000) {
+                options(id).targetGroupName == "News"
+            }
+            runOnIdle { visible.value = true }
+            waitForIdle()
+            onNodeWithText("Group name").assertTextContains("News")
+            onNodeWithText("Group name").performTextReplacement("Updated")
+            onNodeWithText("Save").performClick()
+            waitUntil(timeoutMillis = 5_000) {
+                options(id).targetGroupName == "Updated"
+            }
+            waitForIdle()
+            onNodeWithText("Group name").assertDoesNotExist()
+        }
+
+    @Test fun cancelledNameValidationCanBeRetried() =
+        runComposeUiTest {
+            val id = seed()
+            val cancel = AtomicBoolean(true)
+            val validating =
+                object : GroupRepository by groups {
+                    override suspend fun checkName(
+                        name: String,
+                        excludingGroupId: Long?,
+                    ): Outcome<String, GroupError> {
+                        if (cancel.getAndSet(false)) throw CancellationException("validation cancelled")
+                        return groups.checkName(name, excludingGroupId)
+                    }
+                }
+            val vm = routeViewModel(id, groupRepository = validating)
+            setRouteContent(ImportKey(id.toString()), vm)
+            enterTargetName()
+            onNodeWithText("Save").performClick()
+            waitUntil(timeoutMillis = 5_000) { !cancel.get() }
+            waitForIdle()
+            assertNull(options(id).targetGroupName)
+            assertNull(host.currentSnackbarData)
+            onNodeWithText("Save").performClick()
+            waitUntil(timeoutMillis = 5_000) {
+                options(id).targetGroupName == "News"
             }
         }
 

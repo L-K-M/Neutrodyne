@@ -259,7 +259,7 @@ internal class ImportViewModel
                     suspendRunCatching { groups.checkName(name) }.getOrElse {
                         Log.w(TAG, it) { "import group name check failed" }
                         postWriteFailed()
-                        return@enqueueEdit null
+                        throw it
                     }
                 val validated =
                     when (outcome) {
@@ -273,7 +273,7 @@ internal class ImportViewModel
                             name.trim()
                         }
                     }
-                writeEdit { store(validated) }
+                writeEdit { store(validated) }.getOrThrow()
                 null
             }.await()
         }
@@ -371,12 +371,11 @@ internal class ImportViewModel
             enqueueEdit { writeEdit(block) }
         }
 
-        private suspend fun writeEdit(block: suspend () -> Unit) {
+        private suspend fun writeEdit(block: suspend () -> Unit) =
             suspendRunCatching { block() }.onFailure {
                 Log.w(TAG, it) { "import edit failed" }
                 postWriteFailed()
             }
-        }
 
         private fun <T> enqueueEdit(block: suspend () -> T): Deferred<T> {
             val previous = pendingEdit
