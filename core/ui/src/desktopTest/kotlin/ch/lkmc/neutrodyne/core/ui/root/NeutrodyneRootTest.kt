@@ -22,6 +22,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
@@ -274,7 +275,12 @@ class NeutrodyneRootTest {
 
             runOnIdle { pending.trySend(Route.SelectFeed("tech")) }
             onNodeWithText("count:0").assertIsDisplayed()
-            onNodeWithText("Couldn't save the change").assertIsDisplayed()
+            val message = "Couldn't save the change"
+            // The queued route and snackbar transition settle after the tab's unchanged frame.
+            waitUntil(timeoutMillis = 5_000) {
+                onAllNodesWithText(message).fetchSemanticsNodes().size == 1 && onNodeWithText(message).isDisplayed()
+            }
+            onNodeWithText(message).assertIsDisplayed()
         }
 
     @Test

@@ -355,8 +355,9 @@ class AndroidAppGraphTest {
         runBlocking {
             graph.databaseOpener.awaitOpen()
             try {
-                assertThat(graph.importRepository).isSameInstanceAs(graph.importRepository)
-                assertThat(graph.backupRepository).isSameInstanceAs(graph.backupRepository)
+                // The implementations are internal to :core:data, so the bindings are pinned by name.
+                assertThat(graph.importRepository.javaClass.name).isEqualTo(IMPORT_REPOSITORY_IMPL)
+                assertThat(graph.backupRepository.javaClass.name).isEqualTo(BACKUP_REPOSITORY_IMPL)
                 assertThat(graph.importReportPoster).isInstanceOf(AndroidImportReportPoster::class.java)
             } finally {
                 graph.databaseOpener.requireDatabase().close()
@@ -382,6 +383,9 @@ class AndroidAppGraphTest {
     }
 
     private companion object {
+        const val IMPORT_REPOSITORY_IMPL = "ch.lkmc.neutrodyne.core.data.importing.ImportRepositoryImpl"
+        const val BACKUP_REPOSITORY_IMPL = "ch.lkmc.neutrodyne.core.data.backup.BackupRepositoryImpl"
+
         val STARTUP_BANDS =
             mapOf(
                 "DebugToolsInitializer" to 0..99,

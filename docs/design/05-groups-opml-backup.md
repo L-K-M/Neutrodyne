@@ -1979,7 +1979,7 @@ Both Android sections must stay present: a missing `<cloud-backup>` or `<device-
 | `backup-auto-snapshot` | periodic 24 h, `setRequiresDeviceIdle(true)`, `setRequiresCharging(true)`, policy `UPDATE` | start-up initializer, order 200 ([01 Application start-up](01-foundation.md#application-start-up)) |
 | `backup-auto-snapshot-now` | one-time, initial delay 10 min, `setRequiresBatteryNotLow(true)`, policy `REPLACE` (debounce) | `SnapshotScheduler.requestSoon()` (`WorkManagerSnapshotScheduler`): called directly by 05's own writes (group create/rename/delete/reorder/look, membership changes, scope-settings writes, import `DONE`, restore finished) and by a library watcher for 03's subscribe and unsubscribe (below) — not after played-state changes (the daily run covers them) |
 
-**Library watcher.** The order-200 initializer that schedules `backup-auto-snapshot` also launches, on `@ApplicationScope`, a collector of `BackupDao.observeLibraryShape()` (`SELECT (SELECT COUNT(*) FROM podcast), (SELECT COUNT(*) FROM podcast_group_member)`, requested from 02) with `distinctUntilChanged().drop(1)` → `requestSoon()`. Refreshes write `podcast` but never change these counts, so they trigger nothing; customTitle and `includeInAll` edits wait for the daily run.
+**Library watcher.** The order-200 initializer that schedules `backup-auto-snapshot` also launches, on `@ApplicationScope`, a collector of `BackupDao.observeLibraryShape()` (`SELECT (SELECT COUNT(*) FROM podcast), (SELECT COUNT(*) FROM podcast_group_member)`, requested from 02) with `distinctUntilChanged()`, skipping leading emissions equal to a baseline shape the initializer reads before it returns (so a change landing before the collector's first query still counts; `drop(1)` if that read fails) → `requestSoon()`. Refreshes write `podcast` but never change these counts, so they trigger nothing; customTitle and `includeInAll` edits wait for the daily run.
 
 Algorithm:
 
@@ -2310,8 +2310,17 @@ production behaviour: band 100's `OpenResult.created`, the `backup-restore` work
 `fromAndroidBackup` flag and exact HISTORY+UP_NEXT `MERGE` request, content equality of the
 seeded library, and the snapshot's retirement to `restored-*.zip` (or a valid, different
 replacement a periodic write may already have produced). Without the seed argument the class
-skips through `Assume`, and a skip is never a pass — the seeded scope is the evidence. The
-`bmgr`, device-to-device and reference-device checks stay separate gates
+skips through `Assume`, and a skip is never a pass — the seeded scope is the evidence.
+The gate clears the two device result directories before GMD runs, then
+`scripts/ci/check-first-launch-restore-results.py` requires the named
+`firstLaunchRestoresTheSeededSnapshot` case in `FirstLaunchRestoreDeviceTest` to pass
+without skips, failures or errors in each device's own XML (`api26` and `api36`, with
+matching GMD device properties) before recovery reporting. Missing, malformed or duplicate
+reports cannot supply a device leg. The replacement-writer evidence check also requires
+every physical ZIP payload to be declared and hashed in the manifest, as [Writing](#writing)
+specifies; imports still ignore undeclared entries as
+[Validation and preview](#validation-and-preview) specifies. The `bmgr`, device-to-device
+and reference-device checks stay separate gates
 ([Testing with bmgr](#testing-with-bmgr)).
 
 ---

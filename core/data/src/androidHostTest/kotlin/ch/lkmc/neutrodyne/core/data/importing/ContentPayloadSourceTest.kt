@@ -400,7 +400,11 @@ class ScriptedProvider : ContentProvider() {
     override fun openAssetFile(
         uri: Uri,
         mode: String,
-    ): AssetFileDescriptor? = onOpenAsset?.invoke(uri, mode) ?: super.openAssetFile(uri, mode)
+    ): AssetFileDescriptor? {
+        // A scripted handler's `null` must reach the resolver, not fall back to `openFile`.
+        val handler = onOpenAsset ?: return super.openAssetFile(uri, mode)
+        return handler(uri, mode)
+    }
 
     override fun getType(uri: Uri): String? = null
 
