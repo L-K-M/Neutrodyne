@@ -26,6 +26,7 @@ import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.network.okhttp.DebugInterceptors
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.ReleaseSmoke
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.installFakeImageLoader
@@ -65,6 +66,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /** Real Android parser/transport/Add UI, with recorded Apple lookup and a local feed server. */
+@ReleaseSmoke
 @RunWith(AndroidJUnit4::class)
 class SubscribeJourneyTest {
     @get:Rule val compose = createComposeRule()

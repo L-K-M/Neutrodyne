@@ -60,16 +60,26 @@ class DiscoveryManifestTest {
         assertThat(filters.length).isEqualTo(8)
         for (i in 0 until filters.length) {
             val filter = filters.item(i) as Element
-            assertThat(filter.getAttribute("android:autoVerify")).isEmpty()
+            assertThat(filter.getAttribute("android:autoVerify")).isNotEqualTo("true")
             val data = filter.getElementsByTagName("data")
             assertThat(data.length).isAtMost(1)
             if (data.length == 0) continue
             val entry = data.item(0) as Element
             val scheme = entry.getAttribute("android:scheme")
+            if (scheme != "https") assertThat(filter.getAttribute("android:autoVerify")).isEmpty()
             when (scheme) {
-                "https" -> assertThat(entry.getAttribute("android:host")).isEqualTo("podcasts.apple.com")
-                "neutrodyne" -> assertThat(entry.getAttribute("android:host")).isEqualTo("subscribe")
-                else -> assertThat(entry.getAttribute("android:host")).isEmpty()
+                "https" -> {
+                    assertThat(entry.getAttribute("android:host")).isEqualTo("podcasts.apple.com")
+                    assertThat(filter.getAttribute("android:autoVerify")).isEqualTo("false")
+                }
+
+                "neutrodyne" -> {
+                    assertThat(entry.getAttribute("android:host")).isEqualTo("subscribe")
+                }
+
+                else -> {
+                    assertThat(entry.getAttribute("android:host")).isEmpty()
+                }
             }
         }
     }

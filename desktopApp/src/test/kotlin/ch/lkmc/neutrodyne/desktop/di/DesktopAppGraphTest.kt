@@ -73,6 +73,31 @@ class DesktopAppGraphTest {
     }
 
     @Test
+    fun discoveryEntriesResolveWithTheirIntendedScenes() {
+        val provider = entryProvider<NavKey> { graph.entryInstallers.forEach { it() } }
+        assertThat(provider(DiscoverKey).metadata[NdSceneMetadata.KEY_PANE])
+            .isEqualTo(NdSceneMetadata.PANE_LIST)
+        for (key in listOf(
+            DirectoryKey("news", null),
+            DirectoryKey("", null),
+            DirectoryKey("", "1318"),
+            PodcastPreviewKey("https://example.test/feed"),
+        )) {
+            assertThat(provider(key).metadata[NdSceneMetadata.KEY_PANE]).isEqualTo(NdSceneMetadata.PANE_DETAIL)
+        }
+        assertThat(provider(AddPodcastKey(null)).metadata[NdSceneMetadata.KEY_OVERLAY])
+            .isEqualTo(NdSceneMetadata.OVERLAY_SHEET)
+        for (page in listOf(SettingsPage.DISCOVER, SettingsPage.PRIVACY)) {
+            assertThat(provider(SettingsKey(page)).contentKey).isNotNull()
+        }
+        assertThat(graph.searchRepository::class.simpleName).isEqualTo("SearchRepositoryImpl")
+        assertThat(graph.searchRepository).isSameInstanceAs(graph.searchRepository)
+        assertThat(graph.autodiscovery::class.simpleName).isEqualTo("JsoupAutodiscovery")
+        assertThat(graph.metroViewModelFactory).isNotNull()
+        assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+    }
+
+    @Test
     fun durablePlaybackPortsResolveToSingleProductionBindings() =
         runBlocking {
             graph.databaseOpener.awaitOpen()

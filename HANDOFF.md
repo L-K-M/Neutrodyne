@@ -4,6 +4,20 @@ This file lets another person or agent take over the work at any point. **Last u
 
 ## 0. Implementation status
 
+### M7 local integration (2026-10-19)
+
+Branch `impl/m7-p1` integrates W1–W7 through `c23d7140`, with W8 adding shared
+replay, Android/desktop screenshots, CI execution assertions and the
+[M7 acceptance ledger](docs/evidence/m7-discovery.md). W1 already recorded
+all adopted §4 resolutions in 03, 08, 09 and PLAN; W8 updates the stale
+implementation status and fixes 09's contradictory directory-fixture prose.
+No schema, index, entity or production dependency changed in W8.
+The owner requested local commits only: no push, PR, CI dispatch, review or
+merge (0 review rounds). M7 stays open for the ledger's device, cross-OS,
+network-capture, provider terms/key-permission and release evidence. Final
+local counts and the bounded emulator result appear in that ledger and
+`.nd-context/m7-w8-report.md`; earlier milestone gates remain open.
+
 ### M5 local integration (2026-10-19)
 
 Branch `impl/m5-p1` integrates the M5 features on baseline `30eef445`.

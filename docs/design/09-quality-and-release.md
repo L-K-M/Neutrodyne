@@ -527,14 +527,16 @@ Instrumented tests run inside the app's process, so killing the process (`am kil
 
 ### Recorded responses
 
-- No PR job contacts YouTube, Apple, fyyd, Podcast Index, GitHub's release endpoints or a real sync server. Directory JSON (03), channel pages and oEmbed (04) and the engine's InnerTube traffic (04's `RecordingRH`, driven by `scripts/youtube/record-responses.sh`) are recorded on a developer machine, scrubbed per [04 Recorded responses](04-youtube.md#recorded-responses) (`ip=`, signatures, cookies, visitor data, `expire`), and committed under `youtube/engine/src/test/resources/recorded/`; both engine hosts replay the same files. The update check's GitHub responses (`latest/download` redirects, manifests with `desktop[]` and `server` entries) are hand-written fixtures served by MockWebServer. Sync traffic is never recorded: the tests use `InMemorySyncServer`, Ktor's test host or the built JAR.
+- No PR job contacts YouTube, Apple, fyyd, Podcast Index, GitHub's release endpoints or a real sync server. Channel pages and oEmbed (04) and the engine's InnerTube traffic (04's `RecordingRH`, driven by `scripts/youtube/record-responses.sh`) are recorded on a developer machine, scrubbed per [04 Recorded responses](04-youtube.md#recorded-responses) (`ip=`, signatures, cookies, visitor data, `expire`), and committed under `youtube/engine/src/test/resources/recorded/`; both engine hosts replay the same files. The update check's GitHub responses (`latest/download` redirects, manifests with `desktop[]` and `server` entries) are hand-written fixtures served by MockWebServer. Sync traffic is never recorded: the tests use `InMemorySyncServer`, Ktor's test host or the built JAR.
 - Recording never runs in CI (GitHub runners use data-centre IPs that YouTube bot-challenges).
 - A replay test fails on any unrecorded request; that failure means "re-record", never "add a fallback".
 
 **Implementation note (2026-10-19, M7):** Directory JSON/HTML belongs in
 `feeds/src/test/resources/discovery/`, superseding YouTube placement above;
 keep origin/date/terms metadata and scrubbing, preserve the existing corpus.
-W2/W3/W8 wire identical desktop/Android host/device replay; W1 has no live evidence.
+W8 shares parser/HTML assertions across desktop, Android host and device
+replay. See the [M7 evidence ledger](../evidence/m7-discovery.md) for executed
+counts, screenshot wiring, XML gates and the outstanding runtime/owner rows.
 W6 inventory/policy parity keeps `apple`, `fyyd`, `podcastindex`, `add-input` IDs
 and effective-provider states; enumerate Apple search/lookup/chart hosts,
 ID lookups/PI auth, pages/probes, publishers and artwork. Correct query/country-only

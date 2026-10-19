@@ -1326,7 +1326,9 @@ DEVICE, keys SecretStore only; disabled providers never contacted automatically,
 explicit Apple-link Add offers one-time lookup; recommendations only Discover
 rows plus matching-category navigation. AC2/AC5 below resolve the stricter
 rolling-minute limit and PO-44 storage qualification. W1 freezes contracts;
-W2–W8 implementation/evidence remains. Baseline is this tree (`4f54f149`), with
+W2–W8 are integrated locally; [the M7 AC ledger](evidence/m7-discovery.md)
+records executed checks and open owner/device gates. M7 is not complete.
+Baseline is this tree (`4f54f149`), with
 M3/M4/M5 services; older HANDOFF headings prove no remote/release/device state.
 Earlier gates remain open; M7 needs M1b/M2, not M6/MD1 or earlier device gates.
 No schema change is authorized here.

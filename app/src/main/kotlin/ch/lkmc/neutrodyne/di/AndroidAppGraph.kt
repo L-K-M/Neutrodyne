@@ -24,11 +24,13 @@ import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.PositionStore
 import ch.lkmc.neutrodyne.core.domain.QueueRepository
+import ch.lkmc.neutrodyne.core.domain.SearchRepository
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
+import ch.lkmc.neutrodyne.feeds.discovery.Autodiscovery
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackMaintenance
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
@@ -77,6 +79,10 @@ interface AndroidAppGraph {
 
     /** `MainActivity` collects `appearance.*` through it into `AppearancePrefs` (08 App scheme). */
     val settingsRepository: SettingsRepository
+
+    /** Discovery bindings remain safe to resolve before the database startup gate. */
+    val searchRepository: SearchRepository
+    val autodiscovery: Autodiscovery
 
     val groupChannelSync: GroupChannelSync
 
