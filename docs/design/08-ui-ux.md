@@ -1951,7 +1951,13 @@ saveable-state registry. The original root resize regression now passes, includi
 839→840 dp, with exact-child and populated text-field host coverage. Focus
 acceptance remains open: an intentional outside focus transfer after detach but
 before the queued frame restoration is currently reclaimed. That cancellation
-regression remains red. Adaptive landscape/tabletop sheets claim the player lease
+regression remains red. Two entry-local placement experiments pass the exact-child,
+populated-field and outside-transfer cases but fail the unchanged lazy-list root
+regression. The focused lazy row's placement callback follows the restore attempt,
+even when that attempt follows the wrapper's child-placement call. Those experiments
+were rejected; the current entry callback does not establish descendant readiness.
+A repair still needs a descendant-ready restoration boundary with cancellation
+when focus or entry ownership changes. Adaptive landscape/tabletop sheets claim the player lease
 only at the status strip; side panels never claim it. Final accessibility and
 screenshot acceptance remain W8/W9. No screenshot reference is recorded or accepted.
 
