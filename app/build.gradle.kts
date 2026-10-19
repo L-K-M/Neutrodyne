@@ -68,6 +68,12 @@ android {
     sourceSets["test"].kotlin.srcDir("src/restoreTest/kotlin")
 }
 
+// Opt-in fixtures enter the single-variant KMP download library, so disable every
+// app variant except the disposable target. A release task with the flag must fail.
+if (providers.gradleProperty("neutrodyne.systemTests").orNull == "true") {
+    androidComponents.beforeVariants { it.enable = it.buildType == "benchmarkRelease" }
+}
+
 dependencies {
     for (feature in listOf(
         "feeds",

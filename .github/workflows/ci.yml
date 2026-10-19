@@ -96,12 +96,15 @@ jobs:
         run: scripts/ci/check-frozen-schemas.sh
       # The CI scripts' own boundary regressions (scripts/ci/tests): fixtures
       # and stubs only, no build outputs — bash, coreutils and python3's stdlib.
+      - name: Compile the opt-in system-test fixture driver
+        run: ./gradlew :app:compileBenchmarkReleaseKotlin -Pneutrodyne.systemTests=true
       - name: CI script fixture tests
         run: |
           scripts/ci/tests/install-android-sdk.test.sh
           python3 scripts/ci/tests/report-nightly.test.py
           python3 scripts/ci/tests/assert-playback-tests.test.py
           python3 scripts/ci/tests/playback-reboot.test.py
+          python3 scripts/ci/tests/assert-system-tests.test.py
 
   unit:
     runs-on: ubuntu-24.04
@@ -165,7 +168,7 @@ jobs:
       # the runtime.lock/jlink setup that lands with the desktop package (it
       # fails at createRuntimeImage today).
       - name: Build the APKs and the server JAR
-        run: ./gradlew assembleRelease assembleDebug :sync:server:fatJar -Pneutrodyne.abiSplits=true
+        run: ./gradlew assembleRelease assembleDebug :benchmark:assembleBenchmarkRelease :sync:server:fatJar -Pneutrodyne.abiSplits=true
       # PR builds are signed with the committed public key, so a PR build is
       # signed exactly like a release and needs no secret (09 Hardening).
       - name: Build-output checks on the release APKs
