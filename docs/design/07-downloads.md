@@ -383,12 +383,11 @@ At `RESOLVING`, before any network request, the engine checks for a process deat
 
 #### Estimates
 
-Implementation note (2026-10-19, M6a): the 128 kbit/s duration estimate is
-`durationMs × 16` bytes (16,000 bytes per second). The formula below uses a
-seconds multiplier with a milliseconds field; W2 corrects the units and clamps
-large duration hints to avoid overflow.
+**Implementation note (2026-10-19, M6b).** W2 shares the manual and automatic
+estimate helper: 128 kbit/s is `durationMs × 16` bytes (16,000 bytes per second).
+Duration hints are clamped before multiplication to avoid overflow.
 
-`estimatedBytes` = `enclosureLength` when ≥ 100 KB (smaller values are bogus placeholders, never used for integrity); else `durationMs × 16 000` (128 kbit/s) when a duration is known; else `null`. The free-space check then falls back to 150 MB ([Free space](#free-space-and-allocation)). 05's "Download all" confirmation uses the same rule.
+`estimatedBytes` = `enclosureLength` when ≥ 100 KB (smaller values are bogus placeholders, never used for integrity); else `durationMs × 16` (128 kbit/s) when a positive duration is known; else `null`. The free-space check then falls back to 150 MB ([Free space](#free-space-and-allocation)). 05's "Download all" confirmation uses the same rule.
 
 ### Other controller operations
 

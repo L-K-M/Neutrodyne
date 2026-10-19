@@ -430,7 +430,7 @@ internal class ReconcileRig(
     }
 }
 
-private class TestArtwork : ArtworkStore {
+internal class TestArtwork : ArtworkStore {
     override fun pinnedFile(key: String): Path? = null
 
     override fun pin(

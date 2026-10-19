@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.download.api.RootChangeMode
 import ch.lkmc.neutrodyne.download.api.RootChangeResult
 import ch.lkmc.neutrodyne.download.api.ShareableFile
 import ch.lkmc.neutrodyne.download.api.StorageUsage
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -31,6 +32,9 @@ internal class DownloadStorage(
     private val artwork: ArtworkStore,
     private val share: (String, String) -> String?,
 ) : DownloadControllerFiles {
+    /** The runtime supplies this same state to the planner; admission owns the flag. */
+    val autoBlockedByCap = MutableStateFlow(false)
+
     override suspend fun prepareRemoval(rows: List<DownloadEntity>) {
         rows.forEach { index.remove(it.episodeId) }
         deletes.journal(rows)
@@ -46,7 +50,11 @@ internal class DownloadStorage(
     override suspend fun reportFileMissing(episodeId: Long) = reconciler.reportFileMissing(episodeId)
 
     override fun observeStorage() =
-        combine(db.downloadDao().observeEntries(), reconciler.orphanBytes) { entries, orphans ->
+        combine(
+            db.downloadDao().observeEntries(),
+            reconciler.orphanBytes,
+            autoBlockedByCap,
+        ) { entries, orphans, blocked ->
             val rows = entries.map { it.download }
             val root = roots.current()
             var partial = 0L
@@ -61,7 +69,7 @@ internal class DownloadStorage(
                 orphans,
                 roots.list().firstOrNull { it.rootId == root }?.freeBytes,
                 null,
-                false,
+                blocked,
             )
         }
 

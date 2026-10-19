@@ -56,6 +56,30 @@ abstract class PodcastDao(
     @Query("SELECT id FROM podcast WHERE id IN (:ids)")
     protected abstract suspend fun existingIdsChunk(ids: List<Long>): List<Long>
 
+    /** D67 reads only the planner-owned column and subscription time, at the bind limit. */
+    suspend fun autoDownloadWatermarks(ids: Collection<Long>): List<AutoDownloadWatermark> =
+        ids.distinct().chunked(BIND_CHUNK).flatMap { autoDownloadWatermarkChunk(it) }
+
+    @Query("SELECT id, subscribedAt, autoDownloadEligibleAfter FROM podcast WHERE id IN (:ids)")
+    protected abstract suspend fun autoDownloadWatermarkChunk(ids: List<Long>): List<AutoDownloadWatermark>
+
+    /** Caller groups equal values and commits the complete pass before persisting its baseline. */
+    suspend fun setAutoDownloadWatermarks(
+        ids: List<Long>,
+        eligibleAfter: Long?,
+    ) {
+        ids.distinct().chunked(BIND_CHUNK).forEach { setAutoDownloadWatermarkChunk(it, eligibleAfter) }
+    }
+
+    @Query(
+        "UPDATE podcast SET autoDownloadEligibleAfter = :eligibleAfter WHERE id IN (:ids)" +
+            " AND autoDownloadEligibleAfter IS NOT :eligibleAfter",
+    )
+    protected abstract suspend fun setAutoDownloadWatermarkChunk(
+        ids: List<Long>,
+        eligibleAfter: Long?,
+    )
+
     @Query("SELECT * FROM podcast WHERE feedKey = :feedKey")
     abstract suspend fun byFeedKey(feedKey: String): PodcastEntity?
 
@@ -513,3 +537,10 @@ abstract class PodcastDao(
                 " lastAttemptAt, lastErrorKind, guidCoverageSince"
     }
 }
+
+/** The D67 pass never rewrites unrelated podcast metadata or sync fields. */
+data class AutoDownloadWatermark(
+    val id: Long,
+    val subscribedAt: Long,
+    val autoDownloadEligibleAfter: Long?,
+)
