@@ -154,6 +154,12 @@ abstract class PodcastDao(
     @Query("SELECT * FROM podcast WHERE id = :id")
     abstract fun observeById(id: Long): Flow<PodcastEntity?>
 
+    @Query(
+        "SELECT p.*, COALESCE(a.version, 0) AS artworkVersion, a.avgArgb AS artworkAvgArgb" +
+            " FROM podcast p LEFT JOIN artwork a ON a.key = p.artworkKey WHERE p.id = :id",
+    )
+    abstract fun observeWithArtwork(id: Long): Flow<PodcastArtworkRow?>
+
     @Query("SELECT * FROM podcast_url_alias WHERE podcastId = :podcastId")
     abstract fun observeAliases(podcastId: Long): Flow<List<PodcastUrlAliasEntity>>
 

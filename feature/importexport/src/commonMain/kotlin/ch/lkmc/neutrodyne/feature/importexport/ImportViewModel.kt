@@ -19,7 +19,6 @@ import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.domain.ImportScreenVisibility
 import ch.lkmc.neutrodyne.core.domain.ImportSessionOperations
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
-import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.GroupProposal
@@ -31,6 +30,7 @@ import ch.lkmc.neutrodyne.core.model.ImportItemView
 import ch.lkmc.neutrodyne.core.model.ImportReportSection
 import ch.lkmc.neutrodyne.core.model.ImportSessionView
 import ch.lkmc.neutrodyne.core.model.ImportState
+import ch.lkmc.neutrodyne.core.model.PodcastDetail
 import ch.lkmc.neutrodyne.core.model.reportSection
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessages
@@ -428,8 +428,7 @@ internal class ImportViewModel
         }
 
         /** The row observes persisted artwork; previews never invoke this stream. */
-        fun artworkFor(podcastId: Long): Flow<ArtworkRef?> =
-            podcasts.observePodcast(podcastId).map { it?.artwork }.catch { emit(null) }
+        fun artworkFor(podcastId: Long): Flow<PodcastDetail?> = podcasts.observePodcast(podcastId).catch { emit(null) }
 
         private val ImportItemView.canFixUp: Boolean
             get() =

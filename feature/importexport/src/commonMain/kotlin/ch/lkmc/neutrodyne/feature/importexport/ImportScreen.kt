@@ -67,7 +67,6 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.components.rememberMonogramPainter
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.domain.GroupError
-import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.Group
@@ -80,6 +79,7 @@ import ch.lkmc.neutrodyne.core.model.ImportItemView
 import ch.lkmc.neutrodyne.core.model.ImportReportSection
 import ch.lkmc.neutrodyne.core.model.ImportSessionView
 import ch.lkmc.neutrodyne.core.model.ImportState
+import ch.lkmc.neutrodyne.core.model.PodcastDetail
 import ch.lkmc.neutrodyne.core.model.reportSection
 import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.FeedErrorText
@@ -207,7 +207,7 @@ internal fun ImportScreen(
     onRemoveAll: () -> Unit = {},
     onEditUrl: suspend (ImportItemView, String) -> UiText? = { _, _ -> null },
     onPassword: suspend (ImportItemView, BasicCredentials) -> UiText? = { _, _ -> null },
-    artworkFor: (Long) -> Flow<ArtworkRef?> = { flowOf(null) },
+    artworkFor: (Long) -> Flow<PodcastDetail?> = { flowOf(null) },
 ) {
     var fixUpFor by remember { mutableStateOf<Pair<ImportItemView, ImportFixUp>?>(null) }
     val session = state.session
@@ -347,7 +347,7 @@ private fun SessionBody(
     onRemoveAll: () -> Unit,
     onEditUrl: (ImportItemView) -> Unit,
     onPassword: (ImportItemView) -> Unit,
-    artworkFor: (Long) -> Flow<ArtworkRef?>,
+    artworkFor: (Long) -> Flow<PodcastDetail?>,
 ) {
     val preview = session.state == ImportState.PREVIEW
     val rowsEnabled = !state.busy && session.state != ImportState.CANCELLED
@@ -810,7 +810,7 @@ private fun ImportRow(
     preview: Boolean,
     enabled: Boolean,
     onToggle: (Int, Boolean) -> Unit,
-    artworkFor: (Long) -> Flow<ArtworkRef?>,
+    artworkFor: (Long) -> Flow<PodcastDetail?>,
     onRetry: () -> Unit,
     onRemove: () -> Unit,
     onEditUrl: () -> Unit,
@@ -825,7 +825,8 @@ private fun ImportRow(
                 val art by remember(podcastId, artworkFor) { artworkFor(podcastId) }
                     .collectAsStateWithLifecycle(initialValue = null)
                 CoverArt(
-                    ref = art,
+                    ref = art?.artwork,
+                    avgArgb = art?.artworkAvgArgb,
                     monogram = rememberMonogram(title),
                     modifier = Modifier.size(MONOGRAM).testTag("import-cover-${item.ordinal}"),
                 )

@@ -375,3 +375,10 @@ data class NewAlias(
     val reason: AliasReason,
     val addedAt: Long,
 )
+
+/** Podcast plus artwork metadata in one observed snapshot; artwork-only writes invalidate it. */
+data class PodcastArtworkRow(
+    @androidx.room3.Embedded val podcast: PodcastEntity,
+    val artworkVersion: Int,
+    val artworkAvgArgb: Int?,
+)

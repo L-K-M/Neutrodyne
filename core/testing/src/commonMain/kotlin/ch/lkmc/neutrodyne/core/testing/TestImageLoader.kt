@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.testing
 
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
+import coil3.intercept.Interceptor
 import coil3.test.FakeImage
 import coil3.test.FakeImageLoaderEngine
 
@@ -15,13 +16,18 @@ private const val FAKE_IMAGE_SIZE = 64
  * deterministic-only rule). [images] overrides the default square for the request data that
  * matches each key (for example a URL string), so tests can control the loaded size.
  * `setUnsafe` makes re-installs deterministic even after an earlier test has materialised the
- * singleton; call it from each UI test class' set-up.
+ * singleton; call it from each UI test class' set-up. [requestInterceptor] can hold a
+ * request pending for placeholder checks without adding real network work.
  */
-public fun installFakeImageLoader(images: Map<Any, FakeImage> = emptyMap()) {
+public fun installFakeImageLoader(
+    images: Map<Any, FakeImage> = emptyMap(),
+    requestInterceptor: Interceptor? = null,
+) {
     SingletonImageLoader.setUnsafe { context ->
         ImageLoader
             .Builder(context)
             .components {
+                if (requestInterceptor != null) add(requestInterceptor)
                 add(
                     FakeImageLoaderEngine
                         .Builder()

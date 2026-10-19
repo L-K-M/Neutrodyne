@@ -177,6 +177,7 @@ data class DownloadEntryRow(
     val artworkKey: String,
     val artworkUrl: String?,
     val artworkVersion: Int,
+    val artworkAvgArgb: Int?,
     val playedAt: Long?,
     val isFavorite: Boolean,
 )

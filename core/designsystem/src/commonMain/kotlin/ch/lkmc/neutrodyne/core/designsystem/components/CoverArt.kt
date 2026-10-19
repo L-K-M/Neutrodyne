@@ -8,12 +8,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.painter.ColorPainter
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import ch.lkmc.neutrodyne.core.designsystem.theme.LocalReducedMotion
@@ -65,8 +69,7 @@ public fun CoverArt(
         return
     }
 
-    val placeholder =
-        avgArgb?.let(::Color) ?: Color(painter.backgroundArgb)
+    val placeholder = rememberPlaceholderPainter(avgArgb?.let(::Color) ?: Color(painter.backgroundArgb))
     val request =
         remember(ref, tier, aspect, crossfade, density, context) {
             Covers.request(context, ref, tier, density, aspect, crossfade)
@@ -92,7 +95,7 @@ public fun CoverArt(
             model = request,
             imageLoader = imageLoader,
             contentDescription = contentDescription,
-            placeholder = thumb ?: ColorPainter(placeholder),
+            placeholder = thumb ?: placeholder,
             error = thumb ?: painter,
             fallback = painter,
             contentScale = ContentScale.Crop,
@@ -103,3 +106,18 @@ public fun CoverArt(
 
 /** `ArtworkKeys.monogram` rows — painted live instead of loaded (08 Monograms and mosaics). */
 private const val MONOGRAM_KEY_PREFIX = "m-"
+
+/** Colour-only backfill must repaint an in-flight request without changing its byte identity. */
+@Composable
+private fun rememberPlaceholderPainter(color: Color): Painter {
+    val current by rememberUpdatedState(color)
+    return remember {
+        object : Painter() {
+            override val intrinsicSize: Size = Size.Unspecified
+
+            override fun DrawScope.onDraw() {
+                drawRect(current)
+            }
+        }
+    }
+}

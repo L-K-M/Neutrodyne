@@ -36,6 +36,26 @@ class DownloadDaoTest {
 
     @After fun close() = db.close()
 
+    @Test fun entryColoursFollowResolvedArtworkWithoutChangingDownloadRows() =
+        runTest {
+            val id = seed(1).single()
+            dao.insert(row(id))
+            dao.observeEntries().test {
+                val initial = awaitItem().single()
+                assertNull(initial.artworkAvgArgb)
+                val key = initial.artworkKey
+                db.artworkDao().upsert(ArtworkEntity(key = key, version = 4, avgArgb = 0xff234567.toInt()))
+                val coloured = awaitItem().single()
+                assertEquals(0xff234567.toInt(), coloured.artworkAvgArgb)
+                assertEquals(4, coloured.artworkVersion)
+                assertEquals(initial.download, coloured.download)
+                assertEquals(initial.sortDate, coloured.sortDate)
+                db.artworkDao().upsert(ArtworkEntity(key = key, version = 4, avgArgb = 0))
+                assertEquals(0, awaitItem().single().artworkAvgArgb)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
     @Test fun externalChannelsCannotBeClaimedEvenWithRssTaggedDownloads() =
         runTest {
             val channel =

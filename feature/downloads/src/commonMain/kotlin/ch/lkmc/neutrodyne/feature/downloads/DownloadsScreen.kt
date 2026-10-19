@@ -51,7 +51,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
-import ch.lkmc.neutrodyne.core.designsystem.components.NdEmptyState
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTooltipIconButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
@@ -63,6 +62,7 @@ import ch.lkmc.neutrodyne.core.navigation.LocalNavTab
 import ch.lkmc.neutrodyne.core.ui.DownloadCommand
 import ch.lkmc.neutrodyne.core.ui.DownloadStateButton
 import ch.lkmc.neutrodyne.core.ui.DownloadStatusText
+import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.LocalUiClock
 import ch.lkmc.neutrodyne.core.ui.ReportVisibleEpisodeIds
@@ -221,7 +221,7 @@ internal fun DownloadsScreen(
             }
             if (rows.inProgress.isEmpty() && rows.failed.isEmpty() && rows.completed.isEmpty()) {
                 item("empty") {
-                    NdEmptyState(
+                    EmptyState(
                         NdIcons.Download,
                         stringResource(Res.string.downloads_empty_manual),
                         stringResource(Res.string.downloads_empty_body),
@@ -528,6 +528,7 @@ private fun DownloadEntryRow(
             ),
             Modifier.size(56.dp).sharedArt(SharedKeys.episodeArt(LocalNavTab.current, id)).clearAndSetSemantics {
             },
+            avgArgb = entry.artworkAvgArgb,
         )
         Column(Modifier.weight(1f)) {
             Text(entry.episodeTitle, style = MaterialTheme.typography.titleMedium)

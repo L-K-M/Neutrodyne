@@ -4,13 +4,17 @@ package ch.lkmc.neutrodyne.feature.downloads
 
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.test.performKeyInput
@@ -57,21 +61,63 @@ class DownloadsScreenTest {
     @Test fun emptyLoadingLinksToSettingsWithoutImplicitBulkRequests() =
         runDesktopComposeUiTest(width = 600, height = 900) {
             val state = mutableStateOf(DownloadsUiState())
+            var settingsOpened = 0
             setContent {
                 CompositionLocalProvider(
                     LocalAppNavigator provides RecordingAppNavigator(),
                     LocalPlatformKind provides PlatformKind.DESKTOP,
                 ) {
-                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) { Screen(state.value) }
+                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                        Screen(state.value, onSettings = { settingsOpened++ })
+                    }
                 }
             }
             onNodeWithText("Loading downloads").assertIsDisplayed()
+            state.value = DownloadsUiState(failed = true)
+            waitForIdle()
+            onNodeWithText("Retry").assertIsDisplayed()
+            onNodeWithText("Downloaded episodes play offline").assertDoesNotExist()
             state.value = DownloadsUiState(overview = empty, storage = storage)
             waitForIdle()
             onNodeWithText("Downloaded episodes play offline").assertIsDisplayed()
-            onNodeWithText("Download settings").assertIsDisplayed()
+            onNodeWithText("Download settings").assertIsDisplayed().performClick()
+            assertEquals(1, settingsOpened)
             onNodeWithText("Auto-download settings").assertDoesNotExist()
             onNodeWithText("Download all").assertDoesNotExist()
+        }
+
+    @Test fun persistedAveragePaintsPendingCover() =
+        runDesktopComposeUiTest(width = 600, height = 900) {
+            ch.lkmc.neutrodyne.core.testing.installFakeImageLoader(
+                requestInterceptor = coil3.intercept.Interceptor { kotlinx.coroutines.awaitCancellation() },
+            )
+            val average = 0xff177a5c.toInt()
+            val entry =
+                testDownloadEntry(1).copy(
+                    artwork =
+                        ch.lkmc.neutrodyne.core.model
+                            .ArtworkRef("u-pending", "https://fixture.invalid/art", 9),
+                    artworkAvgArgb = average,
+                )
+            setContent {
+                CompositionLocalProvider(
+                    LocalAppNavigator provides RecordingAppNavigator(),
+                    LocalPlatformKind provides PlatformKind.DESKTOP,
+                ) {
+                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                        Screen(DownloadsUiState(overview = empty.copy(inProgress = listOf(entry)), storage = storage))
+                    }
+                }
+            }
+            waitForIdle()
+            val pixels = onRoot().captureToImage().toPixelMap()
+            var matching = 0
+            for (y in 0 until pixels.height) {
+                for (x in 0 until pixels.width) {
+                    if (pixels[x, y].toArgb() == average) matching++
+                }
+            }
+            kotlin.test.assertTrue(matching > 2000, "The persisted average must paint the pending 56 dp cover")
         }
 
     @Test fun offlineWaitAndFailureRowsHaveActionsAndDesktopHidesShare() =
@@ -186,6 +232,7 @@ class DownloadsScreenTest {
         onToggle: (Long) -> Unit = {},
         onDelete: (Long) -> Unit = {},
         onNotice: (DownloadNotice) -> Unit = {},
+        onSettings: () -> Unit = {},
     ) {
         DownloadsScreen(
             state = state,
@@ -206,7 +253,7 @@ class DownloadsScreenTest {
             onSelectPlayedEpisodes = {},
             onClearSelection = {},
             onDeleteSelection = {},
-            onSettings = {},
+            onSettings = onSettings,
             onReload = {},
             onNotice = onNotice,
         )

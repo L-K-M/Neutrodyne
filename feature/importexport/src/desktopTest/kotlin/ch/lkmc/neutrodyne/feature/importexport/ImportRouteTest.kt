@@ -4,6 +4,8 @@ package ch.lkmc.neutrodyne.feature.importexport
 
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -14,6 +16,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasSetTextAction
@@ -254,6 +257,18 @@ class ImportRouteTest {
     @Test
     fun resolvedReportRowsUseCoversAndPreviewRowsKeepMonograms() =
         runComposeUiTest {
+            ch.lkmc.neutrodyne.core.testing.installFakeImageLoader(
+                requestInterceptor = coil3.intercept.Interceptor { kotlinx.coroutines.awaitCancellation() },
+            )
+            val average = 0xff177a5c.toInt()
+            val detail =
+                ch.lkmc.neutrodyne.core.testing.testPodcastDetail(12).copy(
+                    artwork =
+                        ch.lkmc.neutrodyne.core.model
+                            .ArtworkRef("u-report", "https://fixture.invalid/art", 9),
+                    artworkAvgArgb = average,
+                )
+            podcasts.detail.value = detail
             val id = kotlinx.coroutines.runBlocking { seed(listOf(item(0).copy(podcastId = 12))) }
             setRouteContent(ImportKey(id.toString()))
             onNodeWithTag("import-monogram-0", useUnmergedTree = true).assertExists()
@@ -262,6 +277,15 @@ class ImportRouteTest {
                 onAllNodes(hasTestTag("import-cover-0"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
             }
             onNodeWithTag("import-cover-0", useUnmergedTree = true).assertExists()
+
+            fun centreColour(): Int {
+                val pixels = onNodeWithTag("import-cover-0", useUnmergedTree = true).captureToImage().toPixelMap()
+                return pixels[pixels.width / 2, pixels.height / 2].toArgb()
+            }
+            waitUntil { centreColour() == average }
+            val backfilled = 0xff765432.toInt()
+            podcasts.detail.value = detail.copy(artworkAvgArgb = backfilled)
+            waitUntil { centreColour() == backfilled }
         }
 
     @Test

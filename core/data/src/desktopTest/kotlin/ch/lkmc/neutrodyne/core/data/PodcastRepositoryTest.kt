@@ -262,6 +262,30 @@ class PodcastRepositoryTest {
         }
 
     @Test
+    fun detailObservesArtworkPublicationWithoutPodcastWrites() =
+        runTest {
+            val id = seedPodcast(db, "https://a.example.com/f")
+            val key = db.podcastDao().byId(id)!!.artworkKey
+            repo().observePodcast(id).test {
+                assertEquals(0, assertNotNull(awaitItem()).artwork.version)
+                db.artworkDao().upsert(ArtworkEntity(key = key, version = 7, avgArgb = 0xff123456.toInt()))
+                val published = assertNotNull(awaitItem())
+                assertEquals(7, published.artwork.version)
+                assertEquals(0xff123456.toInt(), published.artworkAvgArgb)
+                // Local-only backfill changes colours without changing byte identity.
+                db.artworkDao().upsert(ArtworkEntity(key = key, version = 7, avgArgb = 0))
+                val backfilled = assertNotNull(awaitItem())
+                assertEquals(7, backfilled.artwork.version)
+                assertEquals(0, backfilled.artworkAvgArgb)
+                db.artworkDao().delete(key)
+                val missing = assertNotNull(awaitItem())
+                assertEquals(0, missing.artwork.version)
+                assertNull(missing.artworkAvgArgb)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
     fun aMultiPodcastUnsubscribeIsAtomic() =
         runTest {
             // A crash mid-list must not leave a half-unsubscribed library (03 Unsubscribe).

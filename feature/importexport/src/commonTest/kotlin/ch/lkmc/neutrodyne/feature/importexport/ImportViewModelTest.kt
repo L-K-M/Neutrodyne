@@ -376,20 +376,25 @@ class ImportViewModelTest : MainDispatcherTest() {
             val row = item(0, status = ImportItemStatus.SUBSCRIBED).copy(podcastId = 12)
             val id = seed(listOf(row), state = ImportState.DONE)
             val vm = viewModel(id)
-            val seen = mutableListOf<ch.lkmc.neutrodyne.core.model.ArtworkRef?>()
+            val seen = mutableListOf<ch.lkmc.neutrodyne.core.model.PodcastDetail?>()
             launch { vm.artworkFor(12).take(4).toList(seen) }
             runCurrent()
             val first =
                 ch.lkmc.neutrodyne.core.testing
                     .testPodcastDetail(12)
+                    .copy(artworkAvgArgb = 0xff123456.toInt())
             podcasts.detail.value = first
             runCurrent()
-            val updated = first.artwork.copy(version = first.artwork.version + 1)
-            podcasts.detail.value = first.copy(artwork = updated)
+            val updated =
+                first.copy(
+                    artwork = first.artwork.copy(version = first.artwork.version + 1),
+                    artworkAvgArgb = 0xff654321.toInt(),
+                )
+            podcasts.detail.value = updated
             runCurrent()
             podcasts.detail.value = null
             advanceUntilIdle()
-            assertEquals(listOf(null, first.artwork, updated, null), seen)
+            assertEquals(listOf(null, first, updated, null), seen)
         }
 
     @Test fun newTargetNameWaitsForStorageBeforeReturningSuccess() =

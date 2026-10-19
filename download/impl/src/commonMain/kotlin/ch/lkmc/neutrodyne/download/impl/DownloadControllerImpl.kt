@@ -503,6 +503,7 @@ internal class DownloadControllerImpl(
             sortDate,
             playedAt != null,
             isFavorite,
+            artworkAvgArgb,
         )
 
     private enum class RequestMode(

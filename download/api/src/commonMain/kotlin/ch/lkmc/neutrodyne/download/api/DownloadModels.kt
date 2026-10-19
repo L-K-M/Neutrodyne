@@ -60,6 +60,7 @@ data class DownloadEntry(
     val sortDate: Long,
     val played: Boolean,
     val favorite: Boolean,
+    val artworkAvgArgb: Int? = null,
 )
 
 data class DownloadsOverview(

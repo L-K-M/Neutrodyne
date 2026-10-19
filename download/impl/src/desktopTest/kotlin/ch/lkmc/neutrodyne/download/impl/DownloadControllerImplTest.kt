@@ -37,6 +37,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -52,6 +53,35 @@ import ch.lkmc.neutrodyne.core.model.DownloadState as State
 import ch.lkmc.neutrodyne.core.model.WaitReason as Wait
 
 class DownloadControllerImplTest {
+    @Test fun overviewCarriesEpisodeAverageAndKeepsLaneOrdering() =
+        runTest {
+            fixture { f ->
+                val older = f.episode { copy(sortDate = 10, artworkKey = "u-older") }
+                val newer = f.episode { copy(sortDate = 20, artworkKey = "u-newer") }
+                f.insert(older, State.COMPLETED)
+                f.insert(newer, State.COMPLETED)
+                f.db.artworkDao().upsert(
+                    ch.lkmc.neutrodyne.core.database.ArtworkEntity(
+                        key = "u-newer",
+                        version = 8,
+                        avgArgb = 0xff345678.toInt(),
+                    ),
+                )
+                val result = f.controller.observeAll().first()
+                assertEquals(listOf(newer, older), result.completed.map { it.status.episodeId })
+                assertEquals(0xff345678.toInt(), result.completed.first().artworkAvgArgb)
+                assertEquals(
+                    8,
+                    result.completed
+                        .first()
+                        .artwork.version,
+                )
+                assertNull(result.completed.last().artworkAvgArgb)
+                assertTrue(result.inProgress.isEmpty())
+                assertTrue(result.failed.isEmpty())
+            }
+        }
+
     @Test fun externalChannelRequestsRefuseEvenExistingRssTaggedRows() =
         runTest {
             fixture { f ->

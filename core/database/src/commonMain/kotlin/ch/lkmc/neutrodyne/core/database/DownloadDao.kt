@@ -139,7 +139,7 @@ abstract class DownloadDao : DownloadQueries {
             " COALESCE(p.customTitle, p.title) AS podcastTitle," +
             " COALESCE(e.artworkKey, p.artworkKey) AS artworkKey," +
             " COALESCE(e.imageUrl, p.artworkUrl) AS artworkUrl, COALESCE(a.version, 0) AS artworkVersion," +
-            " s.playedAt, COALESCE(s.isFavorite, 0) AS isFavorite" +
+            " a.avgArgb AS artworkAvgArgb, s.playedAt, COALESCE(s.isFavorite, 0) AS isFavorite" +
             " FROM download d JOIN episode e ON e.id = d.episodeId JOIN podcast p ON p.id = e.podcastId" +
             " LEFT JOIN episode_state s ON s.episodeId = d.episodeId" +
             " LEFT JOIN artwork a ON a.key = COALESCE(e.artworkKey, p.artworkKey)",
