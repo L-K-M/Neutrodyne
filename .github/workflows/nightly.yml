@@ -6,8 +6,8 @@
 # adds `mutation-full`. The other jobs land with their milestones
 # (`no-engine-build` M9a, `desktop-matrix` M0b,
 # `sync-convergence` MS0, `server-image-smoke` MS1, `benchmark-dryrun` M10,
-# `screenshots-full` M10, `live-canary`, `youtube-canary` and
-# `engine-nightly-canary` M9a).
+# `screenshots-full` M10, `live-canary` and `engine-nightly-canary` M9a).
+# M8 adds one report-only, feed-only `youtube-canary`; it never loads an engine.
 #
 # A failing job runs scripts/ci/report-nightly.sh, which opens or updates one
 # issue per job (label `nightly-failure`) and closes it after the next green
@@ -27,7 +27,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: "full | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | downloads (M6a journeys on API26/33/34/36) | desktop (M0b) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36)"
+        description: "full | youtube-smoke (recorded external-mode E8 on api36 debug and release) | downloads (M6a journeys on API26/33/34/36) | desktop (M0b) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36)"
         default: full
 
 permissions:
@@ -82,8 +82,7 @@ jobs:
           if [ "${{ inputs.scope }}" = "youtube-smoke" ]; then
             ./gradlew --max-workers=2 api36DebugAndroidTest \
               -Pneutrodyne.testScope=nightly \
-              -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
-              -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest,ch.lkmc.neutrodyne.SmokeTest
+              -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.ExternalYouTubeModeTest
           elif [ "${{ inputs.scope }}" = "downloads" ]; then
             ./gradlew --max-workers=2 :app:nightlyGroupDebugAndroidTest \
               -Pneutrodyne.testScope=nightly \
@@ -94,6 +93,14 @@ jobs:
               -Pneutrodyne.testScope=nightly \
               -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
               -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
+          fi
+      - name: Require external YouTube mode
+        if: ${{ !cancelled() && inputs.scope != 'downloads' }}
+        run: |
+          if [ "${{ inputs.scope }}" = "youtube-smoke" ]; then
+            python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --external-youtube --device api36
+          else
+            python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --external-youtube --device api26 --device api33 --device api34 --device api36
           fi
       - name: Require M7 discovery on every nightly device
         if: ${{ !cancelled() && inputs.scope != 'youtube-smoke' && inputs.scope != 'downloads' }}
@@ -282,6 +289,7 @@ jobs:
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true connectedDebugAndroidTest
             ./gradlew --max-workers=2 -Pneutrodyne.testScope=nightly connectedAndroidDeviceTest
             python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/debug --device connected
+            python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/debug --external-youtube --device connected
             python3 scripts/ci/assert-playback-tests.py api37 app/build/outputs/androidTest-results/connected/debug --device connected --apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
       - name: Release smoke on API 37
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
@@ -326,6 +334,7 @@ jobs:
             ! grep -q 'hasReadColorBufferDma' "$RUNNER_TEMP/logcat-api37-release.txt" || { echo "::error::goldfish mapper aborted on color-buffer DMA"; exit 1; }
             ./gradlew --max-workers=2 -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true :app:connectedReleaseAndroidTest
             python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/release --device connected
+            python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results/connected/release --external-youtube --variant release --device connected
             python3 scripts/ci/assert-playback-tests.py release app/build/outputs/androidTest-results/connected/release --device connected --apk app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
             python3 scripts/ci/playback-reboot.py --hardening
             scripts/ci/system-tests.sh smoke connected
@@ -403,7 +412,9 @@ jobs:
         run: ./gradlew -PtestBuildType=release -Pandroid.testInstrumentationRunnerArguments.annotation=ch.lkmc.neutrodyne.core.testing.ReleaseSmoke -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true api36ReleaseAndroidTest
       - name: Require M7 discovery in optimized release
         if: ${{ !cancelled() }}
-        run: python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api36
+        run: |
+          python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api36
+          python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --external-youtube --variant release --device api36
       - name: Require real release playback smoke
         run: python3 scripts/ci/assert-playback-tests.py release app/build/outputs/androidTest-results --device api36 --apk app/build/outputs/apk/androidTest/release/app-release-androidTest.apk
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -674,3 +685,36 @@ jobs:
         with:
           name: bmgr-download-exclusion-api${{ matrix.api }}
           path: build/bmgr-evidence/
+
+  youtube-canary:
+    # Feed availability is report-only; recorded PR tests remain independent of YouTube.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+      issues: write
+    if: inputs.scope == '' || inputs.scope == 'full' || inputs.scope == 'youtube-smoke'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - name: Bounded controls and feed variants
+        id: feeds
+        run: python3 scripts/ci/youtube-feed-canary.py --output youtube-feed-canary.json
+      - name: Report feed failure
+        if: ${{ failure() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh youtube-canary
+      - name: Report feed recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh youtube-canary --close
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: youtube-feed-canary
+          path: youtube-feed-canary.json
+          if-no-files-found: error

@@ -1232,7 +1232,7 @@ Row shape: `sourceKind = YOUTUBE`, `sourceRef = videoId`, `formatPref = AudioQua
 
 ### Engine absent or disabled
 
-Implementation note (2026-10-19, M8): W8 gates channel scoped auto-download
+Implementation note (2026-10-19, M8): The UI gates channel-scoped auto-download
 presentation with the live downloads capability and refuses hidden policy
 edits. Cleanup of existing files remains available. M8 has only an RSS transfer
 source: both candidates and direct claims join the parent podcast and refuse

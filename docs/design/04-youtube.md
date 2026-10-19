@@ -327,7 +327,7 @@ Capabilities are all-or-nothing in v1 (`externalReason == null` ⇔ all five `tr
 
 ### DI bindings
 
-Implementation note (2026-10-19, M8): Both shells bind named external implementations in M8: all five capabilities false, `NOT_YET_AVAILABLE`, regardless of packaged self-test scaffolding (adopted resolution 1).
+Implementation note (2026-10-19, M8): Both shells bind named external implementations in M8: all five capabilities false, `NOT_YET_AVAILABLE`, regardless of packaged self-test scaffolding.
 
 Bound only in the shells' YouTube binding containers — `:app`'s `YouTubeBindingsModule` and `:desktopApp`'s `DesktopYouTubeBindingsModule` ([01 YouTube bindings](01-foundation.md#youtube-bindings)); `YouTubeChannelResolver` (→ `DefaultYouTubeChannelResolver`, `:youtube:impl`), `YouTubeHealth` (→ `DefaultYouTubeHealth`, `:core:data`), `YouTubeChannelRepository` and `YouTubeAvailabilityRecorder` (`:core:data`) are capability-independent bindings contributed by their modules (Metro), the same on both platforms. The host ports of [Shared engine module](#shared-engine-module) are contributed by the host modules, never by the shells' containers.
 
@@ -344,13 +344,12 @@ The engine-backed implementations also serve the `armeabi-v7a` APK and the off o
 
 ### Capability consumers
 
-Implementation note (2026-10-19, M8): I3 integrates the landed M6a/M6b
-code without changing adopted resolution 1. Requests and AUTO insertion
-remain RSS-only, Download all uses the false downloads capability, restore
-re-download selects RSS only, and runtime claims disable YouTube candidates.
-The low-level DAO claim trusts its caller's candidate/source admission;
-W8 must assess direct-claim and malformed/restored-row coverage. Its external
-action hiding and integrated safety tests are not implemented by this merge.
+Implementation note (2026-10-19, M8): Both shells remain external. Request,
+planner, bulk, restore, claim and runnable download boundaries reject external
+YouTube rows, including malformed or restored RSS-tagged channel rows. Existing
+completed files can still be cleaned up. Queue additions and group playback
+consult current capabilities. Host and controlled journey evidence is listed in
+[the acceptance ledger](../evidence/m8-acceptance.md).
 
 | Flag | Consumers |
 |---|---|
@@ -364,9 +363,9 @@ action hiding and integrated safety tests are not implemented by this merge.
 
 ### UI per capability (hand-off to [08 Capability differences in UI](08-ui-ux.md#capability-differences-in-ui))
 
-Implementation note (2026-10-19, M8): W8 observes runtime capabilities on
+Implementation note (2026-10-19, M8): The UI observes runtime capabilities on
 rows, detail, queue and Settings. Every M8 build remains external with
-NOT_YET_AVAILABLE (adopted resolution 1); Settings offers suggest-RSS and
+`NOT_YET_AVAILABLE`; Settings offers suggest-RSS and
 mark-played-on-open only. A successful OS handoff invokes YouTubeExternalOpen;
 no handler or cancellation never invokes it. Played transitions use the shared
 transaction and update counts. Its matching undo operation clears only the
@@ -478,7 +477,7 @@ flowchart TD
 
 The page is about 2.5 MB; reading it fully for every subscribe is wasteful, hence head-first. Unverified: the byte size of `<head>`; M8 measures it on the recorded fixture. If the median head exceeds 512 KiB, imports fetch avatars only for the first 20 channels per refresh run on metered networks (rest on unmetered); the decision is recorded here.
 
-Implementation note (2026-10-19, M8): W2 implements the head and total byte
+Implementation note (2026-10-19, M8): The resolver enforces the head and total byte
 limits in common code, counting UTF-8 bytes before decoding. FULL alone scans
 for banners. FEED redirects are explicit, bounded to five hops and restricted
 to HTTPS YouTube page hosts; consent redirects produce CONSENT_WALL. The
@@ -555,7 +554,7 @@ sequenceDiagram
 | `Failed(CONSENT_WALL or PAGE_UNREADABLE)` | "Couldn't read this YouTube page. Paste the channel's /channel/UC… link or a link to one of its videos." | Edit |
 | Typed name in external mode | "To add a YouTube channel, share it from the YouTube app or paste its link." | — |
 
-Implementation note (2026-10-19, M8): W6 implements the same metadata-only
+Implementation note (2026-10-19, M8): Both shells use the same metadata-only
 Add branch on Android and desktop. Canonical identity, pending initial state,
 sync ID and memberships commit together through `YouTubeSubscriptionWriter`;
 normal SUBSCRIBE refresh runs after commit, with no preview Atom ingest.
@@ -563,11 +562,9 @@ normal SUBSCRIBE refresh runs after commit, with no preview Atom ingest.
 an exact duplicate's Open action before confirmation. Metadata-only titles
 fall back to the channel ID. Page descriptions are escaped before storage
 because the existing description column is rendered as HTML. All capability
-bindings remain external (`NOT_YET_AVAILABLE`), implementing adopted plan
-resolution 1 for these screens.
+bindings remain external (`NOT_YET_AVAILABLE`), without starting an engine.
 
-Implementation note (2026-10-19, M8): W6 implements adopted plan resolution 6:
-Include past live streams affects future polls, and disabling it keeps
+Implementation note (2026-10-19, M8): The Include past live streams setting affects future polls, and disabling it keeps
 previously fetched recordings visible. The settings explanation also states
 that external mode cannot reliably distinguish live streams or premieres.
 Shorts changes instead invalidate existing feed pages immediately through
@@ -578,7 +575,7 @@ introduced.
 
 [PO-9](../PLAN.md#48-further-product-owner-decisions) default. When the preview opens and `youtube.suggest_rss` is on, `YouTubeChannelRepository.findRssAlternative(title)` queries 03's `SearchRepository` (enabled podcast directories only; never YouTube search) with an 8 s timeout. A hit matches when `norm(channelTitle)` equals `norm(collectionName)` or `norm(artistName)`, where `norm` = NFKC, lowercase, remove everything except letters and digits. The first match is shown as a card "This show also has a podcast feed — Subscribe to the podcast instead"; the preview is never blocked. The query only goes to directories the user already has enabled ([03 Search and discovery](03-feeds-and-discovery.md#search-and-discovery) privacy text applies).
 
-Implementation note (2026-10-19, M8): W6 uses the enabled M7 search service,
+Implementation note (2026-10-19, M8): The suggestion uses the enabled directory search service,
 with an eight-second deadline, NFKC name/artist comparison and no persistence.
 The optional suggestion runs after the channel preview becomes subscribable;
 Use podcast re-enters the same Add resolver and discards the old channel state.
@@ -591,7 +588,7 @@ With the engine only, M9a. Discover offers an explicit "Search YouTube channels"
 
 ### Channel metadata refresh
 
-Implementation note (2026-10-19, M8): W3 and W6 share one app-scoped
+Implementation note (2026-10-19, M8): The adapter and detail repository share one app-scoped
 `DefaultYouTubeChannelMetadata` binding for adapter after-ingest and channel
 detail. It owns the 100-new/30-stale sliding budget, two lookup permits,
 jitter, coalescing and the 20-second bound. Detail upgrades an in-flight
@@ -600,11 +597,11 @@ Both callers refresh at the 30-day boundary. A fresh AVATAR-only preview
 with no banner does not force another page request. Failed metadata leaves
 the timestamp unchanged; NotFound stamps it without affecting feed health.
 The transaction preserves missing page values, escapes plain descriptions
-for HTML storage and explicitly re-pins changed avatar keys through W7's
+for HTML storage and explicitly re-pins changed avatar keys through the
 900 px helper. Banners stay unpinned. Atom uses `applyYouTubeFeedMetadata`
 and cannot erase page artwork, banner, description or link. Both shells
-provide one W2 resolver with the current app locale and keep external
-capabilities (`NOT_YET_AVAILABLE`, adopted resolution 1).
+provide one resolver with the current app locale and keep external
+capabilities (`NOT_YET_AVAILABLE`).
 
 - Atom `author/name` updates the title on every refresh (via 03's metadata update).
 - Avatar and description: in `afterIngest` (after a successful fetch, ingested or unchanged; after the enrichment step), `YouTubeSourceAdapter` re-resolves `Channel(id)` with `AVATAR` depth when `channelMetadataAt` is null or older than 30 days, under `withTimeoutOrNull(20 s)`. Budget (in-memory sliding window of 10 min, which covers one 8-min run): at most 100 never-fetched (`channelMetadataAt IS NULL`, typically fresh imports) plus 30 stale channels, 2 concurrently with 0.5–1.5 s jitter. With the engine, a denied extraction gate makes the lookup fall back to HTML ([Engine channel lookup](#engine-channel-lookup)). Channels over budget keep their monogram until a later run. New avatar URL → new `artworkKey`. 03's pin on an `artworkUrl` change runs before `afterIngest` and never sees this write, so whenever `applyYouTubeChannelMetadata` changes `artworkKey` (first avatar after a monogram, or a new avatar URL; the caller compares the stored key), the caller (`YouTubeSourceAdapter.afterIngest` here, `YouTubeChannelRepository.ensureChannelArt` below) calls `ArtworkStore.pin(ArtworkRef(newKey, avatarUrl, 0), PinReason.SUBSCRIPTION, podcastId)`, which schedules `artwork-sync` ([08 ArtworkStore](08-ui-ux.md#artworkstore)).
@@ -661,7 +658,7 @@ The prefixes are undocumented; if YouTube drops them, the `channel_id` fallback 
 
 ### Fetch policy
 
-Implementation note (2026-10-19, M8): W3 applies adopted resolution 2 to
+Implementation note (2026-10-19, M8): The adapter applies this policy to
 all seven masks: primary 404/410 always tries canonical first, including
 Shorts/live-only selections; failed fallback keeps its real diagnostic.
 Selected variants run sequentially under the refresher's
@@ -677,7 +674,7 @@ health probe always reports, including cancellation as inconclusive.
 | Minimum interval | `nextRefreshAt ≥ lastAttemptAt + 15 min` (server sends `max-age=900`). Manual refreshes are not throttled beyond 03's 20 s pull-to-refresh cooldown |
 | Interval | The podcast's effective refresh interval ([D45](../PLAN.md#3-key-decisions)), never below 15 min |
 | 404 on `UUSH`/`UULV` | Treated as `Empty` (Unverified: whether channels without such content answer 404 or an empty feed; both are handled) |
-| 404 on the primary | Try `channel_id`; 200 → use it (fallback mode), mark Shorts by link and **drop** them unless `SHORTS` is set (live items cannot be told apart in this mode; known limitation, enrichment marks them when the engine is available); 404, 5xx or I/O → channel failure (`Failed(HTTP_NOT_FOUND …, transient = true)`) and one failure for [YouTubeOutageMonitor](#errors-and-global-outage) |
+| 404 on the primary | Try `channel_id`; 200 → use it (fallback mode), mark Shorts by link and **drop** them unless `SHORTS` is set (live items cannot be told apart in this mode; known limitation, enrichment marks them when the engine is available); 404, 5xx or I/O → channel failure (preserve the actual HTTP/network diagnostic, `transient = true`) and one failure for [YouTubeOutageMonitor](#errors-and-global-outage) |
 | 410 | Same as 404. YouTube channels are **never** marked `gone`; a channel failing for 7 days gets 03's derived "possibly dead" badge (terminated channels), which clears on the next success |
 | 429 or 403 on any feed | `health.reportFeedRateLimited(now, Retry-After)` → `feedRateLimitedUntil = now + max(Retry-After, 30 min)`, doubling per consecutive occurrence to 6 h; this channel and every YouTube channel fetched before that time return `Deferred(feedRateLimitedUntil)` without network (no failure counted). The next successful fetch resets the doubling |
 
@@ -718,8 +715,7 @@ Episode columns (subset; full entity in [02 episode](02-data-model.md#episode)):
 
 ### Merge algorithm
 
-Implementation note (2026-10-19, M8): W3 implements adopted resolution 4
-with transient `AtomDates` parser provenance. RSS values and RSS hashes
+Implementation note (2026-10-19, M8): The parser exposes transient `AtomDates` parser provenance. RSS values and RSS hashes
 stay unchanged, so this additive provenance does not bump the parser
 version or rewrite its goldens. YouTube takes only published/raw-published;
 malformed or missing published never uses updated. The digest includes
@@ -736,7 +732,7 @@ therefore writes even when the text stays equal. No schema change is needed.
 3. In fallback mode drop Shorts unless `SHORTS` is enabled (after step 7's floor is computed on the raw entries).
 4. Order by `published` descending, ties by `videoId`; `feedOrder` = index (03 inserts in descending `feedOrder`).
 5. Title = `authorName` of the first `Ok` result.
-6. `digest` = lowercase SHA-256 hex over lines `videoId|title|published|isShort|sha1(description)` in order. Equal to the stored `contentSha256` → `AdapterResult.Unchanged` (reschedule only, no transaction; this replaces 03's body-hash shortcut, which never hits for YouTube because view counts and `<updated>` change every fetch).
+6. `digest` = lowercase SHA-256 hex over length-framed fields `videoId`, `title`, published/raw-published, `isShort`, `sha1(description)` in order, plus normalized channel authorName. Equal to the stored `contentSha256` → `AdapterResult.Unchanged` (reschedule only, no transaction; this replaces 03's body-hash shortcut, which never hits for YouTube because view counts and `<updated>` change every fetch).
 7. `absenceFloor`: if any enabled variant `Failed` → `Long.MAX_VALUE` (mark no absences). Otherwise `max` over the `Ok` variants of `floorᵥ`, where `floorᵥ` = the smallest 03 `sortDate` of that variant's raw entries when it returned exactly 15 entries, else `Long.MIN_VALUE` (a short list is the complete list); `Empty` variants contribute `Long.MIN_VALUE`.
 8. Return `Parsed(merged feed, partial = true, meta, rowHints, absenceFloor)`.
 
@@ -750,19 +746,17 @@ YouTube feeds show only the newest 15 entries per variant, so "absent from this 
 
 ### Gap detection
 
-Implementation note (2026-10-19, M8): W3 implements adopted resolution 3
-for the triggering success and the next two successful refreshes. Failure,
+Implementation note (2026-10-19, M8): Gap pull-in applies to the triggering success and the next two successful refreshes. Failure,
 deferred and manual-only deadlines are preserved; publisher max-age is a
 lower bound even during pull-in. The normal success hook now also runs
 after a body ingest commits, before the post-ingest announcement. Manual
 requests still bypass due-time selection. Gap counters are in-memory only.
 
-On a non-initial refresh, if every entry of a 15-entry variant is unknown, items may have been missed between refreshes (high-volume channels, or the device was offline). Then: with the engine, the enrichment step also requests `uploadsPage(channelId, bit, null)` (one page, ~30 items) and ingests unknown IDs through 03's `FeedIngestor` in `OLDER_PAGE` mode (never `isNew`, never flips absence; [D66](../PLAN.md#3-key-decisions)); in both capability modes `nextRefreshAt` is pulled in to `now + max(15 min, interval / 2)` for the next three refreshes of that channel (in memory, best effort). The 15 newest unknown items of the triggering refresh stay `isNew = 1` subject to 03's dump guard.
+On a non-initial refresh, if every entry of a 15-entry variant is unknown, items may have been missed between refreshes (high-volume channels, or the device was offline). Then: with the engine, the enrichment step also requests `uploadsPage(channelId, bit, null)` (one page, ~30 items) and ingests unknown IDs through 03's `FeedIngestor` in `OLDER_PAGE` mode (never `isNew`, never flips absence; [D66](../PLAN.md#3-key-decisions)); in both capability modes `nextRefreshAt` is pulled in to `now + max(15 min, interval / 2)` for the triggering success and the next two successful refreshes of that channel (in memory, best effort). The 15 newest unknown items of the triggering refresh stay `isNew = 1` subject to 03's dump guard.
 
 ### Errors and global outage
 
-Implementation note (2026-10-19, M8): W4 implements adopted resolution 5
-with serialized device health writes and probe admission. Only global outage
+Implementation note (2026-10-19, M8): Health uses serialized device health writes and probe admission. Only global outage
 state suppresses channel badges; ordinary failures retain their diagnostics
 and never set `gone` or unsubscribe. Control checks use the existing FEED
 transport under the adapter's current host permit, or after refresh fan-out,
@@ -800,8 +794,7 @@ UI: one in-app banner on Feeds and Library while `feedOutageLevel > 0`, "YouTube
 
 ### Enrichment step
 
-Implementation note (2026-10-19, M8): Under adopted resolutions 1 and 6,
-W3's post-ingest path performs channel metadata and announcement filtering
+Implementation note (2026-10-19, M8): The post-ingest path performs channel metadata and announcement filtering
 only. All M8 builds remain external (`NOT_YET_AVAILABLE`); it never calls
 an enricher, extractor or back-catalogue engine. Canonical fallback cannot
 reliably identify live, premiere or members-only uploads, and disabling LIVE
@@ -860,12 +853,11 @@ With the engine, M9a; `YouTubeChannelRepository.loadOlder(podcastId)` from the p
 
 Serves R3.2, R5.2, R5.3, R5.8. Delivered in M8. 08 owns rendering, `ArtworkStore`, Coil and the interceptor code; this section defines the sources.
 
-Implementation note (2026-10-19, M8): W7 supplies the common URL rules and
+Implementation note (2026-10-19, M8): The artwork pipeline supplies the common URL rules and
 thumbnail interceptor. Avatar normalization defaults to 900 px; video URLs
 default to `mqdefault`. Banner selection returns only a URL and does not
-fetch or pin it; W3/W6 own metadata persistence and lazy detail loading.
-All M8 artwork works in external mode without engine lookup (adopted
-resolution 1).
+fetch or pin it; The adapter and detail repository own metadata persistence and lazy detail loading.
+All M8 artwork works in external mode without engine lookup.
 
 ```kotlin
 object YouTubeThumbnails {
@@ -1446,10 +1438,10 @@ Export (05 writes the XML, [D31](../PLAN.md#3-key-decisions)): each channel as `
 
 `ImportFormat.URL_LIST` (02's constant, 05's pipeline; stored as TEXT, no migration): UTF-8 text ≤ 1 MB, ≤ 5,000 lines; lines trimmed; empty and `#` lines skipped; each line is an http(s) URL (RSS or YouTube), a `UC…` ID or an `@handle`. Sniffed when ≥ 80 % of the remaining lines are such tokens. Covers LibreTube's "list of URLs/IDs" export and hand-made lists.
 
-Implementation note (2026-10-19, M8): W5 implements the four pure format parsers,
+Implementation note (2026-10-19, M8): The import pipeline implements the four pure format parsers,
 OPML canonical channel export and full-library NewPipe export in external mode.
 JSON row caps apply during decoding, and ignored JSON structures have a 64-level
-nesting bound. W5 and W6 use one app-scoped `YouTubeSubscriptionWriter`
+nesting bound. Import and Add use one app-scoped `YouTubeSubscriptionWriter`
 implementation for Add, static imports and durable resolved imports. It commits
 canonical identity, sync ID, pending initial state, variants and memberships
 together. Import preserves existing settings and unions groups; Add rejects an
@@ -1462,7 +1454,7 @@ recheck cancellation and input ownership before canonical insertion and group un
 
 Implementation note (2026-10-19, M8): Import format examples live under
 `feeds/src/test/resources/import/` and shared parser tests replay on the desktop
-and Android host targets (adopted resolution 8). They are small synthetic examples
+and Android host targets. They are small synthetic examples
 with provenance, not current owner exports. NewPipe interoperability is an M8 manual
 check despite its placement in the M9 checklist below. A current localized Takeout
 ZIP, grouped LibreTube owner export and application interoperability remain owner
@@ -1470,7 +1462,7 @@ acceptance evidence; deterministic tests do not claim those checks.
 
 ### Pipeline rules for YouTube items (05 implements)
 
-Implementation note (2026-10-19, M8): Parser-owned ordinal maps `itemYouTubeInputs` and `itemYouTubeVariants` retain htmlUrl-selected inputs and validated nd-over-hint-over-LONG_FORM masks in optionsJson. Old maps default empty. W5 lazily upgrades unfinished sessions on retry/re-preview, preserves historical reports and unions duplicate memberships through the same canonical-key writer as Add, without storing handle aliases (adopted resolution 7).
+Implementation note (2026-10-19, M8): Parser-owned ordinal maps `itemYouTubeInputs` and `itemYouTubeVariants` retain htmlUrl-selected inputs and validated nd-over-hint-over-LONG_FORM masks in optionsJson. Old maps default empty. The importer lazily upgrades unfinished sessions on retry/re-preview, preserves historical reports and unions duplicate memberships through the same canonical-key writer as Add, without storing handle aliases.
 
 1. Before M8: YouTube items get `YOUTUBE_UNSUPPORTED_YET` and are not selectable.
 2. Statically known channels: commit inserts `PENDING_FIRST_FETCH` podcasts with the canonical feed URL, `youtubeChannelId`, `youtubeVariants`, title from the file, `initialFetch = 1`, `channelMetadataAt = null`. Dedupe by `feedKey`; duplicates within one file merge with the union of group names.
@@ -1760,10 +1752,10 @@ Rejected: NewPipe Extractor (GPL-3.0-or-later; the previous design), youtubedl-a
 
 ## Settings
 
-Implementation note (2026-10-19, M8): W1 registers M8 keys only: portable
+Implementation note (2026-10-19, M8): Only subscription and external-mode keys are registered: portable
 preferences, device-only health, no youtube-key sync. Zero stored deadline
 means null in health APIs; the external-mode live limitation and switches
-follow the Add and ingestion notes above (adopted resolution 6).
+follow the Add and ingestion notes above.
 
 | Key | Type | Default | File | UI location | Milestone |
 |---|---|---|---|---|---|
@@ -1816,17 +1808,33 @@ Serves N11. No test in PR CI touches live YouTube (runners use data-centre IPs t
 | APK content scan (`check-apk.sh --published` on the release APKs, 09) | CI | No `mutagen`, `readline`, `libreadline`, `org/schabi/newpipe`, `org/mozilla/javascript` in any APK; no Python native libraries in the `armeabi-v7a` APK; no `ch/lkmc/neutrodyne/youtube/ytdlp` classes in the `-Pneutrodyne.youtubeEngine=false` build; 16 KB alignment including the `.so` files inside Chaquopy's asset zips | M9a |
 | Desktop host tests (11 owns them) | `:youtube:ytdlp-desktop` `desktopTest`, the nightly `desktop-matrix`, `release.yml`'s `desktop` jobs | `StdioYtxTransportTest` (MD3 AC1: the recorded-response vectors of M9 AC1 through the stdio host), the packaged app's YouTube smoke test with `ReplayRH` on every target (MD3 AC2), `YtxProcessTest` (MD3 AC3), `EngineUpdaterTest` with the desktop store (MD3 AC4), `check-desktop-image.sh` and `codesign --verify --deep --strict` (MD3 AC5), PB29 (MD3 AC6) ([11 Testing](11-desktop.md#testing)) | MD3 |
 
-Implementation note (2026-10-19, M8): W3 implements the Atom portion of
-adopted resolution 8 with a synthetic, provenance-documented
+Implementation note (2026-10-19, M8): Atom replay uses a synthetic, provenance-documented
 `feeds/src/test/resources/youtube/m8-atom.xml`, shared with Android host
 replay. Tests generate bounded 15-entry windows and status changes; no live
 YouTube calls are used as acceptance proof.
 
-Fixtures: `feeds/src/test/resources/corpus/youtube/` (`uulf_mkbhd.xml`, `channel_id_mkbhd.xml` with 3 Shorts, `uush_mkbhd.xml`, `uulv_nasa.xml`, `user_marquesbrownlee.xml`, `playlist_pl_oldest_first.xml`, `empty_channel.xml`); `youtube/impl/src/test/resources/youtube/` (`handle_mkbhd.html.gz`, `channel_canonical_only.html`, `consent_redirect.txt`, `oembed_3iRUwVzRDZQ.json`); `youtube/engine/src/test/resources/recorded/{scenario}/` (request/response pairs and `result.json`, both hosts, [Recorded responses](#recorded-responses)); `youtube/engine/src/test/resources/engine/` (test manifest keys, a signed test manifest, the real 2026.08.19 `SHA2-256SUMS` and `.sig`); `feeds/src/test/resources/import/{newpipe,libretube,takeout,urllist}/`.
+Current Layer A fixtures are `feeds/src/test/resources/youtube/m8-atom.xml`,
+`feeds/src/test/resources/feeds/youtube-atom-*.xml` and
+`youtube/impl/src/test/resources/recorded/` (channel/canonical/watch HTML,
+oEmbed JSON and consent head). The resolver provenance file distinguishes
+reconstructed success shapes from the unsuccessful live consent capture.
+Import examples live in `feeds/src/test/resources/import/{newpipe,libretube,takeout,urllist}/`;
+limits, windows, archives and hostile mutations are generated by the tests.
+These examples do not replace owner exports. Engine request/response recordings
+and signed-manifest fixtures under `youtube/engine/src/test/resources/` remain
+future engine work; M8 does not require an engine fixture module.
 
-**Nightly `youtube-canary`** (09, non-blocking): from a scheduled workflow, subscribe to two well-known channels by handle, fetch `UULF`, resolve one video through the shim's stdio adapter on a host CPython and fetch its first 10 MiB chunk, and fetch the canonical feeds of `YouTubeFeedUrls.CONTROL_CHANNEL_IDS` (a control whose feed fails while another channel's answers must be replaced in the next release, [Errors and global outage](#errors-and-global-outage) step 7); a failure opens or updates one GitHub issue. Bot challenges on runner IPs make it noisy by design. **`engine-nightly-canary`** (09, informational): `shimTest` and `shimTestStdio` against yt-dlp's latest nightly build. **`no-engine-build`** (09, blocking): `assembleRelease` (the published build type) and a desktop app image, both with `-Pneutrodyne.youtubeEngine=false`. The engine canary's content: [Engine canary](#engine-canary).
+**Nightly `youtube-canary`** (09, non-blocking): M8 makes at most five bounded
+feed requests: canonical controls `UCBR8-60-B28hp2BmDPdntcQ` and
+`UCK8sQmJBp8GCxrOtXWBpyEA`, then UULF/UUSH/UULV for the first control.
+It validates Atom author/channel/video identity, accepts optional empty variants,
+and reuses the canonical result for primary fallback. Responses are capped at
+2 MiB, with request/body deadlines and a job timeout. Failures use the existing
+nightly issue reporter; runner consent/bot failures remain diagnostics.
+There is no extraction or engine-update request. M9a may extend this same job
+with engine checks; it must not add a duplicate feed canary. **`engine-nightly-canary`** (09, informational): `shimTest` and `shimTestStdio` against yt-dlp's latest nightly build. **`no-engine-build`** (09, blocking): `assembleRelease` (the published build type) and a desktop app image, both with `-Pneutrodyne.youtubeEngine=false`. The engine canary's content: [Engine canary](#engine-canary).
 
-**M9 device checklist** (manual, recorded in the PR): a 2-hour YouTube episode plays with the screen off; Wi-Fi → mobile switch mid-episode recovers without position loss; IPv6-only Wi-Fi and IPv4-only mobile both play (IP-family matching); a 60-minute audio download completes in 10 MiB chunks and the `.m4a` plays in another app; `OPUS` quality produces a playable `.webm`; airplane mode shows the avatar on the lock screen; a dubbed video plays its original track; toggling volume levelling, then replaying a cached episode, never mixes audio; the breaker notice appears after simulated failures and "Try now" recovers; our NewPipe JSON export imports into NewPipe and LibreTube; sustained streaming and download throughput ≥ 1.5× real time with plain `Range` requests ([Playback integration](#playback-integration) throttling row); engine budgets on the reference device with the release `arm64-v8a` APK (cold and warm resolve, `:ytx` PSS, `:ytx` gone 3 min after the last call) and cold start unchanged on `benchmarkRelease`; turning the engine off mid-playback and on again; the `armeabi-v7a` APK on a 32-bit device shows external mode with the reason; (M9b) an engine update staged during playback activates only at engine idle and never interrupts audio, "Reset to bundled" works, an injected bad version rolls back; (JS provider shipped) a made-for-kids video plays.
+**M9 device checklist** (manual, recorded in the PR): a 2-hour YouTube episode plays with the screen off; Wi-Fi → mobile switch mid-episode recovers without position loss; IPv6-only Wi-Fi and IPv4-only mobile both play (IP-family matching); a 60-minute audio download completes in 10 MiB chunks and the `.m4a` plays in another app; `OPUS` quality produces a playable `.webm`; airplane mode shows the avatar on the lock screen; a dubbed video plays its original track; toggling volume levelling, then replaying a cached episode, never mixes audio; the breaker notice appears after simulated failures and "Try now" recovers; our NewPipe JSON export imports into NewPipe and LibreTube (this interoperability evidence is already required for M8); sustained streaming and download throughput ≥ 1.5× real time with plain `Range` requests ([Playback integration](#playback-integration) throttling row); engine budgets on the reference device with the release `arm64-v8a` APK (cold and warm resolve, `:ytx` PSS, `:ytx` gone 3 min after the last call) and cold start unchanged on `benchmarkRelease`; turning the engine off mid-playback and on again; the `armeabi-v7a` APK on a 32-bit device shows external mode with the reason; (M9b) an engine update staged during playback activates only at engine idle and never interrupts audio, "Reset to bundled" works, an injected bad version rolls back; (JS provider shipped) a made-for-kids video plays.
 
 **MD3 desktop checklist** (manual, per OS on the reference laptops of [PO-43](../PLAN.md#48-further-product-owner-decisions), recorded in the PR; 11's OS-integration checklists cover the rest): a 2-hour YouTube episode plays with the OS media controls and survives a sleep and wake (paused, re-resolved on play); a 60-minute audio download completes in 10 MiB chunks; a dual-stack (IPv6) network and an IPv4-only network both play; an engine update staged during playback activates only at engine idle without interrupting audio; "Reset to bundled" works; a quarantined or deleted interpreter shows `ENGINE_FAILED` with "The YouTube engine could not start"; Windows 11 on Arm (x64 build, emulated) resolves and plays; PB29 measured per 11; (JS provider shipped) a made-for-kids video plays.
 

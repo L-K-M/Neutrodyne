@@ -1386,6 +1386,14 @@ No schema change is authorized here.
 
 #### M8: YouTube subscriptions in all builds
 
+**Local integration checkpoint (2026-10-19):** Subscription and external-mode
+behavior is implemented on Android and desktop; all five engine capabilities
+remain false with `NOT_YET_AVAILABLE`. The [AC1–9 ledger](evidence/m8-acceptance.md)
+separates deterministic host evidence from unexecuted device, OS/ABI, browser,
+accessibility, interoperability and network captures. M8 is not complete or
+merged. The existing nightly has one bounded, report-only feed control/variant
+canary; extraction and engine updates remain later milestones.
+
 - **Goal:** YouTube channels become podcasts in every APK (layer A); until M9 every APK treats YouTube episodes as external episodes.
 - **Deliverables:**
   - `:youtube:api` (`YouTubeFeedUrls` for `UULF`/`UUSH`/`UULV`, `YouTubeEntryRules`, `YouTubeThumbnails`, `YouTubeChannelResolver`, `YouTubeEnricher`; uses `YtRef` and `YouTubeUrlClassifier` from M3 and `YouTubeCapabilities` and the `YouTubeStreamResolver` contract from M2/M4); `:youtube:impl` (HTML autodiscovery resolver with `SOCS=CAE=` cookie and head-only parsing, oEmbed client, avatar and banner extraction); the external-only bindings (`ExternalOnlyYouTubeStreamResolver`, `NoOpYouTubeEnricher`, `UnsupportedYouTubeChannelSearch`, `NoExtractorChannelLookup`, a static `YouTubeCapabilitiesSource` with reason `NOT_YET_AVAILABLE`) stay bound until M9a binds the engine-backed implementations.

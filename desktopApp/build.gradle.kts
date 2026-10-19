@@ -233,3 +233,10 @@ extensions
     .application {
         if (smokeRun.get()) jvmArgs("-Dneutrodyne.smoke=true")
     }
+
+// Share only replay code/resources with the test APK, never with either application.
+sourceSets.test {
+    kotlin.srcDir("../app/src/externalModeTest/kotlin")
+    resources.srcDir("../youtube/impl/src/test/resources")
+    resources.srcDir("../feeds/src/test/resources")
+}

@@ -105,6 +105,7 @@ jobs:
           python3 scripts/ci/tests/assert-playback-tests.test.py
           python3 scripts/ci/tests/assert-download-tests.test.py
           python3 scripts/ci/tests/assert-discovery-tests.test.py
+          python3 scripts/ci/tests/youtube-feed-canary.test.py
           python3 scripts/ci/tests/playback-reboot.test.py
           python3 scripts/ci/tests/assert-system-tests.test.py
           python3 scripts/ci/tests/first-launch-restore-results.test.py
@@ -144,7 +145,9 @@ jobs:
           -Proborazzi.test.verify=true --continue
       - name: Require executed M7 discovery journeys and Android host replay
         if: ${{ !cancelled() }}
-        run: python3 scripts/ci/assert-discovery-tests.py .
+        run: |
+          python3 scripts/ci/assert-discovery-tests.py .
+          python3 scripts/ci/assert-discovery-tests.py . --external-youtube
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() }}
         with:
@@ -255,7 +258,9 @@ jobs:
         run: ./gradlew --max-workers=2 ciGroupDebugAndroidTest ciGroupAndroidDeviceTest -Pneutrodyne.testScope=ci -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
       - name: Require M7 discovery on both CI devices
         if: ${{ !cancelled() }}
-        run: python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api26 --device api36
+        run: |
+          python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --device api26 --device api36
+          python3 scripts/ci/assert-discovery-tests.py app/build/outputs/androidTest-results --external-youtube --device api26 --device api36
       - name: Require M4 and M5 playback cases on both CI devices
         run: python3 scripts/ci/assert-playback-tests.py ci app/build/outputs/androidTest-results --device api26 --device api36 --apk app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -3,6 +3,8 @@ package ch.lkmc.neutrodyne
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -12,7 +14,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.lifecycle.SavedStateHandle
@@ -69,7 +71,12 @@ import kotlin.test.assertTrue
 @ReleaseSmoke
 @RunWith(AndroidJUnit4::class)
 class SubscribeJourneyTest {
-    @get:Rule val compose = createComposeRule()
+    @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+
+    // The release manifest declares MainActivity; the empty Compose host is debug-only.
+    private fun showJourney(content: @Composable () -> Unit) {
+        compose.runOnUiThread { compose.activity.setContent(content = content) }
+    }
 
     @Test
     fun sharedAppleLinkResolvesWithoutWritingUntilConfirmation() = journey(Entry.APPLE)
@@ -180,7 +187,7 @@ class SubscribeJourneyTest {
                             ),
                         )
                     }
-                compose.setContent {
+                showJourney {
                     if (showing) {
                         CompositionLocalProvider(
                             LocalMetroViewModelFactory provides graph.metroViewModelFactory,

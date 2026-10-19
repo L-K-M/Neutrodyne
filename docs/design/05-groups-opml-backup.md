@@ -1369,7 +1369,7 @@ close as if deletion succeeded.
 
 ## Other import formats
 
-Implementation note (2026-10-19, M8): W5 activates NewPipe, LibreTube/Piped,
+Implementation note (2026-10-19, M8): The importer activates NewPipe, LibreTube/Piped,
 Takeout CSV/ZIP and mixed URL-list imports through the existing durable session
 pipeline. Takeout uses the existing ZipGuard factory with no extraction: 10,000
 central-directory entries, at most 50 CSV candidates, 5 MB per entry and 250 MB
@@ -1387,7 +1387,7 @@ file-intent filters below and accepts JSON/CSV/text through its existing unrestr
 picker. Desktop file hand-off additionally accepts `.json`, `.csv`, `.txt` and `.tgz`;
 all inputs are still sniffed, and `.tgz` gives the explicit choose-ZIP message.
 
-Implementation note (2026-10-19, M8): Parser-owned ordinal maps `itemYouTubeInputs` and `itemYouTubeVariants` in `optionsJson` default to empty for old sessions and survive preview edits. They retain a classified `htmlUrl` input and validated variant precedence without schema changes. Unfinished M3 previews upgrade when reopened or confirmed, while historical reports retain their old meaning. Static and resolved imports use the same canonical-key transaction writer as Add to dedupe channels and union memberships without handle aliases (adopted resolution 7).
+Implementation note (2026-10-19, M8): Parser-owned ordinal maps `itemYouTubeInputs` and `itemYouTubeVariants` in `optionsJson` default to empty for old sessions and survive preview edits. They retain a classified `htmlUrl` input and validated variant precedence without schema changes. Unfinished M3 previews upgrade when reopened or confirmed, while historical reports retain their old meaning. Static and resolved imports use the same canonical-key transaction writer as Add to dedupe channels and union memberships without handle aliases.
 
 Serves R1.6, R1.7, R8.1. Delivered in [M3](../PLAN.md#m3-import-export-and-backup) on both platforms (sniffing, backups, YouTube reported as unsupported) and [M8](../PLAN.md#m8-youtube-subscriptions-in-all-builds) (YouTube formats). Format specifications and parsers: [04 Import and export formats](04-youtube.md#import-and-export-formats); this section is how they enter the pipeline.
 

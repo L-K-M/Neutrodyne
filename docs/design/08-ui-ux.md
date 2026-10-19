@@ -1545,7 +1545,7 @@ enum class CoverAspect { SQUARE, WIDE_16_9 }
 
 `PodcastHeader` (`:core:ui`) is the first item of the podcast screen's `LazyColumn` and scrolls away; a pinned transparent `NdTopAppBar` overlays it and fades its container and title in as `firstVisibleItemScrollOffset` passes the cover's bottom (simpler and more robust than nested-scroll large app bars with a 300 dp header). Background: vertical gradient from the artwork scheme's `primaryContainer` (top) to `surface` at 70 % of the header height. Cover 160 dp, 24 dp corners, `dropShadow` in the seed colour at 30 % (M10). YouTube: the banner (`podcast.bannerUrl`, never pinned, 04) fills the top 6:1 strip behind the avatar with a 40 % bottom scrim; without a banner (offline, missing): the avatar blurred (`Modifier.blur(24.dp)`, API 31+) or the artwork gradient below 31. Group chips are `NdInputChip`s with the group dot; the trailing "x" removes the membership (snackbar with Undo) and "+ Group" opens `AddToGroupsKey(listOf(id))`.
 
-Implementation note (2026-10-19, M8): W6 renders the channel banner as an
+Implementation note (2026-10-19, M8): The podcast header renders the channel banner as an
 unpinned 6:1 image with a bottom scrim and requests coalesced metadata on
 podcast detail open. The existing avatar/monogram remains the fallback when
 no banner exists; the blurred avatar and artwork gradient remain M10 polish.
@@ -2551,7 +2551,7 @@ Coil 3's computed memory key omits the size unless transformations are set, so w
 
 ### YouTube thumbnails
 
-Implementation note (2026-10-19, M8): W7 registers the interceptor in the
+Implementation note (2026-10-19, M8): The artwork pipeline registers the interceptor in the
 singleton loader on both platforms. Candidate URLs have separate disk keys;
 explicit request-tier memory keys are retained so hero placeholders can find
 row art. Pinned references retain their original data and keys. `LetterboxCrop169` shares its rectangle calculation in common
@@ -2848,7 +2848,7 @@ Denied → no repeated system dialog; the relevant screen shows an inline row "N
 
 ## Capability differences in UI
 
-Implementation note (2026-10-19, M8): W8 observes capability changes in
+Implementation note (2026-10-19, M8): The shared UI observes capability changes in
 Feeds, Podcast, episode detail and YouTube Settings. Injected capability,
 health and successful-open ports are required dependencies: Metro's constructor
 defaults would otherwise bypass the real bindings. Test fixtures pass explicit
@@ -2860,7 +2860,7 @@ browser handoff offers the optional played transition and a five-second Undo;
 failed opens retain the existing Copy link feedback. Feeds and Library each
 render one shared outage banner with Retry now. The podcast health mapper
 suppresses channel failure badges while the global outage level is active,
-retaining single-channel diagnostics once it recovers (adopted resolution 5).
+retaining single-channel diagnostics once it recovers.
 No system notification is emitted for a feed outage. The desktop's pre-MD1
 playback stub uses read-only domain queries after the database gate to report
 external row refusal and all-external contexts truthfully; RSS playback still

@@ -2,9 +2,10 @@
 
 # Privacy
 
-v0 (M0a). The outline of 09's Privacy section; updated whenever a document adds
-a network destination, final in M11b. The in-app "What Neutrodyne connects to"
-list uses the same IDs as the inventory below.
+The in-app "What Neutrodyne connects to" list uses the same IDs as the
+inventory below. Current Android and desktop builds open YouTube externally.
+They do not start a Python engine, resolve streams or check for engine updates.
+The engine destinations below describe future engine-enabled builds.
 
 ## Summary
 
@@ -38,6 +39,9 @@ The inventory below uses the same stable IDs as Settings › Privacy. Provider
 switches stop automatic directory requests. An explicit Apple-link lookup asks
 for one-time consent when Apple is off; Podcast Index lookups require its
 switch and an effective key. URLs are never automatically sent as searches.
+If "Suggest podcast feed" is on in YouTube settings, a channel preview also sends its channel title as a search
+to the directories you have enabled. The suggestion runs in the background and
+does not block subscribing. Turn it off to stop these title queries.
 Searches, charts and previews remain in memory until eviction or app exit.
 
 | ID | Destination and what it receives |
@@ -51,7 +55,7 @@ Searches, charts and previews remain in memory until eviction or app exit.
 | `apple` | **Apple.** itunes.apple.com receives search text, country and search parameters; explicit Apple, pod.link or Overcast lookups send Apple podcast IDs. rss.marketingtools.apple.com receives the country for overall charts. Genre charts send country and genre ID to itunes.apple.com; chart resolution sends podcast IDs there. Apple receives no subscriptions, feed URLs or Podcast Index credentials. |
 | `fyyd` | **fyyd.** api.fyyd.de receives search text and result-count parameters. It receives no country, subscriptions, feed URLs or API credentials. A fyyd page entered in Add is fetched as a web page. |
 | `podcastindex` | **Podcast Index.** api.podcastindex.org receives search text and result-count parameters, or an explicit Podcast Index feed ID. Every request includes X-Auth-Key (API key), X-Auth-Date (timestamp), and Authorization (SHA-1 of key, secret and timestamp); the secret itself is not sent. Verifying a pair sends the fixed query “podcast”. No country, subscriptions or feed URLs are sent. |
-| `youtube-subscriptions` | **YouTube subscriptions.** When you add or refresh a YouTube channel, www.youtube.com receives channel IDs and page/feed requests. When all subscribed channels fail in a library of one or two YouTube channels, the app also checks the canonical feeds of the official YouTube (UCBR8-60-B28hp2BmDPdntcQ) and Google (UCK8sQmJBp8GCxrOtXWBpyEA) channels to distinguish an outage from a deleted channel. Checks stop at the first success and results are cached for one hour. These channels are not added to your subscriptions. YouTube thumbnail hosts (i.ytimg.com, yt3.googleusercontent.com, yt3.ggpht.com) receive image paths. |
+| `youtube-subscriptions` | **YouTube subscriptions.** When you add or refresh a YouTube channel, www.youtube.com receives channel IDs and page/feed requests. When all subscribed channels fail in a library of one or two YouTube channels, the app also checks the canonical feeds of the official YouTube (UCBR8-60-B28hp2BmDPdntcQ) and Google (UCK8sQmJBp8GCxrOtXWBpyEA) channels to distinguish an outage from a deleted channel. Checks stop at the first success and results are cached for one hour. These channels are not added to your subscriptions. Channel/watch HTML requests carry the fixed reject-consent cookie `SOCS=CAE=` and your app locale, without signed-in cookies. Video thumbnails use i.ytimg.com; channel avatars and banners use URLs returned by YouTube pages, including yt3.ggpht.com and yt3.googleusercontent.com. Those hosts receive the image path when images are loaded. |
 | `youtube-streams` | **YouTube playback and channel search.** With the engine, www.youtube.com receives video/channel IDs, explicit channel searches, locale, client headers and an in-memory consent cookie. googlevideo.com hosts receive media requests. Podcast search text is not sent to YouTube. |
 | `youtube-engine` | **YouTube engine updates.** When enabled, the project GitHub Pages host receives approved-manifest requests; github.com and release-assets.githubusercontent.com receive engine download paths. |
 | `app-updates` | **App updates.** When enabled, github.com and release-assets.githubusercontent.com receive update-manifest requests with the app User-Agent. Tapping a release or download opens your browser. |
@@ -115,13 +119,16 @@ is declared anywhere: the app never downloads or installs an update.
 
 ## YouTube engine and update checks
 
-The engine update check contacts `{owner}.github.io` (approved manifest),
+In future engine-enabled builds, the engine update check will contact
+`{owner}.github.io` (approved manifest),
 `github.com` and `release-assets.githubusercontent.com`; turn it off in
 Settings › YouTube › "Engine updates". The app update check makes one
 `releases/latest/download/neutrodyne-update.json` request per day to
 `github.com`; turn it off in Settings › Updates › "Check for updates". The apps
-download no update: your browser does, from GitHub. On the `armeabi-v7a` APK
-YouTube always opens in the YouTube app (external mode).
+download no update: your browser does, from GitHub. All current Android and
+desktop builds open YouTube in an external app or browser.
+Engine controls are not available in these builds. The future `armeabi-v7a` APK
+will continue to use external mode.
 
 ## Contact and change history
 
