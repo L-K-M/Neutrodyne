@@ -95,6 +95,23 @@ class NeutrodyneRootTest {
         Locale.setDefault(previousLocale)
     }
 
+    @Test fun downloadsBadgeWaitsForTheStartupGate() =
+        runComposeUiTest {
+            var subscribed = false
+            var startup by mutableStateOf<StartupGateState>(StartupGateState.Pending)
+            val counts =
+                kotlinx.coroutines.flow.flow {
+                    subscribed = true
+                    emit(3)
+                }
+            setContent { TestRoot(startup = startup, failedDownloads = counts) }
+            runOnIdle { kotlin.test.assertFalse(subscribed) }
+
+            runOnIdle { startup = StartupGateState.Ready }
+            onAllNodesWithContentDescription("3 failed downloads").onFirst().assertIsDisplayed()
+            runOnIdle { kotlin.test.assertTrue(subscribed) }
+        }
+
     @Test
     fun downloadsBadgeTracksOnlyTheFailureCountFlow() =
         runComposeUiTest {

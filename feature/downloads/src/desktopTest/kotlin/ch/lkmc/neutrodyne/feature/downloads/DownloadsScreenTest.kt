@@ -82,7 +82,7 @@ class DownloadsScreenTest {
         ) {
             val overview =
                 empty.copy(
-                    inProgress = listOf(testDownloadEntry(1, wait = WaitReason.NETWORK)),
+                    inProgress = listOf(testDownloadEntry(1, wait = WaitReason.NONE)),
                     failed = listOf(testDownloadEntry(2, DownloadState.FAILED)),
                     completed =
                         listOf(testDownloadEntry(3, DownloadState.COMPLETED)),
@@ -97,7 +97,7 @@ class DownloadsScreenTest {
                 ) {
                     NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
                         Screen(
-                            DownloadsUiState(overview = overview, storage = storage),
+                            DownloadsUiState(overview = overview, storage = storage, offline = true),
                             onPlay = { played += it },
                             onToggle = { retried += it },
                             onDelete = { deleted += it },

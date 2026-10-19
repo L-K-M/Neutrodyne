@@ -105,6 +105,7 @@ public class EpisodeViewModel
         downloadController: DownloadController,
         liveStateSource: EpisodeLiveStateSource,
     ) : ViewModel() {
+        private val visibleDownloadIds = MutableStateFlow<Set<Long>>(emptySet())
         private val userMessages = UserMessages()
         public val downloads =
             DownloadRequestHandler(
@@ -168,12 +169,21 @@ public class EpisodeViewModel
             }.combine(chapters.observe(episodeId)) { state, rows -> state.copy(chapters = rows) }
                 .combine(playbackStates.currentChapter) { state, current ->
                     state.copy(currentChapter = current?.takeIf { it.episodeId == episodeId })
-                }.combine(liveStateSource.observe(kotlinx.coroutines.flow.flowOf(setOf(episodeId)))) { state, live ->
+                }.combine(liveStateSource.observe(visibleDownloadIds)) { state, live ->
                     state.copy(downloadLive = live[episodeId])
                 }.stateIn(viewModelScope, SHARING, EpisodeUiState())
 
         init {
             viewModelScope.launch { suspendRunCatching { chapters.ensureLoaded(episodeId) } }
+        }
+
+        public fun onVisible() {
+            visibleDownloadIds.value = setOf(episodeId)
+        }
+
+        /** Release the window even while stateIn retains its upstream during the sharing grace. */
+        public fun onHidden() {
+            visibleDownloadIds.value = emptySet()
         }
 
         public fun onTimestamp(positionMs: Long) {

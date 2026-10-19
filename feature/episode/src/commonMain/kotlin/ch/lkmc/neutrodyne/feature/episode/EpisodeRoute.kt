@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
@@ -38,6 +39,10 @@ internal fun EpisodeRoute(
             create(key.episodeId)
         },
 ) {
+    LifecycleStartEffect(viewModel) {
+        viewModel.onVisible()
+        onStopOrDispose { viewModel.onHidden() }
+    }
     DownloadDialogs(viewModel.downloads)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val consent by viewModel.playback.meteredConsent.collectAsStateWithLifecycle()

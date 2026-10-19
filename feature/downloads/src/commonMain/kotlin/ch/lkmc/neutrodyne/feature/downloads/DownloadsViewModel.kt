@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.feature.downloads
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
@@ -51,6 +52,7 @@ public data class DownloadsUiState(
     val selected: Set<Long> = emptySet(),
     val messages: ImmutableList<UserMessage> = persistentListOf(),
     val failed: Boolean = false,
+    val offline: Boolean = false,
 )
 
 /** At most two notices, in 07's order. Deferred producers cannot expose M6b controls. */
@@ -71,6 +73,7 @@ public class DownloadsViewModel(
     playbackStates: PlaybackStateSource,
     private val settings: SettingsRepository,
     platform: PlatformInfo,
+    network: NetworkMonitor,
 ) : ViewModel() {
     private val messages = UserMessages()
     private val overview = MutableStateFlow<DownloadsOverview?>(null)
@@ -109,7 +112,9 @@ public class DownloadsViewModel(
         )
 
     public val uiState =
-        combine(overview, storage, selected, messages.flow, failed, ::DownloadsUiState)
+        combine(overview, storage, selected, messages.flow, failed) { overview, storage, selected, messages, failed ->
+            DownloadsUiState(overview, storage, selected, messages, failed)
+        }.combine(network.status) { state, status -> state.copy(offline = !status.isConnected) }
             .stateIn(viewModelScope, SHARING, DownloadsUiState())
 
     @OptIn(ExperimentalCoroutinesApi::class)

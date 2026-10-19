@@ -135,7 +135,6 @@ public fun NeutrodyneRoot(
     routes: Flow<Route> = emptyFlow(),
     failedDownloads: Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
 ) {
-    val failedDownloadCount by failedDownloads.collectAsStateWithLifecycle(initialValue = 0)
     val rootViewModelOwner = LocalViewModelStoreOwner.current
     val backOwner = LocalNavigationEventDispatcherOwner.current ?: rememberNavigationEventDispatcherOwner()
     val navigation = rememberNavigationState(initialTab)
@@ -211,7 +210,7 @@ public fun NeutrodyneRoot(
                         modifier,
                         expandRequest,
                         collapseRequest,
-                        failedDownloadCount,
+                        failedDownloads,
                     )
                 }
             }
@@ -232,8 +231,9 @@ private fun ReadyRoot(
     modifier: Modifier = Modifier,
     expandRequest: Int = 0,
     collapseRequest: Int = 0,
-    failedDownloadCount: Int = 0,
+    failedDownloads: Flow<Int> = emptyFlow(),
 ) {
+    val failedDownloadCount by failedDownloads.collectAsStateWithLifecycle(initialValue = 0)
     var expandedSettled by remember { mutableStateOf(false) }
     var playerNavigationRequests by rememberSaveable { mutableIntStateOf(0) }
     var lastPlayerTab by remember { mutableStateOf(navigation.selectedTab) }

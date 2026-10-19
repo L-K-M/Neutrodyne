@@ -49,6 +49,9 @@ class EpisodeViewModelTest : MainDispatcherTest() {
     private val downloads =
         ch.lkmc.neutrodyne.core.testing
             .FakeDownloadController()
+    private val liveSource =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeEpisodeLiveStateSource()
     private val episodes = FakeEpisodeRepository()
     private val chapters =
         FakeChapterRepository()
@@ -70,14 +73,29 @@ class EpisodeViewModelTest : MainDispatcherTest() {
             testPlatformInfo,
             network,
             downloadController = downloads,
-            liveStateSource =
-                ch.lkmc.neutrodyne.core.testing
-                    .FakeEpisodeLiveStateSource(),
+            liveStateSource = liveSource,
         )
 
     private fun TestScope.collect(viewModel: EpisodeViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
     }
+
+    @Test fun progressWindowTracksVisibilityAndClearsDuringTheSharingGrace() =
+        runTest {
+            val model = viewModel()
+            val subscription = backgroundScope.launch { model.uiState.collect {} }
+            runCurrent()
+            assertEquals(emptySet(), liveSource.lastVisibleIds.value)
+
+            model.onVisible()
+            runCurrent()
+            assertEquals(setOf(5L), liveSource.lastVisibleIds.value)
+
+            subscription.cancel()
+            model.onHidden()
+            runCurrent()
+            assertEquals(emptySet(), liveSource.lastVisibleIds.value)
+        }
 
     @Test fun timestampSeeksCurrentAndStartsOtherEpisodeAtExactPosition() =
         runTest {

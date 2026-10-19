@@ -67,6 +67,7 @@ import ch.lkmc.neutrodyne.core.ui.DownloadStateButton
 import ch.lkmc.neutrodyne.core.ui.DownloadStatusText
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.LocalUiClock
+import ch.lkmc.neutrodyne.core.ui.ReportVisibleEpisodeIds
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.downloadCommandText
@@ -156,16 +157,17 @@ internal fun DownloadsScreen(
 ) {
     val list = rememberLazyListState()
     val rows = state.overview
-    val visibleCallback by rememberUpdatedState(onVisibleIds)
-    LaunchedEffect(list) {
-        snapshotFlow {
+    ReportVisibleEpisodeIds(
+        listState = list,
+        itemCount = { list.layoutInfo.totalItemsCount },
+        idAt = { index ->
             list.layoutInfo.visibleItemsInfo
-                .mapNotNull { it.key as? Long }
-                .toSet()
-        }.distinctUntilChanged()
-            .collect { visibleCallback(it) }
-    }
-    DisposableEffect(Unit) { onDispose { visibleCallback(emptySet()) } }
+                .firstOrNull { it.index == index }
+                ?.key as? Long
+        },
+        onIds = onVisibleIds,
+        margin = 0,
+    )
     Column(Modifier.fillMaxSize()) {
         NdTopAppBar(title = stringResource(Res.string.nav_downloads), actions = { SettingsGearButton() })
         LazyColumn(
@@ -276,8 +278,17 @@ internal fun DownloadsScreen(
                     }
                 }
                 items(rows.inProgress, key = { it.status.episodeId }) { entry ->
+                    // A constrained runner may not have started to persist NETWORK yet.
+                    val displayEntry =
+                        if (state.offline && entry.status.state == DownloadState.QUEUED &&
+                            entry.status.waitReason in setOf(WaitReason.NONE, WaitReason.SLOT)
+                        ) {
+                            entry.copy(status = entry.status.copy(waitReason = WaitReason.NETWORK))
+                        } else {
+                            entry
+                        }
                     DownloadEntryRow(
-                        entry,
+                        displayEntry,
                         live[entry.status.episodeId],
                         false,
                         onOpen,
@@ -364,7 +375,12 @@ internal fun DownloadsScreen(
                         onPlay,
                         onShare,
                         onSelect,
-                        selectionMode = state.selected.isNotEmpty(),
+                        selectionMode =
+                            if (state.selected.isEmpty()) {
+                                DownloadSelectionMode.BROWSE
+                            } else {
+                                DownloadSelectionMode.SELECT
+                            },
                     )
                 }
             }
@@ -397,7 +413,7 @@ private fun DownloadEntryRow(
     onPlay: (Long?) -> Unit,
     onShare: ((Long, String) -> Unit)?,
     onSelect: (Long) -> Unit,
-    selectionMode: Boolean = false,
+    selectionMode: DownloadSelectionMode = DownloadSelectionMode.BROWSE,
 ) {
     val status =
         if (progress != null && entry.status.state in
@@ -521,12 +537,12 @@ private fun DownloadEntryRow(
                 onSelect = { if (completed) onSelect(id) },
                 onExtend = { if (completed) onSelect(id) },
             ).combinedClickable(
-                onClick = { if (selectionMode) onSelect(id) else onOpen(id) },
+                onClick = { if (selectionMode == DownloadSelectionMode.SELECT) onSelect(id) else onOpen(id) },
                 onLongClick = { if (completed) onSelect(id) else menu = true },
             ).semantics(mergeDescendants = true) {
                 contentDescription = summary
                 stateDescription = listOfNotNull(text, selectedText).joinToString(". ")
-                this.selected = selected
+                if (selectionMode == DownloadSelectionMode.SELECT) this.selected = selected
                 customActions =
                     actions.map { (label, action) ->
                         CustomAccessibilityAction(label) {
@@ -537,7 +553,7 @@ private fun DownloadEntryRow(
             }.padding(16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (selectionMode) {
+        if (selectionMode == DownloadSelectionMode.SELECT) {
             Checkbox(
                 checked = selected,
                 onCheckedChange = { onSelect(id) },
@@ -579,7 +595,13 @@ private fun DownloadEntryRow(
                 progress?.let { tick ->
                     tick.totalBytes?.takeIf { it > 0 }?.let { tick.downloadedBytes.toFloat() / it }
                 },
-                { onToggle(id) },
+                {
+                    if (status.state == DownloadState.QUEUED && status.waitReason != WaitReason.NEEDS_FOREGROUND) {
+                        menu = true
+                    } else {
+                        onToggle(id)
+                    }
+                },
                 modifier = Modifier.clearAndSetSemantics {},
             )
         }
@@ -715,3 +737,5 @@ private fun downloadNoticeText(
             UiText.Res(Res.string.downloads_working)
         }
     }
+
+private enum class DownloadSelectionMode { BROWSE, SELECT }

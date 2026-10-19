@@ -20,12 +20,16 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DownloadsViewModelTest : MainDispatcherTest() {
+    private val network =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeNetworkMonitor()
     private val downloads = FakeDownloadController()
     private val progress = FakeDownloadProgressSource()
     private val player = FakePlaybackController()
@@ -33,7 +37,7 @@ class DownloadsViewModelTest : MainDispatcherTest() {
     private val store = ViewModelStore()
 
     private fun model() =
-        DownloadsViewModel(downloads, progress, player, player.state, settings, testPlatformInfo).also {
+        DownloadsViewModel(downloads, progress, player, player.state, settings, testPlatformInfo, network).also {
             store.put("downloads", it)
         }
 
@@ -44,6 +48,29 @@ class DownloadsViewModelTest : MainDispatcherTest() {
             } finally {
                 store.clear()
             }
+        }
+
+    @Test fun connectionChangesUpdatePresentationWithoutChangingStoredWaits() =
+        test {
+            downloads.overview.value = downloads.overview.value.copy(inProgress = listOf(testDownloadEntry(1)))
+            val vm = model()
+            backgroundScope.launch { vm.uiState.collect {} }
+            runCurrent()
+            assertTrue(vm.uiState.value.offline)
+            assertEquals(
+                ch.lkmc.neutrodyne.core.model.WaitReason.NONE,
+                vm.uiState.value.overview
+                    ?.inProgress
+                    ?.single()
+                    ?.status
+                    ?.waitReason,
+            )
+
+            network.setStatus(ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor.ONLINE)
+            runCurrent()
+            assertFalse(vm.uiState.value.offline)
+            assertEquals(downloads.overview.value, vm.uiState.value.overview)
+            assertTrue(downloads.calls.isEmpty())
         }
 
     @Test fun loadingSettlesToEmptyAndStorageHasIndependentUnknownState() =
@@ -169,7 +196,13 @@ class DownloadsViewModelTest : MainDispatcherTest() {
                 },
             )
             assertEquals(listOf(7L), downloads.calls.last().ids)
-            assertEquals(2, player.calls.size)
+            assertEquals(
+                listOf<FakePlaybackController.Call>(
+                    FakePlaybackController.Downloads(null),
+                    FakePlaybackController.Downloads(3),
+                ),
+                player.calls,
+            )
         }
 
     @Test fun orphanDeleteNeedsExplicitConfirmationAndRejectedOperationReportsFailure() =
