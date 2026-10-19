@@ -5,6 +5,8 @@ import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -85,6 +87,10 @@ class InstanceHandshake(
                         runCatching { socket.close() }
                     }
                 }
+            } catch (failure: IOException) {
+                // Interrupting a channel throws IOException; preserve coroutine cancellation.
+                currentCoroutineContext().ensureActive()
+                throw failure
             } finally {
                 runCatching { Files.deleteIfExists(portFile) }
                 runCatching { Files.deleteIfExists(tokenFile) }
