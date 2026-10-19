@@ -19,6 +19,76 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class PlaybackActionsTest : MainDispatcherTest() {
+    @Test fun explicitPositionSeeksPlayingOrPausedCurrentItemAndRejectsInvalidTime() =
+        runTest {
+            val controller = FakePlaybackController()
+            val actions =
+                PlaybackActions(
+                    backgroundScope,
+                    controller,
+                    controller.state,
+                    UserMessages(),
+                    PlatformKind.ANDROID,
+                    {},
+                    { throw it },
+                )
+            for (playing in listOf(true, false)) {
+                controller.state.nowPlaying.value = testNowPlaying(5).copy(isPlaying = playing, playWhenReady = playing)
+                actions.seekOrPlay(5, 754_000, 900_000)
+            }
+            actions.seekOrPlay(5, -1, 900_000)
+            actions.seekOrPlay(5, 900_001, 900_000)
+            runCurrent()
+            assertEquals(
+                List<FakePlaybackController.Call>(2) {
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.SEEK, 754_000)
+                },
+                controller.calls,
+            )
+        }
+
+    @Test fun explicitPositionSurvivesConsentAndServiceRetryWithoutToggleOrDoubleStart() =
+        runTest {
+            val controller = FakePlaybackController()
+            val messages = UserMessages()
+            val actions =
+                PlaybackActions(
+                    backgroundScope,
+                    controller,
+                    controller.state,
+                    messages,
+                    PlatformKind.ANDROID,
+                    {},
+                    { throw it },
+                )
+            controller.playResult = PlayResult.NeedsMeteredConsent(5)
+            actions.seekOrPlay(5, 754_000)
+            runCurrent()
+            assertEquals(5L, actions.meteredConsent.value?.episodeId)
+            controller.playResult = PlayResult.ServiceUnavailable
+            actions.consentOnce()
+            runCurrent()
+            controller.playResult = PlayResult.Started
+            actions.onMessageAction(
+                messages.flow.value
+                    .last()
+                    .id,
+            )
+            runCurrent()
+            assertEquals(
+                List(3) {
+                    FakePlaybackController.Call.Episode(5, 754_000)
+                },
+                controller.calls.filterIsInstance<FakePlaybackController.Call.Episode>(),
+            )
+            assertFalse(
+                controller.calls.any {
+                    it ==
+                        FakePlaybackController.Call.Transport(FakePlaybackController.Action.TOGGLE)
+                },
+            )
+        }
+
     @Test fun replacementStartDiscardsLateConsentResult() =
         runTest {
             val controller = FakePlaybackController()

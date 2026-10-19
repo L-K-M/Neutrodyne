@@ -6,15 +6,26 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.domain.ChapterRepository
+import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.Availability
+import ch.lkmc.neutrodyne.core.model.CurrentChapter
 import ch.lkmc.neutrodyne.core.model.EffectivePlayback
+import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import ch.lkmc.neutrodyne.core.model.SettingScope
+import ch.lkmc.neutrodyne.core.model.ShowNotes
+import ch.lkmc.neutrodyne.core.model.SleepTimerMode
+import ch.lkmc.neutrodyne.core.model.SleepTimerState
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.ShowNotesImages
 import ch.lkmc.neutrodyne.core.ui.AvailabilityText
+import ch.lkmc.neutrodyne.core.ui.ShowNotesImageMode
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.UserMessages
@@ -57,9 +68,11 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -75,6 +88,17 @@ public data class PlayerUiState(
     val consent: PlayResult.NeedsMeteredConsent? = null,
     val messages: ImmutableList<UserMessage> = persistentListOf(),
     val miniSkip: Boolean = true,
+    val sleepTimer: SleepTimerState = SleepTimerState.Off,
+    val lastSleepMinutes: Int = PlaybackSettingKeys.SLEEP_LAST_MINUTES.default,
+    val chapters: List<EpisodeChapter> = emptyList(),
+    val currentChapter: CurrentChapter? = null,
+)
+
+public data class PlayerNotesState(
+    val episodeId: Long? = null,
+    val notes: ShowNotes? = null,
+    val imageMode: ShowNotesImageMode = ShowNotesImageMode.TAP_TO_LOAD,
+    val offline: Boolean = false,
 )
 
 /** Window-scoped UI policy. Audio, scope resolution and storage stay behind their ports. */
@@ -86,6 +110,9 @@ public class PlayerViewModel(
     private val source: PlaybackStateSource,
     private val settings: SettingsRepository,
     private val clock: Clock,
+    private val chapters: ChapterRepository,
+    private val episodes: EpisodeRepository,
+    private val network: NetworkMonitor,
 ) : ViewModel() {
     private val messages = UserMessages()
     private val messageActions = mutableMapOf<Long, PlayerMessageAction>()
@@ -93,6 +120,60 @@ public class PlayerViewModel(
     private val ignoredConsent = MutableStateFlow<PlayResult.NeedsMeteredConsent?>(null)
     private val scopeWrite = MutableStateFlow<ScopeWriteResult?>(null)
     public val scopeWriteResult: StateFlow<ScopeWriteResult?> = scopeWrite.asStateFlow()
+
+    private val notesVisible = MutableStateFlow(false)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val chapterRows =
+        source.nowPlaying
+            .map { it?.episodeId }
+            .distinctUntilChanged()
+            .flatMapLatest { id ->
+                if (id == null) {
+                    flowOf(null to emptyList())
+                } else {
+                    chapters.observe(id).map { id to it }.onStart { emit(id to emptyList()) }
+                }
+            }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    public val notes: StateFlow<PlayerNotesState> =
+        combine(
+            source.nowPlaying.map { it?.episodeId }.distinctUntilChanged(),
+            notesVisible,
+        ) { id, visible -> id?.takeIf { visible } }
+            .distinctUntilChanged()
+            .flatMapLatest { id ->
+                if (id == null) {
+                    flowOf(PlayerNotesState())
+                } else {
+                    combine(
+                        episodes.observeShowNotes(id),
+                        settings.observe(FeedsSettingKeys.SHOW_NOTES_IMAGES),
+                        network.status,
+                    ) { notes, images, net ->
+                        val imageMode =
+                            when (images) {
+                                ShowNotesImages.ALWAYS -> {
+                                    ShowNotesImageMode.SHOWN
+                                }
+
+                                ShowNotesImages.TAP_TO_LOAD -> {
+                                    ShowNotesImageMode.TAP_TO_LOAD
+                                }
+
+                                ShowNotesImages.WIFI_ONLY -> {
+                                    if (net.isMetered) ShowNotesImageMode.BLOCKED else ShowNotesImageMode.SHOWN
+                                }
+                            }
+                        PlayerNotesState(id, notes, imageMode, !net.isConnected)
+                    }
+                }
+            }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(0), PlayerNotesState())
+
+    public fun showNotes(visible: Boolean) {
+        notesVisible.value = visible
+    }
 
     public val uiState: StateFlow<PlayerUiState> =
         combine(
@@ -110,7 +191,17 @@ public class PlayerViewModel(
             .combine(
                 settings.observe(AppearanceSettingKeys.MINI_PLAYER_SKIP),
             ) { state, show -> state.copy(miniSkip = show) }
-            .combine(messages.flow) { state, messages -> state.copy(messages = messages) }
+            .combine(source.sleepTimer) { state, timer -> state.copy(sleepTimer = timer) }
+            .combine(settings.observe(PlaybackSettingKeys.SLEEP_LAST_MINUTES)) { state, minutes ->
+                val valid =
+                    minutes.takeIf(SleepTimerMode::isValidMinutes)
+                        ?: PlaybackSettingKeys.SLEEP_LAST_MINUTES.default
+                state.copy(lastSleepMinutes = valid)
+            }.combine(chapterRows) { state, rows ->
+                state.copy(chapters = rows.second.takeIf { rows.first == state.now?.episodeId }.orEmpty())
+            }.combine(source.currentChapter) { state, current ->
+                state.copy(currentChapter = current?.takeIf { it.episodeId == state.now?.episodeId })
+            }.combine(messages.flow) { state, messages -> state.copy(messages = messages) }
             .stateIn(viewModelScope, SHARING, PlayerUiState(now = source.nowPlaying.value))
 
     /** Only 1 Hz samples enter a flow. Frame interpolation belongs to the visible scrubber. */
@@ -173,10 +264,34 @@ public class PlayerViewModel(
 
     public fun skipForward() = controller.skipForward()
 
-    public fun previous() = controller.skipToPrevious()
+    public fun previous() {
+        if (uiState.value.chapters.isNotEmpty()) controller.previousChapter() else controller.skipToPrevious()
+    }
 
     public fun next() {
+        if (uiState.value.chapters.isNotEmpty()) controller.nextChapter() else nextEpisode()
+    }
+
+    public fun nextEpisode() {
         if (source.nowPlaying.value?.hasNext == true) controller.skipToNext()
+    }
+
+    public fun setSleepTimer(mode: SleepTimerMode) {
+        if (source.nowPlaying.value == null) return
+        if (mode is SleepTimerMode.Minutes && !SleepTimerMode.isValidMinutes(mode.minutes)) return
+        controller.setSleepTimer(mode)
+        if (mode !is SleepTimerMode.Minutes) return
+        viewModelScope.launch {
+            if (suspendRunCatching { settings.set(PlaybackSettingKeys.SLEEP_LAST_MINUTES, mode.minutes) }
+                    .getOrNull() !is Outcome.Success
+            ) {
+                writeFailed()
+            }
+        }
+    }
+
+    public fun extendSleepTimer(minutes: Int) {
+        if (SleepTimerMode.isValidMinutes(minutes)) controller.extendSleepTimer(minutes)
     }
 
     public fun seekTo(

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -96,7 +97,7 @@ import org.jetbrains.compose.resources.stringResource
  * The episode detail screen (08 Episode detail): a 120 dp cover beside the title (YouTube renders
  * its art 16:9 full width instead), the meta line, the action row and the sanitised show notes as
  * one lazy item per block. Play, download and Up-next actions dispatch to the route's handler and
- * use the playback controller in M4 and download engine in M6; timestamps wait for M5's seek.
+ * use the shared playback actions for explicit timestamp seeks; downloads wait for M6.
  */
 @Composable
 internal fun EpisodeScreen(
@@ -104,6 +105,7 @@ internal fun EpisodeScreen(
     onAction: (EpisodeAction) -> Unit,
     onFavorite: (Boolean) -> Unit,
     onOpenLink: (String) -> Unit,
+    onTimestamp: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val episode = state.episode
@@ -136,6 +138,16 @@ internal fun EpisodeScreen(
                     item(key = "header", contentType = "header") {
                         EpisodeHeader(episode, state, onAction)
                     }
+                    if (state.chapters.isNotEmpty()) {
+                        item(key = "chapters", contentType = "chapters") {
+                            ch.lkmc.neutrodyne.core.ui.ChapterList(
+                                state.chapters,
+                                state.currentChapter,
+                                onTimestamp,
+                                Modifier.heightIn(max = 320.dp),
+                            )
+                        }
+                    }
                     val notes = state.notes
                     if (notes == null || notes.blocks.isEmpty()) {
                         item(key = "noNotes", contentType = "notes") {
@@ -160,7 +172,7 @@ internal fun EpisodeScreen(
                             durationMs = episode.durationMs,
                             onLink = onOpenLink,
                             // M5 seeks; M1a timestamps render but do nothing (deviation in 08).
-                            onTimestamp = {},
+                            onTimestamp = onTimestamp,
                             onLoadImages = { imagesRevealed = true },
                         )
                     }

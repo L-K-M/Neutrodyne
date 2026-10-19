@@ -18,6 +18,7 @@ import ch.lkmc.neutrodyne.core.model.SettingSource
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
+import ch.lkmc.neutrodyne.core.navigation.SleepTimerKey
 import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.ui.resolve
 import ch.lkmc.neutrodyne.core.ui.root.LocalRootViewModelStoreOwner
@@ -36,6 +37,7 @@ public object PlayerNavigation {
     @IntoSet
     public fun entries(): EntryProviderInstaller =
         {
+            entry<SleepTimerKey>(metadata = NdSceneMetadata.bottomSheet()) { SleepRoute() }
             entry<SpeedKey>(metadata = NdSceneMetadata.bottomSheet()) { SpeedRoute() }
         }
 }
@@ -78,4 +80,26 @@ private fun SpeedRouteContent(vm: PlayerViewModel = metroViewModel()) {
             resetScopeToken = resetScope,
         )
     }
+}
+
+@Composable
+private fun SleepRoute() {
+    CompositionLocalProvider(
+        LocalViewModelStoreOwner provides
+            checkNotNull(LocalRootViewModelStoreOwner.current ?: LocalViewModelStoreOwner.current),
+    ) { SleepRouteContent() }
+}
+
+@Composable
+private fun SleepRouteContent(vm: PlayerViewModel = metroViewModel()) {
+    val ui by vm.uiState.collectAsStateWithLifecycle()
+    val navigator = LocalAppNavigator.current
+    SleepTimerSheet(
+        ui.sleepTimer,
+        ui.lastSleepMinutes,
+        ui.now != null,
+        vm::setSleepTimer,
+        vm::extendSleepTimer,
+        { navigator.pop(SleepTimerKey) },
+    )
 }
