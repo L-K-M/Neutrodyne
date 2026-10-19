@@ -871,6 +871,21 @@ claim that this platform experiment has passed.
 
 ### Desktop runners
 
+**Implementation note (2026-10-19, M6a).** W7 binds the manual lane to the
+existing `JobLanePoker` runner and default root. The first lane invocation awaits
+reconciliation before draining; the runner retains concurrent pokes and owns the
+minute retry tick. Lane activity refreshes the controller's busy calculation at
+run end, including when a retry becomes due without a database write. Runner
+cancellation supplies `STOP_APP_QUIT` before child cleanup, keeps parts and
+validators, and retains live tokens through final commits. Callback pause modes
+are honored directly; historical Task Manager inference remains M6b. Manual
+failure and storage-full alerts use the existing in-app banner notifier. MD1 is
+still an open prerequisite for audible desktop offline playback; MD2 owns native
+alerts and tray behavior. No desktop audio implementation is included here.
+Active episode ownership protects journal and orphan deletion during final rename
+and root reassignment. Smoke shutdown stops and joins graph jobs before closing
+Room and removing temporary files, then disarms its watchdog.
+
 **Implementation note (2026-10-19, M6a).** Adopted resolution 2: transfer/restart mechanics can ship
 independently, but AC14's audible offline playback requires MD1. M6a acceptance
 remains open until that proof exists. MD2 owns tray/native alerts, not M6a.

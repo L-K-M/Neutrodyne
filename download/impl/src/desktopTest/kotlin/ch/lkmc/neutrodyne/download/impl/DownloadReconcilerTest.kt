@@ -190,6 +190,11 @@ class DownloadReconcilerTest {
                 holder.await()
                 load.await()
                 assertEquals("file:///old/file", index.localUriOrNull(id))
+                rig.deletes.journal(listOf(f.row(id)))
+                rig.store.fail = true
+                index.remove(id)
+                assertFailsWith<IOException> { rig.reconciler.initialLoad() }
+                assertEquals("file:///old/file", index.localUriOrNull(id))
             }
         }
 

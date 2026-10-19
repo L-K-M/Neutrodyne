@@ -45,8 +45,9 @@ internal class DeferredDeletes(
     }
 
     suspend fun drain(currentEpisodeId: Long?) {
+        val live = rows()
         val owned =
-            rows()
+            live
                 .flatMap { row ->
                     listOfNotNull(row.tempPath ?: DownloadPaths.part(row.episodeId), row.relativePath)
                         .map { row.rootId to it }
@@ -58,6 +59,13 @@ internal class DeferredDeletes(
                 done += entry.encoded()
                 continue
             }
+            // An active replacement may already have renamed this path without committing it.
+            // Claims cannot start during this drain; existing owners retain the journal until finish.
+            val replacing =
+                live.any {
+                    it.episodeId == entry.episodeId && it.runnerToken != null
+                }
+            if (replacing) continue
             if (entry.episodeId == currentEpisodeId || roots.resolve(entry.rootId) == null) continue
             try {
                 files.delete(entry.rootId, entry.path)

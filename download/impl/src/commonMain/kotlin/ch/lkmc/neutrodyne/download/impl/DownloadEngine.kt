@@ -189,7 +189,7 @@ internal class DownloadEngine(
                                         val child =
                                             runnerScope.launch(
                                                 start = CoroutineStart.ATOMIC,
-                                            ) { runTransfer(entry, lease) }
+                                            ) { runTransfer(entry, lease, request.cancellationIntent) }
                                         entry.attach(child)
                                         true
                                     }
@@ -229,7 +229,10 @@ internal class DownloadEngine(
                     reporting.cancelAndJoin()
                     // The caller's cancellation already cancelled its children; retain token through commits.
                     own(request).forEach { entry ->
-                        entry.stop(entry.intent ?: StopIntent.RunnerStopped(UNKNOWN_RUNNER_STOP_REASON))
+                        entry.stop(
+                            entry.intent ?: request.cancellationIntent()
+                                ?: StopIntent.RunnerStopped(UNKNOWN_RUNNER_STOP_REASON),
+                        )
                         entry.finished.await()
                     }
                     request.reporter.active(emptySet())
@@ -326,6 +329,7 @@ internal class DownloadEngine(
     private suspend fun runTransfer(
         entry: ActiveTransfers.Entry,
         lease: DownloadSlots.Lease,
+        cancellationIntent: () -> StopIntent?,
     ) {
         val transfer = Attempt(entry.row)
         var end: TransferEnd = TransferEnd.Unknown
@@ -337,7 +341,10 @@ internal class DownloadEngine(
             currentCoroutineContext().ensureActive()
             end = TransferEnd.Finished(result)
         } catch (cancelled: CancellationException) {
-            end = TransferEnd.Stopped(entry.intent ?: StopIntent.RunnerStopped(UNKNOWN_RUNNER_STOP_REASON))
+            end =
+                TransferEnd.Stopped(
+                    entry.intent ?: cancellationIntent() ?: StopIntent.RunnerStopped(UNKNOWN_RUNNER_STOP_REASON),
+                )
             throw cancelled
         } finally {
             withContext(NonCancellable) {
@@ -614,7 +621,9 @@ internal class DownloadEngine(
                 }
 
                 is StopIntent.RunnerStopped -> {
-                    val paused = intent.platformStopReason == DownloadStopReasons.USER_TASK_MANAGER
+                    val paused =
+                        intent.mode == RunnerStopMode.PAUSE ||
+                            intent.platformStopReason == DownloadStopReasons.USER_TASK_MANAGER
                     row.copy(
                         state = if (paused) DownloadState.PAUSED else DownloadState.QUEUED,
                         waitReason = if (paused) WaitReason.NONE else WaitReason.SYSTEM,

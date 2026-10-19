@@ -49,6 +49,16 @@ class DownloadWorkersTest {
             stops += intent
         }, wake = {}, controller = { FakeDownloadController() })
 
+    @Test
+    @Config(sdk = [34])
+    fun coldStopAndWakeDoNotInitializeDatabase() {
+        val pending = lazy<DownloadComponents> { error("Database is not open") }
+        val host = AndroidDownloadBindings.runtime(pending, lazy { error("Scheduler is not needed") })
+        host.stop(RunnerToken("uidt:cold"), StopIntent.Pause)
+        host.wake(DownloadLane.MANUAL)
+        assertFalse(pending.isInitialized())
+    }
+
     @Test fun backgroundHasEightMinuteDeadline() =
         runTest {
             val worker = worker()

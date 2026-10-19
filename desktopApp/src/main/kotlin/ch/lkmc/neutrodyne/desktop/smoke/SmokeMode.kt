@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.runInitializers
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
@@ -26,6 +27,8 @@ import ch.lkmc.neutrodyne.desktop.window.WindowIcons
 import ch.lkmc.neutrodyne.desktop.window.rememberNeutrodyneWindowState
 import ch.lkmc.neutrodyne.desktop.window.toGateState
 import coil3.SingletonImageLoader
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
@@ -58,8 +61,9 @@ internal class SmokeMode(
     private val timings = LinkedHashMap<String, Long>()
 
     fun run(): Int {
-        armWatchdog()
+        val watchdog = armWatchdog()
         var root: Path? = null
+        var startedGraph: DesktopAppGraph? = null
 
         return try {
             val tempRoot = Files.createTempDirectory("neutrodyne-smoke")
@@ -69,7 +73,7 @@ internal class SmokeMode(
             val graph =
                 step("graph") {
                     val crashReporter = DesktopCrashReporter(dirs, buildInfo, DesktopClock, RecentLogBuffer())
-                    createDesktopGraph(dirs, buildInfo, crashReporter)
+                    createDesktopGraph(dirs, buildInfo, crashReporter).also { startedGraph = it }
                 }
             // The database open gets its own step ahead of the bands, so the timing is real;
             // band 100's `DatabaseOpenInitializer` then returns at once (11 Smoke mode, M1a).
@@ -84,8 +88,8 @@ internal class SmokeMode(
             val windowOpened = firstFrameMs != null
             if (windowOpened) timings[FIRST_FRAME_STEP] = firstFrameMs
 
+            cleanUp(tempRoot, startedGraph)
             output("SMOKE ${smokeJson(buildInfo, timings, windowOpened, failure = null)}")
-            cleanUp(tempRoot)
             EXIT_OK
         } catch (t: Throwable) {
             Log.e(TAG, t) { "smoke run failed" }
@@ -99,21 +103,30 @@ internal class SmokeMode(
                         t.message ?: t.javaClass.simpleName,
                 )}",
             )
-            root?.let(::cleanUp)
+            runCatching { root?.let { cleanUp(it, startedGraph) } }
+                .onFailure { Log.e(TAG, it) { "smoke shutdown failed" } }
             EXIT_FAILED_STEP
+        } finally {
+            watchdog.interrupt()
+            watchdog.join()
         }
     }
 
     /** A daemon thread that ends a hanging run (11: the watchdog exits 1 after 60 s). */
-    private fun armWatchdog() {
+    private fun armWatchdog(): Thread {
         val watchdog =
             Thread({
-                sleepQuietly(WATCHDOG_TIMEOUT)
+                try {
+                    Thread.sleep(WATCHDOG_TIMEOUT.inWholeMilliseconds)
+                } catch (_: InterruptedException) {
+                    return@Thread
+                }
                 System.err.println("smoke run exceeded $WATCHDOG_TIMEOUT; exiting")
                 Runtime.getRuntime().halt(EXIT_FAILED_STEP)
             }, THREAD_NAME)
         watchdog.isDaemon = true
         watchdog.start()
+        return watchdog
     }
 
     /** Runs [block], recording its wall time under [name] — also when it fails. */
@@ -129,17 +142,21 @@ internal class SmokeMode(
         }
     }
 
-    private fun cleanUp(root: Path) {
-        runCatching {
-            Files.walk(root).sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists)
+    private fun cleanUp(
+        root: Path,
+        graph: DesktopAppGraph?,
+    ) {
+        if (graph != null) {
+            runBlocking {
+                // Collectors and lanes must finish before Room closes or its files disappear.
+                val opened = graph.databaseOpener.openState.value is DatabaseOpenState.Opened
+                if (opened) graph.jobRunner.stop(RUNNER_GRACE)
+                graph.appScope.coroutineContext[Job]?.cancelAndJoin()
+                if (opened) graph.databaseOpener.requireDatabase().close()
+            }
         }
-    }
-
-    private fun sleepQuietly(duration: Duration) {
-        try {
-            Thread.sleep(duration.inWholeMilliseconds)
-        } catch (_: InterruptedException) {
-            Thread.currentThread().interrupt()
+        Files.walk(root).use { paths ->
+            paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists)
         }
     }
 
@@ -149,6 +166,7 @@ internal class SmokeMode(
         private const val EXIT_OK = 0
         private const val EXIT_FAILED_STEP = 1
         private val WATCHDOG_TIMEOUT = 60.seconds
+        private val RUNNER_GRACE = 3.seconds
 
         /** [openWindowAndAwaitFirstFrame]'s "no frame yet" marker. */
         private const val FRAME_NOT_RENDERED = -1L

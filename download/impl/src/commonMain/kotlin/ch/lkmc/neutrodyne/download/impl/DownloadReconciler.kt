@@ -30,8 +30,8 @@ internal class DownloadReconciler(
     /** Only startup replaces the whole snapshot: later passes must not erase concurrent puts. */
     suspend fun initialLoad() =
         claimMutex.withLock {
-            deletes.drain(null)
             index.replace(dao.completedIndex().associate { it.episodeId to it.finalUri })
+            deletes.drain(null)
         }
 
     suspend fun resetOrphanedRunners() =
@@ -119,9 +119,10 @@ internal class DownloadReconciler(
 
     /** Only app-shaped final files count. Arbitrary user files and directories are never swept. */
     suspend fun orphanFiles(): List<Pair<String, DownloadFileInfo>> {
+        val rows = dao.allRows()
+        val active = rows.filter { it.runnerToken != null }.map { it.episodeId }.toSet()
         val owned =
-            dao
-                .pathsByRoot()
+            rows
                 .flatMap { row ->
                     listOfNotNull(row.relativePath, row.tempPath).map {
                         row.rootId to
@@ -135,11 +136,12 @@ internal class DownloadReconciler(
                 for (folder in files.list(root, "")) {
                     if (!folder.directory || !PODCAST_FOLDER.matches(folder.path)) continue
                     for (file in files.list(root, folder.path)) {
-                        if (!file.directory && FINAL_FILE.matches(file.path) && (root to file.path) !in owned &&
-                            (root to file.path) !in journal
-                        ) {
-                            add(root to file)
-                        }
+                        if (file.directory) continue
+                        val match = FINAL_FILE.matchEntire(file.path) ?: continue
+                        val episodeId = match.groupValues[1].toLongOrNull() ?: continue
+                        // A first download can have renamed its final file before its completion commit.
+                        if (episodeId in active) continue
+                        if ((root to file.path) !in owned && (root to file.path) !in journal) add(root to file)
                     }
                 }
             }
@@ -151,6 +153,6 @@ internal class DownloadReconciler(
         const val STALE_PART_MS = 14L * 24 * 60 * 60 * 1000
         val FINAL_STATES = setOf(DownloadState.COMPLETED, DownloadState.MISSING)
         val PODCAST_FOLDER = Regex(".* \\[p[0-9]+\\]")
-        val FINAL_FILE = Regex(".* \\[e[0-9]+\\]\\.[a-z0-9]+")
+        val FINAL_FILE = Regex(".* \\[e([0-9]+)\\]\\.[a-z0-9]+")
     }
 }
