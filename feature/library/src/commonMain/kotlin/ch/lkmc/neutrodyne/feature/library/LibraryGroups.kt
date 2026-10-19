@@ -162,7 +162,7 @@ internal fun LibraryGroupsGrid(
             },
         )
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(CELL_MIN),
+        columns = GridCells.Adaptive(state.density.minCellWidthDp.dp),
         state = grid,
         contentPadding = PaddingValues(GRID_PADDING),
         horizontalArrangement = Arrangement.spacedBy(GRID_SPACING),

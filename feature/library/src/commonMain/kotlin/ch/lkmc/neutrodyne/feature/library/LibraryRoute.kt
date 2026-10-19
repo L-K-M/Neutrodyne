@@ -204,6 +204,7 @@ internal fun LibraryRoute(
         pendingMarkAll = state.tiles.firstOrNull { it.podcastId == pendingMarkAll },
         onSort = viewModel::setSort,
         onToggleTitles = viewModel::setShowTitles,
+        onDensity = viewModel::setDensity,
         onOpenPodcast = { navigator.pushDetail(PodcastKey(it)) },
         onTileAction = { podcastId, action ->
             when (action) {

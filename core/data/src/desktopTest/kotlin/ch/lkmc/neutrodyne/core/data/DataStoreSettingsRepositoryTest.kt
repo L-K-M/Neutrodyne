@@ -104,6 +104,22 @@ class DataStoreSettingsRepositoryTest : SettingsRepositoryContract() {
             )
         }
 
+    @Test fun everyDensitySurvivesReopeningOnlyThePortableFile() =
+        runTest {
+            for (density in LibraryDensity.entries) {
+                val directory = root.resolve("density-${density.name}")
+                val repository = repositoryOver(directory)
+                assertEquals(LibraryDensity.MEDIUM, repository.get(Appearance.LIBRARY_DENSITY))
+                repository.set(Appearance.LIBRARY_DENSITY, density)
+                scope.coroutineContext[kotlinx.coroutines.Job]!!.cancel()
+                scope.coroutineContext[kotlinx.coroutines.Job]!!.join()
+                scope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))
+                assertEquals(density, repositoryOver(directory).get(Appearance.LIBRARY_DENSITY))
+                assertTrue(File(directory, "config/settings.preferences_pb").isFile)
+                assertFalse(File(directory, "config/device_settings.preferences_pb").exists())
+            }
+        }
+
     private fun TestScope.repositoryOver(dir: File): DataStoreSettingsRepository {
         if (!::scope.isInitialized) {
             scope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher(testScheduler))

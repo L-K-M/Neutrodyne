@@ -15,6 +15,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
@@ -55,6 +57,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.ndScrollbarColor
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.LibraryTile
+import ch.lkmc.neutrodyne.core.model.settings.LibraryDensity
 import ch.lkmc.neutrodyne.core.model.settings.LibrarySegment
 import ch.lkmc.neutrodyne.core.model.settings.LibrarySort
 import ch.lkmc.neutrodyne.core.ui.CoverTile
@@ -73,6 +76,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.feeds_mark_all_played
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_onboarding_title
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_refresh
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_search
+import ch.lkmc.neutrodyne.core.ui.resources.groups_empty
 import ch.lkmc.neutrodyne.core.ui.resources.library_empty_body
 import ch.lkmc.neutrodyne.core.ui.resources.library_show_titles
 import ch.lkmc.neutrodyne.core.ui.resources.library_sort
@@ -91,8 +95,13 @@ import ch.lkmc.neutrodyne.core.ui.resources.podcast_unsubscribe_title
 import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
 import ch.lkmc.neutrodyne.feature.library.resources.add_podcasts
 import ch.lkmc.neutrodyne.feature.library.resources.empty_group
+import ch.lkmc.neutrodyne.feature.library.resources.grid_large
+import ch.lkmc.neutrodyne.feature.library.resources.grid_medium
+import ch.lkmc.neutrodyne.feature.library.resources.grid_size
+import ch.lkmc.neutrodyne.feature.library.resources.grid_small
 import ch.lkmc.neutrodyne.feature.library.resources.manage_groups
 import ch.lkmc.neutrodyne.feature.library.resources.mark_many
+import ch.lkmc.neutrodyne.feature.library.resources.new_group
 import ch.lkmc.neutrodyne.feature.library.resources.select
 import ch.lkmc.neutrodyne.feature.library.resources.ungrouped
 import ch.lkmc.neutrodyne.feature.library.resources.unsubscribe_many
@@ -115,8 +124,8 @@ internal data class PendingUnsubscribe(
 )
 
 /**
- * The Library cover grid (08 Library, M1a): `GridCells.Adaptive(100.dp)` — the density setting
- * arrives with M10 — 16 dp edge padding, 12 dp spacing, sort and titles from `appearance.*`.
+ * The Library cover grid: persisted adaptive cell minimum, 16 dp edge padding,
+ * 12 dp spacing, sort and titles from `appearance.*`.
  * M2 adds group filters, the mosaic segment and selection actions.
  */
 @Composable
@@ -139,6 +148,7 @@ internal fun LibraryScreen(
     segment: LibrarySegment = state.segment,
     selectedIds: List<Long> = emptyList(),
     pendingSelection: PendingSelectionAction? = null,
+    onDensity: (LibraryDensity) -> Unit = {},
     onSegment: (LibrarySegment) -> Unit = {},
     onGroupFilter: (String) -> Unit = {},
     onNewGroup: () -> Unit = {},
@@ -197,6 +207,8 @@ internal fun LibraryScreen(
                 actions = {
                     SortMenu(state.sort, onSort)
                     OverflowMenu(
+                        state.density,
+                        onDensity,
                         state.showTitles,
                         onToggleTitles,
                         onManageGroups,
@@ -211,12 +223,22 @@ internal fun LibraryScreen(
         LibrarySegments(segment, onSegment)
         if (segment == LibrarySegment.PODCASTS) LibraryGroupChips(state, onGroupFilter, onNewGroup)
         when {
+            segment == LibrarySegment.GROUPS && state.loaded && state.groups.isEmpty() -> {
+                EmptyState(
+                    NdIcons.GridView,
+                    stringResource(Res.string.groups_empty),
+                    "",
+                    actionLabel = stringResource(LibraryRes.string.new_group),
+                    onAction = onNewGroup,
+                )
+            }
+
             segment == LibrarySegment.GROUPS && state.loaded -> {
                 LibraryGroupsGrid(state, onOpenGroup, onEditGroup, onManageGroups, onNewGroup, onExportGroup)
             }
 
             !state.loaded -> {
-                SkeletonGrid()
+                SkeletonGrid(state.density)
             }
 
             state.tiles.isEmpty() && state.groupFilter.isNotEmpty() -> {
@@ -236,6 +258,7 @@ internal fun LibraryScreen(
                 EmptyState(
                     icon = NdIcons.GridView,
                     title = stringResource(Res.string.feeds_onboarding_title),
+                    showBrandMark = true,
                     body = stringResource(Res.string.library_empty_body),
                     actionLabel = stringResource(Res.string.feeds_search),
                     onAction = onSearchPodcasts,
@@ -363,7 +386,7 @@ private fun TileGrid(
     val scrollbars = LocalScrollbars.current
     val scrollbarColor = ndScrollbarColor(scrollbars)
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = CELL_MIN),
+        columns = GridCells.Adaptive(minSize = state.density.minCellWidthDp.dp),
         state = grid,
         contentPadding = PaddingValues(GRID_PADDING),
         horizontalArrangement = Arrangement.spacedBy(GRID_SPACING),
@@ -449,6 +472,8 @@ private fun sortLabel(sort: LibrarySort): String =
 
 @Composable
 private fun OverflowMenu(
+    density: LibraryDensity,
+    onDensity: (LibraryDensity) -> Unit,
     showTitles: Boolean,
     onToggleTitles: (Boolean) -> Unit,
     onManageGroups: () -> Unit,
@@ -456,6 +481,47 @@ private fun OverflowMenu(
     onImportSubscriptions: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
+    var choosingDensity by remember { mutableStateOf(false) }
+    if (choosingDensity) {
+        NdDialog(
+            onDismissRequest = { choosingDensity = false },
+            title = stringResource(LibraryRes.string.grid_size),
+            content = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    LibraryDensity.entries.forEach { option ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    stringResource(
+                                        when (option) {
+                                            LibraryDensity.SMALL -> LibraryRes.string.grid_small
+                                            LibraryDensity.MEDIUM -> LibraryRes.string.grid_medium
+                                            LibraryDensity.LARGE -> LibraryRes.string.grid_large
+                                        },
+                                    ),
+                                )
+                            },
+                            leadingIcon = {
+                                if (option == density) {
+                                    androidx.compose.material3.Icon(NdIcons.Check, contentDescription = null)
+                                }
+                            },
+                            onClick = {
+                                onDensity(option)
+                                choosingDensity = false
+                            },
+                            modifier =
+                                Modifier.semantics {
+                                    selected = option == density
+                                    role = Role.RadioButton
+                                },
+                        )
+                    }
+                }
+            },
+            confirm = NdDialogAction(stringResource(Res.string.action_cancel), onClick = { choosingDensity = false }),
+        )
+    }
     Box {
         NdIconButton(
             onClick = { open = true },
@@ -463,6 +529,10 @@ private fun OverflowMenu(
             contentDescription = stringResource(Res.string.action_more),
         )
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text(stringResource(LibraryRes.string.grid_size)) }, onClick = {
+                open = false
+                choosingDensity = true
+            })
             DropdownMenuItem(
                 text = { Text(stringResource(Res.string.library_show_titles)) },
                 leadingIcon = {
@@ -500,9 +570,9 @@ private fun OverflowMenu(
 
 /** 12 `surfaceContainer` placeholders of the loading state (08 Library states). */
 @Composable
-private fun SkeletonGrid() {
+private fun SkeletonGrid(density: LibraryDensity) {
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = CELL_MIN),
+        columns = GridCells.Adaptive(minSize = density.minCellWidthDp.dp),
         contentPadding = PaddingValues(GRID_PADDING),
         horizontalArrangement = Arrangement.spacedBy(GRID_SPACING),
         verticalArrangement = Arrangement.spacedBy(GRID_SPACING),
@@ -527,6 +597,5 @@ private val SORT_ORDER =
         LibrarySort.MOST_UNPLAYED,
         LibrarySort.RECENTLY_ADDED,
     )
-internal val CELL_MIN = 100.dp
 internal val GRID_PADDING = 16.dp
 internal val GRID_SPACING = 12.dp

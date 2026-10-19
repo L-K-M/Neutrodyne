@@ -752,4 +752,7 @@
     <string name="download_desktop_settings">Desktop</string>
     <string name="download_size_mb_decimal">%1$d.%2$d MB</string>
     <string name="download_size_gb_decimal">%1$d.%2$d GB</string>
+    <string name="discovery_add_youtube">Add YouTube channel</string>
+    <string name="feeds_empty_group">No podcasts in '%1$s' yet</string>
+    <string name="feeds_add_podcasts">Add podcasts</string>
 </resources>

@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.feature.library
 
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -11,8 +12,10 @@ import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -37,11 +40,14 @@ import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performMultiModalInput
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.v2.runComposeUiTest
+import androidx.compose.ui.test.v2.runDesktopComposeUiTest
+import androidx.compose.ui.unit.Density
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -59,6 +65,7 @@ import ch.lkmc.neutrodyne.core.model.FeedSourceRef
 import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.LibraryTile
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.LibraryDensity
 import ch.lkmc.neutrodyne.core.model.settings.LibrarySort
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.AddToGroupsKey
@@ -68,6 +75,7 @@ import ch.lkmc.neutrodyne.core.navigation.GroupEditKey
 import ch.lkmc.neutrodyne.core.navigation.GroupsManageKey
 import ch.lkmc.neutrodyne.core.navigation.ImportFileKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
+import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
 import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
@@ -94,6 +102,8 @@ import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
+import java.awt.image.BufferedImage
+import java.io.File
 import java.util.Locale
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -808,6 +818,106 @@ class LibraryScreenTest {
             podcasts.libraryReadGate?.complete(Unit)
         }
 
+    @Test fun densityChooserPersistsAndChangesColumnCount() =
+        runDesktopComposeUiTest(width = 360, height = 700) {
+            setLibraryRoute((1L..12).map { testLibraryTile(it, "Show %02d".format(it)) })
+
+            fun columns() =
+                onAllNodes(
+                    hasContentDescription("Show 01") or hasContentDescription("Show 02") or
+                        hasContentDescription("Show 03") or hasContentDescription("Show 04"),
+                ).fetchSemanticsNodes()
+                    .count {
+                        it.boundsInRoot.top ==
+                            onNodeWithContentDescription("Show 01").fetchSemanticsNode().boundsInRoot.top
+                    }
+            assertEquals(3, columns())
+            for ((label, density, count) in listOf(
+                Triple("Large", LibraryDensity.LARGE, 2),
+                Triple("Small", LibraryDensity.SMALL, 4),
+                Triple("Medium", LibraryDensity.MEDIUM, 3),
+            )) {
+                onNodeWithContentDescription("More actions").performClick()
+                onNodeWithText("Grid size").performClick()
+                onNodeWithText(label).performClick()
+                waitUntil { runBlocking { settings.get(AppearanceSettingKeys.LIBRARY_DENSITY) } == density }
+                waitForIdle()
+                assertEquals(count, columns())
+            }
+        }
+
+    @Test fun densityChangeKeepsSelectionFilterAndVisibleAnchor() =
+        runDesktopComposeUiTest(width = 360, height = 700) {
+            val id = createGroup("tech")
+            val tiles = (1L..90).map { testLibraryTile(it, "Show %02d".format(it)) }
+            podcasts.tilesByGroup.value = mapOf(id to tiles)
+            setLibraryRoute(tiles)
+            onNodeWithText("tech").performClick()
+            onNode(hasScrollToIndexAction()).performScrollToIndex(36)
+            onNodeWithContentDescription("Show 37").performTouchInput { longClick() }
+            onNodeWithText("1 selected").assertIsDisplayed()
+            for (density in listOf(LibraryDensity.LARGE, LibraryDensity.SMALL, LibraryDensity.MEDIUM)) {
+                runBlocking { settings.set(AppearanceSettingKeys.LIBRARY_DENSITY, density) }
+                waitForIdle()
+                onNodeWithText("tech").assertIsSelected()
+                onNodeWithText("1 selected").assertIsDisplayed()
+                onNodeWithContentDescription("Show 37").assertIsDisplayed().assertIsSelected()
+            }
+        }
+
+    @Test fun groupsUseTheSameLiveDensity() =
+        runDesktopComposeUiTest(width = 360, height = 700) {
+            (1..6).forEach { createGroup("Group $it") }
+            setLibraryRoute()
+            onNodeWithText("Groups").performClick()
+
+            fun top(name: String) = onNodeWithContentDescription(name).fetchSemanticsNode().boundsInRoot.top
+            assertEquals(top("Group 1"), top("Group 3"))
+            runBlocking { settings.set(AppearanceSettingKeys.LIBRARY_DENSITY, LibraryDensity.LARGE) }
+            waitForIdle()
+            waitUntil { top("Group 3") > top("Group 1") }
+            runBlocking { settings.set(AppearanceSettingKeys.LIBRARY_DENSITY, LibraryDensity.SMALL) }
+            waitForIdle()
+            waitUntil { top("Group 1") == top("Group 4") }
+        }
+
+    @Test fun smallDensityLongTitlesAtDoubleFontRemainOperable() = densityStress(LibraryDensity.SMALL)
+
+    @Test fun mediumDensityLongTitlesAtDoubleFontRemainOperable() = densityStress(LibraryDensity.MEDIUM)
+
+    @Test fun largeDensityLongTitlesAtDoubleFontRemainOperable() = densityStress(LibraryDensity.LARGE)
+
+    private fun densityStress(density: LibraryDensity) =
+        runDesktopComposeUiTest(width = 360, height = 640) {
+            val tiles =
+                (1L..30).map {
+                    testLibraryTile(it, "Show %02d: a very long title ÄÖÜ".format(it))
+                        .copy(artwork = testMonogramArtwork(it.toString()))
+                }
+            runBlocking {
+                settings.set(AppearanceSettingKeys.LIBRARY_DENSITY, density)
+                settings.set(AppearanceSettingKeys.LIBRARY_TITLES, true)
+            }
+            // The existing route fixture supplies the stable clock, fake images and resumed lifecycle.
+            setLibraryRoute(tiles, fontScale = 2f)
+            onNode(hasScrollToIndexAction()).performScrollToNode(hasText(tiles.last().displayTitle))
+            onNodeWithText(tiles.last().displayTitle).assertIsDisplayed().performClick()
+            val tileBounds = onNodeWithText(tiles.last().displayTitle).fetchSemanticsNode().boundsInRoot
+            assertTrue(tileBounds.width >= density.minCellWidthDp)
+            assertTrue(tileBounds.height >= 48f)
+            assertEquals(
+                RecordingAppNavigator.Call.PushDetail(PodcastKey(30)),
+                navigator.calls.last(),
+            )
+            val pixels = onRoot().captureToImage().toPixelMap()
+            val image =
+                BufferedImage(pixels.width, pixels.height, BufferedImage.TYPE_INT_ARGB)
+            for (y in 0 until pixels.height) for (x in 0 until pixels.width) image.setRGB(x, y, pixels[x, y].toArgb())
+            val output = File("build/reports/w7-layout/library-${density.name.lowercase()}-f200.png")
+            output.parentFile.mkdirs()
+            javax.imageio.ImageIO.write(image, "png", output)
+        }
+
     private fun createGroup(name: String): Long =
         runBlocking {
             assertIs<Outcome.Success<Long>>(groups.create(GroupDraft(name))).value
@@ -866,6 +976,7 @@ class LibraryScreenTest {
         registry: SaveableStateRegistry = SaveableStateRegistry(null) { true },
         snackbarHost: SnackbarHostState = SnackbarHostState(),
         showRoute: () -> Boolean = { true },
+        fontScale: Float = 1f,
     ) {
         podcasts.tiles.value = tiles
         val viewModel =
@@ -895,12 +1006,15 @@ class LibraryScreenTest {
                     LocalPlatformActions provides TestPlatformActions,
                     LocalSnackbarHost provides snackbarHost,
                     LocalSaveableStateRegistry provides registry,
+                    LocalDensity provides Density(1f, fontScale),
                 ) {
                     NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
-                        val holder = rememberSaveableStateHolder()
-                        if (showRoute()) {
-                            holder.SaveableStateProvider("library") {
-                                LibraryRoute(viewModel = viewModel, isCurrentEntry = showRoute)
+                        Surface {
+                            val holder = rememberSaveableStateHolder()
+                            if (showRoute()) {
+                                holder.SaveableStateProvider("library") {
+                                    LibraryRoute(viewModel = viewModel, isCurrentEntry = showRoute)
+                                }
                             }
                         }
                     }

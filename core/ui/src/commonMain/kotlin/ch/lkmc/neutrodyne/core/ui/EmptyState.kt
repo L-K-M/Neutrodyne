@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,6 +11,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -17,8 +20,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import ch.lkmc.neutrodyne.core.designsystem.components.BrandMark
 import ch.lkmc.neutrodyne.core.designsystem.components.NdButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 
@@ -39,42 +44,56 @@ public fun EmptyState(
     onSecondary: (() -> Unit)? = null,
     tertiaryLabel: String? = null,
     onTertiary: (() -> Unit)? = null,
+    showBrandMark: Boolean = false,
+    footer: @Composable () -> Unit = {},
 ) {
-    Column(
-        modifier = modifier.fillMaxSize().padding(horizontal = 32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        // The 400 dp cap lives on the inner content column: `widthIn` after `fillMaxSize` on the
-        // same node is coerced into the incoming (already fixed) constraints and does nothing.
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        // A LazyColumn item already scrolls in its parent and has unbounded height.
+        val scroll = rememberScrollState()
+        val scrolling = if (constraints.hasBoundedHeight) Modifier.verticalScroll(scroll) else Modifier
         Column(
-            modifier = Modifier.widthIn(max = 400.dp),
+            modifier = Modifier.fillMaxSize().then(scrolling).padding(horizontal = 32.dp, vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
         ) {
-            Icon(
-                icon,
-                contentDescription = null,
-                modifier = Modifier.size(EMPTY_ICON_SIZE),
-                tint = MaterialTheme.colorScheme.primary,
-            )
-            Spacer(Modifier.height(ICON_TITLE_GAP))
-            Text(title, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
-            Spacer(Modifier.height(TITLE_BODY_GAP))
-            Text(
-                body,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
-            if (actionLabel != null && onAction != null) {
-                Spacer(Modifier.height(BODY_ACTION_GAP))
-                NdButton(label = actionLabel, onClick = onAction)
-            }
-            if (secondaryLabel != null && onSecondary != null) {
-                NdTextButton(label = secondaryLabel, onClick = onSecondary)
-            }
-            if (tertiaryLabel != null && onTertiary != null) {
-                NdTextButton(label = tertiaryLabel, onClick = onTertiary)
+            // The 400 dp cap lives on the inner content column: `widthIn` after `fillMaxSize` on the
+            // same node is coerced into the incoming (already fixed) constraints and does nothing.
+            Column(
+                modifier = Modifier.widthIn(max = 400.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                if (showBrandMark) {
+                    BrandMark(Modifier.size(EMPTY_ICON_SIZE).testTag("onboarding-brand-mark"))
+                    Spacer(Modifier.height(ICON_TITLE_GAP))
+                }
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(EMPTY_ICON_SIZE),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.height(ICON_TITLE_GAP))
+                Text(title, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+                if (body.isNotEmpty()) {
+                    Spacer(Modifier.height(TITLE_BODY_GAP))
+                    Text(
+                        body,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+                if (actionLabel != null && onAction != null) {
+                    Spacer(Modifier.height(BODY_ACTION_GAP))
+                    NdButton(label = actionLabel, onClick = onAction)
+                }
+                if (secondaryLabel != null && onSecondary != null) {
+                    NdTextButton(label = secondaryLabel, onClick = onSecondary)
+                }
+                if (tertiaryLabel != null && onTertiary != null) {
+                    NdTextButton(label = tertiaryLabel, onClick = onTertiary)
+                }
+                footer()
             }
         }
     }

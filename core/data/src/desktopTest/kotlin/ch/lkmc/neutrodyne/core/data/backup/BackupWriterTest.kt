@@ -308,6 +308,11 @@ class BackupWriterTest {
             settings.set(AppearanceSettingKeys.ARTWORK_TINT, false)
             settings.set(AppearanceSettingKeys.PURE_BLACK, true)
             settings.set(AppearanceSettingKeys.LIBRARY_DENSITY, LibraryDensity.LARGE)
+            settings.set(AppearanceSettingKeys.LIBRARY_GROUP_FILTER, "source-group")
+            settings.set(
+                AppearanceSettingKeys.LIBRARY_SEGMENT,
+                ch.lkmc.neutrodyne.core.model.settings.LibrarySegment.GROUPS,
+            )
             settings.set(AppearanceSettingKeys.PLAYER_PANEL_HIDDEN, true)
             settings.set(PlaybackSettingKeys.SPEED, 1.8f)
             settings.set(PlaybackSettingKeys.SKIP_SILENCE, true)
@@ -322,11 +327,18 @@ class BackupWriterTest {
             reader(target()).use { reader ->
                 val values = reader.settings().values
                 val restored = FakeSettingsRepository()
+                restored.set(AppearanceSettingKeys.LIBRARY_DENSITY, LibraryDensity.SMALL)
+                restored.set(AppearanceSettingKeys.LIBRARY_GROUP_FILTER, "device-group")
                 assertIs<Outcome.Success<*>>(RestoreSettingsMerge(restored).apply(reader.settings()))
                 assertEquals(expected, restored.observePortableSnapshot().first())
                 assertEquals(false, restored.get(AppearanceSettingKeys.ARTWORK_TINT))
                 assertEquals(true, restored.get(AppearanceSettingKeys.PURE_BLACK))
                 assertEquals(LibraryDensity.LARGE, restored.get(AppearanceSettingKeys.LIBRARY_DENSITY))
+                assertEquals("device-group", restored.get(AppearanceSettingKeys.LIBRARY_GROUP_FILTER))
+                assertEquals(
+                    ch.lkmc.neutrodyne.core.model.settings.LibrarySegment.PODCASTS,
+                    restored.get(AppearanceSettingKeys.LIBRARY_SEGMENT),
+                )
                 assertEquals(false, restored.get(AppearanceSettingKeys.PLAYER_PANEL_HIDDEN))
                 for (key in listOf(
                     AppearanceSettingKeys.ARTWORK_TINT,
