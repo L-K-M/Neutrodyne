@@ -14,7 +14,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlin.test.assertNull
 
-/** Public behavior reusable by W3 implementations with equivalent seeded durable state. */
+/** Public checker behavior reusable by coordinator implementations with equivalent seeded durable state. */
 @OptIn(ExperimentalCoroutinesApi::class)
 abstract class AppUpdateCheckerContract {
     protected abstract fun TestScope.createChecker(initial: UpdateCheckState): AppUpdateChecker

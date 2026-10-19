@@ -11,7 +11,7 @@ class DesktopUpdateRuntimeInputsTest {
         val host = DesktopPlatformInfo("Windows 11", "10.0", "aarch64")
         assertEquals(UpdateRuntimeTarget.Desktop("10.0"), DesktopUpdateRuntimeInputs("10.0").target)
         assertEquals("Windows 11; arm64", host.userAgentPlatform)
-        // W2 maps Windows targets to x64; runtime inputs must not guess an asset or parse the UA.
+        // The desktop asset selector maps Windows targets to x64; runtime inputs must not guess an asset or parse the UA.
     }
 
     @Test fun defaultReadsTheJvmOsVersion() {

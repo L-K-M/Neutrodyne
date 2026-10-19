@@ -65,7 +65,7 @@ import kotlin.time.Duration.Companion.seconds
  * splash, edge-to-edge, then the shared [NeutrodyneRoot]. The start-up gate renders
  * `DatabaseOpener.openState` (01 Splash and start-up gate): "Try again" re-runs `awaitOpen()` (a
  * failed result is never cached), "Manage storage" opens `ACTION_INTERNAL_STORAGE_SETTINGS`;
- * notices and sync wire their state in later milestones.
+ * update notices use the app-scoped services; sync wires its state in a later milestone.
  */
 class MainActivity : AppCompatActivity() {
     /** `appearance.*` once the settings file has emitted; null until then (08 App scheme). */
@@ -214,7 +214,7 @@ class MainActivity : AppCompatActivity() {
         /** 01 Application start-up: the settings wait never blocks the splash past 1 s. */
         val PREFS_GATE_TIMEOUT = 1.seconds
 
-        /** Defaults for notices and remote sessions until their milestones. */
+        /** Base state before live update and playback values are applied. */
         val ROOT_STATE_BASE = RootUiState.READY
     }
 }

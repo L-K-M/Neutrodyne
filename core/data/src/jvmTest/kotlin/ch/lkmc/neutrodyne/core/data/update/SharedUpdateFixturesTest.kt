@@ -13,7 +13,7 @@ import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
-/** W7 can read these same files directly from its shell/Python script tests. */
+/** Release tooling reads these same files directly from its shell/Python script tests. */
 class SharedUpdateFixturesTest {
     private val parser = UpdateManifestParser(updateBuild())
 

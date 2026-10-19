@@ -1729,7 +1729,7 @@ Covered in [Backups](#backups). The README's "Run the server" section (09 owns t
 
 ### Update notice
 
-**Implementation note (2026-10-19, M11a).** MS1 owns actual server notice delivery, scheduler/config/admin infrastructure and its independent JDK parser/client. M11a validates the optional server entry only; no app graph or forbidden app-module dependency is introduced.
+**Implementation note (2026-10-19, M11a).** MS1 owns actual server notice delivery, scheduler/config/admin infrastructure and its independent JDK parser/client. This integration base installs only health and discovery routes in `ServerModule`, with no admin page or update-check configuration, so conditional server integration is deferred until MS1 supplies that infrastructure. M11a validates the optional server entry only; no app graph or forbidden app-module dependency is introduced.
 
 `ServerUpdateNotice` (on unless `NEUTRODYNE_SERVER_UPDATE_CHECK=false`) fetches `https://github.com/{owner}/Neutrodyne/releases/latest/download/neutrodyne-update.json` once a day (jittered, JDK `HttpClient`, redirects followed only to GitHub's release-asset hosts), reads `versionName`, the release page URL and the additive `server` entry (`jar`, `image`, `minJava`) of the update manifest ([D78](../PLAN.md#3-key-decisions), [09 Update check](09-quality-and-release.md#update-check)), and shows "Neutrodyne Sync X.Y.Z is available" with the release link on `/admin/server`. It never downloads or installs anything. This is the server's only outbound request (network inventory ID `server-updates`, [09 Network inventory](09-quality-and-release.md#network-inventory)); the nightly `server-image-smoke` capture shows no other.
 
