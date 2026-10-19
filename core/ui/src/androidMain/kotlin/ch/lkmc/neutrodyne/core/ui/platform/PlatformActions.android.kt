@@ -9,6 +9,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.provider.Settings
+import android.provider.Settings.ACTION_IGNORE_BACKGROUND_DATA_RESTRICTIONS_SETTINGS
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContract
@@ -75,6 +77,36 @@ internal class AndroidPlatformActions(
     private val createLauncher: ActivityResultLauncher<CreateDocumentRequest>,
     private val notificationLauncher: ActivityResultLauncher<String>,
 ) : PlatformActions {
+    override val downloadSettings: DownloadSystemSettings =
+        DownloadSystemSettings { target ->
+            val action =
+                when (target) {
+                    DownloadSystemSettingsTarget.DATA_SAVER -> {
+                        ACTION_IGNORE_BACKGROUND_DATA_RESTRICTIONS_SETTINGS
+                    }
+
+                    DownloadSystemSettingsTarget.BACKGROUND -> {
+                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+                    }
+
+                    DownloadSystemSettingsTarget.STORAGE -> {
+                        Settings.ACTION_INTERNAL_STORAGE_SETTINGS
+                    }
+                }
+            val intent = Intent(action)
+            if (target !=
+                DownloadSystemSettingsTarget.STORAGE
+            ) {
+                intent.data = Uri.parse("package:${context.packageName}")
+            }
+            try {
+                context.startActivity(intent)
+                true
+            } catch (_: ActivityNotFoundException) {
+                false
+            }
+        }
+
     override val urls: ExternalUrlOpener =
         ExternalUrlOpener { url ->
             val intent =

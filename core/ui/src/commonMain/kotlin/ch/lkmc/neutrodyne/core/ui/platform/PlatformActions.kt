@@ -28,6 +28,8 @@ public interface PlatformActions {
     public val reveal: RevealInFolder?
 
     /** Android 13+ only; `null` on the desktop and on API < 33. */
+    public val downloadSettings: DownloadSystemSettings? get() = null
+
     public val notifications: NotificationPermissionRequester?
 }
 
@@ -105,3 +107,9 @@ public interface NotificationPermissionRequester {
 /** Provided by `NeutrodyneRoot` from the shell's platform implementation. */
 public val LocalPlatformActions: androidx.compose.runtime.ProvidableCompositionLocal<PlatformActions> =
     staticCompositionLocalOf { error("LocalPlatformActions not provided by the shell") }
+
+public enum class DownloadSystemSettingsTarget { DATA_SAVER, BACKGROUND, STORAGE }
+
+public fun interface DownloadSystemSettings {
+    public fun open(target: DownloadSystemSettingsTarget): Boolean
+}

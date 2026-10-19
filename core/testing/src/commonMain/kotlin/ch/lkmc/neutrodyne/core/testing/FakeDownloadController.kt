@@ -32,6 +32,8 @@ class FakeDownloadController : DownloadController {
     val busy = MutableStateFlow(false)
     var roots: List<StorageRootInfo> = emptyList()
     var requestResult: RequestResult? = null
+    var folderResult: FolderRootResult = FolderRootResult.Rejected(FolderRejectReason.UNSUPPORTED)
+    var moveResult: RootChangeResult = RootChangeResult.Unsupported
     var rootResult: RootChangeResult = RootChangeResult.Unavailable
     var orphanResult: OrphanDeleteResult = OrphanDeleteResult.Unavailable
     var sharedFile: ShareableFile? = null
@@ -132,7 +134,7 @@ class FakeDownloadController : DownloadController {
 
     override suspend fun registerFolderRoot(absolutePath: String): FolderRootResult {
         record(Call(Action.REGISTER, rootId = absolutePath))
-        return FolderRootResult.Rejected(FolderRejectReason.UNSUPPORTED)
+        return folderResult
     }
 
     override suspend fun changeRoot(
@@ -140,7 +142,7 @@ class FakeDownloadController : DownloadController {
         mode: RootChangeMode,
     ): RootChangeResult {
         record(Call(Action.ROOT, rootId = rootId, rootMode = mode))
-        return if (mode == RootChangeMode.MOVE_EXISTING) RootChangeResult.Unsupported else rootResult
+        return if (mode == RootChangeMode.MOVE_EXISTING) moveResult else rootResult
     }
 
     override suspend fun deleteOrphanFiles(): OrphanDeleteResult {

@@ -21,6 +21,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeScopeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import ch.lkmc.neutrodyne.core.testing.testFeedInfo
 import ch.lkmc.neutrodyne.core.testing.testPodcastDetail
+import ch.lkmc.neutrodyne.core.ui.DownloadSettingEdit
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.platform.NotificationPermissionRequester
 import ch.lkmc.neutrodyne.core.ui.resources.Res
@@ -441,6 +442,44 @@ class PodcastSettingsViewModelTest : MainDispatcherTest() {
                 viewModel.uiState.value.messages
                     .isNotEmpty(),
             )
+        }
+
+    @Test fun downloadOverridesUseAtomicEditsAndAllowInheritance() =
+        runTest {
+            val vm = viewModel()
+            collect(vm)
+            advanceUntilIdle()
+            vm.setRefreshIntervalMinutes(60)
+            vm.editDownload(
+                DownloadSettingEdit
+                    .Enabled(true),
+            )
+            vm.editDownload(
+                DownloadSettingEdit
+                    .Keep(9),
+            )
+            vm.editDownload(
+                DownloadSettingEdit
+                    .Video(true),
+            )
+            advanceUntilIdle()
+            assertEquals(
+                9,
+                vm.uiState.value.scoped
+                    ?.own
+                    ?.autoDownloadKeepLatest,
+            )
+            vm.editDownload(
+                DownloadSettingEdit
+                    .Keep(null),
+            )
+            advanceUntilIdle()
+            val own =
+                vm.uiState.value.scoped!!
+                    .own
+            assertNull(own.autoDownloadKeepLatest)
+            assertEquals(true, own.includeVideoInAutoDownload)
+            assertEquals(60, own.refreshIntervalMinutes)
         }
 }
 

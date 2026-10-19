@@ -94,6 +94,9 @@ class PodcastViewModelTest : MainDispatcherTest() {
         network,
         liveSource,
         clock,
+        downloads =
+            ch.lkmc.neutrodyne.core.testing
+                .FakeDownloadController(),
     )
 
     private fun TestScope.collect(viewModel: PodcastViewModel) {

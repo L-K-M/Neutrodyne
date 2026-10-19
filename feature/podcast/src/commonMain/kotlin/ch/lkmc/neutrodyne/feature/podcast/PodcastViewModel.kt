@@ -37,6 +37,7 @@ import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
 import ch.lkmc.neutrodyne.core.model.withCapabilities
+import ch.lkmc.neutrodyne.core.ui.DownloadAllController
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionController
 import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedController
@@ -51,6 +52,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_undo
 import ch.lkmc.neutrodyne.core.ui.resources.membership_changed
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_removed_from_group
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
+import ch.lkmc.neutrodyne.download.api.DownloadController
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
 import dev.zacsweers.metro.Assisted
@@ -96,6 +98,7 @@ public class PodcastViewModel
         network: NetworkMonitor,
         liveStateSource: EpisodeLiveStateSource,
         clock: Clock,
+        downloads: DownloadController,
     ) : ViewModel() {
         private val filters = MutableStateFlow(FeedFilters())
         private val detail = podcasts.observePodcast(podcastId)
@@ -243,6 +246,9 @@ public class PodcastViewModel
         public fun unsubscribe() {
             write { unsubscribe(listOf(podcastId)) }
         }
+
+        public val downloadAll: DownloadAllController =
+            DownloadAllController(viewModelScope, feedRepository::downloadAllEstimate, downloads)
 
         public val markPlayed: MarkFeedPlayedController =
             MarkFeedPlayedController(viewModelScope, clock, feedRepository::countUnplayed) { source, before, count ->

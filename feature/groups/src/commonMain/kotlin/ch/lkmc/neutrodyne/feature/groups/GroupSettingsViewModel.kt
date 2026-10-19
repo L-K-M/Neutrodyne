@@ -9,20 +9,25 @@ import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.GroupRepository
+import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.ScopeSettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.model.ExternalReason
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.ScopedSettingsView
 import ch.lkmc.neutrodyne.core.model.SettingField
 import ch.lkmc.neutrodyne.core.model.SettingOverrides
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
+import ch.lkmc.neutrodyne.core.ui.DownloadSettingEdit
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import ch.lkmc.neutrodyne.core.ui.UserMessages
 import ch.lkmc.neutrodyne.core.ui.platform.NotificationPermissionRequester
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import dev.zacsweers.metro.Assisted
 import dev.zacsweers.metro.AssistedFactory
 import dev.zacsweers.metro.AssistedInject
@@ -43,6 +48,7 @@ internal data class GroupSettingsUiState(
     val scoped: ScopedSettingsView? = null,
     val inherited: SettingOverrides = SettingOverrides(),
     val loaded: Boolean = false,
+    val externalGroupReason: ExternalReason? = null,
     val invalidFields: Set<SettingField> = emptySet(),
     val messages: ImmutableList<UserMessage> = persistentListOf(),
 ) {
@@ -56,6 +62,8 @@ internal class GroupSettingsViewModel
         groups: GroupRepository,
         private val scopes: ScopeSettingsRepository,
         settings: SettingsRepository,
+        podcasts: PodcastRepository,
+        capabilities: YouTubeCapabilitiesSource,
     ) : ViewModel() {
         private val messages = UserMessages()
         private val invalidFields = MutableStateFlow<Set<SettingField>>(emptySet())
@@ -69,9 +77,24 @@ internal class GroupSettingsViewModel
             ) { group, scoped, minutes, notify ->
                 // A group inherits only app defaults, so its chooser can preview them even with an override.
                 GroupSettingsUiState(group, scoped, SettingOverrides(minutes, notify), loaded = true)
+            }.combine(
+                combine(podcasts.observeLibraryTiles(groupId), capabilities.capabilities) { members, caps ->
+                    caps.externalReason.takeIf {
+                        !caps.downloads &&
+                            members.any { it.sourceType == SourceType.YOUTUBE_CHANNEL }
+                    }
+                },
+            ) { state, reason ->
+                state.copy(
+                    externalGroupReason = reason,
+                )
             }.combine(invalidFields) { state, fields -> state.copy(invalidFields = fields) }
                 .combine(messages.flow) { state, list -> state.copy(messages = list) }
                 .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), GroupSettingsUiState())
+
+        fun editDownload(edit: DownloadSettingEdit) {
+            write(edit.field, edit::applyTo)
+        }
 
         fun setRefreshIntervalMinutes(minutes: Int?) {
             write(SettingField.REFRESH_INTERVAL_MINUTES, { it.copy(refreshIntervalMinutes = minutes) })

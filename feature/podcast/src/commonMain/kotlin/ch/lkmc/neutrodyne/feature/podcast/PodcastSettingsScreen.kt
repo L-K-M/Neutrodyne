@@ -49,8 +49,12 @@ import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.PodcastDetail
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.ui.CredentialFields
+import ch.lkmc.neutrodyne.core.ui.DownloadSettingEdit
+import ch.lkmc.neutrodyne.core.ui.DownloadSettingsRows
+import ch.lkmc.neutrodyne.core.ui.DownloadSettingsScope
 import ch.lkmc.neutrodyne.core.ui.FeedDates
 import ch.lkmc.neutrodyne.core.ui.FeedErrorText
+import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.LocalUiClock
 import ch.lkmc.neutrodyne.core.ui.NavBackButton
 import ch.lkmc.neutrodyne.core.ui.UiText
@@ -106,6 +110,7 @@ internal fun PodcastSettingsScreen(
     onRefreshInterval: (Int?) -> Unit,
     onNotifications: (Boolean?) -> Unit,
     modifier: Modifier = Modifier,
+    onDownloadEdit: (DownloadSettingEdit) -> Unit = {},
 ) {
     val detail = state.detail
     val feedInfo = state.feedInfo
@@ -133,6 +138,15 @@ internal fun PodcastSettingsScreen(
             SectionHeader(stringResource(Res.string.section_general))
             GeneralSection(detail, state.effectiveOrder, onCustomTitle, onIncludeInAll, onOrderChange)
 
+            state.scoped?.let {
+                DownloadSettingsRows(
+                    it,
+                    DownloadSettingsScope.PODCAST,
+                    LocalPlatformKind.current,
+                    onDownloadEdit,
+                    invalidFields = state.invalidFields,
+                )
+            }
             PodcastEffectiveSettings(state, onRefreshInterval, onNotifications)
 
             if (feedInfo != null) {

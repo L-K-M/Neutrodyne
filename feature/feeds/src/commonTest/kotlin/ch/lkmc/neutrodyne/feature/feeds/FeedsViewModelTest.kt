@@ -129,6 +129,9 @@ class FeedsViewModelTest : MainDispatcherTest() {
         playbackStates = playbackController.state,
         platformInfo = testPlatformInfo,
         defaultDispatcher = dispatcher,
+        downloads =
+            ch.lkmc.neutrodyne.core.testing
+                .FakeDownloadController(),
     ).also { store.put("feeds${vmNumber++}", it) }
 
     private fun viewModelTest(block: suspend TestScope.() -> Unit) =

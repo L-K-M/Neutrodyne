@@ -48,6 +48,7 @@ internal fun PodcastSettingsRoute(key: PodcastSettingsKey) {
 
     PodcastSettingsScreen(
         state = state,
+        onDownloadEdit = viewModel::editDownload,
         onCustomTitle = viewModel::setCustomTitle,
         onOrderChange = viewModel::setOrder,
         onIncludeInAll = viewModel::setIncludeInAll,

@@ -93,4 +93,28 @@ class NotificationPermissionRequesterTest {
         assertNotNull(actions)
         assertNull(actions!!.notifications)
     }
+
+    @Test
+    fun downloadNoticeActionsOpenTheMatchingSystemSettings() {
+        var actions: PlatformActions? = null
+        rule.setContent { actions = rememberAndroidPlatformActions() }
+        rule.waitForIdle()
+        val cases =
+            mapOf(
+                DownloadSystemSettingsTarget.DATA_SAVER to Settings.ACTION_IGNORE_BACKGROUND_DATA_RESTRICTIONS_SETTINGS,
+                DownloadSystemSettingsTarget.BACKGROUND to Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                DownloadSystemSettingsTarget.STORAGE to Settings.ACTION_INTERNAL_STORAGE_SETTINGS,
+            )
+        for ((target, action) in cases) {
+            rule.runOnIdle { assertTrue(actions!!.downloadSettings!!.open(target)) }
+            val intent = shadowOf(rule.activity).nextStartedActivity
+            assertEquals(action, intent.action)
+            val expectedData =
+                when (target) {
+                    DownloadSystemSettingsTarget.STORAGE -> null
+                    else -> "package:${rule.activity.packageName}"
+                }
+            assertEquals(expectedData, intent.dataString)
+        }
+    }
 }

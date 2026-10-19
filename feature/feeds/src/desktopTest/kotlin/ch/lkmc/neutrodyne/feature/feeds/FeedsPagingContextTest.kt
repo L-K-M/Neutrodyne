@@ -78,6 +78,9 @@ class FeedsPagingContextTest : MainDispatcherTest() {
                     FakePlaybackStateSource(),
                     testPlatformInfo,
                     defaultDispatcher,
+                    downloads =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeDownloadController(),
                 )
 
             val store = ViewModelStore().apply { put("feeds", viewModel) }

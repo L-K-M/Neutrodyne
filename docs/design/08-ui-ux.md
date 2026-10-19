@@ -748,6 +748,22 @@ In progress is enabled; Downloaded remains gated until M6.
 
 ### Downloads
 
+**Implementation note (2026-10-19, M6b).** W9's supplied base has the M6a
+controller contracts and status mapper, but its Downloads destination is still
+an empty placeholder. W9 adds an overview using the existing Nd components,
+with the ordered two-notice limit, status text and controller actions. The
+full M6a presentation (selection, sorting, playback and detailed live transfer
+rates) still needs integration with that UI owner's work; this slice does not
+claim those acceptance checks. `DownloadsOverview` has no move counters, so
+`MOVE_IN_PROGRESS` reads "Moving downloads…" without invented counts. The
+folder picker uses the controller's frozen registration forwarding contract;
+unsupported or unavailable operations remain visible failures until the W4
+owner is bound. Scoped download choosers use the existing M2 "Inherit" label:
+the frozen `ScopedSettingsView` does not expose the value beneath an explicit
+podcast override, so it cannot honestly preview that inherited value. Group
+dependents require an explicit group opt-in, and external-mode cleanup remains
+editable as agreed above. No YouTube transfer behavior is added.
+
 `DownloadsKey`, `:feature:downloads`, M6 (empty state from M0). Data: 07's `DownloadController.observeAll(): Flow<DownloadsOverview>` (in progress, completed and failed `DownloadEntry` lists, `StorageUsage`, `notices`) with live bytes from `DownloadProgressSource` for the visible in-progress rows ([07 Engine architecture](07-downloads.md#engine-architecture), [07 Notices](07-downloads.md#notices)); texts are [`DownloadStatusText`](#download-status-text).
 
 ```
