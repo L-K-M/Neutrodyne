@@ -54,7 +54,7 @@ class DownloadsScreenTest {
     private val storage = StorageUsage("dir:default", 0, 0, 0, null, null, false)
     private val empty = DownloadsOverview(emptyList(), emptyList(), emptyList(), storage, emptySet())
 
-    @Test fun emptyLoadingAndManualSettingsHideDeferredControls() =
+    @Test fun emptyLoadingLinksToSettingsWithoutImplicitBulkRequests() =
         runDesktopComposeUiTest(width = 600, height = 900) {
             val state = mutableStateOf(DownloadsUiState())
             setContent {
@@ -154,10 +154,11 @@ class DownloadsScreenTest {
 
     @Test fun automaticCapAndMoveNoticesUseTheManualDownloadsScreen() =
         runDesktopComposeUiTest(width = 900, height = 1200) {
-            val overview = empty.copy(
-                storage = storage.copy(capBytes = 1_073_741_824L),
-                notices = setOf(DownloadNotice.CAP_REACHED, DownloadNotice.MOVE_IN_PROGRESS),
-            )
+            val overview =
+                empty.copy(
+                    storage = storage.copy(capBytes = 1_073_741_824L),
+                    notices = setOf(DownloadNotice.CAP_REACHED, DownloadNotice.MOVE_IN_PROGRESS),
+                )
             val actions = mutableListOf<DownloadNotice>()
             setContent {
                 CompositionLocalProvider(
@@ -165,7 +166,10 @@ class DownloadsScreenTest {
                     LocalPlatformKind provides PlatformKind.DESKTOP,
                 ) {
                     NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
-                        Screen(DownloadsUiState(overview = overview, storage = overview.storage), onNotice = { actions += it })
+                        Screen(DownloadsUiState(overview = overview, storage = overview.storage), onNotice = {
+                            actions +=
+                                it
+                        })
                     }
                 }
             }

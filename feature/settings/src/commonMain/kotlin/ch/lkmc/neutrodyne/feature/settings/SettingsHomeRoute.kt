@@ -26,7 +26,6 @@ import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.feedsIntervalText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_root_new
 import ch.lkmc.neutrodyne.core.ui.resources.download_desktop_settings
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_settings
 import ch.lkmc.neutrodyne.core.ui.resources.settings

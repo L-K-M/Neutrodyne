@@ -4,6 +4,34 @@ This file lets another person or agent take over the work at any point. **Last u
 
 ## 0. Implementation status
 
+### M6b I2 local integration (2026-10-19)
+
+`impl/m6b-p1` integrates completed M6a (`38f139e2`) and M6b W9
+(`f17a9f4d`) through local merges `138053e3` and `9d6c1e9d`.
+M6a's playback/cascade cleanup, Downloads selection, live progress and manual
+consent coexist with M6b's planner, cleanup, moves and automatic lanes.
+W9 uses that Downloads screen and manual settings controls, shared notices,
+root move confirmation and notification prompts. Desktop file reveal uses
+the recorded local URI; storage actions use the selected root.
+Both W10 workflow job sets and evidence assertions are retained.
+
+The full gate ran once with cache restoration disabled. Its only failure was
+`SmartResumeTest.coldProjectionAndArrivalsReadTheLiveSmartResumeSetting`
+("Adapter did not converge"). The unchanged case passed alone, then all
+161 playback adapter tests passed serially. No playback code or timing
+threshold was changed. This observation is consistent with scheduling
+sensitivity; it does not establish a production root cause. Focused regressions
+first exposed the default-folder and bulk-prompt integration errors, then
+verified their fixes. The [integration report](.nd-context/m6b-i2-report.md)
+contains final per-task counts, command receipts, conflicts and file list.
+
+W6 is deliberately excluded; its pre-reset seam is preserved for the parallel
+branch. No schema, entity, index or dependency is changed by this integration.
+No device, physical radio/storage/Share, optimized-release journey, bmgr or
+packaged desktop run is claimed. MD1 still gates audible desktop acceptance.
+Work remains local only: no push, PR, CI execution or external review
+(0 review rounds), as the owner requested.
+
 ### M6a W10 integration evidence (2026-10-19)
 
 Work is local on `impl/m6a-p1`, following W1–W9 at `bfa3ce48`.

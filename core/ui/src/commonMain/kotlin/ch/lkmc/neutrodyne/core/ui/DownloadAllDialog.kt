@@ -5,13 +5,11 @@ package ch.lkmc.neutrodyne.core.ui
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
-import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.download_all
@@ -28,14 +26,6 @@ import org.jetbrains.compose.resources.stringResource
 public fun DownloadAllDialogs(controller: DownloadAllController) {
     val state by controller.state.collectAsStateWithLifecycle()
     val messages by controller.messages.flow.collectAsStateWithLifecycle()
-    val prompt by controller.notificationPrompt.collectAsStateWithLifecycle()
-    val permission = LocalPlatformActions.current.notifications
-    LaunchedEffect(prompt) {
-        if (prompt) {
-            controller.notificationPrompt.value = false
-            if (permission?.granted == false) permission.request {}
-        }
-    }
     state?.let {
         DownloadAllDialog(
             it,

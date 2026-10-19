@@ -549,9 +549,11 @@ Reports and variant metadata are always uploaded. Host CI builds the test APK
 and opted-in driver, and checks dependency policy and graph boundaries; Licensee
 stays on shipped shells. No schema, domain-interface or licence exceptions.
 
-Device execution is Unverified. P1's episode/podcast `DownloadToggle` actions
-remain no-ops until W9; smoke intentionally requires that wiring and never
-bypasses it. W11 must not record host checks as passing device acceptance.
+Device execution is Unverified. I2 integrates M6a's real episode DownloadToggle
+and feed/podcast request handlers with W9's controls; smoke exercises that UI
+entry point instead of bypassing it. M6a's E4/downloads selectors and bmgr job
+coexist with the system-tests job and benchmark smoke legs. W11 must not record
+host compilation or passing host tests as device acceptance.
 
 **Implementation note (2026-10-19, M6b).** Adopted resolution 9 permits
 W10 to use `benchmarkRelease` if AGP 9.4 does not offer the required `release`

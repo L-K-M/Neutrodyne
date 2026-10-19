@@ -6,9 +6,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import ch.lkmc.neutrodyne.core.designsystem.components.NdActionRole
-import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
-import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
@@ -16,19 +13,12 @@ import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.ui.DownloadDialogs
 import ch.lkmc.neutrodyne.core.ui.MeteredConsentDialog
 import ch.lkmc.neutrodyne.core.ui.PlaybackMessageAction
-import ch.lkmc.neutrodyne.core.ui.downloadSize
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.SystemSettingsTarget
-import ch.lkmc.neutrodyne.core.ui.resources.Res
-import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
-import ch.lkmc.neutrodyne.core.ui.resources.action_delete_download
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_delete_orphans
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_delete_orphans_body
 import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
 import ch.lkmc.neutrodyne.download.api.DownloadNotice
 import dev.zacsweers.metrox.viewmodel.metroViewModel
 import kotlinx.coroutines.launch
-import org.jetbrains.compose.resources.stringResource
 
 @Composable
 internal fun DownloadsRoute(viewModel: DownloadsViewModel = metroViewModel()) {

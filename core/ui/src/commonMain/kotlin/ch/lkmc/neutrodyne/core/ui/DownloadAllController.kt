@@ -32,11 +32,11 @@ public class DownloadAllController(
     private val scope: CoroutineScope,
     private val estimate: suspend (FeedSource) -> DownloadAllEstimate,
     private val downloads: DownloadController,
+    private val onNotificationsRequired: () -> Unit,
 ) {
     private val mutableState = MutableStateFlow<DownloadAllState?>(null)
     public val state = mutableState.asStateFlow()
     public val messages: UserMessages = UserMessages()
-    public val notificationPrompt: MutableStateFlow<Boolean> = MutableStateFlow(false)
     private var read: Job? = null
 
     public fun open(source: FeedSource) {
@@ -119,7 +119,7 @@ public class DownloadAllController(
                                 ),
                             )
                         }
-                        notificationPrompt.value = result.askNotificationPermission
+                        if (result.askNotificationPermission) onNotificationsRequired()
                     }
                 }
             }.onFailure {

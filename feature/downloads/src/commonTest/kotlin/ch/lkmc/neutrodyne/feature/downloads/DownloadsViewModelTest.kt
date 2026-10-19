@@ -11,7 +11,6 @@ import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import ch.lkmc.neutrodyne.core.testing.testDownloadEntry
 import ch.lkmc.neutrodyne.core.testing.testPlatformInfo
-import ch.lkmc.neutrodyne.download.api.DownloadNotice
 import ch.lkmc.neutrodyne.download.api.LiveProgress
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -33,12 +32,23 @@ class DownloadsViewModelTest : MainDispatcherTest() {
     private val downloads = FakeDownloadController()
     private val progress = FakeDownloadProgressSource()
     private val player = FakePlaybackController()
-    private val localMedia = ch.lkmc.neutrodyne.core.testing.FakeLocalMediaIndex()
+    private val localMedia =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeLocalMediaIndex()
     private val settings = FakeSettingsRepository()
     private val store = ViewModelStore()
 
     private fun model() =
-        DownloadsViewModel(downloads, progress, player, player.state, settings, testPlatformInfo, network, localMedia).also {
+        DownloadsViewModel(
+            downloads,
+            progress,
+            player,
+            player.state,
+            settings,
+            testPlatformInfo,
+            network,
+            localMedia,
+        ).also {
             store.put("downloads", it)
         }
 
@@ -235,7 +245,11 @@ class DownloadsViewModelTest : MainDispatcherTest() {
             runCurrent()
             localMedia.files[1L] = "file:///old/episode.mp3"
             val revealed = mutableListOf<String>()
-            val reveal = ch.lkmc.neutrodyne.core.ui.platform.RevealInFolder { revealed += it; true }
+            val reveal =
+                ch.lkmc.neutrodyne.core.ui.platform.RevealInFolder {
+                    revealed += it
+                    true
+                }
             vm.revealFile(1L, reveal)
             assertEquals(listOf("file:///old/episode.mp3"), revealed)
             vm.revealFile(2L, reveal)

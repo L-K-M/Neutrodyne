@@ -25,7 +25,6 @@ import ch.lkmc.neutrodyne.core.ui.resources.downloads_file_unavailable
 import ch.lkmc.neutrodyne.core.ui.resources.nav_downloads
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
 import ch.lkmc.neutrodyne.download.api.DownloadController
-import ch.lkmc.neutrodyne.download.api.DownloadNotice
 import ch.lkmc.neutrodyne.download.api.DownloadProgressSource
 import ch.lkmc.neutrodyne.download.api.DownloadsOverview
 import ch.lkmc.neutrodyne.download.api.OrphanDeleteResult
@@ -75,8 +74,10 @@ public class DownloadsViewModel(
     private val visible = MutableStateFlow<Set<Long>>(emptySet())
     private val selected = MutableStateFlow<Set<Long>>(emptySet())
     private val orphanState = MutableStateFlow<Long?>(null)
-    public val orphanWorking = MutableStateFlow(false)
-    public val orphanError = MutableStateFlow<UiText?>(null)
+    private val orphanWorkingState = MutableStateFlow(false)
+    public val orphanWorking: kotlinx.coroutines.flow.StateFlow<Boolean> = orphanWorkingState
+    private val orphanErrorState = MutableStateFlow<UiText?>(null)
+    public val orphanError: kotlinx.coroutines.flow.StateFlow<UiText?> = orphanErrorState
     public val orphanConfirmation: kotlinx.coroutines.flow.StateFlow<Long?> = orphanState
     public val downloads =
         DownloadRequestHandler(
@@ -227,7 +228,10 @@ public class DownloadsViewModel(
             if (it == null) messages.post(UiText.Res(Res.string.downloads_file_unavailable))
         }
 
-    public fun revealFile(id: Long, reveal: ch.lkmc.neutrodyne.core.ui.platform.RevealInFolder) {
+    public fun revealFile(
+        id: Long,
+        reveal: ch.lkmc.neutrodyne.core.ui.platform.RevealInFolder,
+    ) {
         val uri = localMedia.localUriOrNull(id)
         if (uri == null || !reveal.reveal(uri)) {
             messages.post(UiText.Res(Res.string.downloads_file_unavailable))
@@ -235,7 +239,7 @@ public class DownloadsViewModel(
     }
 
     public fun askDeleteOrphans() {
-        orphanError.value = null
+        orphanErrorState.value = null
         orphanState.value = storage.value?.orphanBytes?.takeIf { it > 0 }
     }
 
@@ -245,17 +249,17 @@ public class DownloadsViewModel(
 
     public fun deleteOrphans() {
         if (orphanState.value == null || orphanWorking.value) return
-        orphanWorking.value = true
-        orphanError.value = null
+        orphanWorkingState.value = true
+        orphanErrorState.value = null
         viewModelScope.launch {
             try {
                 if (suspendRunCatching { controller.deleteOrphanFiles() }.getOrNull() is OrphanDeleteResult.Deleted) {
                     orphanState.value = null
                 } else {
-                    orphanError.value = UiText.Res(Res.string.write_failed)
+                    orphanErrorState.value = UiText.Res(Res.string.write_failed)
                 }
             } finally {
-                orphanWorking.value = false
+                orphanWorkingState.value = false
             }
         }
     }

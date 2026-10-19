@@ -1624,6 +1624,23 @@ class FeedsViewModelTest : MainDispatcherTest() {
             assertEquals(listOf(5L), downloads.calls.single().ids)
         }
 
+    @Test fun bulkDownloadUsesTheContextualNotificationPrompt() =
+        viewModelTest {
+            val source = FeedSource.Group(7)
+            feeds.downloadAllEstimates[source] =
+                ch.lkmc.neutrodyne.core.model
+                    .DownloadAllEstimate(listOf(5), 1, 1000, 0, false)
+            downloads.requestResult =
+                ch.lkmc.neutrodyne.download.api.RequestResult
+                    .Queued(1, 0, emptyMap(), true)
+            val vm = viewModel()
+            vm.downloadAll.open(source)
+            runCurrent()
+            vm.downloadAll.confirm()
+            runCurrent()
+            assertTrue(vm.downloads.notificationPrompt.value)
+        }
+
     private companion object {
         val allTab = FeedTab(FeedSource.All, "All", null, null, null)
         const val HOUR = 3_600_000L

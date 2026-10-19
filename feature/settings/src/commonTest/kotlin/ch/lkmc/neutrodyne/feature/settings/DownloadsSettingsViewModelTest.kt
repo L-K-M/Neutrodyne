@@ -188,9 +188,16 @@ class DownloadsSettingsViewModelTest : MainDispatcherTest() {
         runTest {
             val card = StorageRootInfo("ext:card", RootKind.REMOVABLE, "SD card", 999, true)
             downloads.roots = listOf(card, card.copy(rootId = "ext:gone", available = false))
-            downloads.overview.value = downloads.overview.value.copy(
-                completed = listOf(ch.lkmc.neutrodyne.core.testing.testDownloadEntry(1, ch.lkmc.neutrodyne.core.model.DownloadState.COMPLETED)),
-            )
+            downloads.overview.value =
+                downloads.overview.value.copy(
+                    completed =
+                        listOf(
+                            ch.lkmc.neutrodyne.core.testing.testDownloadEntry(
+                                1,
+                                ch.lkmc.neutrodyne.core.model.DownloadState.COMPLETED,
+                            ),
+                        ),
+                )
             val vm = DownloadsSettingsViewModel(settings, downloads)
             backgroundScope.launch { vm.storage.collect {} }
             advanceUntilIdle()

@@ -50,10 +50,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
-import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
-import ch.lkmc.neutrodyne.core.designsystem.components.NdBanner
-import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdEmptyState
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTooltipIconButton
@@ -75,7 +72,6 @@ import ch.lkmc.neutrodyne.core.ui.downloadSize
 import ch.lkmc.neutrodyne.core.ui.downloadWaitCommand
 import ch.lkmc.neutrodyne.core.ui.onEpisodePointerGesture
 import ch.lkmc.neutrodyne.core.ui.rememberMonogram
-import ch.lkmc.neutrodyne.core.ui.resources.download_show_folder
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel_download
 import ch.lkmc.neutrodyne.core.ui.resources.action_delete_download
@@ -85,30 +81,22 @@ import ch.lkmc.neutrodyne.core.ui.resources.action_play
 import ch.lkmc.neutrodyne.core.ui.resources.action_resume_download
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry
 import ch.lkmc.neutrodyne.core.ui.resources.action_retry_download
+import ch.lkmc.neutrodyne.core.ui.resources.download_show_folder
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_about
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_allow
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_background
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_bytes
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_cancel_selection
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_completed
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_data_saver
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_dismiss
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_empty_body
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_empty_manual
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_failed
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_folder
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_folder_missing
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_in_progress
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_loading
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_manage
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_notification_body
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_orphans
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_partial
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_pause_all
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_play_all
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_resume_all
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_retry_all
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_root_missing
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_select
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_select_all
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_select_played
@@ -118,7 +106,6 @@ import ch.lkmc.neutrodyne.core.ui.resources.downloads_settings
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_share
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_speed
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_storage
-import ch.lkmc.neutrodyne.core.ui.resources.downloads_storage_low
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_unknown
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_working
 import ch.lkmc.neutrodyne.core.ui.resources.nav_downloads
@@ -127,7 +114,6 @@ import ch.lkmc.neutrodyne.core.ui.root.SettingsGearButton
 import ch.lkmc.neutrodyne.download.api.DownloadEntry
 import ch.lkmc.neutrodyne.download.api.DownloadNotice
 import ch.lkmc.neutrodyne.download.api.DownloadStatus
-import ch.lkmc.neutrodyne.download.api.DownloadsOverview
 import ch.lkmc.neutrodyne.download.api.LiveProgress
 import kotlinx.coroutines.flow.distinctUntilChanged
 import org.jetbrains.compose.resources.stringResource
@@ -227,7 +213,8 @@ internal fun DownloadsScreen(
                 return@LazyColumn
             }
             item("notices") {
-                ch.lkmc.neutrodyne.core.ui.DownloadNotices(rows, LocalPlatformKind.current, onNotice)
+                ch.lkmc.neutrodyne.core.ui
+                    .DownloadNotices(rows, LocalPlatformKind.current, onNotice)
             }
             if (rows.inProgress.isEmpty() && rows.failed.isEmpty() && rows.completed.isEmpty()) {
                 item("empty") {

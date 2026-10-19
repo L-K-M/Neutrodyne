@@ -20,6 +20,7 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DownloadAllControllerTest {
+    private var notificationPrompts = 0
     private val estimate =
         DownloadAllEstimate(
             listOf(
@@ -41,6 +42,7 @@ class DownloadAllControllerTest {
                     backgroundScope,
                     { gate.await() },
                     downloads,
+                    { notificationPrompts++ },
                 )
             controller.open(FeedSource.Group(7))
             runCurrent()
@@ -78,6 +80,7 @@ class DownloadAllControllerTest {
                     backgroundScope,
                     { estimate },
                     downloads,
+                    { notificationPrompts++ },
                 )
             controller.open(FeedSource.Group(7))
             runCurrent()
@@ -98,7 +101,7 @@ class DownloadAllControllerTest {
             )
             assertNull(downloads.calls.single().allowMetered)
             assertNull(controller.state.value)
-            assertTrue(controller.notificationPrompt.value)
+            assertEquals(1, notificationPrompts)
         }
 
     @Test fun meteredDecisionRequiresAnotherExplicitConfirmation() =
@@ -117,6 +120,7 @@ class DownloadAllControllerTest {
                     backgroundScope,
                     { estimate },
                     downloads,
+                    { notificationPrompts++ },
                 )
             controller.open(FeedSource.Podcast(3))
             runCurrent()
@@ -161,6 +165,7 @@ class DownloadAllControllerTest {
                     backgroundScope,
                     { estimate },
                     downloads,
+                    { notificationPrompts++ },
                 )
             controller.open(FeedSource.Group(7))
             runCurrent()
@@ -192,6 +197,7 @@ class DownloadAllControllerTest {
                     backgroundScope,
                     { estimate.copy(episodeIds = emptyList()) },
                     downloads,
+                    { notificationPrompts++ },
                 )
             controller.open(FeedSource.Group(7))
             runCurrent()

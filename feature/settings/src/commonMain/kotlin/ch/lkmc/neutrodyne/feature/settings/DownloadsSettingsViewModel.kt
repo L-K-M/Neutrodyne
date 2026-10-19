@@ -7,7 +7,6 @@ import androidx.lifecycle.viewModelScope
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
-import ch.lkmc.neutrodyne.core.domain.DownloadRootRegistration
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.SettingOverrides
 import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys

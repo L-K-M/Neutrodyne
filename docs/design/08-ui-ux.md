@@ -769,6 +769,9 @@ use the same move-or-leave confirmation and W4's implemented controller.
 Desktop completed rows reveal their indexed file URI through RevealInFolder;
 Share file remains Android-only. Episode DownloadToggle uses M6a's real request
 handler, including the entry point used by the benchmark smoke journey.
+Bulk requests also hand notification consent to that contextual handler,
+including its blocked-permission guidance. Storage actions resolve the selected
+root instead of assuming the desktop default folder.
 `DownloadsOverview` has no move counters, so MOVE_IN_PROGRESS reads
 "Moving downloads…" without invented counts. Scoped choosers retain M2's
 "Inherit" label because ScopedSettingsView has no underlying overridden value.
