@@ -60,7 +60,19 @@ class GroupSettingsViewModelTest : MainDispatcherTest() {
             advanceUntilIdle()
             val scoped = vm.uiState.value.scoped!!
             assertEquals(SettingOverrides(120, true), scoped.own)
-            assertEquals(scoped.own.copy(playbackSpeed = 1f, skipSilence = false), scoped.effective)
+            assertEquals(
+                scoped.own.copy(
+                    playbackSpeed = 1f,
+                    skipSilence = false,
+                    autoDownload = false,
+                    autoDownloadKeepLatest = 3,
+                    autoDownloadNetwork = ch.lkmc.neutrodyne.core.model.NetworkPolicy.UNMETERED,
+                    autoDownloadRequireCharging = false,
+                    includeVideoInAutoDownload = false,
+                    deleteAfterPlayed = ch.lkmc.neutrodyne.core.model.DeleteAfter.AFTER_24H,
+                ),
+                scoped.effective,
+            )
             assertEquals(ownSource, scoped.sources[SettingField.REFRESH_INTERVAL_MINUTES])
             assertEquals(ownSource, scoped.sources[SettingField.NOTIFY_NEW_EPISODES])
             assertTrue(settings.calls.isEmpty(), "Group overrides must not write global settings")

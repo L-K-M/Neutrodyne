@@ -206,6 +206,91 @@ abstract class DownloadDao : DownloadQueries {
         stopReason: Int,
     ): Int
 
+    @Query(
+        "SELECT e.id, e.sortDate, e.enclosureLength, e.isVideo, e.externalMediaId," +
+            " d.state AS downloadState, d.lane FROM episode e JOIN podcast p ON p.id = e.podcastId" +
+            " LEFT JOIN episode_state s ON s.episodeId = e.id LEFT JOIN download d ON d.episodeId = e.id" +
+            " WHERE e.podcastId = :podcastId AND e.isNew = 1 AND e.firstSeenAt > :eligibleAfter" +
+            " AND s.playedAt IS NULL AND s.downloadDismissedAt IS NULL AND " + FeedQueryBuilder.VISIBLE +
+            " AND e.availability = 'AVAILABLE' AND (:includeVideo = 1 OR e.isVideo = 0)" +
+            " AND (e.enclosureUrl IS NOT NULL OR (e.externalMediaId IS NOT NULL AND :youtubeDownloads = 1))" +
+            " ORDER BY e.sortDate DESC, e.id DESC LIMIT :keepLatest",
+    )
+    abstract override suspend fun autoCandidates(
+        podcastId: Long,
+        eligibleAfter: Long,
+        keepLatest: Int,
+        includeVideo: Boolean,
+        youtubeDownloads: Boolean,
+    ): List<AutoDownloadCandidate>
+
+    @Query(
+        "SELECT d.episodeId, e.podcastId, s.playedAt FROM download d" +
+            " JOIN episode e ON e.id = d.episodeId JOIN episode_state s ON s.episodeId = d.episodeId" +
+            " WHERE d.state = 'COMPLETED' AND s.playedAt IS NOT NULL AND s.isFavorite = 0" +
+            " AND d.episodeId NOT IN (SELECT currentEpisodeId FROM play_session WHERE currentEpisodeId IS NOT NULL)" +
+            " AND d.episodeId NOT IN (SELECT q.episodeId FROM queue_entry q" +
+            " ORDER BY q.orderKey, q.id LIMIT :upNextProtected)" +
+            " ORDER BY (d.lane = 'AUTO') DESC, s.playedAt, d.episodeId",
+    )
+    abstract override suspend fun cleanupCandidates(upNextProtected: Int): List<CleanupCandidate>
+
+    override suspend fun unplayedAutoCompleted(
+        podcastIds: List<Long>,
+        upNextProtected: Int,
+    ): List<RollingDownloadCandidate> =
+        podcastIds.distinct().chunked(DOWNLOAD_BIND_CHUNK).flatMap { unplayedAutoChunk(it, upNextProtected) }
+
+    @Query(
+        "SELECT d.episodeId, e.podcastId, (s.startedAt IS NOT NULL OR COALESCE(s.isFavorite, 0) = 1" +
+            " OR d.episodeId IN (SELECT currentEpisodeId FROM play_session WHERE currentEpisodeId IS NOT NULL)" +
+            " OR d.episodeId IN (SELECT q.episodeId FROM queue_entry q" +
+            " ORDER BY q.orderKey, q.id LIMIT :upNextProtected)) AS protected" +
+            " FROM download d JOIN episode e ON e.id = d.episodeId" +
+            " LEFT JOIN episode_state s ON s.episodeId = d.episodeId" +
+            " WHERE d.state = 'COMPLETED' AND d.lane = 'AUTO' AND e.podcastId IN (:podcastIds) AND s.playedAt IS NULL" +
+            " ORDER BY e.podcastId, e.sortDate DESC, e.id DESC",
+    )
+    protected abstract suspend fun unplayedAutoChunk(
+        podcastIds: List<Long>,
+        upNextProtected: Int,
+    ): List<RollingDownloadCandidate>
+
+    @Query("SELECT * FROM download WHERE state = 'COMPLETED' AND rootId <> :target ORDER BY episodeId LIMIT :limit")
+    abstract override suspend fun rowsOnOtherRoots(
+        target: String,
+        limit: Int,
+    ): List<DownloadEntity>
+
+    @Query(
+        "SELECT d.episodeId FROM download d JOIN episode_state s ON s.episodeId = d.episodeId" +
+            " WHERE d.state = 'COMPLETED' AND s.playedAt IS NOT NULL ORDER BY d.episodeId",
+    )
+    abstract override fun observePlayedCompletedIds(): Flow<List<Long>>
+
+    @Transaction
+    override suspend fun resetTaskManagerStoppedRunners(
+        liveTokens: Set<String>,
+        stopReason: Int,
+    ): Int = pauseStoppedUidt(liveTokens.toList(), stopReason) + pauseManualQueue(stopReason)
+
+    @Query(
+        "UPDATE download SET state = 'PAUSED', waitReason = 'NONE', runnerToken = NULL," +
+            " lastError = 'CANCELLED_BY_SYSTEM', lastStopReason = :stopReason" +
+            " WHERE lane = 'MANUAL' AND state IN ('RESOLVING','DOWNLOADING','VERIFYING')" +
+            " AND runnerToken LIKE 'uidt:%' AND runnerToken NOT IN (:liveTokens)",
+    )
+    protected abstract suspend fun pauseStoppedUidt(
+        liveTokens: List<String>,
+        stopReason: Int,
+    ): Int
+
+    @Query(
+        "UPDATE download SET state = 'PAUSED', waitReason = 'NONE', lastStopReason = :stopReason" +
+            " WHERE lane = 'MANUAL' AND state = 'QUEUED' AND runnerToken IS NULL",
+    )
+    protected abstract suspend fun pauseManualQueue(stopReason: Int): Int
+
     @Transaction
     override suspend fun requeueChangedEnclosures(now: Long): List<DownloadPathRow> {
         val rows = changedEnclosures()

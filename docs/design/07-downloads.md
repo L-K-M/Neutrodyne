@@ -127,6 +127,16 @@ Callers: features (`:feature:downloads`, `:feature:episode`, `:feature:podcast`,
 
 ### Threading and coroutines
 
+**Implementation note (2026-10-19, M6b).** W1 exposes the orchestration ports
+in `ch.lkmc.neutrodyne.core.domain` so `core:testing` can supply fakes without
+an implementation-module dependency. The concrete owners remain in
+`download:impl`. Planner, cleanup and mover each own a separate single-flight
+mutex. Queue mutations coordinate with the shared claim mutex; file/network IO
+stays outside DB transactions. `DownloadMover.run(target, deadline)` takes a
+nullable monotonic elapsed-ms deadline, null on desktop, and returns
+COMPLETE, PENDING, DEADLINE or STORAGE_FULL. Scheduler lane/wake signatures stay
+unchanged; W5 extends their Android implementation to AUTO.
+
 | Component | Runs on | Rules |
 |---|---|---|
 | `DownloadControllerImpl` | caller's coroutine; main-safe | DAO calls on Room's query context; scheduling on `@Dispatcher(IO)`; never blocks the caller beyond one write transaction per call |
@@ -560,6 +570,17 @@ Other states: `RESOLVING` and `VERIFYING` show an indeterminate ring; `DOWNLOADI
 "Dismiss" on a `FAILED` row is `cancel(ids)` (row removed, tombstone written).
 
 ### Pause, cancel and Task Manager stops
+
+**Implementation note (2026-10-19, M6b).** Adopted resolution 2 keeps the
+three-condition inference rule: USER_REQUESTED, exit newer than the stale UIDT
+token, and no pending manual job. If an OEM Recents swipe also removes that job,
+AC11's Recents distinction is a named device gap, not presumed verified.
+Adopted resolution 3 freezes a dedicated
+`resetTaskManagerStoppedRunners(liveTokens, stopReason)` DAO transaction before
+generic orphan reset. Only stale active MANUAL `uidt:` owners and the unclaimed
+MANUAL queue pause; other stale rows retain generic SYSTEM recovery. No schema
+change is needed. W6 owns inference and invocation.
+
 
 **Implementation note (2026-10-19, M6a).** Adopted resolution 7: M6a handles actual
 callback stop reasons and stale-runner recovery only. ApplicationExitInfo historical
@@ -1422,6 +1443,15 @@ This confirms 02's reading: a **tombstoned episode does not occupy a `keepLatest
 
 ### Planner algorithm
 
+**Implementation note (2026-10-19, M6b).** Adopted resolution 10 preserves
+network/charging values in effective policy attribution, but desktop admission
+must write `allowMetered = true`, `requireCharging = false`; neither network nor
+charging holds desktop rows or gates cleanup. Adopted resolution 11 keeps the
+full-library watermark pass, with reads/writes batched at 500 bind variables
+and no write when watermarks are unchanged. W2 measures the pass in its tests;
+W1 adds no planner cache or runtime behavior.
+
+
 `AutoDownloadPlanner.plan(podcastIds)` (single flight; `@Dispatcher(IO)`):
 
 1. The [watermark pass](#no-backfill-watermark) over all podcasts (`observeAutoDownload()`'s current map, or `resolver.autoDownload(allSubscribedIds)` outside the collector); `eff` = its entries for `podcastIds`.
@@ -1650,6 +1680,14 @@ Auto Backup includes `getExternalFilesDir()` by default. 05's include-only rules
 
 ## Settings
 
+**Implementation note (2026-10-19, M6b).** Adopted resolution 1 assigns
+`desktop_roots`, `move_target`, `cleanup_last_at`, folder registration, the folder
+picker and MOVE_EXISTING to M6b. The Podcasts bmgr assertion remains M6a.
+W1 freezes keys and owner contracts only; W4/W5/W7 bind root/move and AUTO hosts.
+M6a's explicit unavailable results remain until a real owner is supplied; root
+registration and changes now have a delegation seam rather than a successful no-op.
+
+
 **Implementation note (2026-10-19, M6a).** W1 registers only MANUAL_METERED (portable), ROOT_ID,
 NOTIFICATION_PROMPTED and DEFERRED_DELETES (device store), all unsynced. The
 remaining policy/registry/move/cleanup keys in the full table are deferred to M6b;
@@ -1671,7 +1709,7 @@ registration is not a promise of working automatic policy in M6a.
 | `downloads.notification_prompted` | Bool | `false` | `device_settings` | none (contextual prompt flag; Android) | M6 |
 | `downloads.deferred_deletes` | TextSet (`{episodeId}\|{rootId}\|{path}`, split at the first two `\|` because desktop paths may contain one) | empty | `device_settings` | none (deferred deletes and deletion journal) | M6 |
 | `downloads.planner_baseline_at` | Long (epoch ms) | absent = 0 | `device_settings` | none (planner state, [No backfill watermark](#no-backfill-watermark)) | M6 |
-| `downloads.desktop_roots` (2026-10-05) | TextSet (`{rootId}\|{absolute path}`, split at the first `\|`) | empty | `device_settings` | none (desktop root registry, [Roots](#roots)) | M6a (desktop) |
+| `downloads.desktop_roots` (2026-10-05) | TextSet (`{rootId}\|{absolute path}`, split at the first `\|`) | empty | `device_settings` | none (desktop root registry, [Roots](#roots)) | M6b (desktop) |
 | `downloads.move_target` (2026-10-05) | Text (`rootId`) | absent | `device_settings` | none (pending desktop move, [Moving between roots](#moving-between-roots)) | M6b (desktop) |
 | `downloads.cleanup_last_at` (2026-10-05) | Long (epoch ms) | absent | `device_settings` | none (desktop daily pass, [Desktop runners](#desktop-runners)) | M6b (desktop) |
 | `youtube.auto_download`, `youtube.auto_download_keep_latest`, `youtube.audio_quality` | 04's keys | — | — | Settings › Downloads › YouTube channels (with the engine) | M9a; MD3 (desktop) |

@@ -43,13 +43,44 @@ class M6RestoreSettingsTest {
             assertTrue(settings.get(Keys.DEFERRED_DELETES).isEmpty())
         }
 
-    @Test fun portableSnapshotExportsOnlyManualPolicy() =
+    @Test fun automaticPolicyBackupValidation() =
+        runTest {
+            val settings = FakeSettingsRepository()
+            val entries =
+                listOf(
+                    SettingValueV1(Keys.AUTO_DOWNLOAD.name, "Bool", JsonPrimitive(true)),
+                    SettingValueV1(Keys.AUTO_DOWNLOAD_KEEP_LATEST.name, "Int32", JsonPrimitive(7)),
+                    SettingValueV1(Keys.AUTO_DOWNLOAD_KEEP_LATEST.name, "Int32", JsonPrimitive(11)),
+                    SettingValueV1(Keys.AUTO_DOWNLOAD_NETWORK.name, "Choice", JsonPrimitive("ANY")),
+                    SettingValueV1(Keys.AUTO_DOWNLOAD_NETWORK.name, "Choice", JsonPrimitive("INVALID")),
+                    SettingValueV1(Keys.STORAGE_CAP_MB.name, "Int32", JsonPrimitive(1024)),
+                    SettingValueV1(Keys.STORAGE_CAP_MB.name, "Int32", JsonPrimitive(1000)),
+                    SettingValueV1(Keys.PLANNER_BASELINE_AT.name, "Int64", JsonPrimitive(42L)),
+                    SettingValueV1(Keys.MOVE_TARGET.name, "Text", JsonPrimitive("new-root")),
+                    SettingValueV1(Keys.CLEANUP_LAST_AT.name, "Int64", JsonPrimitive(42L)),
+                )
+            val result =
+                assertIs<Outcome.Success<SettingsMergeCounts>>(
+                    RestoreSettingsMerge(settings).apply(SettingsV1(entries)),
+                ).value
+            assertEquals(4, result.applied)
+            assertEquals(6, result.skipped)
+            assertTrue(settings.get(Keys.AUTO_DOWNLOAD))
+            assertEquals(7, settings.get(Keys.AUTO_DOWNLOAD_KEEP_LATEST))
+            assertEquals(0L, settings.get(Keys.PLANNER_BASELINE_AT))
+        }
+
+    @Test fun portableSnapshotExportsPoliciesButNeverDeviceState() =
         runTest {
             val settings = FakeSettingsRepository()
             settings.set(Keys.MANUAL_METERED, ManualMeteredPolicy.NEVER)
             settings.set(Keys.ROOT_ID, "int")
             settings.set(Keys.NOTIFICATION_PROMPTED, true)
             val exported = settings.observePortableSnapshot().first().filterKeys { it.startsWith("downloads.") }
-            assertEquals(mapOf(Keys.MANUAL_METERED.name to ManualMeteredPolicy.NEVER), exported)
+            assertEquals(8, exported.size)
+            assertEquals(ManualMeteredPolicy.NEVER, exported[Keys.MANUAL_METERED.name])
+            assertEquals(false, exported[Keys.AUTO_DOWNLOAD.name])
+            assertFalse(Keys.PLANNER_BASELINE_AT.name in exported)
+            assertFalse(Keys.MOVE_TARGET.name in exported)
         }
 }

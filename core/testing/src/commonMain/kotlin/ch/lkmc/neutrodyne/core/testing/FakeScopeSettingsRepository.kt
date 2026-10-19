@@ -17,9 +17,11 @@ import ch.lkmc.neutrodyne.core.model.SettingField
 import ch.lkmc.neutrodyne.core.model.SettingOverrides
 import ch.lkmc.neutrodyne.core.model.SettingScope
 import ch.lkmc.neutrodyne.core.model.SettingSource
+import ch.lkmc.neutrodyne.core.model.hasSupportedKeepLatest
 import ch.lkmc.neutrodyne.core.model.hasSupportedPlaybackSpeed
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
+import ch.lkmc.neutrodyne.core.model.withGroupAutoDownloadGating
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -61,6 +63,14 @@ class FakeScopeSettingsRepository(
                     own.notifyNewEpisodes ?: inherited.effective.notifyNewEpisodes,
                     own.playbackSpeed ?: speed ?: globalSpeed,
                     own.skipSilence ?: silence ?: globalSilence,
+                    autoDownload = own.autoDownload ?: inherited.effective.autoDownload,
+                    autoDownloadKeepLatest = own.autoDownloadKeepLatest ?: inherited.effective.autoDownloadKeepLatest,
+                    autoDownloadNetwork = own.autoDownloadNetwork ?: inherited.effective.autoDownloadNetwork,
+                    autoDownloadRequireCharging =
+                        own.autoDownloadRequireCharging ?: inherited.effective.autoDownloadRequireCharging,
+                    includeVideoInAutoDownload =
+                        own.includeVideoInAutoDownload ?: inherited.effective.includeVideoInAutoDownload,
+                    deleteAfterPlayed = own.deleteAfterPlayed ?: inherited.effective.deleteAfterPlayed,
                 ),
                 mapOf(
                     SettingField.PLAYBACK_SPEED to if (own.playbackSpeed != null) ownSource else speedSource,
@@ -79,7 +89,24 @@ class FakeScopeSettingsRepository(
                         },
                 ),
                 inherited.groupHints,
-            )
+            ).let { view ->
+                val explicit =
+                    mapOf(
+                        SettingField.AUTO_DOWNLOAD to own.autoDownload,
+                        SettingField.AUTO_DOWNLOAD_KEEP_LATEST to own.autoDownloadKeepLatest,
+                        SettingField.AUTO_DOWNLOAD_NETWORK to own.autoDownloadNetwork,
+                        SettingField.AUTO_DOWNLOAD_REQUIRE_CHARGING to own.autoDownloadRequireCharging,
+                        SettingField.INCLUDE_VIDEO_IN_AUTO_DOWNLOAD to own.includeVideoInAutoDownload,
+                        SettingField.DELETE_AFTER_PLAYED to own.deleteAfterPlayed,
+                    )
+                view.copy(
+                    sources =
+                        view.sources +
+                            explicit.mapValues { (field, value) ->
+                                if (value != null) ownSource else inherited.sources[field] ?: SettingSource.AppDefault
+                            },
+                )
+            }
         }
     }
 
@@ -154,7 +181,7 @@ class FakeScopeSettingsRepository(
         groupId: Long,
         change: (SettingOverrides) -> SettingOverrides,
     ): Outcome<Unit, SettingsError> =
-        update(groups, groupId, change).also { outcome ->
+        update(groups, groupId) { change(it).withGroupAutoDownloadGating() }.also { outcome ->
             if (outcome is Outcome.Success) {
                 withContext(NonCancellable) {
                     suspendRunCatching { channelSync.sync() }
@@ -231,6 +258,11 @@ class FakeScopeSettingsRepository(
             if (!next.hasSupportedPlaybackSpeed()) {
                 return@withLock Outcome.Failure(SettingsError.OutOfRange("playbackSpeed"))
             }
+            if (!next.hasSupportedKeepLatest()) {
+                return@withLock Outcome.Failure(
+                    SettingsError.OutOfRange("autoDownloadKeepLatest"),
+                )
+            }
             failNextWrite?.let {
                 failNextWrite = null
                 return@withLock Outcome.Failure(it)
@@ -243,7 +275,18 @@ class FakeScopeSettingsRepository(
         fun appDefaults(): ScopedSettingsView =
             ScopedSettingsView(
                 SettingOverrides(),
-                SettingOverrides(FeedsSettingKeys.DEFAULT_REFRESH_INTERVAL_MINUTES, false, 1f, false),
+                SettingOverrides(
+                    FeedsSettingKeys.DEFAULT_REFRESH_INTERVAL_MINUTES,
+                    false,
+                    1f,
+                    false,
+                    autoDownload = false,
+                    autoDownloadKeepLatest = 3,
+                    autoDownloadNetwork = ch.lkmc.neutrodyne.core.model.NetworkPolicy.UNMETERED,
+                    autoDownloadRequireCharging = false,
+                    includeVideoInAutoDownload = false,
+                    deleteAfterPlayed = ch.lkmc.neutrodyne.core.model.DeleteAfter.AFTER_24H,
+                ),
                 SettingField.entries.associateWith { SettingSource.AppDefault },
             )
     }

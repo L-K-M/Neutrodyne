@@ -1734,6 +1734,17 @@ WHERE episodeId = :id AND state = 'QUEUED';
 
 ### Auto-download candidates
 
+**Implementation note (2026-10-19, M6b).** W1 freezes the read signatures
+on `DownloadQueries`/`DownloadDao`: `autoCandidates`, `cleanupCandidates`,
+`unplayedAutoCompleted`, `rowsOnOtherRoots` and `observePlayedCompletedIds`,
+plus the dedicated Task Manager reset transaction. The played cleanup
+projection carries episode ID, podcast ID and played time; deletion reads the
+current row under the claim mutex. The rolling projection carries episode ID,
+podcast ID and the protected flag. Move batches return full `DownloadEntity`
+snapshots rather than a second partial row type. The owning algorithms still
+recheck state before mutation. These query additions and the settings-scope
+projection change no entity, index, schema JSON or database version.
+
 `DownloadDao.autoCandidates(...)` per podcast (M6). 07's `AutoDownloadPlanner` resolves the effective policy with `EffectiveSettingsResolver` (05) in Kotlin, then:
 
 ```sql

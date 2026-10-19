@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.database.DownloadEntity
 import ch.lkmc.neutrodyne.core.database.DownloadEntryRow
 import ch.lkmc.neutrodyne.core.database.DownloadSourceRow
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.domain.DownloadRootRegistration
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
@@ -55,6 +56,7 @@ internal class DownloadControllerImpl(
     private val askNotificationPermission: suspend () -> Boolean,
     private val activity: Flow<Long> = flowOf(0L),
     private val hasActiveTransfers: () -> Boolean = { false },
+    private val rootRegistration: DownloadRootRegistration? = null,
 ) : DownloadController {
     private val dao = db.downloadDao()
 
@@ -382,13 +384,20 @@ internal class DownloadControllerImpl(
     override suspend fun storageRoots() = roots.list()
 
     override suspend fun registerFolderRoot(absolutePath: String) =
-        FolderRootResult.Rejected(FolderRejectReason.UNSUPPORTED)
+        rootRegistration?.registerFolderRoot(absolutePath) ?: FolderRootResult.Rejected(FolderRejectReason.UNSUPPORTED)
 
     override suspend fun changeRoot(
         rootId: String,
         mode: RootChangeMode,
     ): RootChangeResult =
-        if (mode == RootChangeMode.MOVE_EXISTING) RootChangeResult.Unsupported else files.changeRoot(rootId, mode)
+        rootRegistration?.changeRoot(rootId, mode)
+            ?: if (mode ==
+                RootChangeMode.MOVE_EXISTING
+            ) {
+                RootChangeResult.Unsupported
+            } else {
+                files.changeRoot(rootId, mode)
+            }
 
     override suspend fun deleteOrphanFiles() = files.deleteOrphanFiles()
 

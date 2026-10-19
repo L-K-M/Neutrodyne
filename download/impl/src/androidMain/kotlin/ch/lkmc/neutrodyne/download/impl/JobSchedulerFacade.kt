@@ -10,10 +10,21 @@ import ch.lkmc.neutrodyne.core.database.DownloadEntity
 
 internal class JobSchedulerFacade(
     private val context: Context,
+    private val scheduler: () -> JobScheduler = {
+        context.getSystemService(JobScheduler::class.java).forNamespace(NAMESPACE)
+    },
 ) {
+    /** W6 inference must query the same namespace as the persisted UIDT job. */
+    fun pendingManualJob(): JobInfo? =
+        if (Build.VERSION.SDK_INT < 34) {
+            null
+        } else {
+            scheduler().getPendingJob(JOB_ID)
+        }
+
     fun scheduleManual(due: List<DownloadEntity>): Boolean {
         if (Build.VERSION.SDK_INT < 34 || due.isEmpty()) return false
-        val scheduler = context.getSystemService(JobScheduler::class.java).forNamespace(NAMESPACE)
+        val scheduler = scheduler()
         return try {
             if (!scheduler.canRunUserInitiatedJobs()) return false
             scheduler.schedule(info(due)) == JobScheduler.RESULT_SUCCESS

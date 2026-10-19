@@ -309,6 +309,69 @@ class DownloadDaoTest {
             assertTrue(db.episodeDao().downloadSources(listOf(-1)).isEmpty())
         }
 
+    @Test fun automationQueriesRetainProtectedWindowAndMoveOnlyCompleted() =
+        runTest {
+            val ids = seed(4)
+            ids.forEachIndexed { i, id ->
+                dao.insert(
+                    row(id).copy(
+                        state = State.COMPLETED,
+                        lane = if (i == 3) Lane.MANUAL else Lane.AUTO,
+                        rootId = "old",
+                    ),
+                )
+            }
+            db.episodeStateDao().upsert(episodeStateEntity(ids[0]) { copy(playedAt = 10) })
+            db.episodeStateDao().upsert(episodeStateEntity(ids[1]) { copy(isFavorite = true) })
+            db.episodeStateDao().upsert(episodeStateEntity(ids[2]) { copy(startedAt = 1) })
+            assertEquals(listOf(ids[0]), dao.cleanupCandidates(3).map { it.episodeId })
+            val podcast = requireNotNull(db.episodeDao().downloadSources(ids).firstOrNull()).podcastId
+            val rolling = dao.unplayedAutoCompleted(listOf(podcast), 3)
+            assertEquals(setOf(ids[1], ids[2]), rolling.map { it.episodeId }.toSet())
+            assertTrue(rolling.all { it.protected })
+            assertEquals(ids.take(2), dao.rowsOnOtherRoots("new", 2).map { it.episodeId })
+            assertTrue(dao.rowsOnOtherRoots("old", 20).isEmpty())
+            assertEquals(listOf(ids[0]), dao.observePlayedCompletedIds().first())
+        }
+
+    @Test fun taskManagerResetLeavesLiveAndOtherLaneOwnersForGenericReset() =
+        runTest {
+            val ids = seed(5)
+            dao.insert(row(ids[0]).copy(state = State.DOWNLOADING, runnerToken = "uidt:stale"))
+            dao.insert(row(ids[1]))
+            dao.insert(row(ids[2]).copy(state = State.DOWNLOADING, runnerToken = "uidt:live"))
+            dao.insert(row(ids[3]).copy(state = State.DOWNLOADING, lane = Lane.AUTO, runnerToken = "wm:stale"))
+            dao.insert(row(ids[4]).copy(state = State.PAUSED))
+            assertEquals(2, dao.resetTaskManagerStoppedRunners(setOf("uidt:live"), 99))
+            assertEquals(1, dao.resetOrphanedRunners(setOf("uidt:live"), 100))
+            assertEquals(State.PAUSED, dao.byEpisode(ids[0])?.state)
+            assertEquals(99, dao.byEpisode(ids[1])?.lastStopReason)
+            assertEquals(State.DOWNLOADING, dao.byEpisode(ids[2])?.state)
+            assertEquals(Wait.SYSTEM, dao.byEpisode(ids[3])?.waitReason)
+            assertEquals(State.PAUSED, dao.byEpisode(ids[4])?.state)
+        }
+
+    @Test fun autoCandidatesHonorWatermarkTombstoneAndExistingSlots() =
+        runTest {
+            val ids = seed(4)
+            db.useWriterConnection { connection ->
+                ids.forEachIndexed { i, id ->
+                    connection.exec("UPDATE episode SET isNew=1, firstSeenAt=${i + 1}, sortDate=${i + 1} WHERE id=$id")
+                }
+            }
+            val podcast =
+                db
+                    .episodeDao()
+                    .downloadSources(ids)
+                    .first()
+                    .podcastId
+            dao.insert(row(ids[3]))
+            db.episodeStateDao().upsert(episodeStateEntity(ids[2]) { copy(downloadDismissedAt = 1) })
+            assertEquals(listOf(ids[3], ids[1]), dao.autoCandidates(podcast, 1, 3, false, false).map { it.id })
+            assertEquals(State.QUEUED, dao.autoCandidates(podcast, 1, 1, false, false).single().downloadState)
+            assertTrue(dao.autoCandidates(podcast, 4, 3, false, false).isEmpty())
+        }
+
     private fun row(id: Long) =
         ch.lkmc.neutrodyne.core.testing.database
             .downloadEntity(id, State.QUEUED)

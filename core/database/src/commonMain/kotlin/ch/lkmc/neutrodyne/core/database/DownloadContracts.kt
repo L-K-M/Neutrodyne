@@ -97,6 +97,38 @@ interface DownloadQueries {
         stopReason: Int,
     ): Int
 
+    suspend fun autoCandidates(
+        podcastId: Long,
+        eligibleAfter: Long,
+        keepLatest: Int,
+        includeVideo: Boolean,
+        youtubeDownloads: Boolean,
+    ): List<AutoDownloadCandidate>
+
+    /** Played completed rows excluding the SQL protected set, AUTO first then oldest played. */
+    suspend fun cleanupCandidates(upNextProtected: Int): List<CleanupCandidate>
+
+    /** Protected rows still occupy their slot in the per-podcast rolling window. Chunk IDs at 500. */
+    suspend fun unplayedAutoCompleted(
+        podcastIds: List<Long>,
+        upNextProtected: Int,
+    ): List<RollingDownloadCandidate>
+
+    suspend fun rowsOnOtherRoots(
+        target: String,
+        limit: Int,
+    ): List<DownloadEntity>
+
+    /** Consumer owns the 30 s debounce; this observes state transitions, not progress. */
+    fun observePlayedCompletedIds(): Flow<List<Long>>
+
+    /** Call before generic reset, only after W6's three-condition rule is satisfied.
+     * Pauses stale active uidt: MANUAL owners and the unclaimed MANUAL queue atomically. */
+    suspend fun resetTaskManagerStoppedRunners(
+        liveTokens: Set<String>,
+        stopReason: Int,
+    ): Int
+
     suspend fun requeueChangedEnclosures(now: Long): List<DownloadPathRow>
 }
 
@@ -174,3 +206,26 @@ interface DownloadStateQueries {
 interface DownloadSessionQueries {
     fun observeCurrentEpisodeId(): Flow<Long?>
 }
+
+/** Candidate rows include existing downloads so they count towards keepLatest. */
+data class AutoDownloadCandidate(
+    val id: Long,
+    val sortDate: Long,
+    val enclosureLength: Long?,
+    val isVideo: Boolean,
+    val externalMediaId: String?,
+    val downloadState: DownloadState?,
+    val lane: DownloadLane?,
+)
+
+data class CleanupCandidate(
+    val episodeId: Long,
+    val podcastId: Long,
+    val playedAt: Long,
+)
+
+data class RollingDownloadCandidate(
+    val episodeId: Long,
+    val podcastId: Long,
+    val protected: Boolean,
+)

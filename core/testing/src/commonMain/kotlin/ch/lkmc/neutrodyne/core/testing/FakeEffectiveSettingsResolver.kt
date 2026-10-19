@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.testing
 
 import ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.model.Effective
+import ch.lkmc.neutrodyne.core.model.EffectiveAutoDownload
 import ch.lkmc.neutrodyne.core.model.EffectivePlayback
 import ch.lkmc.neutrodyne.core.model.SettingSource
 import kotlinx.coroutines.flow.Flow
@@ -29,6 +30,13 @@ class FakeEffectiveSettingsResolver : EffectiveSettingsResolver {
         playbackValues.map { it[podcastId to contextGroupId] ?: defaultPlayback }.distinctUntilChanged()
 
     val notificationValues = MutableStateFlow<Map<Long, Effective<Boolean>>>(emptyMap())
+    val autoDownloadValues = MutableStateFlow<Map<Long, EffectiveAutoDownload>>(emptyMap())
+
+    override suspend fun autoDownload(podcastIds: Collection<Long>): Map<Long, EffectiveAutoDownload> =
+        autoDownloadValues.value.filterKeys { it in podcastIds }
+
+    override fun observeAutoDownload(): Flow<Map<Long, EffectiveAutoDownload>> = autoDownloadValues
+
     val refreshValues = MutableStateFlow<Map<Long, Effective<Int?>>>(emptyMap())
 
     override suspend fun notifications(podcastIds: Collection<Long>): Map<Long, Effective<Boolean>> =

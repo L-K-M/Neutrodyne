@@ -401,6 +401,15 @@ The channel group `grp_new_episodes` and the default channel `new_episodes` are 
 
 ## Group feeds
 
+**Implementation note (2026-10-19, M6b).** Adopted resolution 8 places
+`DownloadAllEstimate(episodeIds, totalCandidates, knownBytes, unknownSizeCount,
+capped)` in `core:model`, following this document's fuller shape rather than the
+plan's abbreviated field list. W8 owns the repository operation and estimates.
+Adopted resolution 7 limits the new action to a visible group/podcast action;
+it creates MANUAL rows at priority 100, never implicit Downloads-screen requests.
+The restore re-download offer remains M6a.
+
+
 Serves R2.3, R2.4 (data side), R2.5, R2.8, R2.9, R3.4, R8.1. Delivered in [M1](../PLAN.md#m1-subscribe-and-ingest-rss) (All and Podcast sources) and [M2](../PLAN.md#m2-groups-and-group-feeds) (everything else), on both platforms from the same common code. Honours [D16](../PLAN.md#3-key-decisions), [D30](../PLAN.md#3-key-decisions). SQL, indices and EXPLAIN expectations: [02 Feed pages](02-data-model.md#feed-pages), [02 Feed counts](02-data-model.md#feed-counts).
 
 ```kotlin
@@ -540,6 +549,17 @@ Budgets are [R2.9](../PLAN.md#21-functional-requirements): first page (COUNT + 8
 ---
 
 ## Effective settings resolution
+
+**Implementation note (2026-10-19, M6b).** Adopted resolution 4 freezes
+`core:model`'s `EffectiveAutoDownload(enabled, keepLatest, network,
+requireCharging, includeVideo, deleteAfterPlayed, source)`. `source` attributes
+the enabled decision using `SettingSource`, including `NotSupported`; this differs
+from a user disabling automatic downloads. The resolver emits the full distinct
+map immediately; its planner consumer owns the 2 s debounce. Group dependent
+fields clear atomically when auto-download is false or inherited. Policies and
+overrides are device-local for sync (PO-37), while portable settings and overrides
+remain eligible for manual backup with range/type validation.
+
 
 Serves R2.7, R3.7 (auto-download side), R4.4, R4.5, R7.3. Delivered in M2 (refresh interval, notifications), M4 (speed, skip silence), M6 (auto-download, delete after played), M9a (YouTube auto-download globals with the engine), MS2 (sync classification); the resolver is common code used by both platforms. Honours [D20](../PLAN.md#3-key-decisions), [D45](../PLAN.md#3-key-decisions), [D93](../PLAN.md#3-key-decisions), [PO-37](../PLAN.md#48-further-product-owner-decisions). Storage: `podcast_settings` and `podcast_group_settings` share 02's `ScopeOverrides` columns; `null` = inherit ([02 podcast_settings](02-data-model.md#podcast_settings)). There are no per-episode overrides in v1.
 

@@ -1289,6 +1289,13 @@ this integration; the milestone remains open pending those runs and owner checks
 
 #### M6: Downloads
 
+**Implementation note (2026-10-19, M6b).** All eleven resolutions in the
+M6b plan's ambiguity table are adopted; the owning sections in 05, 07, 08 and 09
+record the individual decisions. W1 freezes settings resolution, settings keys,
+DAO query contracts and planner/cleanup/mover/root/exit ports for parallel work.
+PO-12 defaults and PO-37 device-local sync classification apply. W2+ still own
+planning, cleanup, moves, runners and UI; W1 does not satisfy M6b runtime ACs.
+
 **Implementation note (2026-10-19, M6a).** Adopted resolutions 2, 3, 5 and 7:
 AC14's audible offline half requires MD1; transfer mechanics are independent and
 cannot close all M6a acceptance. AC1/AC14's HTML failure applies to validated

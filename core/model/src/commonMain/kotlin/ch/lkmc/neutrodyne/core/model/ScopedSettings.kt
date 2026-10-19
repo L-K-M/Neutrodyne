@@ -18,6 +18,8 @@ sealed interface SettingSource {
         val groups: List<Group>,
     ) : SettingSource
 
+    data object NotSupported : SettingSource
+
     data object AppDefault : SettingSource
 }
 
@@ -32,12 +34,46 @@ data class SettingOverrides(
     val notifyNewEpisodes: Boolean? = null,
     val playbackSpeed: Float? = null,
     val skipSilence: Boolean? = null,
+    val autoDownload: Boolean? = null,
+    val autoDownloadKeepLatest: Int? = null,
+    val autoDownloadNetwork: NetworkPolicy? = null,
+    val autoDownloadRequireCharging: Boolean? = null,
+    val includeVideoInAutoDownload: Boolean? = null,
+    val deleteAfterPlayed: DeleteAfter? = null,
 ) {
     fun hasSupportedRefreshInterval(): Boolean =
         refreshIntervalMinutes == null || refreshIntervalMinutes in FeedsSettingKeys.REFRESH_INTERVAL_CHOICES
 }
 
-enum class SettingField { REFRESH_INTERVAL_MINUTES, NOTIFY_NEW_EPISODES, PLAYBACK_SPEED, SKIP_SILENCE }
+enum class SettingField {
+    REFRESH_INTERVAL_MINUTES,
+    NOTIFY_NEW_EPISODES,
+    PLAYBACK_SPEED,
+    SKIP_SILENCE,
+    AUTO_DOWNLOAD,
+    AUTO_DOWNLOAD_KEEP_LATEST,
+    AUTO_DOWNLOAD_NETWORK,
+    AUTO_DOWNLOAD_REQUIRE_CHARGING,
+    INCLUDE_VIDEO_IN_AUTO_DOWNLOAD,
+    DELETE_AFTER_PLAYED,
+}
+
+/** Group dependents cannot remain latent while the group's policy is off or inherited. */
+fun SettingOverrides.withGroupAutoDownloadGating(): SettingOverrides =
+    if (autoDownload == true) {
+        this
+    } else {
+        copy(
+            autoDownloadKeepLatest = null,
+            autoDownloadNetwork = null,
+            autoDownloadRequireCharging = null,
+            includeVideoInAutoDownload = null,
+        )
+    }
+
+fun SettingOverrides.hasSupportedKeepLatest(): Boolean =
+    autoDownloadKeepLatest == null ||
+        autoDownloadKeepLatest in ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys.KEEP_LATEST_RANGE
 
 /** One player edit; other playback and non-playback fields must survive chain clearing. */
 sealed interface PlaybackSettingChange {

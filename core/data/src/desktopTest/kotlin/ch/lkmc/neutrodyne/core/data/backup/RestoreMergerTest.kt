@@ -106,6 +106,65 @@ class RestoreMergerTest {
             assertTrue(db.groupDao().groupsInOrder().isEmpty())
         }
 
+    @Test fun restoreDropsInvalidAutoKeepLatestInsteadOfActivatingIt() =
+        runTest {
+            val staged =
+                stagedOf(
+                    podcasts =
+                        listOf(
+                            podcastV1(
+                                "https://invalid/feed",
+                                settings = OverridesV1(autoDownload = true, autoDownloadKeepLatest = 99),
+                            ),
+                            podcastV1("https://valid/feed", settings = OverridesV1(autoDownloadKeepLatest = 7)),
+                        ),
+                )
+            merger.mergeLibrary(staged, MergePolicy.RESTORE_REPLACE, ALL_CATEGORIES)
+            val invalid = requireNotNull(db.podcastDao().byFeedKey("https://invalid/feed")).id
+            val valid = requireNotNull(db.podcastDao().byFeedKey("https://valid/feed")).id
+            assertEquals(
+                null,
+                db
+                    .scopeSettingsDao()
+                    .forPodcast(invalid)
+                    ?.o
+                    ?.autoDownloadKeepLatest,
+            )
+            assertEquals(
+                7,
+                db
+                    .scopeSettingsDao()
+                    .forPodcast(valid)
+                    ?.o
+                    ?.autoDownloadKeepLatest,
+            )
+        }
+
+    @Test fun restoreClearsDisabledGroupDependentsAndPreservesDeletionPolicy() =
+        runTest {
+            val staged =
+                stagedOf(
+                    groups =
+                        listOf(
+                            groupV1(
+                                uuid = "disabled",
+                                name = "Disabled",
+                                settings =
+                                    OverridesV1(
+                                        autoDownload = false,
+                                        autoDownloadKeepLatest = 5,
+                                        deleteAfterPlayed = "NEVER",
+                                    ),
+                            ),
+                        ),
+                )
+            merger.mergeLibrary(staged, MergePolicy.RESTORE_REPLACE, ALL_CATEGORIES)
+            val group = db.groupDao().groupsInOrder().single()
+            val stored = requireNotNull(db.scopeSettingsDao().forGroup(group.id)).o
+            assertEquals(null, stored.autoDownloadKeepLatest)
+            assertEquals(ch.lkmc.neutrodyne.core.model.DeleteAfter.NEVER, stored.deleteAfterPlayed)
+        }
+
     // --- Podcasts ----------------------------------------------------------------------------------
 
     @Test
