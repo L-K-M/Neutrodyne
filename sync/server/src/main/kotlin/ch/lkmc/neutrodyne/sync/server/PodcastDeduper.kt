@@ -79,9 +79,9 @@ internal class PodcastDeduper(
         val source = changes.resolve(RecordKey(SyncCollection.EPISODE, from))
         val target = changes.resolve(RecordKey(SyncCollection.EPISODE, to))
         if (source != target) {
-            // An old key's authority is immutable, including retries after a second rekey.
-            val original = RecordKey(SyncCollection.EPISODE, from)
-            if (source != original && changes.hasRedirect(original)) {
+            // Parent relocation preserves the episode key and may precede its first rekey.
+            // A prior episode-key assignment still cannot be changed, even through a parent alias.
+            if ((source.id as RecordId.Episode).key != from.key) {
                 invalidChange("conflicting rekey destination")
             }
             changes.move(source, target)

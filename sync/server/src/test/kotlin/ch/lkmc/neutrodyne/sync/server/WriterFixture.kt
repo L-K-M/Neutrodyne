@@ -13,8 +13,9 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.SyncRequest
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 
-internal class WriterFixture {
-    val store = FakeSyncStore().apply { accounts[1] = FakeSyncTransaction() }
+internal class WriterFixture(
+    val store: SyncStore = FakeSyncStore().apply { accounts[1] = FakeSyncTransaction() },
+) {
     var now = 1_791_072_000_000L
     val inputs = ServerInputs({ now }, { ByteArray(it) })
     val writer = StoredRecordWriter(store, inputs)

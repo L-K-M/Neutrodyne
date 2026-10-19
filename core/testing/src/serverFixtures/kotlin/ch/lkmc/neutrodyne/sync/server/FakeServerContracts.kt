@@ -135,10 +135,13 @@ internal class FakeSyncTransaction : SyncWrite {
 
 internal class FakeAccountSnapshot(
     override val records: Sequence<StoredRecord>,
+    private val redirects: Map<RecordKey, RecordKey> = emptyMap(),
 ) : AccountSnapshot {
     override val accountId = 1L
     override val installationId = "test-installation"
     override val schemaVersion = 1
+
+    override fun redirect(key: RecordKey): RecordKey? = redirects[key]
 
     override fun close() = Unit
 }

@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: Unlicense
+@file:Suppress("ktlint:standard:max-line-length")
+
 package ch.lkmc.neutrodyne.sync.server
 
+import ch.lkmc.neutrodyne.sync.protocol.ConformanceVectors
 import ch.lkmc.neutrodyne.sync.protocol.NodeId
 import ch.lkmc.neutrodyne.sync.protocol.RecordId
 import ch.lkmc.neutrodyne.sync.protocol.RecordMerger
 import ch.lkmc.neutrodyne.sync.protocol.SyncCollection
 import ch.lkmc.neutrodyne.sync.protocol.SyncJson
+import ch.lkmc.neutrodyne.sync.protocol.VectorDisposition
 import ch.lkmc.neutrodyne.sync.protocol.dto.AccountResetRequest
+import ch.lkmc.neutrodyne.sync.protocol.dto.ChangeDto
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -17,25 +22,53 @@ import kotlinx.serialization.json.long
 import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
 import java.io.File
+import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-/** Executes the four MS1 scenarios through the production RecordWriter and frozen store contract. */
+/** All protocol fixtures execute; server scenarios use the production writer on temporary SQLite. */
 @RunWith(Parameterized::class)
-class ServerWriterVectorTest(
+class ServerConformanceTest(
     private val file: File,
 ) {
+    private var backing: AuthFixture? = null
+
+    @AfterTest fun close() {
+        backing?.close()
+    }
+
     @Test
     fun vector() =
         runBlocking {
             val vector = SyncJson.parseToJsonElement(file.readText()).jsonObject
+            if ("serverOnly" !in vector) {
+                assertEquals(VectorDisposition.PASSED, ConformanceVectors.run(file.readText()).disposition)
+                return@runBlocking
+            }
             val scenario = vector.getValue("scenario").jsonObject
-            val f = WriterFixture()
+            val real = AuthFixture().also { backing = it }
+            real.account()
+            val f = WriterFixture(real.store)
             val id = vector.getValue("id").jsonPrimitive.content
             val podcast = key(SyncCollection.fromWire(vector.getValue("collection").jsonPrimitive.content), id)
             when (scenario.getValue("operation").jsonPrimitive.content) {
+                "parent-rekey" -> {
+                    f.push(f.podcast(id, subscribedAt = 2), f.podcast(B, subscribedAt = 1))
+                    f.push(f.write(episode(id), "fav", JsonPrimitive(true)))
+                    val parentAlias = f.store.read(1) { redirects()[episode(id)] }
+                    assertEquals(episode(B), parentAlias)
+                    val target = episode(id, "g:stable")
+                    val result =
+                        f.push(
+                            ChangeDto("episode", episode(id).id.toWire(), op = "rekey", to = target.id.toWire()),
+                        )
+                    assertEquals("merged", result.results.single().status)
+                    assertEquals(parentAlias, f.store.read(1) { redirects()[episode(id)] })
+                    assertEquals(episode(B, "g:stable").id, f.raw(episode(B)).mergedInto)
+                }
+
                 "reset" -> {
                     if ("before" in scenario) {
                         resetBoundary(f, scenario)
@@ -84,7 +117,12 @@ class ServerWriterVectorTest(
                     val removed = scenario.getValue("expectRemoved").jsonArray.map { it.jsonPrimitive.content }
                     assertTrue(queue.collection.wire in removed && RecordMerger.isDead(deadQueue.raw))
                     assertEquals(deadQueue, f.record(queue))
-                    val resequenced = scenario.getValue("expectResequenced").jsonArray.map { it.jsonPrimitive.content }
+                    val resequenced =
+                        scenario
+                            .getValue(
+                                "expectResequenced",
+                            ).jsonArray
+                            .map { it.jsonPrimitive.content }
                     before.filterKeys { it.collection.wire in resequenced }.forEach { (key, old) ->
                         assertTrue(f.record(key).seq > old.seq)
                         assertEquals(old.raw, f.raw(key))
@@ -138,10 +176,13 @@ class ServerWriterVectorTest(
             val vectors =
                 requireNotNull(root.listFiles())
                     .filter {
-                        it.name.startsWith("server-") &&
-                            it.extension == "json"
+                        it.extension == "json"
                     }.sortedBy { it.name }
-            check(vectors.size == 4) { "Expected all four frozen server scenarios" }
+            check(
+                vectors.count {
+                    it.name.startsWith("server-")
+                } >= 5,
+            ) { "Expected the four frozen scenarios and parent-rekey regression" }
             return vectors.map { arrayOf(it) }
         }
     }

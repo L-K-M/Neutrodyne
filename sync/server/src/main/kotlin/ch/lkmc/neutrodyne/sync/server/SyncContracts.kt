@@ -167,6 +167,9 @@ internal interface AccountSnapshot : AutoCloseable {
     val accountId: Long
     val installationId: String
     val schemaVersion: Int
+
+    fun redirect(key: RecordKey): RecordKey?
+
     val records: Sequence<StoredRecord>
 }
 

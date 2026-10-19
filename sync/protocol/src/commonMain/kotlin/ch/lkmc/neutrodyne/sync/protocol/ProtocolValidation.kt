@@ -48,7 +48,9 @@ object ProtocolValidation {
                 if (from == to || from.podcast != to.podcast) invalid("rekey must change key within podcast")
                 return@checked ValidatedChange.Rekey(from, to)
             }
-            if (dto.op != null || dto.to != null || dto.fields.isEmpty()) invalid("invalid write operation")
+            if (dto.op != null || dto.to != null || (dto.fields.isEmpty() && dto.match?.values().isNullOrEmpty())) {
+                invalid("invalid write operation")
+            }
             val state = readState(coll, dto.fields, dto.match, dto.matchClocks, null, serverTimeMs)
             ValidatedChange.Write(id, state)
         }

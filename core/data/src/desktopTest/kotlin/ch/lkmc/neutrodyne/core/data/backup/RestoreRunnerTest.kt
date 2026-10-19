@@ -187,6 +187,51 @@ class RestoreRunnerTest {
     // --- The real writer -> stager -> Room path -------------------------------------------------
 
     @Test
+    fun serverExportRestoresThroughMerge() = runTest { restoreServerExport(RestoreMode.MERGE) }
+
+    @Test
+    fun serverExportRestoresThroughReplace() = runTest { restoreServerExport(RestoreMode.REPLACE) }
+
+    @Test
+    fun serverExportRestoresSparseQueueWhenTheEpisodeAlreadyExists() =
+        runTest {
+            val url = "https://example.com/feed"
+            val podcast = db.podcastDao().insertPodcast(podcastEntity(feedUrl = url, feedKey = feedKey(url)))
+            val episode =
+                db.episodeDao().insertStub(
+                    episodeEntity(podcastId = podcast, identityKey = "g:queued") {
+                        copy(guid = null, enclosureUrl = "https://cdn.example.com/local.mp3")
+                    },
+                )
+            val archive = checkNotNull(System.getProperty("neutrodyne.serverExportFixture")).toPath()
+            val completed = assertIs<RestoreRunResult.Completed>(runner.run(session(archive)))
+            assertEquals(0, completed.summary.unmatched)
+            assertTrue(db.queueDao().entries().any { it.episodeId == episode })
+            assertNull(db.episodeDao().byIdentityKey(podcast, "g:queued")?.guid)
+        }
+
+    private suspend fun restoreServerExport(mode: RestoreMode) {
+        val archive = checkNotNull(System.getProperty("neutrodyne.serverExportFixture")).toPath()
+        check(fileSystem.exists(archive)) { "Real server export fixture is missing" }
+        val sessionId = session(archive, mode)
+        val completed = assertIs<RestoreRunResult.Completed>(runner.run(sessionId))
+        assertEquals(1, completed.summary.unmatched)
+        val podcast = checkNotNull(db.podcastDao().byFeedKey(feedKey("https://example.com/feed")))
+        assertEquals("Untitled podcast", podcast.title)
+        val history = checkNotNull(db.episodeDao().byIdentityKey(podcast.id, "g:ep"))
+        assertEquals("Server episode", history.title)
+        assertEquals(true, db.episodeStateDao().byEpisode(history.id)?.isFavorite)
+        assertEquals(12000L, db.positionDao().byEpisode(history.id)?.positionMs)
+        assertEquals(60000L, db.positionDao().byEpisode(history.id)?.durationMs)
+        val queued = checkNotNull(db.episodeDao().byIdentityKey(podcast.id, "g:queue-known"))
+        assertEquals(listOf(queued.id), db.queueDao().entries().map { it.episodeId })
+        assertEquals(1.5f, settings.get(PlaybackSettingKeys.SPEED))
+        // 05 permits a new stub only with media evidence. An opaque queue key stays unmatched.
+        assertNull(db.episodeDao().byIdentityKey(podcast.id, "g:queued"))
+        assertNull(queued.guid)
+    }
+
+    @Test
     fun aMergeRestoresTheWrittenBackupAndFinishes() =
         runTest {
             val sp = seedSourcePodcast(FEED_A)

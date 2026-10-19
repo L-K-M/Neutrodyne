@@ -258,6 +258,19 @@ class ProtocolContractTest {
     }
 
     @Test
+    fun hintOnlyReplayRetainsItsOriginalProvenanceWithoutInventingFields() {
+        val id = RecordId.Episode(podcast, EpisodeKey("g:hint-only"))
+        val hints = MatchHints(title = "Retained hint")
+        val dto = ChangeDto("episode", id.toWire(), match = hints, matchClocks = mapOf("title" to clock.toString()))
+        val replay = ProtocolValidation.change(dto) as ValidatedChange.Write
+        assertTrue(replay.state.fields.isEmpty())
+        assertEquals(hints, replay.state.match)
+        assertEquals(mapOf("title" to clock), replay.state.matchClocks)
+        assertInvalid { ProtocolValidation.change(dto.copy(matchClocks = emptyMap())) }
+        assertInvalid { ProtocolValidation.change(dto.copy(match = MatchHints(), matchClocks = emptyMap())) }
+    }
+
+    @Test
     fun rekeyValidatesCollectionPodcastTargetAndPayload() {
         val from = RecordId.Episode(podcast, EpisodeKey("g:old")).toWire()
         val to = RecordId.Episode(podcast, EpisodeKey("g:new")).toWire()

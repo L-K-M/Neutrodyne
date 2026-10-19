@@ -24,7 +24,7 @@ class StoredRecordWriterTest {
             val f = WriterFixture()
             val change = f.podcast()
             val first = f.push(change, f.write(episode(), "fav", JsonPrimitive(true)))
-            assertEquals(1, f.store.writes)
+            assertEquals(1, (f.store as FakeSyncStore).writes)
             assertEquals(listOf(1L, 2L), first.page.records.map { it.seq })
             val before = f.record(podcastA)
             val retry = f.push(change)

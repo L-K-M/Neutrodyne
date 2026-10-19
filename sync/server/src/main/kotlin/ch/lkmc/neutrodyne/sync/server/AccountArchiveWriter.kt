@@ -232,6 +232,7 @@ internal class AccountArchiveWriter(
                                 pos = effective.positionMs,
                                 posAt = pos?.c?.millis,
                                 posSrc = (position?.get("src") as? JsonPrimitive)?.contentOrNull,
+                                dur = (position?.get("dur") as? JsonPrimitive)?.longOrNull,
                                 fav = effective.favourite,
                                 md = row.long("measuredDurationMs"),
                                 ts =
@@ -270,9 +271,13 @@ internal class AccountArchiveWriter(
 
                     fun ref(value: JsonElement?): EpisodeRefV1? {
                         val obj = value as? JsonObject ?: return null
-                        val p = (obj["p"] as? JsonPrimitive)?.content ?: return null
-                        val k = (obj["k"] as? JsonPrimitive)?.content ?: return null
-                        return keys[p]?.let { EpisodeRefV1(it, k) }
+                        val address =
+                            terminal(
+                                snapshot,
+                                RecordKey(SyncCollection.EPISODE, RecordId.fromWire(SyncCollection.EPISODE, obj)),
+                            )
+                        val id = address.id as RecordId.Episode
+                        return keys[id.podcast.value]?.let { EpisodeRefV1(it, id.key.value) }
                     }
                     val filters = context?.get("filters") as? JsonObject
                     SessionV1(
@@ -280,13 +285,30 @@ internal class AccountArchiveWriter(
                         anchor = ref(context?.get("anchor")),
                         contextType = context?.get("type")?.jsonPrimitive?.contentOrNull,
                         contextGroupUuid =
-                            context?.get("group")?.jsonPrimitive?.contentOrNull?.takeIf { id ->
-                                groups.any {
-                                    it.uuid ==
-                                        id
-                                }
+                            context
+                                ?.get("group")
+                                ?.jsonPrimitive
+                                ?.contentOrNull
+                                ?.let {
+                                    terminal(
+                                        snapshot,
+                                        RecordKey(SyncCollection.GROUP, RecordId.fromRid(SyncCollection.GROUP, it)),
+                                    ).id.rid
+                                }?.takeIf { id ->
+                                    groups.any {
+                                        it.uuid ==
+                                            id
+                                    }
+                                },
+                        contextPodcastKey =
+                            context?.get("podcast")?.jsonPrimitive?.contentOrNull?.let {
+                                keys[
+                                    terminal(
+                                        snapshot,
+                                        RecordKey(SyncCollection.PODCAST, RecordId.fromRid(SyncCollection.PODCAST, it)),
+                                    ).id.rid,
+                                ]
                             },
-                        contextPodcastKey = keys[context?.get("podcast")?.jsonPrimitive?.contentOrNull],
                         order = context?.get("order")?.jsonPrimitive?.contentOrNull ?: "NEWEST_FIRST",
                         filterFlags = filters?.get("flags")?.jsonPrimitive?.intOrNull ?: 0,
                         mediaFilter = filters?.get("media")?.jsonPrimitive?.contentOrNull ?: "ALL",
@@ -345,6 +367,30 @@ internal class AccountArchiveWriter(
                 )
             zip.entry("manifest.json").buffer().use { it.writeUtf8(codec.encodeManifest(manifest)) }
         }
+    }
+
+    /** Session values embed identities; unlike record IDs, the merge writer leaves these raw. */
+    private fun terminal(
+        snapshot: AccountSnapshot,
+        key: RecordKey,
+    ): RecordKey {
+        var current = key
+        val visited = mutableSetOf<RecordKey>()
+        repeat(ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits.MAX_REDIRECT_HOPS + 1) {
+            check(visited.add(current)) { "Cyclic backup identity" }
+            val direct = snapshot.redirect(current)
+            val id = current.id
+            val next =
+                direct ?: if (id is RecordId.Episode) {
+                    val parent = terminal(snapshot, RecordKey(SyncCollection.PODCAST, RecordId.Podcast(id.podcast)))
+                    current.copy(id = id.copy(podcast = (parent.id as RecordId.Podcast).id))
+                } else {
+                    current
+                }
+            if (next == current) return current
+            current = next
+        }
+        error("Backup identity exceeds redirect hop limit")
     }
 
     private fun podcast(row: StoredRecord): PodcastV1? {

@@ -80,3 +80,11 @@ kotlin {
         }
     }
 }
+
+// The producer is test-only and emits a real 05 archive; no server classes enter the client.
+tasks.named<org.gradle.api.tasks.testing.Test>("desktopTest") {
+    dependsOn(":sync:server:exportTestFixture")
+    val archive = rootProject.layout.projectDirectory.file("sync/server/build/interop/server-export.zip")
+    inputs.file(archive)
+    systemProperty("neutrodyne.serverExportFixture", archive.asFile.absolutePath)
+}

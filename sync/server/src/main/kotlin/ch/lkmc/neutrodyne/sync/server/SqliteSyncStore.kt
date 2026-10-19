@@ -261,6 +261,19 @@ internal class SqliteSyncStore(
         override val installationId: String,
         private val connection: Connection,
     ) : AccountSnapshot {
+        override fun redirect(key: RecordKey): RecordKey? {
+            check(!snapshotClosed) { "Snapshot is closed" }
+            return connection
+                .query(
+                    "SELECT to_rid FROM identity_redirect WHERE account_id=? AND coll=? AND from_rid=?",
+                    accountId,
+                    key.collection.wire,
+                    key.id.rid,
+                ) { row ->
+                    RecordKey(key.collection, RecordId.fromRid(key.collection, row.getString(1)))
+                }.singleOrNull()
+        }
+
         override val schemaVersion = Migrator.SCHEMA_VERSION
         private var snapshotClosed = false
         override val records: Sequence<StoredRecord> get() =

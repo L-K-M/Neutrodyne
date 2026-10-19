@@ -1531,6 +1531,16 @@ Every purge raises `account.min_cursor` to the highest purged `seq`, so only a d
 
 ### Backups
 
+**Implementation note (2026-10-19, MS1).** W10 interoperability follows 05's
+existing media-evidence rule: an unknown opaque episode key without `u` or `yt`
+cannot create a playable stub and is reported as unmatched. It restores against
+an already known episode; an enclosure/YouTube hint permits a fresh stub.
+Exports do not invent media URLs or GUID provenance to evade this rule. Tests
+exercise both Merge and Replace, sparse matching, hints, positions and settings.
+Session references resolve through the same snapshot's retained ledger, even
+when redirect records have been collected; ZIP I/O never owns the writer.
+
+
 **Implementation note (2026-10-19, MS1).** W7 stages a validated copy of the
 current database, imports backed-up content for matching current accounts,
 then applies the carried identity ledger before atomically replacing the file.
@@ -2146,13 +2156,27 @@ minimized failures become resources. Protocol never depends on core:testing.
 
 ### Convergence property test
 
+**Implementation note (2026-10-19, MS1).** W10 supplies the SQLite adapter for
+all five replicas, original clocks, resets, grow sets and hint provenance.
+The pure fixture suite enumerates pure cases; `ServerConformanceTest` executes
+all fixtures, including the four original server scenarios and the parent-rekey
+regression, without assumptions or deferred skips. Real convergence exposed two
+boundary defects: a parent-only relocation must not consume an episode's first
+rekey, and a guarded zero-position write can leave a hint-only record. Hint-only
+replay is admitted with complete original hint clocks; empty or clockless writes
+still reject. An empty rekey destination has no wire payload; replay is a no-op
+while canonical comparisons retain its raw record. The retained ledger is
+unchanged by a parent relocation or retry. Seed tests use temporary SQLite files
+on tmpfs when available, with the production WAL/FULL settings; disk recovery
+and durability tests remain separate. JNI bootstraps outside noexec tmpfs.
+
 **Implementation note (2026-10-19, MS1).** SyncServerAdapter factory injects
 push/rekey/page/snapshot/expiry into the unchanged generator; default fake stays,
 W10 owns real adapter lifetime. Reproduced identityRollbackCanViolateTheSingleAuthorityDomain:
 A→B, ledger lost, A→C rejects `invalid`. Adopt ledger carry-forward/canonicalization
 ([Backups](#backups)), not epoch rotation alone. This resolves the design gap
-below; JDBC proof remains W2/W7/W10. All four server vectors remain deferred
-until W10 executes them with the real writer.
+below. W7 recovery tests prove JDBC ledger carry-forward and W10 executes all
+server vectors through the real writer without deferred skips.
 
 S15 and `SyncConvergenceTest` (`:sync:impl` `commonTest`):
 
@@ -2178,10 +2202,10 @@ supplies configuration/resources; failing seeds and traces appear in XML.
 Seed 2 exposed an out-of-domain identity rollback: a restored server can
 reassign an already known redirect, which W2 rejects as `invalid`. The
 minimized `identityRollbackCanViolateTheSingleAuthorityDomain` test pins
-this rejection. S15 retains one authoritative identity ledger; full identity
-restore convergence is an open MS1 gap. D92's field-kind fallback is unchanged.
+this rejection. S15 retains one authoritative identity ledger, carried forward by W7 recovery
+and exercised by W10 against SQLite. D92's field-kind fallback is unchanged.
 The simulator does not certify GC scheduling, the MS2 database applier or
-user effects. `ServerConvergenceTest` awaits MS1's real `RecordWriter`;
+user effects. W10 supplies `ServerConvergenceTest` against the real writer;
 S15 still requires the 100,000-seed nightly evidence.
 
 ### Client database tests
