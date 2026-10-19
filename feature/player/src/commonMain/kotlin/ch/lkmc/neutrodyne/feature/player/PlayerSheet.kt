@@ -605,6 +605,12 @@ private fun PlayerSheetContent(
                     )
                 )
             if (adaptive) {
+                if (!sidePanel && collapsedPx * (1f - state.progress) <= 0f) {
+                    PlatformSystemBarAppearance(
+                        statusBarAppearanceFor(MaterialTheme.colorScheme.primaryContainer),
+                        SystemBarOwner.Player,
+                    )
+                }
                 AdaptivePlayerBody(
                     ui = ui,
                     posture = slot.posture,

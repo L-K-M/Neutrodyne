@@ -71,7 +71,7 @@ public fun NeutrodyneNavHost(
                             rememberSaveableStateHolderNavEntryDecorator(),
                             rememberViewModelStoreNavEntryDecorator(),
                             rememberTabLocalNavEntryDecorator(tab),
-                            rememberPaneFocusDecorator(),
+                            rememberPaneFocusDecorator(directive),
                             rememberHeaderBarDecorator(state, tab, directive.maxHorizontalPartitions),
                         ),
                     entryProvider = { key -> withPaneRole(key, provider(key), tab) },

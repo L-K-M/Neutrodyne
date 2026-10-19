@@ -10,6 +10,8 @@ import androidx.compose.animation.core.snap
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.onFocusedBoundsChanged
+import androidx.compose.material3.adaptive.layout.PaneScaffoldDirective
 import androidx.compose.material3.adaptive.layout.ThreePaneScaffoldDestinationItem
 import androidx.compose.material3.adaptive.layout.ThreePaneScaffoldRole
 import androidx.compose.material3.adaptive.layout.ThreePaneScaffoldValue
@@ -24,6 +26,9 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
+import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
@@ -337,30 +342,64 @@ private val LocalPaneSceneMotion = compositionLocalOf<PaneSceneMotion?> { null }
 
 /** Material's focus ancestors change when a shared movable entry changes scenes. */
 @Composable
-internal fun rememberPaneFocusDecorator(): NavEntryDecorator<NavKey> =
-    remember {
-        NavEntryDecorator { entry -> PaneFocusContent(entry) }
+internal fun rememberPaneFocusDecorator(directive: PaneScaffoldDirective): NavEntryDecorator<NavKey> {
+    val currentDirective by rememberUpdatedState(directive)
+    return remember {
+        NavEntryDecorator { entry -> PaneFocusContent(entry) { currentDirective } }
     }
+}
 
 @Composable
 @Suppress("FunctionNaming") // Compose functions use PascalCase.
-private fun PaneFocusContent(entry: NavEntry<NavKey>) {
+private fun PaneFocusContent(
+    entry: NavEntry<NavKey>,
+    currentDirective: () -> PaneScaffoldDirective,
+) {
+    val directive = currentDirective()
     val requester = remember { FocusRequester() }
     var focused by remember { mutableStateOf(false) }
     val restore = focused
     val scene = LocalPaneSceneMotion.current?.key
+    val parentRegistry = LocalSaveableStateRegistry.current
+    val savedFocus = remember { mutableMapOf<String, List<Any?>>() }
+    // FocusTargetNode clears its saved child on detach, even when movable content survives.
+    val focusRegistry =
+        remember(parentRegistry) {
+            val storage = SaveableStateRegistry(null) { parentRegistry?.canBeSaved(it) ?: true }
+            object : SaveableStateRegistry by storage {
+                override fun consumeRestored(key: String): Any? =
+                    savedFocus.remove(key)?.firstOrNull() ?: storage.consumeRestored(key)
+            }
+        }
 
-    Box(
-        Modifier
-            .fillMaxSize()
-            .focusRequester(requester)
-            .onFocusChanged {
-                focused = it.hasFocus
-                if (it.hasFocus) requester.saveFocusedChild()
-            }.focusGroup(),
-    ) { EntryBackDispatch(entry) { entry.Content() } }
+    fun saveFocus() {
+        if (!requester.saveFocusedChild()) return
+        val snapshot = focusRegistry.performSave()
+        savedFocus.clear()
+        savedFocus.putAll(snapshot)
+    }
 
-    LaunchedEffect(scene) {
+    CompositionLocalProvider(LocalSaveableStateRegistry provides focusRegistry) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .focusRequester(requester)
+                .onFocusedBoundsChanged {
+                    if (it != null) saveFocus()
+                }.onFocusChanged {
+                    // A reparent's detach can precede recomposition for the new allocation.
+                    if (it.hasFocus || directive == currentDirective()) focused = it.hasFocus
+                    if (it.hasFocus) saveFocus()
+                }.focusGroup(),
+        ) {
+            CompositionLocalProvider(LocalSaveableStateRegistry provides parentRegistry) {
+                EntryBackDispatch(entry) { entry.Content() }
+            }
+        }
+    }
+
+    // Allocation can reparent an entry without changing its retained scene key.
+    LaunchedEffect(scene, directive) {
         if (restore) {
             // The moved child must attach to its new Material focus ancestors first.
             withFrameNanos { }

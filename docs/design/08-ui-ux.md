@@ -1944,12 +1944,16 @@ hinges do not select tabletop. Desktop supplies no hinges.
 Injected posture and deterministic transport tests prove layout and callback
 behavior only. Real WindowManager hinges, cutouts/IME on hardware, nonlinear
 Android fonts, assistive technology and physical playback acceptance still
-need their device gates. Shared-art transitions and system-bar ownership remain
-W5. The root resize regression currently also exposes navigation-entry focus
-loss when 839→840 dp changes the content partition count; W5/W11 must resolve
-that navigation integration gate. Final accessibility and screenshot acceptance
-remain W8/W9. No screenshot
-reference is recorded or accepted by W6.
+need their device gates. Frozen W5 shared-art transitions and system-bar leases
+are integrated. The entry focus decorator retains its group's saved-child record
+across detach and samples descendant changes; content keeps the original entry
+saveable-state registry. The original root resize regression now passes, including
+839→840 dp, with exact-child and populated text-field host coverage. Focus
+acceptance remains open: an intentional outside focus transfer after detach but
+before the queued frame restoration is currently reclaimed. That cancellation
+regression remains red. Adaptive landscape/tabletop sheets claim the player lease
+only at the status strip; side panels never claim it. Final accessibility and
+screenshot acceptance remain W8/W9. No screenshot reference is recorded or accepted.
 
 ### Video (v1.x)
 
