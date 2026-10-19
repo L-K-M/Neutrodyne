@@ -1768,6 +1768,14 @@ Rows already downloaded or queued count towards `keepLatest`; the planner insert
 
 ### Download all candidates
 
+Implementation note (2026-10-19, M6b): W8 also gates non-RSS sources by
+`youtubeDownloads`. The enclosure alternative alone would admit a legacy
+YouTube row carrying an enclosure in external mode, contradicting
+[05 Group actions](05-groups-opml-backup.md#group-actions). The source guard
+below keeps both channel and playlist episodes excluded until downloads are
+supported. Playback and bulk download queries share source and view predicates;
+bulk selection adds its download eligibility rules and uses no anchor.
+
 `FeedDao.downloadAllCandidates(query)` and `FeedDao.downloadAllCount(query)` (M6) back 05's `downloadAllEstimate(source)` ([05 Group feeds](05-groups-opml-backup.md#group-feeds)). `FeedQueryBuilder.downloadAll(spec, youtubeDownloads)` (`youtubeDownloads` = `YouTubeCapabilities.downloads`) reuses the play-context source predicate and carried filters of [Play context](#play-context) without an anchor:
 
 ```sql
@@ -1779,6 +1787,7 @@ WHERE <source predicate> AND <filters> AND <VISIBLE> AND e.availability = 'AVAIL
   AND e.sortDate >= :minSortDate
   AND s.playedAt IS NULL AND s.downloadDismissedAt IS NULL          -- tombstones are deliberate user deletions
   AND (d.episodeId IS NULL OR d.state IN ('FAILED', 'MISSING'))     -- no row in QUEUED … COMPLETED
+  AND (:youtubeDownloads = 1 OR p.sourceType = 'RSS')
   AND (e.enclosureUrl IS NOT NULL OR (e.externalMediaId IS NOT NULL AND :youtubeDownloads = 1))
 ORDER BY e.sortDate DESC, e.id DESC
 LIMIT 200

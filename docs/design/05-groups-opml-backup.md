@@ -542,6 +542,18 @@ confirmation retains the unchecked two-argument overload until its own PR.
 
 `downloadAllEstimate` ([02 Download all candidates](02-data-model.md#download-all-candidates), M6): the feed's source predicate, its view filters and `hideOlderThanDays` bound (as [Playing a group](#playing-a-group) rules 1, 3 and 5, no anchor), unplayed, without a `download` row in `QUEUED`…`COMPLETED` (`FAILED` and `MISSING` rows count as candidates), without a tombstone (`downloadDismissedAt IS NULL`; the user deleted those deliberately), and downloadable (`enclosureUrl IS NOT NULL`, or YouTube when `YouTubeCapabilitiesSource.capabilities.value.downloads` at call time, [04 Capability matrix](04-youtube.md#capability-matrix)); newest first, **capped at 200** (`capped = true` → "200 newest of 1,234"). Unlike the context tail, Up next items and the current episode are **not** excluded: downloading them is wanted (answers 02's open question 7). Size per episode follows [07 Estimates](07-downloads.md#estimates): `enclosureLength` when ≥ 100 KB (smaller values are placeholders), else `durationMs × 16 000 B/s` (128 kbit/s) when known, else counted in `unknownSizeCount`; no invented numbers.
 
+Implementation note (2026-10-19, M6b): W8 reads the candidate IDs and the full
+count in one read transaction. `knownBytes` and `unknownSizeCount` describe
+only the offered IDs (at most 200), while `totalCandidates` is uncapped. The
+source-only signature reads persisted feed filters and the current hour-rounded
+age bound. Podcast has no persisted filters, so it uses its default unfiltered
+view; transient screen filters cannot be supplied through this signature.
+The duration fallback uses 16 bytes per millisecond, as corrected in
+[07 Estimates](07-downloads.md#estimates), with positive durations and
+saturating arithmetic for large hints and totals. The 100 KB threshold means
+100,000 bytes, matching manual requests. The estimate creates no download rows;
+the visible caller submits the returned IDs to the existing MANUAL request API.
+
 ### Performance
 
 Budgets are [R2.9](../PLAN.md#21-functional-requirements): first page (COUNT + 80 rows) ≤ 60 ms for a group, ≤ 100 ms for All on the reference device with 300 podcasts, 50,000 episodes and 20 groups; counts for 20 groups ≤ 50 ms (recorded). They are measured by 02's `FeedQueryTimingTest`. If All misses its budget with LIMIT/OFFSET, only All switches to a keyset `PagingSource` keyed by `(sortDate, id)` behind `pagedFeed` (risk [T6](../PLAN.md#8-risks-and-mitigations)); callers do not change.

@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.domain
 
 import androidx.paging.PagingData
+import ch.lkmc.neutrodyne.core.model.DownloadAllEstimate
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.FeedCounts
 import ch.lkmc.neutrodyne.core.model.FeedFilters
@@ -31,6 +32,13 @@ interface FeedRepository {
         source: FeedSource,
         sortDateBefore: Long?,
     ): Int
+
+    /**
+     * Newest 200 unplayed download candidates under persisted view filters, plus the full count.
+     * Sizes describe only the returned IDs. Podcast uses its default, unfiltered view (05).
+     * This read never queues downloads; the visible caller submits IDs as a MANUAL request (07).
+     */
+    suspend fun downloadAllEstimate(source: FeedSource): DownloadAllEstimate
 
     fun observePrefs(source: FeedSource): Flow<FeedPrefs>
 

@@ -6,16 +6,20 @@ import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.PagingData
 import androidx.paging.map
+import androidx.room3.withReadTransaction
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.database.DownloadAllCandidate
 import ch.lkmc.neutrodyne.core.database.EpisodeRowProjection
 import ch.lkmc.neutrodyne.core.database.FeedQueryBuilder
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.FeedRepository
+import ch.lkmc.neutrodyne.core.domain.PlayContextResolver
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.groupCountsWindowStart
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
+import ch.lkmc.neutrodyne.core.model.DownloadAllEstimate
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.FeedCounts
 import ch.lkmc.neutrodyne.core.model.FeedFilters
@@ -28,6 +32,7 @@ import ch.lkmc.neutrodyne.core.model.VirtualCounts
 import ch.lkmc.neutrodyne.core.model.isSupportedFeedAgeLimit
 import ch.lkmc.neutrodyne.core.model.settings.GroupsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
@@ -37,6 +42,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
@@ -51,6 +57,8 @@ internal class FeedRepositoryImpl(
     private val db: NeutrodyneDatabase,
     private val settings: SettingsRepository,
     private val clock: Clock,
+    private val contexts: PlayContextResolver,
+    private val capabilities: YouTubeCapabilitiesSource,
 ) : FeedRepository {
     private val visitMutex = Mutex()
 
@@ -139,6 +147,34 @@ internal class FeedRepositoryImpl(
         source: FeedSource,
         sortDateBefore: Long?,
     ): Int = db.feedDao().countUnplayed(FeedQueryBuilder.countUnplayed(source, sortDateBefore))
+
+    override suspend fun downloadAllEstimate(source: FeedSource): DownloadAllEstimate {
+        val prefs = observePrefs(source).first()
+        val spec = contexts.spec(source, prefs.filters, FeedOrder.NEWEST_FIRST)
+        val queries = FeedQueryBuilder.downloadAll(spec, capabilities.capabilities.value.downloads)
+        // Keep the uncapped count and the offered IDs on the same database snapshot.
+        return db.withReadTransaction {
+            val candidates = db.feedDao().downloadAllCandidates(queries.candidates)
+            val total = db.feedDao().downloadAllCount(queries.count)
+            val sizes = candidates.map { it.estimatedBytes() }
+            DownloadAllEstimate(
+                episodeIds = candidates.map { it.episodeId },
+                totalCandidates = total,
+                knownBytes =
+                    sizes.filterNotNull().fold(0L) { sum, bytes ->
+                        sum + bytes.coerceAtMost(Long.MAX_VALUE - sum)
+                    },
+                unknownSizeCount = sizes.count { it == null },
+                capped = total > candidates.size,
+            )
+        }
+    }
+
+    private fun DownloadAllCandidate.estimatedBytes(): Long? =
+        enclosureLength?.takeIf { it >= MIN_ENCLOSURE_BYTES }
+            ?: durationMs?.takeIf { it > 0 }?.let {
+                it.coerceAtMost(Long.MAX_VALUE / BYTES_PER_MILLISECOND) * BYTES_PER_MILLISECOND
+            }
 
     private fun countWindows(sinceMs: Long): Flow<Pair<Long, Long>> =
         flow {
@@ -296,6 +332,9 @@ internal class FeedRepositoryImpl(
     }
 
     private companion object {
+        const val MIN_ENCLOSURE_BYTES = 100_000L
+        const val BYTES_PER_MILLISECOND = 16L
+
         /** 08 Paging hand-off: page size and prefetch distance share one value. */
         const val PAGE_SIZE = 40
         const val INITIAL_LOAD_SIZE = 80
