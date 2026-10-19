@@ -531,6 +531,15 @@ Instrumented tests run inside the app's process, so killing the process (`am kil
 - Recording never runs in CI (GitHub runners use data-centre IPs that YouTube bot-challenges).
 - A replay test fails on any unrecorded request; that failure means "re-record", never "add a fallback".
 
+**Implementation note (2026-10-19, M7):** Directory JSON/HTML belongs in
+`feeds/src/test/resources/discovery/`, superseding YouTube placement above;
+keep origin/date/terms metadata and scrubbing, preserve the existing corpus.
+W2/W3/W8 wire identical desktop/Android host/device replay; W1 has no live evidence.
+W6 inventory/policy parity keeps `apple`, `fyyd`, `podcastindex`, `add-input` IDs
+and effective-provider states; enumerate Apple search/lookup/chart hosts,
+ID lookups/PI auth, pages/probes, publishers and artwork. Correct query/country-only
+and no-token-leaves claims; defer unrelated crash-report controls.
+
 ### Fixture policy
 
 - **Licensing.** The repository is Unlicense; fixtures must not carry copyrighted prose, artwork or audio. Real-world feeds and OPML are minimised to structure with `lorem` text and `https://example.invalid/…` URLs; images are generated (08's `ArtworkFixtures`); audio is synthesised with ffmpeg by `scripts/fixtures/make-playback-fixtures.sh` (06), `make-media-fixtures.sh` (07) and 11's corpus script (including the HE-AAC samples of MD0), whose outputs are committed together with the ffmpeg version used. Each fixture directory has a `README.md` with origin URL and capture date. Sync vectors are written by hand or generated from a seeded run, never captured from a user's server.

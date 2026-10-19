@@ -1498,6 +1498,48 @@ data class CategoryCount(val category: String, val podcastIds: List<Long>)
 
 ## Search and discovery
 
+**Implementation note (2026-10-19, M7):** These W1 contracts supersede the
+conflicting examples/prose below. Domain/extraction interfaces have
+`:core:testing` fakes; `assertSearchContract` also serves W2's recorded real tests.
+
+- Search is cold: initial Pending/Disabled, per-answer partials, one final with
+  no Pending. Blank/all-disabled emits one empty final without I/O. Cancellation
+  propagates; settings/key changes cancel stale runs/invalidate caches; retry
+  recollects. Immutable models retain ranks and Apple/PI/fyyd order. Provider
+  state separates stored switch, key source/status and effective recipients;
+  `ProviderFailure.CREDENTIALS` identifies rejected keys without raw error text.
+  Provider `configurationVersion` changes on country/switch/key replacement,
+  independently of status, so W5 restarts the current query even for USER→USER keys.
+- Internal `:core:data` Apple search/lookup/charts share limiter/caches; lookup
+  takes at most 100 decimal IDs in requested order. Retain the bucket plus
+  **20 dispatches per rolling 60 seconds**, immediate RateLimited/no queue,
+  shared 403/429 cooldown, free cache hits. PI ID lookup is key/switch-gated.
+- No disabled provider receives automatic requests. Explicit Apple-link Add
+  offers **Look up once with Apple**: W3 adds `AddResolution.LookupRequired(input, provider)`
+  and resolver `lookupOnce(input: String): AddResolution`; W5 grants `DirectoryAccess.ONE_TIME_LOOKUP`
+  only for that lookup, no saved consent/toggle change. Explicit BYOK verifies
+  before replacement, preserves old keys on cancellation; user overrides build,
+  clear falls back. No keys in public state/logs.
+- Country/three switches are PORTABLE via explicit backups, never synced,
+  superseding “per device”. Dismissal is DEVICE; key material SecretStore-only.
+  Country is empty (system region then US) or two uppercase ASCII letters;
+  shared registry validation governs writes/restores, invalid restores skip.
+- Feed-owned `DirectoryRecord`, `HostAction`, `DiscoveredFeed`/`Autodiscovery`
+  freeze parser/add boundaries; W2 maps DTOs in `:core:data`. fyyd pages use
+  HTML discovery, no detail API. Keep YouTube checks at every URL handoff.
+  W3 caps HTML transport after sniffing at 2 MiB, parses the prefix; retain
+  32 MiB feeds, five sequential 64 KiB probes/15 seconds, verification five/
+  concurrency two. Edit feed address stays direct-only; no pre-Subscribe rows.
+- Never automatically search URL-like/private input or look up feed URLs.
+  Disclose ID lookups and PI auth, publishers and artwork alongside query/country.
+  Recommendations are Discover rows plus matching-category navigation, no Feeds
+  pager material. Hide failed Discover rows; explicit chart directories retry.
+  Genre loads are independent/coalesced with bounded six-hour country/genre caches.
+- W4 retains category-count/create-with-members contracts: distinct IDs per
+  normalized top-level category, exclude existing group names, threshold two,
+  count/name sort, five maximum, DEVICE dismissal. No schema change or provider
+  implementation/binding/live evidence in W1.
+
 Serves onboarding for R1/R2/R5, R8.1 and N3. Delivered in M7 (both apps; the providers, parsers and aggregation are common code on Ktor's API client, so PLAN M7 AC10 runs the same recorded responses in `desktopTest`). Honours [D26](../PLAN.md#3-key-decisions) (amended 2026-10-05), [PO-3](../PLAN.md#po-3-podcast-index-api-key-handling) default B (option A: a key in the published builds built by `release.yml` — the APKs and the desktop images — once Podcast Index grants written permission); mitigates risk L3. Podcast directories only: YouTube channel search is 04's ([04 Channel search](04-youtube.md#channel-search)) and never part of `SearchRepository`.
 
 ```kotlin

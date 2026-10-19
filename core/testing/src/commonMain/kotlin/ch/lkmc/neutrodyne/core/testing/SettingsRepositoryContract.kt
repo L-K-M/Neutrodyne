@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.DiscoverSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
@@ -18,6 +19,8 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * Shared behaviour every [SettingsRepository] must show (09 fake contract tests): the fakes in
@@ -224,6 +227,32 @@ abstract class SettingsRepositoryContract {
             )
             assertEquals(false, repository.get(PlaybackSettingKeys.SMART_RESUME))
             assertEquals(240, repository.get(PlaybackSettingKeys.SLEEP_LAST_MINUTES))
+        }
+
+    @Test fun discoverValidationAndBackupClassification() =
+        runTest {
+            val repository = createRepository()
+            val keys = DiscoverSettingKeys
+            assertEquals(Outcome.Success(Unit), repository.set(keys.COUNTRY, "CH"))
+            for (bad in listOf("ch", "USA", " US", "1A", "ÜS")) {
+                assertEquals(
+                    Outcome.Failure(SettingsError.OutOfRange(keys.COUNTRY.name)),
+                    repository.set(keys.COUNTRY, bad),
+                )
+                assertEquals("CH", repository.get(keys.COUNTRY))
+            }
+            repository.set(keys.APPLE_ENABLED, false)
+            repository.set(keys.FYYD_ENABLED, false)
+            repository.set(keys.PODCASTINDEX_ENABLED, false)
+            repository.set(keys.SUGGESTED_GROUPS_DISMISSED, true)
+            val snapshot = repository.observePortableSnapshot().first()
+            assertEquals("CH", snapshot[keys.COUNTRY.name])
+            for (key in listOf(keys.APPLE_ENABLED, keys.FYYD_ENABLED, keys.PODCASTINDEX_ENABLED)) {
+                assertEquals(false, snapshot[key.name])
+            }
+            assertFalse(keys.SUGGESTED_GROUPS_DISMISSED.name in snapshot)
+            assertTrue(keys.ALL.none { it.synced })
+            assertEquals(Outcome.Success(Unit), repository.set(keys.COUNTRY, ""))
         }
 
     @Suppress("UNCHECKED_CAST")

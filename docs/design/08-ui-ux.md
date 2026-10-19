@@ -774,6 +774,23 @@ In progress is enabled; Downloaded remains gated until M6.
 
 ### Discover
 
+**Implementation note (2026-10-19, M7):** W5 owns Discover/directory state and
+`:feature:podcast` preview via domain services. Save input/query/group IDs,
+re-fetch memory-only results/previews after death. Search statuses distinguish
+pending/partial/empty/all-disabled/offline/failed/rate-limited; disabled offers
+Settings, retry recollects. Retain debounce/IME/stale cancellation. Preview
+reuses Add/Subscribe groups, with no play/download or pre-confirmation DB rows.
+Recommendations are Discover rows plus matching-category navigation only;
+hide failed rows, explicit chart directories offer unavailable/retry.
+`DirectoryKey` serializer/fields stay unchanged: nonblank query = search (ignore
+genre); empty/null = overall chart; empty/numeric `ChartGenre.id` = genre chart;
+reject unknown IDs without I/O, no cross-provider genre filtering. W5 renders
+W3's Apple-off one-time action. W6 settings/privacy use effective provider/key
+source/status, never save passwords, and add nullable `PlatformActions.appleLinks`
+with `openSettings(): OpenResult` (Android 31+); W7 implements it and adapts
+VIEW/SEND text/plain through existing `IntentRouter` (4 KiB UTF-8, external
+internal-routes rejected), only navigating to Add cold/warm.
+
 `DiscoverKey`, `:feature:discover`, M1 (add by URL and import entry points), M7 (search, charts), M9a (YouTube channel search with the engine).
 
 ```

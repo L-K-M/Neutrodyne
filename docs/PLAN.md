@@ -1320,6 +1320,17 @@ this integration; the milestone remains open pending those runs and owner checks
 
 #### M7: Discovery
 
+**Implementation note (2026-10-19, M7):** Owner adopted all kickoff defaults:
+country/provider choices portable by explicit backup, never sync; dismissal
+DEVICE, keys SecretStore only; disabled providers never contacted automatically,
+explicit Apple-link Add offers one-time lookup; recommendations only Discover
+rows plus matching-category navigation. AC2/AC5 below resolve the stricter
+rolling-minute limit and PO-44 storage qualification. W1 freezes contracts;
+W2–W8 implementation/evidence remains. Baseline is this tree (`4f54f149`), with
+M3/M4/M5 services; older HANDOFF headings prove no remote/release/device state.
+Earlier gates remain open; M7 needs M1b/M2, not M6/MD1 or earlier device gates.
+No schema change is authorized here.
+
 - **Goal:** find and add podcasts without knowing a feed URL.
 - **Deliverables:**
   - `SearchRepository` with `PodcastSearchProvider`s: Apple (token bucket 20/min, debounce, 30-min in-memory LRU), fyyd, Podcast Index (key-gated, BYOK setting with Keystore storage); parallel query with 8 s per-provider timeout, merge and dedupe.
@@ -1330,10 +1341,10 @@ this integration; the milestone remains open pending those runs and owner checks
   - The Discover screen, directory results and the add sheet run on the desktop as well; desktop URL and file handlers arrive in MD2.
 - **Acceptance criteria:**
   1. Searching "news" returns merged, de-duplicated Apple + fyyd results; a failing provider still yields partial results; hits without a feed URL are dropped.
-  2. Unit test: no more than 20 Apple requests per minute; search fires after 600 ms debounce with ≥ 3 characters or on IME search.
+  2. Unit test: no more than 20 Apple dispatches in any rolling 60 seconds across search/lookup/charts, immediate RateLimited and no queue; search fires after 600 ms debounce with ≥ 3 characters or on IME search.
   3. Autodiscovery fixtures: `<link rel=alternate>` page, page with only an Apple Podcasts link, WordPress `/feed/podcast`, page with several candidates → chooser.
   4. Sharing a podcasts.apple.com URL from a browser opens the add sheet with a preview and a subscribe button.
-  5. Without a key Podcast Index is hidden; with a user key its results appear; the key is stored encrypted.
+  5. Without a key Podcast Index is hidden; with a user key its results appear; storage uses Android Keystore encryption, Windows DPAPI, or macOS/Linux protected files (0600 per PO-44).
   6. Discover shows which providers receive queries.
   7. `neutrodyne://subscribe?url=…` and `feed:`/`pcast:`/`podcast:`/`itpc:` links open the add sheet with a preview (E1 deep-link case, [03 Deep links and share targets](design/03-feeds-and-discovery.md#deep-links-and-share-targets)).
   8. Recorded Apple search, Apple chart, fyyd and Podcast Index responses parse into ranked results; hits without a feed URL are dropped and unknown fields ignored ([03 Search and discovery](design/03-feeds-and-discovery.md#search-and-discovery)).
