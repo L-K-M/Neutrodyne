@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.PodcastDetail
 import ch.lkmc.neutrodyne.core.model.ShowType
+import ch.lkmc.neutrodyne.core.ui.RowCaps
 import ch.lkmc.neutrodyne.core.ui.UserMessage
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
@@ -25,6 +26,14 @@ public data class PodcastUiState(
     val feedUrl: String? = null,
     val loaded: Boolean = false,
     val filters: FeedFilters = FeedFilters(),
+    val rowCaps: RowCaps =
+        RowCaps(
+            false,
+            false,
+            false,
+            null,
+            false,
+        ),
     val offline: Boolean = false,
     val refreshing: Boolean = false,
     /** The podcast's groups in repository order — the header's membership chips (M2, D6). */

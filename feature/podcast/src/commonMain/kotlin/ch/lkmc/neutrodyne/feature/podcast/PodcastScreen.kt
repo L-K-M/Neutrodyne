@@ -82,6 +82,7 @@ import ch.lkmc.neutrodyne.core.ui.RowCaps
 import ch.lkmc.neutrodyne.core.ui.SelectionTopBar
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.episodeSelectionKeys
+import ch.lkmc.neutrodyne.core.ui.forSource
 import ch.lkmc.neutrodyne.core.ui.offlineBannerItem
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.resources.Res
@@ -192,8 +193,16 @@ internal fun PodcastScreen(
                 selection,
                 selectedIds.size,
                 selectAll,
-                onPlayNext = onPlaySelectionNext,
-                onPlayLast = onPlaySelectionLast,
+                onPlayNext =
+                    onPlaySelectionNext.takeIf {
+                        detail?.sourceType == SourceType.RSS ||
+                            state.rowCaps.inAppPlayback
+                    },
+                onPlayLast =
+                    onPlaySelectionLast.takeIf {
+                        detail?.sourceType == SourceType.RSS ||
+                            state.rowCaps.inAppPlayback
+                    },
             )
         } else {
             NdTopAppBar(
@@ -213,6 +222,7 @@ internal fun PodcastScreen(
                     )
                     PodcastOverflow(
                         detail = detail,
+                        caps = state.rowCaps,
                         feedUrl = state.feedUrl,
                         onOpenSettings = onOpenSettings,
                         onMarkAllPlayedClick = onMarkAllPlayedClick,
@@ -388,7 +398,7 @@ internal fun PodcastScreen(
                                 row = row,
                                 live = rowLive,
                                 style = EpisodeRowStyle.PODCAST,
-                                caps = RowCaps.FULL.copy(offline = state.offline),
+                                caps = state.rowCaps.forSource(row.sourceType).copy(offline = state.offline),
                                 highlightNew = false,
                                 selected = selectedIds.takeIf { it.isNotEmpty() }?.contains(row.id),
                                 onAction = { action ->
@@ -473,6 +483,7 @@ internal fun PodcastScreen(
 @Composable
 private fun PodcastOverflow(
     detail: PodcastDetail?,
+    caps: RowCaps,
     feedUrl: String?,
     onOpenSettings: () -> Unit,
     onMarkAllPlayedClick: () -> Unit,
@@ -496,10 +507,12 @@ private fun PodcastOverflow(
             contentDescription = stringResource(Res.string.action_more),
         )
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(text = { Text(stringResource(Res.string.download_all)) }, onClick = {
-                open = false
-                onDownloadAll()
-            })
+            if (detail?.sourceType == SourceType.RSS || caps.downloads) {
+                DropdownMenuItem(text = { Text(stringResource(Res.string.download_all)) }, onClick = {
+                    open = false
+                    onDownloadAll()
+                })
+            }
             DropdownMenuItem(
                 text = { Text(stringResource(Res.string.podcast_settings)) },
                 onClick = {

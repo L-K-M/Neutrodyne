@@ -463,7 +463,7 @@ internal class DownloadControllerImpl(
                     ?.lowercase()
             val type = mime?.substringBefore(';')?.trim()?.lowercase()
             return when {
-                row.sourceType != SourceType.RSS -> RejectReason.YOUTUBE_NOT_SUPPORTED
+                row.sourceType != SourceType.RSS || row.youtubeChannelId != null -> RejectReason.YOUTUBE_NOT_SUPPORTED
                 row.availability != Availability.AVAILABLE -> RejectReason.UNAVAILABLE
                 url.isNullOrBlank() -> RejectReason.NOT_DOWNLOADABLE
                 type in HLS_TYPES || extension in HLS_EXTENSIONS -> RejectReason.UNSUPPORTED_STREAM

@@ -37,6 +37,23 @@ class PlayContextResolverTest {
 
     @AfterTest fun close() = db.close()
 
+    @Test fun mixedGroupSkipsExternalChannelsAndAllExternalHasNoNativeStart() =
+        runTest {
+            val group = db.groupDao().insert(groupEntity(orderKey = "a0"))
+            val rss = db.podcastDao().insertPodcast(podcastEntity())
+            val channel = db.podcastDao().insertPodcast(podcastEntity { copy(sourceType = SourceType.YOUTUBE_CHANNEL) })
+            db.groupDao().insertMember(memberEntity(group, rss, "a0"))
+            db.groupDao().insertMember(memberEntity(group, channel, "a1"))
+            val audio = db.episodeDao().insertStub(episodeEntity(podcastId = rss, sortDate = 100))
+            val video = db.episodeDao().insertStub(episodeEntity(podcastId = channel, sortDate = 200))
+            val spec = resolver.spec(FeedSource.Group(group), FeedFilters(), FeedOrder.NEWEST_FIRST)
+            assertEquals(audio, resolver.startItem(spec))
+            assertEquals(video, resolver.startItem(spec, ContextEligibility.INCLUDE_EXTERNAL_YOUTUBE))
+            db.episodeStateDao().upsert(episodeStateEntity(audio, playedAt = 1))
+            assertNull(resolver.startItem(spec))
+            assertEquals(video, resolver.startItem(spec, ContextEligibility.INCLUDE_EXTERNAL_YOUTUBE))
+        }
+
     @Test fun specsCarryFiltersAndApplyEntryPointRules() =
         runTest {
             val filters =

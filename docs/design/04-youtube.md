@@ -372,6 +372,16 @@ action hiding and integrated safety tests are not implemented by this merge.
 
 ### UI per capability (hand-off to [08 Capability differences in UI](08-ui-ux.md#capability-differences-in-ui))
 
+Implementation note (2026-10-19, M8): W8 observes runtime capabilities on
+rows, detail, queue and Settings. Every M8 build remains external with
+NOT_YET_AVAILABLE (adopted resolution 1); Settings offers suggest-RSS and
+mark-played-on-open only. A successful OS handoff invokes YouTubeExternalOpen;
+no handler or cancellation never invokes it. Played transitions use the shared
+transaction and update counts. Its matching undo operation clears only the
+played mark, preserving position and Up next; the shared UI offers it for five
+seconds. Playable overflow never marks played.
+
+
 | Element | With the engine | External mode |
 |---|---|---|
 | YouTube episode row primary action | Play / Pause | "Watch on YouTube" (opens the YouTube app or a browser; the default browser on the desktop) |

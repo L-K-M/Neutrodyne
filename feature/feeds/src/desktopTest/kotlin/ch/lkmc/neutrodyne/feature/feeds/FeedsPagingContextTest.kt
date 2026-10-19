@@ -81,6 +81,15 @@ class FeedsPagingContextTest : MainDispatcherTest() {
                     downloadController =
                         ch.lkmc.neutrodyne.core.testing
                             .FakeDownloadController(),
+                    externalOpenService =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeYouTubeExternalOpen(),
+                    capabilities =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeYouTubeCapabilitiesSource(),
+                    youTubeHealth =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeYouTubeHealth(),
                 )
 
             val store = ViewModelStore().apply { put("feeds", viewModel) }

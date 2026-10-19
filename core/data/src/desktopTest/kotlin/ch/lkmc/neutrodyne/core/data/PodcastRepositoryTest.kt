@@ -78,6 +78,9 @@ class PodcastRepositoryTest {
     private fun repo(
         secrets: SecretStore = FakeSecretStore(),
         fetcherBundle: FetcherBundle? = null,
+        health: ch.lkmc.neutrodyne.youtube.api.YouTubeHealth =
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeHealth(),
     ) = PodcastRepositoryImpl(
         db = db,
         refresher = newRefresher(db, emptyMap(), clock, settings),
@@ -105,7 +108,57 @@ class PodcastRepositoryTest {
                     FileSystem.SYSTEM,
                 ),
         downloads = Provider { FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) } },
+        youTubeHealth = health,
     )
+
+    @Test fun globalOutageSuppressesChannelBadgesAndRecoveryRestoresDiagnostics() =
+        runTest {
+            val health =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeYouTubeHealth()
+            val id =
+                db.podcastDao().insertPodcast(
+                    podcastEntity {
+                        copy(
+                            sourceType = ch.lkmc.neutrodyne.core.model.SourceType.YOUTUBE_CHANNEL,
+                            failureCount = 10,
+                            lastSuccessAt = NOW - 8L * 86_400_000,
+                            gone = true,
+                            needsCredentials = true,
+                            lastErrorKind = ch.lkmc.neutrodyne.core.model.FeedErrorKind.HTTP_NOT_FOUND,
+                        )
+                    },
+                )
+            health.state.value =
+                ch.lkmc.neutrodyne.youtube.api
+                    .YouTubeHealthState(feedOutageLevel = 1)
+            val repository = repo(health = health)
+            val tile = repository.observeLibraryTiles(null).first().single()
+            assertFalse(tile.health.gone)
+            assertFalse(tile.health.needsCredentials)
+            assertFalse(tile.health.possiblyDead)
+            assertEquals(0, tile.health.failureCount)
+            assertNull(tile.health.lastErrorKind)
+            assertEquals(
+                0,
+                repository
+                    .observePodcast(id)
+                    .first()
+                    ?.health
+                    ?.failureCount,
+            )
+            health.state.value =
+                ch.lkmc.neutrodyne.youtube.api
+                    .YouTubeHealthState()
+            assertEquals(
+                10,
+                repository
+                    .observePodcast(id)
+                    .first()
+                    ?.health
+                    ?.failureCount,
+            )
+        }
 
     @Test
     fun categorySuggestionsUseDistinctNormalizedTopLevels() =
@@ -466,6 +519,9 @@ class PodcastRepositoryTest {
                         fetcher = Provider { bundle.fetcher },
                         tempFiles = bundle.tempFiles,
                         downloads = Provider { FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) } },
+                        youTubeHealth =
+                            ch.lkmc.neutrodyne.core.testing
+                                .FakeYouTubeHealth(),
                     )
 
                 val first =

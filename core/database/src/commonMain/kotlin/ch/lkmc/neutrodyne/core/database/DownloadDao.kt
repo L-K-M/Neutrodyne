@@ -38,6 +38,8 @@ abstract class DownloadDao : DownloadQueries {
         "SELECT * FROM download WHERE state = 'QUEUED' AND runnerToken IS NULL AND lane IN (:lanes)" +
             " AND (nextAttemptAt IS NULL OR nextAttemptAt <= :now)" +
             " AND (allowMetered = 1 OR :unmetered = 1) AND (requireCharging = 0 OR :charging = 1)" +
+            " AND EXISTS (SELECT 1 FROM episode e JOIN podcast p ON p.id = e.podcastId" +
+            " WHERE e.id = download.episodeId AND p.sourceType = 'RSS' AND p.youtubeChannelId IS NULL)" +
             " AND (:youtubeAllowed = 1 OR sourceKind <> 'YOUTUBE')" +
             " ORDER BY priority DESC, requestedAt, episodeId LIMIT $DOWNLOAD_CANDIDATE_PAGE_SIZE OFFSET :offset",
     )
@@ -75,7 +77,9 @@ abstract class DownloadDao : DownloadQueries {
     @Query(
         "UPDATE download SET state = 'RESOLVING', waitReason = 'NONE', runnerToken = :token" +
             " WHERE episodeId = :episodeId AND state = 'QUEUED' AND runnerToken IS" +
-            " NULL AND length(trim(:token)) > 0",
+            " NULL AND length(trim(:token)) > 0" +
+            " AND EXISTS (SELECT 1 FROM episode e JOIN podcast p ON p.id = e.podcastId" +
+            " WHERE e.id = download.episodeId AND p.sourceType = 'RSS' AND p.youtubeChannelId IS NULL)",
     )
     abstract override suspend fun claim(
         episodeId: Long,
@@ -158,7 +162,9 @@ abstract class DownloadDao : DownloadQueries {
             " nextAttemptAt END) AS earliestRetryNoCharging," +
             " SUM(MAX(COALESCE(totalBytes, estimatedBytes, $UNKNOWN_DOWNLOAD_BYTES)" +
             " - downloadedBytes, 0)) AS remainingBytes" +
-            " FROM download WHERE state = 'QUEUED' AND runnerToken IS NULL AND lane = :lane",
+            " FROM download WHERE state = 'QUEUED' AND runnerToken IS NULL AND lane = :lane" +
+            " AND EXISTS (SELECT 1 FROM episode e JOIN podcast p ON p.id = e.podcastId" +
+            " WHERE e.id = download.episodeId AND p.sourceType = 'RSS' AND p.youtubeChannelId IS NULL)",
     )
     abstract override suspend fun queuedNeeds(
         lane: DownloadLane,

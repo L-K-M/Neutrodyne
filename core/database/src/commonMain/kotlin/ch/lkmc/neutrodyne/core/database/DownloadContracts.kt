@@ -153,6 +153,7 @@ data class DownloadSourceRow(
     val externalMediaId: String?,
     @Relation(parentColumns = ["episodeId"], entityColumns = ["episodeId"])
     val audioAlternates: List<EpisodeAltEnclosureEntity>,
+    val youtubeChannelId: String? = null,
 )
 
 data class CompletedDownloadRow(

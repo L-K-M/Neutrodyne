@@ -2848,6 +2848,25 @@ Denied → no repeated system dialog; the relevant screen shows an inline row "N
 
 ## Capability differences in UI
 
+Implementation note (2026-10-19, M8): W8 observes capability changes in
+Feeds, Podcast, episode detail and YouTube Settings. Injected capability,
+health and successful-open ports are required dependencies: Metro's constructor
+defaults would otherwise bypass the real bindings. Test fixtures pass explicit
+fakes. The window's player resolves its successful-open service lazily, keeping
+pre-gate construction free of database access. External channels have no
+queue or download menu, selection or accessibility actions; RSS in mixed feeds
+keeps its native actions. Restored Up next channel rows remain grey. Successful
+browser handoff offers the optional played transition and a five-second Undo;
+failed opens retain the existing Copy link feedback. Feeds and Library each
+render one shared outage banner with Retry now. The podcast health mapper
+suppresses channel failure badges while the global outage level is active,
+retaining single-channel diagnostics once it recovers (adopted resolution 5).
+No system notification is emitted for a feed outage. The desktop's pre-MD1
+playback stub uses read-only domain queries after the database gate to report
+external row refusal and all-external contexts truthfully; RSS playback still
+reports ServiceUnavailable, with native audio left to MD1.
+
+
 **Implementation note (2026-10-19, M6b).** Adopted resolution 5 applies the
 global delete-after-played policy to completed YouTube files even while the
 channel is NotSupported; cleanup is still the user's chosen policy. External-mode

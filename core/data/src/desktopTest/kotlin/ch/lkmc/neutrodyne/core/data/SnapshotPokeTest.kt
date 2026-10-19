@@ -42,7 +42,17 @@ class SnapshotPokeTest {
     private val snapshots = FakeSnapshotScheduler()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val groups = GroupRepositoryImpl(db, TestClock(), TestOrderKeys, channels, refresh, snapshots, scope)
-    private val settings = ScopeSettingsRepositoryImpl(db, FakeSettingsRepository(), { refresh }, channels, snapshots)
+    private val settings =
+        ScopeSettingsRepositoryImpl(
+            db,
+            FakeSettingsRepository(),
+            { refresh },
+            channels,
+            snapshots,
+            capabilities =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeYouTubeCapabilitiesSource(),
+        )
 
     @AfterTest
     fun close() {
@@ -150,7 +160,16 @@ class SnapshotPokeTest {
                 }
             val failingGroups = GroupRepositoryImpl(db, TestClock(), TestOrderKeys, channels, refresh, failing, scope)
             val failingSettings =
-                ScopeSettingsRepositoryImpl(db, FakeSettingsRepository(), { refresh }, channels, failing)
+                ScopeSettingsRepositoryImpl(
+                    db,
+                    FakeSettingsRepository(),
+                    { refresh },
+                    channels,
+                    failing,
+                    capabilities =
+                        ch.lkmc.neutrodyne.core.testing
+                            .FakeYouTubeCapabilitiesSource(),
+                )
 
             val id = assertIs<Outcome.Success<Long>>(failingGroups.create(GroupDraft("Tech"))).value
             assertIs<Outcome.Success<Unit>>(failingGroups.update(id, GroupEdit.Rename("Science")))

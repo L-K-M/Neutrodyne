@@ -81,6 +81,9 @@ class ImportCredentialOrderTest {
                     FileSystem.SYSTEM,
                 ),
         downloads = Provider { FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) } },
+        youTubeHealth =
+            ch.lkmc.neutrodyne.core.testing
+                .FakeYouTubeHealth(),
     )
 
     private fun newSecretsStore(

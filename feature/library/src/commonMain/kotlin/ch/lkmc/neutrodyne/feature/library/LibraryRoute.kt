@@ -50,6 +50,7 @@ internal fun LibraryRoute(
     isCurrentEntry: () -> Boolean = rememberEntryIsCurrent(LibraryKey),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val feedHealth by viewModel.feedHealth.collectAsStateWithLifecycle()
     val navigator = LocalAppNavigator.current
     val snackbar = LocalSnackbarHost.current
     val scope = rememberCoroutineScope()
@@ -116,6 +117,12 @@ internal fun LibraryRoute(
     }
 
     LibraryScreen(
+        outageBanner = {
+            if (feedHealth.feedOutageLevel > 0) {
+                ch.lkmc.neutrodyne.core.ui
+                    .YouTubeFeedBanner(viewModel::retryYouTubeFeeds)
+            }
+        },
         segment = state.segment,
         selectedIds = selection,
         onSegment = {

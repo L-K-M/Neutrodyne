@@ -326,6 +326,9 @@ class RestoreWorkerTest {
                                 Provider {
                                     FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
                                 },
+                            youTubeHealth =
+                                ch.lkmc.neutrodyne.core.testing
+                                    .FakeYouTubeHealth(),
                         ),
                         FakeNewEpisodePoster(),
                     ),
