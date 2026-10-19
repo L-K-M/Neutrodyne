@@ -9,8 +9,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.recalculateWindowInsets
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
@@ -70,6 +74,7 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.model.WindowPosture
 import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
 import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
@@ -235,6 +240,7 @@ private fun ReadyRoot(
 ) {
     val failedDownloadCount by failedDownloads.collectAsStateWithLifecycle(initialValue = 0)
     var expandedSettled by remember { mutableStateOf(false) }
+    var consumedPlayerExpandRequest by rememberSaveable { mutableIntStateOf(0) }
     var playerNavigationRequests by rememberSaveable { mutableIntStateOf(0) }
     var lastPlayerTab by remember { mutableStateOf(navigation.selectedTab) }
     LaunchedEffect(navigation.selectedTab) {
@@ -246,8 +252,10 @@ private fun ReadyRoot(
         if (key is TopLevelKey) navigation.selectTab(key) else navigation.push(key)
     }
     var contentBottomPx by remember { mutableFloatStateOf(0f) }
+    var contentTopPx by remember { mutableFloatStateOf(0f) }
+    var rootTopPx by remember { mutableFloatStateOf(0f) }
     val suiteState = rememberNavigationSuiteScaffoldState()
-    val hideSuite = expandedSettled && contentBottomPx > 0f
+    val hideSuite = expandedSettled && state.hasNowPlaying && contentBottomPx > 0f
     LaunchedEffect(hideSuite) {
         // The sheet already covers the chrome. Snapping avoids a second resize animation.
         suiteState.snapTo(
@@ -270,10 +278,19 @@ private fun ReadyRoot(
         ndPaneLayout(
             windowWidthDp = windowWidthDp,
             navChromeDp = navChromeDp,
-            // M4 uses the sheet at every width. Keep the panel geometry for MD1.
-            hasNowPlaying = false,
+            hasNowPlaying = state.hasNowPlaying,
             panelHidden = state.playerPanelHidden,
         )
+    val posture =
+        if (platform == BuildInfo.Platform.ANDROID) {
+            state.posture ?: windowPostureDp(windowInfo.windowPosture, density.density)
+        } else {
+            WindowPosture()
+        }
+    LaunchedEffect(layout.playerPanel, state.hasNowPlaying) {
+        if (layout.playerPanel || !state.hasNowPlaying) expandedSettled = false
+    }
+    val panelWidthDp = if (layout.playerPanel) windowWidthDp - navChromeDp - layout.contentWidthDp else 0
     // The pane directive keeps the library's spacing/hinge values; only the partition count is ours.
     val directive =
         remember(windowInfo, layout.partitions) {
@@ -329,6 +346,7 @@ private fun ReadyRoot(
                 modifier
                     .fillMaxSize()
                     .testTagsAsResourceId()
+                    .onGloballyPositioned { rootTopPx = it.boundsInRoot().top }
                     .onKeyEvent { event ->
                         if (platform == BuildInfo.Platform.DESKTOP && navigation.selectedTab == DiscoverKey &&
                             event.type == KeyEventType.KeyDown && event.key == Key.F &&
@@ -362,7 +380,7 @@ private fun ReadyRoot(
                 footer = { SettingsGearButton() },
                 state = suiteState,
             ) {
-                Column(Modifier.fillMaxSize()) {
+                Column(Modifier.fillMaxSize().padding(end = panelWidthDp.dp)) {
                     RootBanners(
                         state = state,
                         actions = actions,
@@ -386,7 +404,9 @@ private fun ReadyRoot(
                                 if ((!expandedSettled || contentBottomPx == 0f) && !suiteState.isAnimating &&
                                     suiteState.currentValue == NavigationSuiteScaffoldValue.Visible
                                 ) {
-                                    contentBottomPx = it.boundsInRoot().bottom - dockBottomInsetPx
+                                    val bounds = it.boundsInRoot()
+                                    contentTopPx = bounds.top
+                                    contentBottomPx = bounds.bottom - dockBottomInsetPx
                                 }
                             },
                         ) {
@@ -397,25 +417,52 @@ private fun ReadyRoot(
                                 modifier = Modifier.fillMaxSize(),
                             )
                         }
-                        if (layout.playerPanel) {
-                            slots.player(PlayerSlotState(layout, navigateFromPlayer))
-                        }
                     }
                 }
             }
 
-            if (!layout.playerPanel) {
-                Box(Modifier.fillMaxSize()) {
+            slots.ready(navigateFromPlayer)
+            if (state.hasNowPlaying) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .then(
+                            if (layout.playerPanel) {
+                                // Match the measured content viewport, including the short-height bar.
+                                // Recalculate insets so the player does not consume the bar's insets twice.
+                                Modifier
+                                    .width(panelWidthDp.dp)
+                                    .offset(y = with(density) { (contentTopPx - rootTopPx).toDp() })
+                                    .height(
+                                        with(density) {
+                                            (contentBottomPx + dockBottomInsetPx - contentTopPx)
+                                                .coerceAtLeast(0f)
+                                                .toDp()
+                                        },
+                                    ).recalculateWindowInsets()
+                            } else {
+                                Modifier.fillMaxSize()
+                            },
+                        ),
+                ) {
                     slots.player(
                         PlayerSlotState(
-                            layout,
-                            navigateFromPlayer,
-                            contentBottomPx,
-                            expandRequest,
-                            collapseRequest + playerNavigationRequests,
-                        ) {
-                            expandedSettled = it
-                        },
+                            layout = layout,
+                            navigate = navigateFromPlayer,
+                            onClosePanel = actions.closePlayerPanel,
+                            onReopenPanel = actions.reopenPlayerPanel,
+                            posture = posture,
+                            reopenPanelFromMini = state.playerPanelHidden && windowWidthDp >= 840,
+                            contentStartDp = navChromeDp.toFloat(),
+                            contentBottomPx = contentBottomPx,
+                            expandRequest = expandRequest,
+                            initialConsumedExpandRequest = consumedPlayerExpandRequest,
+                            onExpandRequestConsumed = {
+                                consumedPlayerExpandRequest = maxOf(consumedPlayerExpandRequest, it)
+                            },
+                            collapseRequest = collapseRequest + playerNavigationRequests,
+                            onExpandedSettled = { expandedSettled = it && !layout.playerPanel },
+                        ),
                     )
                 }
             }

@@ -1898,9 +1898,46 @@ Chips and the slider (on release) call `setSpeed(value, scope)`; the switch call
 
 The side panel is part of the pane computation ([Pane directive](#pane-directive)); it has no back behaviour and no drag. On the desktop it is the usual player: the default 1,200 × 800 dp window shows it at 412 dp beside two content panes, and resizing the window across 840 dp switches between panel and sheet without changing playback.
 
-**Implementation note (2026-10-19, M10):** W6 owns presentation and required
-close/reopen callbacks: hidden survives new items, ≥840 dp mini reopens panel,
-recreated sheet starts collapsed.
+**Implementation note (2026-10-19, M10 W6):** The root uses actual now-playing
+state and reserves the panel once, beside the navigation content. Both shells
+observe and write the existing device-only `ui.player_panel_hidden` key;
+failed writes retain the old layout and report an error. Neither starting a new
+item nor dismissing playback resets this preference. There is one player slot
+while an item exists and none while idle. Desktop menu/input hooks have a
+separate ready slot, so they remain available while idle. Existing command
+feedback uses the same window ViewModels there: first-play metered consent and
+refusal/write messages remain available without collecting player UI, position,
+artwork or notes while idle. The root also acknowledges handled expansion tokens
+across idle intervals, so an old deep link cannot reopen a newly playing hidden
+panel. The sheet dock excludes the actual suite start width while collapsed
+and interpolates to the full window on expansion, keeping the rail gear clear.
+Artwork tap and upward drag use the same mini expand/reopen action without an
+extra artwork focus stop. The shared player
+keeps controller, tabs and queue content across presentation changes; entering
+a sheet from a panel collapses it. Panels install no drag or back handler.
+
+The same transport, scrubber, chapters, notes, sleep and queue controls serve
+portrait, landscape and tabletop. Compact landscape opens tabs through the
+Up next entry; control rows and tabs wrap, with scrolling for short windows
+and large text. Full-player content caps at 720 dp; shared episode rows also
+centre at a 720 dp maximum without changing pane thresholds. The root subtracts
+96 dp only for the actual rail suite, and uses the default bar in short-height
+or tabletop windows. The stable panel overlay uses the measured content viewport
+above that bar, with recalculated window insets, so it cannot intercept bar taps
+or consume the bar's insets twice. Android adaptive hinge pixels become window dp once;
+the player subtracts its measured, inset origin before placing art and controls
+on opposite sides of a horizontal HALF_OPENED hinge. Vertical/book and flat
+hinges do not select tabletop. Desktop supplies no hinges.
+
+Injected posture and deterministic transport tests prove layout and callback
+behavior only. Real WindowManager hinges, cutouts/IME on hardware, nonlinear
+Android fonts, assistive technology and physical playback acceptance still
+need their device gates. Shared-art transitions and system-bar ownership remain
+W5. The root resize regression currently also exposes navigation-entry focus
+loss when 839→840 dp changes the content partition count; W5/W11 must resolve
+that navigation integration gate. Final accessibility and screenshot acceptance
+remain W8/W9. No screenshot
+reference is recorded or accepted by W6.
 
 ### Video (v1.x)
 

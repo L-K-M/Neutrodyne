@@ -281,6 +281,8 @@ class SettingsScreensTest {
                     state = RootUiState.READY,
                     actions =
                         RootActions(
+                            closePlayerPanel = {},
+                            reopenPlayerPanel = {},
                             retryStartup = {},
                             dismissNotice = {},
                             continueHere = {},

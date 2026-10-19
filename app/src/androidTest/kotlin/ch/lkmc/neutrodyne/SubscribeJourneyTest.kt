@@ -189,7 +189,7 @@ class SubscribeJourneyTest {
                         ) {
                             NeutrodyneRoot(
                                 state = RootUiState.READY,
-                                actions = RootActions({}, {}, {}, {}, { false }),
+                                actions = RootActions({}, {}, {}, {}, { false }, {}, {}),
                                 slots = RootSlots(player = {}, userMessages = emptyFlow()),
                                 installers = graph.entryInstallers,
                                 routes = routing.routes,

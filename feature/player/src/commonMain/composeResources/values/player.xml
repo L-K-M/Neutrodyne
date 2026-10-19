@@ -60,4 +60,6 @@
         <item quantity="one">%1$d second</item>
         <item quantity="other">%1$d seconds</item>
     </plurals>
+    <string name="player_close_panel">Close player panel</string>
+    <string name="player_reopen_panel">Reopen player panel</string>
 </resources>

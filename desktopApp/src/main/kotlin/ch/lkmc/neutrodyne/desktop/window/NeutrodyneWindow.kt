@@ -10,6 +10,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.key.Key
@@ -62,9 +63,13 @@ import ch.lkmc.neutrodyne.desktop.resources.tray_show
 import ch.lkmc.neutrodyne.desktop.resources.tray_tooltip
 import ch.lkmc.neutrodyne.desktop.resources.window_title
 import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
+import ch.lkmc.neutrodyne.feature.player.PlayerFeedbackRoute
+import ch.lkmc.neutrodyne.feature.player.PlayerPanelWriteFeedback
 import ch.lkmc.neutrodyne.feature.player.PlayerRoute
+import ch.lkmc.neutrodyne.feature.player.rememberPlayerPanelPreference
 import ch.lkmc.neutrodyne.feature.queue.PlayerUpNextRoute
 import ch.lkmc.neutrodyne.feature.settings.observeAppearance
+import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.coroutines.CoroutineScope
@@ -103,6 +108,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     dataDir: Path,
     viewModelFactory: MetroViewModelFactory,
     settings: SettingsRepository,
+    playbackState: PlaybackStateSource,
     onQuitRequest: () -> Unit,
     openHandler: DesktopOpenHandler? = null,
     rowArt: YouTubeRowArt = YouTubeRowArt.VIDEO_THUMBNAIL,
@@ -161,6 +167,8 @@ internal fun ApplicationScope.NeutrodyneWindow(
         val content: @Composable () -> Unit = {
             NeutrodyneWindowContent(
                 rowArt = rowArt,
+                settings = settings,
+                playbackState = playbackState,
                 prefs = prefs,
                 installers = installers,
                 menuActions = menuActions,
@@ -319,6 +327,8 @@ private fun DesktopApplicationMenu(
  */
 @Composable
 internal fun NeutrodyneWindowContent(
+    settings: SettingsRepository,
+    playbackState: PlaybackStateSource,
     installers: Set<EntryProviderInstaller>,
     menuActions: DesktopMenuActions,
     viewModelFactory: MetroViewModelFactory,
@@ -331,14 +341,19 @@ internal fun NeutrodyneWindowContent(
     rowArt: YouTubeRowArt = YouTubeRowArt.VIDEO_THUMBNAIL,
     failedDownloads: kotlinx.coroutines.flow.Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
 ) {
+    val panel = rememberPlayerPanelPreference(settings)
+    val currentPanel by rememberUpdatedState(panel)
+    val now by playbackState.nowPlaying.collectAsState()
     val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
     val platformActions = rememberDesktopPlatformActions()
     // `NeutrodyneRoot` keys its snackbar effect on `slots` identity — a per-recomposition
     // `RootSlots` would cancel and re-show the in-flight banner, so both contracts are
     // remembered (they were all-no-op until the banner stream landed).
     val actions =
-        remember(platformActions, dataDir, onRetryStartup, banners) {
+        remember(platformActions, dataDir, onRetryStartup, banners, panel.close, panel.reopen) {
             RootActions(
+                closePlayerPanel = panel.close,
+                reopenPlayerPanel = panel.reopen,
                 retryStartup = onRetryStartup,
                 dismissNotice = {},
                 continueHere = {},
@@ -358,12 +373,15 @@ internal fun NeutrodyneWindowContent(
             RootSlots(
                 // Keep menu/input glue inside the root so it reads the root's navigator.
                 // The shared player follows these hooks on the same window store.
-                player = {
-                    menuActions.attachPush(it.navigate)
-                    menuActions.attachNavigator(LocalAppNavigator.current)
+                ready = { navigate ->
+                    PlayerPanelWriteFeedback(currentPanel)
+                    PlayerFeedbackRoute(navigate)
+                    val navigator = LocalAppNavigator.current
+                    menuActions.attachPush(navigate)
+                    menuActions.attachNavigator(navigator)
                     openHandler?.let { DesktopInputFeedback(it) }
-                    PlayerRoute(it, upNext = { PlayerUpNextRoute(it.navigate) })
                 },
+                player = { PlayerRoute(it, upNext = { PlayerUpNextRoute(it.navigate) }) },
                 userMessages = banners?.userMessages ?: emptyFlow(),
                 importResume = { available, open -> importResumeBanner(available, open) },
             )
@@ -379,7 +397,12 @@ internal fun NeutrodyneWindowContent(
     ) {
         NeutrodyneRoot(
             failedDownloads = failedDownloads,
-            state = RootUiState.READY.copy(startup = startup),
+            state =
+                RootUiState.READY.copy(
+                    startup = startup,
+                    hasNowPlaying = now != null,
+                    playerPanelHidden = panel.hidden,
+                ),
             actions = actions,
             slots = slots,
             installers = installers,

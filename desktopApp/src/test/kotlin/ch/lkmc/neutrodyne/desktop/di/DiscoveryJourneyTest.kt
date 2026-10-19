@@ -160,7 +160,7 @@ class DiscoveryJourneyTest {
                             ) {
                                 NeutrodyneRoot(
                                     state = RootUiState.READY,
-                                    actions = RootActions({}, {}, {}, {}, { false }),
+                                    actions = RootActions({}, {}, {}, {}, { false }, {}, {}),
                                     slots = RootSlots(player = {}, userMessages = emptyFlow()),
                                     installers = graph.entryInstallers,
                                     platform = BuildInfo.Platform.DESKTOP,

@@ -211,6 +211,13 @@ public class PlayerViewModel(
                 }
             }
 
+    /** Command feedback stays active while idle without collecting artwork, notes or position. */
+    public val feedbackMessages: StateFlow<ImmutableList<UserMessage>> = messages.flow
+    public val pendingConsent: StateFlow<PlayResult.NeedsMeteredConsent?> =
+        combine(source.pendingMeteredConsent, locallyPendingConsent, ignoredConsent) { retained, local, ignored ->
+            (retained ?: local)?.takeUnless { it == ignored }
+        }.stateIn(viewModelScope, SHARING, source.pendingMeteredConsent.value)
+
     @OptIn(ExperimentalCoroutinesApi::class)
     public val uiState: StateFlow<PlayerUiState> =
         combine(
@@ -221,9 +228,7 @@ public class PlayerViewModel(
             settings.observe(PlaybackSettingKeys.SPEED_PRESETS),
             ::PlayerUiState,
         ).combine(
-            combine(source.pendingMeteredConsent, locallyPendingConsent, ignoredConsent) { retained, local, ignored ->
-                (retained ?: local)?.takeUnless { it == ignored }
-            },
+            pendingConsent,
         ) { state, consent -> state.copy(consent = consent) }
             .combine(
                 settings.observe(AppearanceSettingKeys.MINI_PLAYER_SKIP),
@@ -430,7 +435,7 @@ public class PlayerViewModel(
     }
 
     public fun declineMobileData() {
-        ignoredConsent.value = uiState.value.consent
+        ignoredConsent.value = pendingConsent.value
         locallyPendingConsent.value = null
     }
 

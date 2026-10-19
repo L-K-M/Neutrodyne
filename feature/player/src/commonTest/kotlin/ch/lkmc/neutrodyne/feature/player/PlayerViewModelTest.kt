@@ -87,6 +87,45 @@ class PlayerViewModelTest : MainDispatcherTest() {
         return vm
     }
 
+    @Test fun idleCommandFeedbackDoesNotSubscribeToThePlayerPresentationGraph() =
+        runTest {
+            val vm =
+                PlayerViewModel(
+                    controller,
+                    controller.state,
+                    settings,
+                    clock,
+                    chapters = Provider { error("Idle feedback must not resolve chapters") },
+                    episodes = Provider { error("Idle feedback must not resolve notes") },
+                    network = FakeNetworkMonitor(),
+                    artwork = Provider { error("Idle feedback must not resolve artwork") },
+                    externalOpenService = Provider { FakeYouTubeExternalOpen() },
+                )
+            backgroundScope.launch { vm.pendingConsent.collect {} }
+            runCurrent()
+            controller.state.pendingMeteredConsent.value = PlayResult.NeedsMeteredConsent(8)
+            runCurrent()
+            assertEquals(8L, vm.pendingConsent.value?.episodeId)
+            assertNull(vm.uiState.value.now)
+            assertNull(vm.uiState.value.consent)
+            vm.declineMobileData()
+            runCurrent()
+            assertNull(vm.pendingConsent.value)
+            controller.state.pendingMeteredConsent.value = null
+            runCurrent()
+            controller.playResult = PlayResult.NeedsMeteredConsent(9)
+            vm.togglePlayPause()
+            runCurrent()
+            assertEquals(9L, vm.pendingConsent.value?.episodeId)
+            controller.state.events.emit(PlaybackEvent.StartRefused(PlayResult.Offline))
+            runCurrent()
+            assertTrue(vm.feedbackMessages.value.isNotEmpty())
+            assertTrue(
+                vm.uiState.value.messages
+                    .isEmpty(),
+            )
+        }
+
     @Test fun tintFollowsCurrentArtworkAndClearsOnSwitchOrDismiss() =
         runTest {
             val first =

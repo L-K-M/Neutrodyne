@@ -223,6 +223,8 @@ internal class SmokeMode(
                     icon = remember { WindowIcons.windowIconPainter() },
                 ) {
                     NeutrodyneWindowContent(
+                        settings = graph.settingsRepository,
+                        playbackState = graph.playbackStateSource,
                         installers = graph.entryInstallers,
                         menuActions = menuActions,
                         viewModelFactory = graph.metroViewModelFactory,

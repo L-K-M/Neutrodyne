@@ -110,7 +110,7 @@ class ExternalYouTubeModeTest {
                         ) {
                             NeutrodyneRoot(
                                 RootUiState.READY,
-                                RootActions({}, {}, {}, {}, { false }),
+                                RootActions({}, {}, {}, {}, { false }, {}, {}),
                                 RootSlots(player = {}, userMessages = emptyFlow()),
                                 graph.entryInstallers,
                                 platform = BuildInfo.Platform.DESKTOP,

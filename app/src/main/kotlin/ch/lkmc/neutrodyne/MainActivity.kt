@@ -10,6 +10,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.core.splashscreen.SplashScreen
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.DEFAULT_ARGS_KEY
@@ -49,7 +51,10 @@ import ch.lkmc.neutrodyne.core.ui.root.StartupFailure
 import ch.lkmc.neutrodyne.core.ui.root.StartupGateState
 import ch.lkmc.neutrodyne.di.AndroidAppGraph
 import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
+import ch.lkmc.neutrodyne.feature.player.PlayerFeedbackRoute
+import ch.lkmc.neutrodyne.feature.player.PlayerPanelWriteFeedback
 import ch.lkmc.neutrodyne.feature.player.PlayerRoute
+import ch.lkmc.neutrodyne.feature.player.rememberPlayerPanelPreference
 import ch.lkmc.neutrodyne.feature.queue.PlayerUpNextRoute
 import ch.lkmc.neutrodyne.feature.settings.observeAppearance
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
@@ -98,6 +103,20 @@ class MainActivity : AppCompatActivity() {
                         graph.downloadController().observeFailedCount().collect { emit(it) }
                     }
                 }
+            val panel = rememberPlayerPanelPreference(graph.settingsRepository)
+            val currentPanel by rememberUpdatedState(panel)
+            val rootSlots =
+                remember {
+                    RootSlots(
+                        player = { PlayerRoute(it, upNext = { PlayerUpNextRoute(it.navigate) }) },
+                        ready = { navigate ->
+                            PlayerPanelWriteFeedback(currentPanel)
+                            PlayerFeedbackRoute(navigate)
+                        },
+                        userMessages = emptyFlow(),
+                        importResume = { available, open -> importResumeBanner(available, open) },
+                    )
+                }
             val nowPlaying by graph.playbackStateSource.nowPlaying.collectAsStateWithLifecycle()
             val rowArt by graph.settingsRepository
                 .observe(AppearanceSettingKeys.YOUTUBE_ROW_ART)
@@ -115,9 +134,16 @@ class MainActivity : AppCompatActivity() {
             ) {
                 NeutrodyneRoot(
                     failedDownloads = failedDownloads,
-                    state = ROOT_STATE_BASE.copy(startup = openState.toGateState(), hasNowPlaying = nowPlaying != null),
+                    state =
+                        ROOT_STATE_BASE.copy(
+                            startup = openState.toGateState(),
+                            hasNowPlaying = nowPlaying != null,
+                            playerPanelHidden = panel.hidden,
+                        ),
                     actions =
                         RootActions(
+                            closePlayerPanel = panel.close,
+                            reopenPlayerPanel = panel.reopen,
                             selectFeedSource = { uuid ->
                                 suspendRunCatching {
                                     graph.settingsRepository.set(
@@ -137,7 +163,7 @@ class MainActivity : AppCompatActivity() {
                                 startActivity(Intent(Settings.ACTION_INTERNAL_STORAGE_SETTINGS))
                             },
                         ),
-                    slots = M0_ROOT_SLOTS,
+                    slots = rootSlots,
                     routes = routing.routes,
                     installers = graph.entryInstallers,
                     prefs = appearance.value ?: AppearancePrefs(),
@@ -197,14 +223,6 @@ class MainActivity : AppCompatActivity() {
 
         /** Defaults for notices and remote sessions until their milestones. */
         val ROOT_STATE_BASE = RootUiState.READY
-
-        /** Window player and import-resume content share the root slots. */
-        val M0_ROOT_SLOTS =
-            RootSlots(
-                player = { PlayerRoute(it, upNext = { PlayerUpNextRoute(it.navigate) }) },
-                userMessages = emptyFlow(),
-                importResume = { available, open -> importResumeBanner(available, open) },
-            )
     }
 }
 

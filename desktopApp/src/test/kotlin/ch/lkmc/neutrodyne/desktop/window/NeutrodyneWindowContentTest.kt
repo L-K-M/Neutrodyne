@@ -134,6 +134,8 @@ class NeutrodyneWindowContentTest {
             val menuActions = DesktopMenuActions()
             setContent {
                 NeutrodyneWindowContent(
+                    settings = graph.settingsRepository,
+                    playbackState = graph.playbackStateSource,
                     installers = graph.entryInstallers + platformProbeInstaller { provided = it },
                     menuActions = menuActions,
                     viewModelFactory = graph.metroViewModelFactory,
@@ -165,6 +167,8 @@ class NeutrodyneWindowContentTest {
             }
             setContent {
                 NeutrodyneWindowContent(
+                    settings = graph.settingsRepository,
+                    playbackState = graph.playbackStateSource,
                     installers = graph.entryInstallers,
                     menuActions = DesktopMenuActions(),
                     viewModelFactory = graph.metroViewModelFactory,
@@ -251,6 +255,8 @@ class NeutrodyneWindowContentTest {
         runBlocking { graph.databaseOpener.awaitOpen() }
         setContent {
             NeutrodyneWindowContent(
+                settings = graph.settingsRepository,
+                playbackState = graph.playbackStateSource,
                 installers = graph.entryInstallers,
                 menuActions = DesktopMenuActions(),
                 viewModelFactory = graph.metroViewModelFactory,

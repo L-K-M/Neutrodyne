@@ -5,6 +5,8 @@ package ch.lkmc.neutrodyne.core.ui.root
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.navigation3.runtime.NavKey
+import ch.lkmc.neutrodyne.core.model.PlayerPresentation
+import ch.lkmc.neutrodyne.core.model.WindowPosture
 import ch.lkmc.neutrodyne.core.navigation.PaneLayout
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.UserMessage
@@ -77,10 +79,22 @@ public data class PlayerSlotState(
     val layout: PaneLayout,
     /** Pushes a key onto the selected tab's stack (podcast link, Go to episode, …). */
     val navigate: (NavKey) -> Unit,
+    val onClosePanel: () -> Unit,
+    val onReopenPanel: () -> Unit,
+    val presentation: PlayerPresentation =
+        if (layout.playerPanel) PlayerPresentation.SIDE_PANEL else PlayerPresentation.SHEET,
+    val posture: WindowPosture = WindowPosture(),
+    /** Hidden-panel mini tap/up-drag reopens at this window width, regardless of content width. */
+    val reopenPanelFromMini: Boolean = false,
+    /** Actual suite width at the window start, used only by the collapsed sheet dock. */
+    val contentStartDp: Float = 0f,
     /** Frozen bottom of NavDisplay while the suite is visible, in window pixels. */
     val contentBottomPx: Float = 0f,
     /** Route requests are tokens so repeated deep links are observable. */
     val expandRequest: Int = 0,
+    /** Root acknowledgement survives an idle interval with no player slot. */
+    val initialConsumedExpandRequest: Int = 0,
+    val onExpandRequestConsumed: (Int) -> Unit = {},
     val collapseRequest: Int = 0,
     /** Hide the suite only after the player settles; keep anchors frozen until shown again. */
     val onExpandedSettled: (Boolean) -> Unit = {},
@@ -125,6 +139,8 @@ public class RootActions(
     public val dismissRemoteSession: () -> Unit,
     /** Dispatches a root key chord; returns whether the action ran (for event consumption). */
     public val playbackKey: (PlaybackKey) -> Boolean,
+    public val closePlayerPanel: () -> Unit,
+    public val reopenPlayerPanel: () -> Unit,
     /**
      * The failed gate's storage action: Android runs `ACTION_MANAGE_STORAGE`, the desktop reveals
      * the data folder (08 Banners and the startup gate). `null` hides the button.
@@ -155,6 +171,8 @@ public class RootActions(
 public class RootSlots(
     public val player: @Composable (PlayerSlotState) -> Unit,
     public val userMessages: Flow<UserMessage>,
+    /** Shell hooks that must also run without a player (desktop menus and input feedback). */
+    public val ready: @Composable (navigate: (NavKey) -> Unit) -> Unit = {},
     /** The import feature fills one priority-7 banner position after startup. */
     public val importResume: @Composable (available: Boolean, open: (Long) -> Unit) -> Boolean = { _, _ -> false },
 )
@@ -175,6 +193,8 @@ public data class RootUiState(
     val hasNowPlaying: Boolean = false,
     /** `ui.player_panel_hidden` — the side panel's close button sets it (08 Desktop windows). */
     val playerPanelHidden: Boolean = false,
+    /** Optional deterministic posture injection; production Android reads adaptive window info. */
+    val posture: WindowPosture? = null,
 ) {
     public companion object {
         /** A ready gate with no badge or notices; the M0a default and the tests' base. */

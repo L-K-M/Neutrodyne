@@ -130,7 +130,7 @@ class NeutrodyneRootTest {
             var lastSlot: PlayerSlotState? = null
             setContent {
                 TestRoot(
-                    state = RootUiState.READY.copy(hasNowPlaying = true),
+                    state = RootUiState.READY.copy(hasNowPlaying = true, playerPanelHidden = true),
                     slots =
                         RootSlots(
                             player = { slot ->
@@ -175,7 +175,7 @@ class NeutrodyneRootTest {
         }
 
     @Test
-    fun playerExpansionRouteReachesSlotAndKeepsWideLayoutAsSheet() =
+    fun playerExpansionRouteKeepsWidePanelAndSuite() =
         runComposeUiTest {
             val pending = Channel<Route>(Channel.UNLIMITED)
             val routes = pending.receiveAsFlow()
@@ -191,11 +191,11 @@ class NeutrodyneRootTest {
             waitForIdle()
             runOnIdle {
                 kotlin.test.assertEquals(1, lastSlot?.expandRequest)
-                kotlin.test.assertEquals(false, lastSlot?.layout?.playerPanel)
+                kotlin.test.assertEquals(true, lastSlot?.layout?.playerPanel)
                 kotlin.test.assertTrue(requireNotNull(lastSlot).contentBottomPx > 0f)
                 lastSlot?.onExpandedSettled?.invoke(true)
             }
-            onNodeWithTag("nav_feeds").assertDoesNotExist()
+            onNodeWithTag("nav_feeds").assertExists()
             runOnIdle { lastSlot?.onExpandedSettled?.invoke(false) }
             onNodeWithTag("nav_feeds").assertExists()
         }
@@ -599,6 +599,8 @@ private val TestPlatformActions =
 
 private fun testActions(selectFeedSource: suspend (String?) -> Boolean = { true }): RootActions =
     RootActions(
+        closePlayerPanel = {},
+        reopenPlayerPanel = {},
         retryStartup = {},
         dismissNotice = {},
         continueHere = {},
@@ -619,7 +621,8 @@ private fun TestRoot(
     routes: Flow<Route> = emptyFlow(),
     selectFeedSource: suspend (String?) -> Boolean = { true },
     slots: RootSlots = TestSlots,
-    state: RootUiState = RootUiState.READY.copy(startup = startup),
+    state: RootUiState =
+        RootUiState.READY.copy(startup = startup, hasNowPlaying = slots !== TestSlots, playerPanelHidden = true),
     failedDownloads: Flow<Int> = kotlinx.coroutines.flow.emptyFlow(),
 ) {
     CompositionLocalProvider(LocalPlatformActions provides TestPlatformActions) {

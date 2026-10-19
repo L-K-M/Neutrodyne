@@ -8,24 +8,35 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.AnchoredDraggableDefaults
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.anchoredDraggable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,17 +48,17 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -55,6 +66,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
@@ -62,12 +74,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -75,10 +93,13 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.NavKey
@@ -94,8 +115,12 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.ArtworkTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.LocalReducedMotion
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneMotion
 import ch.lkmc.neutrodyne.core.model.EpisodeChapter
+import ch.lkmc.neutrodyne.core.model.HingeOrientation
+import ch.lkmc.neutrodyne.core.model.HingeState
+import ch.lkmc.neutrodyne.core.model.PlayerPresentation
 import ch.lkmc.neutrodyne.core.model.SleepTimerState
 import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.model.WindowPosture
 import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
@@ -125,6 +150,7 @@ import ch.lkmc.neutrodyne.feature.player.resources.player_back_value
 import ch.lkmc.neutrodyne.feature.player.resources.player_chapter
 import ch.lkmc.neutrodyne.feature.player.resources.player_chapter_image
 import ch.lkmc.neutrodyne.feature.player.resources.player_chapters
+import ch.lkmc.neutrodyne.feature.player.resources.player_close_panel
 import ch.lkmc.neutrodyne.feature.player.resources.player_collapse
 import ch.lkmc.neutrodyne.feature.player.resources.player_continue
 import ch.lkmc.neutrodyne.feature.player.resources.player_description
@@ -158,6 +184,7 @@ import ch.lkmc.neutrodyne.feature.player.resources.player_previous
 import ch.lkmc.neutrodyne.feature.player.resources.player_previous_chapter
 import ch.lkmc.neutrodyne.feature.player.resources.player_previous_symbol
 import ch.lkmc.neutrodyne.feature.player.resources.player_rate_limited
+import ch.lkmc.neutrodyne.feature.player.resources.player_reopen_panel
 import ch.lkmc.neutrodyne.feature.player.resources.player_seconds
 import ch.lkmc.neutrodyne.feature.player.resources.player_settings
 import ch.lkmc.neutrodyne.feature.player.resources.player_speed
@@ -198,55 +225,10 @@ public fun PlayerRoute(
     val copyLabel = stringResource(UiRes.string.action_copy_link)
     val noHandler = stringResource(UiRes.string.no_handler)
     val routeScope = rememberCoroutineScope()
-    val failed by episodeVm.writeFailed.collectAsStateWithLifecycle()
     val snackbar = LocalSnackbarHost.current
-    val failureText = stringResource(Res.string.player_write_failed)
-    LaunchedEffect(failed) {
-        if (failed) {
-            snackbar.showSnackbar(failureText)
-            episodeVm.acknowledgeFailure()
-        }
-    }
     Box(modifier) {
-        ShowUserMessages(ui.messages, vm::onMessageShown) { id ->
-            vm.externalOpen.onAction(id)
-            when (vm.onMessageAction(id)) {
-                PlayerMessageAction.RETRY -> {
-                    vm.togglePlayPause()
-                }
-
-                PlayerMessageAction.PLAYBACK_SETTINGS -> {
-                    slot.navigate(SettingsKey(SettingsPage.PLAYBACK))
-                }
-
-                PlayerMessageAction.WATCH_ON_YOUTUBE -> {
-                    // Capture before acknowledgement clears the snackbar's action mapping.
-                    val episodeId = vm.watchEpisode(id)
-                    if (episodeId != null) {
-                        routeScope.launch {
-                            vm.watchLink(episodeId)?.let { url ->
-                                if (urls.open(url) == OpenResult.OPENED) {
-                                    vm.externalOpen.opened(episodeId)
-                                } else if (snackbar.showSnackbar(noHandler, copyLabel) ==
-                                    androidx.compose.material3.SnackbarResult.ActionPerformed
-                                ) {
-                                    clipboard.setText(
-                                        androidx.compose.ui.text
-                                            .AnnotatedString(url),
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                null -> {
-                    Unit
-                }
-            }
-        }
         PlayerSheet(
-            ui = ui,
+            ui = ui.copy(consent = null),
             position = position,
             slot = slot,
             positionAt = vm::positionAt,
@@ -283,6 +265,77 @@ public fun PlayerRoute(
     }
 }
 
+/** Command results outlive the current item; this never collects player UI, artwork, notes or position. */
+@Composable
+public fun PlayerFeedbackRoute(
+    navigate: (NavKey) -> Unit,
+    vm: PlayerViewModel = metroViewModel(),
+    episodeVm: PlayerEpisodeViewModel = metroViewModel(),
+) {
+    val messages by vm.feedbackMessages.collectAsStateWithLifecycle()
+    val pendingConsent by vm.pendingConsent.collectAsStateWithLifecycle()
+    val urls = LocalPlatformActions.current.urls
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val copyLabel = stringResource(UiRes.string.action_copy_link)
+    val noHandler = stringResource(UiRes.string.no_handler)
+    val routeScope = rememberCoroutineScope()
+    val failed by episodeVm.writeFailed.collectAsStateWithLifecycle()
+    val snackbar = LocalSnackbarHost.current
+    val failureText = stringResource(Res.string.player_write_failed)
+    LaunchedEffect(failed) {
+        if (failed) {
+            snackbar.showSnackbar(failureText)
+            episodeVm.acknowledgeFailure()
+        }
+    }
+    ShowUserMessages(messages, vm::onMessageShown) { id ->
+        vm.externalOpen.onAction(id)
+        when (vm.onMessageAction(id)) {
+            PlayerMessageAction.RETRY -> {
+                vm.togglePlayPause()
+            }
+
+            PlayerMessageAction.PLAYBACK_SETTINGS -> {
+                navigate(SettingsKey(SettingsPage.PLAYBACK))
+            }
+
+            PlayerMessageAction.WATCH_ON_YOUTUBE -> {
+                // Capture before acknowledgement clears the snackbar's action mapping.
+                val episodeId = vm.watchEpisode(id)
+                if (episodeId != null) {
+                    routeScope.launch {
+                        vm.watchLink(episodeId)?.let { url ->
+                            if (urls.open(url) == OpenResult.OPENED) {
+                                vm.externalOpen.opened(episodeId)
+                            } else if (snackbar.showSnackbar(noHandler, copyLabel) ==
+                                androidx.compose.material3.SnackbarResult.ActionPerformed
+                            ) {
+                                clipboard.setText(
+                                    androidx.compose.ui.text
+                                        .AnnotatedString(url),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            null -> {
+                Unit
+            }
+        }
+    }
+
+    if (pendingConsent != null) {
+        NdDialog(
+            onDismissRequest = vm::declineMobileData,
+            title = stringResource(Res.string.player_mobile_consent),
+            confirm = NdDialogAction(stringResource(Res.string.player_continue), onClick = vm::continueOnMobileData),
+            dismiss = NdDialogAction(stringResource(Res.string.player_not_now), onClick = vm::declineMobileData),
+        )
+    }
+}
+
 /** One surface and artwork morph continuously between the mini and full layouts. */
 @Composable
 public fun PlayerSheet(
@@ -311,7 +364,11 @@ public fun PlayerSheet(
 ) {
     ArtworkTheme(
         ui.colors?.seedArgb,
-        if (state.progress > MINI_SEMANTICS_END) ArtworkSurface.FULL else ArtworkSurface.MINI,
+        if (slot.presentation == PlayerPresentation.SIDE_PANEL || state.progress > MINI_SEMANTICS_END) {
+            ArtworkSurface.FULL
+        } else {
+            ArtworkSurface.MINI
+        },
     ) {
         PlayerSheetContent(
             ui,
@@ -371,8 +428,21 @@ private fun PlayerSheetContent(
     val now = ui.now
     val reducedMotion = LocalReducedMotion.current
     val scope = rememberCoroutineScope()
+    val moveControls = remember { movableContentOf<@Composable () -> Unit> { content -> content() } }
+    val fullScrollState = rememberScrollState()
+    val controlsState = rememberSaveableStateHolder()
+    val miniFocus = remember { FocusRequester() }
+    var wasExpanded by remember { mutableStateOf(false) }
     val density = LocalDensity.current
-    val expanded = state.settledExpanded && now != null
+    val sidePanel = slot.presentation == PlayerPresentation.SIDE_PANEL
+    val expanded = (sidePanel || (!slot.reopenPanelFromMini && state.settledExpanded)) && now != null
+    LaunchedEffect(state.drag.settledValue, sidePanel, now != null) {
+        if (wasExpanded && !sidePanel && state.drag.settledValue == PlayerSheetValue.Collapsed && now != null) {
+            withFrameMillis { }
+            miniFocus.requestFocus()
+        }
+        wasExpanded = !sidePanel && state.drag.settledValue == PlayerSheetValue.Expanded
+    }
     LaunchedEffect(ui.chapters.isEmpty()) {
         if (ui.chapters.isEmpty() && activeTab == PlayerTab.CHAPTERS) selectedTab = PlayerTab.UP_NEXT.name
     }
@@ -384,13 +454,21 @@ private fun PlayerSheetContent(
     }
     val settled by rememberUpdatedState(slot.onExpandedSettled)
     val dismissPaused by rememberUpdatedState(dismiss)
-    SideEffect { settled(expanded) }
+    SideEffect { settled(expanded && !sidePanel) }
+    var previousPresentation by rememberSaveable { mutableStateOf(slot.presentation.name) }
+    LaunchedEffect(slot.presentation) {
+        if (sidePanel || previousPresentation != slot.presentation.name) state.collapse(true)
+        previousPresentation = slot.presentation.name
+    }
     DisposableEffect(Unit) { onDispose { settled(false) } }
-    var consumedExpand by rememberSaveable { mutableIntStateOf(0) }
+    var consumedExpand by rememberSaveable { mutableIntStateOf(slot.initialConsumedExpandRequest) }
     LaunchedEffect(slot.expandRequest, now?.episodeId) {
         if (slot.expandRequest > consumedExpand && now != null) {
             consumedExpand = slot.expandRequest
-            state.expand(reducedMotion)
+            slot.onExpandRequestConsumed(consumedExpand)
+            if (!sidePanel) {
+                if (slot.reopenPanelFromMini) slot.onReopenPanel() else state.expand(reducedMotion)
+            }
         }
     }
     var consumedCollapse by rememberSaveable { mutableIntStateOf(0) }
@@ -410,7 +488,7 @@ private fun PlayerSheetContent(
         }
     }
     Box(modifier.fillMaxSize()) {
-        PlayerBackHandler(state, panelOpen) { panelOpen = false }
+        if (!sidePanel && !slot.reopenPanelFromMini) PlayerBackHandler(state, panelOpen) { panelOpen = false }
         // Consent may arrive before nowPlaying exists, so it must outlive the visible sheet.
         if (ui.consent != null) {
             NdDialog(
@@ -422,7 +500,10 @@ private fun PlayerSheetContent(
         }
         if (now == null) return@Box
 
-        val expandLabel = stringResource(Res.string.player_expand)
+        val expandLabel =
+            stringResource(
+                if (slot.reopenPanelFromMini) Res.string.player_reopen_panel else Res.string.player_expand,
+            )
         val collapseLabel = stringResource(Res.string.player_collapse)
         val dismissLabel = stringResource(Res.string.player_dismiss)
         val playLabel =
@@ -443,18 +524,14 @@ private fun PlayerSheetContent(
                 now.podcastTitle,
                 stringResource(if (now.isPlaying) Res.string.player_playing else Res.string.player_paused),
             )
-        val backLabel = stringResource(Res.string.player_back, ui.skipBackMs / MILLIS_PER_SECOND)
-        val previousLabel =
-            stringResource(
-                if (ui.chapters.isEmpty()) Res.string.player_previous else Res.string.player_previous_chapter,
-            )
-        val nextLabel =
-            stringResource(if (ui.chapters.isEmpty()) Res.string.player_next else Res.string.player_next_chapter)
         val paused = !now.isPlaying && !now.playWhenReady
-        val expand: () -> Unit = { scope.launch { state.expand(reducedMotion) } }
+        val expand: () -> Unit = {
+            if (slot.reopenPanelFromMini) slot.onReopenPanel() else scope.launch { state.expand(reducedMotion) }
+        }
+        val expandArtwork by rememberUpdatedState(expand)
         val collapse: () -> Unit = { scope.launch { state.collapse(reducedMotion) } }
         val navigate: (NavKey) -> Unit = { key ->
-            if (key == SpeedKey || key == SleepTimerKey) {
+            if (sidePanel || key == SpeedKey || key == SleepTimerKey) {
                 slot.navigate(key)
             } else {
                 scope.launch {
@@ -464,16 +541,106 @@ private fun PlayerSheetContent(
             }
         }
 
-        BoxWithConstraints(Modifier.fillMaxSize().testTag("playerHost")) {
+        BoxWithConstraints(
+            Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                .testTag("playerHost"),
+        ) {
             val upNextMaxHeight = maxHeight * UP_NEXT_HEIGHT_FRACTION
             val heightPx = with(density) { maxHeight.toPx() }
             val contentBottom = slot.contentBottomPx.takeIf { it > 0f } ?: heightPx
             val collapsedPx = (contentBottom - with(density) { MINI_ANCHOR_SPACE.toPx() }).coerceAtLeast(0f)
             val dismissDistance = with(density) { DISMISS_DISTANCE.toPx() }
-            LaunchedEffect(collapsedPx, paused, dismissDistance) {
-                state.setAnchors(collapsedPx, dismissDistance, paused)
+            LaunchedEffect(collapsedPx, paused, dismissDistance, sidePanel, slot.reopenPanelFromMini) {
+                if (!sidePanel) state.setAnchors(collapsedPx, dismissDistance, paused)
             }
-            val progress = state.progress
+            // Hidden wide panels use the mini affordance; an upward drag must not create a sheet.
+            LaunchedEffect(state.drag.settledValue, slot.reopenPanelFromMini, sidePanel) {
+                if (!sidePanel && slot.reopenPanelFromMini && state.drag.settledValue == PlayerSheetValue.Expanded) {
+                    slot.onReopenPanel()
+                    state.collapse(true)
+                }
+            }
+            val dragModifier = playerSheetDrag(state)
+            val sharedControls: @Composable () -> Unit = {
+                controlsState.SaveableStateProvider("player-controls") {
+                    PlayerControls(
+                        ui,
+                        position,
+                        positionAt,
+                        toggle,
+                        back,
+                        forward,
+                        previous,
+                        next,
+                        seek,
+                        navigate,
+                        consent,
+                        declineConsent,
+                        upNext,
+                        notes,
+                        onLink,
+                        activeTab,
+                        panelOpen,
+                        {
+                            selectedTab = it.name
+                            panelOpen = true
+                        },
+                        upNextMaxHeight,
+                        compactLandscape = maxHeight < 480.dp && maxWidth > maxHeight,
+                    )
+                }
+            }
+            val adaptive =
+                sidePanel || (
+                    state.drag.settledValue == PlayerSheetValue.Expanded && (
+                        (maxWidth > maxHeight) ||
+                            slot.posture.hinges.any {
+                                it.orientation == HingeOrientation.HORIZONTAL && it.state == HingeState.HALF_OPENED
+                            }
+                    )
+                )
+            if (adaptive) {
+                AdaptivePlayerBody(
+                    ui = ui,
+                    posture = slot.posture,
+                    panel = sidePanel,
+                    sheetOffsetPx = if (sidePanel) 0f else collapsedPx * (1f - state.progress),
+                    sheetState = if (sidePanel) null else state,
+                    close = if (sidePanel) slot.onClosePanel else collapse,
+                    menu = { PlayerMenu(now, navigate, markPlayed, stop, ui.chapters.isNotEmpty(), nextEpisode) },
+                    artwork = { artModifier ->
+                        Box(artModifier) {
+                            CoverArt(
+                                ref = now.artwork,
+                                avgArgb = ui.colors?.avgArgb,
+                                monogram = rememberMonogram(now.podcastTitle),
+                                title = now.podcastTitle,
+                                tier = CoverTier.HERO,
+                                aspect =
+                                    if (now.sourceType != SourceType.RSS) CoverAspect.WIDE_16_9 else CoverAspect.SQUARE,
+                                modifier = Modifier.fillMaxSize().testTag("playerArtwork"),
+                            )
+                            ui.currentChapter?.chapter?.imageUrl?.let { url ->
+                                ChapterArtwork(
+                                    url,
+                                    stringResource(
+                                        Res.string.player_chapter_image,
+                                        ui.currentChapter.chapter.title
+                                            .orEmpty(),
+                                    ),
+                                    Modifier.fillMaxSize(),
+                                )
+                            }
+                        }
+                    },
+                    scrollState = fullScrollState,
+                    controls = { moveControls(sharedControls) },
+                )
+                return@BoxWithConstraints
+            }
+            val progress = if (slot.reopenPanelFromMini) 0f else state.progress
             val statusBar =
                 with(density) {
                     WindowInsets.statusBars
@@ -488,17 +655,6 @@ private fun PlayerSheetContent(
                     PlayerGeometry(maxWidth.value, maxHeight.value, statusBar, if (wideArt) WIDE_ART_ASPECT else 1f),
                 )
             val artworkHeight = morph.artworkHeight
-            val dragModifier =
-                Modifier.anchoredDraggable(
-                    state.drag,
-                    Orientation.Vertical,
-                    flingBehavior =
-                        AnchoredDraggableDefaults.flingBehavior(
-                            state = state.drag,
-                            positionalThreshold = { it * SETTLE_FRACTION },
-                            animationSpec = NeutrodyneMotion.spatial(reducedMotion),
-                        ),
-                )
             val topPx =
                 collapsedPx * (1f - progress) +
                     (
@@ -511,8 +667,10 @@ private fun PlayerSheetContent(
                 modifier =
                     Modifier
                         .offset { IntOffset(0, topPx.roundToInt()) }
-                        .padding(horizontal = morph.inset.dp)
-                        .fillMaxWidth()
+                        .padding(
+                            start = (morph.inset + slot.contentStartDp * (1f - progress)).dp,
+                            end = morph.inset.dp,
+                        ).fillMaxWidth()
                         .height(sheetHeight)
                         .testTag("playerSheet"),
                 shape = RoundedCornerShape(morph.corner.dp),
@@ -552,6 +710,7 @@ private fun PlayerSheetContent(
                                 .fillMaxWidth()
                                 .height(MINI_HEIGHT)
                                 .graphicsLayer { alpha = morph.miniAlpha }
+                                .focusRequester(miniFocus)
                                 .clickable(onClickLabel = expandLabel, onClick = expand)
                                 .clearAndSetSemantics {
                                     this[SemanticsProperties.TestTag] = "miniPlayer"
@@ -651,217 +810,19 @@ private fun PlayerSheetContent(
                                     translationY =
                                         morph.controlsOffset.dp.toPx()
                                 }.padding(top = statusBar.dp)
-                                .verticalScroll(rememberScrollState())
+                                .windowInsetsPadding(WindowInsets.ime)
+                                .verticalScroll(fullScrollState)
                                 .testTag("fullPlayer"),
                         ) {
                             Spacer(Modifier.height(PLAYER_HEADER_HEIGHT + artworkHeight.dp + 16.dp))
-                            Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
-                                Text(
-                                    now.title,
-                                    style = MaterialTheme.typography.titleLarge,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                TextButton(onClick = { navigate(PodcastKey(now.podcastId)) }) { Text(now.podcastTitle) }
-                                if (now.isVideo) Text(stringResource(UiRes.string.summary_video))
-                                ui.currentChapter?.let { current ->
-                                    TextButton({
-                                        selectedTab = PlayerTab.CHAPTERS.name
-                                        panelOpen = true
-                                    }) {
-                                        Text(
-                                            stringResource(
-                                                Res.string.player_chapter,
-                                                current.index + 1,
-                                                current.chapter.title.orEmpty(),
-                                            ),
-                                        )
-                                    }
-                                }
-                                PlayerScrubber(
-                                    position?.takeIf {
-                                        it.episodeId == now.episodeId
-                                    } ?: now.position,
-                                    positionAt,
-                                    seek,
-                                    back,
-                                    forward,
-                                    ui.skipBackMs,
-                                    ui.skipForwardMs,
-                                    ui.chapters,
-                                )
-                                Row(
-                                    Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceEvenly,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    TextButton(
-                                        onClick = back,
-                                        modifier =
-                                            Modifier.semantics {
-                                                contentDescription =
-                                                    backLabel
-                                            },
-                                    ) {
-                                        Text(
-                                            stringResource(
-                                                Res.string.player_back_value,
-                                                ui.skipBackMs / MILLIS_PER_SECOND,
-                                            ),
-                                        )
-                                    }
-                                    TextButton(
-                                        onClick = previous,
-                                        modifier =
-                                            Modifier.semantics {
-                                                contentDescription =
-                                                    previousLabel
-                                            },
-                                    ) { Text(stringResource(Res.string.player_previous_symbol)) }
-                                    PlayButton(now, toggle, playLabel, presentation = TransportPresentation.FULL)
-                                    TextButton(
-                                        onClick = next,
-                                        enabled = ui.chapters.isNotEmpty() || now.hasNext,
-                                        modifier =
-                                            Modifier.semantics {
-                                                contentDescription =
-                                                    nextLabel
-                                            },
-                                    ) { Text(stringResource(Res.string.player_next_symbol)) }
-                                    TextButton(
-                                        onClick = forward,
-                                        modifier =
-                                            Modifier.semantics {
-                                                contentDescription = forwardLabel
-                                            },
-                                    ) {
-                                        Text(
-                                            stringResource(
-                                                Res.string.player_forward_value,
-                                                ui.skipForwardMs / MILLIS_PER_SECOND,
-                                            ),
-                                        )
-                                    }
-                                }
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                    TextButton(onClick = { navigate(SpeedKey) }) {
-                                        Text(
-                                            stringResource(
-                                                Res.string.player_speed,
-                                                (
-                                                    ui.effective?.speed?.value
-                                                        ?: 1f
-                                                ).toString(),
-                                            ),
-                                        )
-                                    }
-                                    TextButton(onClick = { navigate(SleepTimerKey) }) {
-                                        Text(
-                                            when (val timer = ui.sleepTimer) {
-                                                SleepTimerState.Off -> {
-                                                    stringResource(Res.string.sleep_title)
-                                                }
-
-                                                is SleepTimerState.Running -> {
-                                                    stringResource(
-                                                        Res.string.sleep_minutes,
-                                                        (
-                                                            (
-                                                                timer.remainingMs +
-                                                                    59_999
-                                                            ) /
-                                                                60_000
-                                                        ).toInt(),
-                                                    )
-                                                }
-
-                                                is SleepTimerState.EndOfEpisode -> {
-                                                    stringResource(Res.string.sleep_end)
-                                                }
-                                            },
-                                        )
-                                    }
-                                    TextButton(onClick = {
-                                        selectedTab = PlayerTab.UP_NEXT.name
-                                        panelOpen = true
-                                    }) {
-                                        Text(stringResource(Res.string.player_up_next))
-                                    }
-                                }
-                                ui.effective?.let {
-                                    Text(
-                                        AttributionText.describe(it.speed.source).asString(),
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                }
-                                PlayerIssue(
-                                    now.issue ?: if (now.phase ==
-                                        PlayerPhase.ERROR
-                                    ) {
-                                        PlaybackIssue.PLAYER_ERROR
-                                    } else {
-                                        null
-                                    },
-                                    consent,
-                                    declineConsent,
-                                    toggle,
-                                ) { navigate(SettingsKey(SettingsPage.PLAYBACK)) }
-                                val tabs =
-                                    PlayerTab.entries.filter {
-                                        it != PlayerTab.CHAPTERS ||
-                                            ui.chapters.isNotEmpty()
-                                    }
-                                PrimaryTabRow(tabs.indexOf(activeTab).coerceAtLeast(0)) {
-                                    tabs.forEach { tab ->
-                                        Tab(panelOpen && activeTab == tab, onClick = {
-                                            selectedTab = tab.name
-                                            panelOpen =
-                                                true
-                                        }, text = {
-                                            Text(
-                                                when (tab) {
-                                                    PlayerTab.UP_NEXT -> {
-                                                        stringResource(Res.string.player_up_next)
-                                                    }
-
-                                                    PlayerTab.CHAPTERS -> {
-                                                        stringResource(
-                                                            Res.string.player_chapters,
-                                                            ui.chapters.size,
-                                                        )
-                                                    }
-
-                                                    PlayerTab.NOTES -> {
-                                                        stringResource(Res.string.player_notes)
-                                                    }
-                                                },
-                                            )
-                                        })
-                                    }
-                                }
-                                if (panelOpen) {
-                                    Box(Modifier.fillMaxWidth().heightIn(max = upNextMaxHeight)) {
-                                        when (activeTab) {
-                                            PlayerTab.UP_NEXT -> {
-                                                upNext()
-                                            }
-
-                                            PlayerTab.CHAPTERS -> {
-                                                ChapterList(ui.chapters, ui.currentChapter, seek)
-                                            }
-
-                                            PlayerTab.NOTES -> {
-                                                PlayerNotes(
-                                                    notes,
-                                                    now.position.durationMs,
-                                                    seek,
-                                                    onLink,
-                                                    now.episodeId,
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
+                            Column(
+                                Modifier
+                                    .widthIn(max = 720.dp)
+                                    .fillMaxWidth()
+                                    .align(Alignment.CenterHorizontally)
+                                    .padding(horizontal = 24.dp),
+                            ) {
+                                moveControls(sharedControls)
                                 Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.safeDrawing))
                             }
                         }
@@ -914,7 +875,17 @@ private fun PlayerSheetContent(
                                     ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = ART_SHADOW_ALPHA),
                                     spotColor = MaterialTheme.colorScheme.primary.copy(alpha = ART_SHADOW_ALPHA),
                                 ).then(dragModifier)
-                                .testTag("playerArtwork"),
+                                .pointerInput(state) {
+                                    // Observe the tap without consuming drag ownership or adding an art focus stop.
+                                    awaitEachGesture {
+                                        awaitFirstDown(requireUnconsumed = false)
+                                        if (waitForUpOrCancellation() != null &&
+                                            state.drag.settledValue == PlayerSheetValue.Collapsed
+                                        ) {
+                                            expandArtwork()
+                                        }
+                                    }
+                                }.testTag("playerArtwork"),
                     )
                     if (expanded) {
                         ui.currentChapter?.chapter?.imageUrl?.let { url ->
@@ -944,6 +915,369 @@ private fun PlayerSheetContent(
                                 ).size(8.dp)
                                 .clip(RoundedCornerShape(4.dp))
                                 .background(MaterialTheme.colorScheme.error),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Keep pointer ownership on the art/header; scrolling controls never own sheet dragging. */
+@Composable
+private fun playerSheetDrag(state: PlayerSheetState?): Modifier {
+    if (state == null) return Modifier
+    return Modifier.anchoredDraggable(
+        state.drag,
+        Orientation.Vertical,
+        flingBehavior =
+            AnchoredDraggableDefaults.flingBehavior(
+                state = state.drag,
+                positionalThreshold = { it * SETTLE_FRACTION },
+                animationSpec = NeutrodyneMotion.spatial(LocalReducedMotion.current),
+            ),
+    )
+}
+
+/** Shared geometry is measured inside safe drawing/IME space; hinge origin stays in window dp. */
+@Composable
+private fun AdaptivePlayerBody(
+    ui: PlayerUiState,
+    posture: WindowPosture,
+    panel: Boolean,
+    sheetOffsetPx: Float,
+    close: () -> Unit,
+    menu: @Composable () -> Unit,
+    artwork: @Composable (Modifier) -> Unit,
+    scrollState: androidx.compose.foundation.ScrollState,
+    sheetState: PlayerSheetState?,
+    controls: @Composable () -> Unit,
+) {
+    val density = LocalDensity.current
+    val dragModifier = playerSheetDrag(sheetState)
+    var origin by remember { mutableStateOf(Offset.Zero) }
+    Surface(
+        Modifier
+            .fillMaxSize()
+            .offset { IntOffset(0, sheetOffsetPx.roundToInt()) }
+            .testTag(if (panel) "playerSidePanel" else "fullPlayer"),
+    ) {
+        BoxWithConstraints(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.surface),
+                    ),
+                ).windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.ime))
+                .onGloballyPositioned { origin = it.positionInWindow() },
+        ) {
+            val geometry =
+                adaptivePlayerGeometry(
+                    maxWidth.value,
+                    maxHeight.value,
+                    origin.x / density.density,
+                    origin.y / density.density,
+                    posture,
+                )
+
+            fun region(bounds: ch.lkmc.neutrodyne.core.model.WindowRectDp): Modifier =
+                Modifier
+                    .offset(bounds.left.dp, bounds.top.dp)
+                    .size((bounds.right - bounds.left).dp, (bounds.bottom - bounds.top).dp)
+            Box(
+                region(geometry.art).padding(16.dp).then(dragModifier).testTag("playerArtRegion"),
+                contentAlignment = Alignment.Center,
+            ) {
+                BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    val wide = ui.now?.sourceType != SourceType.RSS
+                    val aspect = if (wide) WIDE_ART_ASPECT else 1f
+                    val width = minOf(maxWidth, maxHeight * aspect, if (panel) 320.dp else 480.dp)
+                    artwork(Modifier.size(width, width / aspect))
+                }
+            }
+            Column(
+                region(geometry.controls)
+                    .testTag("playerControlsRegion")
+                    .verticalScroll(scrollState),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Column(Modifier.widthIn(max = 720.dp).fillMaxWidth().padding(horizontal = 16.dp)) {
+                    Row(Modifier.fillMaxWidth().then(dragModifier), verticalAlignment = Alignment.CenterVertically) {
+                        NdIconButton(
+                            close,
+                            NdIcons.Close,
+                            stringResource(if (panel) Res.string.player_close_panel else Res.string.player_collapse),
+                        )
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(Res.string.player_now))
+                            ui.now
+                                ?.context
+                                ?.takeIf { it.type != ch.lkmc.neutrodyne.core.model.ContextType.EXTERNAL }
+                                ?.let {
+                                    Text(it.title, style = MaterialTheme.typography.bodySmall)
+                                }
+                        }
+                        menu()
+                    }
+                    controls()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlayerControls(
+    ui: PlayerUiState,
+    position: PositionSnapshot?,
+    positionAt: (PositionSnapshot) -> Long,
+    toggle: () -> Unit,
+    back: () -> Unit,
+    forward: () -> Unit,
+    previous: () -> Unit,
+    next: () -> Unit,
+    seek: (Long) -> Unit,
+    navigate: (NavKey) -> Unit,
+    consent: () -> Unit,
+    declineConsent: () -> Unit,
+    upNext: @Composable () -> Unit,
+    notes: PlayerNotesState,
+    onLink: (String) -> Unit,
+    activeTab: PlayerTab,
+    panelOpen: Boolean,
+    openTab: (PlayerTab) -> Unit,
+    upNextMaxHeight: androidx.compose.ui.unit.Dp,
+    compactLandscape: Boolean,
+) {
+    val now = ui.now ?: return
+    val playLabel =
+        stringResource(
+            if (now.isPlaying || now.playWhenReady) Res.string.player_pause else Res.string.player_play,
+        )
+    val backLabel = stringResource(Res.string.player_back, ui.skipBackMs / MILLIS_PER_SECOND)
+    val forwardLabel = stringResource(Res.string.player_forward, ui.skipForwardMs / MILLIS_PER_SECOND)
+    val previousLabel =
+        stringResource(
+            if (ui.chapters.isEmpty()) Res.string.player_previous else Res.string.player_previous_chapter,
+        )
+    val nextLabel =
+        stringResource(
+            if (ui.chapters.isEmpty()) Res.string.player_next else Res.string.player_next_chapter,
+        )
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            now.title,
+            style = MaterialTheme.typography.titleLarge,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        TextButton(onClick = { navigate(PodcastKey(now.podcastId)) }) { Text(now.podcastTitle) }
+        if (now.isVideo) Text(stringResource(UiRes.string.summary_video))
+        ui.currentChapter?.let { current ->
+            TextButton({
+                openTab(PlayerTab.CHAPTERS)
+            }) {
+                Text(
+                    stringResource(
+                        Res.string.player_chapter,
+                        current.index + 1,
+                        current.chapter.title.orEmpty(),
+                    ),
+                )
+            }
+        }
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+            PlayerScrubber(
+                position?.takeIf {
+                    it.episodeId == now.episodeId
+                } ?: now.position,
+                positionAt,
+                seek,
+                back,
+                forward,
+                ui.skipBackMs,
+                ui.skipForwardMs,
+                ui.chapters,
+            )
+            FlowRow(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                itemVerticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(
+                    onClick = back,
+                    modifier =
+                        Modifier.semantics {
+                            contentDescription =
+                                backLabel
+                        },
+                ) {
+                    Text(
+                        stringResource(
+                            Res.string.player_back_value,
+                            ui.skipBackMs / MILLIS_PER_SECOND,
+                        ),
+                    )
+                }
+                TextButton(
+                    onClick = previous,
+                    modifier =
+                        Modifier.semantics {
+                            contentDescription =
+                                previousLabel
+                        },
+                ) { Text(stringResource(Res.string.player_previous_symbol)) }
+                PlayButton(now, toggle, playLabel, presentation = TransportPresentation.FULL)
+                TextButton(
+                    onClick = next,
+                    enabled = ui.chapters.isNotEmpty() || now.hasNext,
+                    modifier =
+                        Modifier.semantics {
+                            contentDescription =
+                                nextLabel
+                        },
+                ) { Text(stringResource(Res.string.player_next_symbol)) }
+                TextButton(
+                    onClick = forward,
+                    modifier =
+                        Modifier.semantics {
+                            contentDescription = forwardLabel
+                        },
+                ) {
+                    Text(
+                        stringResource(
+                            Res.string.player_forward_value,
+                            ui.skipForwardMs / MILLIS_PER_SECOND,
+                        ),
+                    )
+                }
+            }
+        }
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            TextButton(onClick = { navigate(SpeedKey) }) {
+                Text(
+                    stringResource(
+                        Res.string.player_speed,
+                        (
+                            ui.effective?.speed?.value
+                                ?: 1f
+                        ).toString(),
+                    ),
+                )
+            }
+            TextButton(onClick = { navigate(SleepTimerKey) }) {
+                Text(
+                    when (val timer = ui.sleepTimer) {
+                        SleepTimerState.Off -> {
+                            stringResource(Res.string.sleep_title)
+                        }
+
+                        is SleepTimerState.Running -> {
+                            stringResource(
+                                Res.string.sleep_minutes,
+                                (
+                                    (
+                                        timer.remainingMs +
+                                            59_999
+                                    ) /
+                                        60_000
+                                ).toInt(),
+                            )
+                        }
+
+                        is SleepTimerState.EndOfEpisode -> {
+                            stringResource(Res.string.sleep_end)
+                        }
+                    },
+                )
+            }
+            TextButton(onClick = {
+                openTab(PlayerTab.UP_NEXT)
+            }) {
+                Text(stringResource(Res.string.player_up_next))
+            }
+        }
+        ui.effective?.let {
+            Text(
+                AttributionText.describe(it.speed.source).asString(),
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        PlayerIssue(
+            now.issue ?: if (now.phase ==
+                PlayerPhase.ERROR
+            ) {
+                PlaybackIssue.PLAYER_ERROR
+            } else {
+                null
+            },
+            consent,
+            declineConsent,
+            toggle,
+        ) { navigate(SettingsKey(SettingsPage.PLAYBACK)) }
+        val tabs =
+            PlayerTab.entries.filter {
+                it != PlayerTab.CHAPTERS ||
+                    ui.chapters.isNotEmpty()
+            }
+        if (!compactLandscape || panelOpen) {
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                tabs.forEach { tab ->
+                    TextButton(
+                        onClick = { openTab(tab) },
+                        modifier =
+                            Modifier
+                                .heightIn(min = 48.dp)
+                                .background(
+                                    if (panelOpen && activeTab == tab) {
+                                        MaterialTheme.colorScheme.secondaryContainer
+                                    } else {
+                                        androidx.compose.ui.graphics.Color.Transparent
+                                    },
+                                    RoundedCornerShape(16.dp),
+                                ).semantics {
+                                    role = androidx.compose.ui.semantics.Role.Tab
+                                    selected = panelOpen && activeTab == tab
+                                },
+                    ) {
+                        Text(
+                            when (tab) {
+                                PlayerTab.UP_NEXT -> {
+                                    stringResource(Res.string.player_up_next)
+                                }
+
+                                PlayerTab.CHAPTERS -> {
+                                    stringResource(Res.string.player_chapters, ui.chapters.size)
+                                }
+
+                                PlayerTab.NOTES -> {
+                                    stringResource(Res.string.player_notes)
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+        }
+        if (panelOpen) {
+            Box(Modifier.fillMaxWidth().heightIn(max = upNextMaxHeight)) {
+                when (activeTab) {
+                    PlayerTab.UP_NEXT -> {
+                        upNext()
+                    }
+
+                    PlayerTab.CHAPTERS -> {
+                        ChapterList(ui.chapters, ui.currentChapter, seek)
+                    }
+
+                    PlayerTab.NOTES -> {
+                        PlayerNotes(
+                            notes,
+                            now.position.durationMs,
+                            seek,
+                            onLink,
+                            now.episodeId,
                         )
                     }
                 }
@@ -1051,7 +1385,7 @@ private fun PlayerIssue(
         Text(stringResource(text), color = MaterialTheme.colorScheme.error)
         when (issue) {
             PlaybackIssue.METERED_PAUSE -> {
-                Row {
+                FlowRow {
                     TextButton(onClick = consent) { Text(stringResource(Res.string.player_continue)) }
                     TextButton(onClick = decline) { Text(stringResource(Res.string.player_not_now)) }
                 }

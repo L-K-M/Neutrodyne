@@ -394,7 +394,7 @@ class PlayerSheetTest {
         }
 }
 
-private class SheetFixture(
+internal class SheetFixture(
     initial: PlayerSheetValue = PlayerSheetValue.Collapsed,
 ) {
     val state = PlayerSheetState(initial)
@@ -402,9 +402,18 @@ private class SheetFixture(
     var chapters by mutableStateOf<List<EpisodeChapter>>(emptyList())
     var pending by mutableStateOf<PlayResult.NeedsMeteredConsent?>(null)
     var expandToken by mutableIntStateOf(0)
+    var consumedExpandToken by mutableIntStateOf(0)
     var collapseToken by mutableIntStateOf(0)
     var contentBottomPx = 0f
     var miniSkip = true
+    var layout by mutableStateOf(PaneLayout(1, false, 400))
+    var posture by mutableStateOf(
+        ch.lkmc.neutrodyne.core.model
+            .WindowPosture(),
+    )
+    var reopenPanelFromMini by mutableStateOf(false)
+    var onClosePanel: () -> Unit = { calls += "closePanel" }
+    var onReopenPanel: () -> Unit = { calls += "reopenPanel" }
     val calls = mutableListOf<String>()
     val navigated = mutableListOf<androidx.navigation3.runtime.NavKey>()
     var expanded = false
@@ -412,6 +421,7 @@ private class SheetFixture(
     @androidx.compose.runtime.Composable
     fun Content(
         sheetState: PlayerSheetState = state,
+        slotOverride: PlayerSlotState? = null,
         upNext: @androidx.compose.runtime.Composable () -> Unit = {},
     ) {
         NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT.copy(reducedMotion = true)) {
@@ -419,11 +429,17 @@ private class SheetFixture(
                 ui = PlayerUiState(now = now, consent = pending, miniSkip = miniSkip, chapters = chapters),
                 position = now?.position,
                 slot =
-                    PlayerSlotState(
-                        PaneLayout(1, false, 400),
+                    slotOverride ?: PlayerSlotState(
+                        layout,
                         { navigated += it },
+                        onClosePanel = onClosePanel,
+                        onReopenPanel = onReopenPanel,
+                        posture = posture,
+                        reopenPanelFromMini = reopenPanelFromMini,
                         contentBottomPx = contentBottomPx,
                         expandRequest = expandToken,
+                        initialConsumedExpandRequest = consumedExpandToken,
+                        onExpandRequestConsumed = { consumedExpandToken = it },
                         collapseRequest = collapseToken,
                         onExpandedSettled = { expanded = it },
                     ),
