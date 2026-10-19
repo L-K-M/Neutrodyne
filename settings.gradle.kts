@@ -106,4 +106,5 @@ include(
     ":feature:settings",
     ":feature:sync",
 )
-// M6b: include(":benchmark")   v1.x: include(":feature:widgets")
+include(":benchmark")
+// v1.x: include(":feature:widgets")

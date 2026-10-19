@@ -523,6 +523,36 @@ private fun Project.disableEmptyDeviceTests() = extensions.getByType<AndroidComp
 
 ### Out-of-process system tests
 
+**Implementation note (2026-10-19, M6b).** W10's self-instrumenting
+`:benchmark` producer uses the recorded `benchmarkRelease` fallback; published
+`release` mapping remains Unverified. `scripts/ci/system-tests.sh` runs E10 on
+full-image `bench34`, smoke on ATD `api36` and connected API 37. It records
+SHA/device/variant metadata, removes old XML, and requires one named, non-skipped
+pass from that variant/device. Empty, failed, skipped and duplicate results fail.
+Nightly `system-tests`, `instrumented-full` and API 37 enforce this gate.
+
+E10's test-APK server supplies a strong-ETag WAV. Assertions cover PID death and
+restart, the real reconciler's `QUEUED(SYSTEM)` reset and cleared token, matching
+server-observed `Range`/`If-Range` from actual `.part` length, and the final hash.
+`-Pneutrodyne.systemTests=true` adds a DUMP-protected fixture initializer to
+`download:impl` and disables all app variants except `benchmarkRelease`. It
+accepts only loopback seed URLs and calls the real engine without an FGS so
+`am kill` can kill the cached process. A test-APK activity backgrounds it without
+SystemUI. Startup records the real reset before parking the row until resume.
+UIDT/WorkManager lifecycle coverage stays with their device suites. Normal
+builds exclude the hook; `check-apk.sh --published` rejects its classes.
+
+Smoke uses the real UI and normal scheduling: five destinations, subscribe,
+ten seconds of actual playing state, download and back. Both suites clear data;
+connected runs uninstall both APKs, while GMD owns its disposable installation.
+Reports and variant metadata are always uploaded. Host CI builds the test APK
+and opted-in driver, and checks dependency policy and graph boundaries; Licensee
+stays on shipped shells. No schema, domain-interface or licence exceptions.
+
+Device execution is Unverified. P1's episode/podcast `DownloadToggle` actions
+remain no-ops until W9; smoke intentionally requires that wiring and never
+bypasses it. W11 must not record host checks as passing device acceptance.
+
 **Implementation note (2026-10-19, M6b).** Adopted resolution 9 permits
 W10 to use `benchmarkRelease` if AGP 9.4 does not offer the required `release`
 test variant. The fallback differs only by profileability. Record the actual
