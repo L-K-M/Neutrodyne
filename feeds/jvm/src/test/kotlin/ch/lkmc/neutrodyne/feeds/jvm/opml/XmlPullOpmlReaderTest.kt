@@ -249,6 +249,21 @@ class XmlPullOpmlReaderTest {
         assertEquals("$literal A A 🎧", doc.entries.first().text)
     }
 
+    /** References to code points outside XML 1.0 `Char` (NUL, C0 controls, U+FFFE/U+FFFF) stay literal. */
+    @Test
+    fun nonXmlCharReferencesStayLiteralDuringSalvage() {
+        val literal = "&#0; &#x1; &#31; &#xFFFE; &#xFFFF;"
+        val xml =
+            """<opml version="1.0" note="&#xZZZZ;"><body>
+                <outline xmlUrl="https://a.example/feed" text="$literal &#x20AC;"/>
+                </body></opml>"""
+        val result = read(xml)
+        val doc = assertIs<OpmlReadResult.Ok>(result, "salvage result: $result").document
+
+        assertEquals(ParseMode.SALVAGE, doc.mode)
+        assertEquals("$literal €", doc.entries.single().text)
+    }
+
     @Test
     fun strayApostropheDoesNotSwallowLaterSalvageOutlines() {
         val xml =

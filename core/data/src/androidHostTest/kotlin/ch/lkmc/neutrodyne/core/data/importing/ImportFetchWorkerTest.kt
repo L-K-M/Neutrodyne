@@ -7,6 +7,7 @@ import androidx.work.ListenableWorker
 import androidx.work.WorkerParameters
 import androidx.work.testing.TestListenableWorkerBuilder
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.data.StubSourceAdapter
 import ch.lkmc.neutrodyne.core.data.adapterParsed
 import ch.lkmc.neutrodyne.core.data.fetchMeta
 import ch.lkmc.neutrodyne.core.data.importItem
@@ -25,17 +26,18 @@ import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import com.google.common.truth.Truth.assertThat
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
-import kotlin.coroutines.cancellation.CancellationException
-import kotlin.test.assertFailsWith
 
 /**
  * `ImportFetchWorker` over the real `ImportFetchRunner` (05 §7): the session id decodes from
@@ -140,17 +142,39 @@ class ImportFetchWorkerTest {
         }
 
     @Test
-    fun `a stopped run propagates cancellation`() =
+    fun `a run stopped mid-fetch propagates cancellation`() =
         runBlocking<Unit> {
             val db = openDb()
-            val sessionId = db.seedImportSession(state = ImportState.COMMITTED)
-            val stopped = Job().apply { cancel() }
+            val podcastId = seedPodcast(db, FEED_URL, nextRefreshAt = 0L)
+            val sessionId =
+                db.seedImportSession(
+                    state = ImportState.COMMITTED,
+                    items = listOf(importItem(0, FEED_URL, status = ImportItemStatus.QUEUED, podcastId = podcastId)),
+                )
+            // The fetch parks until the stop lands, so the cancel hits a run that is
+            // actually inside the lane rather than one that never started.
+            val fetching = CompletableDeferred<Unit>()
+            val adapter =
+                StubSourceAdapter(onFetch = { _, _ ->
+                    fetching.complete(Unit)
+                    awaitCancellation()
+                })
+            var returned: ListenableWorker.Result? = null
+            val run = launch(Dispatchers.Default) { returned = worker(db, sessionId, adapter = adapter).doWork() }
+            withTimeout(STOP_WAIT_MS) { fetching.await() }
 
-            assertFailsWith<CancellationException> {
-                withContext(stopped) { worker(db, sessionId).doWork() }
-            }
-            // The durable session is untouched — startup reconciliation re-enqueues it.
-            assertThat(db.importDao().sessionById(sessionId)?.state).isEqualTo(ImportState.COMMITTED)
+            run.cancel()
+            withTimeout(STOP_WAIT_MS) { run.join() }
+
+            // A swallowed stop would surface as a returned Result.
+            assertThat(returned).isNull()
+            // No fake success: the item stays QUEUED and the session stays pending, so
+            // start-up reconciliation re-enqueues it.
+            assertThat(db.importDao().sessionById(sessionId)?.state)
+                .isIn(listOf(ImportState.COMMITTED, ImportState.FETCHING))
+            assertThat(
+                db.importDao().itemsByStatus(sessionId, listOf(ImportItemStatus.QUEUED)),
+            ).hasSize(1)
         }
 
     private fun worker(
@@ -205,5 +229,8 @@ class ImportFetchWorkerTest {
 
     private companion object {
         const val FEED_URL = "https://import.test/feed.xml"
+
+        /** Real-time bound for the parked fetch to start and for the stop to land. */
+        const val STOP_WAIT_MS = 10_000L
     }
 }
