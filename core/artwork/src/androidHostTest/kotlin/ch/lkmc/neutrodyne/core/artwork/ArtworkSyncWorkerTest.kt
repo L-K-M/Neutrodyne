@@ -205,7 +205,25 @@ class ArtworkSyncWorkerTest {
                         appContext: Context,
                         workerClassName: String,
                         workerParameters: WorkerParameters,
-                    ): ListenableWorker = ArtworkSyncWorker(appContext, workerParameters, fixture.opener, runner, io)
+                    ): ListenableWorker =
+                        ArtworkSyncWorker(
+                            appContext,
+                            workerParameters,
+                            fixture.opener,
+                            runner,
+                            Provider {
+                                MosaicSync(
+                                    fixture.db,
+                                    fixture.store,
+                                    MosaicSources(fixture.db),
+                                    MosaicRenderer(fixture.store, fixture.monograms, fixture.codec),
+                                    fixture.scheduler,
+                                    fixture.clock,
+                                    Dispatchers.Default,
+                                )
+                            },
+                            io,
+                        )
                 },
             ).build()
 }

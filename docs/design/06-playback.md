@@ -625,6 +625,11 @@ snapshot descriptor, including empty groups, rather than the first member cover.
 does not change episode/system-surface fallback above or add a desktop raster
 consumer.
 
+**Implementation note (2026-10-19, M10):** W4 uses the persisted mosaic version
+for group children, direct item lookup and search. Existing committed-artwork
+invalidation notifies subscribed Auto nodes when that version changes; no remote
+or first-member URI is used, including offline and empty-group browse.
+
 ### DataSource stack
 
 ```mermaid
@@ -1218,7 +1223,7 @@ Serves R4.7, R5.2. Delivered in M4 (lock screen, System UI, Bluetooth metadata),
 |---|---|
 | `root` | `upnext`, `groups`, `downloads`, `podcasts` (if `EXTRAS_KEY_ROOT_CHILDREN_LIMIT` < 4, drop `podcasts`, then `downloads`) |
 | `upnext` | current + Up next as `episode:{id}@upnext` |
-| `groups` | browsable `group:{groupId}` in group order (`ORDER BY orderKey, id`, [02 Group and member ordering](02-data-model.md#group-and-member-ordering)) (artwork: the group mosaic `g-{groupUuid}` from M10, before that the first member's cover) |
+| `groups` | browsable `group:{groupId}` in group order (`ORDER BY orderKey, id`, [02 Group and member ordering](02-data-model.md#group-and-member-ordering)) (artwork: local versioned group mosaic `g-{groupUuid}`, including empty groups) |
 | `group:{groupId}` | the group's context-eligible episodes (05's Play-group set: unplayed, available, playable, group filters and `hideOlderThanDays`) in `playOrder`, as `episode:{id}@group:{groupId}` |
 | `downloads` | completed downloads, newest first, `episode:{id}@downloads` (empty until M6) |
 | `podcasts` | browsable `podcast:{podcastId}` by title |

@@ -2393,7 +2393,7 @@ object ArtworkKeys {
 
 - `podcast.artworkKey` = `forUrl(artworkUrl)` or `monogram(feedKey)`; `episode.artworkKey` = `forUrl(imageUrl)` or null; restore and import use the same functions (05 writes `m-{sha1hex(feedKey)}`, identical).
 - `ArtworkRef(key, url, version)`: `version` = `artwork.version` (0 when no row) — every byte change bumps it, which changes every memory key and content URI, so an updated cover can never be shown stale from memory (pitfall: artwork URL changes).
-- `artwork.url` holds the **source descriptor** of the stored bytes: the image URL for fetched art, `nd:monogram:v1:{initials}:{hue}` for monograms, `nd:mosaic:v1:{sha1 of member keys, versions and colour}` for mosaics. A key needs work when its row is missing, has no `localPath`, or its descriptor differs from the current one (02's [artwork](02-data-model.md#artwork) column comment documents it).
+- `artwork.url` holds the **source descriptor** of the stored bytes: the image URL for fetched art, `nd:monogram:v1:{initials}:{hue}` for monograms, `nd:mosaic:v1:{sha256 of canonical snapshot fields}` for mosaics. A key needs work when its row is missing, has no `localPath`, or its descriptor differs from the current one (02's [artwork](02-data-model.md#artwork) column comment documents it).
 
 ### ArtworkStore
 
@@ -2484,12 +2484,25 @@ refresh preserves valid old files/colours. No schema flag.
 
 - In-app monograms are painted live by `MonogramPainter` (crisp, light/dark aware); rows and tiles never load monogram files.
 - `MonogramRenderer.render(spec, 512)`: RASTER colours, initials at 38 % of the side, JPEG; stored under the podcast's `m-` key with descriptor `nd:monogram:v1:{initials}:{hue}`; used by system surfaces — Android through `ArtworkProvider`, the desktop OS media sessions by reading the file (11).
-- `MosaicRenderer.render(members, groupColor, 512)` (M10, Android only: its consumers are Android surfaces): 2 × 2 cells of 254 px with 4 px gaps; each cell is the member's pinned file (decoded with `inSampleSize`), else the member's monogram raster, else the group container tone; JPEG under `g-{uuid}`. Consumers: Auto's `groups` node (06) and v1.x widgets; the in-app [`GroupMosaic`](#groupmosaic-and-group-tab-label) composes four `CoverArt`s instead.
+- `MosaicRenderer.render(snapshot)` (M10, Android only: its consumers are Android surfaces): a 512 px JPEG with 2 × 2 cells of 254 px with 4 px gaps; each cell is the member's pinned file (decoded with `inSampleSize`), else the member's monogram raster, else the group container tone; JPEG under `g-{uuid}`. Consumers: Auto's `groups` node (06) and v1.x widgets; the in-app [`GroupMosaic`](#groupmosaic-and-group-tab-label) composes four `CoverArt`s instead.
 
 **Implementation note (2026-10-19, M10):** Resolution 6: W4 owns Android-only raster
 snapshots/descriptors, including empty groups,
 membership/art-version/fallback-title/group-appearance invalidation. Distinct sources
 debounce 10 s, exclude own output and recheck source under store lock.
+
+**Implementation note (2026-10-19, M10):** W4 implements resolution 6 with
+length-prefixed UTF-8 fields and explicit null markers in the SHA-256 descriptor,
+including member order, identities, art versions, fallback titles and group look.
+Snapshots use the same member query as in-app mosaics and retain empty groups.
+The Android tail renders one group at a time after member art to bound bitmap
+memory, within the existing pass deadline. Publication rechecks the snapshot in
+a writer transaction under the store lock. Rejected stale results enqueue a
+continuation because Room can coalesce rapid source changes.
+Unchanged JPEG bytes retain their version. Raster files have no live app theme:
+empty cells and empty groups use the group's light container tone (90), with
+the palette amber (`#FFC107`) as the seed for a colourless group. They carry no in-app icon or stripe.
+The member fallback sequence remains local file, RASTER monogram, container.
 
 ### ArtworkProvider
 

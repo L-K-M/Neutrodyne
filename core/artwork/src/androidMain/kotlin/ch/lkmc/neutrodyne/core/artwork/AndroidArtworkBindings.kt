@@ -6,9 +6,11 @@ import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Dispatcher
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.common.WorkerCreator
 import ch.lkmc.neutrodyne.core.common.WorkerKey
+import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import coil3.ImageLoader
@@ -25,6 +27,7 @@ import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -66,13 +69,27 @@ internal class ArtworkInitializer(
             store().refreshIndex()
             if (observation == null) {
                 // Source commits include subscribe/import/restore and art/title changes.
-                // Artwork writes are excluded so a completed pass cannot schedule itself.
+                // Mosaic sources use their own signature and 10 s debounce, excluding output writes.
                 observation =
                     scope.launch(io) {
-                        database()
-                            .invalidationTracker
-                            .createFlow("podcast", "episode", "download", "podcast_group")
-                            .collect { scheduler.request() }
+                        coroutineScope {
+                            launch {
+                                database()
+                                    .invalidationTracker
+                                    .createFlow("podcast", "episode", "download")
+                                    .collect { scheduler.request() }
+                            }
+                            launch {
+                                MosaicSources(database()).observe().mosaicChanges().collect {
+                                    suspendRunCatching { scheduler.enqueueNow() }.onFailure { error ->
+                                        Log.w(
+                                            "ArtworkSync",
+                                            error,
+                                        ) { "mosaic enqueue failed; next source change retries" }
+                                    }
+                                }
+                            }
+                        }
                     }
             }
             scheduler.request()
