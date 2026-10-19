@@ -26,6 +26,188 @@ import kotlin.test.assertTrue
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [26, 30, 33, 34, 36])
 class AndroidDownloadSchedulerTest {
+    @Test fun autoNeverUsesUidtExpeditedOrForegroundWait() =
+        runTest {
+            val f = SchedulerFixture()
+            f.rows += downloadRow().copy(lane = DownloadLane.AUTO)
+            f.visible = true
+            f.limited = true
+            f.scheduler.ensureScheduled(DownloadLane.AUTO)
+            val request = f.enqueued.single().second
+            assertEquals(0, f.uidtCalls)
+            assertFalse(request.workSpec.expedited)
+            assertEquals("AUTO", request.workSpec.input.getString(AndroidDownloadWork.KEY_LANE))
+            assertTrue(request.workSpec.constraints.requiresBatteryNotLow())
+            assertTrue(request.workSpec.constraints.requiresStorageNotLow())
+            assertFalse(request.workSpec.constraints.requiresCharging())
+            assertTrue(f.notices.isEmpty())
+            assertEquals(WaitReason.NONE, f.rows.single().waitReason)
+            if (Build.VERSION.SDK_INT >= 28) {
+                assertTrue(
+                    checkNotNull(request.workSpec.constraints.requiredNetworkRequest).hasCapability(
+                        android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED,
+                    ),
+                )
+            }
+        }
+
+    @Test fun manualAndAutoPendingAndWorkerHistoryAreIndependent() =
+        runTest {
+            val f = SchedulerFixture()
+            f.rows += downloadRow().copy(lane = DownloadLane.AUTO)
+            f.rows += downloadRow(2)
+            f.scheduler.ensureScheduled(DownloadLane.AUTO)
+            f.ensure()
+            assertEquals(2, f.enqueued.size)
+            assertEquals(listOf(ExistingWorkPolicy.KEEP, ExistingWorkPolicy.KEEP), f.enqueued.map { it.first })
+            val token = RunnerToken("work:auto")
+            f.scheduler.workerStarted(token, DownloadLane.AUTO)
+            f.scheduler.registry(DownloadLane.AUTO).unregister(token)
+            f.scheduler.ensureScheduled(DownloadLane.AUTO)
+            assertEquals(ExistingWorkPolicy.APPEND_OR_REPLACE, f.enqueued.last().first)
+            f.ensure()
+            assertEquals(3, f.enqueued.size)
+        }
+
+    @Test fun autoWakeOnlyCoversAutoQueuedUnclaimedRssRows() =
+        runTest {
+            val f = SchedulerFixture()
+            f.rows += downloadRow().copy(nextAttemptAt = f.clock.now() + 1)
+            f.rows += downloadRow(2).copy(lane = DownloadLane.AUTO, state = DownloadState.PAUSED)
+            f.rows += downloadRow(3).copy(lane = DownloadLane.AUTO, runnerToken = "work:live")
+            f.rows += downloadRow(4).copy(lane = DownloadLane.AUTO, sourceKind = SourceKind.YOUTUBE)
+            f.scheduler.scheduleWake(DownloadLane.AUTO, f.clock.now() + 500, WaitReason.BACKOFF)
+            assertNull(f.wakes.last())
+            f.rows += downloadRow(5).copy(lane = DownloadLane.AUTO, nextAttemptAt = f.clock.now() + 90_000)
+            f.scheduler.ensureScheduled(DownloadLane.AUTO)
+            val wake = checkNotNull(f.wakes.last())
+            assertEquals("AUTO", wake.workSpec.input.getString(AndroidDownloadWork.KEY_LANE))
+            assertEquals(90_000, wake.workSpec.initialDelay)
+            assertTrue(wake.workSpec.constraints.requiresBatteryNotLow())
+            assertFalse(wake.workSpec.expedited)
+            assertTrue(f.enqueued.isEmpty())
+            f.rows.removeAll { it.episodeId == 5L }
+            f.scheduler.ensureScheduled(DownloadLane.AUTO)
+            assertNull(f.wakes.last())
+        }
+
+    @Test fun chargingHeldAutoArmsChargingWakeAndRunsAfterPlugIn() =
+        runTest {
+            val f = SchedulerFixture()
+            f.charging = false
+            f.rows += downloadRow().copy(lane = DownloadLane.AUTO, requireCharging = true)
+            f.scheduler.ensureScheduled(DownloadLane.AUTO)
+            assertTrue(f.enqueued.isEmpty())
+            assertTrue(checkNotNull(f.wakes.last()).workSpec.constraints.requiresCharging())
+            f.charging = true
+            f.scheduler.ensureScheduled(DownloadLane.AUTO)
+            assertEquals(1, f.enqueued.size)
+            assertFalse(
+                f.enqueued
+                    .single()
+                    .second.workSpec.constraints
+                    .requiresCharging(),
+            )
+            assertNull(f.wakes.last())
+        }
+
+    @Test fun mixedAutoWakeDelayUsesOnlyRowsCoveredByNetworkAndCharging() =
+        runTest {
+            val f = SchedulerFixture()
+            f.connected = false
+            f.charging = false
+            f.rows +=
+                downloadRow().copy(
+                    lane = DownloadLane.AUTO,
+                    allowMetered = false,
+                    nextAttemptAt = f.clock.now() + 1_000,
+                )
+            f.rows +=
+                downloadRow(2).copy(
+                    lane = DownloadLane.AUTO,
+                    requireCharging = true,
+                    nextAttemptAt = f.clock.now() + 2_000,
+                )
+            f.rows += downloadRow(3).copy(lane = DownloadLane.AUTO, nextAttemptAt = f.clock.now() + 90_000)
+            f.scheduler.ensureScheduled(DownloadLane.AUTO)
+            assertEquals(90_000, checkNotNull(f.wakes.last()).workSpec.initialDelay)
+            assertFalse(checkNotNull(f.wakes.last()).workSpec.constraints.requiresCharging())
+        }
+
+    @Test fun disjointChargingAndNetworkNeedsStillCoverOneAutoRow() =
+        runTest {
+            val f = SchedulerFixture()
+            f.connected = false
+            f.charging = false
+            f.rows +=
+                downloadRow().copy(
+                    lane = DownloadLane.AUTO,
+                    allowMetered = false,
+                    nextAttemptAt = f.clock.now() + 1_000,
+                )
+            f.rows +=
+                downloadRow(2).copy(
+                    lane = DownloadLane.AUTO,
+                    requireCharging = true,
+                    nextAttemptAt = f.clock.now() + 2_000,
+                )
+            f.scheduler.ensureScheduled(DownloadLane.AUTO)
+            val wake = checkNotNull(f.wakes.last())
+            assertEquals(1_000, wake.workSpec.initialDelay)
+            assertFalse(wake.workSpec.constraints.requiresCharging())
+            if (Build.VERSION.SDK_INT >= 28) {
+                assertTrue(
+                    checkNotNull(wake.workSpec.constraints.requiredNetworkRequest)
+                        .hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED),
+                )
+            }
+        }
+
+    @Test fun autoDeadlineAppendsContinuationEvenWhileUidtRuns() =
+        runTest {
+            val f = SchedulerFixture()
+            f.rows += downloadRow().copy(lane = DownloadLane.AUTO)
+            f.registry.uidtStarted(RunnerToken("uidt:manual"))
+            val token = RunnerToken("work:auto")
+            f.scheduler.workerStarted(token, DownloadLane.AUTO)
+            val exit = f.scheduler.exit(DownloadLane.AUTO)
+            assertTrue(exit.tryClose(token, DrainOutcome.DeadlineReached))
+            assertEquals(ExistingWorkPolicy.APPEND_OR_REPLACE, f.enqueued.single().first)
+            assertFalse(
+                f.enqueued
+                    .single()
+                    .second.workSpec.expedited,
+            )
+            assertEquals(setOf("uidt:manual"), f.scheduler.liveTokens())
+        }
+
+    @Test fun enqueueDuringAutoClosingReopensOnlyAuto() =
+        runTest {
+            val f = SchedulerFixture()
+            val token = RunnerToken("work:auto")
+            val exit = f.scheduler.exit(DownloadLane.AUTO)
+            exit.register(token, setOf(DownloadLane.AUTO))
+            val close = async(start = CoroutineStart.UNDISPATCHED) { exit.tryClose(token, DrainOutcome.Empty) }
+            f.rows += downloadRow().copy(lane = DownloadLane.AUTO)
+            f.scheduler.ensureScheduled(DownloadLane.AUTO)
+            assertFalse(close.await())
+            assertEquals(LaneRegistry.Phase.ACTIVE, f.scheduler.registry(DownloadLane.AUTO).phase())
+            assertEquals(LaneRegistry.Phase.IDLE, f.registry.phase())
+            assertTrue(f.enqueued.isEmpty())
+            exit.unregister(token)
+        }
+
+    @Test fun cleanupRequestHasDailyCadenceAndSixHourFlex() {
+        val request = AndroidDownloadWork.cleanup()
+        assertEquals("download-cleanup", AndroidDownloadWork.CLEANUP)
+        assertEquals(24 * 60 * 60_000L, request.workSpec.intervalDuration)
+        assertEquals(6 * 60 * 60_000L, request.workSpec.flexDuration)
+        assertTrue(request.workSpec.constraints.requiresBatteryNotLow())
+        assertFalse(request.workSpec.constraints.requiresCharging())
+        assertFalse(request.workSpec.expedited)
+        assertEquals(androidx.work.NetworkType.NOT_REQUIRED, request.workSpec.constraints.requiredNetworkType)
+    }
+
     @Test fun emptyAndBackoffQueuesNeverStartIdleRunner() =
         runTest {
             val f = SchedulerFixture()
@@ -237,6 +419,7 @@ internal class SchedulerFixture {
     var connected = true
     var validated = true
     var unmetered = true
+    var charging = true
     var uidtAllowed = true
     var uidtCalls = 0
     var pokes = 0
@@ -258,7 +441,7 @@ internal class SchedulerFixture {
                     }
                 }
             },
-            conditions = { Conditions(connected, unmetered, true, false, connected && validated) },
+            conditions = { Conditions(connected, unmetered, charging, false, connected && validated) },
             visible = { visible },
             backgroundLimited = { limited },
             scheduleUidt = {
@@ -266,7 +449,7 @@ internal class SchedulerFixture {
                 uidtAllowed
             },
             enqueue = { policy, request -> enqueued += policy to request },
-            armWake = { wakes += it },
+            armWake = { _, request -> wakes += request },
             runtimeWake = { pokes++ },
             waitingNotice = { notices += it },
             clock = clock,

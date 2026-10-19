@@ -21,10 +21,13 @@ import ch.lkmc.neutrodyne.download.api.DeleteReason
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.sync.Mutex
 
@@ -34,6 +37,8 @@ internal class DownloadHost(
     val share: (String, String) -> String?,
     val activity: Flow<Long> = flowOf(0L),
     val hasActiveTransfers: () -> Boolean = { false },
+    val charging: StateFlow<Boolean> = MutableStateFlow(true),
+    val beforeRunnerReset: suspend (Set<String>) -> Unit = {},
 )
 
 /** Lazily resolved after DB open by the platform hosts, never by the index's constructor. */
@@ -53,7 +58,7 @@ internal class DownloadComponents(
     private val platform: PlatformInfo,
     media: PlaybackMediaLookup,
     artwork: ArtworkStore,
-    host: DownloadHost,
+    private val host: DownloadHost,
     resolver: EffectiveSettingsResolver,
     @param:ApplicationScope scope: CoroutineScope,
 ) {
@@ -62,7 +67,19 @@ internal class DownloadComponents(
     private val uris = PlatformLocalUris()
     private val verification = DownloadFiles(fileSystem, roots, PlatformSriHasher(roots), uris)
     val deletes = DeferredDeletes(device, fileSystem, roots, db.downloadDao()::allRows)
-    val reconciler = DownloadReconciler(db, fileSystem, roots, uris, index, deletes, claimMutex, host.liveTokens, clock)
+    val reconciler =
+        DownloadReconciler(
+            db,
+            fileSystem,
+            roots,
+            uris,
+            index,
+            deletes,
+            claimMutex,
+            host.liveTokens,
+            clock,
+            host.beforeRunnerReset,
+        )
     val quota = DownloadQuota(settings)
     val mover = DownloadMoverImpl(db, fileSystem, roots, device, index, deletes, claimMutex, clock, quota)
     private val storage =
@@ -86,10 +103,20 @@ internal class DownloadComponents(
     private fun conditions() =
         network.status.value.let {
             val desktop = platform.kind == PlatformKind.DESKTOP
-            Conditions(it.isConnected, desktop || !it.isMetered, true, false, desktop || it.isValidated)
+            Conditions(
+                it.isConnected,
+                desktop || !it.isMetered,
+                desktop || host.charging.value,
+                false,
+                desktop || it.isValidated,
+            )
         }
 
-    private val conditions = network.status.map { conditions() }.stateIn(scope, SharingStarted.Eagerly, conditions())
+    private val conditions =
+        combine(
+            network.status,
+            host.charging,
+        ) { _, _ -> conditions() }.stateIn(scope, SharingStarted.Eagerly, conditions())
     val engine =
         DownloadEngine(
             db,
@@ -123,6 +150,22 @@ internal class DownloadComponents(
                 media.get(row.episodeId)?.let { artwork.pin(it.artwork, PinReason.DOWNLOAD, row.episodeId) }
             },
             cleanup,
+        )
+    val planner =
+        AutoDownloadPlannerImpl(
+            db,
+            resolver,
+            quota,
+            device,
+            clock,
+            roots,
+            scheduler,
+            claimMutex,
+            engine::stopTransfer,
+            storage,
+            media,
+            platform.kind,
+            Dispatchers.IO,
         )
     val controller =
         DownloadControllerImpl(

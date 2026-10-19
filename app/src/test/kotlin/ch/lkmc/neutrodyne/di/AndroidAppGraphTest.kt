@@ -379,6 +379,7 @@ class AndroidAppGraphTest {
                 "DownloadChannelsInitializer" to 10..10,
                 "DownloadIndexInitializer" to 130..130,
                 "DeferredDeletesInitializer" to 310..310,
+                "DownloadCleanupInitializer" to 200..200,
                 "DownloadReconcileInitializer" to 210..210,
                 "DownloadObserversInitializer" to 310..310,
             )

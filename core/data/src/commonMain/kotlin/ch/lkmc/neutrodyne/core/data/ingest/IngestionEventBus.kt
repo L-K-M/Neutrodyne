@@ -15,13 +15,14 @@ import kotlinx.coroutines.flow.SharedFlow
 /**
  * The `NewEpisodes` bus of 03 Events (`:core:data` singleton): `tryEmit` only, in-process and best
  * effort — consumers that must not miss work re-derive it from the database.
+ * Public so Metro can expose the scoped interface contribution across modules.
  */
 @SingleIn(AppScope::class)
 @ContributesBinding(AppScope::class)
 // `FeedRefresher` injects the concrete bus to reach `emit`, not the `IngestionEvents` supertype.
 @ExposeImplBinding
 @Inject
-internal class IngestionEventBus : IngestionEvents {
+class IngestionEventBus : IngestionEvents {
     private val bus =
         MutableSharedFlow<NewEpisodes>(
             replay = 0,
@@ -32,7 +33,7 @@ internal class IngestionEventBus : IngestionEvents {
     override val newEpisodes: SharedFlow<NewEpisodes> = bus
 
     /** `NewEpisodes` emission of the ingest commit (03 step 11: after the transaction, never suspends). */
-    fun emit(
+    internal fun emit(
         podcastId: Long,
         episodeIds: List<Long>,
         initialFetch: Boolean,

@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.download.impl
 
 import android.content.Context
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequest
@@ -55,6 +56,7 @@ class DownloadMoveWorker internal constructor(
         fun request(target: String): OneTimeWorkRequest =
             OneTimeWorkRequestBuilder<DownloadMoveWorker>()
                 .setInputData(workDataOf(KEY_TARGET to target))
+                .setConstraints(Constraints.Builder().setRequiresStorageNotLow(true).build())
                 .addTag(AndroidDownloadWork.TAG)
                 .build()
 

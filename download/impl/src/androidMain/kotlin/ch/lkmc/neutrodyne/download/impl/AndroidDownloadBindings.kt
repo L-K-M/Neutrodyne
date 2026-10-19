@@ -18,7 +18,11 @@ import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.datastore.DeviceSettingsStore
+import ch.lkmc.neutrodyne.core.domain.AutoDownloadPlanner
+import ch.lkmc.neutrodyne.core.domain.CleanupPlanner
 import ch.lkmc.neutrodyne.core.domain.DownloadLifecycle
+import ch.lkmc.neutrodyne.core.domain.DownloadMover
+import ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.domain.MissingLocalMediaReporter
 import ch.lkmc.neutrodyne.core.model.DownloadLane
 import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
@@ -57,12 +61,13 @@ object AndroidDownloadBindings {
     internal fun runtime(
         components: Lazy<DownloadComponents>,
         scheduler: Lazy<AndroidDownloadScheduler>,
+        maintenance: Lazy<AndroidDownloadMaintenance>,
     ): AndroidDownloadRuntime =
         AndroidDownloadRuntime(
             drain = { components.value.engine.drain(it) },
             reconcile = {
                 components.value.reconciler.reconcile()
-                scheduler.value.ensureScheduled(DownloadLane.MANUAL)
+                for (lane in DownloadLane.entries) scheduler.value.ensureScheduled(lane)
             },
             // Framework callbacks can arrive before DB readiness; no drain exists to signal then.
             stop = { token, intent ->
@@ -72,6 +77,8 @@ object AndroidDownloadBindings {
                 if (components.isInitialized()) components.value.engine.wake(lane)
             },
             controller = { components.value.controller },
+            startup = { maintenance.value.startup() },
+            daily = { maintenance.value.daily() },
         )
 
     @Provides
@@ -84,11 +91,12 @@ object AndroidDownloadBindings {
     @Provides
     internal fun host(
         application: Application,
-        registry: LaneRegistry,
+        scheduler: Lazy<AndroidDownloadScheduler>,
+        charging: DownloadChargingMonitor,
         device: DeviceSettingsStore,
     ): DownloadHost =
         DownloadHost(
-            registry::liveTokens,
+            { scheduler.value.liveTokens() },
             {
                 val denied =
                     Build.VERSION.SDK_INT >= 33 &&
@@ -114,6 +122,7 @@ object AndroidDownloadBindings {
                         ).toString()
                 }
             },
+            charging = charging.charging,
         )
 
     @Provides internal fun index(impl: LocalMediaIndexImpl): LocalMediaIndex = impl
@@ -136,6 +145,7 @@ object AndroidDownloadBindings {
         db: Lazy<NeutrodyneDatabase>,
         opener: DatabaseOpener,
         network: NetworkMonitor,
+        charging: DownloadChargingMonitor,
         visibility: DownloadAppVisibility,
         queue: DownloadWorkQueue,
         runtime: Lazy<AndroidDownloadRuntime>,
@@ -157,13 +167,13 @@ object AndroidDownloadBindings {
             },
             conditions = {
                 val status = network.status.value
-                Conditions(status.isConnected, !status.isMetered, true, false, status.isValidated)
+                Conditions(status.isConnected, !status.isMetered, charging.charging.value, false, status.isValidated)
             },
             visible = visibility::isVisible,
             backgroundLimited = { backgroundLimited(application) },
             scheduleUidt = JobSchedulerFacade(application)::scheduleManual,
             enqueue = queue::lane,
-            armWake = { request -> if (request == null) queue.cancelWake() else queue.wake(request) },
+            armWake = { lane, request -> if (request == null) queue.cancelWake(lane) else queue.wake(lane, request) },
             runtimeWake = { runtime.value.wake(it) },
             waitingNotice = notifications::needsForeground,
             clock = clock,
@@ -187,6 +197,60 @@ object AndroidDownloadBindings {
     @WorkerKey(DownloadReconcileWorker::class)
     internal fun reconcileWorker(factory: DownloadReconcileWorker.Factory): WorkerCreator =
         { context, params -> factory.create(context, params) }
+
+    @Provides internal fun planner(components: DownloadComponents): AutoDownloadPlanner = components.planner
+
+    @Provides internal fun cleanupPlanner(components: DownloadComponents): CleanupPlanner = components.cleanup
+
+    @Provides internal fun mover(components: DownloadComponents): DownloadMover = components.mover
+
+    @Provides
+    @SingleIn(AppScope::class)
+    internal fun maintenance(
+        components: Lazy<DownloadComponents>,
+        scheduler: AndroidDownloadScheduler,
+        resolver: EffectiveSettingsResolver,
+        device: DeviceSettingsStore,
+        clock: Clock,
+        queue: DownloadWorkQueue,
+    ): AndroidDownloadMaintenance =
+        AndroidDownloadMaintenance(
+            { components.value.reconciler.reconcile() },
+            scheduler,
+            components.value.planner,
+            components.value.cleanup,
+            resolver,
+            device,
+            clock,
+            queue::move,
+        )
+
+    @Provides @IntoMap
+    @WorkerKey(CleanupWorker::class)
+    internal fun cleanupWorker(factory: CleanupWorker.Factory): WorkerCreator =
+        { context, params -> factory.create(context, params) }
+
+    @Provides @IntoMap
+    @WorkerKey(DownloadMoveWorker::class)
+    internal fun moveWorker(
+        components: Lazy<DownloadComponents>,
+        device: DeviceSettingsStore,
+        clock: Clock,
+    ): WorkerCreator =
+        { context, params ->
+            DownloadMoveWorker(
+                context,
+                params,
+                object : DownloadMover {
+                    override suspend fun run(
+                        target: String,
+                        deadline: Long?,
+                    ) = components.value.mover.run(target, deadline)
+                },
+                device,
+                clock,
+            )
+        }
 
     private fun backgroundLimited(application: Application): Boolean {
         if (Build.VERSION.SDK_INT < 28) return false
