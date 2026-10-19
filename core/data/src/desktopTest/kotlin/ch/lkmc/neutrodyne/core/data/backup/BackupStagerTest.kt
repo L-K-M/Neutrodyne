@@ -102,7 +102,11 @@ class BackupStagerTest {
 
     private val stager = BackupStager(db, ZipGuard(), merger, fileSystem, Dispatchers.IO)
 
-    @AfterTest fun close() = db.close()
+    @AfterTest
+    fun close() {
+        db.close()
+        FileSystem.SYSTEM.deleteRecursively(root)
+    }
 
     // --- Round trips over the real writer ------------------------------------------------------
 

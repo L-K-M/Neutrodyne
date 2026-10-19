@@ -40,6 +40,7 @@ class SavedFileUriTest {
 
         assertTrue(uri.startsWith("file:"))
         assertTrue("%20" in uri)
-        assertEquals(File(dir, "neutrodyne subs.zip"), File(URI(uri)))
+        // Both sides absolute: on Windows "/tmp" alone is drive-relative.
+        assertEquals(File(dir.absolutePath, "neutrodyne subs.zip"), File(URI(uri)))
     }
 }

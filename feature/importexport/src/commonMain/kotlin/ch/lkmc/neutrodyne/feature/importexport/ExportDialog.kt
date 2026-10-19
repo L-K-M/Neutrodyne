@@ -94,7 +94,7 @@ internal fun ExportDialogContent(
             ) {
                 if (warning != null) {
                     NdTextButton(stringResource(Res.string.action_cancel), onCancelWarning)
-                    NdButton(stringResource(Res.string.action_continue), onConfirmWarning)
+                    NdButton(stringResource(Res.string.action_continue), onConfirmWarning, enabled = !state.busy)
                 } else {
                     if (canShare) {
                         NdTextButton(

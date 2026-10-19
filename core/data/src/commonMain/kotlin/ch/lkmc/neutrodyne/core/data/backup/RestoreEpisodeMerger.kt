@@ -27,6 +27,9 @@ private const val NO_STATE_TS = 0L
 /** 05 finish: `ImportOptions.redownloadIds` keeps at most this many resolved `dl` ids. */
 private const val MAX_REDOWNLOAD_IDS = 2_000
 
+/** Every key version this build computes; a ref's own `kv` may be any of them. */
+private val REF_KEY_VERSIONS: Set<Int> = (1..EpisodeKeys.VERSION).toSet()
+
 /**
  * 05's `RestoreMerger` episode, Up next and session phases: steps 5–6 of the Restore
  * algorithm — the transactions B that stream `episodes.jsonl` in 1,000-line write
@@ -311,10 +314,11 @@ internal class RestoreEpisodeMerger(
         refIds[refKeyOf(podcastKey, identityKey, keyVersion)]?.let { return it }
         val podcastId = podcastIdOf(podcastKey, podcastIdByKey) ?: return null
         // A ref carries no enclosure/GUID, so the ladder reduces to its key step; the
-        // match version comes from the key's own prefix (02's caller rule).
+        // match version comes from the key's own prefix (02's caller rule). The cached index
+        // serves refs of any version, so it prefetches the heads every computable version needs.
         val index =
             indexCache[podcastId]
-                ?: episodes.index(podcastId, setOf(EpisodeKeys.VERSION)).also {
+                ?: episodes.index(podcastId, REF_KEY_VERSIONS).also {
                     indexCache[podcastId] = it
                 }
         return index.match(

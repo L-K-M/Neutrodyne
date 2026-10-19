@@ -27,6 +27,7 @@ import ch.lkmc.neutrodyne.core.data.seedPodcast
 import ch.lkmc.neutrodyne.core.data.testClients
 import ch.lkmc.neutrodyne.core.data.testNetErrors
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportState
@@ -39,9 +40,14 @@ import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import com.google.common.truth.Truth.assertThat
 import dev.zacsweers.metro.Provider
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -197,12 +203,11 @@ class BackupWorkHostTest {
             // The periodic UPDATE landed and the durable intents got their specs back.
             specOf(infoOf(RestoreWorkData.WORK_SNAPSHOT).id)
             awaitReal {
-                infoOf(RestoreWorkData.WORK_RESTORE).let {
-                    specOf(it.id).input.getLong("sessionId", -1L) ==
-                        restoreSession
-                }
+                latestInfoOrNull(RestoreWorkData.WORK_RESTORE)?.let {
+                    specOf(it.id).input.getLong("sessionId", -1L) == restoreSession
+                } == true
             }
-            awaitReal { infoOf("import-$fetchSession").state == WorkInfo.State.ENQUEUED }
+            awaitReal { latestInfoOrNull("import-$fetchSession")?.state == WorkInfo.State.ENQUEUED }
         }
 
     @Test
@@ -241,6 +246,53 @@ class BackupWorkHostTest {
         }
 
     @Test
+    fun `a library change before the watcher's first read still pokes the debounced write`() =
+        runTest {
+            val db = openDb()
+            // The watcher's scope only runs when the test advances it, so the insert below
+            // lands before its first query — that emission already contains the new podcast.
+            val watcherScheduler = TestCoroutineScheduler()
+            val watcherScope = CoroutineScope(StandardTestDispatcher(watcherScheduler) + Job())
+            try {
+                initializer(db, appScope = watcherScope).run()
+
+                seedPodcast(db, "https://early.test/feed.xml")
+
+                awaitReal {
+                    watcherScheduler.advanceUntilIdle()
+                    snapshots.soonWorkLive()
+                }
+            } finally {
+                watcherScope.cancel()
+            }
+        }
+
+    @Test
+    fun `start-up completes when the auto-snapshot flag cannot be read`() =
+        runTest {
+            val db = openDb()
+
+            initializer(db, settings = Provider { error("settings store unavailable") }).run()
+            advanceUntilIdle()
+
+            assertThat(infoOf(RestoreWorkData.WORK_SNAPSHOT).state).isEqualTo(WorkInfo.State.ENQUEUED)
+        }
+
+    @Test
+    fun `start-up completes when the database cannot be read`() =
+        runTest {
+            val db = openDb()
+            db.close()
+            this@BackupWorkHostTest.db = null
+
+            // Every database step fails; each is logged and the periodic arm still stands.
+            initializer(db).run()
+            advanceUntilIdle()
+
+            assertThat(infoOf(RestoreWorkData.WORK_SNAPSHOT).state).isEqualTo(WorkInfo.State.ENQUEUED)
+        }
+
+    @Test
     fun `start-up does not schedule intents the restore runner cannot consume`() =
         runTest {
             val db = openDb()
@@ -271,7 +323,11 @@ class BackupWorkHostTest {
 
     private fun openDb(): NeutrodyneDatabase = newDb(app, clock).also { db = it }
 
-    private fun TestScope.initializer(db: NeutrodyneDatabase): AutoBackupInitializer {
+    private fun TestScope.initializer(
+        db: NeutrodyneDatabase,
+        appScope: CoroutineScope = backgroundScope,
+        settings: Provider<SettingsRepository> = Provider { this@BackupWorkHostTest.settings },
+    ): AutoBackupInitializer {
         val payloads =
             PayloadStore(
                 storagePaths = storagePaths,
@@ -285,9 +341,9 @@ class BackupWorkHostTest {
             snapshots = Provider { snapshots },
             work = Provider { imports },
             db = Provider { db },
-            settings = Provider { settings },
+            settings = settings,
             cleaner = Provider { ImportSessionCleaner(db, payloads, clock, Dispatchers.IO) },
-            appScope = backgroundScope,
+            appScope = appScope,
         )
     }
 
@@ -368,6 +424,10 @@ class BackupWorkHostTest {
             }
             error("condition not met within ${AWAIT_MS}ms")
         }
+
+    /** [infoOf] for [awaitReal] polls: an empty answer means "not yet", not a failure. */
+    private fun latestInfoOrNull(uniqueName: String): WorkInfo? =
+        workManager.getWorkInfosForUniqueWork(uniqueName).get().lastOrNull()
 
     private fun infoOf(uniqueName: String): WorkInfo {
         val infos = workManager.getWorkInfosForUniqueWork(uniqueName).get()
