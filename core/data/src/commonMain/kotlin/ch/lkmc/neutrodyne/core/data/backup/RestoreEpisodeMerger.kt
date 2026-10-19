@@ -24,6 +24,9 @@ import dev.zacsweers.metro.Inject
 
 private const val NO_STATE_TS = 0L
 
+/** 05 finish: `ImportOptions.redownloadIds` keeps at most this many resolved `dl` ids. */
+private const val MAX_REDOWNLOAD_IDS = 2_000
+
 /** Every key version this build computes; a ref's own `kv` may be any of them. */
 private val REF_KEY_VERSIONS: Set<Int> = (1..EpisodeKeys.VERSION).toSet()
 
@@ -63,8 +66,10 @@ internal class RestoreEpisodeMerger(
      * then its `queue.json` under the Up next/session rules (05 transactions B and C);
      * [settled] is transaction A's result — its `p`/group-`uuid` maps are the only
      * identities this phase attaches through. [progress] reports `(done, total)` once per
-     * committed chunk. Only the episode counts of the returned [MergeSummary] are filled
-     * — the library counts are [settled]'s.
+     * committed chunk. Only the episode counts of the result's [MergeSummary] are filled
+     * — the library counts are [settled]'s — and [EpisodeMergeResult.redownloadIds] lists
+     * the local episode ids resolved from `dl = true` lines (newest `d` first, capped),
+     * the finish step's worker-owned `ImportOptions.redownloadIds` (05).
      */
     suspend fun mergeEpisodes(
         staged: StagedLibrary,
@@ -73,13 +78,13 @@ internal class RestoreEpisodeMerger(
         categories: Set<RestoreCategory>,
         episodeTotal: Int = 0,
         progress: (done: Int, total: Int) -> Unit = { _, _ -> },
-    ): MergeSummary {
+    ): EpisodeMergeResult {
         require(policy == MergePolicy.RESTORE_MERGE || policy == MergePolicy.RESTORE_REPLACE) {
             "mergeEpisodes supports RESTORE_MERGE and RESTORE_REPLACE; $policy lands with MS2"
         }
         val history = RestoreCategory.HISTORY in categories
         val upNext = RestoreCategory.UP_NEXT in categories
-        if (!history && !upNext) return MergeSummary(0, 0, 0, 0, 0, 0, 0, 0)
+        if (!history && !upNext) return EpisodeMergeResult(MergeSummary(0, 0, 0, 0, 0, 0, 0, 0), emptyList())
         val now = clock.now()
         val podcastIdByKey = settled.podcastIdByKey
         // `queue.json` is read before the stream: an unmatched line referenced by it stubs
@@ -88,6 +93,9 @@ internal class RestoreEpisodeMerger(
         val queue = if (upNext) staged.queue() else null
         val referenced = referencedKeys(queue)
         val refIds = HashMap<EpisodeRefKey, Long>()
+        // `dl` line → resolved episode id, newest `d` kept per id — recorded at the write,
+        // never by a later live match (05 After restore's re-download offer).
+        val downloads = LinkedHashMap<Long, Long>()
 
         var episodeLines = 0
         var stubs = 0
@@ -134,6 +142,7 @@ internal class RestoreEpisodeMerger(
                             }
                         }
                         refIds[refKeyOf(line.p, line.k, line.kv)] = episodeId
+                        if (line.dl) downloads[episodeId] = maxOf(line.d ?: 0L, downloads[episodeId] ?: 0L)
                     }
                 }
             }
@@ -158,15 +167,23 @@ internal class RestoreEpisodeMerger(
                 now,
             )
         }
-        return MergeSummary(
-            podcastsAdded = 0,
-            podcastsMatched = 0,
-            groupsAdded = 0,
-            groupsMatched = 0,
-            episodeLines = episodeLines,
-            stubs = stubs,
-            unmatched = unmatched,
-            skippedLines = skippedLines,
+        return EpisodeMergeResult(
+            summary =
+                MergeSummary(
+                    podcastsAdded = 0,
+                    podcastsMatched = 0,
+                    groupsAdded = 0,
+                    groupsMatched = 0,
+                    episodeLines = episodeLines,
+                    stubs = stubs,
+                    unmatched = unmatched,
+                    skippedLines = skippedLines,
+                ),
+            redownloadIds =
+                downloads.entries
+                    .sortedByDescending { it.value }
+                    .take(MAX_REDOWNLOAD_IDS)
+                    .map { it.key },
         )
     }
 
@@ -435,6 +452,17 @@ internal class RestoreEpisodeMerger(
             link = l,
         )
 }
+
+/** Transaction B/C's result: the episode counts plus the finish step's re-download ids. */
+internal class EpisodeMergeResult(
+    val summary: MergeSummary,
+    /**
+     * Local episode ids resolved from `dl = true` lines — newest `d` first, ≤ 2,000 —
+     * the worker-owned `ImportOptions.redownloadIds` of 05's finish. YouTube rows stay
+     * listed; the M6 offer skips them when capabilities say downloads false.
+     */
+    val redownloadIds: List<Long>,
+)
 
 /** `(p, k)` as episode lines record it and `queue.json` refs carry it. */
 private data class EpisodeRefKey(

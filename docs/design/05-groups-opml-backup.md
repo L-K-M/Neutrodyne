@@ -1488,6 +1488,8 @@ A backup arrives through the import pipeline ([Sniffing](#sniffing) → `NEUTROD
 4. `library.json` ≤ 32 MiB; `episodes.jsonl` is streamed, lines > 64 KiB or undecodable are skipped and counted (warning, not fatal).
 5. Matching is dry-run to compute what Replace would remove.
 
+*Implementation note (2026-10-17, M3 B12a):* `BackupStager.inspect` stages and validates in one archive open: the manifest's `entries` may declare only whitelist names besides `manifest.json` itself — a foreign or duplicate declaration, or a required name not declared-and-present, is `Corrupt`; archive entries never declared are counted (`IGNORED_ENTRIES`) and never opened. `library.json` content is then validated beyond structure (N3): feed `key`/`aliases` must be canonical `forIdentity` form, URL fields must be fetchable http(s) without userinfo, `source` must name a real `SourceType`, credential origins must be canonical `scheme://host[:port]` (so `sync:*` and `podcastindex` can never arrive from a backup), and `uuid`/`syncId` must be canonical UUIDs — any violation is `Corrupt(library.json)` rather than a silent rewrite. The dry run reuses `RestoreMerger.matchedLocalIds` inside one `withReadTransaction`; preview warnings carry `IGNORED_ENTRIES` and `SKIPPED_LINES` counts derived from decoded content, never `manifest.counts`.
+
 ```kotlin
 // :core:domain — canonical interface, owned here
 interface BackupRepository {
@@ -1572,6 +1574,13 @@ sequenceDiagram
     W->>W: Use this device's library everywhere (10)
   end
 ```
+
+**M3 limit (2026-10-18):** a restore requested while `sync_state.linkedAt` is set is
+rejected before any write — the session goes `CANCELLED`, progress reports
+`BackupError.Unsupported` — because linked execution (unlink first, `withApplying`
+capture, the ALL_DEVICES steps) lands with MS2. The linked branches below describe MS2.
+
+**Implementation note (2026-10-18, B12b):** a replay still queues a matched podcast awaiting its first fetch, including one inserted by an interrupted attempt. Auto-snapshot retirement finishes before a terminal session marker; a failed rename or cancellation-marker write leaves durable work for retry. Settings restore requires the declared JSON primitive type rather than coercing strings into booleans or numbers.
 
 1. **Validate** again (the cache copy is ours, but cheap to re-check); failure → session `CANCELLED`, `RestoreProgress.Failed`, notification (ID 3003 on Android; `DesktopNotifier` on the desktop). For `auto` restores (Android) a `Corrupt` or `NotABackup` snapshot is renamed to `restored-{epochMs}.zip` as well, so the installation-ID guard of [Snapshot production](#snapshot-production) stops protecting a file that can never be restored; `NewerFormat` keeps it ([First-launch restore](#first-launch-restore)).
 2. **Replace pre-step** (skipped on an empty database): on a linked device with reach `THIS_DEVICE`, 10's unlink runs first ([10 Unlink and Delete my data](10-sync.md#unlink-and-delete-my-data)); with reach `ALL_DEVICES` (confirmed after 10's pull, with `linkedAt` already cleared, [Restore while linked](#restore-while-linked)) every write of steps 2–7 runs with `applying = 1`. Then local podcasts matched by no backup podcast → `UnsubscribeUseCase(ids)` (03: pauses playback of them, deletes download files, D24); local groups matched by no backup group → deleted without undo (channels deleted immediately on Android); for every matched podcast, delete its `episode_state` and `episode_position` rows (only when HISTORY is selected; one transaction per podcast); clear `queue_entry` and the `play_session` context (UP_NEXT).
@@ -1795,6 +1804,24 @@ Algorithm:
 | 1 | played lines with `pl` older than 365 days and no position, favourite or queue reference slimmed to `p`, `k`, `kv`, `pl`, `ts` | very long histories |
 | 2 | those lines dropped; tombstone-only lines older than 365 days dropped | extreme |
 | 3 | only in-progress, favourite, queued and current lines | last resort |
+
+*Implementation note (2026-10-18, M3 C4a):* `BackupWriter.write` takes the level as a `SnapshotLevel` (`FULL`, `SLIM_HISTORY`, `DROP_HISTORY`, `ACTIVE_ONLY`) plus an optional compressed-size cap; the numeric `snapshotLevel` enters only at the manifest and `SnapshotStatus` boundaries, and a non-`AUTO_SNAPSHOT` write refuses a non-`FULL` level rather than dropping lines silently. The protected ("queue reference") set is read inside the one export read transaction just before the `episodes.jsonl` stream — every Up next ref plus the play session's `current`, whether or not that episode is queued — so a referenced line is never slimmed or dropped and still restores or stubs on an empty database. The session `anchor` is not protected: it is a resume hint, not user state, and a dropped anchor line simply restores without an anchor. "Older than 365 days" is judged on `pl` (played lines) or the tombstone's own `dis` against the write time; "tombstone-only" means `dis` is the line's sole state — any played, started, last-played, play-count, favourite, measured-duration or live-position/download mark keeps it.
+
+*Implementation note (2026-10-18, M3 C4b):* `AutoSnapshotProducer` (`:core:data`
+`commonMain`) owns the Android-only algorithm and status/control lifecycle. Native
+restore work and fail-closed durable preview intents guard the lane. A bounded,
+manifest-only probe protects unreadable/newer/mismatched or missing-ID snapshots as
+foreign; status reads neither mint an installation ID nor swallow cancellation.
+Writes, disable and discard serialize on one mutex, and writer staging preserves the
+previous snapshot through every failed level. Foreign-pending disable requires the
+explicit discard ordering. An owned file is deleted before recording disabled, so a
+failed delete cannot leave a supposedly-disabled file in the OS backup include path;
+that file/preference/work-cancellation step finishes non-cancellably once started.
+A failed deletion retains the preference and records an IO error. Enable requests a
+debounced write; disable cancels
+both work names. Status observes settings, backup previews and control changes without
+polling. Desktop automatic operations remain unsupported/no-op without IO. Native
+worker/initializer/receiver registration follows in C2/C4/C5/C6b.
 
 ### First-launch restore
 

@@ -35,6 +35,7 @@ import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.feeds.backup.CredentialV1
 import ch.lkmc.neutrodyne.feeds.backup.GroupV1
+import ch.lkmc.neutrodyne.feeds.backup.LibraryV1
 import ch.lkmc.neutrodyne.feeds.backup.MemberV1
 import ch.lkmc.neutrodyne.feeds.backup.OverridesV1
 import ch.lkmc.neutrodyne.feeds.backup.PodcastV1
@@ -120,6 +121,7 @@ internal class RestoreMerger(
 
         val credentialIds = HashMap<String, Long>()
         val podcastIdByKey = HashMap<String, Long>()
+        val insertedPodcastIds = HashSet<Long>()
         val uuidChanges = ArrayList<UuidChange>()
         var podcastsAdded = 0
         var podcastsMatched = 0
@@ -185,6 +187,7 @@ internal class RestoreMerger(
                     if (localId == null) {
                         localId = insertPodcast(podcast, now, credentialIds)
                         podcastsAdded++
+                        insertedPodcastIds += localId
                     } else {
                         podcastsMatched++
                         applyMatchedPodcast(localId, podcast, policy)
@@ -247,6 +250,24 @@ internal class RestoreMerger(
                 ),
             podcastIdByKey = podcastIdByKey.toMap(),
             groupIdByUuid = groupIdByUuid,
+            insertedPodcastIds = insertedPodcastIds,
+        )
+    }
+
+    /**
+     * 05 step 5's Replace dry run: the local row ids the backup's library would claim —
+     * matched by the same fold and match ladders [mergeLibrary] runs before its writes, so
+     * the preview's "not in the backup" counts agree with a real Replace. Read-only on the
+     * database (the fold state lives on per-call `StagedGroup`s); the caller holds the read
+     * snapshot and counts the local rows *not* in the result. [library] arrives already
+     * validated by `BackupStager`.
+     */
+    suspend fun matchedLocalIds(library: LibraryV1): MatchedLocalIds {
+        val stagedGroups = foldStagedGroups(library.groups)
+        val stagedPodcasts = library.podcasts.distinctBy { it.key }
+        return MatchedLocalIds(
+            podcastIds = matchStagedPodcasts(stagedPodcasts).values.filterNotNullTo(HashSet()),
+            groupIds = matchStagedGroups(stagedGroups),
         )
     }
 
@@ -776,6 +797,21 @@ internal class LibraryMergeResult(
     val summary: MergeSummary,
     val podcastIdByKey: Map<String, Long>,
     val groupIdByUuid: Map<String, Long>,
+    /**
+     * The local ids transaction A inserted fresh — B12b's finish writes these as QUEUED
+     * `import_item`s (matched rows report ALREADY_SUBSCRIBED instead). Recorded at the
+     * write, never re-derived by a live lookup.
+     */
+    val insertedPodcastIds: Set<Long> = emptySet(),
+)
+
+/**
+ * The local row ids a backup's podcasts and groups claim — [RestoreMerger.matchedLocalIds]
+ * (05 step 5's Replace dry run). Rows not in either set are the ones Replace would remove.
+ */
+internal class MatchedLocalIds(
+    val podcastIds: Set<Long>,
+    val groupIds: Set<Long>,
 )
 
 /**

@@ -56,6 +56,29 @@ abstract class ImportDao {
     )
     abstract suspend fun activeSessions(): List<ImportSessionEntity>
 
+    /**
+     * 05 Restore arbitration and the auto-snapshot's durable-intent guard: backup sessions
+     * still in `PREVIEW`. `optionsJson` is decoded in Kotlin — never in SQL — so the
+     * fail-closed rule for unreadable restore intents lives in one place
+     * (`ch.lkmc.neutrodyne.core.data.importing`'s `hasRestoreIntent`).
+     */
+    @Query(
+        "SELECT * FROM import_session WHERE sourceFormat = 'NEUTRODYNE_BACKUP'" +
+            " AND state = 'PREVIEW' ORDER BY createdAt, id",
+    )
+    abstract suspend fun backupPreviewSessions(): List<ImportSessionEntity>
+
+    /**
+     * [backupPreviewSessions] observed — the snapshot status flow's database trigger: a
+     * restore request stamped or a restored/retired session leaving `PREVIEW` re-reads the
+     * pending foreign-snapshot probe.
+     */
+    @Query(
+        "SELECT * FROM import_session WHERE sourceFormat = 'NEUTRODYNE_BACKUP'" +
+            " AND state = 'PREVIEW' ORDER BY createdAt, id",
+    )
+    abstract fun observeBackupPreviewSessions(): Flow<List<ImportSessionEntity>>
+
     /** 02 Import commit: per-status counts — the progress screen's "Fetched 87 of 139". */
     @Query(
         "SELECT status, COUNT(*) AS count FROM import_item WHERE sessionId = :sessionId" +
