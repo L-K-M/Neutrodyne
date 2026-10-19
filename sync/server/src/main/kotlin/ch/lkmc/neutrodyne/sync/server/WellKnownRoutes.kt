@@ -8,7 +8,7 @@ import ch.lkmc.neutrodyne.sync.protocol.dto.DiscoveryDocument
 import ch.lkmc.neutrodyne.sync.protocol.dto.ProtocolRange
 import io.ktor.http.ContentType
 import io.ktor.server.response.respondText
-import io.ktor.server.routing.Routing
+import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import kotlin.time.Clock
 import kotlin.time.Instant
@@ -18,7 +18,7 @@ internal class WellKnownRoutes(
     private val serverVersion: String,
     private val clock: Clock,
 ) {
-    fun install(routing: Routing) {
+    fun install(routing: Route) {
         routing.get(WELL_KNOWN_PATH) {
             val document =
                 DiscoveryDocument(

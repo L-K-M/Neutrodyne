@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.sync.server
 
+import io.ktor.server.application.ServerReady
 import io.ktor.server.application.serverConfig
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.EngineConnectorBuilder
 import io.ktor.server.engine.embeddedServer
 import org.slf4j.LoggerFactory
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.attribute.PosixFilePermissions
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.system.exitProcess
 
 /**
@@ -26,31 +25,54 @@ fun main(args: Array<String>) {
  */
 internal fun serve(config: ServerConfig) {
     configureSimpleLogging(config.logLevel)
-    createDataDirectory(config.dataDir)
 
     val logger = LoggerFactory.getLogger(LOGGER_NAME)
     if (config.insecureLan) {
         logger.warn("--insecure-lan: serving plain HTTP for a trusted LAN; tokens cross the LAN unencrypted")
     }
 
-    val server =
-        embeddedServer(
-            CIO,
-            serverConfig {
-                module {
-                    ServerModule(config, ServerVersion.current()).install(this)
-                }
-            },
-        ) {
-            connectors +=
-                EngineConnectorBuilder().apply {
-                    host = config.listen.host
-                    port = config.listen.port
-                }
-            connectionIdleTimeoutSeconds = CIO_IDLE_TIMEOUT_SECONDS
+    ServerStorage.open(config.dataDir).use { storage ->
+        val ready = AtomicBoolean(false)
+        val server =
+            embeddedServer(
+                CIO,
+                serverConfig {
+                    module {
+                        ServerModule(
+                            config,
+                            ServerVersion.current(),
+                            writeProbe = storage.store::writeProbe,
+                        ).install(this)
+                        monitor.subscribe(ServerReady) { ready.set(true) }
+                    }
+                },
+            ) {
+                connectors +=
+                    EngineConnectorBuilder().apply {
+                        host = config.listen.host
+                        port = config.listen.port
+                    }
+                connectionIdleTimeoutSeconds = CIO_IDLE_TIMEOUT_SECONDS
+            }
+        logger.info("neutrodyne-server {} listening on {}", ServerVersion.current(), config.listen)
+        val shutdownHook =
+            Thread({
+                server.stop(SHUTDOWN_GRACE_MS, SHUTDOWN_TIMEOUT_MS)
+                if (ready.get()) storage.finishGracefully()
+            }, "neutrodyne-shutdown")
+        Runtime.getRuntime().addShutdownHook(shutdownHook)
+        try {
+            server.start(wait = true)
+            // CIO's wait may return before the stop hook finishes closing the application.
+            shutdownHook.join()
+        } finally {
+            try {
+                Runtime.getRuntime().removeShutdownHook(shutdownHook)
+            } catch (_: IllegalStateException) {
+                // The JVM is already stopping; the registered hook owns graceful shutdown.
+            }
         }
-    logger.info("neutrodyne-server {} listening on {}", ServerVersion.current(), config.listen)
-    server.start(wait = true)
+    }
 }
 
 /** slf4j-simple is configured through system properties before the first logger is created. */
@@ -59,19 +81,12 @@ private fun configureSimpleLogging(level: LogLevel) {
     System.setProperty(SIMPLE_LOGGER_PREFIX + "showDateTime", "true")
 }
 
-/** The data directory is created and tightened to `0700` (N13). */
-private fun createDataDirectory(dataDir: Path) {
-    Files.createDirectories(dataDir)
-    try {
-        Files.setPosixFilePermissions(dataDir, PosixFilePermissions.fromString("rwx------"))
-    } catch (_: UnsupportedOperationException) {
-        // Non-POSIX file system: no permissions to tighten.
-    }
-}
-
 private const val LOGGER_NAME = "ch.lkmc.neutrodyne.sync.server"
 
 /** 10 Ktor setup: longer than Caddy's 2-min upstream keep-alive. */
 private const val CIO_IDLE_TIMEOUT_SECONDS = 180
 
 private const val SIMPLE_LOGGER_PREFIX = "org.slf4j.simpleLogger."
+
+private const val SHUTDOWN_GRACE_MS = 1_000L
+private const val SHUTDOWN_TIMEOUT_MS = 5_000L

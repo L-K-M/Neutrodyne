@@ -1338,6 +1338,18 @@ Ktor's XForwardedHeaders plugin is not installed: it offers no check of the imme
 
 ### Request pipeline
 
+**Implementation note (2026-10-19, MS1).** W3 counts the complete received wire
+body before gzip decoding, including chunked bodies and trailing bytes. Both
+buffers have exact inclusive byte caps; strict UTF-8 validation uses bounded
+scratch space, and JSON charset declarations must be UTF-8. The shared codec pre-scans depth and token lengths before tree
+construction. Invalid envelopes fail the request; semantic changes remain W4's
+independent results. Missing/below-minimum protocol headers return 426, malformed
+or duplicate headers return 400; above-maximum versions remain the client's
+discovery compatibility decision. Named Ktor account limiters require an
+injected authenticated principal; W5 owns authentication and failed-login delay.
+Only discovery is publicly registered, with its IP limiter; no sync endpoint is
+exposed by this intermediate implementation.
+
 **Implementation note (2026-10-19, MS1).** Malformed JSON/envelope/DTO shapes,
 body/depth/global string-token caps fail the request; field/ID/type/admission
 failures reject one change. Shared names enforce `[A-Za-z0-9_.~]{1,64}`: registry
@@ -1352,6 +1364,23 @@ future cursors before mutation and concurrent writes.
 5. The route; `StatusPages` maps failures to problems.
 
 ### Storage
+
+**Implementation note (2026-10-19, MS1).** W2 implements the corrected schema
+below in numbered JDBC SQL, without changing client Room entities or indexes.
+One serve process holds a singleton lease and a shared maintenance lease;
+live administration takes only the shared maintenance lease, and offline
+restore requires its exclusive form. OS locks release after a crash. Backup
+destinations cannot replace the active database or its WAL/SHM files. Only a
+serve instance that reached Ktor's ready event and stopped successfully can
+publish the clean marker; the JVM shutdown hook stops CIO and drains storage
+before publishing it. Store/admin close alone never does. Snapshots use
+separate read transactions and stream outside the writer; callers must close
+them promptly to release pinned WAL pages. Pre-upgrade copies use checked
+VACUUM INTO plus atomic publication; a UTC-minute timestamp and random suffix
+keep repeated upgrade attempts from replacing earlier copies. Failed SQL
+upgrades roll back as a unit. Initial auto-vacuum is selected before entering
+WAL as well as before creating tables; an empty WAL database otherwise ignores
+the setting.
 
 **Implementation note (2026-10-19, MS1).** Corrections superseding the v1 sketch for
 W2 (no client D22 change): account adds `password_set_at`, durable `clock_packed`;
@@ -1565,6 +1594,29 @@ A red banner "This server is not using HTTPS" appears on every page in insecure 
 - **Audit:** `AuditLog` writes logins (success and failure, with IP), link approvals and denials, invite creation and redemption, token revocations, password changes, account resets and purges, admin actions; visible on `/admin/server`.
 
 ### Performance and footprint
+
+**Implementation note (2026-10-19, MS1).** Early packaged-fat-JAR JDBC gate
+passed on Linux amd64, Temurin 21.0.12.1+1, sqlite-jdbc 3.53.4.0
+(SQLite 3.53.4), with /tmp on the host overlay filesystem.
+DriverManager service discovery, WAL create/insert/read, and native extraction
+under the selected data/native directory passed with only the flattened JAR
+and the compiled test probe on the classpath. Both Linux x86_64 and aarch64
+native resources and META-INF/services/java.sql.Driver survived packaging.
+Artifact SHA-256: `09a076f9771a848bb135739d397624e1dd35183dbd8de1cb69a3b4988e5d2e4e`.
+With the documented JVM flags, process wall time was 0.354 s, JDBC work 277 ms,
+and peak RSS 50,152 KiB (local temporary storage). Reproduce with
+`PackagedJdbcProbe.java` from the server test sources: compile it with javac,
+then run its main class with the fat JAR and probe classes on the classpath,
+passing a fresh writable data directory. This is an early feasibility result,
+not PB30 acceptance: Bouncy Castle/authentication, ten-minute idle, capped
+50,000-record upload, arm64 execution, Pi 4 and Pi 3/Zero 2 W remain for W5/W11.
+
+The final local W2/W3 JAR repeated the JDBC service/native check and passed
+12 packaged CIO checks with `-Xmx96m`: exact chunked wire/decoded caps, malformed
+JSON, protocol policy, readiness, native extraction/permissions, failed bind
+and graceful SIGTERM shutdown. Final artifact SHA-256:
+`2727980ec623ae2d66d876fe9fb85f59db4c5315a8d751c60bfa7f45d95d0b7d`.
+This local feasibility evidence does not close S16.
 
 Prototype measured by the research for this plan (Ktor 3.6.0 CIO + sqlite-jdbc 3.53.4.0 on a 4-vCPU x86-64 container, OpenJDK 21): 27.5 MB of JARs; idle RSS 92 MB with `-Xmx64m -XX:+UseSerialGC -Xss512k -XX:TieredStopAtLevel=1` (133 MB with the default heap); 50,000 single-field changes pushed in 1.7–2.0 s and pulled in 0.5–0.7 s. The real merge of JSON documents is slower per change (Unverified); a household sees a few hundred changes a day and one-off initial uploads of about 50,000 records, so throughput is not a concern. The documented flags are `-Xmx96m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss512k`; S16 confirms them on a Raspberry Pi 4 against PB30 (idle ≤ 160 MB RSS, a 50,000-record initial upload ≤ 60 s) ([Spikes](#spikes)); Unverified until then: the footprint and upload time on a Pi.
 

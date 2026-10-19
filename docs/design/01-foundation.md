@@ -583,13 +583,20 @@ These run in `check`; CI (09) only invokes Gradle.
 
 ##### `checkBannedApis` rules
 
+**Implementation note (2026-10-19, MS1).** Server JVM test sources under
+`sync/server/src/test/` may start JVM children to prove OS process leases,
+SIGKILL recovery and CLI shutdown. This is a test-source ownership exception
+to rule 5 below, not a production process allowance. The source-scan fixture
+accepts that test directory and still rejects process starts in server main
+and app test sources. Production process ownership and D90 stay unchanged.
+
 A plain text scan (fast, configuration-cache safe) of the Kotlin, Java, C/C++/Objective-C sources and Android manifests of every root-build module — every source set (`commonMain`, `androidMain`, `desktopMain`, `main`, and `:app`'s `debug`, `release`, `benchmarkRelease`, `youtubeEngine`, `noYouTubeEngine` directories, `:desktopApp`'s `youtubeEngine` and `noYouTubeEngine` directories) — plus the module build scripts (not `build-logic/`; tests may build their own clients). False positives are fixed by rewording, never by suppression lists. It fails when:
 
 1. **`commonMain`** of any module contains an import or fully qualified use of `java.`, `javax.` or `android.` (not `androidx.`, whose KMP libraries are allowed), or `System.currentTimeMillis` (the compiler already rejects most of these; the scan also covers `expect` declarations and string templates, and keeps [D81](../PLAN.md#3-key-decisions)'s iOS door open).
 2. A **build script** adds a JVM island (`:feeds:jvm`, `:core:network:okhttp`, `:youtube:engine`) to a `commonMain` dependency block, or a platform-only module to any KMP module (the module-graph plugin cannot see source sets, [Module-graph assertion configuration](#module-graph-assertion-configuration)). Enforced twice (2026-10-06): `verifyDependencyPolicy` checks the declared project edges of every `commonMain*` configuration for islands and every configuration of a KMP module for platform-only modules — it sees an edge whichever DSL form declared it (`commonMain.dependencies { }`, `commonMain { dependencies { } }`, `by getting`, `getByName`/`named`, `.apply`/`.also`) — and this text scan stays as the second line of defence for the same forms in build scripts.
 3. Source outside `core/designsystem/` contains `ExperimentalMaterial3Api` or `ExperimentalMaterial3ExpressiveApi`; source outside `playback/impl/` contains `UnstableApi`.
 4. Source outside `youtube/ytdlp/` contains `com.chaquo.python`, or a manifest outside `youtube/ytdlp/` declares `android:process`.
-5. Source outside `youtube/ytdlp-desktop/` contains `ProcessBuilder(` or `Runtime.getRuntime().exec` (the only process any app starts is the desktop engine child, [D90](../PLAN.md#3-key-decisions); Android's engine runs in-process, [Platform compliance](#platform-compliance) P33).
+5. Source outside `youtube/ytdlp-desktop/` and the server JVM test directory above contains `ProcessBuilder(` or `Runtime.getRuntime().exec` (the only process any app starts is the desktop engine child, [D90](../PLAN.md#3-key-decisions); Android's engine runs in-process, [Platform compliance](#platform-compliance) P33).
 6. `java.awt.Desktop` appears outside `desktopApp/`, `desktop/system/` and `core/ui/src/desktopMain/`; `java.lang.foreign` appears outside `playback/native/`, `desktop/system/` and `playback/engine/` (`:playback:engine` binds FFmpeg only; our own native code is called only from the first two, PLAN 5.1 rule 6).
 7. Any source contains `System.load(` or `System.loadLibrary(` (native code is loaded through FFM `SymbolLookup.libraryLookup` from the app image on the desktop and by the libraries themselves elsewhere; Android P35), `DexClassLoader`, `InMemoryDexClassLoader`, `PackageInstaller` (the apps install nothing, [D78](../PLAN.md#3-key-decisions)), `api.github.com`, `GlobalScope`, `override fun onBackPressed`, or `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`; any manifest declares `REQUEST_INSTALL_PACKAGES` or `UPDATE_PACKAGES_WITHOUT_USER_ACTION` or sets `android:debuggable`.
 8. Source contains `okhttp3.Cache(`, `.cache(Cache(`, `OkHttpClient()` or `OkHttpClient.Builder()` outside `core/network/okhttp/`, or a Ktor `HttpClient(` outside `core/network/` ([Networking baseline](#one-client-family)); `sync/server/` is exempt from the Ktor rule (server code).

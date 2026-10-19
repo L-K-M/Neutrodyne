@@ -39,6 +39,7 @@ dependencies {
     implementation(platform(libs.ktor.bom))
     implementation(libs.bundles.server.ktor)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.sqlite.jdbc)
     implementation(libs.slf4j.api)
     runtimeOnly(libs.slf4j.simple)
 
@@ -56,4 +57,15 @@ private val versionNameProperty = "neutrodyne.versionName"
 // Compile JVM-only domain fakes here; :core:testing must not depend on the server application.
 kotlin.sourceSets.named("test") {
     kotlin.srcDir(rootProject.file("core/testing/src/serverFixtures/kotlin"))
+}
+
+// Child JVMs prove OS lock/crash behavior using the same resolved runtime as the tests.
+tasks.named<org.gradle.api.tasks.testing.Test>("test") {
+    systemProperty(
+        "neutrodyne.server.testClasspath",
+        project.extensions
+            .getByType<org.gradle.api.tasks.SourceSetContainer>()
+            .getByName("test")
+            .runtimeClasspath.asPath,
+    )
 }
