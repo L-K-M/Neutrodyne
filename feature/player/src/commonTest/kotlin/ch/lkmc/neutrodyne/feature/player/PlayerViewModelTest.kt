@@ -33,6 +33,7 @@ import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.PlaybackEvent
 import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
 import ch.lkmc.neutrodyne.playback.api.UnplayableReason
+import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -65,8 +66,8 @@ class PlayerViewModelTest : MainDispatcherTest() {
                 controller.state,
                 settings,
                 clock,
-                chapters,
-                episodeRepo,
+                Provider { chapters },
+                Provider { episodeRepo },
                 FakeNetworkMonitor(),
             )
         backgroundScope.launch { vm.uiState.collect {} }

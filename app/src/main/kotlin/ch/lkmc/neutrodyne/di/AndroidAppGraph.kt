@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.BackupRepository
+import ch.lkmc.neutrodyne.core.domain.ChapterRepository
 import ch.lkmc.neutrodyne.core.domain.ExportRepository
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
 import ch.lkmc.neutrodyne.core.domain.ImportReportPoster
@@ -68,6 +69,7 @@ interface AndroidAppGraph {
     val playSessionStore: Provider<PlaySessionStore>
     val positionStore: Provider<PositionStore>
     val playbackMediaLookup: Provider<PlaybackMediaLookup>
+    val chapterRepository: Provider<ChapterRepository>
 
     val workerFactory: WorkerFactory
 

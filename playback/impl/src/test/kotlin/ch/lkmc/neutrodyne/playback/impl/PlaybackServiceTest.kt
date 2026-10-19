@@ -246,7 +246,7 @@ class PlaybackServiceTest {
             install(h)
             val service = Robolectric.buildService(NeutrodynePlaybackService::class.java).create()
             try {
-                pumpUntil { h.hub.bridge != null }
+                h.run { activate(service.get(), h).await() }
                 val player = service.get().onGetSession(controllerInfo())!!.player
                 pumpUntil { player.mediaItemCount == 1 && player.currentPosition == 12_000L }
                 player.play()

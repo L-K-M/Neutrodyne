@@ -34,6 +34,8 @@ internal object CustomCommands {
             SKIP_SILENCE,
             SPEED_CYCLE,
             DISMISS,
+            PlaybackSessionCommands.SLEEP_SET,
+            PlaybackSessionCommands.SLEEP_EXTEND,
             PlaybackSessionCommands.CHAPTER_NEXT,
             PlaybackSessionCommands.CHAPTER_PREV,
         )

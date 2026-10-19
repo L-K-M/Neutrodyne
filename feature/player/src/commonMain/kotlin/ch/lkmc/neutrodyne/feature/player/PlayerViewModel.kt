@@ -59,6 +59,7 @@ import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
 import ch.lkmc.neutrodyne.playback.api.UnplayableReason
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.Inject
+import dev.zacsweers.metro.Provider
 import dev.zacsweers.metrox.viewmodel.ViewModelKey
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
@@ -110,8 +111,8 @@ public class PlayerViewModel(
     private val source: PlaybackStateSource,
     private val settings: SettingsRepository,
     private val clock: Clock,
-    private val chapters: ChapterRepository,
-    private val episodes: EpisodeRepository,
+    private val chapters: Provider<ChapterRepository>,
+    private val episodes: Provider<EpisodeRepository>,
     private val network: NetworkMonitor,
 ) : ViewModel() {
     private val messages = UserMessages()
@@ -132,7 +133,7 @@ public class PlayerViewModel(
                 if (id == null) {
                     flowOf(null to emptyList())
                 } else {
-                    chapters.observe(id).map { id to it }.onStart { emit(id to emptyList()) }
+                    chapters().observe(id).map { id to it }.onStart { emit(id to emptyList()) }
                 }
             }
 
@@ -148,7 +149,7 @@ public class PlayerViewModel(
                     flowOf(PlayerNotesState())
                 } else {
                     combine(
-                        episodes.observeShowNotes(id),
+                        episodes().observeShowNotes(id),
                         settings.observe(FeedsSettingKeys.SHOW_NOTES_IMAGES),
                         network.status,
                     ) { notes, images, net ->

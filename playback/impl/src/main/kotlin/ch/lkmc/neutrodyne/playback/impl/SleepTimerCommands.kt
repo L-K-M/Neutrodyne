@@ -8,8 +8,6 @@ import ch.lkmc.neutrodyne.playback.api.PlaybackSessionCommands as Wire
 
 /** Strict wire types: Bundle getters otherwise silently substitute zero for malformed values. */
 internal object SleepTimerCommands {
-    val names = listOf(Wire.SLEEP_SET, Wire.SLEEP_EXTEND)
-
     fun encode(mode: SleepTimerMode): Bundle =
         Bundle().apply {
             putString(

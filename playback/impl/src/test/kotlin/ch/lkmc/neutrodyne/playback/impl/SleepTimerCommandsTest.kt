@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.playback.impl
 
 import android.os.Bundle
+import androidx.media3.session.MediaController
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
@@ -32,8 +33,24 @@ class SleepTimerCommandsTest {
                 }
             val service = Robolectric.buildService(NeutrodynePlaybackService::class.java).create()
             try {
-                pumpUntil { h.hub.bridge != null }
                 val session = service.get().onGetSession(controllerInfo()) as MediaLibrarySession
+                val client = h.run { MediaController.Builder(app, session.token).buildAsync().await() }
+                try {
+                    h.run {
+                        assertEquals(
+                            SessionResult.RESULT_SUCCESS,
+                            client
+                                .sendCustomCommand(
+                                    CustomCommands.command(Wire.SLEEP_SET),
+                                    SleepTimerCommands.encode(SleepTimerMode.Minutes(1)),
+                                ).await()
+                                .resultCode,
+                        )
+                    }
+                } finally {
+                    client.release()
+                }
+                val chapterActions = mutableListOf<String>()
                 val callback =
                     SessionCallback(
                         { checkNotNull(h.hub.bridge) },
@@ -42,6 +59,14 @@ class SleepTimerCommandsTest {
                         MediaButtons(h.prefs),
                         h.scope,
                         kotlinx.coroutines.Dispatchers.IO,
+                        chapterCommand = { action ->
+                            if (action == Wire.CHAPTER_NEXT || action == Wire.CHAPTER_PREV) {
+                                chapterActions += action
+                                SessionResult(SessionResult.RESULT_SUCCESS)
+                            } else {
+                                null
+                            }
+                        },
                     )
 
                 fun command(
@@ -63,6 +88,10 @@ class SleepTimerCommandsTest {
                     SessionResult.RESULT_SUCCESS,
                     command(Wire.SLEEP_SET, SleepTimerCommands.encode(SleepTimerMode.Minutes(1))),
                 )
+                assertEquals(SessionResult.RESULT_SUCCESS, command(Wire.CHAPTER_NEXT, Bundle.EMPTY))
+                assertEquals(SessionResult.RESULT_SUCCESS, command(Wire.CHAPTER_PREV, Bundle.EMPTY))
+                assertEquals(listOf(Wire.CHAPTER_NEXT, Wire.CHAPTER_PREV), chapterActions)
+                assertEquals(SessionError.ERROR_NOT_SUPPORTED, command("nd.UNKNOWN", Bundle.EMPTY))
                 val before = assertIs<SleepTimerState.Running>(h.hub.sleepTimer.value)
                 val invalid =
                     listOf(

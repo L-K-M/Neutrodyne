@@ -77,6 +77,7 @@ class AndroidAppGraphTest {
                         graph.playSessionStore() to "SessionWriter",
                         graph.positionStore() to "PositionWriter",
                         graph.playbackMediaLookup() to "PlaybackMediaLookupImpl",
+                        graph.chapterRepository() to "ChapterRepositoryImpl",
                     )
                 for ((binding, expectedName) in bindings) {
                     assertThat(binding::class.simpleName).isEqualTo(expectedName)
@@ -86,6 +87,7 @@ class AndroidAppGraphTest {
                 assertThat(graph.playSessionStore()).isSameInstanceAs(graph.playSessionStore())
                 assertThat(graph.positionStore()).isSameInstanceAs(graph.positionStore())
                 assertThat(graph.playbackMediaLookup()).isSameInstanceAs(graph.playbackMediaLookup())
+                assertThat(graph.chapterRepository()).isSameInstanceAs(graph.chapterRepository())
             } finally {
                 graph.databaseOpener.requireDatabase().close()
             }
@@ -143,6 +145,7 @@ class AndroidAppGraphTest {
             assertThat(graph.playSessionStore).isNotNull()
             assertThat(graph.positionStore).isNotNull()
             assertThat(graph.playbackMediaLookup).isNotNull()
+            assertThat(graph.chapterRepository).isNotNull()
             assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
         }
 

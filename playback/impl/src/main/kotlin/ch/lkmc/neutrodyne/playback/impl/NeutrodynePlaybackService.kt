@@ -193,7 +193,7 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
 }
 
 /** Null in all normal runs. Tests arm it before framework creation; no runtime setting exposes it. */
-@androidx.annotation.VisibleForTesting
+@androidx.annotation.VisibleForTesting(otherwise = androidx.annotation.VisibleForTesting.PACKAGE_PRIVATE)
 @androidx.annotation.Keep
 public object PlaybackTestHooks {
     @Volatile public var foregroundServiceTimeoutMs: Long? = null

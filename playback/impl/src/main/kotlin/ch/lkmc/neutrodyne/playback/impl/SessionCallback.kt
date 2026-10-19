@@ -3,11 +3,7 @@ package ch.lkmc.neutrodyne.playback.impl
 
 import android.os.Bundle
 import android.os.Process
-import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.session.LibraryResult
-import androidx.media3.session.MediaLibraryService.LibraryParams
-import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSession.ConnectionResult
 import androidx.media3.session.MediaSession.ControllerInfo
@@ -15,9 +11,6 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
 import ch.lkmc.neutrodyne.core.model.SettingScope
-import ch.lkmc.neutrodyne.playback.api.PlayResult
-import ch.lkmc.neutrodyne.playback.core.StartRequest
-import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CoroutineDispatcher
@@ -56,7 +49,6 @@ internal class SessionCallback(
         if (canControl(session, controller)) {
             val custom = ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
             CustomCommands.names.forEach { custom.add(CustomCommands.command(it)) }
-            SleepTimerCommands.names.forEach { custom.add(CustomCommands.command(it)) }
             builder
                 .setAvailablePlayerCommands(
                     ConnectionResult.DEFAULT_PLAYER_COMMANDS

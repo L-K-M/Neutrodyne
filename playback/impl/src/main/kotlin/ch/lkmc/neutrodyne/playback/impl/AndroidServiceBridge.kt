@@ -127,6 +127,7 @@ internal class AndroidServiceBridge(
     private var detached = false
 
     fun attach(hasPendingStart: Boolean = false) {
+        // Capture departures first; the projector freezes completion before sleep disarms its reason.
         tracker.attach(player)
         projector.attach(player)
         sleep.attach()

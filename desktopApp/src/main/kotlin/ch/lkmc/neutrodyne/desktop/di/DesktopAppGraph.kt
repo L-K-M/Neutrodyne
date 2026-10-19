@@ -15,6 +15,7 @@ import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.BackupRepository
+import ch.lkmc.neutrodyne.core.domain.ChapterRepository
 import ch.lkmc.neutrodyne.core.domain.ExportRepository
 import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.domain.NewEpisodePoster
@@ -82,6 +83,7 @@ interface DesktopAppGraph {
     val playSessionStore: Provider<PlaySessionStore>
     val positionStore: Provider<PositionStore>
     val playbackMediaLookup: Provider<PlaybackMediaLookup>
+    val chapterRepository: Provider<ChapterRepository>
 
     /** Every feature's navigation entries (01 Feature entry installers). */
     val entryInstallers: Set<EntryProviderInstaller>
