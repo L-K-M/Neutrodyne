@@ -62,6 +62,13 @@ class AddPodcastResolverTest {
 
     // --- Input normalisation (03 steps 1–7) ---------------------------------------------------------
 
+    @Test fun importReportUrlFormsNormalizeToTheSameFetchUrl() {
+        for (input in listOf("feeds.example/show.xml", "feed:https://feeds.example/show.xml")) {
+            val normalized = assertIs<NormalizedInput.Url>(AddInputNormalizer.normalize(input))
+            assertEquals("https://feeds.example/show.xml", normalized.url)
+        }
+    }
+
     @Test
     fun schemeWrappersUnwrapToTheFetchUrl() {
         assertUrl("feed:https://a.example.com/f", "https://a.example.com/f")

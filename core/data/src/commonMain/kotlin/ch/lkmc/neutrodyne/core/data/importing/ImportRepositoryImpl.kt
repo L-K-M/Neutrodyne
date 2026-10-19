@@ -20,6 +20,7 @@ import ch.lkmc.neutrodyne.core.database.ImportSessionEntity
 import ch.lkmc.neutrodyne.core.database.ImportStatusCount
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
+import ch.lkmc.neutrodyne.core.domain.DiscardPreviewResult
 import ch.lkmc.neutrodyne.core.domain.ImportError
 import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
@@ -112,7 +113,7 @@ internal class ImportRepositoryImpl(
             .distinctUntilChanged()
             .flatMapLatest { state ->
                 Pager(PAGING_CONFIG) {
-                    db.importDao().pagedItems(sessionId, filterStatuses(filter, state))
+                    db.importDao().pagedItems(sessionId, filterStatuses(filter, state), state ?: ImportState.PREVIEW)
                 }.flow.map { data -> data.map(::itemView) }
             }
 
@@ -184,24 +185,9 @@ internal class ImportRepositoryImpl(
         val session = dao.sessionById(sessionId) ?: return
         when (session.state) {
             ImportState.PREVIEW -> {
-                // The early read is a fast path — the transaction re-claims under the lock.
                 if (!session.previewOwned()) return
-                // Non-cancellable so a caller cancelled mid-delete cannot strand a row
-                // whose payload is gone; a failed file delete keeps the row so a later
-                // cancel or sweep retries the file first.
-                withContext(NonCancellable) {
-                    db.withWriteTransaction {
-                        val latest = dao.sessionById(sessionId) ?: return@withWriteTransaction
-                        if (latest.state != ImportState.PREVIEW || !latest.previewOwned()) {
-                            return@withWriteTransaction
-                        }
-                        val cleared =
-                            latest.payloadPath?.let {
-                                withContext(io) { payloads.deleteIfPresent(payloads.payloadFile(it)) }
-                            } != false
-                        if (!cleared) return@withWriteTransaction
-                        dao.deleteSession(sessionId)
-                    }
+                if (discardPreview(sessionId) == DiscardPreviewResult.FAILED) {
+                    throw IllegalStateException("Import preview deletion failed")
                 }
             }
 
@@ -221,6 +207,39 @@ internal class ImportRepositoryImpl(
             ImportState.DONE, ImportState.CANCELLED -> {}
         }
     }
+
+    override suspend fun discardPreview(sessionId: Long): DiscardPreviewResult =
+        withContext(NonCancellable) {
+            suspendRunCatching {
+                db.withWriteTransaction {
+                    val dao = db.importDao()
+                    val session =
+                        dao.sessionById(sessionId)
+                            ?: return@withWriteTransaction DiscardPreviewResult.NOT_PREVIEW
+                    if (session.state != ImportState.PREVIEW) {
+                        return@withWriteTransaction DiscardPreviewResult.NOT_PREVIEW
+                    }
+                    val encodedOptions = session.optionsJson
+                    if (encodedOptions != null && ImportOptionsJson.decodeOrNull(encodedOptions) == null) {
+                        return@withWriteTransaction DiscardPreviewResult.FAILED
+                    }
+                    if (!session.previewOwned()) return@withWriteTransaction DiscardPreviewResult.NOT_PREVIEW
+
+                    // Hold the writer across file deletion so confirm cannot claim this payload.
+                    val cleared =
+                        session.payloadPath?.let {
+                            withContext(io) { payloads.deleteIfPresent(payloads.payloadFile(it)) }
+                        } != false
+                    if (!cleared) return@withWriteTransaction DiscardPreviewResult.FAILED
+
+                    dao.deleteSession(sessionId)
+                    DiscardPreviewResult.DISCARDED
+                }
+            }.getOrElse {
+                Log.w(TAG, it) { "import preview discard failed for session $sessionId" }
+                DiscardPreviewResult.FAILED
+            }
+        }
 
     override suspend fun retry(
         sessionId: Long,
@@ -257,11 +276,13 @@ internal class ImportRepositoryImpl(
             db.importDao().observeSession(sessionId),
             db.importDao().observeProgress(sessionId),
             db.importDao().observeItemTallies(sessionId),
-        ) { session, progress, tallies -> session?.toView(progress, tallies) }
+            db.importDao().observeNoMediaOrdinals(sessionId),
+        ) { session, progress, tallies, noMedia -> session?.toView(progress, tallies, noMedia) }
 
     private fun ImportSessionEntity.toView(
         progress: List<ImportStatusCount>,
         tallies: ImportItemTallies,
+        noMedia: List<Int>,
     ): ImportSessionView =
         ImportSessionView(
             id = id,
@@ -275,6 +296,8 @@ internal class ImportRepositoryImpl(
             selectedCount = tallies.selectedCount,
             youtubeCount = tallies.youtubeCount,
             createdAt = createdAt,
+            deferredCount = tallies.deferredCount,
+            noMediaOrdinals = noMedia.toSet(),
         )
 
     /** Rows show monogram, title and host — never the URL (05 §5). */

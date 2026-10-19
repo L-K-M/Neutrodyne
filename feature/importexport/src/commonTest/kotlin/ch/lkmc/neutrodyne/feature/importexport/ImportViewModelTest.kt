@@ -4,11 +4,15 @@ package ch.lkmc.neutrodyne.feature.importexport
 
 import androidx.lifecycle.ViewModelStore
 import androidx.paging.testing.asSnapshot
+import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.Outcome
+import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.domain.ImportError
 import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.domain.ImportScreenVisibility
+import ch.lkmc.neutrodyne.core.domain.ImportSessionOperations
+import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.model.GroupProposal
 import ch.lkmc.neutrodyne.core.model.ImportFormat
@@ -22,6 +26,7 @@ import ch.lkmc.neutrodyne.core.model.ImportSource
 import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.testing.FakeGroupRepository
 import ch.lkmc.neutrodyne.core.testing.FakeImportRepository
+import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.platform.NotificationPermissionRequester
@@ -37,6 +42,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
@@ -53,6 +59,7 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalCoroutinesApi::class)
 class ImportViewModelTest : MainDispatcherTest() {
     private val imports = FakeImportRepository()
+    private val podcasts = FakePodcastRepository()
     private val groups = FakeGroupRepository()
     private val visibility = ImportScreenVisibility()
 
@@ -65,7 +72,15 @@ class ImportViewModelTest : MainDispatcherTest() {
     private fun TestScope.appScope(): CoroutineScope = CoroutineScope(coroutineContext + SupervisorJob())
 
     private fun TestScope.viewModel(sessionId: Long) =
-        ImportViewModel(sessionId, imports, groups, visibility, appScope())
+        ImportViewModel(
+            sessionId,
+            imports,
+            groups,
+            visibility,
+            appScope(),
+            podcasts,
+            ImportSessionOperations(appScope()),
+        )
 
     private fun item(
         ordinal: Int,
@@ -130,6 +145,253 @@ class ImportViewModelTest : MainDispatcherTest() {
 
     private fun session(id: Long) = imports.sessions.value[id]
 
+    @Test fun retryRequeuesFailedRowThroughRepository() =
+        runTest {
+            val row = item(0, status = ImportItemStatus.GONE).copy(podcastId = 12)
+            val id = seed(listOf(row), state = ImportState.DONE)
+            val vm = viewModel(id)
+            advanceUntilIdle()
+            assertTrue(vm.retry(row), "Retry must succeed through the repository")
+            assertTrue(imports.calls.contains("retry($id, [0])"))
+        }
+
+    @Test fun removeUsesSessionOwnershipAndCompleteNoMediaSet() =
+        runTest {
+            val rows = (0 until 100).map { item(it, status = ImportItemStatus.NO_MEDIA).copy(podcastId = it + 1L) }
+            val id = seed(rows, state = ImportState.DONE)
+            val vm = viewModel(id)
+            advanceUntilIdle()
+            assertTrue(vm.removeAllNoMedia(), "Remove all must remove the whole session set")
+            assertTrue(imports.items.value[id].isNullOrEmpty())
+        }
+
+    @Test fun urlAndPasswordFixUpsReturnRepositorySuccess() =
+        runTest {
+            val row = item(0, status = ImportItemStatus.AUTH_REQUIRED).copy(podcastId = 12)
+            val id = seed(listOf(row), state = ImportState.DONE)
+            val vm = viewModel(id)
+            advanceUntilIdle()
+            assertNull(vm.editUrl(row, "https://example.com/feed"), "URL success must clear the inline error")
+            assertNull(
+                vm.enterPassword(
+                    row,
+                    ch.lkmc.neutrodyne.core.model
+                        .BasicCredentials("user", "secret"),
+                ),
+                "Password success must clear the inline error",
+            )
+            assertTrue(imports.calls.contains("editUrl($id, 0)"))
+            assertTrue(imports.calls.contains("enterPassword($id, 0)"))
+        }
+
+    @Test fun fixUpExceptionsShowFailureWithoutLoggingSecrets() =
+        runTest {
+            val row = item(0, status = ImportItemStatus.AUTH_REQUIRED).copy(podcastId = 12)
+            val id = seed(listOf(row), state = ImportState.DONE)
+            val logged = mutableListOf<String>()
+            Log.install(
+                ch.lkmc.neutrodyne.core.common
+                    .LogSink { _, _, text -> logged += text },
+            )
+            val repo =
+                object : ImportRepository by imports {
+                    override suspend fun enterPassword(
+                        sessionId: Long,
+                        ordinal: Int,
+                        credentials: BasicCredentials,
+                    ): Outcome<Unit, AddPodcastError> = error("opaque-password")
+
+                    override suspend fun editUrl(
+                        sessionId: Long,
+                        ordinal: Int,
+                        input: String,
+                    ): Outcome<Unit, AddPodcastError> = error("opaque-url-token")
+
+                    override suspend fun retry(
+                        sessionId: Long,
+                        ordinals: Set<Int>,
+                    ) = error("write failed")
+
+                    override suspend fun remove(
+                        sessionId: Long,
+                        ordinals: Set<Int>,
+                    ) = error("write failed")
+                }
+            try {
+                val vm =
+                    ImportViewModel(
+                        id,
+                        repo,
+                        groups,
+                        visibility,
+                        appScope(),
+                        podcasts,
+                        ImportSessionOperations(appScope()),
+                    )
+                advanceUntilIdle()
+                assertEquals(
+                    UiText.Res(Res.string.write_failed),
+                    vm.enterPassword(row, BasicCredentials("u", "opaque-password")),
+                )
+                assertEquals(
+                    UiText.Res(Res.string.write_failed),
+                    vm.editUrl(row, "https://example.com/feed?token=opaque-url-token"),
+                )
+                assertFalse(vm.retry(row))
+                assertFalse(vm.remove(row))
+                assertTrue(vm.messages.value.isNotEmpty(), "Failed retry/remove must post a message")
+                assertTrue(logged.none { "opaque-password" in it || "opaque-url-token" in it })
+                assertFalse(vm.uiState.value.busy)
+            } finally {
+                Log.install()
+            }
+        }
+
+    @Test fun invalidCredentialsAndIneligibleFixUpsNeverReachRepository() =
+        runTest {
+            val row = item(0, status = ImportItemStatus.AUTH_REQUIRED).copy(podcastId = 12)
+            val id = seed(listOf(row), state = ImportState.DONE)
+            val vm = viewModel(id)
+            advanceUntilIdle()
+            val before = imports.calls.toList()
+            assertTrue(vm.enterPassword(row, BasicCredentials("", "")) != null)
+            assertTrue(vm.enterPassword(row, BasicCredentials("u:injected", "password")) != null)
+            assertFalse(vm.remove(row.copy(status = ImportItemStatus.MERGED)))
+            assertFalse(vm.remove(row.copy(status = ImportItemStatus.ALREADY_SUBSCRIBED)))
+            assertFalse(vm.retry(row.copy(status = ImportItemStatus.FETCH_FAILED, errorDetail = "DEFERRED")))
+            assertEquals(before, imports.calls)
+        }
+
+    @Test fun fixUpsReturnTypedErrorsInline() =
+        runTest {
+            val row = item(0, status = ImportItemStatus.AUTH_REQUIRED).copy(podcastId = 12)
+            val id = seed(listOf(row), state = ImportState.DONE)
+            imports.editUrlOutcome = Outcome.Failure(AddPodcastError.NotAFeed)
+            imports.enterPasswordOutcome = Outcome.Failure(AddPodcastError.AuthRequired("private realm"))
+            val vm = viewModel(id)
+            advanceUntilIdle()
+            assertEquals(addPodcastErrorText(AddPodcastError.NotAFeed), vm.editUrl(row, "https://example.com/feed"))
+            assertEquals(
+                addPodcastErrorText(AddPodcastError.AuthRequired(null)),
+                vm.enterPassword(row, BasicCredentials("user", "secret")),
+            )
+            assertFalse(vm.uiState.value.busy)
+        }
+
+    @Test fun acceptedPasswordFixUpSurvivesRouteAndViewModelTeardown() =
+        runTest {
+            val row = item(0, status = ImportItemStatus.AUTH_REQUIRED).copy(podcastId = 12)
+            val id = seed(listOf(row), state = ImportState.DONE)
+            val gate = CompletableDeferred<Unit>()
+            var sent: BasicCredentials? = null
+            val repo =
+                object : ImportRepository by imports {
+                    override suspend fun enterPassword(
+                        sessionId: Long,
+                        ordinal: Int,
+                        credentials: BasicCredentials,
+                    ): Outcome<Unit, AddPodcastError> {
+                        gate.await()
+                        sent = credentials
+                        return imports.enterPassword(sessionId, ordinal, credentials)
+                    }
+                }
+            val vm =
+                ImportViewModel(id, repo, groups, visibility, appScope(), podcasts, ImportSessionOperations(appScope()))
+            val store = ViewModelStore()
+            store.put("import", vm)
+            advanceUntilIdle()
+            val owner = Job(coroutineContext.job)
+            CoroutineScope(coroutineContext + owner).launch { vm.enterPassword(row, BasicCredentials("u", "secret")) }
+            runCurrent()
+            assertTrue(vm.uiState.value.busy, "Accepted fix-up must own busy until repository completion")
+            assertFalse(vm.retry(row), "Concurrent fix-ups must be rejected")
+            owner.cancel()
+            store.clear()
+            gate.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(BasicCredentials("u", "secret"), sent)
+            assertFalse(vm.uiState.value.busy)
+            assertFalse(
+                vm.uiState.value
+                    .toString()
+                    .contains("secret"),
+            )
+        }
+
+    @Test fun fixUpsClearBusyEvenWhenCancelledBeforeDispatch() =
+        runTest {
+            val row = item(0, status = ImportItemStatus.GONE).copy(podcastId = 12)
+            val id = seed(listOf(row), state = ImportState.DONE)
+            val appJob = SupervisorJob()
+            val vm =
+                ImportViewModel(
+                    id,
+                    imports,
+                    groups,
+                    visibility,
+                    CoroutineScope(coroutineContext + appJob),
+                    podcasts,
+                    ImportSessionOperations(CoroutineScope(coroutineContext + appJob)),
+                )
+            advanceUntilIdle()
+            val caller = launch(start = CoroutineStart.UNDISPATCHED) { vm.retry(row) }
+            assertTrue(vm.uiState.value.busy, "Accepted retry must set busy before dispatch")
+            appJob.cancel()
+            runCurrent()
+            assertTrue(caller.isCancelled)
+            assertFalse(vm.uiState.value.busy)
+            assertTrue(imports.calls.none { it.startsWith("retry") })
+        }
+
+    @Test fun previewCancelledAndMissingPodcastRowsCannotRunFixUps() =
+        runTest {
+            for (state in listOf(ImportState.PREVIEW, ImportState.CANCELLED)) {
+                val row = item(0, status = ImportItemStatus.GONE).copy(podcastId = 12)
+                val id = seed(listOf(row), state = state)
+                val vm = viewModel(id)
+                advanceUntilIdle()
+                val before = imports.calls.toList()
+                assertFalse(vm.retry(row))
+                assertFalse(vm.remove(row))
+                assertTrue(vm.editUrl(row, "https://example.com/feed") != null)
+                assertEquals(before, imports.calls)
+            }
+        }
+
+    @Test fun basicAuthAllowsAnEmptyUsernameOrPassword() =
+        runTest {
+            val row = item(0, status = ImportItemStatus.AUTH_REQUIRED).copy(podcastId = 12)
+            val id = seed(listOf(row), state = ImportState.DONE)
+            val vm = viewModel(id)
+            advanceUntilIdle()
+            for (credentials in listOf(BasicCredentials("", "secret"), BasicCredentials("alice", ""))) {
+                assertNull(vm.enterPassword(row, credentials), "A nonempty Basic-auth pair must reach the repository")
+            }
+            assertEquals(2, imports.calls.count { it.startsWith("enterPassword") })
+        }
+
+    @Test fun artworkTracksTheResolvedPodcastAndVersionChanges() =
+        runTest {
+            val row = item(0, status = ImportItemStatus.SUBSCRIBED).copy(podcastId = 12)
+            val id = seed(listOf(row), state = ImportState.DONE)
+            val vm = viewModel(id)
+            val seen = mutableListOf<ch.lkmc.neutrodyne.core.model.ArtworkRef?>()
+            launch { vm.artworkFor(12).take(4).toList(seen) }
+            runCurrent()
+            val first =
+                ch.lkmc.neutrodyne.core.testing
+                    .testPodcastDetail(12)
+            podcasts.detail.value = first
+            runCurrent()
+            val updated = first.artwork.copy(version = first.artwork.version + 1)
+            podcasts.detail.value = first.copy(artwork = updated)
+            runCurrent()
+            podcasts.detail.value = null
+            advanceUntilIdle()
+            assertEquals(listOf(null, first.artwork, updated, null), seen)
+        }
+
     @Test fun newTargetNameWaitsForStorageBeforeReturningSuccess() =
         runTest {
             val id = seed()
@@ -144,7 +406,8 @@ class ImportViewModelTest : MainDispatcherTest() {
                         imports.updateOptions(sessionId, change)
                     }
                 }
-            val vm = ImportViewModel(id, repo, groups, visibility, appScope())
+            val vm =
+                ImportViewModel(id, repo, groups, visibility, appScope(), podcasts, ImportSessionOperations(appScope()))
             advanceUntilIdle()
             val rename = launch { assertNull(vm.setTargetGroupName("News")) }
             runCurrent()
@@ -169,7 +432,8 @@ class ImportViewModelTest : MainDispatcherTest() {
                         imports.updateOptions(sessionId, change)
                     }
                 }
-            val vm = ImportViewModel(id, repo, groups, visibility, appScope())
+            val vm =
+                ImportViewModel(id, repo, groups, visibility, appScope(), podcasts, ImportSessionOperations(appScope()))
             val store = ViewModelStore()
             store.put("import", vm)
             advanceUntilIdle()
@@ -235,7 +499,8 @@ class ImportViewModelTest : MainDispatcherTest() {
                         imports.updateOptions(sessionId, change)
                     }
                 }
-            val vm = ImportViewModel(id, repo, groups, visibility, appScope())
+            val vm =
+                ImportViewModel(id, repo, groups, visibility, appScope(), podcasts, ImportSessionOperations(appScope()))
             advanceUntilIdle()
             val rename = launch { assertNull(vm.renameGroup("tech", "News")) }
             runCurrent()
@@ -260,7 +525,8 @@ class ImportViewModelTest : MainDispatcherTest() {
                         imports.updateOptions(sessionId, change)
                     }
                 }
-            val vm = ImportViewModel(id, repo, groups, visibility, appScope())
+            val vm =
+                ImportViewModel(id, repo, groups, visibility, appScope(), podcasts, ImportSessionOperations(appScope()))
             advanceUntilIdle()
             vm.setTreatExistingAsPlayed(true)
             launch { vm.renameGroup("tech", "News") }
@@ -288,7 +554,16 @@ class ImportViewModelTest : MainDispatcherTest() {
         runTest {
             val id = seed()
             val appJob = SupervisorJob()
-            val vm = ImportViewModel(id, imports, groups, visibility, CoroutineScope(coroutineContext + appJob))
+            val vm =
+                ImportViewModel(
+                    id,
+                    imports,
+                    groups,
+                    visibility,
+                    CoroutineScope(coroutineContext + appJob),
+                    podcasts,
+                    ImportSessionOperations(CoroutineScope(coroutineContext + appJob)),
+                )
             advanceUntilIdle()
             val caller = launch(start = CoroutineStart.UNDISPATCHED) { vm.confirm() }
             assertTrue(vm.uiState.value.busy)
@@ -304,7 +579,16 @@ class ImportViewModelTest : MainDispatcherTest() {
         runTest {
             val id = seed()
             val appJob = SupervisorJob()
-            val vm = ImportViewModel(id, imports, groups, visibility, CoroutineScope(coroutineContext + appJob))
+            val vm =
+                ImportViewModel(
+                    id,
+                    imports,
+                    groups,
+                    visibility,
+                    CoroutineScope(coroutineContext + appJob),
+                    podcasts,
+                    ImportSessionOperations(CoroutineScope(coroutineContext + appJob)),
+                )
             advanceUntilIdle()
             val caller = launch(start = CoroutineStart.UNDISPATCHED) { vm.cancelSession() }
             assertTrue(vm.uiState.value.busy)
@@ -571,7 +855,16 @@ class ImportViewModelTest : MainDispatcherTest() {
                     }
                 }
             val id = seed()
-            val vm = ImportViewModel(id, gated, groups, visibility, appScope())
+            val vm =
+                ImportViewModel(
+                    id,
+                    gated,
+                    groups,
+                    visibility,
+                    appScope(),
+                    podcasts,
+                    ImportSessionOperations(appScope()),
+                )
             advanceUntilIdle()
             val owner = Job(coroutineContext.job)
             val routeScope = CoroutineScope(coroutineContext + owner)
@@ -600,7 +893,16 @@ class ImportViewModelTest : MainDispatcherTest() {
                     }
                 }
             val id = seed()
-            val vm = ImportViewModel(id, gated, groups, visibility, appScope())
+            val vm =
+                ImportViewModel(
+                    id,
+                    gated,
+                    groups,
+                    visibility,
+                    appScope(),
+                    podcasts,
+                    ImportSessionOperations(appScope()),
+                )
             advanceUntilIdle()
 
             launch { vm.confirm() }
@@ -638,7 +940,16 @@ class ImportViewModelTest : MainDispatcherTest() {
         runTest {
             val appJob = SupervisorJob()
             val id = seed()
-            val vm = ImportViewModel(id, imports, groups, visibility, CoroutineScope(coroutineContext + appJob))
+            val vm =
+                ImportViewModel(
+                    id,
+                    imports,
+                    groups,
+                    visibility,
+                    CoroutineScope(coroutineContext + appJob),
+                    podcasts,
+                    ImportSessionOperations(CoroutineScope(coroutineContext + appJob)),
+                )
             advanceUntilIdle()
 
             appJob.cancel()
@@ -771,7 +1082,16 @@ class ImportViewModelTest : MainDispatcherTest() {
                     ): Unit = throw IllegalStateException("boom")
                 }
             val id = seed()
-            val vm = ImportViewModel(id, broken, groups, visibility, appScope())
+            val vm =
+                ImportViewModel(
+                    id,
+                    broken,
+                    groups,
+                    visibility,
+                    appScope(),
+                    podcasts,
+                    ImportSessionOperations(appScope()),
+                )
             advanceUntilIdle()
 
             vm.setImportGroups(false)

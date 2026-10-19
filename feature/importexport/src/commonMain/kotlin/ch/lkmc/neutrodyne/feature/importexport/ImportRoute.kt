@@ -76,6 +76,12 @@ internal fun ImportSessionRoute(
         },
         onStopImport = { scope.launch { viewModel.cancelSession() } },
         onBack = { navigator.pop(key) },
+        onRetry = { item -> scope.launch { viewModel.retry(item) } },
+        onRemove = { item -> scope.launch { viewModel.remove(item) } },
+        onRemoveAll = { scope.launch { viewModel.removeAllNoMedia() } },
+        onEditUrl = viewModel::editUrl,
+        onPassword = viewModel::enterPassword,
+        artworkFor = viewModel::artworkFor,
     )
 }
 

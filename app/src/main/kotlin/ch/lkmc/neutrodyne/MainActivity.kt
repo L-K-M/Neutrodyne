@@ -48,6 +48,7 @@ import ch.lkmc.neutrodyne.core.ui.root.RootUiState
 import ch.lkmc.neutrodyne.core.ui.root.StartupFailure
 import ch.lkmc.neutrodyne.core.ui.root.StartupGateState
 import ch.lkmc.neutrodyne.di.AndroidAppGraph
+import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
@@ -185,7 +186,12 @@ class MainActivity : AppCompatActivity() {
         val ROOT_STATE_BASE = RootUiState.READY
 
         /** No player (M4) and no user messages yet. */
-        val M0_ROOT_SLOTS = RootSlots(player = {}, userMessages = emptyFlow())
+        val M0_ROOT_SLOTS =
+            RootSlots(
+                player = {},
+                userMessages = emptyFlow(),
+                importResume = { available, open -> importResumeBanner(available, open) },
+            )
     }
 }
 

@@ -93,23 +93,36 @@ abstract class ImportDao {
     @Query(
         "SELECT COUNT(*) AS itemCount," +
             " COUNT(CASE WHEN selected = 1 THEN 1 END) AS selectedCount," +
-            " COUNT(CASE WHEN kind = 'YOUTUBE' THEN 1 END) AS youtubeCount" +
+            " COUNT(CASE WHEN kind = 'YOUTUBE' THEN 1 END) AS youtubeCount," +
+            " COUNT(CASE WHEN status = 'FETCH_FAILED' AND errorDetail = 'DEFERRED' THEN 1 END) AS deferredCount" +
             " FROM import_item WHERE sessionId = :sessionId",
     )
     abstract fun observeItemTallies(sessionId: Long): Flow<ImportItemTallies>
 
+    /** The whole no-media set, including rows outside the loaded report pages. */
+    @Query("SELECT ordinal FROM import_item WHERE sessionId = :sessionId AND status = 'NO_MEDIA' ORDER BY ordinal")
+    abstract fun observeNoMediaOrdinals(sessionId: Long): Flow<List<Int>>
+
     /**
-     * 02 Import commit: the preview and report lists, file order, filtered by 05's
+     * 02 Import commit: preview stays in file order; progress/report group by 05's
+     * section and retain file order within each section. Filtered by 05's
      * `ImportItemFilter` → statuses table (the enum bounds the `IN` list; `ALL` passes every
      * status). Observes `import_item` via the `(sessionId, status)` index.
      */
     @Query(
         "SELECT * FROM import_item WHERE sessionId = :sessionId AND status IN (:statuses)" +
-            " ORDER BY ordinal",
+            " ORDER BY CASE WHEN :sessionState = 'PREVIEW' THEN 0" +
+            " WHEN status = 'QUEUED' THEN 0 WHEN status = 'SUBSCRIBED' THEN 1" +
+            " WHEN status IN ('NOT_A_FEED', 'AUTH_REQUIRED', 'GONE') THEN 2" +
+            " WHEN status = 'FETCH_FAILED' AND COALESCE(errorDetail, '') != 'DEFERRED' THEN 2" +
+            " WHEN status = 'ALREADY_SUBSCRIBED' THEN 3 WHEN status = 'MERGED' THEN 4" +
+            " WHEN status = 'NO_MEDIA' THEN 5 WHEN status = 'FETCH_FAILED' THEN 6" +
+            " ELSE 7 END, ordinal",
     )
     abstract fun pagedItems(
         sessionId: Long,
         statuses: List<ImportItemStatus>,
+        sessionState: ImportState = ImportState.PREVIEW,
     ): PagingSource<Int, ImportItemEntity>
 
     /** 05 §6 commit (B5): the selected, still-`PREVIEW` items in file order. */
@@ -433,6 +446,7 @@ data class ImportItemTallies(
     val itemCount: Int,
     val selectedCount: Int,
     val youtubeCount: Int,
+    val deferredCount: Int = 0,
 )
 
 /** [ImportDao.expiredSessions]' row: the expired session and its payload file (when stored). */

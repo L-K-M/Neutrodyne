@@ -6,6 +6,7 @@ import androidx.paging.PagingData
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
+import ch.lkmc.neutrodyne.core.domain.DiscardPreviewResult
 import ch.lkmc.neutrodyne.core.domain.ImportError
 import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
@@ -21,6 +22,7 @@ import ch.lkmc.neutrodyne.core.model.ImportSessionView
 import ch.lkmc.neutrodyne.core.model.ImportSource
 import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.ImportWarning
+import ch.lkmc.neutrodyne.core.model.reportSection
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -107,7 +109,14 @@ class FakeImportRepository(
     ): Flow<PagingData<ImportItemView>> =
         combine(sessions, items) { bySession, byItem ->
             val statuses = filterStatuses(filter, bySession[sessionId]?.state)
-            PagingData.from(byItem[sessionId].orEmpty().filter { it.status in statuses })
+            val rows = byItem[sessionId].orEmpty().filter { it.status in statuses }
+            PagingData.from(
+                if (bySession[sessionId]?.state == ImportState.PREVIEW) {
+                    rows
+                } else {
+                    rows.sortedWith(compareBy<ImportItemView> { it.reportSection().ordinal }.thenBy { it.ordinal })
+                },
+            )
         }
 
     /** Only PREVIEW items may toggle (05's status table); `ordinals = null` means all. */
@@ -143,20 +152,18 @@ class FakeImportRepository(
 
     override suspend fun confirm(sessionId: Long): Outcome<Unit, ImportError> {
         calls += "confirm($sessionId)"
-        val session = sessions.value[sessionId] ?: return Outcome.Failure(ImportError.SessionGone)
         if (confirmOutcome is Outcome.Failure) return confirmOutcome
-        if (session.state != ImportState.PREVIEW) return confirmOutcome
-
         val committedAt = clock.now()
-        sessions.update {
-            it +
-                (
-                    sessionId to
-                        session.copy(
-                            state = ImportState.COMMITTED,
-                            options = session.options.copy(committedAt = committedAt),
-                        )
+        while (true) {
+            val current = sessions.value
+            val session = current[sessionId] ?: return Outcome.Failure(ImportError.SessionGone)
+            if (session.state != ImportState.PREVIEW) return confirmOutcome
+            val committed =
+                session.copy(
+                    state = ImportState.COMMITTED,
+                    options = session.options.copy(committedAt = committedAt),
                 )
+            if (sessions.compareAndSet(current, current + (sessionId to committed))) break
         }
         mutateItems(sessionId) { item ->
             if (item.status == ImportItemStatus.PREVIEW && item.selected) {
@@ -179,6 +186,23 @@ class FakeImportRepository(
             return
         }
         sessions.update { it + (sessionId to session.copy(state = ImportState.CANCELLED)) }
+    }
+
+    override suspend fun discardPreview(sessionId: Long): DiscardPreviewResult {
+        calls += "discardPreview($sessionId)"
+        // Claim the session atomically, just as the production write transaction does.
+        while (true) {
+            val current = sessions.value
+            val session = current[sessionId] ?: return DiscardPreviewResult.NOT_PREVIEW
+            if (session.state != ImportState.PREVIEW || session.options.restoreRequestedAt != null) {
+                return DiscardPreviewResult.NOT_PREVIEW
+            }
+            if (!sessions.compareAndSet(current, current - sessionId)) continue
+
+            items.update { it - sessionId }
+            proposals.update { it - sessionId }
+            return DiscardPreviewResult.DISCARDED
+        }
     }
 
     /** Re-queues the need-attention statuses; a DONE session goes back to FETCHING (05). */
@@ -245,6 +269,16 @@ class FakeImportRepository(
             counts = sessionItems.groupingBy { it.status }.eachCount(),
             selectedCount = sessionItems.count { it.selected },
             youtubeCount = sessionItems.count { it.selected && it.kind == ImportItemKind.YOUTUBE },
+            deferredCount =
+                sessionItems.count {
+                    it.status == ImportItemStatus.FETCH_FAILED &&
+                        it.errorDetail == "DEFERRED"
+                },
+            noMediaOrdinals =
+                sessionItems
+                    .filter { it.status == ImportItemStatus.NO_MEDIA }
+                    .map { it.ordinal }
+                    .toSet(),
         )
 
     private companion object {
