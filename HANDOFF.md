@@ -1,8 +1,151 @@
 # Handoff — state of the Neutrodyne work
 
-This file lets another person or agent take over the work at any point. **Last updated: 2026-10-17.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3 is in progress. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
+This file lets another person or agent take over the work at any point. **Last updated: 2026-10-19.** M0a is merged; M0b is held for Android publication; M1a, M1b and M2 are merged, with owner-run device and desktop checks open (see §0). M3 and later local integration evidence is recorded in §0. Follow [`docs/IMPLEMENTATION-PROMPT.md`](docs/IMPLEMENTATION-PROMPT.md) through the v1.0 release.
 
 ## 0. Implementation status
+
+### M5 local integration (2026-10-19)
+
+Branch `impl/m5-p1` integrates the M5 features on baseline `30eef445`.
+Local commits `f6f3e9ba` (service/graph integration) and `52b737a8`
+(device evidence gates) contain the verified code. The owner explicitly
+requested local commits only: no push, PR, merge, CI dispatch or automated
+review was performed (0 review rounds). No emulator, optimized-release,
+reboot, DHU, physical listening or accessibility run was performed.
+The only attached emulator reported offline and was left untouched.
+M5 remains open for the device and owner evidence in the
+[AC-by-AC ledger](docs/PLAN.md#m5-playback-features-and-system-surfaces).
+
+Both graphs resolve one `ChapterRepositoryImpl` from core data; desktop
+playback remains unavailable. Player construction now retains chapter and
+notes repository providers until observation needs them, preserving the
+foundation's database startup gate. Custom command registration uses one
+list, with sleep/chapter dispatch under the existing serialized callback.
+Departure capture precedes the queue projector, which freezes completion
+before the sleep observer disarms its own reason. Duration/chapter
+observers do not choose transitions. No schema, entity, index, dependency
+or D-id changed. The adopted M5 boundary resolutions remain in the owning
+design notes; no additional design deviation was needed.
+
+After running `spotlessApply` alone, this complete command passed with
+JDK 21, the Android SDK and the graphics environment loaded:
+
+```sh
+./gradlew --no-daemon --max-workers=2 \
+  -Pkotlin.incremental=false \
+  -Pkotlin.compiler.execution.strategy=in-process \
+  allTests test mutationTest :app:compileDebugAndroidTestKotlin \
+  spotlessCheck :app:lintRelease assertModuleGraph checkBannedApis \
+  :app:compileDebugKotlin :desktopApp:compileKotlin \
+  :app:assembleDebugAndroidTest --continue
+```
+
+The final gate took 6 min 26 s: 224 executed tasks, 8 reused from cache and
+1,212 up to date. Release lint reported 0 errors and 0 warnings. Counts
+below include current unchanged reports reused by Gradle; there are
+6,745 passes, 3 skips and 0 failures across the three selectors.
+
+| Selector | Passed | Skipped |
+|---|---|---|
+| `allTests` | 5,931 | 1 |
+| `test` | 774 | 2 |
+| `mutationTest` | 40 | 0 |
+
+The skips are the Windows-only DPAPI case and both desktop file-menu picker
+cases. The sync protocol mutation task has no matching cases and supplies
+no mutation evidence. The evidence checker's 7 Python tests, the reboot
+runner's 1 boundary test and the existing nightly reporter's 9 tests pass.
+Both workflow files parse as YAML. Both doc checks pass: 0 problems across
+14 files and 0 invalid of 78 Mermaid diagrams.
+
+The app debug test APK was assembled and inspected: all 9 nonempty media
+fixtures, all 4 playback device classes, and every one of the 15 API 37
+required method names are packaged. This is packaging proof only; it
+supplies no device pass count. Local logs, APK hash and complete per-task
+counts are retained under `build/reports/m5-integration/` (generated,
+ignored outputs). No optimized-release APK execution is claimed.
+
+The gates require 11 short cases on API 26 and 12 on API 36; nightly
+requires 13 on API 26, 14 on API 33/36 and 15 on API 34; API 37 requires
+15, and release smoke requires 8. The separate host reboot route requires
+3 non-skipped phases and archives the actual System UI card/artwork,
+source-restored resume, logs, SHA, ABI, image and APK hash. The host-only
+phases intentionally skip outside that route. All device counts remain
+unexecuted here. DHU and the physical matrix still require separate
+reports; AAOS retail installation remains unverified, desktop audio is
+MD1b, and real playing-download deletion is M6.
+
+The initial failures had identified causes: two service tests still
+assumed eager startup; the player resolved repositories before the
+database gate, crashing Android and blocking desktop; and the decoder
+probe's test visibility annotation rejected its same-package production
+caller in release lint. The blocked desktop worker was stopped after its
+thread stack established the cause. The artwork manifest test reproduced
+alone, so it was not load-sensitive: Robolectric left the implicit
+application process null, while the provider used Android's package-name
+default. Its assertion now honors that default. All affected tests pass in
+the final gate. There were no daemon/lock retries.
+
+Per-task XML totals (aggregator and no-source tasks omitted):
+
+| Task | Passed | Skipped |
+|---|---|---|
+| `:app:testDebugUnitTest` | 142 | 0 |
+| `:core:artwork:desktopTest` | 25 | 0 |
+| `:core:artwork:testAndroidHostTest` | 43 | 0 |
+| `:core:common:desktopTest` | 100 | 0 |
+| `:core:data:desktopTest` | 1,227 | 1 |
+| `:core:data:mutationTest` | 1 | 0 |
+| `:core:data:testAndroidHostTest` | 139 | 0 |
+| `:core:database:desktopTest` | 155 | 0 |
+| `:core:database:testAndroidHostTest` | 9 | 0 |
+| `:core:datastore:desktopTest` | 18 | 0 |
+| `:core:designsystem:desktopTest` | 14 | 0 |
+| `:core:domain:desktopTest` | 3 | 0 |
+| `:core:model:desktopTest` | 2,550 | 0 |
+| `:core:navigation:desktopTest` | 25 | 0 |
+| `:core:network:desktopTest` | 33 | 0 |
+| `:core:network:okhttp:test` | 45 | 0 |
+| `:core:network:testAndroidHostTest` | 6 | 0 |
+| `:core:testing:desktopTest` | 67 | 0 |
+| `:core:ui:desktopTest` | 154 | 0 |
+| `:core:ui:testAndroidHostTest` | 134 | 0 |
+| `:desktop:system:test` | 1 | 0 |
+| `:desktopApp:test` | 113 | 2 |
+| `:download:api:desktopTest` | 1 | 0 |
+| `:download:impl:desktopTest` | 1 | 0 |
+| `:feature:discover:desktopTest` | 40 | 0 |
+| `:feature:episode:desktopTest` | 48 | 0 |
+| `:feature:feeds:desktopTest` | 117 | 0 |
+| `:feature:feeds:testAndroidHostTest` | 70 | 0 |
+| `:feature:groups:desktopTest` | 82 | 0 |
+| `:feature:importexport:desktopTest` | 190 | 0 |
+| `:feature:library:desktopTest` | 57 | 0 |
+| `:feature:player:desktopTest` | 67 | 0 |
+| `:feature:podcast:desktopTest` | 110 | 0 |
+| `:feature:queue:desktopTest` | 19 | 0 |
+| `:feature:settings:desktopTest` | 38 | 0 |
+| `:feature:sync:desktopTest` | 1 | 0 |
+| `:feeds:desktopTest` | 215 | 0 |
+| `:feeds:jvm:mutationTest` | 38 | 0 |
+| `:feeds:jvm:test` | 252 | 0 |
+| `:playback:api:desktopTest` | 1 | 0 |
+| `:playback:core:desktopTest` | 120 | 0 |
+| `:playback:desktop:test` | 1 | 0 |
+| `:playback:engine:test` | 1 | 0 |
+| `:playback:impl:testDebugUnitTest` | 158 | 0 |
+| `:playback:native:test` | 1 | 0 |
+| `:sync:api:desktopTest` | 1 | 0 |
+| `:sync:impl:desktopTest` | 1 | 0 |
+| `:sync:protocol:desktopTest` | 27 | 0 |
+| `:sync:server:test` | 58 | 0 |
+| `:youtube:api:desktopTest` | 22 | 0 |
+| `:youtube:api:mutationTest` | 1 | 0 |
+| `:youtube:engine:test` | 1 | 0 |
+| `:youtube:impl:desktopTest` | 1 | 0 |
+| `:youtube:ytdlp-desktop:test` | 1 | 0 |
+
+### M4 integration status (2026-10-19)
 
 M4 integration (2026-10-19, branch `impl/m4-p1`) is local work only, per the
 owner's no-push instruction. The playback service adapters and full-player
