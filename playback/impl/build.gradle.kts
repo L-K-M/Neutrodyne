@@ -28,6 +28,9 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
 
+    testImplementation(project(":core:data"))
+    testImplementation(libs.androidx.media3.test.utils)
+    testImplementation(libs.androidx.media3.test.utils.robolectric)
     testImplementation(libs.kotlin.test)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.okhttp.mockwebserver3)
