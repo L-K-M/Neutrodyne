@@ -683,6 +683,8 @@ On a non-initial refresh, if every entry of a 15-entry variant is unknown, items
 
 Implementation note (2026-10-19, M8): W1 freezes cancellable, 20-second probe/finalization APIs; controls share the host permit limit. Global outage alone suppresses channel badges (adopted resolution 5). Named controls are YouTube `UCBR8-60-B28hp2BmDPdntcQ` and Google `UCK8sQmJBp8GCxrOtXWBpyEA`. W4/W9 disclose their extra canonical-feed requests before enabling them; W1 makes none.
 
+Implementation note (2026-10-19, M8): W4 implements adopted resolution 5 with serialized device health writes and probe admission. Only global outage state suppresses channel badges; ordinary failures retain their diagnostics and never set `gone` or unsubscribe. Control checks use the existing FEED transport under the adapter's current host permit, or after refresh fan-out, and are bounded to 20 seconds with caller cancellation. The privacy inventory and PRIVACY.md disclose the two named control channels. The refresher counts the whole library at finalization, including rows outside the requested scope; cancellation during that read still resets accounting without control requests. Failed probes read the current library count again. Engine health remains M9 work in external mode.
+
 Since December 2025 the feed endpoint has repeatedly answered 404 for every feed for hours. A YouTube-wide outage must never mark channels dead or unsubscribe them (R3.3).
 
 `YouTubeOutageMonitor` (`:core:data`, singleton, in-memory; persistence through `YouTubeHealth`):

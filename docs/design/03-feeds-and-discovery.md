@@ -977,6 +977,8 @@ forcing unrelated feeds or failing the rest of the appended chain.
 
 ### Engine run
 
+Implementation note (2026-10-19, M8): W4 runs the outage monitor's finalization before non-cancellable fetch-state cleanup, with caller cancellation and a maximum 20-second budget capped by the run deadline (adopted resolution 5). Only the monitor's in-memory accounting reset survives cancellation. Controls therefore cannot keep a stopped worker or desktop run waiting on network IO.
+
 The diagram shows the Android runner; on the desktop `DesktopRefreshLane` takes `RefreshWorker`'s place, passes no deadline and never enqueues a continuation ([Desktop refresh](#desktop-refresh)). Steps 1–10 are the same common code on both.
 
 ```mermaid
