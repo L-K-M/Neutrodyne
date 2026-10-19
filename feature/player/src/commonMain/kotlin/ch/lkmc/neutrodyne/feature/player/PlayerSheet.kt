@@ -82,6 +82,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.NavKey
+import ch.lkmc.neutrodyne.core.designsystem.PlatformSystemBarAppearance
+import ch.lkmc.neutrodyne.core.designsystem.SystemBarOwner
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverAspect
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverTier
@@ -89,6 +91,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.statusBarAppearanceFor
 import ch.lkmc.neutrodyne.core.designsystem.theme.ArtworkSurface
 import ch.lkmc.neutrodyne.core.designsystem.theme.ArtworkTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.LocalReducedMotion
@@ -506,6 +509,19 @@ private fun PlayerSheetContent(
                             .takeIf { it.isFinite() && it > collapsedPx }
                             ?.minus(collapsedPx) ?: 0f
                     )
+            // Only a sheet reaching the status strip owns it; collapse/cancel releases to the header.
+            if (topPx <= 0f) {
+                PlatformSystemBarAppearance(
+                    statusBarAppearanceFor(
+                        lerp(
+                            MaterialTheme.colorScheme.surfaceContainerHigh,
+                            MaterialTheme.colorScheme.primaryContainer,
+                            morph.backgroundMix,
+                        ),
+                    ),
+                    SystemBarOwner.Player,
+                )
+            }
             val sheetHeight = MINI_HEIGHT + (maxHeight - MINI_HEIGHT) * progress
             Surface(
                 modifier =

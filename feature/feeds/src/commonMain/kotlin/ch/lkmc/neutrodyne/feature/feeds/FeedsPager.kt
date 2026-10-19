@@ -66,6 +66,7 @@ import ch.lkmc.neutrodyne.core.ui.LocalDrawnReporter
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.SelectionTopBar
 import ch.lkmc.neutrodyne.core.ui.episodeSelectionKeys
+import ch.lkmc.neutrodyne.core.ui.navigation.LocalSharedArtEnabled
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_all
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_all_groups
@@ -324,6 +325,7 @@ internal fun FeedsScreen(
                     // A prefetched neighbour must not report the selected page as drawn.
                     CompositionLocalProvider(
                         LocalDrawnReporter provides drawnReporter.takeIf { entry.ref == settledRef },
+                        LocalSharedArtEnabled provides (entry.ref == settledRef && !pager.isScrollInProgress),
                     ) {
                         FeedPage(
                             state = state.copy(filters = prefs.filters.copy(minSortDate = null)),

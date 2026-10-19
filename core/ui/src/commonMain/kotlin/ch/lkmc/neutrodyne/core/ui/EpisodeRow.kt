@@ -64,6 +64,9 @@ import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.WaitReason
 import ch.lkmc.neutrodyne.core.model.settings.YouTubeRowArt
+import ch.lkmc.neutrodyne.core.navigation.LocalNavTab
+import ch.lkmc.neutrodyne.core.ui.navigation.SharedKeys
+import ch.lkmc.neutrodyne.core.ui.navigation.sharedArt
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel_download
 import ch.lkmc.neutrodyne.core.ui.resources.action_check_again
@@ -417,7 +420,10 @@ private fun LeadingSlot(
         CoverArt(
             ref = if (video) row.artwork else row.podcastArtwork,
             monogram = rememberMonogram(if (video) row.title else row.podcastTitle),
-            modifier = Modifier.size(width = if (video) VIDEO_THUMB_WIDTH else COVER_SIZE, height = COVER_SIZE),
+            modifier =
+                Modifier
+                    .size(width = if (video) VIDEO_THUMB_WIDTH else COVER_SIZE, height = COVER_SIZE)
+                    .sharedArt(SharedKeys.episodeArt(LocalNavTab.current, row.id)),
             aspect = if (video) CoverAspect.WIDE_16_9 else CoverAspect.SQUARE,
             avgArgb = if (video) row.artworkAvgArgb else row.podcastArtworkAvgArgb,
         )
@@ -429,7 +435,7 @@ private fun LeadingSlot(
             CoverArt(
                 ref = row.artwork,
                 monogram = rememberMonogram(row.podcastTitle),
-                modifier = Modifier.size(COVER_SIZE),
+                modifier = Modifier.size(COVER_SIZE).sharedArt(SharedKeys.episodeArt(LocalNavTab.current, row.id)),
                 avgArgb = row.artworkAvgArgb,
             )
         }
@@ -439,7 +445,7 @@ private fun LeadingSlot(
                 CoverArt(
                     ref = row.artwork,
                     monogram = rememberMonogram(row.podcastTitle),
-                    modifier = Modifier.size(COVER_SIZE),
+                    modifier = Modifier.size(COVER_SIZE).sharedArt(SharedKeys.episodeArt(LocalNavTab.current, row.id)),
                     avgArgb = row.artworkAvgArgb,
                 )
             } else {

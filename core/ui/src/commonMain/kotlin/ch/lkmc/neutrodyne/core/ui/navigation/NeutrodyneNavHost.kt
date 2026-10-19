@@ -72,6 +72,7 @@ public fun NeutrodyneNavHost(
                             rememberViewModelStoreNavEntryDecorator(),
                             rememberTabLocalNavEntryDecorator(tab),
                             rememberPaneFocusDecorator(),
+                            rememberHeaderBarDecorator(state, tab, directive.maxHorizontalPartitions),
                         ),
                     entryProvider = { key -> withPaneRole(key, provider(key), tab) },
                 )
@@ -95,7 +96,8 @@ public fun NeutrodyneNavHost(
     val motionSpec = NeutrodyneMotion.navigation<IntOffset>()
 
     SharedTransitionLayout {
-        NavigationBackDispatch(panes) {
+        val sharedScope = this.takeIf { directive.maxHorizontalPartitions == 1 && !LocalReducedMotion.current }
+        NavigationBackDispatch(panes, sharedScope) {
             NavDisplay(
                 entries = entries,
                 modifier = modifier,
@@ -129,7 +131,7 @@ public fun NeutrodyneNavHost(
                     }
                 },
                 // Expanded panes share movable entries, not whole-entry animated bounds.
-                sharedTransitionScope = if (directive.maxHorizontalPartitions == 1) this else null,
+                sharedTransitionScope = sharedScope,
             )
         }
     }
@@ -310,3 +312,20 @@ private fun withPaneRole(
         content = { entry.Content() },
     )
 }
+
+@Composable
+private fun rememberHeaderBarDecorator(
+    state: NavigationState,
+    tab: TopLevelKey,
+    partitions: Int,
+): NavEntryDecorator<NavKey> =
+    remember(state, tab, partitions) {
+        NavEntryDecorator { entry ->
+            CompositionLocalProvider(
+                LocalHeaderSystemBarsEnabled provides (
+                    partitions == 1 && state.selectedTab == tab &&
+                        state.stack(tab).lastOrNull() == entry.metadata[PANE_NAV_KEY]
+                ),
+            ) { entry.Content() }
+        }
+    }

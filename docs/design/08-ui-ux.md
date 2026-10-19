@@ -373,9 +373,21 @@ Selection mode registers its handler inside the screen's entry (composed inside 
 
 ---
 
-**Implementation note (2026-10-19, M10):** Resolution 5: W5 keeps tab-qualified shared
-art in one partition, existing host/entry scopes, Coil public 200 ms crossfade and
-expanded cover/wipe/movable state. Retain IME/fling limits in the ledger.
+**Implementation note (2026-10-19, M10 W5):** `SharedKeys` uses stable tab
+IDs, kind and item ID; byte versions remain Coil cache identity. `sharedArt`
+reuses each entry's `LocalNavAnimatedContentScope` in one partition. Bounds
+sharing keeps the distinct THUMB/HERO layers drawable through predictive cancel,
+with no extra art fade and the existing 200 ms navigation spec; the Android
+frame regression caught a blank handoff with visibility-only shared elements.
+Reduced
+motion disables matching and snaps; prefetched Feeds pages and selection-mode
+tiles opt out. Expanded cover/wipe/movable state and IME/fling limits remain.
+
+Android native-graphics frames use real decoded PNG THUMB bytes and delayed
+HERO, including failure, offline files, version changes and predictive cancel.
+`CoverArt` retains the same-version THUMB painter during HERO loading/error;
+a colour loading painter otherwise hides Coil's memory placeholder. Hardware
+bitmap/device frame evidence remains open; hardware bitmaps are not disabled.
 
 ## Screens
 
@@ -2331,9 +2343,16 @@ Icons: Material **Symbols** Rounded, weight 400, as vector drawables in `:core:d
 
 `StatusBarAppearance.DarkIcons` / `LightIcons` (`:core:designsystem`) use the existing `PlatformSystemBarAppearance` boundary, extended by W5 to restore the previous status-bar owner on disposal, including predictive-back cancellation. Desktop has no system bars. The podcast header and full player choose icons from the actual top/scrim background; light backgrounds need dark icons (`isAppearanceLightStatusBars = true`). Busy banners add a 48 dp top scrim (`verticalGradient(scrim 40 % → transparent)`). Navigation-bar icons follow the app theme.
 
-**Implementation note (2026-10-19, M10):** Resolution 4: use the existing
-platform boundary and enum, dark icons on light backgrounds, restoring status-bar
-ownership separately from theme navigation-bar updates.
+**Implementation note (2026-10-19, M10 W5):** App/Header/Player leases in the
+existing platform actual restore the next live owner or original window flags.
+Covered updates/disposals cannot steal status ownership; only App controls
+navigation icons. Headers follow the committed foreground entry, excluding
+predictive previews and coexisting panes. Their in-flow bars paint app `surface`
+(or scrolled podcast `surfaceContainer`), not artwork below. The full player
+uses its W3 scoped gradient's top colour when the sheet reaches the status edge.
+Choose the greater black/white WCAG contrast. W6 must retain restoration and
+must not give a side panel strip ownership. Physical bar checks remain open;
+desktop is a no-op.
 
 ### Brand assets
 

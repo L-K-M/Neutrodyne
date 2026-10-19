@@ -59,6 +59,7 @@ import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.model.DownloadError
 import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.WaitReason
+import ch.lkmc.neutrodyne.core.navigation.LocalNavTab
 import ch.lkmc.neutrodyne.core.ui.DownloadCommand
 import ch.lkmc.neutrodyne.core.ui.DownloadStateButton
 import ch.lkmc.neutrodyne.core.ui.DownloadStatusText
@@ -70,6 +71,8 @@ import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.downloadCommandText
 import ch.lkmc.neutrodyne.core.ui.downloadSize
 import ch.lkmc.neutrodyne.core.ui.downloadWaitCommand
+import ch.lkmc.neutrodyne.core.ui.navigation.SharedKeys
+import ch.lkmc.neutrodyne.core.ui.navigation.sharedArt
 import ch.lkmc.neutrodyne.core.ui.onEpisodePointerGesture
 import ch.lkmc.neutrodyne.core.ui.rememberMonogram
 import ch.lkmc.neutrodyne.core.ui.resources.Res
@@ -518,7 +521,14 @@ private fun DownloadEntryRow(
                     Modifier.clearAndSetSemantics {},
             )
         }
-        CoverArt(entry.artwork, rememberMonogram(entry.podcastTitle), Modifier.size(56.dp).clearAndSetSemantics {})
+        CoverArt(
+            entry.artwork,
+            rememberMonogram(
+                entry.podcastTitle,
+            ),
+            Modifier.size(56.dp).sharedArt(SharedKeys.episodeArt(LocalNavTab.current, id)).clearAndSetSemantics {
+            },
+        )
         Column(Modifier.weight(1f)) {
             Text(entry.episodeTitle, style = MaterialTheme.typography.titleMedium)
             Text(entry.podcastTitle, style = MaterialTheme.typography.bodySmall)
