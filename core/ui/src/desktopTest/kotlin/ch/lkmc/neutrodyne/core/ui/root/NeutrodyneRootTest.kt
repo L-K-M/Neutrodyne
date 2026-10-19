@@ -162,6 +162,28 @@ class NeutrodyneRootTest {
         }
 
     @Test
+    fun failedFeedSelectionDoesNotHoldTheNextImportRoute() =
+        runComposeUiTest {
+            val pending = Channel<Route>(Channel.UNLIMITED)
+            setContent { TestRoot(routes = pending.receiveAsFlow(), selectFeedSource = { false }) }
+            onNodeWithTag("nav_library").performClick()
+
+            mainClock.autoAdvance = false
+            try {
+                runOnIdle {
+                    pending.trySend(Route.SelectFeed("missing"))
+                    pending.trySend(Route.Navigate(LibraryKey, listOf(ImportKey("44"))))
+                }
+                // Navigation must finish while the error notice is still visible, not after its timeout.
+                mainClock.advanceTimeBy(1_000)
+                onNodeWithText("import-44").assertIsDisplayed()
+                onNodeWithText("Couldn't save the change").assertIsDisplayed()
+            } finally {
+                mainClock.autoAdvance = true
+            }
+        }
+
+    @Test
     fun importRoutesWaitForStartupAndWarmDeliveryReplacesThePreview() =
         runComposeUiTest {
             val pending = Channel<Route>(Channel.UNLIMITED)
