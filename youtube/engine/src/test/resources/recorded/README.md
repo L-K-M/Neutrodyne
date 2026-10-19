@@ -1,4 +1,4 @@
-# W3 synthetic replay corpus
+# Shared shim synthetic replay corpus
 
 All scenarios here are **synthetic**, generated 2026-10-19 by
 `youtube/engine/python/tests/make_scenarios.py` with official yt-dlp

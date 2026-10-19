@@ -310,7 +310,7 @@ Implementation note (2026-10-19, M9a): Adopted resolution 9 adds preflight
 before native loading: present-but-unusable x86_64 API26–27 maps to
 `ENGINE_FAILED` with `X86_64_API_26_27`, while no engine/32-bit maps to
 `NOT_IN_THIS_APK`. Retry rechecks eligibility without a doomed Python start.
-W4 implements this port; hardware validation remains spike pending.
+The Android host must implement this port; hardware validation remains spike pending.
 
 
 `YtDlpEngine` (the default builds' `YouTubeCapabilitiesSource`, from M9a on Android and MD3 on the desktop) evaluates these rows in order; the first match wins. The external-only bindings publish a fixed reason.
@@ -965,8 +965,8 @@ flowchart LR
 
 ### Shared engine module
 
-Implementation note (2026-10-19, M9a): W3 implements adopted resolutions
-1, 2, 3, 5, 10 and 11 in the shared Python package. `Bridge.call` returns
+Implementation note (2026-10-19, M9a): the shared Python package implements adopted resolutions
+1, 2, 3, 5, 10 and 11. `Bridge.call` returns
 wire-v1 JSON or a sanitized `ShimError.code`; host adapters pass an absolute
 Python-monotonic deadline, derived once from the remaining app budget.
 Worker-local extractors use fixed options; retained lazy cursors serialize
@@ -985,11 +985,12 @@ remain **spike pending**. M9a exposes bundled status/prewarm/retry only.
 Transport uses `YtxMethod` and absolute app-monotonic `YtxDeadline`; adapters
 translate remaining budgets without extension and count encoding overhead
 against caps. Wire seconds map to API milliseconds; lmt stays microseconds.
-W2 owns explicit preparation/compile identity (app/engine/Python minor);
+The store owns explicit preparation/compile identity (app/engine/Python minor);
 playback never compiles inline. A broken bridge fails selftest; urllib
 fallback requires a recorded host choice. Adopted resolution 5 adds bounded
 plain description/truncation and format-independent 45 s `facts` to the API.
-W4 owns inert before-first-bind test arming, W3/W12 replay/provenance.
+Before-first-bind test arming belongs to the future Android host. Replay
+provenance and device evidence remain separate acceptance obligations.
 
 
 One engine, two hosts. Everything that decides what YouTube does — the methods and their results, error mapping, format selection, caches, capabilities, the engine store, the update policy and the trust chain — is host-independent JVM code; a host only runs CPython with the shared shim and carries JSON between the app and the interpreter. Shared Kotlin code lives in `:youtube:engine` from M9a and imports nothing from `android.*`, Chaquopy or AIDL. MD3 adds the desktop host without moving shared code (adopted resolution 1).
@@ -1068,7 +1069,7 @@ Rules every transport meets (the tests of both hosts check them: `BinderYtxTrans
 | `host_chaquopy.py`, `okhttp_rh.py` | registers `NeutrodyneOkHttpRH` as the only handler, binds the solve function to `QuickJsEngine` through Java interop; entry point for `YtxPython` | Android |
 | `host_stdio.py`, `bootstrap.py` | the line loop, the worker pool, `hello`, `cancel` and `jsc` lines, urllib with `source_address` as the only handler, the orphan guard ([11 Stdio protocol](11-desktop.md#stdio-protocol)) | desktop |
 
-Chaquopy packages `youtube/engine/python/` as `:youtube:ytdlp`'s Python source directory and compiles it with the build-host Python ([01 S7 Chaquopy under AGP 9.4.1](01-foundation.md#s7-chaquopy-under-agp-941)); the desktop build copies it into the image's resources and compiles it with each target's bundled interpreter on that target's runner ([11 Trim list and checks](11-desktop.md#trim-list-and-checks)). Its pytest suite lives in `youtube/engine/python/tests/` and runs once per adapter: `:youtube:ytdlp:shimTest` (the Chaquopy adapter with a test stub of Chaquopy's `java` module standing in for `PyHttp`) and `:youtube:ytdlp-desktop:shimTestStdio` (the stdio adapter driving a real child on the host CPython), both against the bundled yt-dlp with `ReplayRH` ([Testing](#testing)).
+Chaquopy packages `youtube/engine/python/` as `:youtube:ytdlp`'s Python source directory and compiles it with the build-host Python ([01 S7 Chaquopy under AGP 9.4.1](01-foundation.md#s7-chaquopy-under-agp-941)); the desktop build copies it into the image's resources and compiles it with each target's bundled interpreter on that target's runner ([11 Trim list and checks](11-desktop.md#trim-list-and-checks)). Its Python test suite lives in `youtube/engine/python/tests/` and runs once per adapter: `:youtube:ytdlp:shimTest` (the Chaquopy adapter with a test stub of Chaquopy's `java` module standing in for `PyHttp`) and `:youtube:ytdlp-desktop:shimTestStdio` (the stdio adapter driving a real child on the host CPython), both against the bundled yt-dlp with `ReplayRH` ([Testing](#testing)).
 
 **Methods.** Payloads and results are JSON strings, decoded in Kotlin with kotlinx.serialization DTOs; no Python object crosses a host boundary. Every payload carries `ctx = {hl, gl, ua, ipFamily}` from the app: `hl`/`gl` from the app locale, `ua` = 01's User-Agent (used only where yt-dlp sets none), `ipFamily` = `V4`, `V6` or null ([IP-family matching](#ip-family-matching)). Methods of `bridge.py`, identical on both hosts:
 
@@ -1108,7 +1109,7 @@ The vendored yt-dlp file (first bullet) is shared by both hosts; everything afte
 
 `EngineStore` extracts a version (zip-slip and size checks as in [Update flow](#update-flow)) before `:ytx` is first bound to it, on `@Dispatcher(IO)`. `YtxPython` compiles an uncompiled `lib/` on its first import (`compileall`, legacy layout; 1.4 s for the whole zip on a host CPU, device time measured by the spike), writes the marker and makes the files read-only; later imports read `.pyc` (host 0.13–0.16 s, against 0.5–0.6 s from the zip). So that this one-time cost — on top of Chaquopy's own first-start extraction — never lands on a playback resolve, the order-210 initializer enqueues the one-time work `engine-prepare` (`KEEP`, 30 s initial delay, no network) whenever the bundled version has no compile marker for this app version, i.e. after every install or app update: it extracts the bundled version and binds `:ytx` once to compile and import it while nothing waits on it, then lets the idle stop end `:ytx`. `YtxPython` runs `Python.start`, compilation and imports on a worker thread, never on `:ytx`'s main thread (`onCreate`/`onBind` return at once, so no service-start ANR), and `ping` answers `ready` only afterwards. A marker for another Python minor (an app update that changed CPython) makes `EngineStore` re-extract from the kept zip.
 
-Implementation note (2026-10-19, M9a): W2 implements adopted resolutions
+Implementation note (2026-10-19, M9a): the bundled store implements adopted resolutions
 1, 2 and 11 in `:youtube:engine`; host selection/activation remain **spike
 pending**. The documented 2026.08.19 pin is unchanged: 3,072,469 bytes,
 SHA-256 `1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6`,
@@ -1123,19 +1124,29 @@ are 10 MiB compressed, 40 MiB expanded, 8 MiB/entry, 4,096 entries, 512-byte
 paths and 200:1 expansion. It checks sizes/CRC and rejects traversal,
 duplicates/collisions, symlinks/special files, encryption/native/precompiled
 code and roots outside the documented allow-list. Extracted sources are
-read-only, with writable directories until W4 compiles legacy `.pyc`.
+read-only, with writable directories until the host worker compiles legacy `.pyc`.
 
 Order 150 reads status only; order 210 schedules unique KEEP `engine-prepare`
-after 30 s with no network requirement. W11 owns wiring these hooks and the
-worker; shells remain external. Preparation publishes `hostLibDir` while
-status stays PREPARING. The worker pings W4's transport for worker-owned
-compile/import; W4 calls `EngineCompileMarkers.write` after success and source
+after 30 s with no network requirement. These hooks and the worker remain unbound until activation approval;
+shells remain external. Preparation publishes `hostLibDir` while
+status stays PREPARING. The worker pings the transport for worker-owned
+compile/import; the host calls `EngineCompileMarkers.write` after success and source
 removal, sealing files and writing the full-identity `.compiled-<minor>`.
 Delayed work rechecks settings and platform preflight before binding.
 Worker success requires reloaded compiled status. Torn active/marker, missing
 required bytecode, app/Python changes or interrupted compile re-extract from
 the APK on explicit preparation. Playback never prepares inline; broken
-bridge fallback remains W3/W4's fail-closed responsibility.
+bridge configuration must fail closed.
+
+Preparation supplies the existing `YtxControlRequest` with caller-provided
+`ctx`; the worker has no locale or network provider. The shared bridge
+continues rejecting context-free calls. The S7 `YtxPython` scaffold still
+uses the runtime-only `selftest()` diagnostics without loading an engine;
+wire `selftest` invokes the full API/handler probe after host configuration.
+The Android host test publishes a real prepared store and worker payload
+as declared Gradle outputs. `:youtube:ytdlp:preparedShimTest` consumes them
+through the Python host adapter and all eight recorded method scenarios;
+Kotlin never launches a process and no Binder execution is claimed.
 
 - **Sizes** (estimates from Chaquopy's 3.14.0 runtime artifacts, [runtime artifacts](https://repo1.maven.org/maven2/com/chaquo/python/target/), and the release asset):
 
@@ -1201,15 +1212,15 @@ oneway interface IYtxCallback {
 
 ### Networking bridge
 
-Implementation note (2026-10-19, M9a): W3's Python/Java adapter contract is
+Implementation note (2026-10-19, M9a): the Python/Java adapter contract is
 `PyHttp.execute(callId, method, url, headersJson, body, timeoutMs, ipFamily)`.
-The final argument explicitly carries the per-call family to W4's socket
+The final argument explicitly carries the per-call family to the Android socket
 owner. The response exposes `status`, final `url`, decoded `body` and
 `headersJson` as a JSON array of header pairs, preserving repeated
 Set-Cookie fields. PyHttp owns redirect/gzip decoding and socket cancellation;
 Python applies the yt-dlp cookie jar and removes decoded gzip headers.
 Configuration/probe failure leaves no urllib fallback (adopted resolution 11).
-The host CPython java stub verifies this contract; Android execution is W4/W12.
+The host CPython java stub verifies this contract; Android execution remains unverified.
 
 
 **Android host** ([D74](../PLAN.md#3-key-decisions)); the desktop host uses the Fallback row below — yt-dlp's urllib handler with `source_address` and the bundled CA file — as its primary rule ([11 Networking and TLS](11-desktop.md#networking-and-tls)). On Android every HTTP request yt-dlp makes goes through `NeutrodyneOkHttpRH`, a yt-dlp `RequestHandler` registered with `register_rh` (`yt_dlp.networking.common`): `RH_KEY = "NeutrodyneOkHttp"`, schemes `http` and `https`, no proxy schemes, and a `register_preference` of 1000, so it is always tried first (and, per Exclusivity below, is the only handler left). Its `_send` calls `PyHttp.execute(callId, method, url, headersJson, body, timeoutMs)` through Chaquopy's Java interop (`from java import jclass`) and wraps the answer in a yt-dlp `Response`; non-2xx statuses raise `HTTPError` and I/O failures `TransportError`, as yt-dlp's own handlers do.
@@ -1578,12 +1589,12 @@ Serves R3.3, R3.8, N2. Delivered in M8 (feed outage), M9a (breaker, rate limit, 
 
 
 Implementation note (2026-10-19, M9a): Adopted resolution 4 makes gate
-views non-reserving. W6 owns atomic `YouTubeExtractionHealth` reservations:
+views non-reserving. Lifecycle health owns atomic `YouTubeExtractionHealth` reservations:
 one per admitted operation, completed once including cancellation, visible
-before persistence. W5/W9/W10 own extraction reports; composite enrichment
-shares one reservation. W7/W8 alone report media 429/fresh-URL 403. Cache
+before persistence. Resolver, enrichment and search own extraction reports; composite enrichment
+shares one reservation. Playback/download loaders alone report media 429/fresh-URL 403. Cache
 hits/claims reserve nothing; breaker opening invalidates URLs before gates.
-W1 leaves the existing feed-health implementation unchanged.
+The current integration leaves feed-health behavior unchanged.
 
 
 ```mermaid
@@ -1791,7 +1802,7 @@ Serves N11, R3.9, R8.6; mitigates risks M1r, M8r. Delivered in M9a (recorded res
 
 Implementation note (2026-10-19, M9a): Adopted resolution 10 keeps live
 host traffic in an explicitly named test/live adapter, not a shipped desktop
-host or Android PyHttp claim. W12 owns informational canaries/evidence;
+host or Android PyHttp claim. Informational canaries provide separate evidence;
 strict recorded replay gates PRs. No canary approves or ships engine updates.
 
 
@@ -1836,7 +1847,7 @@ host/live urllib only in the manual recording tool; it refuses CI and writes
 a new staging directory for review. JSON/bootstrap objects are minimized,
 prose replaced and cookies/visitor data/signatures/IP/expiry scrubbed before
 writing. Unsupported pages fail capture; inspect staging before promotion.
-Committed W3 scenarios are labelled synthetic, never successful live captures.
+Committed shim scenarios are labelled synthetic, never successful live captures.
 The strict corpus and generated synthetic AC1 error vectors exercise the
 real official 2026.08.19 extractor. Generated vectors are parser coverage,
 not evidence of request stability or current server behavior. A replay miss
@@ -1863,7 +1874,7 @@ Rejected: NewPipe Extractor (GPL-3.0-or-later; the previous design), youtubedl-a
 ## Settings
 
 
-Implementation note (2026-10-19, M9a): W1 registers engine-enabled,
+Implementation note (2026-10-19, M9a): The registry includes engine-enabled,
 audio-quality, volume-levelling, auto-download off/keep2 portable keys and
 breaker/rate/start-failure device keys. All are unsynced; portable registry
 membership is the backup whitelist. Zero deadlines encode absence. Quality

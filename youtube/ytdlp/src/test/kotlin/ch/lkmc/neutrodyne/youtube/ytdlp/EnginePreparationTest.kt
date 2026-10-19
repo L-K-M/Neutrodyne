@@ -16,9 +16,13 @@ import ch.lkmc.neutrodyne.core.testing.FakeEnginePlatformPreflight
 import ch.lkmc.neutrodyne.core.testing.FakeEngineSettings
 import ch.lkmc.neutrodyne.core.testing.FakeEngineStore
 import ch.lkmc.neutrodyne.core.testing.FakeYtxTransport
+import ch.lkmc.neutrodyne.youtube.engine.BundledEngineStore
 import ch.lkmc.neutrodyne.youtube.engine.CompileMarker
 import ch.lkmc.neutrodyne.youtube.engine.EnginePreparation
+import ch.lkmc.neutrodyne.youtube.engine.EngineStore
 import ch.lkmc.neutrodyne.youtube.engine.PreparedEngine
+import ch.lkmc.neutrodyne.youtube.engine.YtxContext
+import ch.lkmc.neutrodyne.youtube.engine.YtxControlRequest
 import ch.lkmc.neutrodyne.youtube.engine.YtxMethod
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
@@ -160,7 +164,35 @@ class EnginePreparationTest {
             assertTrue(transport.calls.isEmpty())
         }
 
-    private fun worker(): EnginePrepareWorker =
+    @Test fun preparationPublishesRealBundleAndControlPayload() =
+        runTest {
+            val output = File("build/preparedShim").canonicalFile.apply { mkdirs() }
+            val wrapped =
+                object : ContextWrapper(context) {
+                    override fun getApplicationContext(): Context = this
+
+                    override fun getNoBackupFilesDir(): File = output.resolve("noBackup").apply { mkdirs() }
+
+                    override fun getCacheDir(): File = output.resolve("cache").apply { mkdirs() }
+                }
+            val realStore = BundledEngineStore(AndroidEngineStorePaths(wrapped), 1)
+            transport.answer = { "{\"ready\":true}" }
+            // A working ping alone cannot claim W4 has compiled the engine.
+            assertEquals(ListenableWorker.Result.retry(), worker(realStore).doWork())
+            assertEquals(1, transport.calls.size)
+            assertEquals(EnginePreparation.PREPARING, realStore.preparation.value)
+            // Gradle's preparedShimTest consumes these declared test outputs, without Kotlin exec.
+            output.resolve("call.json").writeText(transport.calls.single().json)
+            output.resolve("lib-path.txt").writeText(
+                realStore
+                    .hostLibDir()!!
+                    .toFile()
+                    .relativeTo(output)
+                    .path,
+            )
+        }
+
+    private fun worker(engineStore: EngineStore = store): EnginePrepareWorker =
         TestListenableWorkerBuilder<EnginePrepareWorker>(context)
             .setWorkerFactory(
                 object : WorkerFactory() {
@@ -172,10 +204,11 @@ class EnginePreparationTest {
                         EnginePrepareWorker(
                             appContext,
                             workerParameters,
-                            store,
+                            engineStore,
                             transport,
                             settings,
                             preflight,
+                            YtxControlRequest(YtxContext("fr", "CH", "preparation-probe/1", "V6")),
                         )
                 },
             ).build()

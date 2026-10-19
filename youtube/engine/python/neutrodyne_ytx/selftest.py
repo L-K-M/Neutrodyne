@@ -40,7 +40,9 @@ def probe(ydl=None):
 
 
 def selftest():
-    # Preserve S7 runtime diagnostics for the old host until W4 switches to bridge.selftest.
-    result = probe()
-    result.update(python=platform.python_version(), openssl=ssl.OPENSSL_VERSION)
-    return json.dumps(result)
+    # The S7 host has no configured engine/HTTP handler; bridge.selftest runs the full probe.
+    return json.dumps({
+        "ok": True,
+        "python": platform.python_version(),
+        "openssl": ssl.OPENSSL_VERSION,
+    })

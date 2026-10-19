@@ -76,11 +76,36 @@ dependencies {
     androidTestImplementation(libs.truth)
 }
 
-// W3: host-only strict replay; package bootstrap remains W2's responsibility.
+// Host-only strict replay uses the same verified asset packaged above.
 tasks.register<Exec>("shimTest") {
+    dependsOn("verifyBundledYtDlp")
     group = "verification"
     description = "Run Python shim tests against hash-verified yt-dlp with strict offline replay"
     workingDir(rootProject.projectDir)
     commandLine("python3", "-B", "youtube/engine/python/tests/run.py")
     // Always run: the selected host interpreter and upstream API are part of this proof.
+}
+
+// Keep host process execution in build tooling; the Android test supplies the real store/payload.
+val preparedShimDirectory = layout.buildDirectory.dir("preparedShim")
+tasks.withType<Test>().configureEach {
+    if (name == "testDebugUnitTest") {
+        val outputDirectory = preparedShimDirectory.get().asFile
+        outputs.dir(outputDirectory)
+        doFirst { outputDirectory.deleteRecursively() }
+    }
+}
+tasks.register<Exec>("preparedShimTest") {
+    group = "verification"
+    description = "Probe the real prepared store and worker payload through the Python host adapter"
+    dependsOn("testDebugUnitTest", "verifyBundledYtDlp")
+    inputs.dir(preparedShimDirectory)
+    workingDir(rootProject.projectDir)
+    commandLine(
+        "python3",
+        "-I",
+        "-B",
+        "youtube/engine/python/tests/probe_prepared.py",
+        preparedShimDirectory.get().asFile.absolutePath,
+    )
 }

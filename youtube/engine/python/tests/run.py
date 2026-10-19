@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Unlicense
-"""Host shim task entry; the only download is the pinned build dependency, before tests."""
+"""Host shim task entry; require the committed, build-verified pinned bundle."""
 
 import hashlib
 import os
@@ -8,7 +8,6 @@ import shutil
 import subprocess
 import sys
 import unittest
-import urllib.request
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -19,17 +18,7 @@ BUILD = ROOT / 'youtube/ytdlp/build/shim'
 
 def prepare():
     BUILD.mkdir(parents=True, exist_ok=True)
-    bundled = ROOT / 'youtube/ytdlp/engine/yt-dlp'
-    asset = bundled if bundled.exists() else BUILD / 'yt-dlp'
-    if not asset.exists():
-        url = f'https://github.com/yt-dlp/yt-dlp/releases/download/{VERSION}/yt-dlp'
-        with urllib.request.urlopen(url, timeout=60) as response:
-            data = response.read(10 * 1024 * 1024 + 1)
-        if hashlib.sha256(data).hexdigest() != SHA256:
-            raise RuntimeError('Pinned yt-dlp hash mismatch')
-        temporary = asset.with_suffix('.tmp')
-        temporary.write_bytes(data)
-        temporary.replace(asset)
+    asset = ROOT / 'youtube/ytdlp/engine/yt-dlp'
     if hashlib.sha256(asset.read_bytes()).hexdigest() != SHA256:
         raise RuntimeError('Pinned yt-dlp hash mismatch')
     return asset

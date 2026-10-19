@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.youtube.engine.EnginePlatformPreflight
 import ch.lkmc.neutrodyne.youtube.engine.EnginePreparation
 import ch.lkmc.neutrodyne.youtube.engine.EngineSettings
 import ch.lkmc.neutrodyne.youtube.engine.EngineStore
+import ch.lkmc.neutrodyne.youtube.engine.YtxControlRequest
 import ch.lkmc.neutrodyne.youtube.engine.YtxDeadline
 import ch.lkmc.neutrodyne.youtube.engine.YtxLimits
 import ch.lkmc.neutrodyne.youtube.engine.YtxMethod
@@ -63,6 +64,7 @@ class EnginePrepareWorker(
     private val transport: YtxTransport,
     private val settings: EngineSettings,
     private val preflight: EnginePlatformPreflight,
+    private val pingRequest: YtxControlRequest,
 ) : CoroutineWorker(context, parameters) {
     override suspend fun doWork(): Result {
         return try {
@@ -74,7 +76,7 @@ class EnginePrepareWorker(
             // The ping waits for W4's worker-owned compile/import and final marker. Values provisional.
             transport.call(
                 YtxMethod.PING,
-                "{}",
+                pingRequest.toJson(),
                 YtxDeadline(SystemClock.elapsedRealtime() + YtxLimits.COMPILE_MS + YtxLimits.START_MS),
             )
             store.loadStatus()

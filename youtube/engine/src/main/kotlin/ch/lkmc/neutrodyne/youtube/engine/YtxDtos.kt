@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.youtube.engine
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 /** Wire v1: camelCase names, duration/releaseTs/timestamp/availableAt in seconds, sizes in bytes.
  * Mappers convert to API epoch milliseconds/duration milliseconds; lmt stays microseconds. All
@@ -63,7 +64,9 @@ data class YtxCursorRequest(
 @Serializable
 data class YtxControlRequest(
     val ctx: YtxContext,
-)
+) {
+    fun toJson(): String = Json.encodeToString(serializer(), this)
+}
 
 @Serializable
 data class YtxPing(

@@ -576,13 +576,14 @@ Instrumented tests run inside the app's process, so killing the process (`am kil
 
 ### Recorded responses
 
-Implementation note (2026-10-19, M9a): W3 adds
+Implementation note (2026-10-19, M9a): The shared shim adds
 `:youtube:ytdlp:shimTest`, using stdlib unittest to avoid a new Python
 dependency. It prefers host CPython 3.14, otherwise records the available
 python3 version in `youtube/ytdlp/build/shim/python-runtime.txt`. The task
-uses W2's official pinned asset when present; before W2 lands it downloads
-that exact asset into ignored build output and verifies its pinned SHA-256.
-Dependency bootstrap precedes the suite; test sockets are disabled and
+depends on the offline upstream verifier and requires the committed pinned
+asset; no test bootstrap download is allowed. The host here runs CPython
+3.11.2, so CPython 3.14 and Android execution remain unverified.
+Test sockets are disabled and
 ReplayRH is the exclusive handler. Committed method fixtures and generated
 AC1 error vectors are explicitly synthetic. Manual capture never runs in CI;
 host/live urllib evidence is distinct from Android PyHttp and MD3 acceptance
@@ -594,8 +595,7 @@ jobs and M7's discovery evidence assertions together. The download-only
 nightly selector does not assert discovery cases it did not select. The
 benchmark assemble task builds the existing `benchmarkRelease` fallback;
 it supplies no executed device or published-release evidence on this host.
-The local integration results and remaining W8 boundaries are recorded in
-[the I3 report](../../.nd-context/m8-i3-report.md).
+Physical-device, real-browser and platform acceptance remain unverified.
 
 Implementation note (2026-10-19, M8): Adopted plan resolution 8 keeps Layer A
 channel/oEmbed fixtures in `youtube/impl/src/test/resources/recorded/`, outside
@@ -877,9 +877,12 @@ When `unit` exceeds 15 min at p50 over a week, the fix order is: raise `maxParal
 
 ## Static analysis
 
-Implementation note (2026-10-19, M9a): W2 adds genuine-release negative
+Implementation note (2026-10-19, M9a): The bundled-engine suite adds genuine-release negative
 signature/hash/missing-input tests, bounded ZIP/recovery host tests and
-Android preparation tests using core:testing fakes. The Android inventory
+Android preparation tests using core:testing fakes, plus
+`:youtube:ytdlp:preparedShimTest` for the real extracted-engine/Python
+host-adapter boundary. The Android test publishes declared outputs; Gradle
+launches the Python probe, preserving the Kotlin process boundary. The Android inventory
 preserves exact meriyah ISC/astring MIT notices from authenticated ejs data;
 yt-dlp/ejs reuse the existing Unlicense text. Device/host compilation and
 activation evidence remain **spike pending**. No runtime updater is added.

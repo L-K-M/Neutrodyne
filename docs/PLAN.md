@@ -1411,22 +1411,18 @@ No schema change is authorized here.
 
 #### M9: YouTube playback and downloads via the embedded yt-dlp engine
 
-Implementation note (2026-10-19, M9a): W2 supplies D72's verified bundle/store
-and D76's build-time trust gate, implementing adopted resolutions 1, 2 and
-11 now in the JVM island. Host selection/activation remain **spike pending**.
-The 2026.08.19 pin is unchanged. W11 owns startup wiring; W4 owns compile/import
-using W2's marker helper. No inline playback preparation or M9b machinery.
-See 04 Host and packaging for limits/recovery and 01/09 for licence gates.
-
-
-
-
-Implementation note (2026-10-19, M9a): Adopted resolution 2 permits portable
-contracts, implementations and deterministic tests before the reference-device
-spike. Host selection and production activation still require owner go;
-**spike pending**. W1 leaves both shells externally bound. This sequencing
-clarification does not assert that the spike or any hardware budget passed.
-
+Implementation note (2026-10-19, M9a): D72's verified bundled store,
+D76's build-time signature/hash gate and the shared Python shim are integrated
+locally. The official 2026.08.19 pin is unchanged. Portable implementation and
+deterministic testing may precede the reference-device spike; host selection
+and production activation still require owner approval, **spike pending**.
+Both shells remain external with `NOT_YET_AVAILABLE`. Status/preparation hooks
+and worker creators stay unbound; ordinary startup never compiles or imports
+Python. No runtime updater, JS provider or engine-backed playback is activated.
+Host CPython 3.11.2 is a disclosed test fallback, not CPython 3.14 acceptance;
+replay fixtures are synthetic and successful residential captures remain open.
+See [04 Host and packaging](design/04-youtube.md#host-and-packaging) and
+[09 Recorded responses](design/09-quality-and-release.md#recorded-responses).
 
 - **Goal:** on the 64-bit APKs, YouTube episodes play and download as audio exactly like podcasts, through yt-dlp embedded in CPython in the `:ytx` process (layer B, [D72](#3-key-decisions)–[D75](#3-key-decisions)) (M9a); YouTube fixes then reach users as verified engine updates within hours, without an app update ([D76](#3-key-decisions)) (M9b).
 - **Increments** ([7.1](#71-milestone-overview)): **M9a** = every deliverable and criterion below not tagged M9b; **M9b** = the tagged ones. M9a starts with a one-week spike whose results decide the go/fallback before the rest of M9a is built.

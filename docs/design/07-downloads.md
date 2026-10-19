@@ -1234,11 +1234,11 @@ Row shape: `sourceKind = YOUTUBE`, `sourceRef = videoId`, `formatPref = AudioQua
 
 
 Implementation note (2026-10-19, M9a): Adopted resolutions 6, 7 and 8
-preserve M6 prepare/result/runner ownership. W8 owns transfers and wait/wake.
+preserve M6 prepare/result/runner ownership. The download implementation owns transfers and wait/wake.
 `TransferPlan.youtube` is a memory-only preference/representation snapshot.
 Resume requires non-null equal itag/clen/lmt proof in existing fields, lmt
 as decimal microseconds; full formatId also matches within an attempt.
-Real tuple collisions alone trigger W8's D22 contingency. Unknown total
+Real tuple collisions alone trigger the D22 contingency. Unknown total
 requires a bounded first range and consistent finite Content-Range; partial
 chunks resume at verified length or truncate. Engine-off keeps parts/PAUSED
 and never spins lanes; re-enable wakes both lanes. No-engine fails unfinished
