@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.testing.FakePlaybackMediaLookup
 import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
 import ch.lkmc.neutrodyne.playback.api.StreamKind
 import ch.lkmc.neutrodyne.youtube.api.ResolveResult
+import ch.lkmc.neutrodyne.youtube.api.YouTubeResolveException
 import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers

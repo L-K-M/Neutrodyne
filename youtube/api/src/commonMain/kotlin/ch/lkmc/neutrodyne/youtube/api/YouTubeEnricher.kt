@@ -6,6 +6,9 @@ import ch.lkmc.neutrodyne.core.model.Availability
 
 /** External implementations return Unsupported without IO. Cancellation propagates. */
 interface YouTubeEnricher {
+    /** One 45 s BACKGROUND operation, independent of audio-format availability. */
+    suspend fun facts(videoId: String): VideoFactsResult
+
     suspend fun enrich(
         channelId: String,
         videoIds: Set<String>,
@@ -28,7 +31,10 @@ data class VideoFacts(
     val availability: Availability?,
     val isShort: Boolean?,
     val description: String?,
-)
+    val descriptionTruncated: Boolean = false,
+) {
+    override fun toString(): String = "VideoFacts(redacted)"
+}
 
 sealed interface EnrichResult {
     data class Ok(
@@ -46,7 +52,9 @@ sealed interface EnrichResult {
 /** Opaque and host-owned, never stored in Room or optionsJson. */
 data class UploadsCursor(
     val token: String,
-)
+) {
+    override fun toString(): String = "UploadsCursor(redacted)"
+}
 
 sealed interface UploadsPageResult {
     data class Ok(
@@ -59,4 +67,19 @@ sealed interface UploadsPageResult {
     data class Failed(
         val kind: TransientKind,
     ) : UploadsPageResult
+}
+
+sealed interface VideoFactsResult {
+    data class Ok(
+        val facts: VideoFacts,
+    ) : VideoFactsResult
+
+    data object Unsupported : VideoFactsResult
+
+    data class Failed(
+        val kind: TransientKind,
+        val cause: Throwable?,
+    ) : VideoFactsResult {
+        override fun toString(): String = "VideoFactsResult.Failed(kind=$kind)"
+    }
 }

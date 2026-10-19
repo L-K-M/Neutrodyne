@@ -1290,6 +1290,16 @@ Rules:
 
 ### YouTube bindings
 
+
+Implementation note (2026-10-19, M9a): W1 freezes contracts without changing
+either shell's external bindings. W11 alone owns Android activation after
+all five capabilities work and the owner spike go; **spike pending**.
+Platform source sets of `:core:testing` depend on `:youtube:engine` solely
+for host-port fakes; commonMain keeps its existing API-only edges. This
+adds the corresponding module-graph allowance without exposing host types
+to feature common code.
+
+
 Every `:youtube:api` interface is bound in exactly one binding container per shell ([D2](../PLAN.md#3-key-decisions), [D77](../PLAN.md#3-key-decisions), [D90](../PLAN.md#3-key-decisions)): `YouTubeBindingsModule` in `:app` and `DesktopYouTubeBindingsModule` in `:desktopApp`. There are no flavors: what a device can do with YouTube is a **runtime capability** read from `YouTubeCapabilitiesSource` (shape, reasons and every consumer: [04 Capability matrix](04-youtube.md#capability-matrix)). Until the engine milestone (M9a on Android, MD3 on the desktop) each container lives in its shell's `src/main/`; from then on it exists twice and the [engine switch](#emergency-build-without-the-engine) adds exactly one directory to the shell's Kotlin sources:
 
 | Source directory | Compiled when | Binds |

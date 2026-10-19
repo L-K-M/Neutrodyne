@@ -704,6 +704,17 @@ internal data class PinnedFormat(val itag: Int, val formatId: String, val conten
 
 ### YouTube branch
 
+
+Implementation note (2026-10-19, M9a): Adopted resolutions 3, 5 and 8
+add default `PLAYBACK` (20 s warm/25 s cold) and 45 s `BACKGROUND` purpose.
+W5 owns per-waiter budgets, immutable flight deadlines and last-waiter host
+cancellation; W7's 35 s watchdog excludes preroll. The loader exception is
+API-owned and pins compare full formatId/clen/lmt. W9 coalesces missing
+current descriptions through facts; truncated text cannot supply complete
+chapters. External mode keeps completed files unplayable; capability flips
+alone do not stop current audio. W1 keeps both shells externally bound.
+
+
 Owned by [04 Playback integration](04-youtube.md#playback-integration): branch condition, `DataSpec` key, format pinning, expiry through the cache TTL, 403/410 self-heal, pre-warm and pre-resolve triggers, preroll wait and error mapping. The engine behind `YouTubeStreamResolver` — yt-dlp in CPython in the `:ytx` process, reached over Binder — is 04's ([04 YouTube engine](04-youtube.md#youtube-engine)); 06 only ever sees `resolveAudio` results. 06 implements:
 
 - `GuardedHttpDataSource` for keys starting `yt:`: on `InvalidResponseCodeException` 403 or 410, `yt.invalidate(videoId)` (videoId parsed from the key) at most twice per item per 60 s, then rethrow; Media3's retry re-enters `resolveDataSpec` at the same byte offset. A 403 that arrives before the pin's `availableAtMs` is rethrown without invalidating, so it is never reported to the breaker.

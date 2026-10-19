@@ -1411,6 +1411,14 @@ No schema change is authorized here.
 
 #### M9: YouTube playback and downloads via the embedded yt-dlp engine
 
+
+Implementation note (2026-10-19, M9a): Adopted resolution 2 permits portable
+contracts, implementations and deterministic tests before the reference-device
+spike. Host selection and production activation still require owner go;
+**spike pending**. W1 leaves both shells externally bound. This sequencing
+clarification does not assert that the spike or any hardware budget passed.
+
+
 - **Goal:** on the 64-bit APKs, YouTube episodes play and download as audio exactly like podcasts, through yt-dlp embedded in CPython in the `:ytx` process (layer B, [D72](#3-key-decisions)–[D75](#3-key-decisions)) (M9a); YouTube fixes then reach users as verified engine updates within hours, without an app update ([D76](#3-key-decisions)) (M9b).
 - **Increments** ([7.1](#71-milestone-overview)): **M9a** = every deliverable and criterion below not tagged M9b; **M9b** = the tagged ones. M9a starts with a one-week spike whose results decide the go/fallback before the rest of M9a is built.
 - **Deliverables:**

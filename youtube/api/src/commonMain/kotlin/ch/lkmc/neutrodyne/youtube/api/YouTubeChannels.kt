@@ -63,7 +63,9 @@ interface YouTubeChannelSearch {
 /** Opaque, host-owned and never persisted; expires with its result generator. */
 data class SearchCursor(
     val token: String,
-)
+) {
+    override fun toString(): String = "SearchCursor(redacted)"
+}
 
 data class ChannelHit(
     val channelId: String,

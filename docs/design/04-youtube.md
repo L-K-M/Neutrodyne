@@ -305,6 +305,14 @@ There are no build flavors. What YouTube can do is a **runtime capability** of t
 
 ### Capability computation
 
+
+Implementation note (2026-10-19, M9a): Adopted resolution 9 adds preflight
+before native loading: present-but-unusable x86_64 API26–27 maps to
+`ENGINE_FAILED` with `X86_64_API_26_27`, while no engine/32-bit maps to
+`NOT_IN_THIS_APK`. Retry rechecks eligibility without a doomed Python start.
+W4 implements this port; hardware validation remains spike pending.
+
+
 `YtDlpEngine` (the default builds' `YouTubeCapabilitiesSource`, from M9a on Android and MD3 on the desktop) evaluates these rows in order; the first match wins. The external-only bindings publish a fixed reason.
 
 | Condition | `externalReason` | `EngineStatus.availability` |
@@ -947,7 +955,19 @@ flowchart LR
 
 ### Shared engine module
 
-Serves R3.5, R3.6, R3.8, R3.9, R8.6, N11. Delivered in M9a (the JVM island `:youtube:engine` with the host-independent classes, written against the contract below, and `BinderYtxTransport` in `:youtube:ytdlp`), M9b (update orchestration and verifiers, in the island), MD3 (the stdio host on the same island, [11 Desktop YouTube engine host](11-desktop.md#desktop-youtube-engine-host)). Honours [D72](../PLAN.md#3-key-decisions), [D76](../PLAN.md#3-key-decisions), [D81](../PLAN.md#3-key-decisions), [D90](../PLAN.md#3-key-decisions).
+
+Implementation note (2026-10-19, M9a): Adopted resolutions 1, 2 and 11
+place shared contracts in `:youtube:engine` now; host selection/activation
+remain **spike pending**. M9a exposes bundled status/prewarm/retry only.
+Transport uses `YtxMethod` and absolute app-monotonic `YtxDeadline`; adapters
+translate remaining budgets without extension and count encoding overhead
+against caps. Wire seconds map to API milliseconds; lmt stays microseconds.
+W2 owns explicit preparation/compile identity (app/engine/Python minor);
+playback never compiles inline. A broken bridge fails selftest; urllib
+fallback requires a recorded host choice. Adopted resolution 5 adds bounded
+plain description/truncation and format-independent 45 s `facts` to the API.
+W4 owns inert before-first-bind test arming, W3/W12 replay/provenance.
+
 
 One engine, two hosts. Everything that decides what YouTube does — the methods and their results, error mapping, format selection, caches, capabilities, the engine store, the update policy and the trust chain — is host-independent JVM code; a host only runs CPython with the shared shim and carries JSON between the app and the interpreter. Until MD3 the package `…youtube.engine` inside `:youtube:ytdlp` imports nothing from `android.*`, Chaquopy or the AIDL classes (a package rule of 01's `checkBannedApis`), so MD3's move is mechanical.
 
@@ -1493,6 +1513,16 @@ Serves R3.3, R3.8, N2. Delivered in M8 (feed outage), M9a (breaker, rate limit, 
 
 ### Circuit breaker
 
+
+Implementation note (2026-10-19, M9a): Adopted resolution 4 makes gate
+views non-reserving. W6 owns atomic `YouTubeExtractionHealth` reservations:
+one per admitted operation, completed once including cancellation, visible
+before persistence. W5/W9/W10 own extraction reports; composite enrichment
+shares one reservation. W7/W8 alone report media 429/fresh-URL 403. Cache
+hits/claims reserve nothing; breaker opening invalidates URLs before gates.
+W1 leaves the existing feed-health implementation unchanged.
+
+
 ```mermaid
 stateDiagram-v2
   [*] --> Closed
@@ -1696,6 +1726,12 @@ Serves N11, R3.9, R8.6; mitigates risks M1r, M8r. Delivered in M9a (recorded res
 
 ### Engine canary
 
+Implementation note (2026-10-19, M9a): Adopted resolution 10 keeps live
+host traffic in an explicitly named test/live adapter, not a shipped desktop
+host or Android PyHttp claim. W12 owns informational canaries/evidence;
+strict recorded replay gates PRs. No canary approves or ships engine updates.
+
+
 The workflow, its schedule, environment and Pages deployment are 09's ([09 engine-canary.yml](09-quality-and-release.md#engine-canaryyml)); what it tests is defined here. Every 6 h and on `workflow_dispatch(tag)`:
 
 1. **Detect.** The latest yt-dlp stable tag from the `Location` header of `https://github.com/yt-dlp/yt-dlp/releases/latest` (or the dispatched `tag`); nothing to do when it equals the approved version.
@@ -1749,6 +1785,15 @@ Rejected: NewPipe Extractor (GPL-3.0-or-later; the previous design), youtubedl-a
 ---
 
 ## Settings
+
+
+Implementation note (2026-10-19, M9a): W1 registers engine-enabled,
+audio-quality, volume-levelling, auto-download off/keep2 portable keys and
+breaker/rate/start-failure device keys. All are unsynced; portable registry
+membership is the backup whitelist. Zero deadlines encode absence. Quality
+uses model-owned `YouTubeAudioQuality` with API `AudioQuality` alias to
+preserve dependency direction. Update-policy/check/outcome keys await M9b.
+
 
 Implementation note (2026-10-19, M8): W1 registers M8 keys only: portable
 preferences, device-only health, no youtube-key sync. Zero stored deadline

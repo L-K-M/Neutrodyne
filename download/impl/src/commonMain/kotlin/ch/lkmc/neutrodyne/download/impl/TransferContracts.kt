@@ -6,6 +6,7 @@ import ch.lkmc.neutrodyne.core.database.DownloadEntity
 import ch.lkmc.neutrodyne.core.model.DownloadError
 import ch.lkmc.neutrodyne.core.model.SourceKind
 import ch.lkmc.neutrodyne.core.model.WaitReason
+import ch.lkmc.neutrodyne.youtube.api.YouTubeTransferSnapshot
 
 /** One attempt; resolved URLs are memory-only. Engine owns every database transition. */
 internal interface TransferSource {
@@ -34,7 +35,11 @@ internal data class TransferPlan(
     val integrity: String? = null,
     /** In-runner retries may use a memory-only CDN URL; fresh prepare always uses the source. */
     val originalUrl: String = url,
-)
+    /** W8 owns the YouTube source. This stays in memory, never optionsJson or a signed URL row. */
+    val youtube: YouTubeTransferSnapshot? = null,
+) {
+    override fun toString(): String = "TransferPlan(episodeId=$episodeId, offset=$offset)"
+}
 
 internal sealed interface Prepared {
     /** Rename survived a crash; engine commits COMPLETED without another request or move. */

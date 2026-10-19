@@ -9,10 +9,12 @@ import ch.lkmc.neutrodyne.youtube.api.ChannelSearchResult
 import ch.lkmc.neutrodyne.youtube.api.EnrichResult
 import ch.lkmc.neutrodyne.youtube.api.ExtractorChannelLookup
 import ch.lkmc.neutrodyne.youtube.api.MetadataDepth
+import ch.lkmc.neutrodyne.youtube.api.ResolvePurpose
 import ch.lkmc.neutrodyne.youtube.api.ResolveResult
 import ch.lkmc.neutrodyne.youtube.api.SearchCursor
 import ch.lkmc.neutrodyne.youtube.api.UploadsCursor
 import ch.lkmc.neutrodyne.youtube.api.UploadsPageResult
+import ch.lkmc.neutrodyne.youtube.api.VideoFactsResult
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilities
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.youtube.api.YouTubeChannelSearch
@@ -34,6 +36,7 @@ class ExternalOnlyYouTubeStreamResolver : YouTubeStreamResolver {
     override suspend fun resolveAudio(
         videoId: String,
         pref: AudioPref,
+        purpose: ResolvePurpose,
     ): ResolveResult = ResolveResult.Unsupported
 
     override fun invalidate(videoId: String) = Unit
@@ -42,6 +45,8 @@ class ExternalOnlyYouTubeStreamResolver : YouTubeStreamResolver {
 }
 
 class NoOpYouTubeEnricher : YouTubeEnricher {
+    override suspend fun facts(videoId: String): VideoFactsResult = VideoFactsResult.Unsupported
+
     override suspend fun enrich(
         channelId: String,
         videoIds: Set<String>,

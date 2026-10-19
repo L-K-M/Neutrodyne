@@ -1232,6 +1232,19 @@ Row shape: `sourceKind = YOUTUBE`, `sourceRef = videoId`, `formatPref = AudioQua
 
 ### Engine absent or disabled
 
+
+Implementation note (2026-10-19, M9a): Adopted resolutions 6, 7 and 8
+preserve M6 prepare/result/runner ownership. W8 owns transfers and wait/wake.
+`TransferPlan.youtube` is a memory-only preference/representation snapshot.
+Resume requires non-null equal itag/clen/lmt proof in existing fields, lmt
+as decimal microseconds; full formatId also matches within an attempt.
+Real tuple collisions alone trigger W8's D22 contingency. Unknown total
+requires a bounded first range and consistent finite Content-Range; partial
+chunks resume at verified length or truncate. Engine-off keeps parts/PAUSED
+and never spins lanes; re-enable wakes both lanes. No-engine fails unfinished
+rows only. Claims never reserve; gate waits recheck within 30 minutes.
+
+
 YouTube rows are created only while `capabilities.value.downloads` is true: otherwise `request` rejects YouTube IDs (`YOUTUBE_NOT_SUPPORTED`) and the planner gets no YouTube candidates, so before M9a no YouTube row exists on any APK and before MD3 none on the desktop (`NOT_YET_AVAILABLE`). Rows created with the engine meet external mode when the user turns the engine off, it fails three starts, or a build without the engine is installed over one with it. Sync carries no download rows, so a YouTube row never arrives on a device in external mode from elsewhere ([Sync interplay](#sync-interplay)). `YouTubeEngineRules` applies 04's rules ([04 Engine absent or disabled](04-youtube.md#engine-absent-or-disabled)) by `ExternalReason`:
 
 | `externalReason` | Queued, running and paused rows | `.part` | Completed files |

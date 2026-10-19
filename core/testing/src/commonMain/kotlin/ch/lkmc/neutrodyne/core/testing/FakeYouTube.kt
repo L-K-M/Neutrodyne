@@ -20,8 +20,10 @@ import ch.lkmc.neutrodyne.core.model.YouTubeVariantBits
 import ch.lkmc.neutrodyne.youtube.api.ChannelResolution
 import ch.lkmc.neutrodyne.youtube.api.ChannelSearchResult
 import ch.lkmc.neutrodyne.youtube.api.EnrichResult
+import ch.lkmc.neutrodyne.youtube.api.ExtractionAdmission
 import ch.lkmc.neutrodyne.youtube.api.ExtractionGate
 import ch.lkmc.neutrodyne.youtube.api.ExtractionOutcome
+import ch.lkmc.neutrodyne.youtube.api.ExtractionReservation
 import ch.lkmc.neutrodyne.youtube.api.ExtractorChannelLookup
 import ch.lkmc.neutrodyne.youtube.api.FeedChannelMetadata
 import ch.lkmc.neutrodyne.youtube.api.FeedGate
@@ -30,12 +32,13 @@ import ch.lkmc.neutrodyne.youtube.api.MetadataDepth
 import ch.lkmc.neutrodyne.youtube.api.SearchCursor
 import ch.lkmc.neutrodyne.youtube.api.UploadsCursor
 import ch.lkmc.neutrodyne.youtube.api.UploadsPageResult
+import ch.lkmc.neutrodyne.youtube.api.VideoFactsResult
 import ch.lkmc.neutrodyne.youtube.api.YouTubeChannelResolver
 import ch.lkmc.neutrodyne.youtube.api.YouTubeChannelSearch
 import ch.lkmc.neutrodyne.youtube.api.YouTubeEnricher
+import ch.lkmc.neutrodyne.youtube.api.YouTubeExtractionHealth
 import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedMetadataReader
 import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedOutageMonitor
-import ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
 import ch.lkmc.neutrodyne.youtube.api.YouTubeHealthState
 import ch.lkmc.neutrodyne.youtube.api.YtRef
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -91,6 +94,14 @@ class FakeYouTubeFeedMetadataReader : YouTubeFeedMetadataReader {
 }
 
 class FakeYouTubeEnricher : YouTubeEnricher {
+    val factCalls = mutableListOf<String>()
+    var facts: suspend (String) -> VideoFactsResult = { VideoFactsResult.Unsupported }
+
+    override suspend fun facts(videoId: String): VideoFactsResult {
+        factCalls += videoId
+        return facts.invoke(videoId)
+    }
+
     var result: EnrichResult = EnrichResult.Unsupported
     var page: UploadsPageResult = UploadsPageResult.Unsupported
     val calls = mutableListOf<Triple<String, Set<String>, Int>>()
@@ -115,7 +126,26 @@ class FakeYouTubeEnricher : YouTubeEnricher {
     }
 }
 
-class FakeYouTubeHealth : YouTubeHealth {
+class FakeYouTubeHealth : YouTubeExtractionHealth {
+    private var nextId = 0L
+    private val admitted = mutableSetOf<ExtractionReservation>()
+    val reservations = mutableListOf<Long>()
+    val completions = mutableListOf<Pair<ExtractionReservation, ExtractionOutcome>>()
+    var reserve: (Long) -> ExtractionAdmission = { ExtractionAdmission.Admitted(ExtractionReservation(++nextId)) }
+
+    override fun reserveExtraction(nowMs: Long): ExtractionAdmission {
+        reservations += nowMs
+        return reserve(nowMs).also { if (it is ExtractionAdmission.Admitted) admitted += it.reservation }
+    }
+
+    override fun completeExtraction(
+        reservation: ExtractionReservation,
+        outcome: ExtractionOutcome,
+    ) {
+        check(admitted.remove(reservation)) { "Unknown or already completed extraction" }
+        completions += reservation to outcome
+    }
+
     override val state = MutableStateFlow(YouTubeHealthState())
     var gate: ExtractionGate = ExtractionGate.Allow
     val reports = mutableListOf<Any>()
