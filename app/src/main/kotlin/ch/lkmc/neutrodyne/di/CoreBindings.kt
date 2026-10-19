@@ -13,9 +13,11 @@ import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.StoragePaths
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
+import ch.lkmc.neutrodyne.core.domain.update.UpdateRuntimeInputs
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.platform.AndroidBuildInfo
 import ch.lkmc.neutrodyne.platform.AndroidPlatformInfo
+import ch.lkmc.neutrodyne.platform.AndroidUpdateRuntimeInputs
 import ch.lkmc.neutrodyne.platform.DeviceClock
 import ch.lkmc.neutrodyne.sync.protocol.OrderKey
 import dev.zacsweers.metro.BindingContainer
@@ -72,6 +74,10 @@ object CoreBindings {
     @Provides
     @SingleIn(AppScope::class)
     fun platformInfo(): PlatformInfo = AndroidPlatformInfo()
+
+    @Provides
+    @SingleIn(AppScope::class)
+    fun updateRuntimeInputs(): UpdateRuntimeInputs = AndroidUpdateRuntimeInputs()
 
     @Provides
     @SingleIn(AppScope::class)

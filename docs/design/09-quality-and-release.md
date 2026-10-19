@@ -541,6 +541,8 @@ Instrumented tests run inside the app's process, so killing the process (`am kil
 
 ## CI pipelines
 
+**Implementation note (2026-10-19, M11a).** Update-script fixtures/test wiring belong to W7. M0b publication/smoke infrastructure and four-platform desktop release coverage remain missing prerequisites for published upgrade proof. Do not recreate that pipeline in M11a or count source/JVM/banner tests as packaged, native-notification or physical OS evidence.
+
 Serves N8, N11, N12. Delivered in M0a (`ci.yml`, `release.yml` with the `verify-tag`, `android` and `publish` jobs, skeleton `nightly.yml`), M0b (`desktop-smoke`, `desktop-matrix`, the `desktop` and `sources` release jobs, the `server` PR job), MD0 (native builds in the matrix), MD1b (FFmpeg sources), MS0 (`sync-convergence`), MS1 (`server-jar`, the image jobs, `server-image-smoke`), M9a (engine jobs), M9b (`engine-canary.yml`), MD3 (the stdio host in the canary), extended per milestone. Honours [D60](../PLAN.md#3-key-decisions), [D76](../PLAN.md#3-key-decisions), [D79](../PLAN.md#3-key-decisions), [D89](../PLAN.md#3-key-decisions), [D95](../PLAN.md#3-key-decisions), [PO-18](../PLAN.md#48-further-product-owner-decisions) (public GitHub repository: free standard runners on Linux x64 and arm64, Windows and macOS).
 
 ### Runners
@@ -1242,6 +1244,8 @@ GitHub is the only channel and most users never install Obtainium, so both apps 
 
 ### Modules and API
 
+**Implementation note (2026-10-19, M11a).** W1 freezes domain checker/notices/runtime ports with core:testing fakes and internal data parser/source/selector/executor/runner/store/jitter/notifier seams. `UpdateInfo.desktopSelection` carries compatibility reasons; `desktopAsset` is derived. `skip`/`dismiss` keep their signatures, adding `writeError: StateFlow<SettingsError?>`; retain card/notice until durable success, retain it on failure, clear error on successful retry. `UpdateNotices.verificationPhase` exposes pre/post copy without UI access to data-layer constants. One app-scoped coordinator serializes writes and coalesces checks. W4/W5 own platform contributions; W6 owns shared shell accessors/settings/root/help wiring.
+
 No modules of its own ([D13](../PLAN.md#3-key-decisions)): interfaces in `:core:domain` (package `ch.lkmc.neutrodyne.core.domain.update`), state types in `:core:model` (`ch.lkmc.neutrodyne.core.model.update`), the implementation in `:core:data` (`ch.lkmc.neutrodyne.core.data.update`): the logic in `commonMain`, the scheduling and notification in `androidMain` and `desktopMain`, bound through Metro contributions ([01 Dependency injection](01-foundation.md#dependency-injection)). `:feature:settings` (Settings › Updates, Install & updates help) and each shell's root (first-run card, on Android the verification notice, the gear badge) use only the interfaces. `:core:data` already hosts comparable work, and the check needs no install permission, no `PackageInstaller` and no playback or download state, which were the only reasons for separate `:update:*` modules.
 
 ```kotlin
@@ -1270,7 +1274,7 @@ enum class UpdateDisabledReason { DEV_BUILD, CHECKS_OFF }
 data class UpdateInfo(val versionName: String, val versionCode: Long, val minSdk: Int, val publishedAt: String,
                       val notes: String, val releaseUrl: String,
                       val apk: UpdateApk?,                       // Android: the entry for Build.SUPPORTED_ABIS[0], else null; desktop: null
-                      val desktopAsset: UpdateDesktopAsset?,     // desktop: DesktopAssetSelector's pick (11), else null; Android: null
+                      val desktopSelection: DesktopAssetSelection?, // desktop reason-bearing result; desktopAsset is derived; Android: null
                       val server: UpdateServerInfo?)             // validated, unused by the apps in v1.0
 data class UpdateApk(val abi: String, val fileName: String, val url: String, val sizeBytes: Long, val sha256: String)
 data class UpdateDesktopAsset(val os: DesktopOs, val arch: DesktopArch, val kind: InstallKind, val fileName: String,
@@ -1321,6 +1325,10 @@ State rules (both apps unless marked):
 
 ### Update manifest
 
+**Implementation note (2026-10-19, M11a).** Both apps validate all recognized optional desktop/server data before selection; malformed known data fails, unknown targets/fields remain additive.
+
+**Implementation note (2026-10-19, M11a).** Accept explicit :443; reject empty/repeated/traversal raw decoded path segments before normalization and rebuild canonical URLs. W2/W7 share app/script fixtures. Check version arithmetic in Long; widen installed Int version codes without changing BuildInfo.
+
 `neutrodyne-update.json`, an asset of every release (written by `make-update-json.sh`, validated by `check-update-json.sh` before the draft is published, [release.yml](#releaseyml) step 8). Schema 1 with this layout; the `desktop[]` and `server` fields of the scope revision are additive, so parsers that predate them ignore them ([D78](../PLAN.md#3-key-decisions)):
 
 ```json
@@ -1353,7 +1361,7 @@ State rules (both apps unless marked):
 | `published`, `notes` | ISO-8601 UTC; `notes` equal to `changelogs/<versionCode>.txt` (≤ 500 characters) | shown as plain text, never as HTML or links |
 | `releaseUrl` | `{repoUrl}/releases/tag/{tag}` | the link rule below with path segments exactly `[owner, "Neutrodyne", "releases", "tag", "v{versionName}"]`, else `MANIFEST_INVALID` |
 | `apks[]` | exactly the three ABIs built, each `file` present in the release with matching `size` and `sha256`, `url` = `{repoUrl}/releases/download/{tag}/{file}` | every `url` passes the link rule with path segments exactly `[owner, "Neutrodyne", "releases", "download", "v{versionName}", file]` and `file` equal to that entry's `file`, else `MANIFEST_INVALID`; entries with an unknown `abi` are ignored; `sha256` 64 hexadecimal characters |
-| `desktop[]` (from M0b; absent before) | exactly the desktop packages of the release, per target the kinds listed above (no `windows/arm64` entries: Windows on Arm uses x64, [PO-40](../PLAN.md#48-further-product-owner-decisions)), each `file` present with matching `size` and `sha256`, `url` as for `apks[]`; `minOs` `"10.0"` on Windows and `"13.0"` on macOS, absent on Linux | the same link and hash rules; entries with an unknown `os`, `arch` or `kind` are ignored; `DesktopAssetSelector` picks one per 11's rules; Android ignores the field |
+| `desktop[]` (from M0b; absent before) | exactly the desktop packages of the release, per target the kinds listed above (no `windows/arm64` entries: Windows on Arm uses x64, [PO-40](../PLAN.md#48-further-product-owner-decisions)), each `file` present with matching `size` and `sha256`, `url` as for `apks[]`; `minOs` `"10.0"` on Windows and `"13.0"` on macOS, absent on Linux | the same link and hash rules; entries with an unknown `os`, `arch` or `kind` are ignored; `DesktopAssetSelector` picks one per 11's rules; Android validates the field but does not select from it |
 | `server` (from MS1; absent before) | `jar` like an asset entry; `image` = `ghcr.io/{owner}/neutrodyne-server@sha256:<index digest>` equal to the digest `server-image-manifest` attested; `minJava` 21 | parsed into `UpdateServerInfo` with the link rule for the JAR and a reference check (this repository's owner, image name `neutrodyne-server`, a digest, no tag); unused by the apps in v1.0; the server's own notice reads the manifest with its own parser ([10 Update notice](10-sync.md#update-notice)) |
 
 **Link rule.** A URL is accepted only when its scheme is `https`, its host and port are those of `BuildInfo.repoUrl` (`github.com`, 443), it has no user-info, query or fragment, and its raw path, split on `/` and each segment percent-decoded once, equals the expected segment list exactly; a segment that decodes to `.`, `..` or contains `/` or `\` rejects the manifest. Parsing uses Ktor's `Url` in common code (Unverified how it treats `%2e` forms, so the decoding and comparison are our own and tested, [Tests](#tests)). The app then never opens the manifest's string: it opens the URL rebuilt from `BuildInfo.repoUrl` and the validated components, so what it opens is always this repository's release page or release asset for the manifest's own version.
@@ -1380,6 +1388,10 @@ Failures: I/O and timeouts → `NETWORK`; HTTP 403 or 429 from GitHub → `RATE_
 
 ### Update card and links
 
+**Implementation note (2026-10-19, M11a).** Only scheduled checks post; successful manual checks record suppression. Card/badge can precede MD2, which owns native desktop delivery acceptance.
+
+**Implementation note (2026-10-19, M11a).** Adapter ACCEPTED means dispatch accepted (desktop banner until MD2), not OS display. Android permission/channel/minSdk denial returns UNAVAILABLE, without a notified marker. Stable IDs replace retries across the unavoidable OS-delivery/storage crash window; exactly-once crash delivery is not promised.
+
 What the card shows is 08's ([08 Updates settings](08-ui-ux.md#updates-settings)): the version, release date, the first lines of the notes, the size of the linked file, a copyable SHA-256 of that file, and the actions below. The behaviour behind it:
 
 - **"Open release on GitHub"** → the browser (Android `ACTION_VIEW` + `CATEGORY_BROWSABLE`, desktop `ExternalUrlOpener`, which uses `Desktop.browse`) with the rebuilt `info.releaseUrl`, the tag's release page with the notes, every file and `SHA256SUMS`.
@@ -1392,6 +1404,8 @@ What the card shows is 08's ([08 Updates settings](08-ui-ux.md#updates-settings)
 - **After a manual install** the OS installer replaces the app (Android also ends its processes like any update; desktop installers expect the app to be closed, and the MSI asks to close it, Unverified wording). At the next start the stored version is at or below the running one, so `state` returns to `Idle` and the notification is cancelled. Positions, the queue and downloads resume as after a restart (06, 07, 11); nothing plays by itself.
 
 ### Notices
+
+**Implementation note (2026-10-19, M11a).** Use PO-36’s default 2026-12-01 with foreground/date-boundary reevaluation in earlier builds; advance only on the documented announcement trigger. Global date stays unset. PLAN records release-time owner confirmation of this interpretation.
 
 `UpdateNoticesImpl` raises at most one pending `UpdateNotice`; each shell's root shows it through 08's keys and `dismiss` records it:
 
@@ -1959,6 +1973,8 @@ Plus: every earlier milestone's acceptance criteria green (M, MD and MS tracks);
 ---
 
 ## Settings
+
+**Implementation note (2026-10-19, M11a).** Use Int64 -1 for absent update timestamps/codes, mapped to domain null. Timestamps permit zero, codes must be positive; reject other negatives/wrong types. Only the portable Boolean is backed up; none sync. Keep existing DataStore types, no Room changes or extra keys.
 
 Keys owned here ([01 DataStore files and typed setting keys](01-foundation.md#datastore-files-and-typed-setting-keys)), the same keys in both apps; none of them syncs (`SettingKey.synced = false`, [10 What syncs](10-sync.md#what-syncs)). UI on 08's `PRIVACY`, `UPDATES` and `ABOUT` pages ([08 Updates settings](08-ui-ux.md#updates-settings)).
 

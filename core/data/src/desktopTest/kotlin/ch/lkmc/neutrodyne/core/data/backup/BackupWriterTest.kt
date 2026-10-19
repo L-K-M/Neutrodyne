@@ -29,6 +29,7 @@ import ch.lkmc.neutrodyne.core.model.settings.BackupSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
+import ch.lkmc.neutrodyne.core.model.settings.UpdateSettingKeys
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -324,6 +325,31 @@ class BackupWriterTest {
                         .toSet()
                         .all { it in setOf("Bool", "Int32", "Int64", "Float32", "Text", "TextSet", "Choice") },
                 )
+            }
+        }
+
+    @Test
+    fun updateChoiceRoundTripsButDeviceBookkeepingDoesNot() =
+        runTest {
+            seedPodcast()
+            settings.set(UpdateSettingKeys.CHECK_ENABLED, false)
+            settings.set(UpdateSettingKeys.LAST_CHECK_AT, 123L)
+            settings.set(UpdateSettingKeys.SKIPPED_VERSION_CODE, 1000095L)
+            settings.set(UpdateSettingKeys.NOTIFIED_VERSION_CODE, 1000095L)
+            settings.set(UpdateSettingKeys.FIRST_RUN_CHOICE_DONE, true)
+            settings.set(UpdateSettingKeys.VERIFICATION_NOTICE_SHOWN_AT, 456L)
+            assertIs<Outcome.Success<*>>(newWriter().write(BackupKind.MANUAL, target(), includeCredentials = false))
+            reader(target()).use { archive ->
+                val exported = archive.settings()
+                assertEquals(
+                    listOf(UpdateSettingKeys.CHECK_ENABLED.name),
+                    exported.values.filter { it.key.startsWith("updates.") }.map { it.key },
+                )
+                val restored = FakeSettingsRepository()
+                assertIs<Outcome.Success<*>>(RestoreSettingsMerge(restored).apply(exported))
+                assertEquals(false, restored.get(UpdateSettingKeys.CHECK_ENABLED))
+                assertEquals(-1L, restored.get(UpdateSettingKeys.LAST_CHECK_AT))
+                assertEquals(false, restored.get(UpdateSettingKeys.FIRST_RUN_CHOICE_DONE))
             }
         }
 

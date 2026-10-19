@@ -1532,12 +1532,16 @@ sources are attached to every release.
 
 ### Desktop update check
 
+**Implementation note (2026-10-19, M11a).** Use `BuildInfo.desktop.os/arch/installKind` plus runtime `os.version`; Android uses preferred SUPPORTED_ABIS[0]/SDK, never installed APK ABI or User-Agent parsing. Selector results distinguish selected/missing/development/newer-OS (with minOs).
+
+**Implementation note (2026-10-19, M11a).** Persist first-start anchor, chosen due time and retry attempt once in last-check.json. The lane owns expected-error 1/2/4/…/24-hour retries; generic unexpected-error backoff stays unchanged.
+
 R6.6, [D78](../PLAN.md#3-key-decisions). The checker, source, manifest parser and notices are common code owned by 09; on the desktop `DesktopUpdateCheckLane` runs them once a day (jittered) while the app runs and while "Check for updates" (`updates.check_enabled`, on by default, disclosed by the first-run card) is on, and on "Check now" in any case. A newer release puts a dot badge on the Settings gear, shows the update card in Settings › Updates and posts one `APP_UPDATE` notification per version ([Notifications](#notifications)); the card links "Open release on GitHub" and "Download for this computer", opened with `Desktop.browse`. The app never downloads, verifies or installs an update.
 
 `DesktopAssetSelector` (`:core:data` common, 09) picks the asset for "Download for this computer":
 
-1. `os` = `BuildInfo.os`; `arch` = x64 on Windows regardless of the hardware (Windows on Arm runs the x64 build; the manifest has no Windows arm64 entries), else `BuildInfo.arch`.
-2. `preferred` = `BuildInfo.installKind`; `DEV` → no asset (release page only).
+1. `os` = `BuildInfo.desktop.os`; `arch` = x64 on Windows regardless of the hardware (Windows on Arm runs the x64 build; the manifest has no Windows arm64 entries), else `BuildInfo.desktop.arch`.
+2. `preferred` = `BuildInfo.desktop.installKind`; `DEV` → no asset (release page only).
 3. Candidates = the manifest's `desktop[]` entries with that `os` and `arch`.
 4. Take the entry whose `kind` equals `preferred`; otherwise the first match of the fallback chain: `msi` → `zip`; `zip` → `msi`; `dmg` → `mac-zip`; `mac-zip` → `dmg` (testers move to the DMG at 1.0.0); `deb` → `tar.gz`; `rpm` → `tar.gz`; `tar.gz` → (none).
 5. When the entry has `minOs` and the running OS is older (`os.version` compared numerically; Windows reports `10.0` for 10 and 11), no download link is shown and the card says "This version needs {OS} {minOs} or later".

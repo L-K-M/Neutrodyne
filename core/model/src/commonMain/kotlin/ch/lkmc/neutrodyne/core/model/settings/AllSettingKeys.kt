@@ -21,7 +21,8 @@ object AllSettingKeys {
             GroupsSettingKeys.ALL +
             PlaybackSettingKeys.ALL +
             BackupSettingKeys.ALL +
-            DesktopSettingKeys.ALL
+            DesktopSettingKeys.ALL +
+            UpdateSettingKeys.ALL
 
     /**
      * The shared write-side validation (05 Rules 4): [value]'s stored type must match the
@@ -33,7 +34,10 @@ object AllSettingKeys {
     fun acceptsValue(
         key: SettingKey<*>,
         value: Any,
-    ): Boolean = acceptsStoredType(key, value) && PlaybackSettingKeys.acceptsRange(key, value)
+    ): Boolean =
+        acceptsStoredType(key, value) &&
+            PlaybackSettingKeys.acceptsRange(key, value) &&
+            UpdateSettingKeys.acceptsRange(key, value)
 }
 
 /** The stored-type half of [AllSettingKeys.acceptsValue]; one branch per [SettingKey] subclass. */
