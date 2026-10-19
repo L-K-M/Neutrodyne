@@ -107,6 +107,7 @@ jobs:
           python3 scripts/ci/tests/assert-discovery-tests.test.py
           python3 scripts/ci/tests/playback-reboot.test.py
           python3 scripts/ci/tests/assert-system-tests.test.py
+          python3 scripts/ci/tests/first-launch-restore-results.test.py
 
   unit:
     runs-on: ubuntu-24.04

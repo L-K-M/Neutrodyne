@@ -51,6 +51,10 @@ internal object FirstLaunchRestoreChecks {
             check(declared.containsAll(REQUIRED_ENTRIES) && reader.entryNames.containsAll(REQUIRED_ENTRIES)) {
                 "a replacement snapshot must declare and contain every required entry"
             }
+            // Imports may ignore extra entries, but this writer must account for every payload.
+            check(reader.entryNames.toSet() == declared.toSet() + BackupCodec.ENTRY_MANIFEST) {
+                "a replacement snapshot has undeclared or missing physical entries"
+            }
             for (entry in manifest.entries) {
                 check(entry.name in BackupCodec.ENTRY_NAMES && entry.name != BackupCodec.ENTRY_MANIFEST) {
                     "unexpected manifest entry: ${entry.name}"
