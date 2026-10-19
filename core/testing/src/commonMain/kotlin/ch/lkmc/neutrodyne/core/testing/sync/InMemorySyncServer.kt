@@ -50,16 +50,16 @@ data class SyncPage(
  */
 class InMemorySyncServer(
     private val wallMs: () -> Long,
-) {
+) : SyncServerAdapter {
     private val records = mutableMapOf<SyncAddress, SequencedSyncRecord>()
     private val clock = HlcClock(NodeId.SERVER, wallMs)
     private var seq = 0L
     private var epoch = 1
     private var minCursor = 0L
 
-    fun snapshot(): Map<SyncAddress, RecordState> = records.mapValues { it.value.state }
+    override fun snapshot(): Map<SyncAddress, RecordState> = records.mapValues { it.value.state }
 
-    fun push(
+    override fun push(
         address: SyncAddress,
         state: RecordState,
     ) {
@@ -76,7 +76,7 @@ class InMemorySyncServer(
         dedupe()
     }
 
-    fun rekey(
+    override fun rekey(
         from: RecordId.Episode,
         to: RecordId.Episode,
     ) {
@@ -86,7 +86,7 @@ class InMemorySyncServer(
         }
     }
 
-    fun page(
+    override fun page(
         cursor: String?,
         limit: Int,
     ): SyncPage {
@@ -99,7 +99,7 @@ class InMemorySyncServer(
     }
 
     /** Rotate epoch and optionally lose records, like restoring an older server backup. */
-    fun expire(restore: Map<SyncAddress, RecordState>? = null) {
+    override fun expire(restore: Map<SyncAddress, RecordState>?) {
         epoch++
         minCursor = if (restore == null) 0L else seq
         if (restore == null) return

@@ -52,3 +52,8 @@ dependencies {
 private val serverPropertiesFile = "neutrodyne-server.properties"
 private val serverVersionKey = "serverVersion"
 private val versionNameProperty = "neutrodyne.versionName"
+
+// Compile JVM-only domain fakes here; :core:testing must not depend on the server application.
+kotlin.sourceSets.named("test") {
+    kotlin.srcDir(rootProject.file("core/testing/src/serverFixtures/kotlin"))
+}

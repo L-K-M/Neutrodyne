@@ -214,6 +214,27 @@ class ProtocolContractTest {
     }
 
     @Test
+    fun fieldNameGrammarIsSharedAndFailuresStayPerChange() {
+        val value = fv(JsonPrimitive("extension"))
+        listOf("A0_.~", "x".repeat(64)).forEach {
+            ProtocolValidation.field(SyncCollection.PODCAST, it, value)
+        }
+        listOf("", "x".repeat(65), "bad-name", "é", "bad name").forEach { name ->
+            val bad = ChangeDto("podcast", podcastWire(), fields = mapOf(name to value))
+            val good = bad.copy(fields = mapOf("title" to value))
+            val request =
+                ProtocolCodec.decodeRequest(
+                    SyncJson.encodeToString(SyncRequest.serializer(), SyncRequest(changes = listOf(bad, good))),
+                )
+            assertInvalid { ProtocolValidation.change(request.changes[0]) }
+            assertTrue(ProtocolValidation.change(request.changes[1]) is ValidatedChange.Write)
+        }
+        assertInvalid { ProtocolCodec.parse("\"" + "x".repeat(4_097) + "\"") }
+    }
+
+    private fun podcastWire() = JsonPrimitive(podcast.value)
+
+    @Test
     fun malformedChangesAreRejectedIndependently() {
         val bad = ChangeDto("future", JsonPrimitive("id"))
         val good =

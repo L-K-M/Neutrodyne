@@ -28,10 +28,11 @@ import kotlin.random.Random
 /** A bounded deterministic run. Failure messages contain the seed and complete ordered wire trace. */
 class SyncConvergenceHarness(
     private val seed: Long,
+    serverFactory: (() -> Long) -> SyncServerAdapter = { InMemorySyncServer(it) },
 ) {
     private val random = Random(seed xor TRANSPORT_SALT)
     private var now = START_MS
-    private val server = InMemorySyncServer { now }
+    private val server = serverFactory { now }
     private val replicas =
         List(SeededSyncOperations.REPLICAS) { index ->
             val node = NodeId((index + 1).toString(16).padStart(NodeId.LENGTH, '0'))

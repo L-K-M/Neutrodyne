@@ -87,6 +87,31 @@ class InMemorySyncServerTest {
         )
     }
 
+    @Test
+    fun carriedLedgerCanonicalizesBackupWithoutReassigningKnownRedirects() {
+        val server = server()
+        val a = podcast(1)
+        subscribe(server, a, 1, 30)
+        val backup = server.snapshot()
+        subscribe(server, podcast(2), 2, 20)
+        val assigned = server.snapshot().getValue(a)
+        val ledger =
+            server
+                .snapshot()
+                .filterValues { it.mergedInto != null }
+                .mapValues { (address, state) -> RecordState(address.coll, mergedInto = state.mergedInto) }
+        // A pure recovery fixture: overlay authority before folding the old content into survivors.
+        val restored =
+            backup.mapValues { (address, state) ->
+                state.copy(mergedInto = ledger[address]?.mergedInto)
+            } + ledger.filterKeys { it !in backup }
+        server.expire(canonicalSyncSnapshot(restored).raw + ledger)
+        subscribe(server, podcast(3), 3, 10)
+        assertEquals(assigned.mergedInto, server.snapshot().getValue(a).mergedInto)
+        RecordMerger.merge(assigned, server.snapshot().getValue(a))
+        assertEquals(podcast(3), canonicalSyncSnapshot(server.snapshot()).redirects[a])
+    }
+
     private fun server() = InMemorySyncServer { NOW }
 
     private fun clock(counter: Long) = Hlc.of(NOW, counter, NodeId("0000000000000001"))

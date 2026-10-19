@@ -84,7 +84,11 @@ object ProtocolValidation {
         name: String,
         value: FieldValue,
     ) {
-        if (name.isEmpty() || !fitsUtf8(name, ProtocolLimits.MAX_STRING)) invalid("invalid field name")
+        if (name.length !in 1..ProtocolLimits.MAX_FIELD_NAME ||
+            name.any { it !in 'A'..'Z' && it !in 'a'..'z' && it !in '0'..'9' && it !in "_.~" }
+        ) {
+            invalid("invalid field name")
+        }
         val spec =
             coll.fields[name] ?: FieldSpec(
                 name,

@@ -607,6 +607,16 @@ The instrumented job's preamble (as AntennaPod does): `sudo rm -rf /usr/share/do
 
 ### `nightly.yml`
 
+**Implementation note (2026-10-19, MS1).** Supersedes the stub-URL instruction
+below: UPDATE_CHECK stays boolean. Inject a test fetcher; capture zero packaged-
+server egress with checking disabled and separately prove enabled destination
+policy. Separate proxy certificate traffic. MS1 owns five-minute server SSE smoke;
+MS3/S17 adds two-hour streams, keepalive races and real clients. Before AC7,
+reconcile active products with actual build/source jobs, without adding desktop
+packaging to MS1. Serialize image promotion and recheck current minor/latest
+ordering at tag movement using publish's decision, never verify-tag's preview;
+enable only assets of products actually shipped.
+
 `schedule: cron "17 2 * * *"` plus `workflow_dispatch` with input `scope` (`full`, default; `youtube-smoke` = only `release-build-smoke` and the `api36` debug leg of `instrumented-full` filtered to `YouTubeReleaseSmokeTest` and `SmokeTest`, plus, from MD3, `:youtube:ytdlp-desktop:shimTestStdio` and `StdioYtxTransportTest` on Linux x64 — ≈ 15 min, used by the hotfix path; `desktop` = only `desktop-matrix`, dispatched by PRs that change native code or a bundled component; `first-launch-restore` = only `first-launch-restore`, M3's seeded first-launch restore gate — `:app:api26DebugAndroidTest :app:api36DebugAndroidTest` with `firstLaunchSeed=restore` and the `FirstLaunchRestoreDeviceTest` class filter, [05 Testing](05-groups-opml-backup.md#testing); an opt-in scope because a run without the seed argument would only report the class's skip). Changed 2026-10-06: the `ref` dispatch input is gone — every job checks out `github.sha`, the exact commit the run's `head_sha` records, because the input's `main` default let a dispatched run test a different commit than the one `release.sh` gates on (a dispatch on another branch now selects it with GitHub's native ref picker). The Ubuntu GMD jobs (`instrumented-full`, `release-build-smoke`) install the emulator and platform-tools before their Gradle runs (`sdkmanager --install`), as `ci.yml`'s `instrumented` does: the runner image no longer ships the emulator package (added 2026-10-06). A failing job runs `scripts/ci/report-nightly.sh <job>`, which opens or updates one issue per job (label `nightly-failure`, `permissions: issues: write`) and closes it after the next green run.
 
 | Job | From | Runs | Blocks a release? |

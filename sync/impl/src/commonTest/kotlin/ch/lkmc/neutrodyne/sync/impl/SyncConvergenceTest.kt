@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.sync.impl
 
+import ch.lkmc.neutrodyne.core.testing.sync.InMemorySyncServer
 import ch.lkmc.neutrodyne.core.testing.sync.SeededSyncOperation
 import ch.lkmc.neutrodyne.core.testing.sync.SeededSyncOperations
 import ch.lkmc.neutrodyne.core.testing.sync.SyncConvergenceHarness
@@ -18,6 +19,18 @@ import kotlin.test.assertTrue
 import kotlin.time.measureTime
 
 class SyncConvergenceTest {
+    @Test
+    fun injectedAdapterMatchesTheDefaultHarness() {
+        var constructed = 0
+        val injected =
+            SyncConvergenceHarness(42) { wallMs ->
+                constructed++
+                InMemorySyncServer(wallMs)
+            }.run()
+        assertEquals(SyncConvergenceHarness(42).run(), injected)
+        assertEquals(1, constructed)
+    }
+
     @Test
     fun seededFiveReplicaConvergence() {
         val count = convergenceSeedCount()
