@@ -26,6 +26,7 @@ import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.RefreshStatus
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
+import ch.lkmc.neutrodyne.core.domain.YouTubeChannelRepository
 import ch.lkmc.neutrodyne.core.model.AVAILABLE_FEED_FILTER_CAPABILITIES
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
@@ -84,6 +85,7 @@ public class PodcastViewModel
     constructor(
         @Assisted private val podcastId: Long,
         private val podcasts: PodcastRepository,
+        private val channels: YouTubeChannelRepository,
         private val feedRepository: FeedRepository,
         private val episodes: EpisodeRepository,
         private val groups: GroupRepository,
@@ -97,6 +99,13 @@ public class PodcastViewModel
         liveStateSource: EpisodeLiveStateSource,
         clock: Clock,
     ) : ViewModel() {
+        init {
+            viewModelScope.launch {
+                suspendRunCatching { channels.ensureChannelArt(podcastId) }
+                    .onFailure { Log.w("PodcastViewModel", it) { "Channel artwork refresh failed" } }
+            }
+        }
+
         private val filters = MutableStateFlow(FeedFilters())
         private val detail = podcasts.observePodcast(podcastId)
         private val userMessages = UserMessages()

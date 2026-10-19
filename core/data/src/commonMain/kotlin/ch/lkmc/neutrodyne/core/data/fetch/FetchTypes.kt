@@ -74,6 +74,7 @@ internal sealed interface FetchOutcome {
     /** A transport failure classified by `NetErrorClassifier`. */
     data class Network(
         val error: NetError,
+        val rejectedYouTubeUrl: String? = null,
     ) : FetchOutcome
 
     /** Writing or creating the body temp file failed — a local disk fault, not transport (03). */

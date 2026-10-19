@@ -401,6 +401,7 @@ internal class PodcastRepositoryImpl(
             showType = p.showType,
             includeInAll = p.includeInAll,
             hasOlderPages = p.pagingNextUrl != null,
+            youtubeVariants = p.youtubeVariants,
         )
 
     /** 03 Per-feed states: `gone = 0 AND failureCount ≥ 10 AND COALESCE(lastSuccessAt, subscribedAt) < now − 7 d`. */

@@ -537,9 +537,35 @@ sequenceDiagram
 | `Failed(CONSENT_WALL or PAGE_UNREADABLE)` | "Couldn't read this YouTube page. Paste the channel's /channel/UC… link or a link to one of its videos." | Edit |
 | Typed name in external mode | "To add a YouTube channel, share it from the YouTube app or paste its link." | — |
 
+Implementation note (2026-10-19, M8): W6 implements the same metadata-only
+Add branch on Android and desktop. Canonical identity, pending initial state,
+sync ID and memberships commit together through `YouTubeSubscriptionWriter`;
+normal SUBSCRIBE refresh runs after commit, with no preview Atom ingest.
+`subscribedPodcastId(channelId)` extends the frozen repository contract for
+an exact duplicate's Open action before confirmation. Metadata-only titles
+fall back to the channel ID. Page descriptions are escaped before storage
+because the existing description column is rendered as HTML. All capability
+bindings remain external (`NOT_YET_AVAILABLE`), implementing adopted plan
+resolution 1 for these screens.
+
+Implementation note (2026-10-19, M8): W6 implements adopted plan resolution 6:
+Include past live streams affects future polls, and disabling it keeps
+previously fetched recordings visible. The settings explanation also states
+that external mode cannot reliably distinguish live streams or premieres.
+Shorts changes instead invalidate existing feed pages immediately through
+the targeted variants write. No per-row live provenance or schema change is
+introduced.
+
 ### Prefer the show's RSS feed
 
 [PO-9](../PLAN.md#48-further-product-owner-decisions) default. When the preview opens and `youtube.suggest_rss` is on, `YouTubeChannelRepository.findRssAlternative(title)` queries 03's `SearchRepository` (enabled podcast directories only; never YouTube search) with an 8 s timeout. A hit matches when `norm(channelTitle)` equals `norm(collectionName)` or `norm(artistName)`, where `norm` = NFKC, lowercase, remove everything except letters and digits. The first match is shown as a card "This show also has a podcast feed — Subscribe to the podcast instead"; the preview is never blocked. The query only goes to directories the user already has enabled ([03 Search and discovery](03-feeds-and-discovery.md#search-and-discovery) privacy text applies).
+
+Implementation note (2026-10-19, M8): W6 uses the enabled M7 search service,
+with an eight-second deadline, NFKC name/artist comparison and no persistence.
+The optional suggestion runs after the channel preview becomes subscribable;
+Use podcast re-enters the same Add resolver and discards the old channel state.
+Editing or cancelling invalidates the resolution generation, including late
+metadata and directory answers.
 
 ### Channel search
 
@@ -552,6 +578,14 @@ With the engine only, M9a. Discover offers an explicit "Search YouTube channels"
 - A failed lookup leaves `channelMetadataAt` unchanged (null stays null), so it is retried next run; `NotFound` sets `channelMetadataAt = now` (the Atom feed decides whether the channel still exists).
 - Banner: `ensureChannelArt(podcastId)` is called by the podcast detail screen (08) on open; it fetches with `FULL` depth when `bannerUrl` is null and `channelMetadataAt` is null or older than 30 days, or when the avatar is older than 30 days; a changed avatar key is pinned as above. In-flight calls for the same podcast are coalesced.
 - Writes go through `PodcastDao.applyYouTubeChannelMetadata(id, artworkUrl, artworkKey, bannerUrl, descriptionHtml, channelMetadataAt)` (null arguments keep the stored value); Atom ingestion never writes these columns (see mapping below).
+
+Implementation note (2026-10-19, M8): W6 provides the app-scoped
+`YouTubeChannelMetadata` coordinator for both detail and W3's after-ingest
+caller, including the shared budget, concurrency bound, jitter, deadline and
+FULL request upgrade. Detail follows the freshness condition above, so a
+recent AVATAR-only preview does not trigger another page request solely for
+an absent banner. Failed page metadata leaves the timestamp untouched;
+NotFound stamps it without changing feed health. The banner stays unpinned.
 
 ---
 

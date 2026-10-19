@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.desktop.youtube
 
+import ch.lkmc.neutrodyne.core.common.AppScope
+import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
 import ch.lkmc.neutrodyne.youtube.api.ExtractorChannelLookup
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
+import ch.lkmc.neutrodyne.youtube.api.YouTubeChannelResolver
 import ch.lkmc.neutrodyne.youtube.api.YouTubeChannelSearch
 import ch.lkmc.neutrodyne.youtube.api.YouTubeEnricher
+import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedMetadataReader
 import ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver
+import ch.lkmc.neutrodyne.youtube.impl.DefaultYouTubeChannelResolver
 import ch.lkmc.neutrodyne.youtube.impl.ExternalOnlyYouTubeStreamResolver
 import ch.lkmc.neutrodyne.youtube.impl.NoExtractorChannelLookup
 import ch.lkmc.neutrodyne.youtube.impl.NoOpYouTubeEnricher
@@ -13,6 +18,8 @@ import ch.lkmc.neutrodyne.youtube.impl.StaticYouTubeCapabilitiesSource
 import ch.lkmc.neutrodyne.youtube.impl.UnsupportedYouTubeChannelSearch
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.Provides
+import dev.zacsweers.metro.SingleIn
+import java.util.Locale
 
 /** Shell-owned bindings: all M8 builds remain external until M9a / MD3. */
 @BindingContainer
@@ -30,6 +37,15 @@ object DesktopYouTubeBindingsModule {
     @Provides fun enricher(): YouTubeEnricher = enrichment
 
     @Provides fun channelSearch(): YouTubeChannelSearch = search
+
+    @Provides
+    @SingleIn(AppScope::class)
+    fun channelResolver(
+        clients: NeutrodyneHttpClients,
+        reader: YouTubeFeedMetadataReader,
+        extractor: ExtractorChannelLookup,
+    ): YouTubeChannelResolver =
+        DefaultYouTubeChannelResolver(clients, reader, extractor) { Locale.getDefault().toLanguageTag() }
 
     @Provides fun channelLookup(): ExtractorChannelLookup = lookup
 }

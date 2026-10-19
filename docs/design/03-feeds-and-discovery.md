@@ -1337,6 +1337,13 @@ data class AlreadySubscribed(val podcastId: Long, val exact: Boolean)   // exact
 data class BasicCredentials(val username: String, val password: String)
 ```
 
+Implementation note (2026-10-19, M8): W6 recognizes shared bare handles and
+channel IDs before normalization, and channel URLs again after wrapper,
+directory lookup or HTML feed discovery. These inputs return the YouTube
+branch without an RSS fetch or directory name search; direct Edit-feed
+probes still reject source-type changes. Confirming a channel queues normal
+initial refresh and preserves the pending subscription on first-fetch failure.
+
 ### Input normalisation
 
 **YouTube pre-check (first).** `AddPodcastResolverImpl` (`:core:data`, which may depend on `:youtube:api`; `:feeds` may not, [D68](../PLAN.md#3-key-decisions)) trims the input (cap 4,096 chars) and calls `YouTubeUrlClassifier.classify` on the whole text and, if it contains whitespace, on each whitespace-separated token in order; the first non-null `YtRef` ends resolution with the YouTube branch of [Host recognition](#host-recognition). This is the only path for a bare `@handle` (R3.1: `@mkbhd`, `@some.name`) or a bare `UC…` ID, which the normaliser below would otherwise turn into `NotAUrl` or a scheme-less host. From M3 the classifier exists; in M1–M2 the pre-check is the host check of [Host recognition](#host-recognition), so a bare handle yields `NotAUrl` there.

@@ -18,6 +18,7 @@ import ch.lkmc.neutrodyne.core.model.ShowType
 import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
 import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeScopeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeYouTubeChannelRepository
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import ch.lkmc.neutrodyne.core.testing.testFeedInfo
 import ch.lkmc.neutrodyne.core.testing.testPodcastDetail
@@ -42,16 +43,25 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class PodcastSettingsViewModelTest : MainDispatcherTest() {
+    private val channels = FakeYouTubeChannelRepository()
     private val podcasts = FakePodcastRepository()
     private val feeds = FakeFeedRepository()
 
     private val scopes = FakeScopeSettingsRepository().apply { seedPodcast(7) }
 
-    private fun viewModel(podcastId: Long = 7) = PodcastSettingsViewModel(podcastId, podcasts, feeds, scopes)
+    private fun viewModel(podcastId: Long = 7) = PodcastSettingsViewModel(podcastId, podcasts, feeds, scopes, channels)
 
     private fun TestScope.collect(viewModel: PodcastSettingsViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
     }
+
+    @Test fun channelVariantsWriteThroughChannelService() =
+        runTest {
+            val vm = viewModel()
+            vm.setVariants(3)
+            advanceUntilIdle()
+            assertEquals(3, channels.variants[7])
+        }
 
     @Test
     fun effectiveSettingsObserveEveryAttributionAndManualOnlyGroup() =
@@ -225,7 +235,15 @@ class PodcastSettingsViewModelTest : MainDispatcherTest() {
                         change: (SettingOverrides) -> SettingOverrides,
                     ): Outcome<Unit, SettingsError> = Outcome.Failure(SettingsError.WriteFailed)
                 }
-            val vm = PodcastSettingsViewModel(7, podcasts, feeds, failing)
+            val vm =
+                PodcastSettingsViewModel(
+                    7,
+                    podcasts,
+                    feeds,
+                    failing,
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeYouTubeChannelRepository(),
+                )
             val requester = RecordingPermissionRequester()
             collect(vm)
             vm.setNotifyNewEpisodes(true, requester)

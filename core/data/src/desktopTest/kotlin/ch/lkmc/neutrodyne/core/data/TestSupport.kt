@@ -70,8 +70,10 @@ import ch.lkmc.neutrodyne.feeds.model.ParseWarning
 import ch.lkmc.neutrodyne.feeds.model.ParsedEpisode
 import ch.lkmc.neutrodyne.feeds.model.ParsedFeed
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
+import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedOutageMonitor
 import dev.zacsweers.metro.Provider
 import kotlinx.collections.immutable.ImmutableList
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import okio.FileSystem
@@ -212,7 +214,7 @@ internal fun newRefresher(
     moves: FeedMoveCommitter = newFeedMoves(db, clock, coordinator),
     effectiveSettings: EffectiveSettingsResolver = EffectiveSettingsResolverImpl(db, settings),
     notifier: NewEpisodeNotifier = NewEpisodeNotifier(db, effectiveSettings, FakeNewEpisodePoster()),
-    youTubeMonitor: ch.lkmc.neutrodyne.youtube.api.YouTubeFeedOutageMonitor =
+    youTubeMonitor: YouTubeFeedOutageMonitor =
         ch.lkmc.neutrodyne.core.testing
             .FakeYouTubeFeedOutageMonitor(),
 ): FeedRefresher =
@@ -401,8 +403,8 @@ internal fun basicAuthHeader(
 internal class GatedSecretStore(
     private val delegate: SecretStore,
 ) : SecretStore by delegate {
-    val putCommitted = kotlinx.coroutines.CompletableDeferred<Unit>()
-    val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+    val putCommitted = CompletableDeferred<Unit>()
+    val release = CompletableDeferred<Unit>()
     private var gated = true
 
     override suspend fun put(
@@ -614,6 +616,9 @@ internal fun newSubscribe(
 ): SubscribeBundle =
     SubscribeBundle(
         SubscribeUseCaseImpl(
+            channelWriter =
+                ch.lkmc.neutrodyne.core.data.youtube
+                    .YouTubeSubscriptionWriterImpl(db, clock, orderKeys),
             db = db,
             cache = cache,
             resolver = resolver,

@@ -51,6 +51,7 @@ internal fun PodcastSettingsRoute(key: PodcastSettingsKey) {
         onCustomTitle = viewModel::setCustomTitle,
         onOrderChange = viewModel::setOrder,
         onIncludeInAll = viewModel::setIncludeInAll,
+        onVariants = viewModel::setVariants,
         onRefreshInterval = viewModel::setRefreshIntervalMinutes,
         onNotifications = { viewModel.setNotifyNewEpisodes(it, notifications) },
         // The edit-URL dialog shows this failure inline and stays open; `null` closes it.

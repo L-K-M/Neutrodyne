@@ -8,6 +8,9 @@ import ch.lkmc.neutrodyne.youtube.api.ChannelResolution
 import ch.lkmc.neutrodyne.youtube.api.TransientKind
 
 interface YouTubeChannelRepository {
+    /** Canonical identity lookup for metadata-only Add duplicate previews. */
+    suspend fun subscribedPodcastId(channelId: String): Long?
+
     /** Nonzero subset of 1/2/4; UI keeps LONG_FORM. Refreshes after commit; Shorts hide immediately. */
     suspend fun setVariants(
         podcastId: Long,

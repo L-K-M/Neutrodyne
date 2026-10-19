@@ -48,6 +48,7 @@ import ch.lkmc.neutrodyne.core.model.FeedMove
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.PodcastDetail
 import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.model.YouTubeVariantBits
 import ch.lkmc.neutrodyne.core.ui.CredentialFields
 import ch.lkmc.neutrodyne.core.ui.FeedDates
 import ch.lkmc.neutrodyne.core.ui.FeedErrorText
@@ -85,6 +86,9 @@ import ch.lkmc.neutrodyne.core.ui.resources.ps_ok
 import ch.lkmc.neutrodyne.core.ui.resources.ps_show_in_all
 import ch.lkmc.neutrodyne.core.ui.resources.section_feed
 import ch.lkmc.neutrodyne.core.ui.resources.section_general
+import ch.lkmc.neutrodyne.core.ui.resources.yt_include_live
+import ch.lkmc.neutrodyne.core.ui.resources.yt_include_shorts
+import ch.lkmc.neutrodyne.core.ui.resources.yt_live_future_note
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
@@ -106,6 +110,7 @@ internal fun PodcastSettingsScreen(
     onRefreshInterval: (Int?) -> Unit,
     onNotifications: (Boolean?) -> Unit,
     modifier: Modifier = Modifier,
+    onVariants: (Int) -> Unit = {},
 ) {
     val detail = state.detail
     val feedInfo = state.feedInfo
@@ -134,6 +139,28 @@ internal fun PodcastSettingsScreen(
             GeneralSection(detail, state.effectiveOrder, onCustomTitle, onIncludeInAll, onOrderChange)
 
             PodcastEffectiveSettings(state, onRefreshInterval, onNotifications)
+
+            if (detail.sourceType == SourceType.YOUTUBE_CHANNEL) {
+                SectionHeader("YouTube")
+                val variants = detail.youtubeVariants
+                SettingsSwitchRow(
+                    icon = NdIcons.Settings,
+                    title = stringResource(Res.string.yt_include_shorts),
+                    checked = variants and YouTubeVariantBits.SHORTS != 0,
+                    onCheckedChange = { enabled ->
+                        onVariants(toggleVariant(variants, YouTubeVariantBits.SHORTS, enabled))
+                    },
+                )
+                SettingsSwitchRow(
+                    icon = NdIcons.Settings,
+                    title = stringResource(Res.string.yt_include_live),
+                    checked = variants and YouTubeVariantBits.LIVE != 0,
+                    onCheckedChange = { enabled ->
+                        onVariants(toggleVariant(variants, YouTubeVariantBits.LIVE, enabled))
+                    },
+                )
+                Text(stringResource(Res.string.yt_live_future_note), modifier = Modifier.padding(horizontal = 16.dp))
+            }
 
             if (feedInfo != null) {
                 SectionHeader(stringResource(Res.string.section_feed))
@@ -571,3 +598,9 @@ private val ROW_PADDING = 16.dp
 private val RADIO_GAP = 16.dp
 private val LOADING_PADDING = 32.dp
 private val LOADING_TEXT_GAP = 16.dp
+
+private fun toggleVariant(
+    variants: Int,
+    bit: Int,
+    enabled: Boolean,
+): Int = (if (enabled) variants or bit else variants and bit.inv()) or YouTubeVariantBits.LONG_FORM
