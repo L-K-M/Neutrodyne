@@ -86,6 +86,9 @@ internal fun newRefresher(
     coordinator: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
     effectiveSettings: EffectiveSettingsResolver = EffectiveSettingsResolverImpl(db, settings),
     notifier: NewEpisodeNotifier = NewEpisodeNotifier(db, effectiveSettings, FakeNewEpisodePoster()),
+    youTubeMonitor: ch.lkmc.neutrodyne.youtube.api.YouTubeFeedOutageMonitor =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeYouTubeFeedOutageMonitor(),
 ): FeedRefresher =
     FeedRefresher(
         db,
@@ -111,6 +114,7 @@ internal fun newRefresher(
         secrets,
         coordinator,
         notifier,
+        youTubeMonitor,
     )
 
 /** A subscribed podcast row whose `feedKey` matches [feedUrl]; returns the new id. */

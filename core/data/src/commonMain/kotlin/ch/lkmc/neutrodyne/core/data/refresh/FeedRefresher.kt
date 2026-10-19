@@ -42,6 +42,7 @@ import ch.lkmc.neutrodyne.feeds.identity.PodcastGuid
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.model.ParseWarning
 import ch.lkmc.neutrodyne.feeds.model.isPartialWindow
+import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedOutageMonitor
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.SingleIn
@@ -94,6 +95,7 @@ internal class FeedRefresher(
     private val secrets: SecretStore,
     private val coordinator: CredentialCommitCoordinator,
     private val notifier: NewEpisodeNotifier,
+    private val youTubeMonitor: YouTubeFeedOutageMonitor,
 ) {
     // Lock order, outermost first: the run [mutex] → [commitMutex] →
     // CredentialCommitCoordinator → the Room writer ([batcherLock] is a leaf guard).
@@ -429,6 +431,35 @@ internal class FeedRefresher(
             bodyFailure = e
             throw e
         } finally {
+            // Controls need the caller's cancellation and the run's remaining deadline. Only the
+            // monitor's in-memory counter reset survives cancellation; no network runs below.
+            var healthCancellation: CancellationException? = null
+            try {
+                val healthBudget =
+                    if (request.deadlineElapsedMs == RefreshRequest.NO_DEADLINE) {
+                        HEALTH_FINALIZATION_MS
+                    } else {
+                        minOf(
+                            HEALTH_FINALIZATION_MS,
+                            (request.deadlineElapsedMs - clock.elapsedRealtime()).coerceAtLeast(1),
+                        )
+                    }
+                withTimeoutOrNull(healthBudget) {
+                    var total = 0
+                    try {
+                        total = db.podcastDao().youtubeChannelIds().size
+                    } finally {
+                        // Enter the monitor even when the count read is cancelled, so it resets.
+                        youTubeMonitor.onRunFinished(total, clock.now())
+                    }
+                }
+            } catch (error: Exception) {
+                if (error is CancellationException) {
+                    healthCancellation = error
+                } else {
+                    Log.w(TAG, error) { "YouTube run finalization failed" }
+                }
+            }
             // Finalisation survives cancellation (03 Engine run): the buffered fetch-state rows
             // flush, and the finished slots still report their committed outcomes so the summary
             // and status reflect what actually landed.
@@ -495,6 +526,7 @@ internal class FeedRefresher(
                     primary.addSuppressed(flushFailure)
                 }
             }
+            if (bodyFailure == null) healthCancellation?.let { throw it }
         }
         return report ?: error("report unset")
     }
@@ -1506,6 +1538,7 @@ internal class FeedRefresher(
     )
 
     private companion object {
+        const val HEALTH_FINALIZATION_MS = 20_000L
         const val TAG = "FeedRefresher"
 
         /** The fan-out limits of 03 Engine run step 5: ≤ 6 concurrent feeds, ≤ 2 per host. */

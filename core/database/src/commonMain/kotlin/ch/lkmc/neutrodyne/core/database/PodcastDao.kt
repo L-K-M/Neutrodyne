@@ -399,6 +399,10 @@ abstract class PodcastDao(
     @Update(entity = PodcastEntity::class)
     abstract suspend fun updateFetchStates(rows: List<PodcastFetchState>)
 
+    /** All channel subscriptions, including blocked rows, for whole-library outage accounting. */
+    @Query("SELECT id FROM podcast WHERE sourceType = 'YOUTUBE_CHANNEL' ORDER BY id")
+    abstract suspend fun youtubeChannelIds(): List<Long>
+
     /** Car library order uses displayed titles, including custom titles, with stable ties. */
     @Query(
         "SELECT * FROM podcast WHERE (:youtubePlayable = 1 OR sourceType = 'RSS')" +
