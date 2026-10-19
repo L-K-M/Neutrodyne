@@ -2,6 +2,8 @@
 
 package ch.lkmc.neutrodyne.core.database
 
+import androidx.room3.Embedded
+import androidx.room3.Relation
 import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.DownloadLane
 import ch.lkmc.neutrodyne.core.model.DownloadState
@@ -41,7 +43,8 @@ interface DownloadQueries {
         token: String,
     ): Int
 
-    /** Atomic guarded replacement; zero means stale owner. DOWNLOADING retains token,
+    /** Atomic token-owned checkpoint; source and current controller policy are preserved.
+     * Zero means stale owner. DOWNLOADING retains token,
      * final transitions clear it. Never use for progress ticks. */
     suspend fun transition(
         row: DownloadEntity,
@@ -116,6 +119,7 @@ data class DownloadSourceRow(
     val enclosureType: String?,
     val enclosureLength: Long?,
     val externalMediaId: String?,
+    @Relation(parentColumns = ["episodeId"], entityColumns = ["episodeId"])
     val audioAlternates: List<EpisodeAltEnclosureEntity>,
 )
 
@@ -132,7 +136,7 @@ data class DownloadPathRow(
 )
 
 data class DownloadEntryRow(
-    val download: DownloadEntity,
+    @Embedded val download: DownloadEntity,
     val podcastId: Long,
     val podcastTitle: String,
     val episodeTitle: String,
