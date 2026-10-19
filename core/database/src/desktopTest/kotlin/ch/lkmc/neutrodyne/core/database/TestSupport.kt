@@ -70,3 +70,16 @@ internal suspend fun assertThrows(block: suspend () -> Unit): Throwable {
     }
     throw AssertionError("expected an exception but none was thrown")
 }
+
+/** Fresh linked state per assertion, closed even on failure/cancellation. */
+internal fun verifySync(probe: suspend (NeutrodyneDatabase) -> Unit) =
+    kotlinx.coroutines.test.runTest {
+        val db =
+            ch.lkmc.neutrodyne.core.testing.database.TestDb
+                .linked()
+        try {
+            probe(db)
+        } finally {
+            db.close()
+        }
+    }

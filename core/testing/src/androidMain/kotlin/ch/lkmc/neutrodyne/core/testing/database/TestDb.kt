@@ -5,12 +5,14 @@ package ch.lkmc.neutrodyne.core.testing.database
 import android.content.Context
 import androidx.room3.Room
 import androidx.room3.RoomDatabase
+import androidx.room3.withWriteTransaction
 import androidx.sqlite.SQLiteDriver
 import androidx.sqlite.driver.AndroidSQLiteDriver
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabaseCallback
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabaseConstructor
+import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.database.migration.ALL_MIGRATIONS
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +25,24 @@ import kotlin.coroutines.CoroutineContext
  * device tests pass `BundledSQLiteDriver()` explicitly.
  */
 object TestDb {
+    /** Synthetic linked fixture: no engine, network, or credentials. */
+    suspend fun linked(
+        context: Context,
+        driver: SQLiteDriver = AndroidSQLiteDriver(),
+        clock: Clock = TestClock(),
+        queryContext: CoroutineContext = Dispatchers.Default,
+        nodeId: String = "0000000000000001",
+    ): NeutrodyneDatabase {
+        val db = inMemory(context, driver, clock, queryContext)
+        try {
+            db.withWriteTransaction { db.syncStateDao().upsert(SyncStateEntity(enabled = true, nodeId = nodeId)) }
+            return db
+        } catch (failure: Throwable) {
+            db.close()
+            throw failure
+        }
+    }
+
     fun inMemory(
         context: Context,
         driver: SQLiteDriver = AndroidSQLiteDriver(),

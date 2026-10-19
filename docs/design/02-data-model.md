@@ -1168,6 +1168,14 @@ replay clocks, acknowledgement races, restamps and opaque collisions; W4 tests
 spec/schema/golden, open/migrations, both drivers and hygiene; W5 tests actual
 bulk/restore/import/position writers and no-op intent with capture on/off.
 
+**Implementation note (2026-10-19, MS0).** `captureAt` and `captureStored`
+compare the pending complete clock in Kotlin before Room's `@Upsert`, inside
+the required single-writer transaction. This is equivalent to the guarded
+insert/update form above: no writer can interleave between comparison and
+replacement. Equal complete clocks retain the pending row; a different
+literal at that clock rejects as an invalid write. Outbox rekeys use the same
+comparison, while clock-envelope merges remain the sync adapter's job.
+
 #### Installing and changing the triggers
 
 | When | What |

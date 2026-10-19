@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.testing.database
 
 import androidx.room3.Room
 import androidx.room3.RoomDatabase
+import androidx.room3.withWriteTransaction
 import androidx.sqlite.SQLiteDriver
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import ch.lkmc.neutrodyne.core.common.AppDirs
@@ -12,6 +13,7 @@ import ch.lkmc.neutrodyne.core.database.DesktopDatabaseFactory
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabaseCallback
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabaseConstructor
+import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.database.migration.ALL_MIGRATIONS
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import kotlinx.coroutines.Dispatchers
@@ -21,9 +23,26 @@ import kotlin.coroutines.CoroutineContext
 /**
  * Desktop database builders (02 Testing): [inMemory] for everything that does not need a second
  * connection, [file] for file-level behaviour (WAL reader isolation, `DatabaseOpener` recovery).
- * `TestDb.linked(…)` arrives with MS0 (fixed `nodeId` + capture triggers).
+ * [linked] enables capture with a fixed node for transaction tests.
  */
 object TestDb {
+    /** Synthetic linked fixture: no engine, network, or credentials. */
+    suspend fun linked(
+        driver: SQLiteDriver = BundledSQLiteDriver(),
+        clock: Clock = TestClock(),
+        queryContext: CoroutineContext = Dispatchers.Default,
+        nodeId: String = "0000000000000001",
+    ): NeutrodyneDatabase {
+        val db = inMemory(driver, clock, queryContext)
+        try {
+            db.withWriteTransaction { db.syncStateDao().upsert(SyncStateEntity(enabled = true, nodeId = nodeId)) }
+            return db
+        } catch (failure: Throwable) {
+            db.close()
+            throw failure
+        }
+    }
+
     /** `Room.inMemoryDatabaseBuilder` (name confirmed by S10), bundled driver on host natives. */
     fun inMemory(
         driver: SQLiteDriver = BundledSQLiteDriver(),
