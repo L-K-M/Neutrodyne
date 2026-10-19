@@ -509,10 +509,12 @@ class AutoSnapshotProducerTest {
             // The archive factory blocks inside the writer's stage: the producer holds its
             // mutex for the whole pass, so a racing disable can only run before or after.
             val gate = CompletableDeferred<Unit>()
+            val inStage = CompletableDeferred<Unit>()
             val blocking =
                 writerOf(
                     archives =
                         ArchiveWriterFactory { path: Path, level: Int ->
+                            inStage.complete(Unit)
                             runBlocking { gate.await() }
                             ZipArchiveWriter().create(path, level)
                         },
@@ -520,6 +522,8 @@ class AutoSnapshotProducerTest {
             val blocked = producerOf(writer = blocking)
 
             val produceJob = async { blocked.produce() }
+            // Race the disable only once the write is provably parked inside the stage.
+            inStage.await()
             val disableJob = async { blocked.setEnabled(false) }
 
             gate.complete(Unit)

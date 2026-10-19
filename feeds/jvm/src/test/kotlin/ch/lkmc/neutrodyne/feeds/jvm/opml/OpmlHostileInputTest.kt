@@ -11,6 +11,8 @@ import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlin.time.Duration
+import kotlin.time.measureTimedValue
 
 /**
  * The XML leg of the hostile-input table (05 Testing): generated documents trip every cap and the
@@ -233,26 +235,37 @@ class OpmlHostileInputTest {
     /**
      * `&`-dense attribute values whose only `;` sits at the very end: the entity `;` search
      * must stay inside the `MAX_ENTITY_CHARS` window; an unbounded `indexOf` rescans the
-     * value tail per `&`, quadratic CPU inside the 64 KiB tag cap (tens of ms per outline),
-     * which the "< 2 s per case" hostile budget cannot afford across hundreds of them. The
-     * `&#xZZZZ;` fails both pull legs unconditionally, so the salvage scanner is under test.
+     * value tail per `&`, quadratic CPU inside the 64 KiB tag cap (~60 ms per outline).
+     * Timed against a same-size `&`-free baseline instead of a wall-clock budget, so machine
+     * load slows both runs alike: bounded scans stay near 1x, an unbounded one reaches ~6x.
+     * The `&#xZZZZ;` fails both pull legs unconditionally, so the salvage scanner is under test.
      */
-    @Test(timeout = AMP_DENSE_TIMEOUT_MS)
+    @Test(timeout = HOSTILE_TIMEOUT_MS)
     fun ampDenseSalvageValuesStayLinear() {
-        val dense = "&".repeat(AMP_RUN) + ";"
+        val baseline = timedSalvage("a".repeat(AMP_RUN))
+        val dense = timedSalvage("&".repeat(AMP_RUN) + ";")
+
+        assertTrue(dense < baseline * AMP_DENSE_MAX_RATIO, "dense $dense vs baseline $baseline")
+    }
+
+    /** Reads [AMP_DENSE_TAGS] outlines carrying [value] and returns the salvage read's duration. */
+    private fun timedSalvage(value: String): Duration {
         val doc =
             buildString {
                 append("<opml version=\"1.0\"><body>")
                 repeat(AMP_DENSE_TAGS) {
                     append("<outline type=\"rss\" xmlUrl=\"https://x.example.com/\" text=\"")
-                    append(dense)
+                    append(value)
                     append("\" note=\"&#xZZZZ;\"/>")
                 }
                 append("</body></opml>")
             }
-        val result = read(doc.encodeToByteArray())
+        val bytes = doc.encodeToByteArray()
+
+        val (result, elapsed) = measureTimedValue { read(bytes) }
         val ok = assertIs<OpmlReadResult.Ok>(result)
         assertEquals(ParseMode.SALVAGE, ok.document.mode)
+        return elapsed
     }
 
     /** The entity scan sees through UTF-16 units, not only single-byte text. */
@@ -268,14 +281,14 @@ class OpmlHostileInputTest {
         const val HOSTILE_TIMEOUT_MS = 60_000L
 
         /**
-         * The `&`-dense case sizes so the unbounded entity scan times out while the bounded
-         * one finishes inside the per-case budget: ~60 KiB of `&`s per outline is the most
+         * The `&`-dense case sizes so the unbounded entity scan exceeds the ratio while the
+         * bounded one stays near its baseline: ~60 KiB of `&`s per outline is the most
          * quadratic work the 64 KiB tag cap admits, a few hundred of them stay small enough
          * to build and hold in this task's 128 MB heap.
          */
         const val AMP_RUN = 60_000
         const val AMP_DENSE_TAGS = 300
-        const val AMP_DENSE_TIMEOUT_MS = 10_000L
+        const val AMP_DENSE_MAX_RATIO = 3
 
         const val DEEP_NESTING = 10_000
         const val FEED_FLOOD = 100_001

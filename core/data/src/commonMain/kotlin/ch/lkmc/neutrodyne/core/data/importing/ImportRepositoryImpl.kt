@@ -271,7 +271,7 @@ internal class ImportRepositoryImpl(
      * A `PREVIEW` session is cancel's only while it carries no restore intent — the shared
      * fail-closed predicate keeps an unreadable `optionsJson` (which may hide one).
      */
-    private fun ImportSessionEntity.previewOwned(): Boolean = !hasRestoreIntent()
+    private fun ImportSessionEntity.previewOwned(): Boolean = state == ImportState.PREVIEW && !hasRestoreIntent()
 
     // --- Mapping -------------------------------------------------------------------------------
 

@@ -30,6 +30,7 @@ import okio.Path
 import okio.Path.Companion.toPath
 import okio.Source
 import org.junit.After
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -135,6 +136,8 @@ class SafExportDestinationTest {
     @Test
     fun writeFailureAfterOpenIsDestinationUnavailableAndNeverRetries() =
         runBlocking<Unit> {
+            // /dev/full exists only on Linux; elsewhere "wt" fails to open and takes the "w" retry.
+            assumeTrue("requires /dev/full (Linux)", FULL_DEVICE.exists())
             // "wt" opens fine and the write then dies with ENOSPC: the "w" fallback exists
             // only while zero bytes have gone out, so a mid-copy failure is a typed error —
             // not a retry, not a success (05 Destinations).

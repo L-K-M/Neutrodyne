@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.data.importing.ImportSessionCleaner
 import ch.lkmc.neutrodyne.core.data.importing.ImportWorkPolicy
 import ch.lkmc.neutrodyne.core.data.importing.WorkManagerImportWorkScheduler
 import ch.lkmc.neutrodyne.core.data.importing.hasRunnableRestoreIntent
+import ch.lkmc.neutrodyne.core.database.LibraryShape
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.settings.BackupSettingKeys
@@ -21,6 +22,8 @@ import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.dropWhile
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -56,8 +59,16 @@ internal class AutoBackupInitializer
             suspendRunCatching { snapshots().armPeriodic() }
                 .onFailure { Log.e(TAG, it) { "snapshot periodic arm failed" } }
 
-            appScope.launch { watchLibraryShape() }
-            reconcileDurableWork()
+            // The baseline is read before run() returns: a library change that lands before
+            // the watcher's first query is then compared against it instead of being folded
+            // into the first emission and skipped with it.
+            val baseline =
+                suspendRunCatching { db().backupDao().observeLibraryShape().first() }
+                    .onFailure { Log.w(TAG, it) { "library-shape baseline read failed" } }
+                    .getOrNull()
+            appScope.launch { watchLibraryShape(baseline) }
+            suspendRunCatching { reconcileDurableWork() }
+                .onFailure { Log.w(TAG, it) { "durable-work reconciliation failed" } }
 
             // §9's sweep runs even while snapshots are disabled — the producer's own pass is
             // behind the enabled gate, so a disabled install would otherwise keep every
@@ -70,23 +81,21 @@ internal class AutoBackupInitializer
 
         /**
          * 05's library watcher: `distinctUntilChanged` drops same-shape re-emissions and
-         * `drop(1)` skips the current state at subscription — only real library changes poke
-         * the debounced write, and only while the flag allows a produce.
+         * leading emissions equal to the start-up [baseline] are skipped — only real library
+         * changes poke the debounced write, and only while the flag allows a produce. Without
+         * a baseline (its read failed) the first emission stands in for it.
          */
-        private suspend fun watchLibraryShape() {
+        private suspend fun watchLibraryShape(baseline: LibraryShape?) {
             suspendRunCatching {
-                db()
-                    .backupDao()
-                    .observeLibraryShape()
-                    .distinctUntilChanged()
-                    .drop(1)
-                    .collect {
-                        suspendRunCatching {
-                            if (settings().get(BackupSettingKeys.AUTO_SNAPSHOT_ENABLED)) {
-                                snapshots().requestSoon()
-                            }
-                        }.onFailure { Log.w(TAG, it) { "snapshot poke failed" } }
-                    }
+                val shapes = db().backupDao().observeLibraryShape().distinctUntilChanged()
+                val changes = if (baseline == null) shapes.drop(1) else shapes.dropWhile { it == baseline }
+                changes.collect {
+                    suspendRunCatching {
+                        if (settings().get(BackupSettingKeys.AUTO_SNAPSHOT_ENABLED)) {
+                            snapshots().requestSoon()
+                        }
+                    }.onFailure { Log.w(TAG, it) { "snapshot poke failed" } }
+                }
             }.onFailure { Log.w(TAG, it) { "library-shape watcher failed" } }
         }
 
