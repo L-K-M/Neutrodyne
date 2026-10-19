@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.compose.collectAsLazyPagingItems
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastSettingsKey
@@ -19,6 +20,7 @@ import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.ui.BindEpisodeSelection
 import ch.lkmc.neutrodyne.core.ui.DownloadDialogs
+import ch.lkmc.neutrodyne.core.ui.DownloadAllDialogs
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeRouteResult
 import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedDialog
@@ -73,6 +75,7 @@ internal fun PodcastRoute(key: PodcastKey) {
         }
     }
 
+    DownloadAllDialogs(viewModel.downloadAll)
     BindEpisodeSelection(viewModel.episodeSelection)
 
     PodcastScreen(
@@ -119,6 +122,7 @@ internal fun PodcastRoute(key: PodcastKey) {
                 )
             }
         },
+        onDownloadAll = { viewModel.downloadAll.open(FeedSource.Podcast(key.podcastId)) },
         onMarkAllPlayedClick = viewModel::markAllPlayed,
         onUnsubscribeRequest = {
             scope.launch {

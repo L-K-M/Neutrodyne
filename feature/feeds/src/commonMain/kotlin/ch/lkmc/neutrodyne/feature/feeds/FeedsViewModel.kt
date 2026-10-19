@@ -41,6 +41,7 @@ import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
 import ch.lkmc.neutrodyne.core.model.withCapabilities
 import ch.lkmc.neutrodyne.core.ui.DownloadRequestHandler
+import ch.lkmc.neutrodyne.core.ui.DownloadAllController
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionController
 import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedController
@@ -561,6 +562,9 @@ public class FeedsViewModel(
      * The counted "Mark all as played" confirmation. It lives in the ViewModel, so it survives
      * configuration changes but not process death: a destructive confirmation is not restored.
      */
+    public val downloadAll: DownloadAllController =
+        DownloadAllController(viewModelScope, feedRepository::downloadAllEstimate, downloadController)
+
     public val markPlayed: MarkFeedPlayedController =
         MarkFeedPlayedController(viewModelScope, clock, feedRepository::countUnplayed) { source, before, count ->
             when (val result = episodes.markFeedPlayed(source, before, count)) {

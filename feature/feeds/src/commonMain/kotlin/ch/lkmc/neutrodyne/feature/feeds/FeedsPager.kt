@@ -97,6 +97,7 @@ internal fun FeedsScreen(
     onAddPodcast: () -> Unit,
     onSearch: () -> Unit,
     modifier: Modifier = Modifier,
+    onDownloadAll: (FeedSource) -> Unit = {},
     onImport: () -> Unit = {},
     prefsFor: (FeedSource) -> Flow<FeedPrefs> = { flowOf(FeedPrefs(filters = state.filters)) },
     pageState: SaveableStateHolder = rememberSaveableStateHolder(),
@@ -337,6 +338,7 @@ internal fun FeedsScreen(
                                 }
                             },
                             onMarkAllPlayedClick = { onMarkAllPlayedClick(source) },
+                            onDownloadAll = if (source is FeedSource.Group) ({ onDownloadAll(source) }) else null,
                             onAddPodcast = onAddPodcast,
                             onSearch = onSearch,
                             onImport = onImport,

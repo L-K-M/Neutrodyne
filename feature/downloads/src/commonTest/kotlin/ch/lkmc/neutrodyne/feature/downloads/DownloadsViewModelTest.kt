@@ -33,11 +33,12 @@ class DownloadsViewModelTest : MainDispatcherTest() {
     private val downloads = FakeDownloadController()
     private val progress = FakeDownloadProgressSource()
     private val player = FakePlaybackController()
+    private val localMedia = ch.lkmc.neutrodyne.core.testing.FakeLocalMediaIndex()
     private val settings = FakeSettingsRepository()
     private val store = ViewModelStore()
 
     private fun model() =
-        DownloadsViewModel(downloads, progress, player, player.state, settings, testPlatformInfo, network).also {
+        DownloadsViewModel(downloads, progress, player, player.state, settings, testPlatformInfo, network, localMedia).also {
             store.put("downloads", it)
         }
 
@@ -223,24 +224,23 @@ class DownloadsViewModelTest : MainDispatcherTest() {
             vm.deleteOrphans()
             runCurrent()
             assertEquals(FakeDownloadController.Action.ORPHANS, downloads.calls.single().action)
-            assertEquals(1, vm.uiState.value.messages.size)
+            assertNotNull(vm.orphanError.value)
+            assertEquals(500L, vm.orphanConfirmation.value)
         }
 
-    @Test fun noticesAreBoundedAndOrderedWithM6bControlsHidden() {
-        assertEquals(
-            listOf(DownloadNotice.DATA_SAVER, DownloadNotice.BACKGROUND_RESTRICTED),
-            manualDownloadNotices(DownloadNotice.entries.reversed().toSet()),
-        )
-        assertEquals(
-            listOf(DownloadNotice.STORAGE_LOW, DownloadNotice.ORPHAN_FILES),
-            manualDownloadNotices(
-                setOf(
-                    DownloadNotice.ORPHAN_FILES,
-                    DownloadNotice.MOVE_IN_PROGRESS,
-                    DownloadNotice.STORAGE_LOW,
-                    DownloadNotice.CAP_REACHED,
-                ),
-            ),
-        )
-    }
+    @Test fun desktopRevealUsesIndexedUriAndReportsUnavailableFiles() =
+        test {
+            val vm = model()
+            backgroundScope.launch { vm.uiState.collect {} }
+            runCurrent()
+            localMedia.files[1L] = "file:///old/episode.mp3"
+            val revealed = mutableListOf<String>()
+            val reveal = ch.lkmc.neutrodyne.core.ui.platform.RevealInFolder { revealed += it; true }
+            vm.revealFile(1L, reveal)
+            assertEquals(listOf("file:///old/episode.mp3"), revealed)
+            vm.revealFile(2L, reveal)
+            runCurrent()
+            assertEquals(1, vm.uiState.value.messages.size)
+            assertEquals(1, revealed.size)
+        }
 }

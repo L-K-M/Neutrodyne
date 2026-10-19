@@ -37,19 +37,18 @@ import dev.zacsweers.metrox.viewmodel.metroViewModel
 import org.jetbrains.compose.resources.stringResource
 
 @Composable
-internal fun DownloadsPage(
+internal fun ManualDownloadSettings(
     platform: PlatformKind,
+    onRoot: (String) -> Unit,
     viewModel: DownloadSettingsViewModel = metroViewModel(),
 ) {
     val roots by viewModel.roots.collectAsStateWithLifecycle()
     val rootId by viewModel.rootId.collectAsStateWithLifecycle()
     val metered by viewModel.metered.collectAsStateWithLifecycle()
     val messages by viewModel.userMessages.collectAsStateWithLifecycle()
-    Column(Modifier.fillMaxSize()) {
-        NdTopAppBar(title = stringResource(Res.string.downloads_settings), navigation = { SettingsBackButton() })
-        Column(Modifier.verticalScroll(rememberScrollState())) {
+    Column {
+        if (platform == PlatformKind.ANDROID) {
             Text(stringResource(Res.string.downloads_root))
-            Text(stringResource(Res.string.downloads_root_new))
             roots.filter { platform == PlatformKind.ANDROID || it.kind == RootKind.DESKTOP_DEFAULT }.forEach { root ->
                 val label =
                     root.label ?: stringResource(
@@ -78,7 +77,7 @@ internal fun DownloadsPage(
                                 ?: root.path
                         },
                     enabled = root.available && platform == PlatformKind.ANDROID,
-                    onClick = { viewModel.selectRoot(root.rootId) },
+                    onClick = { onRoot(root.rootId) },
                     modifier =
                         Modifier.semantics {
                             selected =

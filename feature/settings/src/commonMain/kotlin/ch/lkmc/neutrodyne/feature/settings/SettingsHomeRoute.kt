@@ -11,6 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
@@ -21,10 +22,12 @@ import ch.lkmc.neutrodyne.core.navigation.LicencesKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
+import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.feedsIntervalText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_root_new
+import ch.lkmc.neutrodyne.core.ui.resources.download_desktop_settings
 import ch.lkmc.neutrodyne.core.ui.resources.downloads_settings
 import ch.lkmc.neutrodyne.core.ui.resources.settings
 import ch.lkmc.neutrodyne.core.ui.resources.settings_feeds
@@ -94,12 +97,14 @@ internal fun SettingsHomeRoute(settings: SettingsRepository) {
                     ),
                 onClick = { navigator.push(SettingsKey(SettingsPage.PLAYBACK)) },
             )
-            SettingsRow(
-                icon = NdIcons.Download,
-                title = stringResource(Res.string.downloads_settings),
-                summary = stringResource(Res.string.downloads_root_new),
-                onClick = { navigator.push(SettingsKey(SettingsPage.DOWNLOADS)) },
-            )
+            SettingsRow(NdIcons.Download, stringResource(Res.string.downloads_settings), null, {
+                navigator.push(SettingsKey(SettingsPage.DOWNLOADS))
+            })
+            if (LocalPlatformKind.current == PlatformKind.DESKTOP) {
+                SettingsRow(NdIcons.Computer, stringResource(Res.string.download_desktop_settings), null, {
+                    navigator.push(SettingsKey(SettingsPage.DESKTOP))
+                })
+            }
             SettingsRow(
                 icon = NdIcons.History,
                 title = stringResource(SettingsRes.string.settings_backup),

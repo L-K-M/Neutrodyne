@@ -35,6 +35,8 @@ internal fun DownloadsRoute(viewModel: DownloadsViewModel = metroViewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val live by viewModel.live.collectAsStateWithLifecycle()
     val orphans by viewModel.orphanConfirmation.collectAsStateWithLifecycle()
+    val orphanWorking by viewModel.orphanWorking.collectAsStateWithLifecycle()
+    val orphanError by viewModel.orphanError.collectAsStateWithLifecycle()
     val consent by viewModel.playback.meteredConsent.collectAsStateWithLifecycle()
     val navigator = LocalAppNavigator.current
     val platform = LocalPlatformActions.current
@@ -74,6 +76,7 @@ internal fun DownloadsRoute(viewModel: DownloadsViewModel = metroViewModel()) {
                     Unit
                 }
             },
+        onReveal = platform.reveal?.let { reveal -> { id -> viewModel.revealFile(id, reveal) } },
         onPauseAll = viewModel::pauseAll,
         onResumeAll = viewModel::resumeAll,
         onRetryAll = viewModel::retryAll,
@@ -91,7 +94,9 @@ internal fun DownloadsRoute(viewModel: DownloadsViewModel = metroViewModel()) {
                 DownloadNotice.NOTIFICATIONS_OFF -> viewModel.downloads.askNotifications()
                 DownloadNotice.STORAGE_LOW -> manageStorage()
                 DownloadNotice.ORPHAN_FILES -> viewModel.askDeleteOrphans()
-                else -> settings()
+                DownloadNotice.ROOT_UNAVAILABLE -> navigator.pushDetail(SettingsKey(SettingsPage.DESKTOP))
+                DownloadNotice.CAP_REACHED -> settings()
+                DownloadNotice.MOVE_IN_PROGRESS, DownloadNotice.YOUTUBE_PAUSED -> Unit
             }
         },
     )
@@ -106,17 +111,12 @@ internal fun DownloadsRoute(viewModel: DownloadsViewModel = metroViewModel()) {
         )
     }
     orphans?.let { bytes ->
-        NdDialog(
-            onDismissRequest = viewModel::dismissOrphans,
-            title = stringResource(Res.string.downloads_delete_orphans, downloadSize(bytes)),
-            text = stringResource(Res.string.downloads_delete_orphans_body),
-            confirm =
-                NdDialogAction(
-                    stringResource(Res.string.action_delete_download),
-                    role = NdActionRole.DESTRUCTIVE,
-                    onClick = viewModel::deleteOrphans,
-                ),
-            dismiss = NdDialogAction(stringResource(Res.string.action_cancel), onClick = viewModel::dismissOrphans),
+        ch.lkmc.neutrodyne.core.ui.OrphanFilesDialog(
+            bytes,
+            orphanWorking,
+            viewModel::deleteOrphans,
+            viewModel::dismissOrphans,
+            error = orphanError,
         )
     }
     ShowUserMessages(state.messages, viewModel::onMessageShown, onMessageAction = { id ->

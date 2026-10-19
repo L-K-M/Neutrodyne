@@ -759,6 +759,23 @@ automatic downloads are unavailable. Queued episode buttons open the current
 wait reason's actions and Cancel; completed buttons open a delete confirmation.
 Progress is an overlay for visible IDs and never invalidates paging membership.
 
+**Implementation note (2026-10-19, M6b).** W9 is integrated with M6a's
+real Downloads screen, preserving selection, playback, visible live progress,
+manual consent and deletion confirmation. Its duplicate overview is replaced
+by shared ordered notices and the orphan-confirmation dialog on that screen.
+Settings combines M6a's manual mobile-data/root controls with W9's automatic
+policy, cleanup and cap controls. Android root rows and desktop folder changes
+use the same move-or-leave confirmation and W4's implemented controller.
+Desktop completed rows reveal their indexed file URI through RevealInFolder;
+Share file remains Android-only. Episode DownloadToggle uses M6a's real request
+handler, including the entry point used by the benchmark smoke journey.
+`DownloadsOverview` has no move counters, so MOVE_IN_PROGRESS reads
+"Moving downloads…" without invented counts. Scoped choosers retain M2's
+"Inherit" label because ScopedSettingsView has no underlying overridden value.
+Group dependents require explicit opt-in, and external-mode cleanup remains
+editable. No YouTube transfer behavior is added. These controls supersede the
+M6a-only hiding described in the preceding historical note.
+
 
 `DownloadsKey`, `:feature:downloads`, M6 (empty state from M0). Data: 07's `DownloadController.observeAll(): Flow<DownloadsOverview>` (in progress, completed and failed `DownloadEntry` lists, `StorageUsage`, `notices`) with live bytes from `DownloadProgressSource` for the visible in-progress rows ([07 Engine architecture](07-downloads.md#engine-architecture), [07 Notices](07-downloads.md#notices)); texts are [`DownloadStatusText`](#download-status-text).
 

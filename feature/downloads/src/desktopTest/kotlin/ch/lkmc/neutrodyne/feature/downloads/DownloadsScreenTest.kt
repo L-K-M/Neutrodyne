@@ -147,9 +147,32 @@ class DownloadsScreenTest {
                 "Data Saver is on. Downloads over mobile data may pause while Neutrodyne is in the background.",
             ).assertIsDisplayed()
             onNodeWithText(
-                "Background activity is restricted for Neutrodyne. Downloads may pause while the app is in the background.",
+                "Background activity is restricted for Neutrodyne. Automatic downloads only run while the app is open.",
             ).assertIsDisplayed()
             onNodeWithText("Not enough storage. 0 downloads are waiting.").assertDoesNotExist()
+        }
+
+    @Test fun automaticCapAndMoveNoticesUseTheManualDownloadsScreen() =
+        runDesktopComposeUiTest(width = 900, height = 1200) {
+            val overview = empty.copy(
+                storage = storage.copy(capBytes = 1_073_741_824L),
+                notices = setOf(DownloadNotice.CAP_REACHED, DownloadNotice.MOVE_IN_PROGRESS),
+            )
+            val actions = mutableListOf<DownloadNotice>()
+            setContent {
+                CompositionLocalProvider(
+                    LocalAppNavigator provides RecordingAppNavigator(),
+                    LocalPlatformKind provides PlatformKind.DESKTOP,
+                ) {
+                    NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT) {
+                        Screen(DownloadsUiState(overview = overview, storage = overview.storage), onNotice = { actions += it })
+                    }
+                }
+            }
+            onNodeWithText("Storage limit of 1 GB reached. Automatic downloads are paused.").assertIsDisplayed()
+            onNodeWithText("Moving downloads…").assertIsDisplayed()
+            onAllNodesWithText("Download settings")[1].performClick()
+            assertEquals(listOf(DownloadNotice.CAP_REACHED), actions)
         }
 
     @androidx.compose.runtime.Composable
@@ -158,29 +181,30 @@ class DownloadsScreenTest {
         onPlay: (Long?) -> Unit = {},
         onToggle: (Long) -> Unit = {},
         onDelete: (Long) -> Unit = {},
+        onNotice: (DownloadNotice) -> Unit = {},
     ) {
         DownloadsScreen(
-            state,
-            emptyMap(),
-            {},
-            {},
-            onToggle,
-            { _, _ -> },
-            {},
-            onDelete,
-            onPlay,
-            null,
-            {},
-            {},
-            {},
-            {},
-            {},
-            {},
-            {},
-            {},
-            {},
-            {},
-            {},
+            state = state,
+            live = emptyMap(),
+            onVisibleIds = {},
+            onOpen = {},
+            onToggle = onToggle,
+            onCommand = { _, _ -> },
+            onCancel = {},
+            onDelete = onDelete,
+            onPlay = onPlay,
+            onShare = null,
+            onPauseAll = {},
+            onResumeAll = {},
+            onRetryAll = {},
+            onSelect = {},
+            onSelectAll = {},
+            onSelectPlayedEpisodes = {},
+            onClearSelection = {},
+            onDeleteSelection = {},
+            onSettings = {},
+            onReload = {},
+            onNotice = onNotice,
         )
     }
 }
