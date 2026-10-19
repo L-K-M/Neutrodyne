@@ -635,4 +635,5 @@
     </plurals>
     <string name="notification_import_ready_source">Datei</string>
     <string name="notification_import_ready_file">Aus %1$s</string>
+    <string name="settings_update_available">Einstellungen, Update verfügbar</string>
 </resources>

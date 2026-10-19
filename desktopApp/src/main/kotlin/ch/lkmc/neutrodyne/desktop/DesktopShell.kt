@@ -274,6 +274,9 @@ internal object DesktopShell {
                 appScope = graph.appScope,
                 dataDir = dirs.data,
                 viewModelFactory = graph.metroViewModelFactory,
+                updateChecker = graph.appUpdateChecker,
+                updateNotices = graph.updateNotices,
+                settings = graph.settingsRepository,
                 onQuitRequest = ::exitApplication,
             )
         }

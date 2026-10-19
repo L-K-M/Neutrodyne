@@ -4,6 +4,8 @@ package ch.lkmc.neutrodyne.feature.settings
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.Switch
@@ -45,11 +47,14 @@ internal fun SettingsRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    badge: Boolean = false,
 ) {
     ListItem(
         headlineContent = { Text(title) },
         supportingContent = { if (summary != null) Text(summary) },
-        leadingContent = { Icon(icon, contentDescription = null) },
+        leadingContent = {
+            BadgedBox(badge = { if (badge) Badge() }) { Icon(icon, contentDescription = null) }
+        },
         trailingContent = { Icon(NdIcons.ArrowForwardIos, contentDescription = null) },
         modifier =
             modifier
@@ -72,14 +77,16 @@ internal fun SettingsSwitchRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     ListItem(
         headlineContent = { Text(title) },
         supportingContent = { if (summary != null) Text(summary) },
-        trailingContent = { Switch(checked = checked, onCheckedChange = null) },
+        trailingContent = { Switch(checked = checked, onCheckedChange = null, enabled = enabled) },
         modifier =
             modifier
                 .toggleable(
+                    enabled = enabled,
                     value = checked,
                     role = Role.Switch,
                     onValueChange = onCheckedChange,

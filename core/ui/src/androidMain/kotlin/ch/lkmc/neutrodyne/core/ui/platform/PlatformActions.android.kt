@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContract
@@ -75,6 +76,8 @@ internal class AndroidPlatformActions(
     private val createLauncher: ActivityResultLauncher<CreateDocumentRequest>,
     private val notificationLauncher: ActivityResultLauncher<String>,
 ) : PlatformActions {
+    override val developerOptions: () -> Boolean = { openDeveloperOptions(context) }
+
     override val urls: ExternalUrlOpener =
         ExternalUrlOpener { url ->
             val intent =
@@ -240,3 +243,16 @@ internal class PendingResult<T> {
 /** Maps the launcher's `Uri` result onto the caller's `String` continuation. */
 private fun <T, R> Continuation<R>.contramap(map: (T) -> R): Continuation<T> =
     Continuation(context) { result -> resumeWith(result.map(map)) }
+
+/** Some OEMs hide Developer options before it is enabled; About phone is the documented fallback. */
+internal fun openDeveloperOptions(context: Context): Boolean {
+    for (action in listOf(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS, Settings.ACTION_DEVICE_INFO_SETTINGS)) {
+        try {
+            context.startActivity(Intent(action))
+            return true
+        } catch (_: ActivityNotFoundException) {
+            // Try the next system screen; offline instructions remain if neither exists.
+        }
+    }
+    return false
+}

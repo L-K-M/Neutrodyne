@@ -9,6 +9,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
@@ -32,6 +33,9 @@ import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.designsystem.components.DesktopScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
+import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.domain.update.AppUpdateChecker
+import ch.lkmc.neutrodyne.core.domain.update.UpdateNotices
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
@@ -56,6 +60,7 @@ import ch.lkmc.neutrodyne.desktop.resources.window_title
 import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
 import ch.lkmc.neutrodyne.feature.player.PlayerRoute
 import ch.lkmc.neutrodyne.feature.queue.PlayerUpNextRoute
+import ch.lkmc.neutrodyne.feature.settings.rememberUpdateRootPresentation
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.coroutines.CoroutineScope
@@ -94,6 +99,9 @@ internal fun ApplicationScope.NeutrodyneWindow(
     viewModelFactory: MetroViewModelFactory,
     onQuitRequest: () -> Unit,
     openHandler: DesktopOpenHandler? = null,
+    updateChecker: AppUpdateChecker? = null,
+    updateNotices: UpdateNotices? = null,
+    settings: SettingsRepository? = null,
 ) {
     val state = rememberNeutrodyneWindowState()
     val icon = remember { WindowIcons.windowIconPainter() }
@@ -128,6 +136,9 @@ internal fun ApplicationScope.NeutrodyneWindow(
                 dataDir = dataDir,
                 viewModelFactory = viewModelFactory,
                 openHandler = openHandler,
+                updateChecker = updateChecker,
+                updateNotices = updateNotices,
+                settings = settings,
             )
         }
         if (openHandler == null) content() else DesktopDropTarget(openHandler, content)
@@ -284,9 +295,19 @@ internal fun NeutrodyneWindowContent(
     onRetryStartup: () -> Unit = {},
     dataDir: Path? = null,
     openHandler: DesktopOpenHandler? = null,
+    updateChecker: AppUpdateChecker? = null,
+    updateNotices: UpdateNotices? = null,
+    settings: SettingsRepository? = null,
 ) {
     val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
     val platformActions = rememberDesktopPlatformActions()
+    val updates =
+        if (updateChecker != null && updateNotices != null && settings != null) {
+            rememberUpdateRootPresentation(updateChecker, updateNotices, settings)
+        } else {
+            null
+        }
+    val currentUpdates by rememberUpdatedState(updates)
     // `NeutrodyneRoot` keys its snackbar effect on `slots` identity — a per-recomposition
     // `RootSlots` would cancel and re-show the in-flight banner, so both contracts are
     // remembered (they were all-no-op until the banner stream landed).
@@ -294,7 +315,8 @@ internal fun NeutrodyneWindowContent(
         remember(platformActions, dataDir, onRetryStartup, banners) {
             RootActions(
                 retryStartup = onRetryStartup,
-                dismissNotice = {},
+                dismissNotice = { currentUpdates?.dismiss?.invoke(it) },
+                disableUpdateChecks = { currentUpdates?.disable?.invoke() },
                 continueHere = {},
                 dismissRemoteSession = {},
                 playbackKey = { false },
@@ -313,6 +335,7 @@ internal fun NeutrodyneWindowContent(
                 // Keep menu/input glue inside the root so it reads the root's navigator.
                 // The shared player follows these hooks on the same window store.
                 player = {
+                    currentUpdates?.feedback?.invoke()
                     menuActions.attachPush(it.navigate)
                     menuActions.attachNavigator(LocalAppNavigator.current)
                     openHandler?.let { DesktopInputFeedback(it) }
@@ -331,7 +354,12 @@ internal fun NeutrodyneWindowContent(
         LocalMetroViewModelFactory provides viewModelFactory,
     ) {
         NeutrodyneRoot(
-            state = RootUiState.READY.copy(startup = startup),
+            state =
+                RootUiState.READY.copy(
+                    startup = startup,
+                    settingsBadge = updates?.badge ?: false,
+                    notice = updates?.notice,
+                ),
             actions = actions,
             slots = slots,
             installers = installers,

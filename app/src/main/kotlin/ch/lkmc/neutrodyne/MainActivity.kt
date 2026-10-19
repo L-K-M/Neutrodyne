@@ -10,6 +10,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.core.splashscreen.SplashScreen
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.DEFAULT_ARGS_KEY
@@ -50,6 +52,7 @@ import ch.lkmc.neutrodyne.di.AndroidAppGraph
 import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
 import ch.lkmc.neutrodyne.feature.player.PlayerRoute
 import ch.lkmc.neutrodyne.feature.queue.PlayerUpNextRoute
+import ch.lkmc.neutrodyne.feature.settings.rememberUpdateRootPresentation
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
@@ -92,8 +95,28 @@ class MainActivity : AppCompatActivity() {
 
             val nowPlaying by graph.playbackStateSource.nowPlaying.collectAsStateWithLifecycle()
             val systemUi = rememberAndroidSystemUiState()
+            val platformActions = rememberAndroidPlatformActions()
+            val updates =
+                rememberUpdateRootPresentation(
+                    graph.appUpdateChecker,
+                    graph.updateNotices,
+                    graph.settingsRepository,
+                    platformActions.notifications,
+                )
+            val feedback by rememberUpdatedState(updates.feedback)
+            val slots =
+                remember {
+                    RootSlots(
+                        player = {
+                            feedback()
+                            PlayerRoute(it, upNext = { PlayerUpNextRoute(it.navigate) })
+                        },
+                        userMessages = emptyFlow(),
+                        importResume = { available, open -> importResumeBanner(available, open) },
+                    )
+                }
             CompositionLocalProvider(
-                LocalPlatformActions provides rememberAndroidPlatformActions(),
+                LocalPlatformActions provides platformActions,
                 // 07 Storage rows pick per-platform wording from this local.
                 LocalPlatformKind provides PlatformKind.ANDROID,
                 // 08 Feeds / 09 ColdStartToFeeds: ReportDrawnWhen once the feed settles.
@@ -102,7 +125,13 @@ class MainActivity : AppCompatActivity() {
                 LocalMetroViewModelFactory provides graph.metroViewModelFactory,
             ) {
                 NeutrodyneRoot(
-                    state = ROOT_STATE_BASE.copy(startup = openState.toGateState(), hasNowPlaying = nowPlaying != null),
+                    state =
+                        ROOT_STATE_BASE.copy(
+                            startup = openState.toGateState(),
+                            hasNowPlaying = nowPlaying != null,
+                            settingsBadge = updates.badge,
+                            notice = updates.notice,
+                        ),
                     actions =
                         RootActions(
                             selectFeedSource = { uuid ->
@@ -114,7 +143,8 @@ class MainActivity : AppCompatActivity() {
                                 }.getOrNull() is Outcome.Success
                             },
                             retryStartup = { graph.appScope.launch { suspendRunCatching { opener.awaitOpen() } } },
-                            dismissNotice = {},
+                            dismissNotice = updates.dismiss,
+                            disableUpdateChecks = updates.disable,
                             continueHere = {},
                             dismissRemoteSession = {},
                             playbackKey = { false },
@@ -124,7 +154,7 @@ class MainActivity : AppCompatActivity() {
                                 startActivity(Intent(Settings.ACTION_INTERNAL_STORAGE_SETTINGS))
                             },
                         ),
-                    slots = M0_ROOT_SLOTS,
+                    slots = slots,
                     routes = routing.routes,
                     installers = graph.entryInstallers,
                     prefs = appearance.value ?: AppearancePrefs(),
@@ -186,14 +216,6 @@ class MainActivity : AppCompatActivity() {
 
         /** Defaults for notices and remote sessions until their milestones. */
         val ROOT_STATE_BASE = RootUiState.READY
-
-        /** Window player and import-resume content share the root slots. */
-        val M0_ROOT_SLOTS =
-            RootSlots(
-                player = { PlayerRoute(it, upNext = { PlayerUpNextRoute(it.navigate) }) },
-                userMessages = emptyFlow(),
-                importResume = { available, open -> importResumeBanner(available, open) },
-            )
     }
 }
 

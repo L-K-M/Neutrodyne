@@ -283,7 +283,9 @@ private fun ReadyRoot(
 
     // The M11a verification notice is a dialog key pushed once, never a route (08 Update notices).
     LaunchedEffect(state.notice) {
-        if (state.notice == RootNotice.VERIFICATION_ENFORCEMENT) {
+        if (state.notice == RootNotice.VERIFICATION_ENFORCEMENT &&
+            navigation.tabs.none { VerificationNoticeKey in navigation.stack(it) }
+        ) {
             navigation.push(VerificationNoticeKey)
         }
     }

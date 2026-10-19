@@ -14,8 +14,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.domain.update.AppUpdateChecker
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
+import ch.lkmc.neutrodyne.core.model.update.UpdateCheckState
 import ch.lkmc.neutrodyne.core.navigation.BackupKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
@@ -37,6 +39,8 @@ import ch.lkmc.neutrodyne.feature.settings.resources.settings_licences_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_playback
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_playback_summary_off
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_playback_summary_on
+import ch.lkmc.neutrodyne.feature.settings.resources.updates_available
+import ch.lkmc.neutrodyne.feature.settings.resources.updates_title
 import org.jetbrains.compose.resources.stringResource
 import ch.lkmc.neutrodyne.feature.settings.resources.Res as SettingsRes
 
@@ -46,8 +50,12 @@ import ch.lkmc.neutrodyne.feature.settings.resources.Res as SettingsRes
  * row's summary is the live refresh interval ("Every 4 hours" in 08's wireframe).
  */
 @Composable
-internal fun SettingsHomeRoute(settings: SettingsRepository) {
+internal fun SettingsHomeRoute(
+    settings: SettingsRepository,
+    checker: AppUpdateChecker? = null,
+) {
     val navigator = LocalAppNavigator.current
+    val updateState = checker?.state?.collectAsStateWithLifecycle()?.value
     // observe() builds a fresh, unequal Flow every call — an unremembered instance would
     // restart the collection on each recomposition.
     val intervalFlow = remember(settings) { settings.observe(FeedsSettingKeys.REFRESH_INTERVAL_MINUTES) }
@@ -97,6 +105,14 @@ internal fun SettingsHomeRoute(settings: SettingsRepository) {
                 title = stringResource(SettingsRes.string.settings_backup),
                 summary = stringResource(SettingsRes.string.settings_backup_summary),
                 onClick = { navigator.push(BackupKey) },
+            )
+            val available = updateState as? UpdateCheckState.Available
+            SettingsRow(
+                icon = NdIcons.Info,
+                title = stringResource(SettingsRes.string.updates_title),
+                summary = available?.let { stringResource(SettingsRes.string.updates_available, it.info.versionName) },
+                onClick = { navigator.push(SettingsKey(SettingsPage.UPDATES)) },
+                badge = available != null,
             )
             SettingsRow(
                 icon = NdIcons.Info,

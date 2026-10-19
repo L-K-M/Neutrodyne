@@ -27,6 +27,7 @@ import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.DesktopArch
 import ch.lkmc.neutrodyne.core.model.DesktopOs
 import ch.lkmc.neutrodyne.core.model.InstallKind
+import ch.lkmc.neutrodyne.core.navigation.InstallHelpKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
@@ -58,50 +59,8 @@ import org.jetbrains.compose.resources.stringResource
  */
 @Composable
 internal fun AboutPage(buildInfo: BuildInfo) {
-    var showInstallHelp by rememberSaveable { mutableStateOf(false) }
     val navigator = LocalAppNavigator.current
-    val urls = LocalPlatformActions.current.urls
-    val snackbarHost = LocalSnackbarHost.current
-    val clipboard = LocalClipboardManager.current
-    val scope = rememberCoroutineScope()
-    val noHandlerMessage = stringResource(Res.string.about_link_no_handler)
-    val copyLabel = stringResource(Res.string.about_link_copy)
-
-    // 08 Show notes renderer: a link nothing can open shows "No app can open this link" with
-    // "Copy link" as its action.
-    fun openLink(url: String) {
-        if (urls.open(url) == OpenResult.OPENED) return
-        scope.launch {
-            // 08's duration rule: an action shows `Long` (10 s) — Material3 would default this
-            // to `Indefinite` and hold the one serial host.
-            val result =
-                snackbarHost.showSnackbar(
-                    message = noHandlerMessage,
-                    actionLabel = copyLabel,
-                    duration = SnackbarDuration.Long,
-                )
-            if (result == SnackbarResult.ActionPerformed) {
-                clipboard.setText(AnnotatedString(url))
-            }
-        }
-    }
-    if (showInstallHelp) {
-        AlertDialog(
-            onDismissRequest = { showInstallHelp = false },
-            title = { Text(stringResource(Res.string.install_help_title)) },
-            text = {
-                Text(
-                    stringResource(Res.string.install_help_android),
-                    Modifier.verticalScroll(rememberScrollState()),
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = { showInstallHelp = false },
-                ) { Text(stringResource(Res.string.install_help_close)) }
-            },
-        )
-    }
+    val openLink = updateLinkOpener()
     Column(Modifier.fillMaxSize()) {
         NdTopAppBar(
             title = stringResource(Res.string.settings_about),
@@ -133,14 +92,12 @@ internal fun AboutPage(buildInfo: BuildInfo) {
                 summary = null,
                 onClick = { navigator.push(LicencesKey) },
             )
-            if (buildInfo.platform == BuildInfo.Platform.ANDROID) {
-                SettingsRow(
-                    icon = NdIcons.Article,
-                    title = stringResource(Res.string.install_help_title),
-                    summary = null,
-                    onClick = { showInstallHelp = true },
-                )
-            }
+            SettingsRow(
+                icon = NdIcons.Article,
+                title = stringResource(Res.string.install_help_title),
+                summary = null,
+                onClick = { navigator.push(InstallHelpKey()) },
+            )
             SettingsRow(
                 icon = NdIcons.Explore,
                 title = stringResource(Res.string.about_source),
@@ -188,20 +145,20 @@ private fun licenceStatementFor(platform: BuildInfo.Platform) =
     }
 
 // OS/arch/install-kind labels are product names, not translated copy.
-private fun osLabel(os: DesktopOs): String =
+internal fun osLabel(os: DesktopOs): String =
     when (os) {
         DesktopOs.WINDOWS -> "Windows"
         DesktopOs.MACOS -> "macOS"
         DesktopOs.LINUX -> "Linux"
     }
 
-private fun archLabel(arch: DesktopArch): String =
+internal fun archLabel(arch: DesktopArch): String =
     when (arch) {
         DesktopArch.X64 -> "x64"
         DesktopArch.ARM64 -> "arm64"
     }
 
-private fun kindLabel(kind: InstallKind): String =
+internal fun kindLabel(kind: InstallKind): String =
     when (kind) {
         InstallKind.MSI -> "MSI"
         InstallKind.ZIP -> "ZIP"

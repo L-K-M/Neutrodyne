@@ -29,6 +29,9 @@ public interface PlatformActions {
 
     /** Android 13+ only; `null` on the desktop and on API < 33. */
     public val notifications: NotificationPermissionRequester?
+
+    /** Android help action. False leaves the bundled steps available when OEM settings are absent. */
+    public val developerOptions: (() -> Boolean)? get() = null
 }
 
 /** How an external-URL open ended. */
