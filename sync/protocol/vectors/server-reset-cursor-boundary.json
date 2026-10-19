@@ -1,0 +1,7 @@
+{
+  "name": "server-reset-cursor-boundary",
+  "collection": "podcast",
+  "id": "11111111-1111-4111-8111-111111111111",
+  "serverOnly": "RecordWriter in MS1",
+  "scenario": {"operation":"reset","before":"c:1234abcd:20","keepSeq":[20,21],"removeSeq":[19]}
+}

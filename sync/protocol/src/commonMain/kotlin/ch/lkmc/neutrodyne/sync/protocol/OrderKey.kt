@@ -61,6 +61,15 @@ object OrderKey {
      */
     fun rewrite(n: Int): List<String> = generateNKeysBetween(null, null, n)
 
+    /** Validate admitted keys without generating a neighbour or consuming randomness. */
+    fun isValid(key: String): Boolean =
+        try {
+            validateOrderKey(key)
+            true
+        } catch (_: IllegalArgumentException) {
+            false
+        }
+
     // Two random digits; the last is never the zero digit, so the jittered key stays a valid
     // fractional index (the library rejects a fractional part ending in 0).
     private fun jitter(random: Random): String {

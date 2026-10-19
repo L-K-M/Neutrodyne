@@ -2,6 +2,13 @@
 
 package ch.lkmc.neutrodyne.sync.protocol
 
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import kotlin.random.Random
 
 /**
@@ -42,6 +49,7 @@ value class NodeId(
  * value, `-`, the node ID), so byte-wise string order equals clock order with the node ID as
  * tie-break — [compareTo] implements the same order.
  */
+@Serializable(with = HlcSerializer::class)
 data class Hlc(
     val packed: Long,
     val nodeId: NodeId,
@@ -132,4 +140,16 @@ class HlcClock(
 
         if (packed > maxPacked) packed = maxPacked
     }
+}
+
+/** Raw-state clocks serialize exactly like the wire fields, including the origin node. */
+object HlcSerializer : KSerializer<Hlc> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("Hlc", PrimitiveKind.STRING)
+
+    override fun serialize(
+        encoder: Encoder,
+        value: Hlc,
+    ) = encoder.encodeString(value.toString())
+
+    override fun deserialize(decoder: Decoder): Hlc = Hlc.parse(decoder.decodeString())
 }

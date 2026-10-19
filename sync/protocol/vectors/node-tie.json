@@ -1,0 +1,10 @@
+{
+  "name": "node-tie",
+  "collection": "podcast",
+  "id": "11111111-1111-4111-8111-111111111111",
+  "stored": {"fields":{"title":{"v":"old","c":"01a10c942d800000-0000000000000001"}}},
+  "changes": [
+    {"fields":{"title":{"v":"new","c":"01a10c942d800000-0000000000000002"}}}
+  ],
+  "expect": {"status":["applied"],"fields":{"title":{"v":"new","c":"01a10c942d800000-0000000000000002"}}}
+}

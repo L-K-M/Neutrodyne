@@ -1,0 +1,10 @@
+{
+  "name": "full-record-hint-provenance",
+  "collection": "episode",
+  "id": {"p":"11111111-1111-4111-8111-111111111111","k":"g:ep1"},
+  "stored": {"fields":{"fav":{"v":true,"c":"01a10c942d800003-0000000000000001"}},"match":{"title":"old","guid":"x"},"matchClocks":{"title":"01a10c942d800000-0000000000000001","guid":"01a10c942d800000-0000000000000001"}},
+  "changes": [
+    {"fields":{"pos":{"v":{"ms":10},"c":"01a10c942d800001-0000000000000001"}},"match":{"title":"new"}}
+  ],
+  "expect": {"status":["applied"],"match":{"title":"new","guid":"x"},"matchClocks":{"title":"01a10c942d800001-0000000000000001","guid":"01a10c942d800000-0000000000000001"}}
+}

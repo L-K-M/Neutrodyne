@@ -2,6 +2,10 @@
 package ch.lkmc.neutrodyne.sync.server
 
 import ch.lkmc.neutrodyne.sync.protocol.PROTOCOL_VERSION
+import ch.lkmc.neutrodyne.sync.protocol.ProtocolLimits
+import ch.lkmc.neutrodyne.sync.protocol.ProtocolValidation
+import ch.lkmc.neutrodyne.sync.protocol.SyncJson
+import ch.lkmc.neutrodyne.sync.protocol.dto.DiscoveryDocument
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpStatusCode
@@ -29,6 +33,8 @@ class WellKnownRoutesTest {
             assertEquals(HttpStatusCode.OK, response.status)
             assertEquals("application/json", response.headers["Content-Type"])
 
+            val decoded = SyncJson.decodeFromString<DiscoveryDocument>(response.bodyAsText())
+            ProtocolValidation.discovery(decoded)
             val document = Json.parseToJsonElement(response.bodyAsText()).jsonObject
             assertEquals(WellKnownRoutes.SERVER_DISPLAY_NAME, document.getValue("name").jsonPrimitive.content)
             assertEquals(TEST_SERVER_VERSION, document.getValue("serverVersion").jsonPrimitive.content)
@@ -39,8 +45,8 @@ class WellKnownRoutesTest {
 
             // The sse, link and password feature flags arrive with MS1 (10 Discovery).
             assertTrue(document.getValue("features").jsonArray.isEmpty())
-            assertEquals(DiscoveryNumbers.MAX_BATCH, document.getValue("maxBatch").jsonPrimitive.int)
-            assertEquals(DiscoveryNumbers.MAX_SKEW_MS, document.getValue("maxSkewMs").jsonPrimitive.long)
+            assertEquals(ProtocolLimits.MAX_CHANGES, document.getValue("maxBatch").jsonPrimitive.int)
+            assertEquals(ProtocolLimits.MAX_SKEW_MS, document.getValue("maxSkewMs").jsonPrimitive.long)
             assertEquals("2026-10-06T10:15:30.250Z", document.getValue("serverTime").jsonPrimitive.content)
         }
 }

@@ -1,0 +1,9 @@
+{
+  "name": "malformed-clock",
+  "collection": "podcast",
+  "id": "11111111-1111-4111-8111-111111111111",
+  "changes": [
+    {"fields":{"title":{"v":"x","c":"bad"}}}
+  ],
+  "expect": {"error":"invalid"}
+}

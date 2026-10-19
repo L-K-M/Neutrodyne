@@ -1130,17 +1130,60 @@ This is the HLC local-event rule of [10 Hybrid logical clocks](10-sync.md#hybrid
 | `captureIntent(coll, rid, field, json)` | as `captureLiteral`, but with the trigger guard: the tick and the insert run only `WHERE id = 0 AND enabled = 1 AND applying = 0` — the explicit mark-unplayed and position-reset chains of [User-state writes](#user-state-writes), which therefore capture nothing inside `withApplying` (10's apply, remote derivations) |
 | `captureAll(coll, rid)` | the same with `field = '*'` and `value = NULL` — explicit whole-library snapshots. Never used for live setting intents: those use `captureLiteral("setting", key, "v", json)` |
 | `captureAt(coll, rid, field, atMs, literal: String? = null)` | `atHlc = clamp(atMs, 2020-01-01, now) << 16` in Kotlin; insert with the current `nodeId`, `captureKind = LOCAL` and the supplied literal, or update only when the complete clock is greater. First link and restore supply frozen played/position/session/setting values from their winning input, never a later projection; NULL remains available for unchanged, non-derived source fields |
-| `captureStored(coll, rid, field, stored: FieldValue)` | Insert the supplied packed `hlc`, original `nodeId`, `captureKind = REPLAY` and literal wire-field value, or raise only when the complete clock is greater. No clamp or tick. Resync iterates individual raw fields: `played` boolean and `playedAt` timestamp/null are separate rows with the same original clock; local capture pairs are a different representation. A grow-set has no clock on the wire, yet `hlc` is NOT NULL: its replay row (`feedKeys`, the literal known set) takes the record's newest known complete field clock (every podcast record has at least `subscribed`), which serves only push order and acknowledgement |
+| `captureStored(coll: String, rid: String, field: String, hlc: Long, nodeId: String, literal: String)` | Insert the supplied packed `hlc`, original `nodeId`, `captureKind = REPLAY` and literal wire-field value, or raise only when the complete clock is greater. No clamp or tick. Resync iterates individual raw fields: `played` boolean and `playedAt` timestamp/null are separate rows with the same original clock; local capture pairs are a different representation. A grow-set has no clock on the wire, yet `hlc` is NOT NULL: its replay row (`feedKeys`, the literal known set) takes the record's newest known complete field clock (every podcast record has at least `subscribed`), which serves only push order and acknowledgement |
+
+**Implementation note (2026-10-19, MS0).** All five capture methods above
+are suspending, return `Unit`, and take `coll`, `rid`, `field` and JSON as
+`String` (the historical `literal` remains nullable). They require the active
+writer transaction even when disabled. Database/data never import protocol;
+`:sync:impl` converts `FieldValue` to the primitive `captureStored` signature.
+`captureAt` creates a historical local stamp; `captureStored` preserves the
+complete accepted clock and literal without ticking. LOCAL versus REPLAY,
+acknowledgement and re-stamping follow the complete-clock rules below.
+
+`withApplying(block: suspend () -> T): T` requires the active writer, restores
+the previous flag in cancellation-safe cleanup, and propagates result/failure.
+Nesting never enables capture early; failures roll back the writer transaction.
+Explicit captures bypass `applying` except intent; all observe `enabled`.
+Outbox rekey collisions retain the greater complete clock per field; unequal
+payloads at equal clocks are invalid. Clock JSON stays opaque to SQL. A
+non-collision renames it; on collision both envelopes survive until the sync
+adapter supplies field-wise merged JSON to
+`SyncClockDao.moveRecord(coll: String, from: String, to: String, mergedClocks: String)`.
+A trigger must not discard either colliding raw/effect envelope. MS2 owns its
+interpretation. Local played pairs, replay's separate fields, internal reset
+markers and `~rekey` literals retain the representations above.
+
+W3 owns bookkeeping and platform `TestDb.linked` fixtures (canonical node,
+capture enabled in a writer transaction, no engine). Freeze `suspend linked`
+as the platform's `inMemory` arguments/defaults plus a final
+`nodeId: String = "0000000000000001"`, returning `NeutrodyneDatabase`;
+Android retains `context` first. W4 owns one declarative
+spec for exactly the 24 names/columns/predicates of [Trigger set](#trigger-set),
+`SyncTriggers.sql()`, the desktop `sync-triggers.sql` golden, and suspending
+`create/dropAll/recreate/ensure(connection: SQLiteConnection): Unit`.
+`ensure` compares the whole capture set and repairs it atomically. W5 owns
+writer hooks. W3 tests disabled/no-tick, nested/cancelled apply, historical and
+replay clocks, acknowledgement races, restamps and opaque collisions; W4 tests
+spec/schema/golden, open/migrations, both drivers and hygiene; W5 tests actual
+bulk/restore/import/position writers and no-op intent with capture on/off.
 
 #### Installing and changing the triggers
 
 | When | What |
 |---|---|
 | New database (MS0 on) | `Callback.onCreate` calls `SyncTriggers.create(connection)` after creating the singleton rows |
-| MS0 upgrade | `Migration(N, N + 1)` (N = the newest schema version frozen before MS0, normally 1) calls `SyncTriggers.recreate(connection)`: additive, no table rebuild, no entity change, so `N + 1.json` equals `N.json` apart from the version |
+| MS0 upgrade | `Migration(N, N + 1)` (N = the newest schema version before MS0; currently 2) calls `SyncTriggers.recreate(connection)`: additive, no table rebuild, no entity change, so `N + 1.json` equals `N.json` apart from the version |
 | Every open | `Callback.onOpen` calls `SyncTriggers.ensure(connection)`: it compares `SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'sync\_cap\_%' ESCAPE '\'` with the rendered set and, on any difference, drops and recreates the whole set in one transaction (logged once). A change of the spec alone therefore needs no schema version; the golden file and `SyncCaptureTest` change in the same PR ([PLAN 7.2](../PLAN.md#72-definition-of-done-every-milestone)) |
-| Migrations | A migration that writes to or alters a synced table first calls `SyncTriggers.dropAll(connection)` and never creates triggers; `ensure` installs the current set after the migration transaction, so no trigger ever fires against an intermediate schema. `TableRebuild.run` drops them itself: since 3.25 SQLite carries renames into trigger bodies and refuses `ALTER TABLE new_x RENAME TO x` while a trigger body names the dropped `x` ("error in trigger …: no such table", observed with SQLite 3.45; [ALTER TABLE](https://www.sqlite.org/lang_altertable.html)) — the bundled drivers are far newer; API 26's framework SQLite 3.18 predates the change, and dropping first is correct for both |
+| Migrations | Except for the MS0 trigger-only installer, a migration that writes to or alters a synced table first calls `SyncTriggers.dropAll(connection)` and never creates triggers; `ensure` installs the current set after the migration transaction, so no trigger ever fires against an intermediate schema. `TableRebuild.run` drops them itself: since 3.25 SQLite carries renames into trigger bodies and refuses `ALTER TABLE new_x RENAME TO x` while a trigger body names the dropped `x` ("error in trigger …: no such table", observed with SQLite 3.45; [ALTER TABLE](https://www.sqlite.org/lang_altertable.html)) — the bundled drivers are far newer; API 26's framework SQLite 3.18 predates the change, and dropping first is correct for both |
 | Checks | `UPDATE OF` silently ignores unknown column names ([CREATE TRIGGER](https://www.sqlite.org/lang_createtrigger.html)), so `SyncTriggersTest` asserts that every column of the spec exists (`PRAGMA table_info`) and that the rendered SQL equals the golden file |
+
+**Implementation note (2026-10-19, MS0).** The current schema is version 2
+(GUID provenance); W4's trigger-only installer is 2→3 if that is still the
+latest version at integration. It is the single exception to the rule that
+migrations only drop capture triggers. Later structural/data migrations drop
+them before their first write and rely on post-chain `ensure`. W1/W2 make no
+schema, entity or index changes, and do not invoke the S14 fallback.
 
 #### Cost
 
@@ -1517,6 +1560,13 @@ the podcast avatar or fallback without another database read; in-app player
 art remains the episode's own art when present.
 
 ### Up next ordering
+
+**Implementation note (2026-10-19, MS0).** Equal order keys remain legal.
+Local SQL keeps its existing `(orderKey, local id)` display tie-break; the
+replicated canonical comparison is `(orderKey, canonical rid)`, implemented
+by `ReplicatedOrder`. W5 tests SQL BINARY ordering and rewrite capture; W6
+compares canonical replicated order, not coincidental local row IDs. Visible
+order among tied keys can therefore differ until a local rewrite.
 
 `QueueDao` (M4, semantics 06). Each entry carries an `orderKey` (fractional index, [D92](../PLAN.md#3-key-decisions)), so a move writes one row and two devices that reorder different items concurrently both keep their moves after sync; keys are computed in Kotlin by `OrderKey` (`:sync:protocol`, [10 Ordered lists](10-sync.md#ordered-lists)) inside the write transaction, which serialises all writers, so reading the neighbours and writing the key is race-free.
 

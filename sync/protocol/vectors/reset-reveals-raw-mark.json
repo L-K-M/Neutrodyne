@@ -1,0 +1,10 @@
+{
+  "name": "reset-reveals-raw-mark",
+  "collection": "episode",
+  "id": {"p":"11111111-1111-4111-8111-111111111111","k":"g:ep1"},
+  "stored": {"fields":{"played":{"v":true,"c":"01a10c942d800001-0000000000000001"},"playedAt":{"v":1791212400000,"c":"01a10c942d800001-0000000000000001"},"pos":{"v":{"ms":300},"c":"01a10c942d800003-0000000000000001"}}},
+  "changes": [
+    {"fields":{"pos":{"v":{"ms":0},"c":"01a10c942d800004-0000000000000001","reset":true}}}
+  ],
+  "expect": {"status":["applied"],"derived":{"state":"PLAYED","positionMs":0}}
+}

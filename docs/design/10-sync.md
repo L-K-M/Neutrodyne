@@ -240,6 +240,20 @@ Device-local: `lastViewedAt` ("new since last visit" is per device), `kind` and 
 
 The [definition of done](../PLAN.md#72-definition-of-done-every-milestone) requires every new portable key to declare `synced`; the default for a new key is `false`.
 
+**Implementation note (2026-10-19, MS0).** `SettingKey.synced` already exists.
+MS0 validates the current five playback keys, two feed keys and seven
+virtual-group view keys (05 already classifies `groups.*`); smart-resume
+and sleep keys arrive classified with their owning features. The sync settings
+table above is not an exhaustive current-key allow-list; the existing
+virtual-group flags are retained. The protocol
+validates the generic setting envelope; the client validates key membership,
+type and range through the existing registry. `SettingsCapture`, the domain
+`SettingsSyncPort`, recovery/effect draining and typed raw-envelope ownership
+remain MS2. No eager startup engine or new domain port is added in W1/W2.
+The storage contract remains `pendingSetting = {value, clock}` and
+`pendingAuth = {reference, credentialOrigin, clock}` in existing `clocks` JSON,
+committed with the page cursor and cleared by exact completed clock.
+
 ### Per-scope overrides
 
 | Override field (`ScopeOverrides`, [D20](../PLAN.md#3-key-decisions)) | Podcast and group scope |
@@ -380,6 +394,11 @@ GET /.well-known/neutrodyne-sync
 `features` lists what this server offers: `sse` (events), `link` (link codes), `password` (password login is enabled for at least one account — the client then shows the password option), `gpodder` (the v1.x layer is enabled). `ServerDiscovery` (client) rejects a document whose `protocol` range excludes `PROTOCOL_VERSION` (`ServerTooOld` or `AppTooOld`), records `serverTime − local midpoint` as the first clock-offset sample, and is called by the setup screen's "Check" and before every link attempt. Discovery is unauthenticated and reveals only the server's display name and version.
 
 **M0b skeleton (deviation 2026-10-06).** The M0b server serves the document from `:sync:server` (`WellKnownRoutes`) instead of `:sync:protocol`'s `DiscoveryDocument` DTO (which arrives with MS0): `name` is the fixed string `Neutrodyne Sync` (the example's per-server display name has no configuration source yet; one arrives with the web UI), `features` is empty (no `sse`, `link` or `password` exists before MS1), and `maxBatch`/`maxSkewMs` come from the server's `DiscoveryNumbers` until `ProtocolLimits` lands in `:sync:protocol` with MS0. `PROTOCOL_VERSION` itself already lives in `:sync:protocol` (`commonMain`).
+
+**Implementation note (2026-10-19, MS0).** `WellKnownRoutes` now uses the
+shared `dto.DiscoveryDocument`, `dto.ProtocolRange`, `ProtocolLimits` and
+`SyncJson`. The skeleton still reports an empty feature list and the fixed
+name; this adopts the wire contract without claiming MS1 routes exist.
 
 ### Sync round trip
 
@@ -546,6 +565,38 @@ enum class SyncErrorCode(val wire: String) { PROTOCOL_TOO_OLD("protocol_too_old"
     UNKNOWN_COLLECTION("unknown_collection"), INSECURE_TRANSPORT("insecure_transport") }
 ```
 
+**Implementation note (2026-10-19, MS0).** The frozen W1/W2 API is:
+
+- `SyncCollection.fields` supplies all seven collections' `FieldSpec` kind,
+  type, nullability and byte cap. Missing fields do nothing; nullable fields
+  accept explicit `JsonNull`. `FieldValue`'s serializer preserves this despite
+  `SyncJson.explicitNulls = false`. DTOs live in `protocol.dto`.
+- `PodcastId`, `GroupId`, `EpisodeKey` and `RecordId` provide `fromWire`,
+  `fromRid` and `toWire`. Persistence keeps exact UUID concatenation; the
+  2-KiB cap applies to the opaque key component, not its UUID prefix.
+- `ProtocolValidation.change(dto, serverTimeMs?)` yields typed `Write` or
+  `Rekey`; `record(dto)` yields raw `RecordState`. Rekey changes only the key
+  within one podcast, with no fields. The played pair shares one clock;
+  reset sits beside `v`. Unknown fields stay opaque LWW, unknown collections
+  reject. Key/settings normalization stays with existing owners.
+- `RecordMerger.merge(stored?, incoming)` returns `MergeResult` with raw
+  record, advanced/lost fields and status; `isDead` checks removal/redirect.
+  `RecordState.toDto(id, seq, by)` retains clocks/reset/hints;
+  `EpisodeStateRules.derive(fields)` returns effective progress, timestamps,
+  position, favourite and Up next eligibility. `SurvivorRule.podcast/group`
+  chooses oldest timestamp then stable ID; `ReplicatedOrder.compare` orders
+  key ties. Raw scalar state is `JsonElement`, `Hlc?`, reset (`JsonNull` is
+  explicit null). Feed-key sets contain bounded opaque, scheme-free identities
+  from `UrlNormalizer`, not fetch URLs; protocol does not normalize them. The
+  returned in-progress `startedAt` seeds a missing local timestamp; apply retains an existing non-null value as specified below.
+- `ProtocolCodec` bounds JSON before tree/DTO decoding. Transport owners also
+  cap streaming bytes; changes are admitted independently.
+  `ProtocolException.code` reports bounded errors without payloads.
+
+No domain interface is added; later ports require `:core:testing` fakes.
+W3–W5 use [02's primitive capture contract](02-data-model.md#kotlin-side-captures).
+No forbidden project edge, D91 version bump or D93 fallback is introduced.
+
 ### Change statuses
 
 | Status | Meaning | Client action |
@@ -673,6 +724,24 @@ enum class SyncCollection(val wire: String, val fields: Map<String, FieldSpec>) 
 }
 data class FieldSpec(val name: String, val kind: FieldKind, val type: ValueType, val maxBytes: Int)
 ```
+
+**Implementation note (2026-10-19, MS0).** Equal complete clocks identify
+the same field write, including reset; conflicting LWW payloads are `invalid`.
+Redirects have one authoritative server assignment: identical repeats are
+idempotent, conflicting assignments are diagnosed rather than promised to
+commute. Extrema preserve the maximum complete clock independently of value.
+State equality includes raw clocks, resets, sets and hint provenance. D92 and
+its S15 fallback remain unchanged.
+
+A pushed hint's provenance is the greatest field clock in that change; a
+hint without an anchor is invalid. Keep each newest non-null hint, using the
+lexicographically greater canonical JSON scalar for equal-provenance ties.
+`RecordState.matchClocks` retains per-hint provenance. `RecordDto` and replay
+`ChangeDto` add optional `matchClocks: Map<String, String>` so relaying partial
+updates cannot make older hints new. Legacy records/changes without it use
+their greatest field clock. Supplied provenance is admitted by the same clock
+bound as fields. This additive v1 metadata does not make absent hints erase
+known ones.
 
 ### Episode-state rules
 
@@ -845,7 +914,7 @@ END;
 
 Kotlin-side captures use `SyncOutboxDao` (02), which computes the clock with the same SQL expression inside the caller's transaction: `captureLiteral(coll, rid, field, json)` (local merges, "Keep mine"), `captureIntent(coll, rid, field, json)` (the explicit mark-unplayed and position-reset chains; guarded like the triggers by `enabled AND NOT applying`, so it never echoes a remote derivation), `captureAll(coll, rid)` (a `*` row) and `captureAt(coll, rid, field, atMs, literal)` (restore while linked and the first link: clock = `atMs << 16` on this node, written as "insert, or raise only if older" with `INSERT OR IGNORE` plus a guarded `UPDATE`, so an older restored stamp never replaces a newer pending change; for played, position, session and setting fields `literal` is the frozen value the restore or merge wrote — the played pair, the `pos` snapshot `{ms, dur, src}` or the reset form, the session, the setting's `v` — never a later read of a projection).
 
-`captureStored(coll, rid, field, stored: FieldValue)` is distinct: full resync copies an accepted value and its complete original clock into a literal outbox row. Every comparison, coalescing choice and acknowledgement uses `(hlc, nodeId)`; `captureAt` continues to create historical local stamps for first link and backup restore only.
+`captureStored(coll: String, rid: String, field: String, hlc: Long, nodeId: String, literal: String)` is distinct: full resync copies an accepted value and its complete original clock into a literal outbox row. Every comparison, coalescing choice and acknowledgement uses `(hlc, nodeId)`; `captureAt` continues to create historical local stamps for first link and backup restore only.
 
 Paths that must not be captured run their transaction with `applying = 1` (`SyncStateDao.withApplying { … }`, 02): `SyncApplier`, `SessionAdopter`, `FirstLinkMerger`'s local writes, episode retention and stub cleanup (`db-maintenance`), deletion of a local merge's loser, and restores whose captures are recorded explicitly with `captureAt` ([Interaction with backup, retention and YouTube](#interaction-with-backup-retention-and-youtube)).
 
@@ -1854,6 +1923,17 @@ Serves N1, N9, N13. Strategy and CI placement: [09 Test strategy](09-quality-and
 ### Conformance vector runs
 
 `ConformanceVectorTest` (`:sync:protocol` `commonTest` on the desktop JVM) runs every file of `sync/protocol/vectors/` through `RecordMerger` and `EpisodeStateRules`; `ServerConformanceTest` (`:sync:server`) replays the same files through `RecordWriter` on a temporary database. The list of required vectors is in [Conformance vectors](#conformance-vectors) (MS0 acceptance 1, MS1 acceptance 2). A bug fix in merge behaviour always adds a vector.
+
+**Implementation note (2026-10-19, MS0).** Pure `ConformanceVectors.run(text)`
+in `commonMain` runs fixtures (`version` omitted means 1) of collection/ID, stored state,
+changes and expected statuses/full fields, plus optional derivation, death,
+clock, admission, survivor and order checks. Permutations compare full state.
+An optional merge callback lets the server reuse these assertions through its
+writer adapter; the default is `RecordMerger.merge`. Only desktop tests load
+files. `serverOnly` scenarios return `DEFERRED_MS1`,
+never a passed `RecordWriter` test. W6 reuses these rules and emits `seed=<Long>`
+and ordered `<index>:<device>:<operation>:<canonical payload>` trace lines;
+minimized failures become resources. Protocol never depends on core:testing.
 
 ### Convergence property test
 

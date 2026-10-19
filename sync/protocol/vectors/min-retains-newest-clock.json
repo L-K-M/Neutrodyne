@@ -1,0 +1,12 @@
+{
+  "name": "min-retains-newest-clock",
+  "collection": "podcast",
+  "id": "11111111-1111-4111-8111-111111111111",
+  "changes": [
+    {"fields":{"subscribedAt":{"v":100,"c":"01a10c942d800000-0000000000000001"}}},
+    {"fields":{"subscribedAt":{"v":200,"c":"01a10c942d800003-0000000000000001"}}},
+    {"fields":{"subscribedAt":{"v":50,"c":"01a10c942d800001-0000000000000001"}}}
+  ],
+  "permutations": true,
+  "expect": {"status":["applied","applied","applied"],"fields":{"subscribedAt":{"v":50,"c":"01a10c942d800003-0000000000000001"}},"maxClock":"01a10c942d800003-0000000000000001"}
+}

@@ -1,0 +1,12 @@
+{
+  "name": "partial-hints-permutations",
+  "collection": "episode",
+  "id": {"p":"11111111-1111-4111-8111-111111111111","k":"g:ep1"},
+  "changes": [
+    {"fields":{"fav":{"v":true,"c":"01a10c942d800000-0000000000000001"}},"match":{"title":"early","guid":"guid1"}},
+    {"fields":{"pos":{"v":{"ms":5},"c":"01a10c942d800002-0000000000000001"}},"match":{"title":"latest"}},
+    {"fields":{"measuredDurationMs":{"v":10,"c":"01a10c942d800001-0000000000000001"}},"match":{"enc":"https://cdn.example/ep"}}
+  ],
+  "permutations": true,
+  "expect": {"status":["applied","applied","applied"],"match":{"title":"latest","guid":"guid1","enc":"https://cdn.example/ep"},"matchClocks":{"title":"01a10c942d800002-0000000000000001","guid":"01a10c942d800000-0000000000000001","enc":"01a10c942d800001-0000000000000001"}}
+}
