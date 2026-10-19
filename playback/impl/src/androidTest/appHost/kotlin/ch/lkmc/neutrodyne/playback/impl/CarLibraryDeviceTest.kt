@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.playback.impl
 
 import android.content.ComponentName
 import android.content.Intent
+import android.media.AudioManager
 import android.media.browse.MediaBrowser
 import android.media.session.MediaController
 import android.os.Bundle
@@ -13,6 +14,9 @@ import ch.lkmc.neutrodyne.MainActivity
 import ch.lkmc.neutrodyne.NeutrodyneApplication
 import ch.lkmc.neutrodyne.core.database.PodcastGroupMemberEntity
 import ch.lkmc.neutrodyne.core.model.ContextType
+import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
+import ch.lkmc.neutrodyne.core.testing.ReleaseSmoke
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.groupEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
@@ -32,7 +36,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Platform MediaBrowser/transport bridge, including legacy unset start index/time. DHU is W9. */
+/** Platform MediaBrowser/transport bridge, including legacy unset start index/time. DHU requires separate head-unit evidence. */
 @RunWith(AndroidJUnit4::class)
 class CarLibraryDeviceTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -97,7 +101,8 @@ class CarLibraryDeviceTest {
             server.close()
         }
 
-    @Test fun legacyBrowserListsFourRootsAndQueuedGroupTapKeepsGroupContext() =
+    @Test @ReleaseSmoke
+    fun legacyBrowserListsFourRootsAndQueuedGroupTapKeepsGroupContext() =
         runBlocking {
             graph.queueRepository().addLast(listOf(episode))
             val browser = connect()
@@ -119,7 +124,8 @@ class CarLibraryDeviceTest {
             assertEquals(generation + 1, db.playSessionDao().get()?.generation)
         }
 
-    @Test fun legacyAssistantSearchStartsExactGroupWithoutExplicitIndexOrTime() =
+    @Test @ReleaseSmoke
+    fun legacyAssistantSearchStartsExactGroupWithoutExplicitIndexOrTime() =
         runBlocking {
             val browser = connect()
             withContext(Dispatchers.Main) {
@@ -133,6 +139,64 @@ class CarLibraryDeviceTest {
                     .get()!!
             assertEquals(ContextType.GROUP, session.contextType)
             assertEquals(group, session.contextId)
+        }
+
+    @Test @ReleaseSmoke
+    fun legacyHardwareSkipUsesIntervalsAndEpisodeModeAdvances() =
+        runBlocking {
+            val db = graph.databaseOpener.requireDatabase()
+            val next =
+                db.episodeDao().insertStub(
+                    episodeEntity(podcastId = checkNotNull(podcast)) {
+                        copy(enclosureUrl = server.url("/next.mp3").toString(), durationMs = 40_000)
+                    },
+                )
+            graph.queueRepository().addLast(listOf(next))
+            val browser = connect()
+            val transport =
+                withContext(Dispatchers.Main) { MediaController(app, browser.sessionToken).transportControls }
+            try {
+                graph.settingsRepository.set(PlaybackSettingKeys.HARDWARE_BUTTONS, HardwareButtons.SKIP)
+                graph.settingsRepository.set(PlaybackSettingKeys.SKIP_FORWARD_MS, 10_000L)
+                withContext(Dispatchers.Main) { transport.playFromMediaId("episode:$episode@upnext", null) }
+                awaitCurrent()
+                withContext(Dispatchers.Main) { transport.skipToNext() }
+                withTimeout(20_000) {
+                    while (graph.playbackStateSource.nowPlaying.value
+                            ?.position
+                            ?.positionMs
+                            ?.let { it >= 10_000 } !=
+                        true
+                    ) {
+                        delay(50)
+                    }
+                }
+                assertEquals(
+                    episode,
+                    graph.playbackStateSource.nowPlaying.value
+                        ?.episodeId,
+                )
+                graph.settingsRepository.set(PlaybackSettingKeys.HARDWARE_BUTTONS, HardwareButtons.EPISODE)
+                // The setting collector is asynchronous; the observed transport result is the proof.
+                delay(500)
+                withContext(Dispatchers.Main) { transport.skipToNext() }
+                withTimeout(20_000) {
+                    while (graph.playbackStateSource.nowPlaying.value
+                            ?.episodeId != next ||
+                        graph.playbackStateSource.nowPlaying.value
+                            ?.isPlaying != true
+                    ) {
+                        delay(50)
+                    }
+                }
+                assertTrue(app.getSystemService(AudioManager::class.java).activePlaybackConfigurations.isNotEmpty())
+            } finally {
+                graph.settingsRepository.set(PlaybackSettingKeys.HARDWARE_BUTTONS, HardwareButtons.EPISODE)
+                graph.settingsRepository.set(
+                    PlaybackSettingKeys.SKIP_FORWARD_MS,
+                    PlaybackSettingKeys.SKIP_FORWARD_MS.default,
+                )
+            }
         }
 
     private suspend fun connect(): MediaBrowser {

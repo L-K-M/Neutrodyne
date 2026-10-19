@@ -39,7 +39,7 @@ import org.junit.runner.RunWith
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Real app graph/player/HTTP boundary. Audible listening and optimized-release evidence go to W9. */
+/** Real app graph/player/HTTP boundary. Audible listening requires a separate device report. */
 @RunWith(AndroidJUnit4::class)
 class VideoAsAudioTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()

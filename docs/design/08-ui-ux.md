@@ -1750,7 +1750,7 @@ Compact portrait layout; other layouts in [Side panel, medium widths and tableto
 
 ### Tabs panel
 
-**Implementation note (2026-10-19, M5).** W7 uses the existing M4 bounded
+**Implementation note (2026-10-19, M5).** The M5 player uses the existing M4 bounded
 player content slot for the tabs, retaining the mini/full geometry. Selecting
 a tab opens its content; Back closes that content before collapsing the
 player. The separate draggable panel geometry remains part of M10 polish.
