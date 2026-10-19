@@ -300,7 +300,7 @@ class DownloadFilesTest {
             val parent = Files.createTempDirectory("w3-downloads")
             try {
                 val dirs = AppDirs(parent, parent, parent, parent, parent, parent.resolve("Downloads"))
-                val roots = DesktopStorageRoots(dirs)
+                val roots = DesktopStorageRoots(dirs, JournalTestStore(), { emptyList() })
                 assertEquals("dir:default", roots.current())
                 assertNull(roots.resolve("dir:unsupported"))
                 assertNotNull(roots.resolve("dir:default"))

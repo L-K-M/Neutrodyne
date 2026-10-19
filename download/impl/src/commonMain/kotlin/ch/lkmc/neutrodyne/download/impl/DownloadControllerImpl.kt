@@ -331,7 +331,7 @@ internal class DownloadControllerImpl(
         dao.observeLiveFor(listOf(episodeId)).map { dao.byEpisode(episodeId)?.status() }.distinctUntilChanged()
 
     override fun observeAll(): Flow<DownloadsOverview> =
-        combine(dao.observeEntries(), files.observeStorage()) { rows, storage ->
+        combine(dao.observeEntries(), files.observeStorage(), files.observeNotices()) { rows, storage, fileNotices ->
             val ordered =
                 rows.sortedWith(
                     compareByDescending<DownloadEntryRow> { it.download.priority }
@@ -356,6 +356,7 @@ internal class DownloadControllerImpl(
                     }.map { it.entry() },
                 storage,
                 buildSet {
+                    addAll(fileNotices)
                     if (storage.autoBlockedByCap) add(DownloadNotice.CAP_REACHED)
                     if (storage.orphanBytes > 0) add(DownloadNotice.ORPHAN_FILES)
                 },
@@ -388,20 +389,12 @@ internal class DownloadControllerImpl(
     override suspend fun storageRoots() = roots.list()
 
     override suspend fun registerFolderRoot(absolutePath: String) =
-        rootRegistration?.registerFolderRoot(absolutePath) ?: FolderRootResult.Rejected(FolderRejectReason.UNSUPPORTED)
+        rootRegistration?.registerFolderRoot(absolutePath) ?: roots.registerFolderRoot(absolutePath)
 
     override suspend fun changeRoot(
         rootId: String,
         mode: RootChangeMode,
-    ): RootChangeResult =
-        rootRegistration?.changeRoot(rootId, mode)
-            ?: if (mode ==
-                RootChangeMode.MOVE_EXISTING
-            ) {
-                RootChangeResult.Unsupported
-            } else {
-                files.changeRoot(rootId, mode)
-            }
+    ): RootChangeResult = rootRegistration?.changeRoot(rootId, mode) ?: files.changeRoot(rootId, mode)
 
     override suspend fun deleteOrphanFiles() = files.deleteOrphanFiles()
 

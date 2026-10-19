@@ -25,7 +25,8 @@ enum class CleanupReason { STARTUP, DAILY, PLAYED, POLICY_CHANGED, STORAGE }
 /** W4 owner. Single flight on a move mutex, separate from planner/cleanup and claimMutex.
  * deadline is monotonic Clock.elapsedRealtime milliseconds; null means no deadline (desktop).
  * Copy/verify/sync precedes the guarded completed-row commit, then journal source deletion.
- * No filesystem IO inside a DB transaction or under claimMutex. */
+ * Bulk copy IO stays outside claimMutex; publication/rollback and journal drains share it.
+ * No filesystem IO inside a DB transaction. */
 interface DownloadMover {
     suspend fun run(
         target: String,

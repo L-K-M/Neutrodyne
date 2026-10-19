@@ -64,6 +64,7 @@ internal class DownloadComponents(
     val deletes = DeferredDeletes(device, fileSystem, roots, db.downloadDao()::allRows)
     val reconciler = DownloadReconciler(db, fileSystem, roots, uris, index, deletes, claimMutex, host.liveTokens, clock)
     val quota = DownloadQuota(settings)
+    val mover = DownloadMoverImpl(db, fileSystem, roots, device, index, deletes, claimMutex, clock, quota)
     private val storage =
         DownloadStorage(
             db,

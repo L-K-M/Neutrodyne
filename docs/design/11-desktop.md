@@ -985,6 +985,15 @@ Serves R8.8, R4.2, R4.3, R8.11, N6. Delivered in M6a (default folder, desktop la
 
 ### Download folders
 
+**Implementation note (2026-10-19, M6b).** W4 stores `desktop.downloads_dir`
+as device-local text, with empty text representing the default folder. The
+registry retains roots with outstanding journal deletions as well as live rows
+and the current root, so a deferred playing source remains reachable. Validation
+uses a unique `.neutrodyne-probe-*` file to avoid overwriting a user file with the
+fixed probe name. Root paths retain `toRealPath()`'s filesystem spelling, including
+decomposed Unicode: normalising an existing path to NFC can point at a different
+or absent directory on Linux. Media component naming still uses NFC.
+
 | Folder | Path | Setting |
 |---|---|---|
 | Default | `<data>/Downloads/` — `%LOCALAPPDATA%\Neutrodyne\Downloads\`, `~/Library/Application Support/ch.lkmc.neutrodyne/Downloads/`, `$XDG_DATA_HOME/neutrodyne/Downloads/` | `desktop.downloads_dir` = null |

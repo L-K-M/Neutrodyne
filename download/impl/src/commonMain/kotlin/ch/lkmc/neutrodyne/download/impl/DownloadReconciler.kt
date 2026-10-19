@@ -51,6 +51,7 @@ internal class DownloadReconciler(
             }
             deletes.drain(db.playSessionDao().get()?.currentEpisodeId)
             sweepAndReport()
+            roots.prune(dao.rootsInUse().toSet() + deletes.entries().map { it.rootId })
         }
     }
 

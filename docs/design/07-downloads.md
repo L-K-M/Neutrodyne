@@ -1627,6 +1627,23 @@ Desktop: installing a new MSI, DMG, DEB or RPM, or unpacking a new ZIP or tar.gz
 
 ### Moving between roots
 
+**Implementation note (2026-10-19, M6b).** W4 uses the frozen first-batch
+`rowsOnOtherRoots(target, 20)` query and a keyset continuation query after skipped
+rows, so an unavailable first batch cannot hide later available files. The
+unavailable-only terminal rule in step 5 wins over its earlier pending wording:
+the target is cleared when only unavailable sources remain; current-file and IO
+failures keep it set. The notice combines the persisted target and W3's quota
+state (`MOVE_IN_PROGRESS`, `STORAGE_LOW`); the API has no skipped-count field.
+Bulk copying remains outside the claim mutex. Final ownership checks, journaling,
+rename, guarded row publication, index update and source deletion share that
+mutex, with the publication/rollback section non-cancellable. This prevents a
+controller deletion from racing the rename, without filesystem IO inside a Room
+transaction. Same-store rollback restores the source on a rejected transaction;
+a rename surviving process death is adopted by its target path and length.
+W5/W7 own worker-factory/lane bindings, scheduling and root/session event pokes;
+W4 exposes the mover and supplies tested, unbound hosts. The existing desktop
+root provider receives device settings and lazy row access for registration.
+
 `changeRoot(rootId, moveExisting)` makes `rootId` current — Android writes `downloads.root_id`; the desktop writes 11's `desktop.downloads_dir` (null for `dir:default`, the registered path otherwise; the root must come from `storageRoots()` or `registerFolderRoot`). New rows use the new root at once, and queued or paused rows follow it at their next prepare, `.part` included ([RSS prepare](#rss-prepare) step 3; YouTube rows use the same placement step). With `moveExisting = true` (Android's settings dialog "Move {n} downloads ({2.3 GB}) to {SD card}?", the desktop's "Move {n} downloads ({size}) to {folder}?" in [11 Change folder](11-desktop.md#change-folder)), the **completed** files follow through the common `DownloadMover`, run by `DownloadMoveWorker` on Android (`download-move` with `targetRootId`, 8-min soft deadline, continuation `APPEND_OR_REPLACE`) and by `DesktopMoveLane` on the desktop (lane `downloads-move`, no deadline; the target is persisted in `downloads.move_target`, so a quit or crash continues the move at the next start, [R8.8](../PLAN.md#21-functional-requirements)). `changeRoot(…, moveExisting = false)` clears `downloads.move_target`, so files left on the old root stay there.
 
 `DownloadMover.run(target, deadline)`:

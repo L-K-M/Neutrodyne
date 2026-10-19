@@ -52,7 +52,7 @@ class FakeDownloadRootRegistration : DownloadRootRegistration {
     val registrations = mutableListOf<String>()
     val changes = mutableListOf<Pair<String, RootChangeMode>>()
     var registrationResult: FolderRootResult = FolderRootResult.Rejected(FolderRejectReason.UNSUPPORTED)
-    var changeResult: RootChangeResult = RootChangeResult.Unsupported
+    var changeResult: RootChangeResult = RootChangeResult.Unavailable
 
     override suspend fun registerFolderRoot(absolutePath: String): FolderRootResult {
         registrations += absolutePath
