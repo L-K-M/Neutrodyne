@@ -1032,7 +1032,15 @@ class ImportViewModelTest : MainDispatcherTest() {
                 }
             val id = seed()
             val vm =
-                ImportViewModel(id, imports, broken, visibility, appScope(), podcasts, ImportSessionOperations(appScope()))
+                ImportViewModel(
+                    id,
+                    imports,
+                    broken,
+                    visibility,
+                    appScope(),
+                    podcasts,
+                    ImportSessionOperations(appScope()),
+                )
             advanceUntilIdle()
             assertFailsWith<IllegalStateException> { vm.setTargetGroupName("News") }
             assertNull(session(id)!!.options.targetGroupName)
