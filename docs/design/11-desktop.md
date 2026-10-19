@@ -528,7 +528,7 @@ data class LaneStatus(val running: Boolean, val lastStartAt: Instant?, val lastE
 | `downloads-auto` | `DesktopDownloadLane` (lane `AUTO`) | [07 Desktop runners](07-downloads.md#desktop-runners) | runnable `AUTO` rows, planner output | refresh ingested new episodes, cleanup, wake |
 | `downloads-move` | `DesktopMoveLane` (`:download:impl`) | [07 Moving between roots](07-downloads.md#moving-between-roots), [Change folder](#change-folder) | a pending folder move | "Change folder…" |
 | `artwork` | `DesktopArtworkLane` (`:core:artwork`) | [08 Artwork pipeline](08-ui-ux.md#artwork-pipeline) | missing or stale pinned artwork | new podcasts or episodes ingested |
-| `app-update-check` | `DesktopUpdateCheckLane` (`:core:data`) | [09 Update check](09-quality-and-release.md#update-check) | 24 h (jittered ± 1 h) after `updates.last_check_at` while `updates.check_enabled` is on | "Check now" |
+| `app-update-check` | `DesktopUpdateCheckLane` (`:core:data`) | [09 Update check](09-quality-and-release.md#update-check) | 24 h (plus 0–1 h jitter) after `updates.last_check_at` while `updates.check_enabled` is on | "Check now" |
 | `engine-update` | `DesktopEngineUpdateLane` (`:youtube:ytdlp-desktop`) | [04 Engine updates](04-youtube.md#engine-updates), [Engine updates on the desktop](#engine-updates-on-the-desktop) | 04's cadence and policy | circuit breaker opening, "Check for engine update" |
 | `sync` | `DesktopSyncLane` (`:sync:impl`) | [10 Client sync engine](10-sync.md#client-sync-engine) | push 2 s after the last local change; pull every 15 min; SSE while running | local change, SSE `changed`, "Sync now", wake, network regained |
 | `maintenance` | `DesktopMaintenanceLane` (`:core:data`) | [02 Retention and maintenance](02-data-model.md#retention-and-maintenance) | once per 24 h, not earlier than 10 min after start | — |
@@ -653,6 +653,8 @@ R8.4's "pause when the output device in use disappears", the desktop form of And
 Policy: `DeviceRemoved` for the device in use → pause and save; `DefaultChanged` alone → keep playing on the new default; a device that stops with an error → `DeviceLost`, pause, save, and re-create the device at the next play. Linux is best effort: PulseAudio and PipeWire move a stream to another sink when its sink disappears, so playback may continue on the speakers (recorded by MD0; a sink-removal subscription is v1.x). Unverified per OS and per Mac model; MD0 AC4.
 
 ### Notifications
+
+**Implementation note (2026-10-19, M11a).** `DesktopUpdateNotifier` lives in `:desktopApp` so it can use localized shell resources without adding a UI dependency to `:core:data`. Its stable `app-update` ID and Updates route dispatch through the existing `DesktopNotifier` banner binding; native OS delivery remains MD2. The update lane skips offline ticks without postponing an overdue check, and its coordinator enforces persisted due times even after a poke.
 
 `DesktopNotifier` is a `:core:common` `desktopMain` port ([Runner contract](#runner-contract)) implemented by `OsDesktopNotifier` here and bound in `DesktopAppGraph`; the owners' desktop notifiers call it — 03's `DesktopNewEpisodePoster` (`:desktopApp`), 07's download-failure and storage notices (`:download:impl` `desktopMain`), 09's `DesktopUpdateNotifier` (`:core:data` `desktopMain`), 04's engine alert and 10's held mass change (`:sync:impl` `desktopMain`) — so none of them depends on `:desktop:system`. Content, grouping and per-kind switches are the owners'; the desktop has no notification channels, so channel-level controls do not exist ([Behaviour differences from Android](#behaviour-differences-from-android)).
 
@@ -1531,6 +1533,8 @@ sources are attached to every release.
 ```
 
 ### Desktop update check
+
+**Implementation note (2026-10-19, M11a).** Daily due times are last successful check plus 24 h plus 0–1 h jitter, following 09's precise Checking table; this replaces the lane table's earlier ±1 h shorthand. The first delay remains exactly 24 h.
 
 **Implementation note (2026-10-19, M11a).** Use `BuildInfo.desktop.os/arch/installKind` plus runtime `os.version`; Android uses preferred SUPPORTED_ABIS[0]/SDK, never installed APK ABI or User-Agent parsing. Selector results distinguish selected/missing/development/newer-OS (with minOs).
 

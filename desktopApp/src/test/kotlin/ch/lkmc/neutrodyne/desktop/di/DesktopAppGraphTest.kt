@@ -71,6 +71,23 @@ class DesktopAppGraphTest {
     }
 
     @Test
+    fun updateLaneResolvesWithTheExistingBannerBackendAfterDatabaseGate() =
+        runBlocking {
+            // Materializing the initializer set must not pull a database-backed lane forward.
+            val initializer = graph.initializers.single { it::class.simpleName == "UpdateCheckInitializer" }
+            assertThat(initializer.order).isEqualTo(200)
+            assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+            graph.databaseOpener.awaitOpen()
+            try {
+                initializer.run()
+                assertThat(graph.jobRunner.status.value).containsKey("app-update-check")
+                assertThat(graph.bannerNotifier).isSameInstanceAs(graph.bannerNotifier)
+            } finally {
+                graph.databaseOpener.requireDatabase().close()
+            }
+        }
+
+    @Test
     fun durablePlaybackPortsResolveToSingleProductionBindings() =
         runBlocking {
             graph.databaseOpener.awaitOpen()

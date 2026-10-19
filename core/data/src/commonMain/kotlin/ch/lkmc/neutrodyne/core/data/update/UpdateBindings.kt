@@ -8,21 +8,21 @@ import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.Provides
 import kotlin.random.Random
 
-/** No startup contribution or shell accessor: W4-W6 opt into these lazy app-scoped bindings. */
+/** Shared services stay lazy until the band-200 initializer or an explicit UI request. */
 @ContributesTo(AppScope::class)
 @BindingContainer
-internal object UpdateBindings {
-    @Provides fun parser(impl: UpdateManifestParser): UpdateParser = impl
+object UpdateBindings {
+    @Provides internal fun parser(impl: UpdateManifestParser): UpdateParser = impl
 
-    @Provides fun source(impl: GitHubUpdateSource): UpdateSource = impl
+    @Provides internal fun source(impl: GitHubUpdateSource): UpdateSource = impl
 
-    @Provides fun store(impl: UpdateCheckStore): UpdateStore = impl
+    @Provides internal fun store(impl: UpdateCheckStore): UpdateStore = impl
 
-    @Provides fun selector(impl: DesktopAssetSelector): UpdateAssetSelector = impl
+    @Provides internal fun selector(impl: DesktopAssetSelector): UpdateAssetSelector = impl
 
-    @Provides fun timeline(): VerificationTimeline = VerificationTimeline()
+    @Provides internal fun timeline(): VerificationTimeline = VerificationTimeline()
 
-    @Provides fun jitter(): UpdateJitter = UpdateJitter { Random.nextLong(JITTER_LIMIT_EXCLUSIVE_MS) }
+    @Provides internal fun jitter(): UpdateJitter = UpdateJitter { Random.nextLong(JITTER_LIMIT_EXCLUSIVE_MS) }
 
     private const val JITTER_LIMIT_EXCLUSIVE_MS = 3_600_001L
 }

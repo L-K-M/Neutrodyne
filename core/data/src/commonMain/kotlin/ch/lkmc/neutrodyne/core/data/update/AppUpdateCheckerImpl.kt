@@ -33,6 +33,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -108,7 +109,8 @@ internal class AppUpdateCheckerImpl(
             snapshot!!.lastCheckAtMs?.let { save(Keys.LAST_CHECK_AT, it) }
             recompute()
             initialized = true
-            runner().setAutomaticChecks(scheduling())
+            // Cancelling this worker's periodic request can cancel initialize's caller. Install
+            // the application-scope observer first so a later switch-on still schedules work.
             scope.launch {
                 settings.observe(Keys.CHECK_ENABLED).collect { choice ->
                     // Cancel before taking the mutation lock: posting or a cache write may be
@@ -128,6 +130,7 @@ internal class AppUpdateCheckerImpl(
                     }
                 }
             }
+            runner().setAutomaticChecks(scheduling())
         }
     }
 
@@ -223,7 +226,14 @@ internal class AppUpdateCheckerImpl(
                 mutableState.value = UpdateCheckState.Checking
                 current.job.also { it.start() }
             }
-        return task.await()
+        return try {
+            task.await()
+        } catch (cancelled: CancellationException) {
+            // The executor's GET is an application-scope child. A stopped worker/lane must
+            // explicitly cancel it too, or quit/WorkManager stops leave network work alive.
+            withContext(NonCancellable) { task.cancelAndJoin() }
+            throw cancelled
+        }
     }
 
     private suspend fun perform(current: Flight): UpdateCheckState {

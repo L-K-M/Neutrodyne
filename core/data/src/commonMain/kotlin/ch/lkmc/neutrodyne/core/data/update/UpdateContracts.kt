@@ -21,7 +21,7 @@ internal enum class UpdateInvocation { MANUAL, SCHEDULED }
 
 internal enum class UpdateScheduling { ENABLED, DISABLED }
 
-internal enum class UpdatePostResult { ACCEPTED, UNAVAILABLE }
+enum class UpdatePostResult { ACCEPTED, UNAVAILABLE }
 
 internal enum class UpdateStoreError { IO, CORRUPT }
 
@@ -104,7 +104,7 @@ internal fun interface UpdateJitter {
  * Write notified code only on ACCEPTED. Manual success records the code without calling post.
  * Stable IDs replace retries across the unavoidable crash window between dispatch and storage.
  */
-internal interface UpdateNotificationAdapter {
+interface UpdateNotificationAdapter {
     suspend fun post(info: UpdateInfo): UpdatePostResult
 
     suspend fun cancel()
