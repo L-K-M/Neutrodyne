@@ -140,7 +140,7 @@ class FakeDownloadController : DownloadController {
         mode: RootChangeMode,
     ): RootChangeResult {
         record(Call(Action.ROOT, rootId = rootId, rootMode = mode))
-        return if (mode == RootChangeMode.MOVE_EXISTING) RootChangeResult.Unsupported else rootResult
+        return rootResult
     }
 
     override suspend fun deleteOrphanFiles(): OrphanDeleteResult {

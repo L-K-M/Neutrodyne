@@ -10,6 +10,7 @@ import ch.lkmc.neutrodyne.core.common.JobLanePoker
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.datastore.DeviceSettingsStore
 import ch.lkmc.neutrodyne.core.domain.DownloadLifecycle
 import ch.lkmc.neutrodyne.core.domain.MissingLocalMediaReporter
 import ch.lkmc.neutrodyne.download.api.DownloadController
@@ -32,7 +33,11 @@ import kotlinx.coroutines.sync.withLock
 object DesktopDownloadBindings {
     @Provides
     @SingleIn(AppScope::class)
-    internal fun roots(dirs: AppDirs): StorageRoots = DesktopStorageRoots(dirs)
+    internal fun roots(
+        dirs: AppDirs,
+        device: DeviceSettingsStore,
+        db: Lazy<NeutrodyneDatabase>,
+    ): StorageRoots = DesktopStorageRoots(dirs, device, { db.value.downloadDao().allRows() })
 
     @Provides
     @SingleIn(AppScope::class)

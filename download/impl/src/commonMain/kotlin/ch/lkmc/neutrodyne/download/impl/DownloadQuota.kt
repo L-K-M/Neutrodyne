@@ -15,6 +15,8 @@ import kotlin.math.max
 internal class DownloadQuota(
     private val settings: SettingsRepository,
 ) {
+    val moveUnavailableSources = MutableStateFlow(0)
+    val moveStorageLow = MutableStateFlow(false)
     private val refused = MutableStateFlow<Long?>(null)
     val refusedEstimate = refused.asStateFlow()
     val capMb = settings.observe(DownloadSettingKeys.STORAGE_CAP_MB)

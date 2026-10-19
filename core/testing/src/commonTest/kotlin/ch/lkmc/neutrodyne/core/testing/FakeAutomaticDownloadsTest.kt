@@ -53,7 +53,7 @@ class FakeAutomaticDownloadsTest {
         runTest {
             val roots = FakeDownloadRootRegistration()
             assertIs<FolderRootResult.Rejected>(roots.registerFolderRoot("/folder"))
-            assertEquals(RootChangeResult.Unsupported, roots.changeRoot("root", RootChangeMode.MOVE_EXISTING))
+            assertEquals(RootChangeResult.Unavailable, roots.changeRoot("root", RootChangeMode.MOVE_EXISTING))
             assertEquals(listOf("/folder"), roots.registrations)
             assertEquals(listOf("root" to RootChangeMode.MOVE_EXISTING), roots.changes)
         }

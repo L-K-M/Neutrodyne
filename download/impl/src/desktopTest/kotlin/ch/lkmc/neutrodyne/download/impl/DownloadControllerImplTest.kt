@@ -429,7 +429,7 @@ class DownloadControllerImplTest {
             }
         }
 
-    @Test fun rootChangesDelegateOnlyWhenTheM6bOwnerIsSupplied() =
+    @Test fun rootChangesUseOwnerOrFileImplementation() =
         runTest {
             val owner = FakeDownloadRootRegistration()
             owner.changeResult = RootChangeResult.Applied
@@ -447,7 +447,7 @@ class DownloadControllerImplTest {
             assertEquals(listOf("chosen" to RootChangeMode.MOVE_EXISTING), owner.changes)
             fixture { f ->
                 assertEquals(
-                    RootChangeResult.Unsupported,
+                    RootChangeResult.Applied,
                     f.controller.changeRoot("chosen", RootChangeMode.MOVE_EXISTING),
                 )
             }

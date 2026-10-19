@@ -262,6 +262,17 @@ abstract class DownloadDao : DownloadQueries {
         limit: Int,
     ): List<DownloadEntity>
 
+    /** Keyset continuation prevents a full skipped batch from hiding available later rows. */
+    @Query(
+        "SELECT * FROM download WHERE state = 'COMPLETED' AND rootId <> :target" +
+            " AND episodeId > :afterId ORDER BY episodeId LIMIT :limit",
+    )
+    abstract suspend fun rowsOnOtherRootsAfter(
+        target: String,
+        afterId: Long,
+        limit: Int,
+    ): List<DownloadEntity>
+
     @Query(
         "SELECT d.episodeId FROM download d JOIN episode_state s ON s.episodeId = d.episodeId" +
             " WHERE d.state = 'COMPLETED' AND s.playedAt IS NOT NULL ORDER BY d.episodeId",
