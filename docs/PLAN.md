@@ -1424,6 +1424,11 @@ and worker creators stay unbound; ordinary startup never compiles or imports
 Python. No runtime updater, JS provider or engine-backed playback is activated.
 Host CPython 3.11.2 is a disclosed test fallback, not CPython 3.14 acceptance;
 replay fixtures are synthetic and successful residential captures remain open.
+W5 now supplies portable client admission, strict DTO/audio/error mapping, the
+pure selector and memory-only resolver single flight/cache. Its network-identity
+adapter is unbound. W4 host enforcement, W6 health, consumer integration and
+reference-device evidence remain separate gates; these local tests do not
+accept the milestone.
 See [04 Host and packaging](design/04-youtube.md#host-and-packaging) and
 [09 Recorded responses](design/09-quality-and-release.md#recorded-responses).
 
