@@ -43,6 +43,17 @@
       </intent-filter>
     </activity>
 
+    <!-- Export share-sheet URIs (05 Destinations); the paths resource exposes only <cache>/export/. -->
+    <provider
+      android:name="androidx.core.content.FileProvider"
+      android:authorities="${applicationId}.fileprovider"
+      android:exported="false"
+      android:grantUriPermissions="true">
+      <meta-data
+        android:name="android.support.FILE_PROVIDER_PATHS"
+        android:resource="@xml/file_paths" />
+    </provider>
+
     <!-- WorkManager is configured by NeutrodyneApplication (Configuration.Provider); ProfileInstaller stays -->
     <provider
       android:name="androidx.startup.InitializationProvider"

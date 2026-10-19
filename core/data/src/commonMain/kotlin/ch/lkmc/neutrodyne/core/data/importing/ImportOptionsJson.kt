@@ -92,6 +92,18 @@ internal data class ImportOptionsJson(
 
         fun decode(encoded: String): ImportOptions = json.decodeFromString<ImportOptionsJson>(encoded).toModel()
 
+        /**
+         * [decode] for rows that may be structurally corrupt: `null` instead of throwing, so
+         * callers can leave the persisted string (and any restore intent hidden inside it)
+         * untouched instead of substituting defaults.
+         */
+        fun decodeOrNull(encoded: String): ImportOptions? =
+            try {
+                decode(encoded)
+            } catch (_: Exception) {
+                null
+            }
+
         private fun restoreMode(name: String): RestoreMode? = RestoreMode.entries.firstOrNull { it.name == name }
 
         private fun restoreCategory(name: String): RestoreCategory? =
