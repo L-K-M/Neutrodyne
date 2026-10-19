@@ -11,10 +11,13 @@ import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
+import ch.lkmc.neutrodyne.core.domain.ChapterRepository
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
 import ch.lkmc.neutrodyne.core.domain.PodcastRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
+import ch.lkmc.neutrodyne.core.model.CurrentChapter
+import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import ch.lkmc.neutrodyne.core.model.EpisodeDetail
 import ch.lkmc.neutrodyne.core.model.ShowNotes
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
@@ -68,6 +71,8 @@ public data class EpisodeUiState(
     val messages: ImmutableList<UserMessage> = persistentListOf(),
     val isNowPlaying: Boolean = false,
     val isPlaying: Boolean = false,
+    val chapters: List<EpisodeChapter> = emptyList(),
+    val currentChapter: CurrentChapter? = null,
 ) {
     public val gone: Boolean
         get() = loaded && episode == null
@@ -83,6 +88,7 @@ public class EpisodeViewModel
     constructor(
         @Assisted private val episodeId: Long,
         private val episodes: EpisodeRepository,
+        private val chapters: ChapterRepository,
         private val podcasts: PodcastRepository,
         private val settings: SettingsRepository,
         private val playbackController: PlaybackController,
@@ -134,7 +140,18 @@ public class EpisodeViewModel
             combine(screenState, playbackStates.nowPlaying) { state, now ->
                 val current = now?.episodeId == episodeId
                 state.copy(isNowPlaying = current, isPlaying = current && now?.isPlaying == true)
-            }.stateIn(viewModelScope, SHARING, EpisodeUiState())
+            }.combine(chapters.observe(episodeId)) { state, rows -> state.copy(chapters = rows) }
+                .combine(playbackStates.currentChapter) { state, current ->
+                    state.copy(currentChapter = current?.takeIf { it.episodeId == episodeId })
+                }.stateIn(viewModelScope, SHARING, EpisodeUiState())
+
+        init {
+            viewModelScope.launch { suspendRunCatching { chapters.ensureLoaded(episodeId) } }
+        }
+
+        public fun onTimestamp(positionMs: Long) {
+            playback.seekOrPlay(episodeId, positionMs, uiState.value.episode?.durationMs)
+        }
 
         /** Repository-owned actions; the route owns navigation, URLs, share and clipboard. */
         public fun onAction(action: EpisodeAction) {

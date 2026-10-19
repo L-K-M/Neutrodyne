@@ -1750,6 +1750,16 @@ Compact portrait layout; other layouts in [Side panel, medium widths and tableto
 
 ### Tabs panel
 
+**Implementation note (2026-10-19, M5).** W7 uses the existing M4 bounded
+player content slot for the tabs, retaining the mini/full geometry. Selecting
+a tab opens its content; Back closes that content before collapsing the
+player. The separate draggable panel geometry remains part of M10 polish.
+Notes stays discoverable with an empty-state message: its repository is
+observed only while that tab is visible, so hiding it based on a background
+notes subscription would violate the observation rule above. Empty Chapters
+is hidden. Sleep state comes exclusively from the service; only validated
+minute choices are persisted, and failed writes produce the existing snackbar.
+
 A nested panel at the bottom of the full player with its own `AnchoredDraggableState` (Peek 56 dp ↔ Open = just below the top bar). Tabs: **Up next** (`UpNextList` with reorder, swipe-remove and the "Then: …" context header, same behaviour as the [Up next screen](#up-next)), **Chapters** (`ChapterList`: image 40 dp, title, start time, current chapter highlighted; tap seeks; hidden chapters excluded by 06), **Notes** ([show notes renderer](#show-notes-renderer) of the current episode). Tabs without content are hidden (no chapters → no Chapters tab). Back while Open → Peek. On the side panel the tabs are a regular `PrimaryTabRow` below the controls.
 
 ### Speed and sleep sheets

@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.ShowNotesImages
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
+import ch.lkmc.neutrodyne.core.testing.FakeChapterRepository
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
@@ -31,6 +32,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -45,6 +47,8 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalCoroutinesApi::class)
 class EpisodeViewModelTest : MainDispatcherTest() {
     private val episodes = FakeEpisodeRepository()
+    private val chapters =
+        FakeChapterRepository()
     private val podcasts = FakePodcastRepository()
     private val settings = FakeSettingsRepository()
     private val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
@@ -55,6 +59,7 @@ class EpisodeViewModelTest : MainDispatcherTest() {
         EpisodeViewModel(
             episodeId,
             episodes,
+            chapters,
             podcasts,
             settings,
             playbackController,
@@ -66,6 +71,25 @@ class EpisodeViewModelTest : MainDispatcherTest() {
     private fun TestScope.collect(viewModel: EpisodeViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
     }
+
+    @Test fun timestampSeeksCurrentAndStartsOtherEpisodeAtExactPosition() =
+        runTest {
+            val model = viewModel()
+            collect(model)
+            playbackStates.nowPlaying.value = testNowPlaying(5)
+            runCurrent()
+            model.onTimestamp(754_000)
+            playbackStates.nowPlaying.value = testNowPlaying(6)
+            model.onTimestamp(754_000)
+            runCurrent()
+            assertEquals(
+                listOf(
+                    FakePlaybackController.Call.Transport(FakePlaybackController.Action.SEEK, 754_000),
+                    FakePlaybackController.Call.Episode(5, 754_000),
+                ),
+                playbackController.calls,
+            )
+        }
 
     @Test
     fun initialStateBeforeSubscription() =

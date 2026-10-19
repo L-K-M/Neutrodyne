@@ -33,6 +33,7 @@ import ch.lkmc.neutrodyne.core.navigation.PodcastSettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
+import ch.lkmc.neutrodyne.core.navigation.SleepTimerKey
 import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import ch.lkmc.neutrodyne.feature.player.PlayerViewModel
@@ -93,6 +94,9 @@ class AndroidAppGraphTest {
     @Test
     fun playerSpeedEntryAndWindowViewModelResolveWithoutOpeningDatabase() {
         val provider = entryProvider<NavKey> { graph.entryInstallers.forEach { it() } }
+        assertThat(
+            provider(SleepTimerKey).metadata[NdSceneMetadata.KEY_OVERLAY],
+        ).isEqualTo(NdSceneMetadata.OVERLAY_SHEET)
         assertThat(provider(SpeedKey).metadata[NdSceneMetadata.KEY_OVERLAY]).isEqualTo(NdSceneMetadata.OVERLAY_SHEET)
         val player = graph.metroViewModelFactory.create(PlayerViewModel::class, CreationExtras.Empty)
         assertThat(player.uiState.value.now).isNull()
@@ -362,6 +366,7 @@ class AndroidAppGraphTest {
                 LibraryKey,
                 UpNextKey,
                 SpeedKey,
+                SleepTimerKey,
                 DownloadsKey,
                 DiscoverKey,
                 SettingsHomeKey,

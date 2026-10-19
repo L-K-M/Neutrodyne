@@ -5,8 +5,10 @@ package ch.lkmc.neutrodyne.feature.player
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.navigationevent.NavigationEvent
 import androidx.navigationevent.NavigationEventHandler
 import androidx.navigationevent.NavigationEventInfo
@@ -16,7 +18,13 @@ import kotlinx.coroutines.launch
 
 /** Registered after NavDisplay, so an expanded player consumes Back before the underlying screen. */
 @Composable
-internal fun PlayerBackHandler(state: PlayerSheetState) {
+internal fun PlayerBackHandler(
+    state: PlayerSheetState,
+    panelOpen: Boolean = false,
+    closePanel: () -> Unit = {},
+) {
+    val nestedOpen by rememberUpdatedState(panelOpen)
+    val closeNested by rememberUpdatedState(closePanel)
     val dispatcher = LocalNavigationEventDispatcherOwner.current?.navigationEventDispatcher ?: return
     val scope = rememberCoroutineScope()
     val reducedMotion = LocalReducedMotion.current
@@ -24,19 +32,19 @@ internal fun PlayerBackHandler(state: PlayerSheetState) {
         remember(state, scope, reducedMotion) {
             object : NavigationEventHandler<NavigationEventInfo>(NavigationEventInfo.None, false) {
                 override fun onBackStarted(event: NavigationEvent) {
-                    state.previewBack(0f)
+                    if (!nestedOpen) state.previewBack(0f)
                 }
 
                 override fun onBackProgressed(event: NavigationEvent) {
-                    state.previewBack(event.progress)
+                    if (!nestedOpen) state.previewBack(event.progress)
                 }
 
                 override fun onBackCancelled() {
-                    scope.launch { state.cancelBack(reducedMotion) }
+                    if (!nestedOpen) scope.launch { state.cancelBack(reducedMotion) }
                 }
 
                 override fun onBackCompleted() {
-                    scope.launch { state.commitBack(reducedMotion) }
+                    if (nestedOpen) closeNested() else scope.launch { state.commitBack(reducedMotion) }
                 }
             }
         }

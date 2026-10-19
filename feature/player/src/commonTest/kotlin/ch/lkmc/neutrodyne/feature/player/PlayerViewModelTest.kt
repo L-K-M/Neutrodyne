@@ -2,13 +2,22 @@
 
 package ch.lkmc.neutrodyne.feature.player
 
+import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsError
+import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.Effective
 import ch.lkmc.neutrodyne.core.model.EffectivePlayback
+import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import ch.lkmc.neutrodyne.core.model.SettingScope
 import ch.lkmc.neutrodyne.core.model.SettingSource
+import ch.lkmc.neutrodyne.core.model.ShowNoteBlock
+import ch.lkmc.neutrodyne.core.model.ShowNoteSpan
+import ch.lkmc.neutrodyne.core.model.ShowNotes
+import ch.lkmc.neutrodyne.core.model.SleepTimerMode
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
+import ch.lkmc.neutrodyne.core.testing.FakeChapterRepository
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
+import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackController
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackController.Action
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackController.Call
@@ -26,6 +35,9 @@ import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
 import ch.lkmc.neutrodyne.playback.api.UnplayableReason
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -41,15 +53,154 @@ import kotlin.test.assertTrue
 class PlayerViewModelTest : MainDispatcherTest() {
     private val controller = FakePlaybackController()
     private val settings = FakeSettingsRepository()
+    private val chapters =
+        FakeChapterRepository()
+    private val episodes = FakeEpisodeRepository()
     private val clock = TestClock(elapsedMs = 5_000)
 
-    private fun TestScope.player(): PlayerViewModel {
-        val vm = PlayerViewModel(controller, controller.state, settings, clock)
+    private fun TestScope.player(episodeRepo: EpisodeRepository = episodes): PlayerViewModel {
+        val vm =
+            PlayerViewModel(
+                controller,
+                controller.state,
+                settings,
+                clock,
+                chapters,
+                episodeRepo,
+                FakeNetworkMonitor(),
+            )
         backgroundScope.launch { vm.uiState.collect {} }
         backgroundScope.launch { vm.position.collect {} }
         runCurrent()
         return vm
     }
+
+    @Test fun sleepPersistsOnlyValidMinuteChoicesAndReportsWriteFailure() =
+        runTest {
+            controller.state.nowPlaying.value = sampleNow()
+            val vm = player()
+            vm.setSleepTimer(
+                SleepTimerMode
+                    .Minutes(0),
+            )
+            vm.setSleepTimer(
+                SleepTimerMode
+                    .Minutes(241),
+            )
+            assertTrue(controller.calls.isEmpty())
+            vm.setSleepTimer(
+                SleepTimerMode
+                    .Minutes(45),
+            )
+            runCurrent()
+            assertEquals(45, vm.uiState.value.lastSleepMinutes)
+            vm.setSleepTimer(SleepTimerMode.EndOfEpisode)
+            vm.setSleepTimer(SleepTimerMode.Off)
+            vm.extendSleepTimer(5)
+            runCurrent()
+            assertEquals(45, vm.uiState.value.lastSleepMinutes)
+            assertEquals(4, controller.calls.size)
+            settings.failNextSet = SettingsError.WriteFailed
+            vm.setSleepTimer(
+                SleepTimerMode
+                    .Minutes(15),
+            )
+            runCurrent()
+            assertTrue(
+                vm.uiState.value.messages
+                    .isNotEmpty(),
+            )
+            controller.state.nowPlaying.value = null
+            vm.setSleepTimer(
+                SleepTimerMode
+                    .Minutes(30),
+            )
+            assertEquals(5, controller.calls.size)
+        }
+
+    @Test fun chaptersFollowEpisodeAndTransportFallsBackToEpisodes() =
+        runTest {
+            controller.state.nowPlaying.value = sampleNow()
+            val chapter =
+                EpisodeChapter(
+                    0,
+                    null,
+                    "Opening",
+                    null,
+                    null,
+                    ChapterSource.PSC,
+                    false,
+                )
+            chapters.rows.value = mapOf(1L to listOf(chapter))
+            val vm = player()
+            vm.previous()
+            vm.next()
+            vm.nextEpisode()
+            assertEquals(
+                listOf(Action.CHAPTER_PREV, Action.CHAPTER_NEXT, Action.NEXT),
+                controller.calls.map {
+                    (it as Call.Transport).action
+                },
+            )
+            controller.calls.clear()
+            controller.state.nowPlaying.value = sampleNow(2)
+            runCurrent()
+            assertTrue(
+                vm.uiState.value.chapters
+                    .isEmpty(),
+            )
+            vm.previous()
+            vm.next()
+            assertEquals(listOf(Action.PREVIOUS, Action.NEXT), controller.calls.map { (it as Call.Transport).action })
+        }
+
+    @Test fun notesObserveOnlyVisibleTabAndSwitchWithCurrentEpisode() =
+        runTest {
+            controller.state.nowPlaying.value = sampleNow()
+            val first =
+                ShowNotes(
+                    listOf(
+                        ShowNoteBlock.Paragraph(
+                            listOf(
+                                ShowNoteSpan
+                                    .Timestamp("12:34", 754_000),
+                            ),
+                        ),
+                    ),
+                )
+            episodes.notes.value = mapOf(1L to first)
+            val observed = mutableListOf<Long>()
+            val repo =
+                object : EpisodeRepository by episodes {
+                    override fun observeShowNotes(episodeId: Long): Flow<ShowNotes?> =
+                        episodes
+                            .observeShowNotes(episodeId)
+                            .onStart { observed += episodeId }
+                            .onCompletion { observed.remove(episodeId) }
+                }
+            val vm = player(repo)
+            val collection = backgroundScope.launch { vm.notes.collect {} }
+            runCurrent()
+            assertTrue(observed.isEmpty())
+            assertNull(vm.notes.value.notes)
+            vm.showNotes(true)
+            runCurrent()
+            assertEquals(first, vm.notes.value.notes)
+            assertEquals(listOf(1L), observed)
+            controller.state.nowPlaying.value = sampleNow(2)
+            runCurrent()
+            assertNull(vm.notes.value.notes)
+            assertEquals(listOf(2L), observed)
+            vm.showNotes(false)
+            runCurrent()
+            assertNull(vm.notes.value.notes)
+            assertTrue(observed.isEmpty())
+            vm.showNotes(true)
+            runCurrent()
+            collection.cancel()
+            runCurrent()
+            assertTrue(observed.isEmpty())
+        }
 
     @Test fun interpolationDoesNotPublishFramesOrReadWallTime() =
         runTest {

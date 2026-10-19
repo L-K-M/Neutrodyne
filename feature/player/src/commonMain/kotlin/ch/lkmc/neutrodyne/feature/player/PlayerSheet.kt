@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsBottomHeight
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -36,8 +37,10 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -57,8 +60,11 @@ import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -83,23 +89,38 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
 import ch.lkmc.neutrodyne.core.designsystem.theme.LocalReducedMotion
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneMotion
+import ch.lkmc.neutrodyne.core.model.EpisodeChapter
+import ch.lkmc.neutrodyne.core.model.SleepTimerState
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
+import ch.lkmc.neutrodyne.core.navigation.SleepTimerKey
 import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import ch.lkmc.neutrodyne.core.ui.AttributionText
+import ch.lkmc.neutrodyne.core.ui.ChapterArtwork
+import ch.lkmc.neutrodyne.core.ui.ChapterList
+import ch.lkmc.neutrodyne.core.ui.ShowNotesImageMode
 import ch.lkmc.neutrodyne.core.ui.asString
+import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
+import ch.lkmc.neutrodyne.core.ui.platform.OpenResult
 import ch.lkmc.neutrodyne.core.ui.rememberMonogram
 import ch.lkmc.neutrodyne.core.ui.resolve
+import ch.lkmc.neutrodyne.core.ui.resources.action_copy_link
+import ch.lkmc.neutrodyne.core.ui.resources.no_handler
+import ch.lkmc.neutrodyne.core.ui.resources.summary_video
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import ch.lkmc.neutrodyne.core.ui.root.PlayerSlotState
 import ch.lkmc.neutrodyne.core.ui.root.ShowUserMessages
+import ch.lkmc.neutrodyne.core.ui.showNotes
 import ch.lkmc.neutrodyne.feature.player.resources.Res
 import ch.lkmc.neutrodyne.feature.player.resources.player_back
 import ch.lkmc.neutrodyne.feature.player.resources.player_back_value
+import ch.lkmc.neutrodyne.feature.player.resources.player_chapter
+import ch.lkmc.neutrodyne.feature.player.resources.player_chapter_image
+import ch.lkmc.neutrodyne.feature.player.resources.player_chapters
 import ch.lkmc.neutrodyne.feature.player.resources.player_collapse
 import ch.lkmc.neutrodyne.feature.player.resources.player_continue
 import ch.lkmc.neutrodyne.feature.player.resources.player_description
@@ -117,8 +138,11 @@ import ch.lkmc.neutrodyne.feature.player.resources.player_mobile_consent
 import ch.lkmc.neutrodyne.feature.player.resources.player_more
 import ch.lkmc.neutrodyne.feature.player.resources.player_network_lost
 import ch.lkmc.neutrodyne.feature.player.resources.player_next
+import ch.lkmc.neutrodyne.feature.player.resources.player_next_chapter
 import ch.lkmc.neutrodyne.feature.player.resources.player_next_symbol
+import ch.lkmc.neutrodyne.feature.player.resources.player_no_notes
 import ch.lkmc.neutrodyne.feature.player.resources.player_not_now
+import ch.lkmc.neutrodyne.feature.player.resources.player_notes
 import ch.lkmc.neutrodyne.feature.player.resources.player_now
 import ch.lkmc.neutrodyne.feature.player.resources.player_pause
 import ch.lkmc.neutrodyne.feature.player.resources.player_paused
@@ -127,6 +151,7 @@ import ch.lkmc.neutrodyne.feature.player.resources.player_playing
 import ch.lkmc.neutrodyne.feature.player.resources.player_podcast
 import ch.lkmc.neutrodyne.feature.player.resources.player_position
 import ch.lkmc.neutrodyne.feature.player.resources.player_previous
+import ch.lkmc.neutrodyne.feature.player.resources.player_previous_chapter
 import ch.lkmc.neutrodyne.feature.player.resources.player_previous_symbol
 import ch.lkmc.neutrodyne.feature.player.resources.player_rate_limited
 import ch.lkmc.neutrodyne.feature.player.resources.player_seconds
@@ -138,6 +163,9 @@ import ch.lkmc.neutrodyne.feature.player.resources.player_unknown_duration
 import ch.lkmc.neutrodyne.feature.player.resources.player_up_next
 import ch.lkmc.neutrodyne.feature.player.resources.player_write_failed
 import ch.lkmc.neutrodyne.feature.player.resources.player_youtube_unavailable
+import ch.lkmc.neutrodyne.feature.player.resources.sleep_end
+import ch.lkmc.neutrodyne.feature.player.resources.sleep_minutes
+import ch.lkmc.neutrodyne.feature.player.resources.sleep_title
 import ch.lkmc.neutrodyne.playback.api.NowPlaying
 import ch.lkmc.neutrodyne.playback.api.PlaybackIssue
 import ch.lkmc.neutrodyne.playback.api.PlayerPhase
@@ -147,6 +175,7 @@ import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 import kotlin.math.roundToInt
+import ch.lkmc.neutrodyne.core.ui.resources.Res as UiRes
 
 /** Window/activity instance, outside NavDisplay. The queue route supplies [upNext] without a feature dependency. */
 @Composable
@@ -159,6 +188,12 @@ public fun PlayerRoute(
 ) {
     val ui by vm.uiState.collectAsStateWithLifecycle()
     val position by vm.position.collectAsStateWithLifecycle()
+    val notes by vm.notes.collectAsStateWithLifecycle()
+    val urls = LocalPlatformActions.current.urls
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val copyLabel = stringResource(UiRes.string.action_copy_link)
+    val noHandler = stringResource(UiRes.string.no_handler)
+    val routeScope = rememberCoroutineScope()
     val failed by episodeVm.writeFailed.collectAsStateWithLifecycle()
     val snackbar = LocalSnackbarHost.current
     val failureText = stringResource(Res.string.player_write_failed)
@@ -193,6 +228,23 @@ public fun PlayerRoute(
             consent = vm::continueOnMobileData,
             declineConsent = vm::declineMobileData,
             upNext = upNext,
+            nextEpisode = vm::nextEpisode,
+            notes = notes,
+            onNotesVisible = vm::showNotes,
+            onLink = { url ->
+                if (urls.open(url) == OpenResult.NO_HANDLER) {
+                    routeScope.launch {
+                        if (snackbar.showSnackbar(noHandler, copyLabel) ==
+                            androidx.compose.material3.SnackbarResult.ActionPerformed
+                        ) {
+                            clipboard.setText(
+                                androidx.compose.ui.text
+                                    .AnnotatedString(url),
+                            )
+                        }
+                    }
+                }
+            },
         )
     }
 }
@@ -218,12 +270,28 @@ public fun PlayerSheet(
     modifier: Modifier = Modifier,
     state: PlayerSheetState = rememberPlayerSheetState(),
     upNext: @Composable () -> Unit = {},
+    nextEpisode: () -> Unit = next,
+    notes: PlayerNotesState = PlayerNotesState(),
+    onNotesVisible: (Boolean) -> Unit = {},
+    onLink: (String) -> Unit = {},
 ) {
+    var selectedTab by rememberSaveable { mutableStateOf(PlayerTab.UP_NEXT.name) }
+    var panelOpen by rememberSaveable { mutableStateOf(false) }
+    val activeTab = PlayerTab.entries.firstOrNull { it.name == selectedTab } ?: PlayerTab.UP_NEXT
     val now = ui.now
     val reducedMotion = LocalReducedMotion.current
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val expanded = state.settledExpanded && now != null
+    LaunchedEffect(ui.chapters.isEmpty()) {
+        if (ui.chapters.isEmpty() && activeTab == PlayerTab.CHAPTERS) selectedTab = PlayerTab.UP_NEXT.name
+    }
+    val notesShown = expanded && panelOpen && activeTab == PlayerTab.NOTES
+    val reportNotes by rememberUpdatedState(onNotesVisible)
+    DisposableEffect(notesShown) {
+        reportNotes(notesShown)
+        onDispose { reportNotes(false) }
+    }
     val settled by rememberUpdatedState(slot.onExpandedSettled)
     val dismissPaused by rememberUpdatedState(dismiss)
     SideEffect { settled(expanded) }
@@ -252,7 +320,7 @@ public fun PlayerSheet(
         }
     }
     Box(modifier.fillMaxSize()) {
-        PlayerBackHandler(state)
+        PlayerBackHandler(state, panelOpen) { panelOpen = false }
         // Consent may arrive before nowPlaying exists, so it must outlive the visible sheet.
         if (ui.consent != null) {
             NdDialog(
@@ -286,13 +354,17 @@ public fun PlayerSheet(
                 stringResource(if (now.isPlaying) Res.string.player_playing else Res.string.player_paused),
             )
         val backLabel = stringResource(Res.string.player_back, ui.skipBackMs / MILLIS_PER_SECOND)
-        val previousLabel = stringResource(Res.string.player_previous)
-        val nextLabel = stringResource(Res.string.player_next)
+        val previousLabel =
+            stringResource(
+                if (ui.chapters.isEmpty()) Res.string.player_previous else Res.string.player_previous_chapter,
+            )
+        val nextLabel =
+            stringResource(if (ui.chapters.isEmpty()) Res.string.player_next else Res.string.player_next_chapter)
         val paused = !now.isPlaying && !now.playWhenReady
         val expand: () -> Unit = { scope.launch { state.expand(reducedMotion) } }
         val collapse: () -> Unit = { scope.launch { state.collapse(reducedMotion) } }
         val navigate: (NavKey) -> Unit = { key ->
-            if (key == SpeedKey) {
+            if (key == SpeedKey || key == SleepTimerKey) {
                 slot.navigate(key)
             } else {
                 scope.launch {
@@ -484,6 +556,21 @@ public fun PlayerSheet(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 TextButton(onClick = { navigate(PodcastKey(now.podcastId)) }) { Text(now.podcastTitle) }
+                                if (now.isVideo) Text(stringResource(UiRes.string.summary_video))
+                                ui.currentChapter?.let { current ->
+                                    TextButton({
+                                        selectedTab = PlayerTab.CHAPTERS.name
+                                        panelOpen = true
+                                    }) {
+                                        Text(
+                                            stringResource(
+                                                Res.string.player_chapter,
+                                                current.index + 1,
+                                                current.chapter.title.orEmpty(),
+                                            ),
+                                        )
+                                    }
+                                }
                                 PlayerScrubber(
                                     position?.takeIf {
                                         it.episodeId == now.episodeId
@@ -494,6 +581,7 @@ public fun PlayerSheet(
                                     forward,
                                     ui.skipBackMs,
                                     ui.skipForwardMs,
+                                    ui.chapters,
                                 )
                                 Row(
                                     Modifier.fillMaxWidth(),
@@ -526,7 +614,7 @@ public fun PlayerSheet(
                                     PlayButton(now, toggle, playLabel, presentation = TransportPresentation.FULL)
                                     TextButton(
                                         onClick = next,
-                                        enabled = now.hasNext,
+                                        enabled = ui.chapters.isNotEmpty() || now.hasNext,
                                         modifier =
                                             Modifier.semantics {
                                                 contentDescription =
@@ -560,9 +648,38 @@ public fun PlayerSheet(
                                             ),
                                         )
                                     }
-                                    TextButton(
-                                        onClick = { navigate(UpNextKey) },
-                                    ) { Text(stringResource(Res.string.player_up_next)) }
+                                    TextButton(onClick = { navigate(SleepTimerKey) }) {
+                                        Text(
+                                            when (val timer = ui.sleepTimer) {
+                                                SleepTimerState.Off -> {
+                                                    stringResource(Res.string.sleep_title)
+                                                }
+
+                                                is SleepTimerState.Running -> {
+                                                    stringResource(
+                                                        Res.string.sleep_minutes,
+                                                        (
+                                                            (
+                                                                timer.remainingMs +
+                                                                    59_999
+                                                            ) /
+                                                                60_000
+                                                        ).toInt(),
+                                                    )
+                                                }
+
+                                                is SleepTimerState.EndOfEpisode -> {
+                                                    stringResource(Res.string.sleep_end)
+                                                }
+                                            },
+                                        )
+                                    }
+                                    TextButton(onClick = {
+                                        selectedTab = PlayerTab.UP_NEXT.name
+                                        panelOpen = true
+                                    }) {
+                                        Text(stringResource(Res.string.player_up_next))
+                                    }
                                 }
                                 ui.effective?.let {
                                     Text(
@@ -582,8 +699,62 @@ public fun PlayerSheet(
                                     declineConsent,
                                     toggle,
                                 ) { navigate(SettingsKey(SettingsPage.PLAYBACK)) }
-                                // W10 installs the shared Up next list here; storage and reordering belong to it.
-                                Box(Modifier.fillMaxWidth().heightIn(max = upNextMaxHeight)) { upNext() }
+                                val tabs =
+                                    PlayerTab.entries.filter {
+                                        it != PlayerTab.CHAPTERS ||
+                                            ui.chapters.isNotEmpty()
+                                    }
+                                PrimaryTabRow(tabs.indexOf(activeTab).coerceAtLeast(0)) {
+                                    tabs.forEach { tab ->
+                                        Tab(panelOpen && activeTab == tab, onClick = {
+                                            selectedTab = tab.name
+                                            panelOpen =
+                                                true
+                                        }, text = {
+                                            Text(
+                                                when (tab) {
+                                                    PlayerTab.UP_NEXT -> {
+                                                        stringResource(Res.string.player_up_next)
+                                                    }
+
+                                                    PlayerTab.CHAPTERS -> {
+                                                        stringResource(
+                                                            Res.string.player_chapters,
+                                                            ui.chapters.size,
+                                                        )
+                                                    }
+
+                                                    PlayerTab.NOTES -> {
+                                                        stringResource(Res.string.player_notes)
+                                                    }
+                                                },
+                                            )
+                                        })
+                                    }
+                                }
+                                if (panelOpen) {
+                                    Box(Modifier.fillMaxWidth().heightIn(max = upNextMaxHeight)) {
+                                        when (activeTab) {
+                                            PlayerTab.UP_NEXT -> {
+                                                upNext()
+                                            }
+
+                                            PlayerTab.CHAPTERS -> {
+                                                ChapterList(ui.chapters, ui.currentChapter, seek)
+                                            }
+
+                                            PlayerTab.NOTES -> {
+                                                PlayerNotes(
+                                                    notes,
+                                                    now.position.durationMs,
+                                                    seek,
+                                                    onLink,
+                                                    now.episodeId,
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                                 Spacer(Modifier.windowInsetsBottomHeight(WindowInsets.safeDrawing))
                             }
                         }
@@ -612,7 +783,7 @@ public fun PlayerSheet(
                                     ?.takeIf { it.type != ch.lkmc.neutrodyne.core.model.ContextType.EXTERNAL }
                                     ?.let { Text(it.title, style = MaterialTheme.typography.bodySmall) }
                             }
-                            PlayerMenu(now, navigate, markPlayed, stop)
+                            PlayerMenu(now, navigate, markPlayed, stop, ui.chapters.isNotEmpty(), nextEpisode)
                         }
                     }
                     CoverArt(
@@ -631,6 +802,25 @@ public fun PlayerSheet(
                                 .then(dragModifier)
                                 .testTag("playerArtwork"),
                     )
+                    if (expanded) {
+                        ui.currentChapter?.chapter?.imageUrl?.let { url ->
+                            ChapterArtwork(
+                                url,
+                                stringResource(
+                                    Res.string.player_chapter_image,
+                                    ui.currentChapter.chapter.title
+                                        .orEmpty(),
+                                ),
+                                Modifier
+                                    .offset(
+                                        morph.artworkX.dp,
+                                        morph.artworkY.dp,
+                                    ).size(morph.artworkSize.dp, artworkHeight.dp)
+                                    .clip(RoundedCornerShape(morph.artworkCorner.dp))
+                                    .then(dragModifier),
+                            )
+                        }
+                    }
                     if (now.issue != null || now.phase == PlayerPhase.ERROR) {
                         Box(
                             Modifier
@@ -687,11 +877,23 @@ private fun PlayerMenu(
     navigate: (NavKey) -> Unit,
     markPlayed: () -> Unit,
     stop: () -> Unit,
+    hasChapters: Boolean,
+    nextEpisode: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
         NdIconButton({ open = true }, NdIcons.MoreVert, stringResource(Res.string.player_more))
         DropdownMenu(open, { open = false }) {
+            if (hasChapters) {
+                DropdownMenuItem(text = {
+                    Text(
+                        stringResource(Res.string.player_next),
+                    )
+                }, enabled = now.hasNext, onClick = {
+                    open = false
+                    nextEpisode()
+                })
+            }
             DropdownMenuItem(text = { Text(stringResource(Res.string.player_episode)) }, onClick = {
                 open = false
                 navigate(EpisodeKey(now.episodeId))
@@ -766,6 +968,7 @@ internal fun PlayerScrubber(
     forward: () -> Unit,
     backMs: Long,
     forwardMs: Long,
+    chapters: List<EpisodeChapter> = emptyList(),
 ) {
     var displayed by remember(snapshot) { mutableLongStateOf(positionAt(snapshot)) }
     var dragged by remember(snapshot.episodeId) { mutableStateOf<Long?>(null) }
@@ -787,6 +990,7 @@ internal fun PlayerScrubber(
             accessiblePlayerTime(current),
             duration?.let { accessiblePlayerTime(it) } ?: durationText,
         )
+    val tickColor = MaterialTheme.colorScheme.onSurfaceVariant
     Column {
         Slider(
             value = current.toFloat(),
@@ -798,20 +1002,39 @@ internal fun PlayerScrubber(
                 dragged = null
             },
             modifier =
-                Modifier.testTag("playerScrubber").semantics {
-                    stateDescription = description
-                    customActions =
-                        listOf(
-                            CustomAccessibilityAction(backLabel) {
-                                back()
-                                true
-                            },
-                            CustomAccessibilityAction(forwardLabel) {
-                                forward()
-                                true
-                            },
-                        )
-                },
+                Modifier
+                    .testTag("playerScrubber")
+                    .drawBehind {
+                        if (duration != null) {
+                            chapters.forEach { chapter ->
+                                if (chapter.startMs in 0..duration) {
+                                    val x = size.width * chapter.startMs.toFloat() / duration
+                                    drawLine(
+                                        tickColor,
+                                        Offset(x, size.height / 2 - 5.dp.toPx()),
+                                        Offset(
+                                            x,
+                                            size.height / 2 + 5.dp.toPx(),
+                                        ),
+                                        1.dp.toPx(),
+                                    )
+                                }
+                            }
+                        }
+                    }.semantics {
+                        stateDescription = description
+                        customActions =
+                            listOf(
+                                CustomAccessibilityAction(backLabel) {
+                                    back()
+                                    true
+                                },
+                                CustomAccessibilityAction(forwardLabel) {
+                                    forward()
+                                    true
+                                },
+                            )
+                    },
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(playerTime(current))
@@ -856,3 +1079,35 @@ private const val UP_NEXT_HEIGHT_FRACTION = 0.5f
 private const val SETTLE_FRACTION = 0.5f
 private const val MINI_SEMANTICS_END = 0.2f
 private const val FULL_SEMANTICS_START = 0.6f
+
+private enum class PlayerTab { UP_NEXT, CHAPTERS, NOTES }
+
+@Composable
+private fun PlayerNotes(
+    state: PlayerNotesState,
+    durationMs: Long?,
+    seek: (Long) -> Unit,
+    link: (String) -> Unit,
+    episodeId: Long,
+) {
+    var revealed by rememberSaveable(episodeId) { mutableStateOf(false) }
+    val mode =
+        if (revealed && !state.offline &&
+            state.imageMode == ShowNotesImageMode.TAP_TO_LOAD
+        ) {
+            ShowNotesImageMode.SHOWN
+        } else {
+            state.imageMode
+        }
+    val notes = state.notes.takeIf { state.episodeId == episodeId }
+    if (notes == null || notes.blocks.isEmpty()) {
+        Text(stringResource(Res.string.player_no_notes))
+        return
+    }
+    LazyColumn {
+        showNotes(notes, if (state.offline) ShowNotesImageMode.BLOCKED else mode, durationMs, link, seek, {
+            revealed =
+                true
+        })
+    }
+}

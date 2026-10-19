@@ -159,6 +159,23 @@ public class PlaybackActions(
         }
     }
 
+    /** Explicit positions never toggle playback; refused starts keep the same position on retry. */
+    public fun seekOrPlay(
+        episodeId: Long,
+        positionMs: Long,
+        durationMs: Long? = null,
+    ) {
+        if (positionMs < 0 || (durationMs != null && positionMs > durationMs)) return
+        ++startGeneration
+        startJob?.cancel()
+        consentDismiss()
+        if (states.nowPlaying.value?.episodeId == episodeId) {
+            controller.seekTo(positionMs)
+            return
+        }
+        play(null) { controller.playEpisodeAt(episodeId, positionMs) }
+    }
+
     /** A context/header start (08's page Play): [attempt] runs on [scope], its result maps below. */
     public fun play(
         context: UiText?,
