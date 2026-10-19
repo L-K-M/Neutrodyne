@@ -3,18 +3,26 @@
 package ch.lkmc.neutrodyne.core.data
 
 import androidx.room3.useWriterConnection
+import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.repo.GroupRepositoryImpl
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
+import ch.lkmc.neutrodyne.core.database.QueueEntryEntity
+import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.GroupError
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
+import ch.lkmc.neutrodyne.core.testing.ProtocolOrderKeys
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
+import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
+import ch.lkmc.neutrodyne.core.testing.database.groupEntity
+import ch.lkmc.neutrodyne.core.testing.database.memberEntity
+import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,6 +32,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -191,6 +200,102 @@ class GroupOrderTest {
                 }
             }
         }
+
+    @Test fun appendRewritesAndCapturesExistingGroupsAndMembersAtomically() =
+        runTest {
+            val g = db.groupDao().insert(groupEntity(orderKey = "a5"))
+            val p = db.podcastDao().insertPodcast(podcastEntity())
+            val q = db.podcastDao().insertPodcast(podcastEntity())
+            db.groupDao().insertMember(memberEntity(g, p, "a5", addedAt = 7))
+            db.syncStateDao().upsert(SyncStateEntity(enabled = true, nodeId = "0000000000000001"))
+            val repo =
+                GroupRepositoryImpl(
+                    db,
+                    clock,
+                    LongAppendKeys,
+                    FakeGroupChannelSync(),
+                    FakeRefreshController(),
+                    FakeSnapshotScheduler(),
+                    backgroundScope,
+                )
+            db.useWriterConnection {
+                it.execSql(
+                    "CREATE TRIGGER reject_group BEFORE INSERT ON podcast_group" +
+                        " BEGIN SELECT RAISE(ABORT, 'test'); END",
+                )
+            }
+            assertFailsWith<Exception> { repo.create(GroupDraft("Next")) }
+            assertEquals("a5", db.groupDao().groupById(g)?.orderKey)
+            assertTrue(db.syncOutboxDao().rows().isEmpty())
+            assertEquals(0, db.syncStateDao().get()?.hlc)
+            db.useWriterConnection { it.execSql("DROP TRIGGER reject_group") }
+
+            val next = assertIs<Outcome.Success<Long>>(repo.create(GroupDraft("Next"))).value
+            assertEquals(ProtocolOrderKeys.rewrite(2), db.groupDao().groupsInOrder().map { it.orderKey })
+            assertEquals(listOf(g, next), db.groupDao().groupsInOrder().map { it.id })
+            assertEquals(Outcome.Success(Unit), repo.setMembers(g, setOf(p, q)))
+            val members = db.groupDao().membersOf(g)
+            assertEquals(ProtocolOrderKeys.rewrite(2), members.map { it.orderKey })
+            assertEquals(7, members.first().addedAt)
+            val rows = db.syncOutboxDao().rows()
+            assertEquals(1, rows.count { it.coll == "group" && it.field == "ok" })
+            assertEquals(2, rows.count { it.coll == "member" && it.field == "ok" })
+        }
+
+    @Test fun sqliteUsesBinaryKeyOrderAndLocalIdTiesForAllThreeLists() =
+        runTest {
+            val keys = listOf("a0z", "a0V", "b00", "Zz", "a0a", "a0V", "a0")
+            val groups = keys.mapIndexed { i, key -> db.groupDao().insert(groupEntity(name = "G$i", orderKey = key)) }
+            val group = groups.first()
+            val podcasts = keys.map { db.podcastDao().insertPodcast(podcastEntity()) }
+            val episodes = podcasts.map { db.episodeDao().insertStub(episodeEntity(podcastId = it)) }
+            for (i in keys.indices) {
+                db.groupDao().insertMember(memberEntity(group, podcasts[i], keys[i]))
+                db.queueDao().insert(QueueEntryEntity(episodeId = episodes[i], orderKey = keys[i], addedAt = 1))
+            }
+            val indices = keys.indices.sortedWith(compareBy({ keys[it] }, { it }))
+            assertEquals(indices.map(groups::get), db.groupDao().groupsInOrder().map { it.id })
+            assertEquals(indices.map(podcasts::get), db.groupDao().membersOf(group).map { it.podcastId })
+            assertEquals(indices.map(episodes::get), db.queueDao().entries().map { it.episodeId })
+        }
+
+    @Test fun groupReorderBetweenTiesCapturesEveryRewrittenKey() =
+        runTest {
+            val ids =
+                (0..2).map {
+                    db.groupDao().insert(groupEntity(name = "G$it", orderKey = if (it == 2) "b00" else "a0"))
+                }
+            db.withWriteTransaction {
+                db.syncStateDao().upsert(SyncStateEntity(enabled = true, nodeId = "0000000000000001"))
+            }
+            val repo =
+                GroupRepositoryImpl(
+                    db,
+                    clock,
+                    ProtocolOrderKeys,
+                    FakeGroupChannelSync(),
+                    FakeRefreshController(),
+                    FakeSnapshotScheduler(),
+                    backgroundScope,
+                )
+            val desired = listOf(ids[0], ids[2], ids[1])
+            assertEquals(Outcome.Success(Unit), repo.reorder(desired))
+            assertEquals(desired, db.groupDao().groupsInOrder().map { it.id })
+            val changed = db.groupDao().groupsInOrder().filter { it.orderKey != if (it.id == ids[2]) "b00" else "a0" }
+            assertEquals(
+                changed.map { it.uuid }.toSet(),
+                db
+                    .syncOutboxDao()
+                    .rows()
+                    .map { it.rid }
+                    .toSet(),
+            )
+            assertTrue(db.syncOutboxDao().rows().all { it.field == "ok" })
+        }
+
+    private object LongAppendKeys : OrderKeys by ProtocolOrderKeys {
+        override fun after(last: String?): String = "z".repeat(OrderKeys.MAX_LENGTH + 1)
+    }
 
     /** `between` returns an over-limit key so every move must fall back to `rewrite`. */
     private object OverlongKeys : OrderKeys {

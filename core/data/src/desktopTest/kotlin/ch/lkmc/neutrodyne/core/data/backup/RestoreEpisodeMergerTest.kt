@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.data.backup
 
 import androidx.room3.useReaderConnection
 import androidx.room3.useWriterConnection
+import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.data.FakeRefreshScheduler
 import ch.lkmc.neutrodyne.core.data.TestOrderKeys
 import ch.lkmc.neutrodyne.core.data.execSql
@@ -14,6 +15,8 @@ import ch.lkmc.neutrodyne.core.database.BackupDao
 import ch.lkmc.neutrodyne.core.database.EpisodeEntity
 import ch.lkmc.neutrodyne.core.database.EpisodePositionEntity
 import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
+import ch.lkmc.neutrodyne.core.database.SyncStateEntity
+import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.MediaFilter
@@ -28,6 +31,7 @@ import ch.lkmc.neutrodyne.core.testing.ProtocolOrderKeys
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.groupEntity
+import ch.lkmc.neutrodyne.core.testing.database.memberEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.core.testing.database.queueEntryEntity
 import ch.lkmc.neutrodyne.feeds.backup.BackupCodec
@@ -90,6 +94,110 @@ class RestoreEpisodeMergerTest {
         )
 
     @AfterTest fun close() = db.close()
+
+    @Test fun linkedFixtureCapturesRestoreWritesWithoutPromotingDerivedReset() =
+        runTest {
+            val p = seedPodcast("feed.test/f")
+            val e = seedEpisode(p, "1a")
+            db.syncStateDao().upsert(SyncStateEntity(enabled = true, nodeId = "0000000000000001"))
+            realRestore(
+                staged(
+                    podcasts = listOf(podcastV1("feed.test/f")),
+                    episodeLines =
+                        listOf(
+                            line(
+                                "feed.test/f",
+                                "1a",
+                                pl = ARCHIVE_AT + 10,
+                                pc = 2,
+                                pos = 900,
+                                posAt = ARCHIVE_AT,
+                                ts = ARCHIVE_AT + 10,
+                            ),
+                        ),
+                ),
+                MergePolicy.RESTORE_MERGE,
+                ALL,
+            )
+            val rid = db.podcastDao().byId(p)!!.syncId + "1a"
+            assertEquals(0, db.positionDao().byEpisode(e)?.positionMs)
+            assertEquals(
+                "{\"ms\":900,\"dur\":null,\"src\":\"STREAM\"}",
+                db.syncOutboxDao().get("episode", rid, "pos")?.value,
+            )
+            assertNotNull(db.syncOutboxDao().get("episode", rid, "playCount"))
+            assertEquals(2, db.episodeStateDao().byEpisode(e)?.playCount)
+        }
+
+    @Test fun suppressedRestoreCanCaptureFrozenHistoricalValueAndKeepNewerIntent() =
+        runTest {
+            val p = seedPodcast("feed.test/f")
+            val e = seedEpisode(p, "1a")
+            val rid = db.podcastDao().byId(p)!!.syncId + "1a"
+            db.syncStateDao().upsert(SyncStateEntity(enabled = true, nodeId = "0000000000000001"))
+            val literal = "{\"ms\":800,\"dur\":null,\"src\":\"STREAM\"}"
+            db.withWriteTransaction {
+                db.syncStateDao().withApplying {
+                    RestoreWrites(db).mergePosition(
+                        e,
+                        RestorePositionValues(800, null, PositionSource.STREAM, ARCHIVE_AT),
+                    )
+                    assertTrue(db.syncOutboxDao().rows().isEmpty())
+                    db.syncOutboxDao().captureAt("episode", rid, "pos", ARCHIVE_AT, literal)
+                    db.positionDao().reset(listOf(e), clock.now())
+                }
+            }
+            val historical = db.syncOutboxDao().get("episode", rid, "pos")!!
+            assertEquals(literal, historical.value)
+            assertEquals(ARCHIVE_AT shl 16, historical.hlc)
+            db.withWriteTransaction {
+                db.syncOutboxDao().captureIntent("episode", rid, "pos", "{\"ms\":0,\"reset\":true}")
+                db.syncOutboxDao().captureAt("episode", rid, "pos", ARCHIVE_AT, literal)
+            }
+            assertEquals("{\"ms\":0,\"reset\":true}", db.syncOutboxDao().get("episode", rid, "pos")?.value)
+        }
+
+    @Test fun restoreAppendAndReplacePlansBoundKeysOnAllLists() =
+        runTest {
+            val p = seedPodcast("feed.test/f")
+            val e = seedEpisode(p, "1a")
+            val g = db.groupDao().insert(groupEntity(name = "Existing", orderKey = "a5"))
+            db.groupDao().insertMember(memberEntity(g, p, "a5"))
+            db.queueDao().insert(queueEntryEntity(e, "a5"))
+            val keys =
+                object : OrderKeys by ProtocolOrderKeys {
+                    override fun after(last: String?): String = "z".repeat(OrderKeys.MAX_LENGTH + 1)
+
+                    override fun between(
+                        previous: String?,
+                        next: String?,
+                    ): String = after(previous)
+                }
+            restore(
+                staged(
+                    podcasts = listOf(podcastV1("feed.test/f"), podcastV1("other.test/f")),
+                    groups =
+                        listOf(
+                            groupV1("new", "New"),
+                            groupV1(db.groupDao().groupById(g)!!.uuid, "Existing").copy(
+                                members = listOf(MemberV1("other.test/f")),
+                            ),
+                        ),
+                    episodeLines = listOf(line("other.test/f", "1b", u = "https://other.test/e")),
+                    queue = QueueV1(upNext = listOf(UpNextRefV1("other.test/f", "1b"))),
+                ),
+                MergePolicy.RESTORE_MERGE,
+                ALL,
+                merger = realMerger(keys),
+                episodes = realEpisodes(keys),
+            )
+            assertEquals(ProtocolOrderKeys.rewrite(2), db.groupDao().groupsInOrder().map { it.orderKey })
+            assertEquals(ProtocolOrderKeys.rewrite(2), db.groupDao().membersOf(g).map { it.orderKey })
+            assertEquals(ProtocolOrderKeys.rewrite(2), db.queueDao().entries().map { it.orderKey })
+            val long = "a0" + "V".repeat(OrderKeys.MAX_LENGTH)
+            assertEquals(ProtocolOrderKeys.rewrite(2), restoreOrderKeys(ProtocolOrderKeys, listOf("a0", long)))
+            assertEquals(ProtocolOrderKeys.rewrite(2), restoreOrderKeys(ProtocolOrderKeys, listOf("a0", "a0")))
+        }
 
     // --- Merge state and position (05 HISTORY) --------------------------------------------------
 
@@ -1140,7 +1248,7 @@ class RestoreEpisodeMergerTest {
             episodes = realEpisodes(),
         )
 
-    private fun realMerger(): RestoreMerger =
+    private fun realMerger(keys: OrderKeys = ProtocolOrderKeys): RestoreMerger =
         RestoreMerger(
             db = db,
             podcasts = PodcastMatcher(db),
@@ -1150,16 +1258,16 @@ class RestoreEpisodeMergerTest {
             secrets = secrets,
             coordinator = coordinator,
             channelSync = channels,
-            orderKeys = ProtocolOrderKeys,
+            orderKeys = keys,
             clock = clock,
         )
 
-    private fun realEpisodes(): RestoreEpisodeMerger =
+    private fun realEpisodes(keys: OrderKeys = ProtocolOrderKeys): RestoreEpisodeMerger =
         RestoreEpisodeMerger(
             db = db,
             episodes = EpisodeMatcher(db),
             writes = RestoreWrites(db),
-            orderKeys = ProtocolOrderKeys,
+            orderKeys = keys,
             clock = clock,
         )
 

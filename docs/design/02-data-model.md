@@ -1576,6 +1576,14 @@ by `ReplicatedOrder`. W5 tests SQL BINARY ordering and rewrite capture; W6
 compares canonical replicated order, not coincidental local row IDs. Visible
 order among tied keys can therefore differ until a local rewrite.
 
+**Implementation note (2026-10-19, MS0).** W5 also guards group/member
+appends in creation, subscribe, import and restore. An append that would
+write more than 64 characters rewrites the existing list plus the new tail
+inside the caller's transaction, updating only changed keys. Replace-restore
+rewrites malformed, tied, descending or over-limit archive keys. Queue and
+session writes reuse M4's existing planner; SQL BINARY ordering and capture
+of rewrites are checked on the three real lists.
+
 `QueueDao` (M4, semantics 06). Each entry carries an `orderKey` (fractional index, [D92](../PLAN.md#3-key-decisions)), so a move writes one row and two devices that reorder different items concurrently both keep their moves after sync; keys are computed in Kotlin by `OrderKey` (`:sync:protocol`, [10 Ordered lists](10-sync.md#ordered-lists)) inside the write transaction, which serialises all writers, so reading the neighbours and writing the key is race-free.
 
 | Operation | SQL / rule |
@@ -1908,6 +1916,18 @@ The last-reference credential delete races with a concurrent `SecretStore.put` f
 6. `UPDATE play_session SET contextId = :winner WHERE contextType = 'PODCAST' AND contextId = :loser`; `UPDATE import_item SET podcastId = :winner WHERE podcastId = :loser`.
 7. Provenance union ([episode_guid_provenance](#episode_guid_provenance)): the loser's GUID knowledge moves to the winner *before* the cascade can delete it — `INSERT INTO episode_guid_provenance(podcastId, guid, knowledge) SELECT :winner, guid, knowledge FROM episode_guid_provenance WHERE podcastId = :loser ON CONFLICT(podcastId, guid) DO UPDATE SET knowledge = 'KNOWN_AMBIGUOUS' WHERE excluded.knowledge = 'KNOWN_AMBIGUOUS'` (ambiguity on either side stays ambiguous; a coverage marker on the winner is never widened by the loser's).
 8. `deleteCascade(loser)` (now only the matched loser rows and the loser's own metadata remain). While linked (MS2), steps 1–6 are captured normally — they are real changes of the winner's records — while step 7 writes only the local, non-synced `episode_guid_provenance` table and so captures nothing; step 8 runs inside `SyncStateDao.withApplying` after `SyncOutboxDao.captureLiteral` has recorded the loser's move instead of an unsubscribe: `feedUrl` = the winner's URL and `feedKeys` = the loser's keys plus the winner's, under the loser's `syncId` ([10 Feed moves](10-sync.md#feed-moves)). A captured unsubscribe would make other devices drop the loser's episodes instead of merging them; the server merges the two records by feed key, marks the loser record with `mergedInto`, and every device follows that redirect ([10 Redirects on clients](10-sync.md#redirects-on-clients)).
+
+**Implementation note (2026-10-19, MS0).** W5 brings the local merge
+hooks listed above as MS2 forward now that triggers exist. Winner state,
+membership and pointer changes
+remain captured; post-merge derived position resets and progress markers
+run with applying, as does the loser's cascade. Before deleting it, the
+transaction freezes both podcasts' primary and alias keys and records the
+winner URL and union under the losing sync ID. Remote-origin merges and
+unsubscribes suppress all capture, retaining coordinator-before-Room order.
+Playback replay-start records only the false played pair and keeps resume
+position; public mark-unplayed also records a zero reset, and position-only
+reset records no played action, including when projections already match.
 
 **Implementation deviation (2026-10-14, M1b PR5):** Step 7's SQL `ON CONFLICT DO UPDATE` needs SQLite 3.24, which conflicts with this document's [SQL dialect baseline](#sql-dialect-baseline). `PodcastMergeDao` implements that union with `INSERT OR IGNORE … SELECT`, followed by a guarded `UPDATE` promoting the winner's GUIDs that are ambiguous on the loser. Both statements run in the same merge transaction before loser deletion; the sticky ambiguity and unchanged winner coverage semantics are identical.
 

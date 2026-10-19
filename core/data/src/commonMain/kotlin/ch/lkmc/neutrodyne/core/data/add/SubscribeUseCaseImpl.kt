@@ -17,6 +17,7 @@ import ch.lkmc.neutrodyne.core.data.ingest.IngestResult
 import ch.lkmc.neutrodyne.core.data.ingest.IngestionEventBus
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshOrigin
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshScheduler
+import ch.lkmc.neutrodyne.core.data.repo.appendMemberKey
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.database.PodcastGroupMemberEntity
@@ -206,7 +207,12 @@ internal class SubscribeUseCaseImpl(
                                             groupId = groupId,
                                             podcastId = id,
                                             orderKey =
-                                                orderKeys.after(db.groupDao().lastMemberOrderKey(groupId)),
+                                                db.groupDao().appendMemberKey(
+                                                    groupId,
+                                                    id,
+                                                    db.groupDao().lastMemberOrderKey(groupId),
+                                                    orderKeys,
+                                                ),
                                             addedAt = now,
                                             source = MemberSource.MANUAL,
                                         ),

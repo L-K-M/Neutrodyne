@@ -15,6 +15,7 @@ import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
+import ch.lkmc.neutrodyne.core.testing.ProtocolOrderKeys
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.groupEntity
@@ -43,7 +44,7 @@ class GroupMembershipChunksTest {
         GroupRepositoryImpl(
             db,
             clock,
-            TestOrderKeys,
+            ProtocolOrderKeys,
             FakeGroupChannelSync(),
             FakeRefreshController(),
             FakeSnapshotScheduler(),

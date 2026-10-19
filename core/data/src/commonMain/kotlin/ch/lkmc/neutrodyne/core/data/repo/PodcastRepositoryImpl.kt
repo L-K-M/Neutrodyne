@@ -54,8 +54,7 @@ import kotlinx.serialization.json.Json
 /**
  * `PodcastRepository` (03 Unsubscribe and other podcast operations): read models mapped in Kotlin
  * from the 02 DAOs and the write paths M1a owns (unsubscribe, user columns, retry) plus M1b's
- * `setCredentials`, `merge` and `editFeedUrl`; `SyncStateDao.withApplying` lands with MS0 so
- * `ChangeOrigin.SYNC` runs the same cascade for now (deviation 2026-10-07).
+ * `setCredentials`, `merge` and `editFeedUrl`; remote-origin cascades suppress capture.
  */
 @SingleIn(AppScope::class)
 @ContributesBinding(AppScope::class)
@@ -163,10 +162,17 @@ internal class PodcastRepositoryImpl(
             // library with stale periodic scheduling (03 Unsubscribe).
             coordinator.withCredentialCommit {
                 db.withWriteTransaction {
-                    for (id in podcastIds) {
-                        if (dao.byId(id) == null) continue
-                        dao.deleteCascade(id, clock.now())
-                        removed += id
+                    suspend fun removePodcasts() {
+                        for (id in podcastIds) {
+                            if (dao.byId(id) == null) continue
+                            dao.deleteCascade(id, clock.now())
+                            removed += id
+                        }
+                    }
+                    if (origin == ChangeOrigin.SYNC) {
+                        db.syncStateDao().withApplying { removePodcasts() }
+                    } else {
+                        removePodcasts()
                     }
                 }
             }

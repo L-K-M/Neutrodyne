@@ -2061,7 +2061,16 @@ Each scenario is a test; the property test generates the first four at random, t
 and the trigger-only 2→3 migration. Database-layer capture, replay, transaction,
 rekey, migration and linked invalidation assertions run on the bundled JVM
 driver and Robolectric's framework driver; Android device tests compile for
-both drivers. Existing `core/data` writer integration remains W5.
+both drivers. W5 integrates the existing `core/data` writers.
+
+**Implementation note (2026-10-19, MS0).** W5's AC3 restore coverage uses
+the real lower-level library/episode mergers with a synthetic linked fixture,
+including suppression and frozen historical `captureAt` values. This proves
+capture groundwork only. `RestoreRunner` still rejects public linked restore;
+MS2 retains ownership of its choices, historical capture orchestration and
+upload/prune workflow. The current `SettingKey.synced` allow-list is already
+asserted by `SyncedSettingsContractTest`; future keys remain with their
+feature milestones.
 
 S14 development measurements below are from Linux x86_64, Temurin
 21.0.12.1, in-memory Room databases, the non-zero position-save DAO sequence

@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.data.backup
 
+import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.database.EpisodeEntity
 import ch.lkmc.neutrodyne.core.database.EpisodeStateEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
@@ -144,9 +145,14 @@ internal class RestoreWrites(
      * `startedAt = COALESCE(startedAt, posAt)` for an existing one whose `updatedAt` stays.
      */
     private suspend fun finishPosition(episodeId: Long) {
-        mergeDao.resetPlayedPosition(episodeId)
-        mergeDao.ensureProgressState(episodeId)
-        mergeDao.deriveProgressStart(episodeId)
+        // Projection cleanup is not a new reset action and must not replace a literal capture.
+        db.withWriteTransaction {
+            db.syncStateDao().withApplying {
+                mergeDao.resetPlayedPosition(episodeId)
+                mergeDao.ensureProgressState(episodeId)
+                mergeDao.deriveProgressStart(episodeId)
+            }
+        }
     }
 
     /**

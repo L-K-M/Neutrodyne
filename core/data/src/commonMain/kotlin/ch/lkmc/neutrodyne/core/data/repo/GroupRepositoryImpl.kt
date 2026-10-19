@@ -141,7 +141,7 @@ internal class GroupRepositoryImpl(
                                 uuid = Uuid.random().toString(),
                                 name = name.name,
                                 nameKey = name.nameKey,
-                                orderKey = orderKeys.after(dao.lastGroupOrderKey()),
+                                orderKey = dao.appendGroupKey(dao.lastGroupOrderKey(), orderKeys, now),
                                 colorArgb =
                                     draft.colorArgb?.let(GroupPalette::opaque)
                                         ?: GroupPalette.nextColor(dao.groupColors()),
@@ -154,7 +154,7 @@ internal class GroupRepositoryImpl(
                         )
                     var lastKey: String? = null
                     for (podcastId in memberIds) {
-                        lastKey = orderKeys.after(lastKey)
+                        lastKey = dao.appendMemberKey(groupId, podcastId, lastKey, orderKeys)
                         dao.insertMember(memberRow(groupId, podcastId, lastKey, now))
                     }
                     groupId
@@ -273,7 +273,7 @@ internal class GroupRepositoryImpl(
                 if (removed.isNotEmpty()) dao.deleteMembers(groupId, removed)
                 var lastKey = dao.lastMemberOrderKey(groupId)
                 for (podcastId in podcastIds - current) {
-                    lastKey = orderKeys.after(lastKey)
+                    lastKey = dao.appendMemberKey(groupId, podcastId, lastKey, orderKeys)
                     dao.insertMember(memberRow(groupId, podcastId, lastKey, now))
                 }
                 dao.touchUpdatedAt(setOf(groupId), now)
@@ -316,7 +316,7 @@ internal class GroupRepositoryImpl(
                 for (groupId in add) {
                     var lastKey = dao.lastMemberOrderKey(groupId)
                     for (podcastId in podcastIds) {
-                        val orderKey = orderKeys.after(lastKey)
+                        val orderKey = dao.appendMemberKey(groupId, podcastId, lastKey, orderKeys)
                         if (dao.insertMember(memberRow(groupId, podcastId, orderKey, now)) == -1L) continue
                         lastKey = orderKey
                         changed += groupId

@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.model.ChangeOrigin
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import dev.zacsweers.metro.Inject
+import kotlinx.serialization.json.Json
 
 /** Lossless database merge (02), shared with the feed-move path without a repository DI cycle. */
 @Inject
@@ -17,14 +18,21 @@ internal class PodcastMerger(
     private val coordinator: CredentialCommitCoordinator,
     private val clock: Clock,
 ) {
-    @Suppress("UNUSED_PARAMETER") // Sync capture/applying hooks arrive with MS2, as for unsubscribe.
-    suspend fun merge(loserId: Long, winnerId: Long, origin: ChangeOrigin) {
+    suspend fun merge(
+        loserId: Long,
+        winnerId: Long,
+        origin: ChangeOrigin,
+    ) {
         require(loserId != winnerId) { "Cannot merge a podcast into itself" }
 
         // Last-reference deletion must exclude credential puts before acquiring the Room writer.
         coordinator.withCredentialCommit {
             db.withWriteTransaction {
-                mergeInTransaction(loserId, winnerId)
+                if (origin == ChangeOrigin.SYNC) {
+                    db.syncStateDao().withApplying { mergeInTransaction(loserId, winnerId) }
+                } else {
+                    mergeInTransaction(loserId, winnerId)
+                }
             }
         }
     }
@@ -52,7 +60,14 @@ internal class PodcastMerger(
     ) {
         val podcasts = db.podcastDao()
         val loser = requireNotNull(podcasts.byId(loserId)) { "Losing podcast does not exist" }
-        requireNotNull(podcasts.byId(winnerId)) { "Winning podcast does not exist" }
+        val winningPodcast = requireNotNull(podcasts.byId(winnerId)) { "Winning podcast does not exist" }
+        // Alias ownership changes below; freeze the move while both complete records still exist.
+        val feedKeys =
+            (
+                listOf(loser.feedKey, winningPodcast.feedKey) +
+                    podcasts.aliases(loserId).map { it.url } + podcasts.aliases(winnerId).map { it.url }
+            ).distinct()
+                .sorted()
         val dao = db.podcastMergeDao()
         val now = clock.now()
 
@@ -89,9 +104,11 @@ internal class PodcastMerger(
             dao.clearPlayedStart(winner.id)
             dao.copyPosition(episode.id, winner.id)
             dao.mergePosition(episode.id, winner.id)
-            dao.resetPlayedPosition(winner.id)
-            dao.ensureProgressState(winner.id)
-            dao.deriveProgressStart(winner.id)
+            db.syncStateDao().withApplying {
+                dao.resetPlayedPosition(winner.id)
+                dao.ensureProgressState(winner.id)
+                dao.deriveProgressStart(winner.id)
+            }
             dao.moveQueue(episode.id, winner.id)
             dao.moveDownload(episode.id, winner.id)
             dao.moveCurrentEpisode(episode.id, winner.id)
@@ -101,6 +118,16 @@ internal class PodcastMerger(
         dao.moveImportItems(loserId, winnerId)
         dao.copyProvenance(loserId, winnerId)
         dao.unionAmbiguity(loserId, winnerId)
-        podcasts.deleteCascade(loserId, now)
+        val state = db.syncStateDao().get()
+        if (state?.enabled == true && !state.applying) {
+            db.syncOutboxDao().captureLiteral(
+                "podcast",
+                loser.syncId,
+                "feedUrl",
+                Json.encodeToString(winningPodcast.feedUrl),
+            )
+            db.syncOutboxDao().captureLiteral("podcast", loser.syncId, "feedKeys", Json.encodeToString(feedKeys))
+        }
+        db.syncStateDao().withApplying { podcasts.deleteCascade(loserId, now) }
     }
 }

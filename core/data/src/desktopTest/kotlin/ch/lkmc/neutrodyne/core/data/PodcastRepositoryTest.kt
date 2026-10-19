@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.data.repo.PodcastMerger
 import ch.lkmc.neutrodyne.core.data.repo.PodcastRepositoryImpl
 import ch.lkmc.neutrodyne.core.database.ArtworkEntity
 import ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity
+import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.CredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
@@ -70,6 +71,21 @@ class PodcastRepositoryTest {
     private val settings = FakeSettingsRepository()
     private val scheduler = FakeRefreshScheduler()
     private val coordinator = FakeCredentialCommitCoordinator()
+
+    @Test fun remoteUnsubscribeSuppressesCaptureWhileLocalUnsubscribeKeepsItsTombstone() =
+        runTest {
+            val remote = seedPodcast(db, "https://remote.test/f")
+            val local = seedPodcast(db, "https://local.test/f")
+            val rid = db.podcastDao().byId(local)!!.syncId
+            db.syncStateDao().upsert(SyncStateEntity(enabled = true, nodeId = "0000000000000001"))
+            assertEquals(listOf(remote), repo().unsubscribe(listOf(remote), ChangeOrigin.SYNC))
+            assertTrue(db.syncOutboxDao().rows().isEmpty())
+            assertEquals(0, db.syncStateDao().get()?.hlc)
+            assertEquals(listOf(local), repo().unsubscribe(listOf(local), ChangeOrigin.LOCAL))
+            assertEquals("false", db.syncOutboxDao().get("podcast", rid, "subscribed")?.value)
+            assertEquals(false, db.syncStateDao().get()?.applying)
+            assertEquals(2, coordinator.commits)
+        }
 
     private fun repo(
         secrets: SecretStore = FakeSecretStore(),

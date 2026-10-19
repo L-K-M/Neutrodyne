@@ -65,6 +65,7 @@ internal class PositionWriter(
         db.withWriteTransaction {
             db.positionDao().reset(listOf(episodeId), now)
             db.episodeStateDao().clearStarted(episodeId, now)
+            db.captureEpisodeIntents(listOf(episodeId), EpisodeIntent.RESET_POSITION)
         }
     }
 
@@ -81,7 +82,10 @@ internal class PositionWriter(
         now: Long,
     ) {
         require(now >= 0)
-        db.withWriteTransaction { db.episodeStateDao().markUnplayed(listOf(episodeId), now) }
+        db.withWriteTransaction {
+            db.episodeStateDao().markUnplayed(listOf(episodeId), now)
+            db.captureEpisodeIntents(listOf(episodeId), EpisodeIntent.UNPLAYED)
+        }
     }
 }
 

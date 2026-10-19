@@ -4,6 +4,8 @@ package ch.lkmc.neutrodyne.core.data.backup
 
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.data.playback.applyQueueWrites
+import ch.lkmc.neutrodyne.core.data.playback.planQueueWrites
 import ch.lkmc.neutrodyne.core.database.BackupDao
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
@@ -271,12 +273,9 @@ internal class RestoreEpisodeMerger(
                     writes.insertQueueEntry(entry.second, key, staged.createdAtMs)
                 }
             } else {
-                var lastKey = queueDao.lastOrderKey()
-                for ((_, episodeId) in accepted) {
-                    val key = orderKeys.after(lastKey)
-                    // An ignored insert consumed no key.
-                    if (writes.insertQueueEntry(episodeId, key, staged.createdAtMs)) lastKey = key
-                }
+                val current = queueDao.entries()
+                val desired = current.map { it.episodeId } + accepted.map { it.second }
+                db.applyQueueWrites(planQueueWrites(current, desired, orderKeys), staged.createdAtMs)
             }
 
             if (policy == MergePolicy.RESTORE_REPLACE || queue?.session != null) {

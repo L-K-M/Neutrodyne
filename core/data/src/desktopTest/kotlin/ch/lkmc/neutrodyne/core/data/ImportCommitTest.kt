@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.data
 
+import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.data.credentials.CredentialCommitCoordinatorImpl
 import ch.lkmc.neutrodyne.core.data.credentials.DesktopSecretStore
@@ -18,7 +19,9 @@ import ch.lkmc.neutrodyne.core.database.ImportItemEntity
 import ch.lkmc.neutrodyne.core.database.ImportSessionEntity
 import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
 import ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity
+import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.ImportError
+import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.model.AliasReason
 import ch.lkmc.neutrodyne.core.model.CreateImportOptions
@@ -36,6 +39,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeImportReportPoster
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
+import ch.lkmc.neutrodyne.core.testing.database.memberEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipGuard
@@ -140,6 +144,7 @@ class ImportCommitTest {
         store: SecretStore = secrets,
         workScheduler: ImportWorkScheduler = scheduler,
         syncIds: () -> String = { Uuid.random().toString() },
+        keys: OrderKeys = TestOrderKeys,
     ) = ImportCommitter(
         db = db,
         secrets = store,
@@ -147,12 +152,40 @@ class ImportCommitTest {
         workScheduler = workScheduler,
         refresh = refresh,
         channels = channels,
-        orderKeys = TestOrderKeys,
+        orderKeys = keys,
         clock = clock,
         newSyncId = syncIds,
     )
 
     // --- Happy path: subscriptions, groups, memberships, state ---------------------------------
+
+    @Test fun linkedCommitCapturesSubscriptionsAndAppendRewrites() =
+        runTest {
+            val group = seedGroup("Existing")
+            val existing = subscribeExisting("https://old.test/f", "old.test/f")
+            db.groupDao().insertMember(memberEntity(group, existing, "0.5"))
+            db.withWriteTransaction {
+                db.syncStateDao().upsert(SyncStateEntity(enabled = true, nodeId = "0000000000000001"))
+            }
+            val sid =
+                seedSession(
+                    options = ImportOptions(targetGroupId = group),
+                    items = listOf(item(1, "https://new.test/f", groups = listOf("New group"))),
+                )
+            val keys =
+                object : OrderKeys by TestOrderKeys {
+                    override fun after(last: String?): String = "z".repeat(OrderKeys.MAX_LENGTH + 1)
+                }
+            assertIs<Outcome.Success<*>>(newCommitter(keys = keys).confirm(sid))
+            assertCommitted(sid)
+            assertTrue(db.groupDao().groupsInOrder().all { it.orderKey.length <= OrderKeys.MAX_LENGTH })
+            assertEquals(2, db.groupDao().membersOf(group).size)
+            assertTrue(db.groupDao().membersOf(group).all { it.orderKey.length <= OrderKeys.MAX_LENGTH })
+            val rows = db.syncOutboxDao().rows()
+            assertEquals(1, rows.count { it.coll == "podcast" && it.field == "*" })
+            assertEquals(1, rows.count { it.coll == "group" && it.field == "ok" })
+            assertEquals(3, rows.count { it.coll == "member" && it.field == "ok" })
+        }
 
     @Test
     fun flatCommitSubscribesPendingFeeds() =

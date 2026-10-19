@@ -5,6 +5,8 @@ package ch.lkmc.neutrodyne.core.data.repo
 import androidx.room3.withWriteTransaction
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.data.playback.EpisodeIntent
+import ch.lkmc.neutrodyne.core.data.playback.captureEpisodeIntents
 import ch.lkmc.neutrodyne.core.data.playback.markEpisodesPlayed
 import ch.lkmc.neutrodyne.core.database.DescriptionFormat
 import ch.lkmc.neutrodyne.core.database.EpisodeDescriptionCodec
@@ -89,6 +91,7 @@ internal class EpisodeRepositoryImpl(
                 for (chunk in episodeIds.distinct().chunked(BIND_CHUNK)) {
                     db.episodeStateDao().markUnplayed(chunk, now)
                     db.positionDao().reset(chunk, now)
+                    db.captureEpisodeIntents(chunk, EpisodeIntent.UNPLAYED, EpisodeIntent.RESET_POSITION)
                 }
             }
         }

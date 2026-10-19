@@ -8,6 +8,8 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.data.repo.GroupMerger
+import ch.lkmc.neutrodyne.core.data.repo.appendGroupKey
+import ch.lkmc.neutrodyne.core.data.repo.appendMemberKey
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
@@ -158,7 +160,7 @@ internal class RestoreMerger(
                                     if (policy == MergePolicy.RESTORE_REPLACE) {
                                         orderKeyPlan.groups.getValue(group)
                                     } else {
-                                        orderKeys.after(lastGroupKey).also { lastGroupKey = it }
+                                        groupDao.appendGroupKey(lastGroupKey, orderKeys, now).also { lastGroupKey = it }
                                     }
                                 groupsAdded++
                                 insertGroup(group, orderKey, staged.createdAtMs, now, policy)
@@ -711,7 +713,7 @@ internal class RestoreMerger(
                 var lastKey = groupDao.lastMemberOrderKey(groupId)
                 for (member in group.members.values) {
                     val podcastId = memberPodcastId(member.podcastKey, podcastIdByKey) ?: continue
-                    val key = orderKeys.after(lastKey)
+                    val key = groupDao.appendMemberKey(groupId, podcastId, lastKey, orderKeys)
                     val inserted =
                         groupDao.insertMember(
                             PodcastGroupMemberEntity(
@@ -832,7 +834,7 @@ internal fun restoreOrderKeys(
     if (
         keys.size == wanted.size &&
         keys.zipWithNext().all { (a, b) -> a < b } &&
-        keys.all { runCatching { orderKeys.after(it) }.isSuccess }
+        keys.all { it.length <= OrderKeys.MAX_LENGTH && runCatching { orderKeys.after(it) }.isSuccess }
     ) {
         return keys
     }

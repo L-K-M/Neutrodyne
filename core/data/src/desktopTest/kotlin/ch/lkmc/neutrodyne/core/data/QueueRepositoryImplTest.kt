@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.data.playback.SessionWriter
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PlaySessionEntity
 import ch.lkmc.neutrodyne.core.database.QueueEntryEntity
+import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.domain.ContextRetention
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.domain.SessionStart
@@ -132,6 +133,7 @@ class QueueRepositoryImplTest {
             val ids = seed(4)
             for (id in ids.take(2)) db.queueDao().insert(QueueEntryEntity(episodeId = id, orderKey = "a0", addedAt = 1))
             db.queueDao().insert(QueueEntryEntity(episodeId = ids[2], orderKey = "a1", addedAt = 1))
+            db.syncStateDao().upsert(SyncStateEntity(enabled = true, nodeId = "0000000000000001"))
             repo.move(ids[2], 1)
             assertEquals(listOf(ids[0], ids[2], ids[1]), order())
             assertEquals(ProtocolOrderKeys.rewrite(3), db.queueDao().entries().map { it.orderKey })
@@ -148,6 +150,9 @@ class QueueRepositoryImplTest {
             assertEquals(ProtocolOrderKeys.rewrite(4), db.queueDao().entries().map { it.orderKey })
             val fresh = seed(1).single()
             val before = db.queueDao().entries()
+            val captured = db.syncOutboxDao().rows()
+            val stamp = db.syncStateDao().get()?.hlc
+            assertTrue(captured.any { it.coll == "upnext" && it.field == "ok" })
             db.useWriterConnection {
                 it.execSql(
                     "CREATE TRIGGER reject_insert BEFORE INSERT ON queue_entry BEGIN SELECT RAISE(ABORT, 'test'); END",
@@ -155,6 +160,8 @@ class QueueRepositoryImplTest {
             }
             assertFailsWith<Exception> { repo.addNext(listOf(ids[1], fresh)) }
             assertEquals(before, db.queueDao().entries())
+            assertEquals(captured, db.syncOutboxDao().rows())
+            assertEquals(stamp, db.syncStateDao().get()?.hlc)
         }
 
     @Test fun largeQueuesChunkBindsAndQueueEditsDoNotAdvanceGeneration() =

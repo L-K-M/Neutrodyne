@@ -13,6 +13,8 @@ import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.data.add.AddInputNormalizer
 import ch.lkmc.neutrodyne.core.data.add.NormalizedInput
 import ch.lkmc.neutrodyne.core.data.credentials.removeUnreferenced
+import ch.lkmc.neutrodyne.core.data.repo.appendGroupKey
+import ch.lkmc.neutrodyne.core.data.repo.appendMemberKey
 import ch.lkmc.neutrodyne.core.database.ImportItemEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastEntity
@@ -400,7 +402,7 @@ internal class ImportCommitter(
         ctx.groups.itemKeys[item.ordinal]?.mapNotNullTo(groupIds) { ctx.groups.ids[it] }
         targetGroupId?.let(groupIds::add)
         for (groupId in groupIds) {
-            val key = orderKeys.after(ctx.memberTail(groupId))
+            val key = db.groupDao().appendMemberKey(groupId, podcastId, ctx.memberTail(groupId), orderKeys)
             val inserted =
                 db
                     .groupDao()
@@ -517,7 +519,7 @@ internal class ImportCommitter(
                     groups.ids[spec.nameKey] = it.id
                     continue
                 }
-                val orderKey = orderKeys.after(lastGroupOrderKey())
+                val orderKey = db.groupDao().appendGroupKey(lastGroupOrderKey(), orderKeys, now)
                 val rowId =
                     db.groupDao().insertGroupOrIgnore(
                         PodcastGroupEntity(

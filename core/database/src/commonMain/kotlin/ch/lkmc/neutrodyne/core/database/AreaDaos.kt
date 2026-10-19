@@ -157,6 +157,16 @@ abstract class GroupDao {
     abstract suspend fun lastMemberOrderKey(groupId: Long): String?
 
     @Query(
+        "UPDATE podcast_group_member SET orderKey = :key WHERE groupId = :groupId" +
+            " AND podcastId = :podcastId AND orderKey <> :key",
+    )
+    abstract suspend fun setMemberOrderKey(
+        groupId: Long,
+        podcastId: Long,
+        key: String,
+    )
+
+    @Query(
         "SELECT EXISTS(SELECT 1 FROM podcast p WHERE NOT EXISTS" +
             " (SELECT 1 FROM podcast_group_member m WHERE m.podcastId = p.id))",
     )
