@@ -4,6 +4,109 @@ This file lets another person or agent take over the work at any point. **Last u
 
 ## 0. Implementation status
 
+M4 integration (2026-10-19, branch `impl/m4-p1`) is local work only, per the
+owner's no-push instruction. The playback service adapters and full-player
+queue are integrated. Framework playback tests are hosted in the app test APK;
+labelled PR CI requires the short cases on API 26/36, nightly requires the
+30-minute screen-off stream on API 34, and the existing API 37 and release
+jobs require their playback cases. The result gate rejects skipped or empty
+suites. No device, nightly, release-APK or physical-audio result has been run
+for this integration. M4 acceptance 3/4/5/8/12 therefore remains unverified on
+devices, including abrupt process-kill recovery, cover/lock-screen inspection,
+TalkBack, calls/headsets and listening at 3x with skip silence. Local host-test
+results are recorded separately from those pending checks; M4 is not complete.
+
+### M4 local verification (2026-10-19)
+
+The requested full gate passed after `spotlessApply` ran alone, using JDK 21,
+the Android SDK and the graphics environment, `--no-daemon --max-workers=2`,
+`-Pkotlin.incremental=false` and
+`-Pkotlin.compiler.execution.strategy=in-process`. The gate included
+`allTests test mutationTest :app:compileDebugAndroidTestKotlin spotlessCheck
+:app:lintRelease assertModuleGraph checkBannedApis :app:compileDebugKotlin
+:desktopApp:compileKotlin --continue`. Release lint reported no errors or
+warnings. The build executed 93 tasks, reused 1 from cache and found 1,215
+up to date. Counts below include the unchanged tests' reused results.
+
+The host XML contains 6,625 passing cases and three environment-dependent
+skips: the Windows-only DPAPI test and two desktop file-menu UI cases.
+`allTests` accounts for 5,855 passes and one skip; `test` for 730 passes and
+two skips; `mutationTest` for 40 passes. The sync protocol mutation task has
+no matching cases and contributes no mutation evidence. The playback-report
+checker's five Python fixture tests also pass.
+
+The desktop localization case passed alone; the new socket cancellation
+regression then failed before its fix. The accept loop now preserves
+coroutine cancellation instead of leaking `ClosedByInterruptException` into
+later tests. The Android graph's 16 cases passed alone; the previous full
+run's SQLite JNI classloader conflict is avoided by sharing the startup
+suite's API 34 Robolectric sandbox. The final full suites pass.
+
+The debug instrumentation APK also assembles. Its ZIP contains all three
+synthetic MP3 assets under `assets/media/`, plus the manifest and DEX files.
+This proves packaging only; the APK was not installed or run on a device.
+
+Both documentation checks pass: 0 problems and 0 invalid Mermaid diagrams.
+Device suites, CI, automated PR review and physical audio were not run. No PR
+was opened or merged, following the owner's local-commit-only instruction.
+
+| Test task | Passed | Skipped |
+|---|---:|---:|
+| `:app:testDebugUnitTest` | 142 | 0 |
+| `:core:artwork:desktopTest` | 25 | 0 |
+| `:core:artwork:testAndroidHostTest` | 43 | 0 |
+| `:core:common:desktopTest` | 100 | 0 |
+| `:core:data:desktopTest` | 1193 | 1 |
+| `:core:data:mutationTest` | 1 | 0 |
+| `:core:data:testAndroidHostTest` | 139 | 0 |
+| `:core:database:desktopTest` | 152 | 0 |
+| `:core:database:testAndroidHostTest` | 9 | 0 |
+| `:core:datastore:desktopTest` | 18 | 0 |
+| `:core:designsystem:desktopTest` | 14 | 0 |
+| `:core:domain:desktopTest` | 3 | 0 |
+| `:core:model:desktopTest` | 2547 | 0 |
+| `:core:navigation:desktopTest` | 25 | 0 |
+| `:core:network:desktopTest` | 33 | 0 |
+| `:core:network:okhttp:test` | 45 | 0 |
+| `:core:network:testAndroidHostTest` | 6 | 0 |
+| `:core:testing:desktopTest` | 65 | 0 |
+| `:core:ui:desktopTest` | 151 | 0 |
+| `:core:ui:testAndroidHostTest` | 134 | 0 |
+| `:desktop:system:test` | 1 | 0 |
+| `:desktopApp:test` | 113 | 2 |
+| `:download:api:desktopTest` | 1 | 0 |
+| `:download:impl:desktopTest` | 1 | 0 |
+| `:feature:discover:desktopTest` | 40 | 0 |
+| `:feature:episode:desktopTest` | 46 | 0 |
+| `:feature:feeds:desktopTest` | 117 | 0 |
+| `:feature:feeds:testAndroidHostTest` | 70 | 0 |
+| `:feature:groups:desktopTest` | 82 | 0 |
+| `:feature:importexport:desktopTest` | 190 | 0 |
+| `:feature:library:desktopTest` | 57 | 0 |
+| `:feature:player:desktopTest` | 61 | 0 |
+| `:feature:podcast:desktopTest` | 110 | 0 |
+| `:feature:queue:desktopTest` | 19 | 0 |
+| `:feature:settings:desktopTest` | 35 | 0 |
+| `:feature:sync:desktopTest` | 1 | 0 |
+| `:feeds:desktopTest` | 215 | 0 |
+| `:feeds:jvm:mutationTest` | 38 | 0 |
+| `:feeds:jvm:test` | 252 | 0 |
+| `:playback:api:desktopTest` | 1 | 0 |
+| `:playback:core:desktopTest` | 100 | 0 |
+| `:playback:desktop:test` | 1 | 0 |
+| `:playback:engine:test` | 1 | 0 |
+| `:playback:impl:testDebugUnitTest` | 114 | 0 |
+| `:playback:native:test` | 1 | 0 |
+| `:sync:api:desktopTest` | 1 | 0 |
+| `:sync:impl:desktopTest` | 1 | 0 |
+| `:sync:protocol:desktopTest` | 27 | 0 |
+| `:sync:server:test` | 58 | 0 |
+| `:youtube:api:desktopTest` | 22 | 0 |
+| `:youtube:api:mutationTest` | 1 | 0 |
+| `:youtube:engine:test` | 1 | 0 |
+| `:youtube:impl:desktopTest` | 1 | 0 |
+| `:youtube:ytdlp-desktop:test` | 1 | 0 |
+
 | Milestone | State | Branch / PR | Notes |
 |---|---|---|---|
 | M0a.1 | scheduled gate green through `52b2fd6`; current-head and tagged checks pending | [PR #10](https://github.com/L-K-M/Neutrodyne/pull/10), merge `e0c3722` | Scaffold, Android shell, policy gates and release pipeline. Seven Codex Sol rounds; GLM waived after repeated timeouts. Scheduled-main [38037939442](https://github.com/L-K-M/Neutrodyne/actions/runs/38037939442) on `bb0d13e` passes all four jobs, including API26/33/34/36 debug, API37 16 KB and release smoke; report-only repro also passes. The newer scheduled nightly [38125978109](https://github.com/L-K-M/Neutrodyne/actions/runs/38125978109) passes on `52b2fd6`. Issue #58 closed for those heads. Next: a scheduled green on the current main head, checklist [#20](https://github.com/L-K-M/Neutrodyne/issues/20), owner-device acceptance and tagged-main checks before `v0.1.0`. |

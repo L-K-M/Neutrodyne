@@ -1635,8 +1635,9 @@ Serves R4.7, R4.8, R5.2, R5.5, R5.7, R8.5, N4. Delivered in M4 (sheet, mini and 
 sheet at every width, without reserving a side-panel column or changing the
 saved panel preference. The panel geometry remains available for MD1; artwork
 tint, tabletop and landscape adaptation remain M10/MD1, and sleep/chapters
-remain M5. The full player exposes a content slot for W10's shared Up next
-list. M4 uses the existing Material 3 slider because the documented `NdSlider`
+remain M5. Both shells fill the full player content slot with the shared Up next
+list through the queue route and its `UpNextViewModel`. M4 uses the existing
+Material 3 slider because the documented `NdSlider`
 wrapper is not present in the codebase. The play button interpolates Compose
 rounded corners between a square and a circle, without adding graphics-shapes.
 Desktop composes the same sheet against
@@ -2244,7 +2245,7 @@ Serves R5.2, R5.3, R5.4, R5.8, N6, N5. Delivered in M1 (Coil loader, `ArtworkRef
 Android codec, worker, provider and monogram rasters. The desktop continues
 to use Coil for in-app covers and fake-tests the common rules; its real Skia
 codec, artwork lane and OS-session rasters remain MD1. Group raster
-production and colour extraction remain M10. The supplied W1/M3 base has no
+production and colour extraction remain M10. At the M4 contracts stage, the M3 base had no
 subscription/import/restore `pin` callers. To keep M4 artwork ownership in
 `:core:artwork`, the Android order-300 initializer observes committed changes
 to podcast, episode, download and group source tables and debounces requests

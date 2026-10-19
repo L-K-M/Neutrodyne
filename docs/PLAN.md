@@ -1209,7 +1209,8 @@ flowchart LR
 #### M4: Playback core
 
 **Implementation note (2026-10-18, M4).** Bring only the standard Media3
-`MediaButtonReceiver` declaration into M4 (W8) for cold media-key starts.
+`MediaButtonReceiver` declaration into M4 (the playback service) for cold
+media-key starts.
 Boot-card resumption and hardware `SKIP` mapping remain M5.
 
 - **Goal:** stream any RSS episode with a reliable background player, a database-owned queue and a cover-first player UI.
