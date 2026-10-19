@@ -838,6 +838,7 @@ class ImportRouteTest {
             onNodeWithText("Put everything into group…").performClick()
             onNodeWithText("New group…").performClick()
             // Both the route and dialog have Cancel actions; the dialog is last.
+            onAllNodesWithText("Cancel").assertCountEquals(2)
             onAllNodesWithText("Cancel")[1].performClick()
             onNodeWithText("Tech").assertIsDisplayed()
             assertNull(options(id).targetGroupName)

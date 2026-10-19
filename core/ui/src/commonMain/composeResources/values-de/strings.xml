@@ -544,6 +544,7 @@
     <string name="import_filter_not_imported">Nicht importiert</string>
     <string name="import_filter_attention">Zu prüfen</string>
     <string name="import_search">Titel oder Host suchen</string>
+    <string name="import_load_error">Der Import konnte nicht geladen werden</string>
     <string name="import_select_none">Keine auswählen</string>
     <string name="import_subscribe">Abonnieren</string>
     <plurals name="import_subscribe_count">
