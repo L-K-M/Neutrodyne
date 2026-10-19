@@ -877,6 +877,14 @@ When `unit` exceeds 15 min at p50 over a week, the fix order is: raise `maxParal
 
 ## Static analysis
 
+Implementation note (2026-10-19, M9a): W2 adds genuine-release negative
+signature/hash/missing-input tests, bounded ZIP/recovery host tests and
+Android preparation tests using core:testing fakes. The Android inventory
+preserves exact meriyah ISC/astring MIT notices from authenticated ejs data;
+yt-dlp/ejs reuse the existing Unlicense text. Device/host compilation and
+activation evidence remain **spike pending**. No runtime updater is added.
+
+
 Serves N8, N10, N11, N12. Delivered in M0a (Lint, formatting, Python licence and APK content checks, with the engine stack from M9a), M0b (desktop image and runtime-source checks, the server's Licensee, the brand check), MD0 (native licences, C formatting), MS1 (server image scan). Honours [D3](../PLAN.md#3-key-decisions), [D60](../PLAN.md#3-key-decisions), [D89](../PLAN.md#3-key-decisions), [D95](../PLAN.md#3-key-decisions).
 
 ### Gates
