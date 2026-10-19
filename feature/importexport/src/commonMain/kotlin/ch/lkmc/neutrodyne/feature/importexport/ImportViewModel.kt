@@ -253,8 +253,9 @@ internal class ImportViewModel
             }
 
         /**
-         * "New group…" in the target picker. `NameTaken` becomes the existing group's id directly
-         * (`targetGroupId`), matching the commit's nameKey reuse instead of creating a duplicate.
+         * "New group…" in the target picker. `NameTaken` reuses the typed name, clearing any
+         * [setTargetGroup] id. The commit resolves that nameKey onto the existing group, as
+         * [renameGroup] does, instead of creating a duplicate.
          */
         suspend fun setTargetGroupName(name: String): GroupError? =
             validateName(name) { validated ->
@@ -273,7 +274,7 @@ internal class ImportViewModel
                     suspendRunCatching { groups.checkName(name) }.getOrElse {
                         Log.w(TAG, it) { "import group name check failed" }
                         postWriteFailed()
-                        return@enqueueEdit null
+                        throw it
                     }
                 val validated =
                     when (outcome) {
@@ -287,7 +288,7 @@ internal class ImportViewModel
                             name.trim()
                         }
                     }
-                writeEdit { store(validated) }
+                writeEdit { store(validated) }.getOrThrow()
                 null
             }.await()
         }
@@ -487,12 +488,11 @@ internal class ImportViewModel
             enqueueEdit { writeEdit(block) }
         }
 
-        private suspend fun writeEdit(block: suspend () -> Unit) {
+        private suspend fun writeEdit(block: suspend () -> Unit) =
             suspendRunCatching { block() }.onFailure {
                 Log.w(TAG, it) { "import edit failed" }
                 postWriteFailed()
             }
-        }
 
         private fun <T> enqueueEdit(block: suspend () -> T): Deferred<T> {
             val previous = pendingEdit
