@@ -14,8 +14,11 @@ import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.domain.AutoDownloadPlanner
 import ch.lkmc.neutrodyne.core.domain.BackupRepository
 import ch.lkmc.neutrodyne.core.domain.ChapterRepository
+import ch.lkmc.neutrodyne.core.domain.CleanupPlanner
+import ch.lkmc.neutrodyne.core.domain.DownloadMover
 import ch.lkmc.neutrodyne.core.domain.ExportRepository
 import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.domain.NewEpisodePoster
@@ -79,6 +82,9 @@ interface DesktopAppGraph {
     val localMediaIndex: LocalMediaIndex
     val localMediaChanges: LocalMediaChanges
     val downloadController: Provider<DownloadController>
+    val autoDownloadPlanner: Provider<AutoDownloadPlanner>
+    val cleanupPlanner: Provider<CleanupPlanner>
+    val downloadMover: Provider<DownloadMover>
     val downloadProgress: Provider<DownloadProgressSource>
     val youtubeCapabilities: YouTubeCapabilitiesSource
     val youtubeStreamResolver: YouTubeStreamResolver

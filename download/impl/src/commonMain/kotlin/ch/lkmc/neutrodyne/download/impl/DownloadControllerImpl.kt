@@ -58,6 +58,7 @@ internal class DownloadControllerImpl(
     private val activity: Flow<Long> = flowOf(0L),
     private val hasActiveTransfers: () -> Boolean = { false },
     private val rootRegistration: DownloadRootRegistration? = null,
+    private val busy: Flow<Boolean> = flowOf(false),
 ) : DownloadController {
     private val dao = db.downloadDao()
 
@@ -368,8 +369,8 @@ internal class DownloadControllerImpl(
     override fun observeFailedCount() = dao.observeFailedCount().distinctUntilChanged()
 
     override fun observeBusy(): Flow<Boolean> =
-        combine(dao.observeEntries(), network.status, activity) { rows, status, _ ->
-            hasActiveTransfers() ||
+        combine(dao.observeEntries(), network.status, activity, busy) { rows, status, _, busy ->
+            busy || hasActiveTransfers() ||
                 rows.any { entry ->
                     val row = entry.download
                     row.state in ACTIVE_STATES || (

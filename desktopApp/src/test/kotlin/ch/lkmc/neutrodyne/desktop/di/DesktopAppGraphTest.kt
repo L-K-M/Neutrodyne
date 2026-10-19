@@ -287,6 +287,7 @@ class DesktopAppGraphTest {
         assertThat(orders.getValue("DesktopDownloadIndexInitializer")).isEqualTo(130)
         assertThat(orders.getValue("DesktopDeferredDeletesInitializer")).isEqualTo(310)
         assertThat(orders.getValue("DesktopDownloadAlerts")).isEqualTo(310)
+        assertThat(orders.getValue("DesktopDownloadObservers")).isEqualTo(310)
         assertThat(orders.getValue("CredentialLoadInitializer"))
             .isLessThan(orders.getValue("DesktopDownloadIndexInitializer"))
         assertThat(orders.getValue("DesktopDownloadIndexInitializer"))
@@ -335,6 +336,36 @@ class DesktopAppGraphTest {
         assertThat(graph.bannerNotifier::class.simpleName).isEqualTo("DesktopBannerNotifier")
         assertThat(graph.jobRunner.status.value.keys).contains("import-backup")
     }
+
+    @Test
+    fun collectingInitializersBeforeDatabaseOpenIsSafeOnTheEventThread() {
+        java.awt.EventQueue.invokeAndWait {
+            assertThat(graph.initializers).isNotEmpty()
+        }
+        assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+    }
+
+    @Test
+    fun desktopAutomaticDownloadsAndMoveLanesResolveWithSharedOwners() =
+        runBlocking {
+            graph.databaseOpener.awaitOpen()
+            try {
+                assertThat(graph.autoDownloadPlanner()::class.simpleName).isEqualTo("AutoDownloadPlannerImpl")
+                assertThat(graph.cleanupPlanner()::class.simpleName).isEqualTo("CleanupPlannerImpl")
+                assertThat(graph.downloadMover()::class.simpleName).isEqualTo("DownloadMoverImpl")
+                assertThat(graph.autoDownloadPlanner()).isSameInstanceAs(graph.autoDownloadPlanner())
+                assertThat(graph.cleanupPlanner()).isSameInstanceAs(graph.cleanupPlanner())
+                assertThat(graph.downloadMover()).isSameInstanceAs(graph.downloadMover())
+                assertThat(graph.jobRunner.status.value.keys).containsAtLeast(
+                    "downloads-manual",
+                    "downloads-auto",
+                    "downloads-move",
+                )
+                assertThat(graph.initializers.count { it::class.simpleName == "DesktopDownloadObservers" }).isEqualTo(1)
+            } finally {
+                graph.databaseOpener.requireDatabase().close()
+            }
+        }
 
     private companion object {
         const val FIRST_BAND = 0

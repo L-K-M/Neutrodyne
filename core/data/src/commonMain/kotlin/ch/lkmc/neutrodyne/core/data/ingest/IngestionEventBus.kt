@@ -5,8 +5,6 @@ package ch.lkmc.neutrodyne.core.data.ingest
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.domain.IngestionEvents
 import ch.lkmc.neutrodyne.core.model.NewEpisodes
-import dev.zacsweers.metro.ContributesBinding
-import dev.zacsweers.metro.ExposeImplBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -17,9 +15,6 @@ import kotlinx.coroutines.flow.SharedFlow
  * effort — consumers that must not miss work re-derive it from the database.
  */
 @SingleIn(AppScope::class)
-@ContributesBinding(AppScope::class)
-// `FeedRefresher` injects the concrete bus to reach `emit`, not the `IngestionEvents` supertype.
-@ExposeImplBinding
 @Inject
 internal class IngestionEventBus : IngestionEvents {
     private val bus =

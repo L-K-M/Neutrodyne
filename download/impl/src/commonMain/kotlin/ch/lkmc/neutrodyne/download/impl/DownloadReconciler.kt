@@ -45,6 +45,11 @@ internal class DownloadReconciler(
 
     suspend fun reconcile() {
         resetOrphanedRunners()
+        reconcileFiles()
+    }
+
+    /** Daily steps 3–5: check files and roots, drain the journal and sweep without resetting runners. */
+    suspend fun reconcileFiles() =
         claimMutex.withLock {
             for (batch in dao.allRows().chunked(RECONCILE_BATCH)) {
                 for (row in batch) if (row.state in FINAL_STATES) checkCompleted(row)
@@ -53,7 +58,6 @@ internal class DownloadReconciler(
             sweepAndReport()
             roots.prune(dao.rootsInUse().toSet() + deletes.entries().map { it.rootId })
         }
-    }
 
     /** Cleanup can sweep without resetting runners or re-statting every completed file. */
     suspend fun sweepFiles() =

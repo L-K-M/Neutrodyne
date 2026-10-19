@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.download.api.RootChangeMode
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -19,6 +20,38 @@ import kotlin.test.assertTrue
 import kotlin.time.Instant
 
 class DesktopMoveTest {
+    @Test fun boundMoveLaneWaitsForStartupAndDefersThePlayingRename() =
+        engineTest {
+            val engine = this
+            val f = MoveRig(engine, sameStore = true)
+            val id = f.completed().single()
+            f.base.current(id)
+            val activity = DesktopDownloadActivity()
+            val events = mutableListOf<String>()
+            val startup =
+                DesktopDownloadStartup {
+                    events += "reconcile"
+                    f.base.reconciler.reconcile()
+                    events += "planner"
+                }
+            val lane =
+                DesktopMoveLane(f.base.store, {
+                    assertEquals(listOf("reconcile", "planner"), events)
+                    f.mover.run(it)
+                }, startup::ensureStarted)
+            assertEquals("downloads-move", lane.name)
+            assertTrue(activity.observeBusy(f.base.store).first())
+            lane.run(Instant.fromEpochMilliseconds(1))
+            assertEquals("old", engine.row(id).rootId)
+            assertEquals("new", f.target())
+            f.base.current(null)
+            lane.run(Instant.fromEpochMilliseconds(2))
+            assertEquals("new", engine.row(id).rootId)
+            assertEquals("", f.target())
+            assertEquals(listOf("reconcile", "planner"), events)
+            kotlin.test.assertFalse(activity.observeBusy(f.base.store).first())
+        }
+
     @Test fun sameStoreRenamesWithoutCopySyncOrSpaceReservation() =
         engineTest {
             val engine = this
