@@ -14,11 +14,12 @@ internal class PageCandidates(
     private val after: Long,
     private val candidates: List<StoredRecord>,
     private val extras: List<StoredRecord>,
+    private val recordLimit: Int = ProtocolLimits.MAX_RECORDS,
 ) {
     fun page(): RecordPage {
         val records = mutableListOf<StoredRecord>()
         var bytes = 2L // The records array's brackets and separators count toward its byte cap.
-        for (record in candidates.take(ProtocolLimits.MAX_RECORDS)) {
+        for (record in candidates.take(recordLimit)) {
             val encoded =
                 SyncJson.encodeToString(
                     RecordDto.serializer(),
@@ -70,4 +71,5 @@ internal enum class CursorPurpose { PAGE, RESET }
 internal fun SyncRead.candidates(
     after: Long,
     extras: List<StoredRecord> = emptyList(),
-): PageCandidates = PageCandidates(account.cursor, after, page(after, ProtocolLimits.MAX_RECORDS + 1), extras)
+    limit: Int = ProtocolLimits.MAX_RECORDS,
+): PageCandidates = PageCandidates(account.cursor, after, page(after, limit + 1), extras, limit)

@@ -45,7 +45,10 @@ internal class ServerStorage private constructor(
     companion object {
         const val CLEAN_MARKER = "clean-shutdown"
 
-        fun open(dataDir: Path): ServerStorage {
+        fun open(
+            dataDir: Path,
+            publish: (ServerEvent) -> Unit = {},
+        ): ServerStorage {
             val lease = ProcessLease.acquire(dataDir, ProcessMode.SERVE)
             var store: SqliteSyncStore? = null
             try {
@@ -53,7 +56,7 @@ internal class ServerStorage private constructor(
                     Files.exists(dataDir.resolve(SqliteSyncStore.DATABASE_FILE)) &&
                         !Files.exists(dataDir.resolve(CLEAN_MARKER))
                 Files.deleteIfExists(dataDir.resolve(CLEAN_MARKER))
-                store = SqliteSyncStore(dataDir)
+                store = SqliteSyncStore(dataDir, publish)
                 if (unclean) {
                     val random = SecureRandom()
                     runBlocking {

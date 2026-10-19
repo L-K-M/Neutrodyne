@@ -17,6 +17,7 @@ import kotlin.time.Instant
 internal class WellKnownRoutes(
     private val serverVersion: String,
     private val clock: Clock,
+    private val features: suspend () -> List<String> = { emptyList() },
 ) {
     fun install(routing: Route) {
         routing.get(WELL_KNOWN_PATH) {
@@ -25,7 +26,7 @@ internal class WellKnownRoutes(
                     name = SERVER_DISPLAY_NAME,
                     serverVersion = serverVersion,
                     protocol = ProtocolRange(PROTOCOL_VERSION, PROTOCOL_VERSION),
-                    features = emptyList(), // sse, link and password arrive with MS1.
+                    features = features(),
                     maxBatch = ProtocolLimits.MAX_CHANGES,
                     maxSkewMs = ProtocolLimits.MAX_SKEW_MS,
                     serverTime = serverTime(),

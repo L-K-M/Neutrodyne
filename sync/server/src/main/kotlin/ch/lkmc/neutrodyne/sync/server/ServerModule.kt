@@ -11,11 +11,16 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCallPipeline
+import io.ktor.server.application.ApplicationStopping
 import io.ktor.server.application.call
 import io.ktor.server.application.install
 import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.plugins.UnsupportedMediaTypeException
 import io.ktor.server.plugins.callid.CallId
+import io.ktor.server.plugins.compression.Compression
+import io.ktor.server.plugins.compression.CompressionConfig
+import io.ktor.server.plugins.compression.excludeContentType
+import io.ktor.server.plugins.compression.gzip
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.defaultheaders.DefaultHeaders
 import io.ktor.server.plugins.ratelimit.rateLimit
@@ -37,6 +42,7 @@ internal class ServerModule(
     private val serverVersion: String,
     private val clock: Clock = Clock.System,
     private val writeProbe: suspend () -> Boolean = { true },
+    private val services: ServerServices? = null,
 ) {
     fun install(application: Application) {
         with(application) {
@@ -59,7 +65,17 @@ internal class ServerModule(
                 )
             }
             install(ContentNegotiation) { json(SyncJson) }
+            install(Compression) {
+                // RequestGuards owns bounded request decompression.
+                mode = CompressionConfig.Mode.CompressResponse
+                gzip()
+                excludeContentType(ContentType.Text.EventStream)
+            }
             install(StatusPages) {
+                exception<AuthThrottled> { call, failure ->
+                    call.response.headers.append(HttpHeaders.RetryAfter, failure.retrySeconds.toString())
+                    call.problem(HttpStatusCode.TooManyRequests, "rate_limited")
+                }
                 exception<BoundaryException> { call, failure -> call.problem(failure.status, failure.code) }
                 exception<ProtocolException> { call, failure ->
                     val status =
@@ -89,9 +105,26 @@ internal class ServerModule(
             RateLimits(config).install(this)
             InsecureTransportGuard(config).install(this)
             RequestGuards().install(this)
+            val authRoutes = services?.let { AuthRoutes(it, config) }
+            authRoutes?.authenticate(this)
+            if (services != null) monitor.subscribe(ApplicationStopping) { services.events.close() }
             routing {
                 HealthRoutes(config.dataDir, writeProbe = writeProbe).install(this)
-                rateLimit(RateLimits.PUBLIC) { WellKnownRoutes(serverVersion, clock).install(this) }
+                rateLimit(RateLimits.PUBLIC) {
+                    WellKnownRoutes(
+                        serverVersion,
+                        clock,
+                        services?.let { it::features } ?: { emptyList() },
+                    ).install(this)
+                }
+                if (services != null) {
+                    authRoutes?.install(this)
+                    DeviceRoutes(services.devices).install(this)
+                    SyncRoutes(services.records).install(this)
+                    ChangesRoutes(services.records, services.inputs).install(this)
+                    AccountRoutes(services.accounts, services.records).install(this)
+                    EventsRoutes(services.events).install(this)
+                }
             }
         }
     }

@@ -6,6 +6,7 @@ import io.ktor.server.application.serverConfig
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.EngineConnectorBuilder
 import io.ktor.server.engine.embeddedServer
+import kotlinx.coroutines.runBlocking
 import org.slf4j.LoggerFactory
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.system.exitProcess
@@ -31,45 +32,53 @@ internal fun serve(config: ServerConfig) {
         logger.warn("--insecure-lan: serving plain HTTP for a trusted LAN; tokens cross the LAN unencrypted")
     }
 
-    ServerStorage.open(config.dataDir).use { storage ->
-        val ready = AtomicBoolean(false)
-        val server =
-            embeddedServer(
-                CIO,
-                serverConfig {
-                    module {
-                        ServerModule(
-                            config,
-                            ServerVersion.current(),
-                            writeProbe = storage.store::writeProbe,
-                        ).install(this)
-                        monitor.subscribe(ServerReady) { ready.set(true) }
-                    }
-                },
-            ) {
-                connectors +=
-                    EngineConnectorBuilder().apply {
-                        host = config.listen.host
-                        port = config.listen.port
-                    }
-                connectionIdleTimeoutSeconds = CIO_IDLE_TIMEOUT_SECONDS
+    lateinit var services: ServerServices
+    EventBus({ services.tokens.valid(it) }, config.sseMaxPerAccount).use { events ->
+        ServerStorage.open(config.dataDir, events::publish).use { storage ->
+            services = ServerServices(storage.store, config, events)
+            runBlocking { services.setup.initialize() }?.let {
+                logger.info("Setup token file: {}", it.toAbsolutePath())
             }
-        logger.info("neutrodyne-server {} listening on {}", ServerVersion.current(), config.listen)
-        val shutdownHook =
-            Thread({
-                server.stop(SHUTDOWN_GRACE_MS, SHUTDOWN_TIMEOUT_MS)
-                if (ready.get()) storage.finishGracefully()
-            }, "neutrodyne-shutdown")
-        Runtime.getRuntime().addShutdownHook(shutdownHook)
-        try {
-            server.start(wait = true)
-            // CIO's wait may return before the stop hook finishes closing the application.
-            shutdownHook.join()
-        } finally {
+            val ready = AtomicBoolean(false)
+            val server =
+                embeddedServer(
+                    CIO,
+                    serverConfig {
+                        module {
+                            ServerModule(
+                                config,
+                                ServerVersion.current(),
+                                writeProbe = storage.store::writeProbe,
+                                services = services,
+                            ).install(this)
+                            monitor.subscribe(ServerReady) { ready.set(true) }
+                        }
+                    },
+                ) {
+                    connectors +=
+                        EngineConnectorBuilder().apply {
+                            host = config.listen.host
+                            port = config.listen.port
+                        }
+                    connectionIdleTimeoutSeconds = CIO_IDLE_TIMEOUT_SECONDS
+                }
+            logger.info("neutrodyne-server {} listening on {}", ServerVersion.current(), config.listen)
+            val shutdownHook =
+                Thread({
+                    server.stop(SHUTDOWN_GRACE_MS, SHUTDOWN_TIMEOUT_MS)
+                    if (ready.get()) storage.finishGracefully()
+                }, "neutrodyne-shutdown")
+            Runtime.getRuntime().addShutdownHook(shutdownHook)
             try {
-                Runtime.getRuntime().removeShutdownHook(shutdownHook)
-            } catch (_: IllegalStateException) {
-                // The JVM is already stopping; the registered hook owns graceful shutdown.
+                server.start(wait = true)
+                // CIO's wait may return before the stop hook finishes closing the application.
+                shutdownHook.join()
+            } finally {
+                try {
+                    Runtime.getRuntime().removeShutdownHook(shutdownHook)
+                } catch (_: IllegalStateException) {
+                    // The JVM is already stopping; the registered hook owns graceful shutdown.
+                }
             }
         }
     }

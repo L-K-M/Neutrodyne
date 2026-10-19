@@ -29,7 +29,8 @@ internal class SqliteSyncStore(
     dataDir: Path,
     private val publish: (ServerEvent) -> Unit = {},
     migrator: Migrator = Migrator(),
-) : SyncStore {
+) : SyncStore,
+    AuthStore {
     private val writerDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
     private val readerDispatcher = Executors.newFixedThreadPool(READ_CONNECTIONS).asCoroutineDispatcher()
     private val lifetime = ReentrantReadWriteLock(true)
@@ -105,6 +106,44 @@ internal class SqliteSyncStore(
                         }
                     }
                 // No suspension between commit and publication: the next writer cannot overtake it.
+                tx.events.forEach(publish)
+                result
+            }
+        }
+
+    override suspend fun <T> readAuth(block: AuthRead.() -> T): T =
+        withContext(readerDispatcher) {
+            lifetime.read {
+                check(!closed) { "Store is closed" }
+                val connection = readers.take()
+                try {
+                    transaction(connection) {
+                        val tx = JdbcAuthRead(connection)
+                        try {
+                            tx.block()
+                        } finally {
+                            tx.end()
+                        }
+                    }
+                } finally {
+                    readers.put(connection)
+                }
+            }
+        }
+
+    override suspend fun <T> writeAuth(block: AuthWrite.() -> T): T =
+        withContext(writerDispatcher) {
+            lifetime.read {
+                check(!closed) { "Store is closed" }
+                val tx = JdbcAuthWrite(writer)
+                val result =
+                    transaction(writer) {
+                        try {
+                            tx.block()
+                        } finally {
+                            tx.end()
+                        }
+                    }
                 tx.events.forEach(publish)
                 result
             }
@@ -499,7 +538,7 @@ private fun Connection.sql(sql: String) {
     createStatement().use { it.execute(sql) }
 }
 
-private fun Connection.update(
+internal fun Connection.update(
     sql: String,
     vararg values: Any?,
 ): Int =
@@ -510,7 +549,7 @@ private fun Connection.update(
         statement.executeUpdate()
     }
 
-private fun <T> Connection.query(
+internal fun <T> Connection.query(
     sql: String,
     vararg values: Any?,
     row: (ResultSet) -> T,

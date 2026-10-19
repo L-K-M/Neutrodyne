@@ -1551,6 +1551,18 @@ local fields/`fc` or feed/audio fetching. Prove real M3 staging and Merge/Replac
 
 ### Event bus and SSE
 
+**Implementation note (2026-10-19, MS1).** W6 reserves stream slots and rechecks
+credentials before sending response headers. The streamed response owns the
+subscription until completion or cancellation. Account changes use a no-replay,
+one-element `DROP_OLDEST` flow; a separate close signal prevents change bursts
+from discarding revocation or shutdown. Tests cover post-commit publication,
+rollback, slow subscribers, isolation, subscription/revocation races and caps.
+A real CIO socket test verifies retry, the clamped heartbeat, uncompressed SSE
+and closure after logout. Account summaries count live rows in SQL rather than
+loading the library. Purge removes records/indexes, rotates the epoch and
+revokes account devices' tokens and browser sessions; W7 must coordinate backup
+deletion with purge/export before exposing exports.
+
 `EventBus` keeps one `MutableSharedFlow<ChangedEvent>` per account with an active subscriber (`replay = 0`, buffer 1, `DROP_OLDEST`), created on demand and dropped when the last stream closes. `EventsRoutes` checks the token, the account's concurrent-stream count (≤ 10) and the device's (≤ 2), emits `retry: 10000`, then forwards events (`conflate()`) and heartbeats; a revocation event for the device closes its streams. Memory per open stream is one coroutine and its socket.
 
 ### Web UI
@@ -1588,12 +1600,26 @@ A red banner "This server is not using HTTPS" appears on every page in insecure 
 
 ### Observability
 
-- **Logs:** one line per request to stdout (`NEUTRODYNE_SERVER_LOG_FORMAT=text` or `json`): time, request ID, account ID (numeric), route template (never the raw path or query), status, duration, changes pushed, records returned. Startup, migrations, backups and GC log one line each. Never logged: tokens, invite and link codes (except the first-start setup code, [First administrator](#first-administrator)), passwords, feed URLs, request or response bodies, record contents (`LogRedactionTest`). Level via `NEUTRODYNE_SERVER_LOG_LEVEL`.
+- **Logs:** one line per request to stdout (`NEUTRODYNE_SERVER_LOG_FORMAT=text` or `json`): time, request ID, account ID (numeric), route template (never the raw path or query), status, duration, changes pushed, records returned. Startup, migrations, backups and GC log one line each. Never logged: tokens, invite and link codes, setup codes, passwords, feed URLs, request or response bodies, record contents (`LogRedactionTest`). Level via `NEUTRODYNE_SERVER_LOG_LEVEL`.
 - **Health:** `/healthz`, `/readyz` ([Account and health endpoints](#account-and-health-endpoints)); the image's `HEALTHCHECK` runs `HealthCheck`.
 - **Metrics:** with `NEUTRODYNE_SERVER_METRICS_LISTEN` set (for example `127.0.0.1:9787`), Prometheus text from hand-written counters and gauges: requests by route and status, changes applied/stale/merged/rejected, records returned, SSE streams, accounts, records, database size, last backup age and result, GC purges. No Micrometer.
 - **Audit:** `AuditLog` writes logins (success and failure, with IP), link approvals and denials, invite creation and redemption, token revocations, password changes, account resets and purges, admin actions; visible on `/admin/server`.
 
 ### Performance and footprint
+
+**Implementation note (2026-10-19, MS1).** W5's packaged Argon2id gate passed
+on Linux amd64, Temurin 21.0.12.1+1, with the flattened JAR and compiled
+`PackagedAuthProbe` test classes as the only classpath entries. The probe checks
+that PasswordHasher and Bouncy Castle load from that same JAR, runs six
+concurrent hash/verify workflows through the process-wide two-hash bound, then
+checks SQLite account creation, invite redemption, device authentication and
+revocation. With `-Xmx96m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss512k`,
+wall time was 1.473 s and peak RSS 147,876 KiB. Artifact SHA-256:
+`d408f0606ea2ca1168a0db32c6004f9cba4b020c1370f60cb16bc638d3b3e96d`.
+Run `ch.lkmc.neutrodyne.sync.server.PackagedAuthProbe` with a fresh writable
+data-directory argument. This local feasibility result does not close S16:
+Pi hardware, arm64 execution, ten-minute idle and the authenticated 50,000-record
+load remain W11 gates.
 
 **Implementation note (2026-10-19, MS1).** Early packaged-fat-JAR JDBC gate
 passed on Linux amd64, Temurin 21.0.12.1+1, sqlite-jdbc 3.53.4.0
@@ -1678,6 +1704,18 @@ Optional per account (for the web UI and password login). `PasswordHasher` uses 
 
 ### Tokens
 
+**Implementation note (2026-10-19, MS1).** W5 adds the DB-only `AuthStore` /
+`AuthRead` / `AuthWrite` contracts beside the record store, with testing fakes.
+SQLite auth writes share the record writer and publish revocations only after
+commit. Both link lookup codes are SHA-256 hashes in the existing columns;
+preview binds the account and credential, and confirm/redemption recheck that
+credential. Failed approval checks are serialized through their outcome so
+concurrent entries cannot bypass the five-failure budget. W8 consumes the
+setup, invite, password, device and web-session services; its HTML/CLI routes
+remain separate. Administrator creation also invalidates setup credentials and
+removes the token file. The setup-file policy above supersedes every older
+setup-banner exception in this document; N13 remains unchanged.
+
 | Kind | Format | Lifetime | Use |
 |---|---|---|---|
 | `device` | `nds_` + base64url(32 random bytes from `SecureRandom`) — the prefix lets secret scanners recognise it | until revoked | API |
@@ -1698,6 +1736,12 @@ Tokens are stored only as SHA-256 (high-entropy secrets need no slow hash), look
 Every query is scoped by the `account_id` of the authenticated token; record IDs exist only within an account, so no request can name another account's data. Device-management calls accept only devices of the caller's account. Admin pages require `role = 'admin'` and a web session (no admin API for device tokens). A disabled account's tokens fail with `403 forbidden`.
 
 ### Rate limits
+
+**Implementation note (2026-10-19, MS1).** Account-wide password backoff returns
+`429` with `Retry-After`; requests do not sleep while retaining a connection or
+hash permit. Failed-login and failed-approval buckets are bounded in-memory
+state, like the named Ktor request limiters. Code lookup/consumption and polling
+intervals remain durable in SQLite.
 
 Ktor RateLimit token buckets, keyed by the client IP from `ClientAddress` and where noted by account or username:
 
@@ -2121,7 +2165,7 @@ S14 plus MS2, in `desktopTest` with the bundled SQLite driver and a subset as An
 - guards: 2 MiB / 16 MiB / 1,000-change / depth / string caps, gzip bombs, `415`, `421`, `426`, rate limits with `Retry-After`;
 - jobs: GC with the device-cursor rule and `min_cursor` (including live members of dead podcasts), nightly backup and per-account ZIP (the ZIP restored by 05's `BackupCodec`), migrations with the pre-migration backup, refusal of a newer schema, `restore` rotating epochs and carrying tokens, revocations, devices, web sessions and password hashes over (`RestoreAuthCarryOverTest`: a token revoked after the backup still gets `401`), the unclean-start epoch rotation;
 - server clock and life cycle: the library reset with `beforeCursor` (including a concurrent subscribe from a device whose clock lags 4 min, stamped below the resetting device's `t0`, which survives), revival and "Keep mine" against stored clocks 4 min ahead, Up next removal on a podcast's death, re-sequencing on revival, `stale` extras outside the page budget, `last_cursor` from `/changes`;
-- `LogRedactionTest`: no token, code (except the setup banner), password, feed URL or payload in any log line across the suite;
+- `LogRedactionTest`: no token, code, password, feed URL or payload in any log line across the suite;
 - `HealthCheckTest`, `ListenRuleTest` (M0b acceptance 16).
 
 ### Cross-device journey

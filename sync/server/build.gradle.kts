@@ -13,6 +13,9 @@ plugins {
 // slf4j's POM names its MIT licence by URL only, in opensource.org's current URL form, which
 // Licensee cannot map to an SPDX id (01 Licensee allow-list: scoped allowUrl with because).
 extensions.configure<LicenseeExtension> {
+    allowDependency("org.bouncycastle", "bcprov-jdk18on", libs.versions.bouncycastle.get()) {
+        because("Bouncy Castle Licence is MIT; the POM declares only its project licence URL")
+    }
     allowUrl("https://opensource.org/license/mit") {
         because("slf4j-api and slf4j-simple are MIT; the POM lists only this licence URL")
     }
@@ -40,6 +43,7 @@ dependencies {
     implementation(libs.bundles.server.ktor)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.sqlite.jdbc)
+    implementation(libs.bouncycastle.bcprov)
     implementation(libs.slf4j.api)
     runtimeOnly(libs.slf4j.simple)
 

@@ -138,12 +138,13 @@ internal class StoredRecordWriter(
     suspend fun changes(
         principal: AccountPrincipal,
         since: String?,
+        limit: Int = ProtocolLimits.MAX_RECORDS,
     ): RecordPage =
         store
             .write(principal.accountId) {
                 val after = account.cursor.validate(since)
                 principal.deviceId?.let { acknowledge(it, since, inputs.wallMs()) }
-                candidates(after)
+                candidates(after, limit = limit.coerceIn(1, ProtocolLimits.MAX_RECORDS))
             }.page()
 
     /** Purge/auth/backup deletion is owned by W6/W7; this service only prunes the staged library. */
