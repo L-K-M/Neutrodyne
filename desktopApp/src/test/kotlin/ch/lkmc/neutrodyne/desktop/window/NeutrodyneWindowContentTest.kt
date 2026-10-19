@@ -12,16 +12,24 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.navigation3.runtime.NavKey
 import ch.lkmc.neutrodyne.core.common.DesktopNotification
 import ch.lkmc.neutrodyne.core.common.NotificationKind
 import ch.lkmc.neutrodyne.core.common.PlatformKind
+import ch.lkmc.neutrodyne.core.model.settings.UpdateSettingKeys
+import ch.lkmc.neutrodyne.core.model.update.UpdateCheckState
+import ch.lkmc.neutrodyne.core.model.update.UpdateInfo
+import ch.lkmc.neutrodyne.core.model.update.UpdateNotice
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.Route
+import ch.lkmc.neutrodyne.core.testing.FakeAppUpdateChecker
+import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.core.testing.FakeUpdateNotices
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
@@ -31,6 +39,7 @@ import ch.lkmc.neutrodyne.desktop.notifications.DesktopBannerNotifier
 import ch.lkmc.neutrodyne.desktop.platform.DesktopClock
 import ch.lkmc.neutrodyne.desktop.shell.tempAppDirs
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -70,6 +79,7 @@ class NeutrodyneWindowContentTest {
 
     @After
     fun tearDown() {
+        graph.appScope.cancel()
         Locale.setDefault(previousLocale)
     }
 
@@ -115,6 +125,43 @@ class NeutrodyneWindowContentTest {
             onAllNodesWithText("About").onFirst().performClick()
             onNodeWithText("Neutrodyne").assertExists()
             onNodeWithText("Debug build").assertExists()
+        }
+
+    @Test
+    fun updateBadgeAndDisclosureObserveServicesAndTurnOffPersists() =
+        runComposeUiTest {
+            runBlocking { graph.databaseOpener.awaitOpen() }
+            val checker = FakeAppUpdateChecker(UpdateCheckState.Available(UPDATE_INFO, 0))
+            val notices = FakeUpdateNotices(listOf(UpdateNotice.FIRST_RUN_CHOICE))
+            val settings = FakeSettingsRepository()
+            setContent {
+                NeutrodyneWindowContent(
+                    installers = graph.entryInstallers,
+                    menuActions = DesktopMenuActions(),
+                    viewModelFactory = graph.metroViewModelFactory,
+                    updateChecker = checker,
+                    updateNotices = notices,
+                    settings = settings,
+                )
+            }
+            onAllNodesWithContentDescription("Update available").onFirst().assertExists()
+            onNodeWithText("Turn off").performClick()
+            waitUntil("the disclosure is durably dismissed", TIMEOUT_MS) { notices.pending.value == null }
+            assertThat(runBlocking { settings.get(UpdateSettingKeys.CHECK_ENABLED) }).isFalse()
+            runOnIdle { checker.state.value = UpdateCheckState.Idle(0) }
+            onAllNodesWithContentDescription("Update available").assertCountEquals(0)
+            onNodeWithText("Turn off").assertDoesNotExist()
+        }
+
+    @Test
+    fun updateSettingsAndBundledHelpOpenThroughTheProductionGraph() =
+        runComposeUiTest {
+            setWindowContent()
+            onAllNodesWithContentDescription("Settings").onFirst().performClick()
+            onNodeWithText("Updates").performClick()
+            onNodeWithTag("updates-page").assertExists()
+            onNodeWithText("Install & updates").performScrollTo().performClick()
+            onNodeWithTag("install-help-page").assertExists()
         }
 
     /**
@@ -253,12 +300,28 @@ class NeutrodyneWindowContentTest {
                 installers = graph.entryInstallers,
                 menuActions = DesktopMenuActions(),
                 viewModelFactory = graph.metroViewModelFactory,
+                updateChecker = graph.appUpdateChecker,
+                updateNotices = graph.updateNotices,
+                settings = graph.settingsRepository,
             )
         }
     }
 
     private companion object {
         const val TIMEOUT_MS = 5_000L
+
+        val UPDATE_INFO =
+            UpdateInfo(
+                "1.0.0",
+                1000095L,
+                26,
+                "2026-10-19T00:00:00Z",
+                "New version",
+                "https://github.com/L-K-M/Neutrodyne/releases/tag/v1.0.0",
+                null,
+                null,
+                null,
+            )
 
         val IMPORT_NOTIFICATION =
             DesktopNotification(

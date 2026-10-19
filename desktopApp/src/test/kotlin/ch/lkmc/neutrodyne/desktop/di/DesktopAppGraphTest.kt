@@ -21,6 +21,7 @@ import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
 import ch.lkmc.neutrodyne.core.navigation.ImportFileKey
+import ch.lkmc.neutrodyne.core.navigation.InstallHelpKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
@@ -32,6 +33,7 @@ import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.navigation.SleepTimerKey
 import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
+import ch.lkmc.neutrodyne.core.navigation.VerificationNoticeKey
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
 import ch.lkmc.neutrodyne.desktop.log.RecentLogBuffer
@@ -86,6 +88,28 @@ class DesktopAppGraphTest {
                 graph.databaseOpener.requireDatabase().close()
             }
         }
+
+    @Test
+    fun updateServicesAndRoutesResolveWithoutOpeningTheDatabase() {
+        try {
+            assertThat(graph.appUpdateChecker::class.simpleName).isEqualTo("AppUpdateCheckerImpl")
+            assertThat(graph.appUpdateChecker).isSameInstanceAs(graph.appUpdateChecker)
+            assertThat(graph.updateNotices::class.simpleName).isEqualTo("UpdateNoticesImpl")
+            assertThat(graph.updateNotices).isSameInstanceAs(graph.updateNotices)
+            val provider = entryProvider<NavKey> { graph.entryInstallers.forEach { it() } }
+            for (key in listOf(
+                SettingsKey(SettingsPage.UPDATES),
+                SettingsKey(SettingsPage.UPDATES, openRelease = true),
+                InstallHelpKey(),
+                VerificationNoticeKey,
+            )) {
+                assertThat(provider(key).contentKey).isNotNull()
+            }
+            assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+        } finally {
+            graph.appScope.cancel()
+        }
+    }
 
     @Test
     fun durablePlaybackPortsResolveToSingleProductionBindings() =
