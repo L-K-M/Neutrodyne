@@ -21,7 +21,10 @@ internal class MediaItemFactory(
     private val artwork: ArtworkStore,
     private val localMedia: LocalMediaIndex,
 ) {
-    fun artworkUri(key: String): android.net.Uri = artwork.contentUri(key, 0).toUri()
+    fun artworkUri(
+        key: String,
+        version: Int = 0,
+    ): android.net.Uri = artwork.contentUri(key, version).toUri()
 
     fun build(
         row: PlaybackMediaInfo,

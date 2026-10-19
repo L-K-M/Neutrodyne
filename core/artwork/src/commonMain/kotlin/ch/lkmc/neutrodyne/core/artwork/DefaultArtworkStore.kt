@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.database.ArtworkSyncResult
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.art.MonogramMode
+import ch.lkmc.neutrodyne.core.model.MosaicSnapshot
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.ExposeImplBinding
 import dev.zacsweers.metro.Inject
@@ -120,71 +121,96 @@ public class DefaultArtworkStore
             produced: List<ArtworkProduction>,
             now: Long,
         ) = files.withLock {
-            db.withWriteTransaction {
-                val rows =
-                    produced.mapNotNull { result ->
-                        val current = db.artworkDao().byKey(result.key)
-                        val snapshot = result.backfill
-                        if (snapshot != null) {
-                            // Decode/extraction ran without the lock. Do not publish over replacement,
-                            // deletion, provider fallback or another completed backfill.
-                            if (current == null || current != snapshot.row) return@mapNotNull null
-                            val path =
-                                safePath(current.key, current.localPath ?: return@mapNotNull null)
-                                    ?: return@mapNotNull null
-                            if (
-                                !fs.exists(path) ||
-                                fs.read(path) { readByteString().sha256() } != snapshot.bytes.sha256()
-                            ) {
-                                return@mapNotNull null
-                            }
-                            if (result.colours != null) {
-                                return@mapNotNull current
-                                    .copy(
-                                        seedArgb = if (result.key.startsWith("g-")) null else result.colours.seedArgb,
-                                        avgArgb = result.colours.avgArgb,
-                                    ).syncResult()
-                            }
-                        }
-                        val old = current ?: ArtworkEntity(result.key)
-                        val image = result.image
-                        if (image == null) {
-                            val attempt = (old.lastError?.substringAfterLast(':')?.toIntOrNull() ?: 0) + 1
-                            return@mapNotNull old
-                                .copy(fetchedAt = now, lastError = "${result.error}:$attempt")
-                                .syncResult()
-                        }
-                        val filename = "${result.key}.${image.extension}"
-                        val target = root / filename
-                        val previous = old.localPath?.let { safePath(old.key, it) }
-                        val unchanged =
-                            previous != null && fs.exists(previous) &&
-                                fs.read(previous) { readByteString().sha256() } == image.bytes.sha256()
-                        if (!unchanged || previous != target) write(result.key, filename, image)
-                        // A successful fetch removes the interim fallback even if an old file vanished.
-                        deleteVariants(result.key, keep = filename)
-                        old
-                            .copy(
-                                url = result.descriptor,
-                                localPath = filename,
-                                width = image.width,
-                                height = image.height,
-                                seedArgb =
-                                    if (result.key.startsWith("g-")) {
-                                        null
-                                    } else {
-                                        result.colours?.seedArgb
-                                            ?: old.seedArgb.takeIf { unchanged && result.colours == null }
-                                    },
-                                avgArgb = result.colours?.avgArgb ?: old.avgArgb.takeIf { unchanged },
-                                version = old.version + if (unchanged) 0 else 1,
-                                fetchedAt = now,
-                                lastError = null,
-                            ).syncResult()
-                    }
-                db.artworkDao().applyBatch(rows)
-            }
+            db.withWriteTransaction { applyBatchLocked(produced, now) }
             refreshIndexLocked()
+        }
+
+        /** Files and source rows cannot change between this check and publication. */
+        internal suspend fun applyMosaic(
+            snapshot: MosaicSnapshot,
+            produced: ArtworkProduction,
+            now: Long,
+        ): Boolean =
+            files.withLock {
+                val applied =
+                    db.withWriteTransaction {
+                        val current = MosaicSources(db).snapshots().firstOrNull { it.groupId == snapshot.groupId }
+                        if (current != snapshot) return@withWriteTransaction false
+                        require(produced.key == ArtworkKeys.mosaic(snapshot.groupUuid))
+                        require(produced.descriptor == mosaicDescriptor(snapshot))
+                        applyBatchLocked(listOf(produced), now)
+                        true
+                    }
+                if (applied) refreshIndexLocked()
+                applied
+            }
+
+        private suspend fun applyBatchLocked(
+            produced: List<ArtworkProduction>,
+            now: Long,
+        ) {
+            val rows =
+                produced.mapNotNull { result ->
+                    val current = db.artworkDao().byKey(result.key)
+                    val snapshot = result.backfill
+                    if (snapshot != null) {
+                        // Decode/extraction ran without the lock. Do not publish over replacement,
+                        // deletion, provider fallback or another completed backfill.
+                        if (current == null || current != snapshot.row) return@mapNotNull null
+                        val path =
+                            safePath(current.key, current.localPath ?: return@mapNotNull null)
+                                ?: return@mapNotNull null
+                        if (
+                            !fs.exists(path) ||
+                            fs.read(path) { readByteString().sha256() } != snapshot.bytes.sha256()
+                        ) {
+                            return@mapNotNull null
+                        }
+                        if (result.colours != null) {
+                            return@mapNotNull current
+                                .copy(
+                                    seedArgb = if (result.key.startsWith("g-")) null else result.colours.seedArgb,
+                                    avgArgb = result.colours.avgArgb,
+                                ).syncResult()
+                        }
+                    }
+                    val old = current ?: ArtworkEntity(result.key)
+                    val image = result.image
+                    if (image == null) {
+                        val attempt = (old.lastError?.substringAfterLast(':')?.toIntOrNull() ?: 0) + 1
+                        return@mapNotNull old
+                            .copy(fetchedAt = now, lastError = "${result.error}:$attempt")
+                            .syncResult()
+                    }
+                    val filename = "${result.key}.${image.extension}"
+                    val target = root / filename
+                    val previous = old.localPath?.let { safePath(old.key, it) }
+                    val unchanged =
+                        previous != null && fs.exists(previous) &&
+                            fs.read(previous) { readByteString().sha256() } == image.bytes.sha256()
+                    if (!unchanged || previous != target) write(result.key, filename, image)
+                    // A successful fetch removes the interim fallback even if an old file vanished.
+                    deleteVariants(result.key, keep = filename)
+                    old
+                        .copy(
+                            url = result.descriptor,
+                            localPath = filename,
+                            width = image.width,
+                            height = image.height,
+                            seedArgb =
+                                if (result.key.startsWith("g-")) {
+                                    null
+                                } else {
+                                    result.colours?.seedArgb
+                                        ?: old.seedArgb.takeIf { unchanged && result.colours == null }
+                                },
+                            avgArgb = result.colours?.avgArgb ?: old.avgArgb.takeIf { unchanged },
+                            version = old.version + if (unchanged) 0 else 1,
+                            fetchedAt = now,
+                            lastError = null,
+                        ).syncResult()
+                }
+            db.artworkDao().applyBatch(rows)
         }
 
         /** Read a stable, owned local input without keeping the publication lock during CPU work. */
