@@ -49,9 +49,14 @@ public interface ShareSheet {
         subject: String?,
     )
 
+    /**
+     * Shares the file [uri] points at. [title] is the file name the receiving app should see
+     * (`EXTRA_TITLE` / ClipData label, 05 Destinations) — the file's display name, not a path.
+     */
     public fun shareFile(
         uri: String,
         mimeType: String,
+        title: String,
     )
 }
 
@@ -68,7 +73,10 @@ public interface FilePicker {
     public suspend fun pickFolder(title: String): String?
 }
 
-/** Creates a document the caller then writes to; `null` = the user cancelled. */
+/**
+ * Creates a document the caller then writes to; `null` = the user cancelled. Android returns the
+ * `content:` URI `CreateDocument` granted; the desktop returns an escaped local `file:` URI.
+ */
 public fun interface FileSaver {
     public suspend fun create(
         suggestedName: String,
@@ -76,7 +84,7 @@ public fun interface FileSaver {
     ): String?
 }
 
-/** Reveals [path] in the platform file manager; desktop only. */
+/** Reveals [path] — a local path or escaped `file:` URI — in the file manager; desktop only. */
 public fun interface RevealInFolder {
     public fun reveal(path: String): Boolean
 }

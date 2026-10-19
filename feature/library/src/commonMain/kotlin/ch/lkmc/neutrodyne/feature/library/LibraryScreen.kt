@@ -66,6 +66,7 @@ import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
 import ch.lkmc.neutrodyne.core.ui.resources.action_more
+import ch.lkmc.neutrodyne.core.ui.resources.export_subscriptions
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_add_url
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_mark_all_played
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_onboarding_title
@@ -142,6 +143,8 @@ internal fun LibraryScreen(
     onOpenGroup: (Long) -> Unit = {},
     onEditGroup: (Long) -> Unit = {},
     onManageGroups: () -> Unit = {},
+    onExportGroup: (Long) -> Unit = {},
+    onExportSubscriptions: () -> Unit = {},
     onSelect: (Long, SelectionGesture) -> Unit = { _, _ -> },
     onExitSelection: () -> Unit = {},
     onSelectionAction: (SelectionAction) -> Unit = {},
@@ -189,7 +192,7 @@ internal fun LibraryScreen(
                 title = stringResource(Res.string.nav_library),
                 actions = {
                     SortMenu(state.sort, onSort)
-                    OverflowMenu(state.showTitles, onToggleTitles, onManageGroups)
+                    OverflowMenu(state.showTitles, onToggleTitles, onManageGroups, onExportSubscriptions)
                     SettingsGearButton()
                 },
             )
@@ -199,7 +202,7 @@ internal fun LibraryScreen(
         if (segment == LibrarySegment.PODCASTS) LibraryGroupChips(state, onGroupFilter, onNewGroup)
         when {
             segment == LibrarySegment.GROUPS && state.loaded -> {
-                LibraryGroupsGrid(state, onOpenGroup, onEditGroup, onManageGroups, onNewGroup)
+                LibraryGroupsGrid(state, onOpenGroup, onEditGroup, onManageGroups, onNewGroup, onExportGroup)
             }
 
             !state.loaded -> {
@@ -439,6 +442,7 @@ private fun OverflowMenu(
     showTitles: Boolean,
     onToggleTitles: (Boolean) -> Unit,
     onManageGroups: () -> Unit,
+    onExportSubscriptions: () -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
@@ -470,6 +474,10 @@ private fun OverflowMenu(
             DropdownMenuItem(text = { Text(stringResource(LibraryRes.string.manage_groups)) }, onClick = {
                 open = false
                 onManageGroups()
+            })
+            DropdownMenuItem(text = { Text(stringResource(Res.string.export_subscriptions)) }, onClick = {
+                open = false
+                onExportSubscriptions()
             })
         }
     }

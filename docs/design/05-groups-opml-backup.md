@@ -117,7 +117,7 @@ All repository functions are main-safe (`suspend` or `Flow`), follow [01 Corouti
 | DAO calls | Room query context (`@Dispatcher(IO)`) | Batch sizes and transaction rules of [02 Conventions](02-data-model.md#conventions): import commit 500 items, restore 1,000 lines per transaction |
 | Copying payloads, OPML/JSON/CSV parsing, ZIP reading and writing | `@Dispatcher(IO)` (blocking streams) | Caps enforced while streaming; no `ContentResolver` or other platform file call inside a transaction |
 | Group proposals of a 10,000-item preview, OPML document building | `@Dispatcher(Default)` | Debounced 100 ms on item changes |
-| Manual OPML and backup export | `@ApplicationScope` | Leaving the dialog does not cancel; result reported as a `UserMessage` |
+| Manual OPML export | `@ApplicationScope` for prepare and the accepted destination copy; the route's composition scope owns the pick/share calls | `export`/`confirmWarning` are `suspend` ops the route launches and only awaits — leaving or recreating the dialog cancels the caller, never an accepted save; the UI calls run inside the caller's captured context so dead seams are never invoked, and `busy` clears in the job's own `finally`; errors post as a `UserMessage`. Backup export keeps `@ApplicationScope` when it lands |
 | Delete-group undo window | `@ApplicationScope`, `delay(10_000)` | Process death within the window makes the delete final |
 | `ImportFetchWorker`, `RestoreWorker`, `AutoSnapshotWorker` (Android) | `CoroutineWorker` created by `MetroWorkerFactory` ([01 Dependency injection](01-foundation.md#dependency-injection)) | Idempotent, resumable, 8-min soft deadline ([N2](../PLAN.md#22-non-functional-requirements)); the first two host the common `ImportFetchRunner` and `RestoreRunner` |
 | `import-backup` lane (desktop) | `DesktopJobRunner` lane on `Dispatchers.IO` ([11 Background work](11-desktop.md#background-work)) | The same runners without a soft deadline; a quit stops the lane and the next start resumes from the persisted session state |
@@ -926,6 +926,43 @@ into a UNC write. `FilePayloadSource` likewise refuses every symlink — the
 "no … link" half of [Acquire step 7](#1-acquire)'s regular-file rule — since
 the metadata stat describes the link itself, not its target.
 
+**Implementation note (2026-10-18, M3 D3).** The export dialog lands in
+`:feature:importexport`: `ExportKey(groupId)` renders through
+`NdSceneMetadata.dialog()` into a `Dialog` window whose body draws the
+options — or, once `prepare` returns an artifact with `privateLinks > 0` or
+`passwords > 0`, the R1.9 counts — and the ViewModel retains that exact
+`PreparedExport` so Continue delivers it unregenerated. The route supplies
+the platform seams (`FileSaver.create` / `ShareSheet.shareFile`), so the
+controller never touches a picker or an `Intent`. Two seam details shipped
+differently from the sketch above: `ShareSheet.shareFile` takes the display
+name as a third parameter (`EXTRA_TITLE` plus the `ClipData` label — the
+grant alone does not carry the name through the chooser), and the desktop
+`FileSaver.create` returns the escaped local `file:` URI after applying the
+extension rule while the AWT `FileDialog` stays the dialog on every OS —
+the XDG portal `SaveFile` is not part of this slice and remains with D5's
+per-OS split. The group action surface wired is the Library group tile's
+menu ("Share as OPML" on Android, "Export group as OPML…" on the desktop)
+plus the Library overflow's "Export subscriptions…"; the feed-header
+overflow variant stays with the group-feed row that owns that menu.
+
+**Implementation note (2026-10-18, M3 D3 review fix).** The dialog's
+lifetime splits UI from data: `export`/`confirmWarning` are `suspend`
+operations the route launches on its composition scope and only awaits,
+while prepare and the accepted destination copy ride one `@ApplicationScope`
+job — a pop or an Activity recreation cancels the caller, never an accepted
+write. The pick/share calls run inside the caller's captured context, which
+is checked again after each await, so a disposed route's dead seams are
+never invoked and a picker answer that reaches only a dead owner writes
+nothing. The pending warning keeps only the immutable `PreparedExport` plus
+its action and Continue receives the live route's destinations; a confirm
+whose owner dies mid-delivery re-arms the same warning, and `busy` clears
+in the data job's own `finally` so a recreated route cannot start a second
+same-name run while an orphaned one still writes. The post-save "Saved"
+snackbar launches on the root-owned `LocalRootScope` so it survives the pop
+but ends with the root. On the desktop, `awaitEdt` bridges the file
+dialogs: an AWT throw resumes the awaiting coroutine exceptionally, and a
+cancelled caller's still-queued or modal dialog is disposed on the EDT.
+
 File names: OPML `neutrodyne-subscriptions-{yyyy-MM-dd}.opml`, MIME `text/x-opml`; a group `neutrodyne-{slug}-{yyyy-MM-dd}.opml` (slug = `nameKey` with non-`[a-z0-9]` runs → `-`, trimmed, ≤ 40 chars, fallback `group`); NewPipe JSON `neutrodyne-youtube-{yyyy-MM-dd}.json`, MIME `application/json` ([04 NewPipe subscriptions JSON](04-youtube.md#newpipe-subscriptions-json-import-and-export)).
 
 `res/xml/file_paths.xml` (`:app`, Android) contains `<cache-path name="export" path="export/"/>` (07 adds the download roots to the same file). `ExportFilesCleaner` (an `AppInitializer`, order 300, both platforms) deletes files in the export cache directory (Android `cacheDir/export/`, desktop `<cache>/export/`, [11 AppDirs](11-desktop.md#appdirs)) older than 24 h; each export also deletes older files with the same name.
@@ -1581,6 +1618,26 @@ rejected before any write — the session goes `CANCELLED`, progress reports
 capture, the ALL_DEVICES steps) lands with MS2. The linked branches below describe MS2.
 
 **Implementation note (2026-10-18, B12b):** a replay still queues a matched podcast awaiting its first fetch, including one inserted by an interrupted attempt. Auto-snapshot retirement finishes before a terminal session marker; a failed rename or cancellation-marker write leaves durable work for retry. Settings restore requires the declared JSON primitive type rather than coercing strings into booleans or numbers.
+
+*Implementation note (2026-10-18, M3 B12c):* `BackupRepositoryImpl` (`:core:data`
+`commonMain`) implements the public contract over the existing services. `restore`
+requires an actual backup `PREVIEW` session with a payload, preserves parser/system
+fields and claims mode/categories/reach/request time in one write transaction.
+Arbitration checks native work, this row's request and the shared fail-closed intent
+predicate over other backup previews. The entire claim and owed enqueue are one
+`NonCancellable` unit; database failures return `Storage` rather than escaping.
+Dispatch uses the claim's own stamp and automatic-origin receipt. `ALREADY_RUNNING`
+undoes only a matching, unused dispatch stamp, preserving the user's preview choices;
+work already accepted for the same session answers `ENQUEUED`. Unknown acceptance
+keeps the intent for C2/C3 startup reconciliation.
+
+The whole manual write/copy/cache-sweep runs under one mutex so same-minute names stay
+private to one caller. Owned cache cleanup also covers writer failure/cancellation.
+The last-manual timestamp is observational bookkeeping after a successful copy.
+`inspect` validates the stored payload within `StagedBackup.use` and writes nothing;
+`observeRestore` is the runner's progress flow. Android snapshot members delegate to
+the producer, and adoption uses `ImportSessions.createAdopted` for own and foreign
+snapshots alike. Graph registration waits for real native scheduler bindings.
 
 1. **Validate** again (the cache copy is ours, but cheap to re-check); failure → session `CANCELLED`, `RestoreProgress.Failed`, notification (ID 3003 on Android; `DesktopNotifier` on the desktop). For `auto` restores (Android) a `Corrupt` or `NotABackup` snapshot is renamed to `restored-{epochMs}.zip` as well, so the installation-ID guard of [Snapshot production](#snapshot-production) stops protecting a file that can never be restored; `NewerFormat` keeps it ([First-launch restore](#first-launch-restore)).
 2. **Replace pre-step** (skipped on an empty database): on a linked device with reach `THIS_DEVICE`, 10's unlink runs first ([10 Unlink and Delete my data](10-sync.md#unlink-and-delete-my-data)); with reach `ALL_DEVICES` (confirmed after 10's pull, with `linkedAt` already cleared, [Restore while linked](#restore-while-linked)) every write of steps 2–7 runs with `applying = 1`. Then local podcasts matched by no backup podcast → `UnsubscribeUseCase(ids)` (03: pauses playback of them, deletes download files, D24); local groups matched by no backup group → deleted without undo (channels deleted immediately on Android); for every matched podcast, delete its `episode_state` and `episode_position` rows (only when HISTORY is selected; one transaction per podcast); clear `queue_entry` and the `play_session` context (UP_NEXT).
