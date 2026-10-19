@@ -30,7 +30,7 @@ abstract class IngestDao(
      */
     @Query(
         "SELECT id, identityKey, guid, enclosureUrl, enclosureType, title, pubDate, sortDate," +
-            " durationMs, contentHash, inFeed, firstSeenAt, chaptersUrl" +
+            " durationMs, contentHash, inFeed, firstSeenAt, chaptersUrl, isShort, externalMediaId" +
             " FROM episode WHERE podcastId = :podcastId",
     )
     abstract suspend fun existing(podcastId: Long): List<ExistingEpisodeKey>

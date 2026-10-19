@@ -547,6 +547,16 @@ With the engine only, M9a. Discover offers an explicit "Search YouTube channels"
 
 ### Channel metadata refresh
 
+Implementation note (2026-10-19, M8): W3 implements the frozen
+`YouTubeChannelMetadata` port as one app-scoped coordinator shared with
+channel detail. It owns the 100-new/30-stale sliding budget, two lookup
+permits, jitter, coalescing and the 20-second bound. Detail requests upgrade
+an in-flight avatar lookup to FULL. The page-metadata transaction explicitly
+re-pins changed avatar keys; Atom uses `applyYouTubeFeedMetadata` and
+cannot erase page artwork, banner, description or link. Both shells provide
+W2's resolver with the current app locale when wiring this new consumer;
+the external capability bindings stay unchanged.
+
 - Atom `author/name` updates the title on every refresh (via 03's metadata update).
 - Avatar and description: in `afterIngest` (after a successful fetch, ingested or unchanged; after the enrichment step), `YouTubeSourceAdapter` re-resolves `Channel(id)` with `AVATAR` depth when `channelMetadataAt` is null or older than 30 days, under `withTimeoutOrNull(20 s)`. Budget (in-memory sliding window of 10 min, which covers one 8-min run): at most 100 never-fetched (`channelMetadataAt IS NULL`, typically fresh imports) plus 30 stale channels, 2 concurrently with 0.5–1.5 s jitter. With the engine, a denied extraction gate makes the lookup fall back to HTML ([Engine channel lookup](#engine-channel-lookup)). Channels over budget keep their monogram until a later run. New avatar URL → new `artworkKey`. 03's pin on an `artworkUrl` change runs before `afterIngest` and never sees this write, so whenever `applyYouTubeChannelMetadata` changes `artworkKey` (first avatar after a monogram, or a new avatar URL; the caller compares the stored key), the caller (`YouTubeSourceAdapter.afterIngest` here, `YouTubeChannelRepository.ensureChannelArt` below) calls `ArtworkStore.pin(ArtworkRef(newKey, avatarUrl, 0), PinReason.SUBSCRIPTION, podcastId)`, which schedules `artwork-sync` ([08 ArtworkStore](08-ui-ux.md#artworkstore)).
 - A failed lookup leaves `channelMetadataAt` unchanged (null stays null), so it is retried next run; `NotFound` sets `channelMetadataAt = now` (the Atom feed decides whether the channel still exists).
@@ -602,6 +612,13 @@ The prefixes are undocumented; if YouTube drops them, the `channel_id` fallback 
 
 ### Fetch policy
 
+Implementation note (2026-10-19, M8): W3 applies adopted resolution 2 to
+all seven masks. Selected variants run sequentially under the refresher's
+host permit, with unconditional Atom requests and a 2 MiB cap. Secondary
+404/410 is empty; other secondary failures disable absence marking.
+403/429 abort the merge and defer without a failure count. An admitted
+health probe always reports, including cancellation as inconclusive.
+
 Implementation note (2026-10-19, M8): Primary 404/410 always tries canonical first, even for Shorts/live-only masks. Only secondary 404/410 is empty; failed fallback keeps its real diagnostic (adopted resolution 2).
 
 | Rule | Value |
@@ -652,6 +669,17 @@ Episode columns (subset; full entity in [02 episode](02-data-model.md#episode)):
 
 ### Merge algorithm
 
+Implementation note (2026-10-19, M8): W3 implements adopted resolution 4
+with transient `AtomDates` parser provenance. RSS values and RSS hashes
+stay unchanged, so this additive provenance does not bump the parser
+version or rewrite its goldens. YouTube takes only published/raw-published;
+malformed or missing published never uses updated. The digest includes
+NFC-normalized, trimmed, whitespace-collapsed authorName. Digest fields
+are length-framed before hashing to avoid delimiter collisions in publisher
+text; a malformed published value contributes its raw text. Item hashes
+include Shorts after OR with stored Shorts, and variant-only reclassification
+therefore writes even when the text stays equal. No schema change is needed.
+
 Implementation note (2026-10-19, M8): Feed-independent W1 DTOs retain published/raw-published and D19 sortDate. Generic Atom keeps its fallback; YouTube ignores updated. The digest adds normalized authorName, and item hashes include sticky Shorts changes (adopted resolution 4; W3 implements).
 
 `YouTubeEntryRules.merge(results, enabledBits): MergedChannel` (pure), called by `YouTubeSourceAdapter` with one `VariantResult` per polled URL (`Ok(bit, entries, authorName)`, `Empty(bit)`, `Failed(bit, httpCode, cause)`; the `channel_id` fallback reports under the primary's bit with `fallback = true`):
@@ -674,6 +702,13 @@ YouTube feeds show only the newest 15 entries per variant, so "absent from this 
 03's column rules ([03 Column rules on update](03-feeds-and-discovery.md#column-rules-on-update)) already keep a stored `durationMs` when the parsed value is null. Through the `RowHint`s the adapter adds: `availability` = stored (Atom never changes it), `isShort = stored || parsed`, `isVideo = false`. A title or description edit therefore never clobbers enrichment.
 
 ### Gap detection
+
+Implementation note (2026-10-19, M8): W3 implements adopted resolution 3
+for the triggering success and the next two successful refreshes. Failure,
+deferred and manual-only deadlines are preserved; publisher max-age is a
+lower bound even during pull-in. The normal success hook now also runs
+after a body ingest commits, before the post-ingest announcement. Manual
+requests still bypass due-time selection. Gap counters are in-memory only.
 
 Implementation note (2026-10-19, M8): The bounded gap rule may lower ordinary success intervals for three refreshes, retaining the 15-minute floor and server/backoff/deferred deadlines; manual bypass is unchanged (adopted resolution 3; W3 implements).
 
@@ -710,6 +745,13 @@ stateDiagram-v2
 UI: one in-app banner on Feeds and Library while `feedOutageLevel > 0`, "YouTube feeds aren't responding. Your channels will update automatically when YouTube is back." with "Retry now" (`health.retryNow()`: `feedOutageUntil = now`, level kept, then `RefreshController.refreshNow(Podcasts(PodcastDao.youtubeChannelIds()))`, so the next fetch is the probe). No system notification and no per-podcast error badges during the outage (08 reads `YouTubeHealth.state`). Feed rate limiting (`feedRateLimitedUntil`) shows nothing beyond "last refreshed".
 
 ### Enrichment step
+
+Implementation note (2026-10-19, M8): Under adopted resolutions 1 and 6,
+W3's post-ingest path performs channel metadata and announcement filtering
+only. All M8 builds remain external (`NOT_YET_AVAILABLE`); it never calls
+an enricher, extractor or back-catalogue engine. Canonical fallback cannot
+reliably identify live, premiere or members-only uploads, and disabling LIVE
+only changes future polls. No guessed availability or new row flag is added.
 
 With the engine, M9a. Runs in `YouTubeSourceAdapter.afterIngest`, i.e. inside the same refresh run (`RefreshWorker` on Android, the `refresh` lane on the desktop, [03 Desktop refresh](03-feeds-and-discovery.md#desktop-refresh)), after the channel's ingest transaction (or after `Unchanged`, so pending premieres of quiet channels are still re-checked).
 
@@ -1694,6 +1736,12 @@ Serves N11. No test in PR CI touches live YouTube (runners use data-centre IPs t
 | `YouTubeReleaseSmokeTest` (E7) | `:app`, the R8-minified release APK and the debug APK, GMD API 36 and API 37 16 KB | On the release APK, R8 keeps the classes Chaquopy calls (`PyHttp`, `QuickJsEngine`) and `YtxTestHooks` (keep rules in `youtube/ytdlp/consumer-rules.pro`, S7 and S19, [01 Release build and baseline profiles](01-foundation.md#release-build-and-baseline-profiles)); on both, one resolve and one chunked download through `:ytx` with `ReplayRH` (the test reads the instrumentation argument `ytxReplay`, copies `ReplayRH` and a scenario into `noBackupFilesDir/ytx-test/` and sets `YtxTestHooks.replayDir` before the first bind, 09) and a MockWebServer googlevideo stand-in (PLAN M9 AC9). Emulators run CheckJNI for every app ([JNI tips](https://developer.android.com/training/articles/perf-jni)), so a JNI misuse in Chaquopy's bridge or `PyHttp` aborts `:ytx` in this test on the GMD images; the release APK is the gating run, and the device checks of PLAN M9 AC3 use it too | M9a |
 | APK content scan (`check-apk.sh --published` on the release APKs, 09) | CI | No `mutagen`, `readline`, `libreadline`, `org/schabi/newpipe`, `org/mozilla/javascript` in any APK; no Python native libraries in the `armeabi-v7a` APK; no `ch/lkmc/neutrodyne/youtube/ytdlp` classes in the `-Pneutrodyne.youtubeEngine=false` build; 16 KB alignment including the `.so` files inside Chaquopy's asset zips | M9a |
 | Desktop host tests (11 owns them) | `:youtube:ytdlp-desktop` `desktopTest`, the nightly `desktop-matrix`, `release.yml`'s `desktop` jobs | `StdioYtxTransportTest` (MD3 AC1: the recorded-response vectors of M9 AC1 through the stdio host), the packaged app's YouTube smoke test with `ReplayRH` on every target (MD3 AC2), `YtxProcessTest` (MD3 AC3), `EngineUpdaterTest` with the desktop store (MD3 AC4), `check-desktop-image.sh` and `codesign --verify --deep --strict` (MD3 AC5), PB29 (MD3 AC6) ([11 Testing](11-desktop.md#testing)) | MD3 |
+
+Implementation note (2026-10-19, M8): W3 implements the Atom portion of
+adopted resolution 8 with a synthetic, provenance-documented
+`feeds/src/test/resources/youtube/m8-atom.xml`, shared with Android host
+replay. Tests generate bounded 15-entry windows and status changes; no live
+YouTube calls are used as acceptance proof.
 
 Fixtures: `feeds/src/test/resources/corpus/youtube/` (`uulf_mkbhd.xml`, `channel_id_mkbhd.xml` with 3 Shorts, `uush_mkbhd.xml`, `uulv_nasa.xml`, `user_marquesbrownlee.xml`, `playlist_pl_oldest_first.xml`, `empty_channel.xml`); `youtube/impl/src/test/resources/youtube/` (`handle_mkbhd.html.gz`, `channel_canonical_only.html`, `consent_redirect.txt`, `oembed_3iRUwVzRDZQ.json`); `youtube/engine/src/test/resources/recorded/{scenario}/` (request/response pairs and `result.json`, both hosts, [Recorded responses](#recorded-responses)); `youtube/engine/src/test/resources/engine/` (test manifest keys, a signed test manifest, the real 2026.08.19 `SHA2-256SUMS` and `.sig`); `feeds/src/test/resources/import/{newpipe,libretube,takeout,urllist}/`.
 

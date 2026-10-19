@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.feeds.model
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 /**
  * One normalised feed item in document order (03 Parser). Immutable and serialisable for the golden
@@ -42,4 +43,14 @@ public data class ParsedEpisode(
     val ytChannelId: String? = null,
     /** Raw `media:group/media:community/media:statistics@views`; interpreted by 04. */
     val mediaStatisticsViews: Long? = null,
+    /** Source provenance for adapters; generic pubDate retains Atom's published/updated fallback.
+     * Not part of the golden/wire model because existing RSS values are unchanged. */
+    @Transient val atomDates: AtomDates? = null,
+)
+
+/** Published-only consumers must not infer publication from an Atom update timestamp. */
+public data class AtomDates(
+    val publishedAtMs: Long?,
+    val rawPublished: String?,
+    val updatedAtMs: Long?,
 )

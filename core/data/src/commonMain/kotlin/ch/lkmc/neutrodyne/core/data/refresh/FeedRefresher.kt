@@ -840,7 +840,20 @@ internal class FeedRefresher(
         // The ingest committed: a cancellation in these reads must not skip its announcement.
         target =
             withContext(NonCancellable) {
-                (db.podcastDao().dueFeedById(target.id) ?: target).also { rememberWarnings(it.id, ingest.warnings) }
+                (db.podcastDao().dueFeedById(target.id) ?: target).also { current ->
+                    rememberWarnings(current.id, ingest.warnings)
+                    if (ingest.emptyKind == null && !ingest.vanished) {
+                        val stored = db.podcastDao().byId(current.id)
+                        val base = stored?.nextRefreshAt
+                        if (base != null) {
+                            val next = adapter.nextRefreshAt(current, result, base)
+                            if (next != base) {
+                                // Only the schedule changes. A manual force mark racing the ingest wins.
+                                db.podcastDao().rebaseNextRefreshAt(current.id, next, stored?.lastAttemptAt ?: now)
+                            }
+                        }
+                    }
+                }
             }
         // `vanished` means the podcast row was deleted mid-run — there is no row left to write a
         // fetch state onto, and the row being gone is itself the terminal state.

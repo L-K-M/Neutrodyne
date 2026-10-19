@@ -7,6 +7,7 @@ import ch.lkmc.neutrodyne.feeds.model.AlternateEnclosureIntegrity
 import ch.lkmc.neutrodyne.feeds.model.AlternateEnclosureSource
 import ch.lkmc.neutrodyne.feeds.model.ArtworkCandidate
 import ch.lkmc.neutrodyne.feeds.model.ArtworkSource
+import ch.lkmc.neutrodyne.feeds.model.AtomDates
 import ch.lkmc.neutrodyne.feeds.model.Enclosure
 import ch.lkmc.neutrodyne.feeds.model.FeedFormat
 import ch.lkmc.neutrodyne.feeds.model.Funding
@@ -1987,6 +1988,7 @@ private class ParseSession(
             externalMediaId = item.externalMediaId,
             ytChannelId = item.ytChannelId,
             mediaStatisticsViews = item.mediaStatisticsViews,
+            atomDates = AtomDates(item.atomPublished, item.atomPublishedRaw, item.atomUpdated),
         )
     }
 
