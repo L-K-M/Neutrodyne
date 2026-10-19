@@ -151,6 +151,8 @@ class ArtworkSyncWorkerTest {
                         fixture.scheduler,
                         fixture.clock,
                         dispatcher,
+                        AndroidArtworkPixelSampler(),
+                        Dispatchers.Default,
                     )
                 val bounded = worker(Provider { runner }, dispatcher)
                 val running = async(Dispatchers.IO) { bounded.doWork() }
@@ -192,6 +194,8 @@ class ArtworkSyncWorkerTest {
             fixture.scheduler,
             fixture.clock,
             Dispatchers.IO,
+            AndroidArtworkPixelSampler(),
+            Dispatchers.Default,
         )
 
     private fun worker(

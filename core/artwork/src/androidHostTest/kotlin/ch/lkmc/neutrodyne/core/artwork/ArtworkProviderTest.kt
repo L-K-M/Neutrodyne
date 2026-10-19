@@ -194,6 +194,8 @@ class ArtworkProviderTest {
                         fixture.scheduler,
                         fixture.clock,
                         Dispatchers.IO,
+                        AndroidArtworkPixelSampler(),
+                        Dispatchers.Default,
                     )
                 val running = async(Dispatchers.IO) { runner.runOnce() }
                 kotlinx.coroutines.withTimeout(10_000) { reached.await() }
@@ -213,6 +215,9 @@ class ArtworkProviderTest {
                 val row = assertNotNull(fixture.db.artworkDao().byKey(key))
                 assertEquals(url, row.url)
                 assertEquals("$key.jpg", row.localPath)
+                val colors = ArtworkColorExtractor.extract(AndroidArtworkPixelSampler().sample(bitmap.asImage()))
+                assertEquals(colors.seedArgb, row.seedArgb)
+                assertEquals(colors.avgArgb, row.avgArgb)
                 val storedBytes = File(app.filesDir, "artwork/$key.jpg").readBytes().toList()
                 assertEquals(image.bytes.toByteArray().toList(), storedBytes)
                 assertFalse(File(app.filesDir, "artwork/$key.fallback.png").exists())

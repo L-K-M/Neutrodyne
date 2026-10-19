@@ -2480,6 +2480,18 @@ completion, including monochrome and (null, 0) transparent art. Only
 missing/unprocessed primary falls back; local backfill preserves versions and failed
 refresh preserves valid old files/colours. No schema flag.
 
+**Implementation note (2026-10-19, M10):** W2 implements resolution 3 with
+`ArtworkPixelSampler` beside the codec and a pure MCU extractor. Android draws an
+owned sRGB sample, preserving aspect ratio and tiny inputs. Local-only backfill
+uses the existing four-producer/eight-row batches and deadline continuation;
+publication rechecks the row and byte digest under the store lock. It changes
+only colours, preserving the file, version, timestamps and retry state. A corrupt
+legacy file records `BACKFILL_DECODE` with the existing backoff before normal
+production repairs it. A non-null average completes extraction even when the
+seed is null or the average is transparent zero. Repository fallback follows
+podcast key changes and clears obsolete observations. No Room schema change or
+desktop raster adapter is introduced; production desktop sampling remains MD1.
+
 ### Monograms and mosaics
 
 - In-app monograms are painted live by `MonogramPainter` (crisp, light/dark aware); rows and tiles never load monogram files.

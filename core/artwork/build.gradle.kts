@@ -19,6 +19,7 @@ kotlin {
             implementation(project.dependencies.platform(libs.coil.bom))
             implementation(libs.coil.core)
             implementation(libs.okio)
+            implementation(libs.materialColorUtilities)
         }
         androidMain.dependencies {
             implementation(libs.androidx.work.runtime)
