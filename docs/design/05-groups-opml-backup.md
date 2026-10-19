@@ -2231,8 +2231,17 @@ production behaviour: band 100's `OpenResult.created`, the `backup-restore` work
 `fromAndroidBackup` flag and exact HISTORY+UP_NEXT `MERGE` request, content equality of the
 seeded library, and the snapshot's retirement to `restored-*.zip` (or a valid, different
 replacement a periodic write may already have produced). Without the seed argument the class
-skips through `Assume`, and a skip is never a pass — the seeded scope is the evidence. The
-`bmgr`, device-to-device and reference-device checks stay separate gates
+skips through `Assume`, and a skip is never a pass — the seeded scope is the evidence.
+The gate clears the two device result directories before GMD runs, then
+`scripts/ci/check-first-launch-restore-results.py` requires the named
+`firstLaunchRestoresTheSeededSnapshot` case in `FirstLaunchRestoreDeviceTest` to pass
+without skips, failures or errors in each device's own XML (`api26` and `api36`, with
+matching GMD device properties) before recovery reporting. Missing, malformed or duplicate
+reports cannot supply a device leg. The replacement-writer evidence check also requires
+every physical ZIP payload to be declared and hashed in the manifest, as [Writing](#writing)
+specifies; imports still ignore undeclared entries as
+[Validation and preview](#validation-and-preview) specifies. The `bmgr`, device-to-device
+and reference-device checks stay separate gates
 ([Testing with bmgr](#testing-with-bmgr)).
 
 ---

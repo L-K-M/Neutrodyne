@@ -367,14 +367,20 @@ jobs:
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools > /dev/null
       - name: First-launch restore on api26 + api36
         timeout-minutes: 60
-        run: >-
-          ./gradlew --max-workers=2
-          :app:api26DebugAndroidTest
-          :app:api36DebugAndroidTest
-          -Pneutrodyne.testScope=nightly
-          -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.FirstLaunchRestoreDeviceTest
-          -Pandroid.testInstrumentationRunnerArguments.firstLaunchSeed=restore
-          -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
+        run: |
+          # A cached or stale XML must never supply a missing device leg.
+          rm -rf app/build/outputs/androidTest-results/managedDevice/debug/{api26,api36}
+          ./gradlew --max-workers=2 \
+            :app:api26DebugAndroidTest \
+            :app:api36DebugAndroidTest \
+            -Pneutrodyne.testScope=nightly \
+            -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.FirstLaunchRestoreDeviceTest \
+            -Pandroid.testInstrumentationRunnerArguments.firstLaunchSeed=restore \
+            -Pandroid.testoptions.manageddevices.emulator.gpu=swiftshader_indirect
+      - name: Verify first-launch restore executed on both APIs
+        run: |
+          python3 scripts/ci/check-first-launch-restore-results.py \
+            app/build/outputs/androidTest-results/managedDevice/debug
       - name: Report failure
         if: failure()
         env:
