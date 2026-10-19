@@ -99,7 +99,11 @@ class BackupWriterTest {
     private val dir = createTempDirectory("nd-backup-writer").toString().toPath()
     private val codec = BackupCodec()
 
-    @AfterTest fun close() = db.close()
+    @AfterTest
+    fun close() {
+        db.close()
+        fileSystem.deleteRecursively(dir)
+    }
 
     private fun newWriter(
         archives: ArchiveWriterFactory = ZipArchiveWriter(),
