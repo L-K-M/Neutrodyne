@@ -373,6 +373,10 @@ Selection mode registers its handler inside the screen's entry (composed inside 
 
 ---
 
+**Implementation note (2026-10-19, M10):** Resolution 5: W5 keeps tab-qualified shared
+art in one partition, existing host/entry scopes, Coil public 200 ms crossfade and
+expanded cover/wipe/movable state. Retain IME/fling limits in the ledger.
+
 ## Screens
 
 Serves R1.1–R1.9 (screens), R2.1–R2.8, R3.1, R3.7, R3.9 (display), R4.6, R5.1–R5.6, R6.1–R6.6, R7.2, R7.5–R7.7, R7.9, R8.3 and R8.8 (Settings › Desktop), N4, N6. Wireframes are compact phone portrait (360–411 dp); the desktop shows the same screens in list-detail panes ([Adaptive layouts](#adaptive-layouts)). Legend: `( )` = 48 dp touch target, `[>]` play, `[v]` download state, `(:)` overflow, `(gear)` settings.
@@ -1894,6 +1898,10 @@ Chips and the slider (on release) call `setSpeed(value, scope)`; the switch call
 
 The side panel is part of the pane computation ([Pane directive](#pane-directive)); it has no back behaviour and no drag. On the desktop it is the usual player: the default 1,200 × 800 dp window shows it at 412 dp beside two content panes, and resizing the window across 840 dp switches between panel and sheet without changing playback.
 
+**Implementation note (2026-10-19, M10):** W6 owns presentation and required
+close/reopen callbacks: hidden survives new items, ≥840 dp mini reopens panel,
+recreated sheet starts collapsed.
+
 ### Video (v1.x)
 
 v1.0 plays video enclosures as audio with a `videocam` badge (06 [Video](06-playback.md#video)). M14 replaces the artwork box with a `PlayerSurface` when the item is video and the surface toggle is on; the morph table is unchanged (the box keeps the video's aspect ratio). Nothing in v1.0 depends on it.
@@ -2202,6 +2210,10 @@ object BrandColors {
 - Dynamic schemes on API 34+ already follow the system contrast setting; Unverified for every OEM. Our MCU schemes (brand and artwork) pass `contrast` as `contrastLevel`.
 - Typography (`NeutrodyneType`) uses the platform font: Roboto or the device font on Android, Compose desktop's default sans-serif font on the desktop (Skia's platform font matching; Unverified which family each OS resolves); a brand typeface remains open under PO-17.
 
+**Implementation note (2026-10-19, M10):** Resolutions 2–3: W3 completes brand MCU and
+the exact pure-black ramp including surfaceDim. Completed monochrome uses app scheme;
+clamp the container. MD1/MD4 native integrations remain separate.
+
 ### Artwork-scoped schemes
 
 ```kotlin
@@ -2291,7 +2303,11 @@ Icons: Material **Symbols** Rounded, weight 400, as vector drawables in `:core:d
 
 ### Status bar and system bars
 
-`StatusBarAppearance(lightIcons: Boolean)` (`:core:designsystem`; called from common screens, it acts only through the `LocalSystemBars` controller `MainActivity` provides and does nothing on the desktop, which has no system bars) sets `WindowInsetsControllerCompat(window, view).isAppearanceLightStatusBars` while composed and restores the previous value on dispose (including a cancelled predictive back). The podcast header and the full player compute `lightIcons = luminance(topColour) > 0.5` from the artwork scheme's top colour and add a 48 dp top scrim (`verticalGradient(scrim 40 % → transparent)`) for busy banners. Navigation-bar icons follow the theme (edge-to-edge, transparent bars).
+`StatusBarAppearance.DarkIcons` / `LightIcons` (`:core:designsystem`) use the existing `PlatformSystemBarAppearance` boundary, extended by W5 to restore the previous status-bar owner on disposal, including predictive-back cancellation. Desktop has no system bars. The podcast header and full player choose icons from the actual top/scrim background; light backgrounds need dark icons (`isAppearanceLightStatusBars = true`). Busy banners add a 48 dp top scrim (`verticalGradient(scrim 40 % → transparent)`). Navigation-bar icons follow the app theme.
+
+**Implementation note (2026-10-19, M10):** Resolution 4: use the existing
+platform boundary and enum, dark icons on light backgrounds, restoring status-bar
+ownership separately from theme navigation-bar updates.
 
 ### Brand assets
 
@@ -2449,19 +2465,31 @@ Features read colours through a domain interface, because they cannot see `:core
 ```kotlin
 // :core:domain (new); implemented by ArtworkRepositoryImpl in :core:data over 02's ArtworkDao.observe(key)
 interface ArtworkRepository {
-    /** Colours of [key]; when that row has no seed (not stored: streamed episode art, YouTube thumbnails) and
-     *  [fallbackPodcastId] is given, the colours of that podcast's artworkKey (looked up once per call). */
+    /** Available completed colours of [key]; missing/unprocessed art may use the current
+     *  podcast key. Completed monochrome art never falls back. Podcast key changes are observed. */
     fun observeColors(key: String, fallbackPodcastId: Long? = null): Flow<ArtworkColors?>
 }
 // :core:model (new)
 data class ArtworkColors(val key: String, val version: Int, val seedArgb: Int?, val avgArgb: Int?)
 ```
 
+**Implementation note (2026-10-19, M10):** W2 owns sampling/extraction: straight sRGB,
+aspect preserved, no upscale, max 112/axis. MCU 5.0.1 source/JVM probe confirms null
+fallback and no alpha filter: filter alpha ≥128 before Celebi. Non-null average marks
+completion, including monochrome and (null, 0) transparent art. Only
+missing/unprocessed primary falls back; local backfill preserves versions and failed
+refresh preserves valid old files/colours. No schema flag.
+
 ### Monograms and mosaics
 
 - In-app monograms are painted live by `MonogramPainter` (crisp, light/dark aware); rows and tiles never load monogram files.
 - `MonogramRenderer.render(spec, 512)`: RASTER colours, initials at 38 % of the side, JPEG; stored under the podcast's `m-` key with descriptor `nd:monogram:v1:{initials}:{hue}`; used by system surfaces — Android through `ArtworkProvider`, the desktop OS media sessions by reading the file (11).
 - `MosaicRenderer.render(members, groupColor, 512)` (M10, Android only: its consumers are Android surfaces): 2 × 2 cells of 254 px with 4 px gaps; each cell is the member's pinned file (decoded with `inSampleSize`), else the member's monogram raster, else the group container tone; JPEG under `g-{uuid}`. Consumers: Auto's `groups` node (06) and v1.x widgets; the in-app [`GroupMosaic`](#groupmosaic-and-group-tab-label) composes four `CoverArt`s instead.
+
+**Implementation note (2026-10-19, M10):** Resolution 6: W4 owns Android-only raster
+snapshots/descriptors, including empty groups,
+membership/art-version/fallback-title/group-appearance invalidation. Distinct sources
+debounce 10 s, exclude own output and recheck source under store lock.
 
 ### ArtworkProvider
 
@@ -2638,6 +2666,11 @@ fun ndPaneLayout(windowWidthDp: Int, navChromeDp: Int, hasNowPlaying: Boolean, p
 
 `partitions` becomes the `maxHorizontalPartitions` of the `PaneScaffoldDirective` handed to 01's `ListDetailSceneStrategy`: start from `calculatePaneScaffoldDirective(windowAdaptiveInfo, verticalHingePolicy = HingePolicy.AvoidSeparating)` (which supplies spacing and the hinge's `excludedBounds`) and replace only `maxHorizontalPartitions` (default pane width 360 dp). Unverified (spike S5): that `rememberListDetailSceneStrategy` in `adaptive-navigation3` 1.3.0 accepts a directive and that `PaneScaffoldDirective` offers a `copy`; fallback: the strategy's own directive (two panes from 840 dp of window) and the side panel only from 1,200 dp. Two panes therefore start at about 696 dp of window width with a 96 dp rail (tablets in portrait, large foldables), not at 600 dp, because two 252 dp panes cannot hold an episode row; a phone-sized inner foldable display keeps single-pane push navigation.
 
+**Implementation note (2026-10-19, M10):** Resolutions 1–2 retain directive
+copy/strategy and 600/1200 content thresholds after subtraction. With 96 dp rail:
+three panes at 1296 idle/1708 playing; 840 playing has one content pane plus panel. W6
+verifies narrow panes at 2× and converts posture pixels to window dp once.
+
 ### Posture
 
 - (Android; desktop windows have no posture.) Tabletop (`windowPosture.isTabletop`, half-opened with a horizontal hinge): the full player or side panel splits at the hinge from `windowPosture.hingeList` — artwork above, title, scrubber and transport below ([Side panel, medium widths and tabletop](#side-panel-medium-widths-and-tabletop)).
@@ -2791,6 +2824,10 @@ Serves R1.1, R2.1, R3.1, R5.4, R6.2, R6.6, R7.7, R7.9, N4. Delivered in M1 (Feed
 | Import | after picking a file | preview first, then the progress list where covers pop in as feeds resolve |
 
 Illustrations are single-colour Material Symbols at 96 dp in `primary` (the brand amber's role in the brand scheme) until PO-17 brand illustrations exist; the empty Feeds and Library state on first start also shows the in-app brand mark ([Brand assets](#brand-assets)) above the text. With a sync server configured but nothing synced yet, the empty state adds "Or link this device to your sync server" → `SyncSettingsKey`.
+
+**Implementation note (2026-10-19, M10):** Resolution 10 retains PO-17 platform fonts,
+amber/navy mark and symbol empty states. Supplied fonts/illustrations remain optional;
+no Expressive migration.
 
 ### Suggested groups card
 
@@ -2986,6 +3023,11 @@ Portable keys are added to the backup whitelist automatically (05); `ui.*` keys 
 
 Swipe actions `REMOVE_FROM_UP_NEXT` and `DELETE_DOWNLOAD` are fixed on Up next and Downloads and are not offered in the setting.
 
+**Implementation note (2026-10-19, M10):** W1 registers tint=true, pure black=false,
+density=MEDIUM (72/100/152 dp), panel hidden=false. Appearance is
+portable/backup-eligible but unsynced; panel is device-only. W3 wires keys; W7 applies
+density.
+
 ### Widgets (v1.x)
 
 Outline for M13 (Android only; `:feature:widgets` would be an Android-only module because Glance is Android-only; the desktop has no widgets and no mini-player window in v1.0, [D64](../PLAN.md#3-key-decisions)): Glance 1.2.0 (`glance-appwidget`, `glance-material3`), `GlanceTheme` with system dynamic colours. **Now playing** (`SizeMode.Responsive` 2×1, 4×1, 4×2): cover, title and podcast (4×1+), play/pause, −10/+30, progress on 4×2 updated on state changes only; data from a small widget state that 06's service writes with throttled `updateAll`; artwork as `ImageProvider(Icon.createWithContentUri(contentUri))` from `ArtworkProvider`, so no bitmaps travel in the `RemoteViews` parcel (Android 17's cap of `1.5 × width × height × 4` bytes throws for target 37); fallback to ≤ 10 bitmaps of 192 px if a launcher fails to load URI icons. Taps: body opens the app with the player expanded; play/pause uses the media-button path; Unverified whether a widget tap grants the FGS while-in-use capability under Android 17 — if not, play opens the app. **Group feed**: newest 5–10 unplayed episodes of a chosen group (configuration activity), row tap → `neutrodyne://open/episode/{id}`. Generated previews (`providePreview` + `setWidgetPreviews`, Android 15+) set once after the first subscription and on app update (the API is rate-limited to about 2 calls per hour). Sources: [Glance releases](https://developer.android.com/jetpack/androidx/releases/glance), [generated previews](https://developer.android.com/develop/ui/compose/glance/generated-previews), [Android 17 changes](https://developer.android.com/about/versions/17/behavior-changes-17).
@@ -3075,6 +3117,11 @@ Two golden sets, both reviewed in PRs: the **Android set** (Roborazzi on Robolec
 | Sync screens (MS2, MS3) | Settings › Sync per `SyncStatus` (with a problem, with held changes), each link step (disclosure, code, first-link choice, merging), the approve sheet, the devices list, the held-changes dialog, the restore-while-linked prompt, the "Continue on this device" card above the mini player and in the side panel × light/dark × font 1.0/2.0 × LTR/RTL (Android); light/dark at 900 dp (desktop) |
 | Brand (M0b, M10) | the in-app mark on the startup gate and in About × light/dark/pure black; the brand scheme's surfaces, primary and containers in a fixed sample screen × light/dark × contrast 0.0/1.0 (both sets) |
 | **Desktop set** (M10, MD4) | the shared components of M10 AC8 (`EpisodeRow` states × light/dark × font 1.0/1.5 via a density override, `CoverTile`, monograms, the players with the three reference artworks); the five destinations, Podcast detail, Settings home, Settings › Desktop, Settings › Updates (desktop card with each install kind, no asset, `minOs` too high) and the Install & updates help (macOS, Windows and Linux sections open) at window widths 600, 900 and 1,400 dp × light/dark (MD4 AC2); an open context menu on a row, hover and focus states of a row, the scrollbar on a list (MD4) |
+
+**Implementation note (2026-10-19, M10):** Resolutions 7–8: Android pseudo-locales,
+desktop forced RTL English/long strings. W9 owns case registry/duplicate map/budgets.
+PR covers every landed state plus stress; final FULL closes AC1/8. Mandatory distinct
+overflow requires owner resolution.
 
 ### Performance journeys
 

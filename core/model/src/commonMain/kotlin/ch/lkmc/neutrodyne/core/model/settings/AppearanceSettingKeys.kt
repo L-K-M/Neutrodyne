@@ -6,9 +6,8 @@ import ch.lkmc.neutrodyne.core.model.SwipeAction
 import kotlinx.collections.immutable.persistentListOf
 
 /**
- * 08 "Keys owned here": the `appearance.*` keys M0a writes. Both live in the portable `settings`
- * file but none syncs (PO-37: appearance is device-local). `ThemeMode` and the later keys
- * (`artwork_tint`, `pure_black`, the M1+/M2+ rows) are added by their milestones.
+ * 08 "Keys owned here": portable appearance preferences follow backup policy but never sync
+ * (PO-37). The `ui.*` selection and panel preferences live only in `device_settings`.
  */
 public object AppearanceSettingKeys {
     /** Appearance › Theme. */
@@ -23,11 +22,23 @@ public object AppearanceSettingKeys {
     public val DYNAMIC_COLOR: SettingKey.Bool =
         SettingKey.Bool(name = "appearance.dynamic_color", default = true)
 
+    val ARTWORK_TINT = SettingKey.Bool("appearance.artwork_tint", true)
+    val PURE_BLACK = SettingKey.Bool("appearance.pure_black", false)
+    val LIBRARY_DENSITY =
+        SettingKey.Choice(
+            "appearance.library_density",
+            LibraryDensity.MEDIUM,
+            persistentListOf(LibraryDensity.SMALL, LibraryDensity.MEDIUM, LibraryDensity.LARGE),
+        )
+
+    /** Closing the panel persists across playback items; reopening explicitly clears it. */
+    val PLAYER_PANEL_HIDDEN = SettingKey.Bool("ui.player_panel_hidden", false, SettingsFile.DEVICE)
+
     /** Library overflow › Show titles: title text under each grid tile (08 Library). */
     public val LIBRARY_TITLES: SettingKey.Bool =
         SettingKey.Bool(name = "appearance.library_titles", default = false)
 
-    /** Library › Sort (08; M1 fixed 100 dp cells, density arrives with M10). */
+    /** Library › Sort (08). */
     public val LIBRARY_SORT: SettingKey.Choice<LibrarySort> =
         SettingKey.Choice(
             name = "appearance.library_sort",
@@ -89,6 +100,10 @@ public object AppearanceSettingKeys {
             YOUTUBE_ROW_ART,
             THEME,
             DYNAMIC_COLOR,
+            ARTWORK_TINT,
+            PURE_BLACK,
+            LIBRARY_DENSITY,
+            PLAYER_PANEL_HIDDEN,
             LIBRARY_TITLES,
             LIBRARY_SORT,
             FEEDS_ROW_SWIPE,

@@ -480,6 +480,14 @@ fun assumeTier(required: ScreenshotTier) { if (ScreenshotTier.current < required
 - **Test hosts:** `debug` is no longer the published build type, so `:app` declares `ui-test-manifest` and `ui-tooling` as `debugImplementation` again ([01 Build variants and ABIs](01-foundation.md#build-variants-and-abis)); `verifyDependencyPolicy` keeps both off `releaseRuntimeClasspath`, `verifyManifestPermissions` rejects their activities in the release manifest and `check-apk.sh --published` rejects them in a published APK ([Build-output checks](#build-output-checks)). KMP modules' Robolectric captures get ui-test-manifest's `ComponentActivity` from their host-test classpath (Unverified that it merges into the Android-KMP host-test manifest, M1a check; fallback: a JUnit rule in `:core:testing` that registers `ComponentActivity` with Robolectric's `ShadowPackageManager.addOrUpdateActivity` before the compose rule starts). `:app`'s instrumented tests use only `createAndroidComposeRule<MainActivity>()` and reach screens through the UI or deep links.
 - Pseudo-locales `en-XA` and `ar-XB` for Compose resources and Android `res/` come from [Pseudo-locales and RTL](#pseudo-locales-and-rtl); `check-apk.sh --published` and `check-desktop-image.sh` assert that no published artefact carries them.
 
+**Implementation note (2026-10-19, M10):** Adopted resolutions 7–8 follow 08: Android
+stress uses dark/2×/`ar-XB`; desktop stress uses dark/1.5×/forced RTL English at 900
+dp. No pseudo assets enter packaged desktop apps. W9 owns the registry and runtime
+tier adapters; W1 defines only case identity and types. FULL includes PR and every
+remaining applicable case. Explicitly map identical variants before applying the
+800/400-image caps; do not drop mandatory distinct cases. FULL evidence at the latest
+candidate, not PR green, closes AC1/8.
+
 ### Gradle Managed Devices
 
 Configured in `neutrodyne.android.testing` for the `com.android.*` modules (`:app`, `:playback:impl`, `:benchmark`) and, from the same build-logic table, by `neutrodyne.kmp.library` for a KMP module's device-test compilation (`withDeviceTest { }`: `:core:database` only) — the device-test DSL carries `managedDevices`, `instrumentationRunner`, `instrumentationRunnerArguments`, `animationsDisabled` and `execution` itself; the orchestrator resolves from `androidTestUtil`, which `ManagedDeviceTestTask` reads per project (wired 2026-10-08). Only those have device tests ([Placement rule](#test-pyramid)). Task names carry the test component: `<device><variant>AndroidTest` for the Android modules (`api26DebugAndroidTest`, `ciGroupDebugAndroidTest`), `<device>AndroidDeviceTest` for KMP (`api26AndroidDeviceTest`, `ciGroupAndroidDeviceTest`, `connectedAndroidDeviceTest`).
@@ -1857,7 +1865,7 @@ On Android the diagnostics screen links to `Settings.ACTION_IGNORE_BATTERY_OPTIM
 
 ## Localisation
 
-Serves N10. Delivered in M0a (Compose resources conventions, `checkTranslations`, per-app language plumbing; spike S11), M0b (the desktop language setting), M10 (pseudo-locale screenshots in both golden sets), M11 (Weblate project per PLAN M11, launch languages). Honours [D83](../PLAN.md#3-key-decisions), [PO-14](../PLAN.md#48-further-product-owner-decisions) default; risk T23.
+Serves N10. Delivered in M0a (Compose resources conventions, `checkTranslations`, per-app language plumbing; spike S11), M0b (the desktop language setting), M10 (Android pseudo-locales and desktop forced-RTL screenshots), M11 (Weblate project per PLAN M11, launch languages). Honours [D83](../PLAN.md#3-key-decisions), [PO-14](../PLAN.md#48-further-product-owner-decisions) default; risk T23.
 
 ### Workflow
 
@@ -1890,7 +1898,7 @@ Pseudo-locales `en-XA` (accented, about 40 % longer) and `ar-XB` (right-to-left)
 
 - **Android `res/`:** `isPseudoLocalesEnabled = true` on `:app`'s `debug` build type ([01 Debug build type](01-foundation.md#debug-build-type)); `release` generates none, and `check-apk.sh --published` asserts that the published APK carries neither ([Build-output checks](#build-output-checks)).
 - **Compose resources:** aapt2 never processes them, so a build-logic task `generatePseudoLocales` (09) writes `values-en-rXA/strings.xml` and `values-ar-rXB/strings.xml` from each module's base strings into a generated directory that only test compilations and `debug`/`DEV` runs see (Unverified that Compose resources accept a generated resource directory per compilation; S11 decides; fallback: the directory is added to `commonMain` only when `-PpseudoLocales` is set, which the screenshot test runs and `record-screenshots.yml` pass and no packaging task does). `check-apk.sh --published` and `check-desktop-image.sh` reject `rXA`/`rXB` directories in any published artefact.
-- Roborazzi captures `en-XA` and `ar-XB` in the Android and desktop golden sets per [Compose UI and screenshot tests](#compose-ui-and-screenshot-tests); `android:supportsRtl="true"` (01); per release a manual Arabic pass and a 200 % font pass on an Android device, and an RTL and 200 % UI-scale pass on one desktop (08's manual checks).
+- Roborazzi captures `en-XA` and `ar-XB` in the Android golden set; desktop forces RTL with English and long strings per [Compose UI and screenshot tests](#compose-ui-and-screenshot-tests); `android:supportsRtl="true"` (01); per release a manual Arabic pass and a 200 % font pass on an Android device, and an RTL and 200 % UI-scale pass on one desktop (08's manual checks).
 
 ---
 
@@ -1956,6 +1964,13 @@ Serves N5, R2.9, R7.4 (propagation); mitigates risks T6, T15, T24. Delivered in 
 | PB31 | Sync propagation with both apps in the foreground or playing: from the local write to the change shown on the other device | ≤ 10 s (R7.4) | MS3's manual check (a phone and a laptop on one network, a played mark, a group rename and an Up next reorder); E12 records it nightly as a trend | MS3 AC1; v1.0 |
 
 Budget changes are PO decisions (N5) and are recorded in this table. PB12 and PB13 are Unverified estimates for R8-minified release APKs; S7 and S19 measure them in M0a, and a miss goes to the PO (PLAN M0 AC1). The engine budgets PB18–PB20 start as estimates (≈ 15–22 MB of engine per 64-bit APK, ≈ 70 MB in `:ytx`, 1–3 s first resolve, [04 Host and packaging](04-youtube.md#host-and-packaging)); a miss in the M9a spike leads to 04's fallbacks or a PO amendment. The desktop budgets PB24–PB29 are Unverified estimates from the research build under software rendering (first frame 0.58–0.63 s with the AOT cache and 1.70–2.09 s without, idle RSS ≈ 199 MB with the cache, [11 AOT cache](11-desktop.md#aot-cache)); S13 sets them on real hardware (PLAN M0 AC14) and MD5 confirms them, or the PO amends them. PB30 starts from the server prototype (92 MB idle RSS on a laptop, 50,000 changes pushed in about 2 s, [D94](../PLAN.md#3-key-decisions)). PB1 must stay unchanged with the engine (Python never starts in the main process, [D73](../PLAN.md#3-key-decisions)) and with sync not configured (nothing of `:sync:impl` is constructed before the first frame, R7.1).
+
+**Implementation note (2026-10-19, M10):** Adopted resolution 9 preserves PLAN's
+strict jank < 1% wording and reports both PB3 P99 ≤ 0 and actual late-frame share
+where available. Emulator timing cannot close AC7. W10 extends M6b benchmark
+infrastructure with benchmark-only seed/readiness and journeys; use Partial/Disable
+with three warmups and also report None. Committed profiles and PodcastOpen remain
+M11b. Release artifacts must contain no seed receiver/classes.
 
 ### Macrobenchmark and profiles
 

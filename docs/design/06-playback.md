@@ -619,6 +619,12 @@ This rule is for system surfaces only. `NowPlaying.artwork` (in-app player, rend
 
 The session keeps Media3's default bitmap loader (`DataSourceBitmapLoader` behind `CacheBitmapLoader`), which reads `content://` URIs through `DefaultDataSource`; no Coil dependency in the service. `pinnedFile` touches the disk, so `MediaItemFactory` runs on `@Dispatcher(IO)`.
 
+**Implementation note (2026-10-19, M10):** Adopted resolution 6 assigns W4 the Android
+Auto group mosaic integration: use local versioned `g-{uuid}` URIs from the shared
+snapshot descriptor, including empty groups, rather than the first member cover. This
+does not change episode/system-surface fallback above or add a desktop raster
+consumer.
+
 ### DataSource stack
 
 ```mermaid
