@@ -31,9 +31,19 @@ internal data class TransferPlan(
     val ifRange: String?,
     val itag: Int? = null,
     val mimeType: String? = null,
+    val integrity: String? = null,
+    /** In-runner retries may use a memory-only CDN URL; fresh prepare always uses the source. */
+    val originalUrl: String = url,
 )
 
 internal sealed interface Prepared {
+    /** Rename survived a crash; engine commits COMPLETED without another request or move. */
+    data class Adopted(
+        val complete: TransferResult.Complete,
+        val relativePath: String,
+        val finalUri: String,
+    ) : Prepared
+
     data class Go(
         val plan: TransferPlan,
         val rootId: String,
@@ -93,6 +103,8 @@ internal sealed interface TransferResult {
         val error: DownloadError,
         val httpStatus: Int?,
         val retryAfterMs: Long?,
+        /** Engine may copy this into the plan for an in-runner retry, never into a row. */
+        val retryUrl: String? = null,
     ) : TransferResult
 
     data class Permanent(
@@ -104,6 +116,9 @@ internal sealed interface TransferResult {
         val reason: WaitReason,
         val error: DownloadError?,
         val untilMs: Long?,
+        /** Long HTTP Retry-After consumes an attempt; storage/network gates do not. */
+        val countsAsAttempt: Boolean = false,
+        val httpStatus: Int? = null,
     ) : TransferResult
 }
 

@@ -903,6 +903,19 @@ sequenceDiagram
 
 ## Transfer core
 
+**Implementation note (2026-10-19, M6a).** W3 keeps the transfer and file classes
+unbound. `Prepared.Adopted` reports verified crash recovery to the engine, which
+still owns the guarded completion commit. `TransferPlan.integrity` carries the
+selected alternate's SRI; `originalUrl` and `Transient.retryUrl` let the engine
+retry a CDN rendition in memory and fall back to the original source. Fresh
+prepare always selects the current source again. Long HTTP pacing waits carry
+`countsAsAttempt` and `httpStatus`; storage and network gates retain the defaults.
+`StorageRoots.maximumFileBytes` distinguishes a known FAT file limit from free
+space. Shared JVM hash/date mechanics live in `jvmMain`, consumed by both targets;
+commonMain retains only their platform seams and reuses core:common's NFC helper.
+Part handles open on first IO so prepare can reassign an unavailable old root;
+closing a handle always releases it even during coroutine cancellation.
+
 Serves R4.2, N1, N3, N9. Delivered in M6 (both platforms). Honours [D46](../PLAN.md#3-key-decisions), [D50](../PLAN.md#3-key-decisions), [D10](../PLAN.md#3-key-decisions), [D81](../PLAN.md#3-key-decisions). Mitigates risk [T7](../PLAN.md#8-risks-and-mitigations) (dynamic ad insertion).
 
 The transfer core is `commonMain` code and the same on both platforms: HTTP through the Ktor `HttpClient` that 01's `NeutrodyneHttpClients.client(DOWNLOAD)` returns (the OkHttp engine with the island's DOWNLOAD client as `preconfigured`, so the shared pool, DNS chain and interceptors apply, [01 One client family](01-foundation.md#one-client-family)), files through Okio. Only free-space probing, the classification of storage errors, SRI digests and `file:` URIs are platform seams ([Storage layout](#storage-layout)).

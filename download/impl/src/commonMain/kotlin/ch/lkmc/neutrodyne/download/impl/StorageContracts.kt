@@ -18,6 +18,9 @@ internal interface StorageRoots {
         requiredBytes: Long,
     ): StorageFailure?
 
+    /** Known filesystem file-size limit, separate from free bytes required for this attempt. */
+    suspend fun maximumFileBytes(rootId: String): Long? = null
+
     suspend fun classify(
         error: Throwable,
         rootId: String,
@@ -33,7 +36,8 @@ internal enum class StorageFailure { FULL, TOO_LARGE, UNAVAILABLE, IO }
 
 /** Okio-backed handles; paths are root-relative and validated, never arbitrary external paths.
  * Implementations dispatch blocking IO. Engine owns close, sync and final rename; transfer owns
- * append/truncate during its child coroutine. length is the actual resume offset. */
+ * append/truncate during its child coroutine. length is the actual resume offset. A descriptor
+ * opens on first IO, so prepare can reassign an unavailable old root; close never opens it. */
 internal interface PartFile {
     val rootId: String
     val path: String
