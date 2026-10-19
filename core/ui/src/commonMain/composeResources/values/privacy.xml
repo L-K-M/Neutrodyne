@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="privacy_feeds_title">Feeds and publishers</string>
+    <string name="privacy_feeds_body">Subscribed feeds, preview feeds and redirect targets receive the requested URL path and query, conditional cache headers, and Basic credentials only for the matching origin.</string>
+    <string name="privacy_add_input_title">Pages and feed candidates</string>
+    <string name="privacy_add_input_body">The page you enter or share, up to five well-known feed paths on that site, and publisher candidates receive their requested URL path and query. Candidates can use other hosts. Neutrodyne verifies up to five candidates; it does not send them to a directory.</string>
+    <string name="privacy_media_title">Audio hosts</string>
+    <string name="privacy_media_body">Enclosure hosts and publisher measurement redirects receive the media URL, range requests, and matching-origin credentials when needed. They can measure playback or downloads by IP and User-Agent.</string>
+    <string name="privacy_artwork_title">Artwork hosts</string>
+    <string name="privacy_artwork_body">Feed and directory artwork hosts, including Apple image CDNs, fyyd image hosts and Podcast Index artwork URLs, receive the requested image path when a cover is displayed. Directory switches do not block images already returned.</string>
+    <string name="privacy_chapters_title">Chapter hosts</string>
+    <string name="privacy_chapters_body">Hosts referenced by episode chapters receive the chapter-file URL when chapters are loaded.</string>
+    <string name="privacy_notes_images_title">Show-notes image hosts</string>
+    <string name="privacy_notes_images_body">Image hosts receive the image URL when images are allowed or you choose to load them. Change this in Feeds settings.</string>
+    <string name="privacy_apple_title">Apple</string>
+    <string name="privacy_apple_body">itunes.apple.com receives search text, country and search parameters; explicit Apple, pod.link or Overcast lookups send Apple podcast IDs. rss.marketingtools.apple.com receives the country for overall charts. Genre charts send country and genre ID to itunes.apple.com; chart resolution sends podcast IDs there. Apple receives no subscriptions, feed URLs or Podcast Index credentials.</string>
+    <string name="privacy_fyyd_title">fyyd</string>
+    <string name="privacy_fyyd_body">api.fyyd.de receives search text and result-count parameters. It receives no country, subscriptions, feed URLs or API credentials. A fyyd page entered in Add is fetched as a web page.</string>
+    <string name="privacy_podcastindex_title">Podcast Index</string>
+    <string name="privacy_podcastindex_body">api.podcastindex.org receives search text and result-count parameters, or an explicit Podcast Index feed ID. Every request includes X-Auth-Key (API key), X-Auth-Date (timestamp), and Authorization (SHA-1 of key, secret and timestamp); the secret itself is not sent. Verifying a pair sends the fixed query “podcast”. No country, subscriptions or feed URLs are sent.</string>
+    <string name="privacy_youtube_subscriptions_title">YouTube subscriptions</string>
+    <string name="privacy_youtube_subscriptions_body">When you add or refresh a YouTube channel, www.youtube.com receives channel IDs and page/feed requests. YouTube thumbnail hosts (i.ytimg.com, yt3.googleusercontent.com, yt3.ggpht.com) receive image paths.</string>
+    <string name="privacy_youtube_streams_title">YouTube playback and channel search</string>
+    <string name="privacy_youtube_streams_body">With the engine, www.youtube.com receives video/channel IDs, explicit channel searches, locale, client headers and an in-memory consent cookie. googlevideo.com hosts receive media requests. Podcast search text is not sent to YouTube.</string>
+    <string name="privacy_youtube_engine_title">YouTube engine updates</string>
+    <string name="privacy_youtube_engine_body">When enabled, the project GitHub Pages host receives approved-manifest requests; github.com and release-assets.githubusercontent.com receive engine download paths.</string>
+    <string name="privacy_app_updates_title">App updates</string>
+    <string name="privacy_app_updates_body">When enabled, github.com and release-assets.githubusercontent.com receive update-manifest requests with the app User-Agent. Tapping a release or download opens your browser.</string>
+    <string name="privacy_sync_server_title">Your sync server</string>
+    <string name="privacy_sync_server_body">Only after linking: your server receives its device token, device name, platform/version and synced library state, including private feed URLs. Feed passwords are shared only when enabled. It receives no audio or feed contents. The server operator can read stored data.</string>
+    <string name="privacy_links_title">Links you open</string>
+    <string name="privacy_links_body">Your browser or chosen app receives a link you tap, including release/download links. Its own privacy settings apply.</string>
+    <string name="privacy_issue_tracker_title">Issue tracker</string>
+    <string name="privacy_issue_tracker_body">Reporting a problem opens github.com in your browser. Review any report before sending it.</string>
+    <string name="privacy_server_updates_title">Sync server updates</string>
+    <string name="privacy_server_updates_body">The optional sync server, rather than this app, checks github.com and release-assets.githubusercontent.com for updates when its operator enables the check.</string>
+</resources>

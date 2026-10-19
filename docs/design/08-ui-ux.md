@@ -2812,6 +2812,13 @@ Serves R2.7 (settings screens), R3.9 (display), R5.5, R6.2–R6.3 and R6.6 (Sett
 
 ### Settings screen structure
 
+**Implementation note (2026-10-19, M7):** W6 installs the Discover/Privacy
+destinations, provider and country writes, transient masked BYOK editor and
+rendered stable-ID inventory. `PlatformActions.appleLinks` is nullable; W7
+supplies Android 31+ Open by default implementation, while other platforms hide
+the action. The key identifier is local unencrypted credential metadata; the
+API secret uses the existing platform protection described in 03.
+
 `SettingsHomeKey` lists the pages; each page is `SettingsKey(page)`. Rows are `NdSwitchRow`/choice rows with the current value as subtitle; owning documents define semantics and defaults.
 
 | `SettingsPage` | Sections and rows | Keys owned by |

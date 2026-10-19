@@ -1653,7 +1653,26 @@ open; builds remain keyless by default, with no release-secret injection.
 
 ### Privacy
 
-Only the query text and the country go to directories; subscriptions and feed URLs never do (the user's own sync server, when linked, is not a directory and receives no search query). Discover shows "Searches are sent to Apple and fyyd" (plus "and Podcast Index" when enabled, also when the key is a release-build key) under the search field (M7 acceptance 6). Typed podcast searches never reach YouTube: 04's channel search sends a query to YouTube only on its explicit action and only with the engine (N3); `PRIVACY.md` lists the hosts ([09 Privacy](09-quality-and-release.md#privacy)). gpodder.net is not used (toplist a decade stale, tested).
+**Implementation note (2026-10-19, M7):** W6 exposes the persisted provider
+switches and country, verified user-key entry/removal through `SearchRepository`
+and SecretStore, and the shared privacy inventory. Key drafts are transient,
+never saved or logged. The existing SecretStore contract stores the API key
+identifier of a user pair in `credential.username` (unencrypted metadata) and protects the API
+secret with Android Keystore or the Windows DPAPI secrets file. macOS/Linux use
+the existing 0600 file exception (PO-44), not encryption. W6 disclosures explicitly
+qualify the earlier blanket encryption wording; no storage/schema change is
+needed to use the frozen key-as-username contract.
+
+Apple receives query text and country for searches, country/genre for charts,
+and podcast IDs for explicit link and chart lookups. fyyd receives query text
+and count parameters, without country. Podcast Index receives query text or an
+explicit feed ID plus API-key, timestamp and SHA-1 authentication headers;
+verification uses the fixed query “podcast”. The API secret itself is not sent.
+All receive IP/User-Agent. Subscriptions and feed URLs never go to directories
+(the user's own sync server, when linked, is not a directory and receives no
+search query). Publisher pages, bounded probes/candidates and directory
+artwork requests are disclosed separately in Settings › Privacy and
+[PRIVACY.md](../../PRIVACY.md). Discover shows "Searches are sent to Apple and fyyd" (plus "and Podcast Index" when enabled, also when the key is a release-build key) under the search field (M7 acceptance 6). Typed podcast searches never reach YouTube: 04's channel search sends a query to YouTube only on its explicit action and only with the engine (N3); `PRIVACY.md` lists the hosts ([09 Privacy](09-quality-and-release.md#privacy)). gpodder.net is not used (toplist a decade stale, tested).
 
 ---
 

@@ -26,6 +26,10 @@ import ch.lkmc.neutrodyne.core.ui.feedsIntervalText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.settings
 import ch.lkmc.neutrodyne.core.ui.resources.settings_feeds
+import ch.lkmc.neutrodyne.feature.settings.resources.discover_summary
+import ch.lkmc.neutrodyne.feature.settings.resources.discover_title
+import ch.lkmc.neutrodyne.feature.settings.resources.privacy_summary
+import ch.lkmc.neutrodyne.feature.settings.resources.privacy_title
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_about
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_about_summary
 import ch.lkmc.neutrodyne.feature.settings.resources.settings_appearance
@@ -97,6 +101,18 @@ internal fun SettingsHomeRoute(settings: SettingsRepository) {
                 title = stringResource(SettingsRes.string.settings_backup),
                 summary = stringResource(SettingsRes.string.settings_backup_summary),
                 onClick = { navigator.push(BackupKey) },
+            )
+            SettingsRow(
+                NdIcons.Explore,
+                stringResource(SettingsRes.string.discover_title),
+                stringResource(SettingsRes.string.discover_summary),
+                { navigator.push(SettingsKey(SettingsPage.DISCOVER)) },
+            )
+            SettingsRow(
+                NdIcons.Info,
+                stringResource(SettingsRes.string.privacy_title),
+                stringResource(SettingsRes.string.privacy_summary),
+                { navigator.push(SettingsKey(SettingsPage.PRIVACY)) },
             )
             SettingsRow(
                 icon = NdIcons.Info,
