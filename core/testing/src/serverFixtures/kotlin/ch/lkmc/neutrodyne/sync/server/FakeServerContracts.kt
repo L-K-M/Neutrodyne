@@ -12,6 +12,8 @@ import java.nio.file.Path
  */
 internal class FakeSyncStore : SyncStore {
     val accounts = mutableMapOf<Long, FakeSyncTransaction>()
+    var writes = 0
+        private set
     var snapshot: AccountSnapshot? = null
     var backup: suspend (Path) -> Path = { error("configure backup fixture") }
 
@@ -23,7 +25,10 @@ internal class FakeSyncStore : SyncStore {
     override suspend fun <T> write(
         accountId: Long,
         block: SyncWrite.() -> T,
-    ): T = accounts.getValue(accountId).block()
+    ): T {
+        writes++
+        return accounts.getValue(accountId).block()
+    }
 
     override suspend fun snapshot(accountId: Long): AccountSnapshot = checkNotNull(snapshot)
 
