@@ -82,7 +82,7 @@ jobs:
             ./gradlew --max-workers=2 api36DebugAndroidTest \
               -Pneutrodyne.testScope=nightly \
               -Pandroid.testInstrumentationRunnerArguments.ytxReplay=true \
-              -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest,ch.lkmc.neutrodyne.SmokeTest
+              -Pandroid.testInstrumentationRunnerArguments.class=ch.lkmc.neutrodyne.YouTubeReleaseSmokeTest,ch.lkmc.neutrodyne.SmokeTest,ch.lkmc.neutrodyne.UpdateNavigationDeviceTest
           else
             ./gradlew --max-workers=2 nightlyGroupDebugAndroidTest nightlyGroupAndroidDeviceTest \
               -Pneutrodyne.testScope=nightly \
@@ -507,6 +507,9 @@ jobs:
       # 09's deep pass over the capped-heap suites the PR gate samples: 1,000
       # seeded iterations per fixture inside the 128 MB `mutationTest` heap.
       # The parses run single-fork, so this is tens of minutes of wall time.
+      - name: Update manifest fixture tests
+        run: python3 scripts/ci/tests/update-json.test.py
+
       - name: Mutation robustness, 1,000 iterations per fixture
         # Leaves the job's last 15 minutes for the failure report and upload.
         timeout-minutes: 75

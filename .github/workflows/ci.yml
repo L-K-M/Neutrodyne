@@ -102,6 +102,7 @@ jobs:
           python3 scripts/ci/tests/report-nightly.test.py
           python3 scripts/ci/tests/assert-playback-tests.test.py
           python3 scripts/ci/tests/playback-reboot.test.py
+          python3 scripts/ci/tests/update-json.test.py
 
   unit:
     runs-on: ubuntu-24.04
