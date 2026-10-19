@@ -15,6 +15,13 @@ import ch.lkmc.neutrodyne.core.model.ImportItemStatus
  * the other platform ports.
  */
 interface ImportReportPoster {
+    /** A detached acquisition persisted its preview (05 Receiving files, Android ID 3002). */
+    suspend fun postReady(
+        sessionId: Long,
+        itemCount: Int,
+        sourceName: String?,
+    )
+
     /**
      * Called once, after the session's `DONE` commit. [counts] maps every `ImportItemStatus`
      * present on the session's items to its tally — the same shape `ImportSessionView.counts`

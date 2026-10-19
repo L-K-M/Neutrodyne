@@ -23,6 +23,7 @@ import ch.lkmc.neutrodyne.core.model.ImportItemStatus
 import ch.lkmc.neutrodyne.core.model.ImportSource
 import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
+import ch.lkmc.neutrodyne.core.testing.FakeImportReportPoster
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
@@ -397,6 +398,7 @@ class ImportPipelineTest {
                     opmlReader = XmlPullOpmlReader.discovered(),
                     archives = ZipGuard(),
                     clock = clock,
+                    reports = FakeImportReportPoster(),
                     appScope = stageScope,
                     io = Dispatchers.Default,
                 )
@@ -607,6 +609,7 @@ class ImportPipelineTest {
             opmlReader = XmlPullOpmlReader.discovered(),
             archives = ZipGuard(),
             clock = clock,
+            reports = FakeImportReportPoster(),
             appScope = scope,
             io = io,
         )

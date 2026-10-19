@@ -34,6 +34,7 @@ import ch.lkmc.neutrodyne.core.model.ImportWarning
 import ch.lkmc.neutrodyne.core.model.SourceGroup
 import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
+import ch.lkmc.neutrodyne.core.testing.FakeImportReportPoster
 import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
@@ -114,6 +115,7 @@ class ImportRepositoryTest {
                 opmlReader = XmlPullOpmlReader.discovered(),
                 archives = ZipGuard(),
                 clock = clock,
+                reports = FakeImportReportPoster(),
                 appScope = appScope,
                 io = Dispatchers.Default,
             )

@@ -512,6 +512,104 @@
     <string name="import_backup_title">Import and backup</string>
     <string name="import_backup_pending">Import and backup details are not available in this build yet.</string>
 
+    <!-- M3 D1 import preview (05 Preview contract, 08 Import). -->
+    <string name="import_title">Import</string>
+    <string name="import_unavailable_title">This import is no longer available</string>
+    <string name="import_unavailable_body">The session was cleared, cancelled or expired.</string>
+    <string name="import_restore_pending_title">Backup restore</string>
+    <string name="import_restore_pending_body">Restoring a backup isn&apos;t available in this build yet.</string>
+    <plurals name="import_podcast_count">
+        <item quantity="one">%1$d podcast</item>
+        <item quantity="other">%1$d podcasts</item>
+    </plurals>
+    <plurals name="import_youtube_count">
+        <item quantity="one">%1$d YouTube channel</item>
+        <item quantity="other">%1$d YouTube channels</item>
+    </plurals>
+    <string name="import_counts_join">%1$s and %2$s</string>
+    <string name="import_header_in">%1$s in %2$s</string>
+    <string name="import_source_unknown">this file</string>
+    <string name="import_warn_salvaged">This file is damaged; folders could not be read.</string>
+    <plurals name="import_warn_ignored">
+        <item quantity="one">%1$d entry was ignored: episode lists</item>
+        <item quantity="other">%1$d entries were ignored: episode lists</item>
+    </plurals>
+    <plurals name="import_warn_truncated">
+        <item quantity="one">%1$d group name was shortened to 40 characters</item>
+        <item quantity="other">%1$d group names were shortened to 40 characters</item>
+    </plurals>
+    <plurals name="import_warn_linked">
+        <item quantity="one">%1$d linked subscription list was not opened</item>
+        <item quantity="other">%1$d linked subscription lists were not opened</item>
+    </plurals>
+    <string name="import_groups_section">Groups</string>
+    <string name="import_groups_master">Import folders as groups</string>
+    <plurals name="import_group_members">
+        <item quantity="one">%1$d podcast</item>
+        <item quantity="other">%1$d podcasts</item>
+    </plurals>
+    <string name="import_group_existing">Already in your library</string>
+    <string name="import_group_rename">Rename</string>
+    <string name="import_group_rename_title">Rename group</string>
+    <string name="import_group_excluded_wrapper">%1$s looks like a container, not a group</string>
+    <string name="import_group_excluded_section">%1$s is a gPodder section, not a group</string>
+    <string name="import_target_label">Put everything into group…</string>
+    <string name="import_target_none">No group</string>
+    <string name="import_target_new">New group…</string>
+    <string name="import_target_name">Group name</string>
+    <string name="import_options_section">Options</string>
+    <string name="import_opt_treat_played">Treat existing episodes as played (except the newest per podcast)</string>
+    <string name="import_opt_notify">Notify me about new episodes for these podcasts</string>
+    <string name="import_filter_new">Only new</string>
+    <string name="import_filter_not_imported">Not imported</string>
+    <string name="import_filter_attention">Needs attention</string>
+    <string name="import_search">Search title or host</string>
+    <string name="import_select_none">Select none</string>
+    <string name="import_subscribe">Subscribe</string>
+    <plurals name="import_subscribe_count">
+        <item quantity="one">Subscribe to %1$d podcast</item>
+        <item quantity="other">Subscribe to %1$d podcasts</item>
+    </plurals>
+    <string name="import_progress">Fetched %1$d of %2$d</string>
+    <string name="import_stop">Stop</string>
+    <string name="import_stop_title">Stop importing?</string>
+    <string name="import_stop_body">Podcasts added so far stay in your library and load later.</string>
+    <string name="import_stop_keep">Keep importing</string>
+    <string name="import_cancelled_title">Import stopped</string>
+    <string name="import_report_done">Done</string>
+    <string name="import_report_attention">Need attention</string>
+    <string name="import_report_no_media">No audio or video found</string>
+    <string name="import_report_merged">Merged with existing</string>
+    <string name="import_report_already">Already subscribed (groups updated)</string>
+    <string name="import_report_not_imported">Not imported</string>
+    <string name="import_deferred_hint">YouTube isn&apos;t responding; this channel loads with a later refresh</string>
+    <string name="import_status_done">Done</string>
+    <string name="import_status_merged">Merged</string>
+    <string name="import_status_not_a_feed">Not a podcast feed</string>
+    <string name="import_status_no_media">No audio or video</string>
+    <string name="import_status_failed">Couldn&apos;t fetch</string>
+    <string name="import_status_not_imported">Not imported</string>
+    <string name="import_youtube_later">YouTube channel — supported in a later build</string>
+    <string name="import_chip_youtube">YouTube</string>
+    <string name="import_chip_duplicate">Duplicate</string>
+    <string name="import_chip_invalid">Invalid</string>
+    <string name="import_select_item">Select %1$s</string>
+    <string name="import_private_feed">Private feed</string>
+    <string name="import_group_include">Include group %1$s</string>
+    <string name="import_group_excluded_default">Excluded by default; you can include this group</string>
+    <string name="import_status_already">Already subscribed</string>
+    <string name="import_status_queued">Queued</string>
+    <string name="import_status_auth">Password required. Enter the feed password to continue.</string>
+    <string name="import_status_gone">Feed no longer available. Check its address or remove it.</string>
+    <string name="import_status_later">Will load later</string>
+    <string name="import_failure_address_hint">Check the feed address or remove it.</string>
+    <string name="import_failure_retry_hint">Check your connection and retry the feed.</string>
+    <string name="import_no_media_hint">Remove this feed if you only want playable podcasts.</string>
+    <string name="import_report_merged_count">%1$d merged with existing subscriptions</string>
+    <string name="import_err_confirm">Couldn&apos;t finish the import</string>
+    <string name="import_err_gone">This import is no longer available</string>
+    <string name="import_err_network">No connection — check the network and try again</string>
+
     <!-- M3 OPML export (05 OPML export, 08 Export dialog). -->
     <string name="export_title">Export subscriptions</string>
     <string name="export_group_title_share">Share '%1$s' as OPML</string>
@@ -541,4 +639,11 @@
     <string name="export_subscriptions">Export subscriptions…</string>
     <string name="group_export_opml">Export group as OPML…</string>
     <string name="group_share_opml">Share as OPML</string>
+    <string name="notification_import_ready_title">Ready to review</string>
+    <plurals name="notification_import_ready">
+        <item quantity="one">%1$d podcast from %2$s</item>
+        <item quantity="other">%1$d podcasts from %2$s</item>
+    </plurals>
+    <string name="notification_import_ready_source">file</string>
+    <string name="notification_import_ready_file">From %1$s</string>
 </resources>

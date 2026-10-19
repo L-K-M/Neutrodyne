@@ -319,6 +319,7 @@ class FirstLaunchRestoreInitializerTest {
                     opmlReader = XmlPullOpmlReader.discovered(),
                     archives = ZipGuard(),
                     clock = clock,
+                    reports = FakeImportReportPoster(),
                     appScope = appScope,
                     io = Dispatchers.IO,
                 ),

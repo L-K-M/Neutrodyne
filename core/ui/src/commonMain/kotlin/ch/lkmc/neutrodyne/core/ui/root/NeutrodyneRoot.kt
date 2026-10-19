@@ -59,6 +59,7 @@ import ch.lkmc.neutrodyne.core.navigation.FeedsKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.LocalPaneLayout
+import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import ch.lkmc.neutrodyne.core.navigation.VerificationNoticeKey
@@ -73,6 +74,10 @@ import ch.lkmc.neutrodyne.core.ui.resources.nav_downloads
 import ch.lkmc.neutrodyne.core.ui.resources.nav_feeds
 import ch.lkmc.neutrodyne.core.ui.resources.nav_library
 import ch.lkmc.neutrodyne.core.ui.resources.nav_up_next
+import ch.lkmc.neutrodyne.core.ui.resources.write_failed
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
+import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -104,6 +109,7 @@ public fun NeutrodyneRoot(
     systemUi: SystemUiState = SystemUiState.DEFAULT,
     platform: BuildInfo.Platform = BuildInfo.Platform.ANDROID,
     initialTab: TopLevelKey = FeedsKey,
+    routes: Flow<Route> = emptyFlow(),
 ) {
     val navigation = rememberNavigationState(initialTab)
     val snackbarHost = remember { SnackbarHostState() }
@@ -130,6 +136,32 @@ public fun NeutrodyneRoot(
                 }
 
                 else -> {
+                    // Keep shell intents queued until screens may resolve database-backed services.
+                    LaunchedEffect(routes) {
+                        routes.collect { route ->
+                            when (route) {
+                                is Route.Navigate -> {
+                                    navigation.open(route.tab, route.stack)
+                                }
+
+                                is Route.Push -> {
+                                    navigation.push(route.key)
+                                }
+
+                                is Route.SelectFeed -> {
+                                    if (actions.selectFeedSource(route.groupUuid)) {
+                                        navigation.open(FeedsKey, emptyList())
+                                    } else {
+                                        snackbarHost.showSnackbar(getString(Res.string.write_failed))
+                                    }
+                                }
+
+                                else -> {
+                                    Unit
+                                }
+                            }
+                        }
+                    }
                     ReadyRoot(state, actions, slots, installers, navigation, snackbarHost, platform, modifier)
                 }
             }

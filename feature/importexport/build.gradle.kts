@@ -15,5 +15,9 @@ kotlin {
             implementation(project(":download:api"))
             implementation(project(":youtube:api"))
         }
+        commonTest.dependencies {
+            // asSnapshot drives the paged import rows' PagingData assertions.
+            implementation(libs.androidx.paging.testing)
+        }
     }
 }
