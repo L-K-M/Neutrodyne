@@ -8,7 +8,10 @@ import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.database.ChapterEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.ChapterRepository
+import ch.lkmc.neutrodyne.core.domain.EmbeddedChapterReader
+import ch.lkmc.neutrodyne.core.domain.EmbeddedChapterResult
 import ch.lkmc.neutrodyne.core.model.ChapterSource
+import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
@@ -41,6 +44,7 @@ internal class ChapterRepositoryImpl(
     private val parser: Podcasting20ChaptersParser,
     private val network: NetworkMonitor,
     private val clock: Clock,
+    private val embedded: EmbeddedChapterReader? = null,
 ) : ChapterRepository {
     private data class Load(
         val url: String,
@@ -75,6 +79,30 @@ internal class ChapterRepositoryImpl(
             if (db.episodeDao().byId(episodeId) == null) return@withWriteTransaction
             if (db.chapterDao().ofSource(episodeId, source) != rows) db.chapterDao().replace(episodeId, source, rows)
         }
+    }
+
+    override suspend fun ensureLocalLoaded(
+        episodeId: Long,
+        fileUri: String,
+    ): EmbeddedChapterResult {
+        val original = db.downloadDao().byEpisode(episodeId)
+        if (original?.finalUri != fileUri || original.state != DownloadState.COMPLETED) {
+            return EmbeddedChapterResult.Unavailable
+        }
+        val result = embedded?.read(fileUri) ?: return EmbeddedChapterResult.Unavailable
+        if (result is EmbeddedChapterResult.Read) {
+            require(result.chapters.all { it.source == ChapterSource.ID3 || it.source == ChapterSource.MP4 })
+            db.withWriteTransaction {
+                // Revalidate ownership: deletion or re-download can overtake the inspector.
+                if (db.downloadDao().byEpisode(episodeId) != original) {
+                    return@withWriteTransaction
+                }
+                for (source in listOf(ChapterSource.ID3, ChapterSource.MP4)) {
+                    replace(episodeId, source, result.chapters.filter { it.source == source })
+                }
+            }
+        }
+        return result
     }
 
     override suspend fun ensureLoaded(episodeId: Long): Unit =

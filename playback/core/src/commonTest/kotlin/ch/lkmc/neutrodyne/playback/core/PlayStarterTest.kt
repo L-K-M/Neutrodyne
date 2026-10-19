@@ -133,6 +133,23 @@ class PlayStarterTest {
         contexts.startResult = 4
     }
 
+    @Test fun downloadsStartUsesContextAndLocalFilesOffline() =
+        runTest {
+            network.setStatus(FakeNetworkMonitor.OFFLINE)
+            sessions.queue = sessions.queue.copy(upNext = emptyList())
+            local.files[4L] = "file:///episode.mp3"
+            val result = committed(StartRequest.Downloads())
+            assertEquals(4L, result.queue.current?.episodeId)
+            assertEquals(
+                ContextType.DOWNLOADS,
+                sessions.calls
+                    .single()
+                    .start
+                    ?.context
+                    ?.type,
+            )
+        }
+
     @Test fun videoWithSelectedAudioCanStartWithoutOriginalEnclosure() =
         runTest {
             lookup.items.value +=

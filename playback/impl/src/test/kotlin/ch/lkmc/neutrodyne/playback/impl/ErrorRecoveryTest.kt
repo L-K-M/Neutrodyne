@@ -194,6 +194,59 @@ class ErrorRecoveryTest {
             }
         }
 
+    @Test fun missingLocalFileRecoversOnceAtSamePositionAndOfflinePauses() =
+        runTest {
+            for ((online, allowed) in listOf(true to true, false to true, true to false)) {
+                val f = AdapterFixture(this)
+                try {
+                    val ids = f.seed(1)
+                    val id = ids.single()
+                    f.local.files[id] = "file:///missing.mp3"
+                    f.attach()
+                    f.start(ids, 42_000)
+                    awaitAdapter { f.player.ids() == ids }
+                    f.resolver.resolveDataSpec(DataSpec.Builder().setUri(episodeUri(id)).build())
+                    val reports = mutableListOf<Long>()
+                    val status = if (online) FakeNetworkMonitor.ONLINE else FakeNetworkMonitor.OFFLINE
+                    val network = FakeNetworkMonitor(status)
+                    val recovery =
+                        ErrorRecovery(
+                            RecoveryBudget(f.clock),
+                            network,
+                            f.clock,
+                            f.resolver,
+                            f.index,
+                            f.projector,
+                            f.scope.backgroundScope,
+                            { true },
+                            f.events::add,
+                            reportMissing = {
+                                reports += it
+                                f.local.files.remove(it)
+                            },
+                            allowStream = { allowed },
+                        )
+                    recovery.attach(f.player)
+                    f.player.calls.clear()
+                    recovery.onPlayerError(error(PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND))
+                    runCurrent()
+                    assertEquals(listOf(id), reports)
+                    assertEquals(PlaybackIssue.LOCAL_FILE_MISSING, recovery.issue.value)
+                    assertEquals(if (online && allowed) 1 else 0, f.player.calls.count { it == "prepare" })
+                    assertEquals(42_000L, f.player.currentPosition)
+                    if (online && allowed) {
+                        val reopened = f.resolver.resolveDataSpec(DataSpec.Builder().setUri(episodeUri(id)).build())
+                        assertEquals("https", reopened.uri.scheme)
+                    } else {
+                        assertFalse(f.player.playWhenReady)
+                    }
+                    recovery.detach()
+                } finally {
+                    f.close()
+                }
+            }
+        }
+
     private fun recovery(
         f: AdapterFixture,
         network: FakeNetworkMonitor = FakeNetworkMonitor(),

@@ -33,7 +33,7 @@
     <string name="player_not_now">Nicht jetzt</string>
     <string name="player_settings">Wiedergabeeinstellungen</string>
     <string name="player_network_lost">Verbindung unterbrochen. Die Wiedergabe wird fortgesetzt, sobald du wieder online bist.</string>
-    <string name="player_file_missing">Die heruntergeladene Datei fehlt. Stattdessen wird gestreamt.</string>
+    <string name="player_file_missing">Die heruntergeladene Datei fehlt. Zum Streamen ist eine Internetverbindung erforderlich.</string>
     <string name="player_error">Wiedergabe fehlgeschlagen. Versuche es erneut.</string>
     <string name="player_rate_limited">YouTube begrenzt die Anfragen. Versuche es später erneut.</string>
     <string name="player_youtube_unavailable">YouTube-Wiedergabe ist vorübergehend nicht verfügbar.</string>

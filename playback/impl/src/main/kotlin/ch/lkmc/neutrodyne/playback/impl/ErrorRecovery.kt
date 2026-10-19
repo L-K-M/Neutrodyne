@@ -9,8 +9,10 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.playback.api.PlaybackEvent
 import ch.lkmc.neutrodyne.playback.api.PlaybackIssue
+import ch.lkmc.neutrodyne.playback.api.StreamKind
 import ch.lkmc.neutrodyne.playback.api.UnplayableReason
 import ch.lkmc.neutrodyne.playback.core.RecoveryBudget
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -30,6 +32,8 @@ internal class ErrorRecovery(
     private val playerScope: CoroutineScope,
     private val isForeground: () -> Boolean,
     private val emitEvent: (PlaybackEvent) -> Unit,
+    private val reportMissing: suspend (Long) -> Unit = {},
+    private val allowStream: suspend (Long) -> Boolean = { true },
 ) : Player.Listener {
     private data class Reconnect(
         val episodeId: Long,
@@ -43,6 +47,8 @@ internal class ErrorRecovery(
     private var reconnect: Reconnect? = null
     private val contentRetried = mutableSetOf<Long>()
     private val audioRetried = mutableSetOf<Long>()
+    private val localRetried = mutableSetOf<Long>()
+    private var missingRecovery: Job? = null
     private val mutableIssue = MutableStateFlow<PlaybackIssue?>(null)
     val issue = mutableIssue.asStateFlow()
 
@@ -68,6 +74,37 @@ internal class ErrorRecovery(
         val http = causes.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()?.responseCode
         val noMedia = causes.any { it is EpisodeGoneException || it is NoMediaException }
         when {
+            error.errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND &&
+                resolver.streamKind(id) == StreamKind.LOCAL -> {
+                mutableIssue.value = PlaybackIssue.LOCAL_FILE_MISSING
+                if (missingRecovery?.isActive == true) return
+                if (!localRetried.add(id) || !budget.tryReprepare(id)) {
+                    live.pause()
+                    return
+                }
+                val position = live.currentPosition.coerceAtLeast(0)
+                live.stop()
+                resolver.unpin(id)
+                missingRecovery =
+                    playerScope.launch {
+                        try {
+                            // Recheck/journal before another open; never retry the same vanished pin.
+                            reportMissing(id)
+                            if (player !== live || live.episodeIdOrNull() != id) return@launch
+                            if (!network.status.value.isConnected || !allowStream(id)) {
+                                live.pause()
+                                return@launch
+                            }
+                            live.seekTo(position)
+                            live.prepare()
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            if (player === live && live.episodeIdOrNull() == id) live.pause()
+                        }
+                    }
+            }
+
             noMedia -> {
                 skip(id, UnplayableReason.NoMedia)
             }
@@ -189,9 +226,12 @@ internal class ErrorRecovery(
         reason: Int,
     ) {
         cancelReconnect()
+        missingRecovery?.cancel()
+        missingRecovery = null
         val id = player?.episodeIdOrNull()
         contentRetried.retainAll(setOfNotNull(id))
         audioRetried.retainAll(setOfNotNull(id))
+        localRetried.retainAll(setOfNotNull(id))
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -218,6 +258,9 @@ internal class ErrorRecovery(
         cancelReconnect()
         contentRetried.clear()
         audioRetried.clear()
+        localRetried.clear()
+        missingRecovery?.cancel()
+        missingRecovery = null
         budget.clear()
         mutableIssue.value = null
     }

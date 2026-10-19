@@ -39,6 +39,39 @@ import kotlin.test.assertTrue
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class ChapterFixturesTest {
+    @Test fun inspectorReadsLocalId3AndMp4WithoutPlayback() =
+        kotlinx.coroutines.runBlocking {
+            val reader = MetadataRetrieverChapterReader(RuntimeEnvironment.getApplication(), Dispatchers.IO)
+            for ((name, source) in listOf(
+                "chapters_id3.mp3" to ChapterSource.ID3,
+                "chapters_nero.m4b" to ChapterSource.MP4,
+                "chapters_quicktime.m4b" to ChapterSource.MP4,
+                "chapters_both.m4b" to ChapterSource.MP4,
+            )) {
+                val file = java.io.File(RuntimeEnvironment.getApplication().cacheDir, name)
+                file.writeBytes(checkNotNull(javaClass.getResourceAsStream("/media/$name")).use { it.readBytes() })
+                val result =
+                    kotlin.test.assertIs<ch.lkmc.neutrodyne.core.domain.EmbeddedChapterResult.Read>(
+                        reader.read(
+                            android.net.Uri
+                                .fromFile(file)
+                                .toString(),
+                        ),
+                    )
+                assertEquals(listOf("Opening", "Closing"), result.chapters.map { it.title }, name)
+                kotlin.test.assertTrue(result.chapters.all { it.source == source })
+                file.delete()
+            }
+            assertEquals(
+                ch.lkmc.neutrodyne.core.domain.EmbeddedChapterResult.Unavailable,
+                reader.read("https://example.com/media.mp3"),
+            )
+            assertEquals(
+                ch.lkmc.neutrodyne.core.domain.EmbeddedChapterResult.MissingFile,
+                reader.read("file:///missing.mp3"),
+            )
+        }
+
     @Test fun actualId3ChapterFramesExtractAndMap() = verify("chapters_id3.mp3", ChapterSource.ID3, Mp3Extractor())
 
     @Test fun actualNeroChaptersExtractAndMap() = verify("chapters_nero.m4b", ChapterSource.MP4, Mp4Extractor())
