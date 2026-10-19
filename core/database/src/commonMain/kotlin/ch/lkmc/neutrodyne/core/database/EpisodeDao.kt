@@ -98,6 +98,17 @@ interface EpisodeDao {
     )
     suspend fun notificationRowsChunk(episodeIds: Collection<Long>): List<NewEpisodeRow>
 
+    /** Filter announcements after ingest; hidden Shorts and unavailable rows are never announced. */
+    @Query(
+        "SELECT e.id FROM episode e JOIN podcast p ON p.id = e.podcastId" +
+            " WHERE e.podcastId = :podcastId AND e.id IN (:ids)" +
+            " AND e.availability = 'AVAILABLE' AND " + FeedQueryBuilder.VISIBLE,
+    )
+    suspend fun youTubeAnnounceable(
+        podcastId: Long,
+        ids: List<Long>,
+    ): List<Long>
+
     // --- Episode detail and show notes (03, added 2026-10-07) -------------------------------------
 
     /** `EpisodeRepository.observeEpisode` (03): the episode detail screen's joined row. */

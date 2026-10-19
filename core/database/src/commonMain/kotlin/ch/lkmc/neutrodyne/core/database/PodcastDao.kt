@@ -22,6 +22,22 @@ import kotlinx.coroutines.flow.Flow
 abstract class PodcastDao(
     private val db: NeutrodyneDatabase,
 ) {
+    /** Atom cannot write page metadata. Null lookup values preserve existing page values. */
+    @Query(
+        "UPDATE podcast SET artworkUrl = COALESCE(:artworkUrl, artworkUrl)," +
+            " artworkKey = COALESCE(:artworkKey, artworkKey), bannerUrl = COALESCE(:bannerUrl, bannerUrl)," +
+            " descriptionHtml = COALESCE(:descriptionHtml, descriptionHtml), channelMetadataAt = :channelMetadataAt" +
+            " WHERE id = :id AND sourceType = 'YOUTUBE_CHANNEL'",
+    )
+    abstract suspend fun applyYouTubeChannelMetadata(
+        id: Long,
+        artworkUrl: String?,
+        artworkKey: String?,
+        bannerUrl: String?,
+        descriptionHtml: String?,
+        channelMetadataAt: Long,
+    )
+
     /** Directory annotations use existing feed/alias indexes in one bounded read. */
     @Query(
         "SELECT feedKey AS url, id AS podcastId FROM podcast WHERE feedKey IN (:keys) " +

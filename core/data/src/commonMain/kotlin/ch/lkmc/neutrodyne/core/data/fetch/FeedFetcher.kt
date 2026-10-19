@@ -106,7 +106,7 @@ internal class FeedFetcher(
         try {
             client
                 .prepareGet(url) {
-                    header(HttpHeaders.Accept, FEED_ACCEPT)
+                    header(HttpHeaders.Accept, req.accept)
                     if (req.conditional) {
                         req.etag?.let { header(HttpHeaders.IfNoneMatch, it) }
                         req.lastModified?.let { header(HttpHeaders.IfModifiedSince, it) }
