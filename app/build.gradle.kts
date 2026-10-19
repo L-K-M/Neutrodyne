@@ -163,6 +163,7 @@ dependencies {
     testImplementation(libs.cmp.resources)
     // Startup recovery verifies the real periodic work against WorkManager's host backend.
     testImplementation(libs.androidx.work.testing)
+    testImplementation(libs.androidx.media3.session)
     testImplementation(project(":feeds:jvm"))
     testImplementation(libs.kotlinx.serialization.json)
 }

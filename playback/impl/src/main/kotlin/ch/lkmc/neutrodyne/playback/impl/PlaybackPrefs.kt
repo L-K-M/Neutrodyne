@@ -11,6 +11,7 @@ import dev.zacsweers.metro.ContributesIntoSet
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.SingleIn
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -50,21 +51,35 @@ internal class PlaybackPrefs
         val current: StateFlow<PlaybackPrefsSnapshot> = _current.asStateFlow()
 
         private val started = AtomicBoolean(false)
+        private val ready = CompletableDeferred<Unit>()
+
+        /** Defaults are for construction only; starts must use the first durable snapshot. */
+        suspend fun awaitReady() {
+            ready.await()
+        }
 
         fun start(scope: CoroutineScope) {
             if (!started.compareAndSet(false, true)) return
             scope.launch {
-                val repo = settings()
-                combine(
-                    repo.observe(PlaybackSettingKeys.SKIP_BACK_MS),
-                    repo.observe(PlaybackSettingKeys.SKIP_FORWARD_MS),
-                    repo.observe(PlaybackSettingKeys.PAUSE_FOR_NAVIGATION),
-                    repo.observe(PlaybackSettingKeys.STREAM_ON_METERED),
-                    repo.observe(PlaybackSettingKeys.STREAM_CACHE_MB),
-                ) { back, forward, navigation, metered, cacheMb ->
-                    PlaybackPrefsSnapshot(back, forward, navigation, metered, cacheMb)
-                }.distinctUntilChanged()
-                    .collect { _current.value = it }
+                try {
+                    val repo = settings()
+                    combine(
+                        repo.observe(PlaybackSettingKeys.SKIP_BACK_MS),
+                        repo.observe(PlaybackSettingKeys.SKIP_FORWARD_MS),
+                        repo.observe(PlaybackSettingKeys.PAUSE_FOR_NAVIGATION),
+                        repo.observe(PlaybackSettingKeys.STREAM_ON_METERED),
+                        repo.observe(PlaybackSettingKeys.STREAM_CACHE_MB),
+                    ) { back, forward, navigation, metered, cacheMb ->
+                        PlaybackPrefsSnapshot(back, forward, navigation, metered, cacheMb)
+                    }.distinctUntilChanged()
+                        .collect {
+                            _current.value = it
+                            ready.complete(Unit)
+                        }
+                } catch (failure: Exception) {
+                    ready.completeExceptionally(failure)
+                    throw failure
+                }
             }
         }
     }

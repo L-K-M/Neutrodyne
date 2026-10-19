@@ -9,7 +9,7 @@ import ch.lkmc.neutrodyne.playback.api.UnplayableReason
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilities
 
 /** Shared structural gates. Offline/metered policy does not remove entries from the window. */
-internal fun PlaybackMediaInfo.refusal(capabilities: YouTubeCapabilities): UnplayableReason? {
+fun PlaybackMediaInfo.refusal(capabilities: YouTubeCapabilities): UnplayableReason? {
     val youtube = sourceType != SourceType.RSS
     if ((!youtube && enclosureUrl.isNullOrBlank()) || (youtube && externalMediaId.isNullOrBlank())) {
         return UnplayableReason.NoMedia
