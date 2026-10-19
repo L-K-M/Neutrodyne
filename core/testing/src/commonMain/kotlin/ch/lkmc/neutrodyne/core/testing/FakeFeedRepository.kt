@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.testing
 import androidx.paging.PagingData
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.domain.FeedRepository
+import ch.lkmc.neutrodyne.core.model.DownloadAllEstimate
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.FeedCounts
 import ch.lkmc.neutrodyne.core.model.FeedFilters
@@ -39,6 +40,13 @@ class FakeFeedRepository(
     val groupCountsSinceMs = mutableListOf<Long>()
     val virtualCounts = MutableStateFlow(VirtualCounts())
     val unplayedCounts = mutableMapOf<Pair<FeedSource, Long?>, Int>()
+    val downloadAllEstimates = mutableMapOf<FeedSource, DownloadAllEstimate>()
+    val downloadAllRequests = mutableListOf<FeedSource>()
+
+    override suspend fun downloadAllEstimate(source: FeedSource): DownloadAllEstimate {
+        downloadAllRequests += source
+        return downloadAllEstimates[source] ?: DownloadAllEstimate(emptyList(), 0, 0, 0, false)
+    }
 
     override fun observeGroupCounts(sinceMs: Long): Flow<Map<Long, FeedCounts>> {
         groupCountsSinceMs += sinceMs
