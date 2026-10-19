@@ -246,13 +246,12 @@ class ImportRepositoryTest {
             assertEquals(ImportState.PREVIEW, view.state)
             assertEquals(
                 mapOf(
-                    ImportItemStatus.PREVIEW to 1,
-                    ImportItemStatus.YOUTUBE_UNSUPPORTED_YET to 1,
+                    ImportItemStatus.PREVIEW to 2,
                     ImportItemStatus.INVALID_URL to 1,
                 ),
                 view.counts,
             )
-            assertEquals(1, view.selectedCount)
+            assertEquals(2, view.selectedCount)
             assertEquals(1, view.youtubeCount)
             assertEquals("Everywhere", view.options.targetGroupName)
             assertEquals(3, view.options.laneAttempts)

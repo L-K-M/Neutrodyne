@@ -14,12 +14,16 @@ import ch.lkmc.neutrodyne.core.data.importing.ImportWorkPolicy
 import ch.lkmc.neutrodyne.core.data.importing.ImportWorkScheduler
 import ch.lkmc.neutrodyne.core.data.importing.PayloadStore
 import ch.lkmc.neutrodyne.core.data.importing.RestoreEnqueue
+import ch.lkmc.neutrodyne.core.data.youtube.YouTubeSubscriptionWriterImpl
 import ch.lkmc.neutrodyne.core.database.ImportItemEntity
 import ch.lkmc.neutrodyne.core.database.ImportSessionEntity
 import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
 import ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity
 import ch.lkmc.neutrodyne.core.domain.ImportError
 import ch.lkmc.neutrodyne.core.domain.SecretStore
+import ch.lkmc.neutrodyne.core.domain.SubscribeError
+import ch.lkmc.neutrodyne.core.domain.YouTubeDuplicatePolicy
+import ch.lkmc.neutrodyne.core.domain.YouTubeSubscription
 import ch.lkmc.neutrodyne.core.model.AliasReason
 import ch.lkmc.neutrodyne.core.model.CreateImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportFormat
@@ -30,6 +34,7 @@ import ch.lkmc.neutrodyne.core.model.ImportSource
 import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceGroup
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeImportReportPoster
@@ -38,6 +43,7 @@ import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.feeds.groups.GroupNames
+import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipGuard
 import ch.lkmc.neutrodyne.feeds.jvm.opml.XmlPullOpmlReader
 import ch.lkmc.neutrodyne.feeds.opml.ExportDocument
@@ -45,6 +51,8 @@ import ch.lkmc.neutrodyne.feeds.opml.ExportFeed
 import ch.lkmc.neutrodyne.feeds.opml.ExportGroup
 import ch.lkmc.neutrodyne.feeds.opml.OpmlLayout
 import ch.lkmc.neutrodyne.feeds.opml.OpmlWriter
+import ch.lkmc.neutrodyne.youtube.api.ChannelResolution
+import ch.lkmc.neutrodyne.youtube.api.ResolvedVia
 import ch.lkmc.neutrodyne.youtube.api.YouTubeUrlClassifier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -151,6 +159,228 @@ class ImportCommitTest {
         clock = clock,
         newSyncId = syncIds,
     )
+
+    @Test
+    fun sharedWriterRejectsDuplicatesAndInvalidMasksWithoutChangingMetadata() =
+        runTest {
+            val writer = YouTubeSubscriptionWriterImpl(db, TestOrderKeys, clock)
+            val channel =
+                ChannelResolution.Resolved(
+                    "UCBJycsmduvYEL83R_U4JriQ",
+                    "Publisher",
+                    "https://yt3.ggpht.com/a=s48",
+                    null,
+                    "Description",
+                    ResolvedVia.HTML,
+                )
+            val policy = YouTubeDuplicatePolicy.REJECT
+            assertIs<Outcome.Failure<*>>(writer.write(channel, 0, emptySet(), policy, null))
+            val first =
+                assertIs<Outcome.Success<YouTubeSubscription>>(
+                    writer.write(channel, 1, emptySet(), policy, null),
+                ).value
+            val duplicate = assertIs<Outcome.Failure<*>>(writer.write(channel, 7, emptySet(), policy, "Ignore"))
+            assertEquals(SubscribeError.AlreadySubscribed(first.podcastId), duplicate.error)
+            val stored = db.podcastDao().allForExport().single()
+            assertEquals(1, stored.youtubeVariants)
+            assertEquals("Publisher", stored.author)
+            assertEquals("https://yt3.ggpht.com/a=s900", stored.artworkUrl)
+            assertEquals(clock.now(), stored.channelMetadataAt)
+        }
+
+    @Test
+    fun staticYouTubeCommitIsCanonicalPendingAndPreservesCustomTitle() =
+        runTest {
+            val id = "UCBJycsmduvYEL83R_U4JriQ"
+            val feed = "https://www.youtube.com/feeds/videos.xml?channel_id=$id"
+            val sid =
+                seedSession(
+                    options =
+                        ImportOptions(
+                            itemCustomTitles = mapOf(0 to "My name"),
+                            itemYouTubeVariants = mapOf(0 to 6),
+                        ),
+                    items =
+                        listOf(
+                            item(
+                                0,
+                                feed,
+                                kind = ImportItemKind.YOUTUBE,
+                                title = "Publisher",
+                                groups = listOf(" Tech "),
+                            ),
+                        ),
+                )
+            val started = System.nanoTime()
+            assertIs<Outcome.Success<*>>(committer.confirm(sid))
+            assertTrue((System.nanoTime() - started) / 1_000_000 < 2_000, "static commit exceeds 2 s")
+            val channel = db.podcastDao().allForExport().single()
+            assertEquals(SourceType.YOUTUBE_CHANNEL, channel.sourceType)
+            assertEquals(id, channel.youtubeChannelId)
+            assertEquals(6, channel.youtubeVariants)
+            assertEquals("My name", channel.customTitle)
+            assertEquals(feed, channel.feedUrl)
+            assertEquals(PodcastStatus.PENDING_FIRST_FETCH, channel.status)
+            assertTrue(channel.initialFetch)
+            assertNull(channel.channelMetadataAt)
+            assertEquals(1, db.groupDao().membershipPairs().size)
+        }
+
+    @Test
+    fun resolvedAliasesUnionGroupsWithoutChangingExistingChannelOrStoringAliases() =
+        runTest {
+            val id = "UCBJycsmduvYEL83R_U4JriQ"
+            val resolution = ChannelResolution.Resolved(id, "Fetched", null, null, null, ResolvedVia.HTML)
+            val sid =
+                seedSession(
+                    options =
+                        ImportOptions(
+                            itemYouTubeInputs = mapOf(0 to "@one", 1 to "@two"),
+                            itemYouTubeVariants = mapOf(0 to 2, 1 to 7),
+                            itemCustomTitles = mapOf(0 to "Custom", 1 to "Ignored"),
+                        ),
+                    items =
+                        listOf(
+                            item(
+                                0,
+                                "@one",
+                                normalizedUrl = null,
+                                kind = ImportItemKind.YOUTUBE,
+                                groups = listOf("Tech"),
+                            ),
+                            item(
+                                1,
+                                "@two",
+                                normalizedUrl = null,
+                                kind = ImportItemKind.YOUTUBE,
+                                groups = listOf("News"),
+                            ),
+                        ),
+                )
+            committer.confirm(sid)
+            assertTrue(db.podcastDao().allForExport().isEmpty())
+            assertTrue(db.importDao().itemsOf(sid).all { it.status == ImportItemStatus.QUEUED && it.podcastId == null })
+            committer.commitResolved(sid, 0, "@one", resolution, clock.now())
+            committer.commitResolved(sid, 1, "@two", resolution, clock.now())
+            val channel = db.podcastDao().allForExport().single()
+            assertEquals(2, channel.youtubeVariants)
+            assertEquals("Custom", channel.customTitle)
+            assertEquals(2, db.groupDao().membershipPairs().size)
+            val statuses = db.importDao().itemsOf(sid).map { it.status }
+            assertEquals(listOf(ImportItemStatus.QUEUED, ImportItemStatus.ALREADY_SUBSCRIBED), statuses)
+            assertNull(db.podcastDao().aliasOwner("youtube.com/@one"))
+            assertNull(db.podcastDao().aliasOwner("youtube.com/@two"))
+        }
+
+    @Test
+    fun lateResolutionCannotInsertAfterCancelOrInputEdit() =
+        runTest {
+            val resolution =
+                ChannelResolution.Resolved(
+                    "UCBJycsmduvYEL83R_U4JriQ",
+                    null,
+                    null,
+                    null,
+                    null,
+                    ResolvedVia.HTML,
+                )
+            val sid =
+                seedSession(
+                    options = ImportOptions(itemYouTubeInputs = mapOf(0 to "@new")),
+                    state = ImportState.FETCHING,
+                    items =
+                        listOf(
+                            item(
+                                0,
+                                "@old",
+                                normalizedUrl = null,
+                                kind = ImportItemKind.YOUTUBE,
+                                status = ImportItemStatus.QUEUED,
+                            ),
+                        ),
+                )
+            committer.commitResolved(sid, 0, "@old", resolution, null)
+            assertTrue(db.podcastDao().allForExport().isEmpty())
+            db.importDao().setState(sid, ImportState.CANCELLED)
+            committer.commitResolved(sid, 0, "@new", resolution, null)
+            assertTrue(db.podcastDao().allForExport().isEmpty())
+        }
+
+    @Test
+    fun opmlHtmlInputAndNdVariantsSurviveDurablePreviewAndEdits() =
+        runTest {
+            val xml =
+                """
+                <opml version="2.0" xmlns:nd="urn:neutrodyne:opml:1"><head/><body>
+                  <outline text="Custom" title="Publisher" xmlUrl="invalid"
+                    htmlUrl="https://www.youtube.com/feeds/videos.xml?playlist_id=UUSHBJycsmduvYEL83R_U4JriQ"
+                    nd:ytVariants="UULF,UULV,unknown"/>
+                </body></opml>
+                """.trimIndent()
+            payloads.register("content://w5/opml", bytes = xml.encodeToByteArray())
+            val outcome = sessions.create(ImportSource("content://w5/opml", null), CreateImportOptions())
+            val created = assertIs<Outcome.Success<Long>>(outcome)
+            val sid = created.value
+            val options = ImportOptionsJson.decode(db.importDao().sessionById(sid)!!.optionsJson!!)
+            assertEquals(5, options.itemYouTubeVariants.values.single())
+            assertTrue(
+                options.itemYouTubeInputs.values
+                    .single()
+                    .contains("playlist_id=UUSH"),
+            )
+            val edited = options.withUserChanges { it.copy(targetGroupName = "Chosen") }
+            assertEquals(options.itemYouTubeInputs, edited.itemYouTubeInputs)
+            committer.confirm(sid)
+            assertEquals(
+                5,
+                db
+                    .podcastDao()
+                    .allForExport()
+                    .single()
+                    .youtubeVariants,
+            )
+        }
+
+    @Test
+    fun canonicalOpmlRoundTripPreservesEveryVariantMaskAndCustomTitle() =
+        runTest {
+            for (mask in 1..7) {
+                val id = "UC" + mask.toString().padStart(21, '0') + "A"
+                val feed = "https://www.youtube.com/feeds/videos.xml?channel_id=$id"
+                val podcast =
+                    podcastEntity(feedUrl = feed, feedKey = UrlNormalizer.forIdentity(feed)!!).copy(
+                        sourceType = SourceType.YOUTUBE_CHANNEL,
+                        youtubeChannelId = id,
+                        youtubeVariants = mask,
+                        title = "Publisher $mask",
+                        customTitle = "Custom $mask",
+                        link = "https://www.youtube.com/@old$mask",
+                    )
+                db.podcastDao().insertPodcast(podcast)
+            }
+            val built =
+                ch.lkmc.neutrodyne.core.data.exporting
+                    .OpmlExporter(db, secrets, clock, Dispatchers.Default)
+                    .build(
+                        ch.lkmc.neutrodyne.core.model
+                            .ExportRequest(),
+                    )!!
+            val bytes = Buffer().also { OpmlWriter.write(it, built.document, OpmlLayout.GROUPED) }.readByteArray()
+            val xml = bytes.decodeToString()
+            assertTrue("/@old" !in xml)
+            payloads.register("content://w5/roundtrip", bytes = bytes)
+            val sid =
+                assertIs<Outcome.Success<Long>>(
+                    sessions.create(
+                        ImportSource("content://w5/roundtrip", null),
+                        CreateImportOptions(),
+                    ),
+                ).value
+            val options = ImportOptionsJson.decode(db.importDao().sessionById(sid)!!.optionsJson!!)
+            assertEquals((1..7).toSet(), options.itemYouTubeVariants.values.toSet())
+            assertEquals((1..7).map { "Custom $it" }.toSet(), options.itemCustomTitles.values.toSet())
+            assertTrue(db.importDao().itemsOf(sid).all { it.status == ImportItemStatus.ALREADY_SUBSCRIBED })
+        }
 
     // --- Happy path: subscriptions, groups, memberships, state ---------------------------------
 

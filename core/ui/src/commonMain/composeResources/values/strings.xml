@@ -658,4 +658,10 @@
     <string name="chapter_time">%1$d:%2$s</string>
     <string name="chapter_number">Chapter %1$d</string>
     <string name="chapter_seek">Seek to %1$s</string>
+    <string name="export_format_opml">OPML</string>
+    <string name="export_format_newpipe">NewPipe JSON (YouTube channels only)</string>
+    <string name="import_youtube_resolution_failed">Couldn’t find this YouTube channel. Edit the URL or retry.</string>
+    <string name="import_newpipe_service">This NewPipe service is not supported (%1$s).</string>
+    <string name="import_err_format_size">This file exceeds its format’s size limit: JSON 10 MB, URL lists 1 MB, CSV 5 MB.</string>
+    <string name="import_err_tgz">Takeout .tgz archives aren’t supported. In Google Takeout, choose the .zip file type.</string>
 </resources>

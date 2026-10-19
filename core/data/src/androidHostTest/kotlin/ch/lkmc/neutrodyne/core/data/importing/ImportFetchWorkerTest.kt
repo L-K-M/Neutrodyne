@@ -7,6 +7,7 @@ import androidx.work.ListenableWorker
 import androidx.work.WorkerParameters
 import androidx.work.testing.TestListenableWorkerBuilder
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.data.StubSourceAdapter
 import ch.lkmc.neutrodyne.core.data.adapterParsed
 import ch.lkmc.neutrodyne.core.data.fetchMeta
 import ch.lkmc.neutrodyne.core.data.importItem
@@ -16,6 +17,7 @@ import ch.lkmc.neutrodyne.core.data.parsedFeed
 import ch.lkmc.neutrodyne.core.data.seedImportSession
 import ch.lkmc.neutrodyne.core.data.seedPodcast
 import ch.lkmc.neutrodyne.core.data.stubAdapter
+import ch.lkmc.neutrodyne.core.data.testImportCommitter
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
 import ch.lkmc.neutrodyne.core.model.ImportState
@@ -23,6 +25,7 @@ import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeImportReportPoster
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
+import ch.lkmc.neutrodyne.core.testing.FakeYouTubeChannelResolver
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.Job
@@ -157,7 +160,7 @@ class ImportFetchWorkerTest {
         db: NeutrodyneDatabase,
         sessionId: Long?,
         runAttemptCount: Int = 0,
-        adapter: ch.lkmc.neutrodyne.core.data.StubSourceAdapter = stubAdapter(),
+        adapter: StubSourceAdapter = stubAdapter(),
         workerClock: Clock = clock,
     ): ImportFetchWorker {
         val runner =
@@ -167,6 +170,11 @@ class ImportFetchWorkerTest {
                 snapshots = snapshots,
                 reports = reports,
                 clock = workerClock,
+                resolver =
+                    FakeYouTubeChannelResolver(),
+                committer =
+                    testImportCommitter(db, workerClock),
+                random = kotlin.random.Random(0),
             )
         val factory =
             object : androidx.work.WorkerFactory() {
