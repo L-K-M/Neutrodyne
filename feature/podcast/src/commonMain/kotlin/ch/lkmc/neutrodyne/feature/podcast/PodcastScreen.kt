@@ -84,6 +84,7 @@ import ch.lkmc.neutrodyne.core.ui.SelectionTopBar
 import ch.lkmc.neutrodyne.core.ui.asString
 import ch.lkmc.neutrodyne.core.ui.episodeSelectionKeys
 import ch.lkmc.neutrodyne.core.ui.forSource
+import ch.lkmc.neutrodyne.core.ui.navigation.HeaderSystemBars
 import ch.lkmc.neutrodyne.core.ui.offlineBannerItem
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.resources.Res
@@ -186,6 +187,15 @@ internal fun PodcastScreen(
     val headerIndex = if (state.offline) 1 else 0
     val headerGone by
         remember(headerIndex) { derivedStateOf { listState.firstVisibleItemIndex > headerIndex } }
+    HeaderSystemBars(
+        if (headerGone &&
+            selectedIds.isEmpty()
+        ) {
+            MaterialTheme.colorScheme.surfaceContainer
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
+    )
     val nowMs = LocalUiClock.current.now()
 
     Column(modifier = modifier.fillMaxSize().episodeSelectionKeys(selection, selectAll)) {

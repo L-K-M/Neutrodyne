@@ -51,6 +51,9 @@ import ch.lkmc.neutrodyne.core.model.ShowNoteBlock
 import ch.lkmc.neutrodyne.core.model.ShowNoteSpan
 import ch.lkmc.neutrodyne.core.model.ShowNotes
 import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.navigation.LocalNavTab
+import ch.lkmc.neutrodyne.core.ui.navigation.SharedKeys
+import ch.lkmc.neutrodyne.core.ui.navigation.sharedArt
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_add_group
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_episode_count
@@ -126,7 +129,7 @@ public fun PodcastHeader(
                 shape = NeutrodyneShapes.PlayerArt,
                 avgArgb = colors?.avgArgb,
                 modifier =
-                    Modifier.size(HERO_SIZE).shadow(
+                    Modifier.size(HERO_SIZE).sharedArt(SharedKeys.cover(LocalNavTab.current, detail.id)).shadow(
                         elevation = 12.dp,
                         shape = NeutrodyneShapes.PlayerArt,
                         ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),

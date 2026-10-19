@@ -20,8 +20,10 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.LocalReducedMotion
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.art.MonogramSpec
+import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
 import coil3.compose.LocalPlatformContext
+import coil3.compose.asPainter
 
 /**
  * 08 "CoverArt and CoverTile": an [ArtworkRef] rendered through Coil's multiplatform
@@ -69,6 +71,18 @@ public fun CoverArt(
         remember(ref, tier, aspect, crossfade, density, context) {
             Covers.request(context, ref, tier, density, aspect, crossfade)
         }
+    val imageLoader = SingletonImageLoader.get(context)
+    // AsyncImage's explicit loading/error painters otherwise replace Coil's cached THUMB.
+    // Retain only this request's byte version; an old version is never a fallback for new art.
+    val thumb =
+        remember(request, imageLoader) {
+            request.placeholderMemoryCacheKey?.let {
+                imageLoader.memoryCache
+                    ?.get(it)
+                    ?.image
+                    ?.asPainter(context)
+            }
+        }
     Box(
         modifier
             .clip(shape)
@@ -76,9 +90,10 @@ public fun CoverArt(
     ) {
         AsyncImage(
             model = request,
+            imageLoader = imageLoader,
             contentDescription = contentDescription,
-            placeholder = ColorPainter(placeholder),
-            error = painter,
+            placeholder = thumb ?: ColorPainter(placeholder),
+            error = thumb ?: painter,
             fallback = painter,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),

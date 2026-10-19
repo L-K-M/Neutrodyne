@@ -55,6 +55,7 @@ import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.EpisodeDetail
 import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.navigation.LocalNavTab
 import ch.lkmc.neutrodyne.core.ui.AvailabilityText
 import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
@@ -67,6 +68,9 @@ import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.YouTubeLinks
 import ch.lkmc.neutrodyne.core.ui.YouTubeWatchMode
 import ch.lkmc.neutrodyne.core.ui.asString
+import ch.lkmc.neutrodyne.core.ui.navigation.HeaderSystemBars
+import ch.lkmc.neutrodyne.core.ui.navigation.SharedKeys
+import ch.lkmc.neutrodyne.core.ui.navigation.sharedArt
 import ch.lkmc.neutrodyne.core.ui.offlineBannerItem
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.rememberMonogram
@@ -117,6 +121,7 @@ internal fun EpisodeScreen(
     val episode = state.episode
     var imagesRevealed by rememberSaveable { mutableStateOf(false) }
 
+    HeaderSystemBars(MaterialTheme.colorScheme.surface)
     Column(modifier = modifier.fillMaxSize()) {
         NdTopAppBar(
             title = "",
@@ -329,7 +334,7 @@ private fun EpisodeHeader(
                 aspect = CoverAspect.WIDE_16_9,
                 shape = NeutrodyneShapes.Tile,
                 avgArgb = state.colors?.avgArgb,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().sharedArt(SharedKeys.episodeArt(LocalNavTab.current, episode.id)),
             )
             Text(
                 episode.title,
@@ -345,10 +350,14 @@ private fun EpisodeHeader(
                     ref = episode.artwork,
                     monogram = rememberMonogram(episode.podcastTitle),
                     title = episode.podcastTitle,
-                    tier = CoverTier.THUMB,
+                    tier = CoverTier.HERO,
                     shape = NeutrodyneShapes.Tile,
                     avgArgb = state.colors?.avgArgb,
-                    modifier = Modifier.size(ART_SIZE),
+                    modifier =
+                        Modifier
+                            .size(
+                                ART_SIZE,
+                            ).sharedArt(SharedKeys.episodeArt(LocalNavTab.current, episode.id)),
                 )
                 Column(Modifier.weight(1f)) {
                     Text(

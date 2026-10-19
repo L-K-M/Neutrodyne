@@ -44,6 +44,9 @@ import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
 import ch.lkmc.neutrodyne.core.model.LibraryTile
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
+import ch.lkmc.neutrodyne.core.navigation.LocalNavTab
+import ch.lkmc.neutrodyne.core.ui.navigation.SharedKeys
+import ch.lkmc.neutrodyne.core.ui.navigation.sharedArt
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_more
 import ch.lkmc.neutrodyne.core.ui.resources.tile_gone
@@ -130,7 +133,15 @@ public fun CoverTile(
                 modifier =
                     Modifier
                         .fillMaxSize()
-                        .let { m -> if (selected == true) m.scale(SELECTED_SCALE) else m },
+                        .let {
+                            if (selected ==
+                                null
+                            ) {
+                                it.sharedArt(SharedKeys.cover(LocalNavTab.current, tile.podcastId))
+                            } else {
+                                it
+                            }
+                        }.let { m -> if (selected == true) m.scale(SELECTED_SCALE) else m },
             )
 
             if (selected != null) {
