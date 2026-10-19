@@ -69,6 +69,25 @@ class FirstLaunchRestoreChecksTest {
     }
 
     @Test
+    fun replacementRejectsUndeclaredPhysicalEntry() {
+        val file = archive(archiveEntries() + ("extra.txt" to "not declared or hashed"))
+        val failure = assertThrows(IllegalStateException::class.java) { validate(file) }
+        assertTrue(failure.message.orEmpty().contains("undeclared"))
+    }
+
+    @Test
+    fun replacementRejectsUndeclaredOptionalPayload() {
+        val file = archive(archiveEntries() + (BackupCodec.ENTRY_OPML to "<opml />"))
+        assertThrows(IllegalStateException::class.java) { validate(file) }
+    }
+
+    @Test
+    fun replacementAcceptsDeclaredOptionalPayload() {
+        val opml = mapOf(BackupCodec.ENTRY_OPML to "<opml />")
+        validate(archive(archiveEntries(declared = payloads + opml) + opml))
+    }
+
+    @Test
     fun replacementRejectsPayloadHashMismatch() {
         val corruptLibrary = """{"podcasts":{},"groups":[]}"""
         val file = archive(archiveEntries() + (BackupCodec.ENTRY_LIBRARY to corruptLibrary))
