@@ -65,6 +65,20 @@ class AndroidAppGraphTest {
     private val graph = createGraphFactory<AndroidAppGraph.Factory>().create(RuntimeEnvironment.getApplication())
 
     @Test
+    fun downloadComponentsInjectBeforeDatabaseOpen() {
+        graph.inject(
+            ch.lkmc.neutrodyne.download.impl
+                .ManualDownloadJobService(),
+        )
+        graph.inject(
+            ch.lkmc.neutrodyne.download.impl
+                .DownloadActionReceiver(),
+        )
+        assertThat(graph.databaseOpener.openState.value).isEqualTo(DatabaseOpenState.Pending)
+        assertThat(graph.initializers.map { it.order }).containsAtLeast(10, 210, 310)
+    }
+
+    @Test
     fun durablePlaybackPortsResolveToSingleProductionBindings() =
         runBlocking {
             graph.databaseOpener.awaitOpen()
@@ -353,6 +367,9 @@ class AndroidAppGraphTest {
                 "PlaybackPrefsInitializer" to 300..300,
                 "PlayerConnectionInitializer" to 300..300,
                 "PlaybackChannels" to 10..10,
+                "DownloadChannelsInitializer" to 10..10,
+                "DownloadReconcileInitializer" to 210..210,
+                "DownloadObserversInitializer" to 310..310,
             )
 
         /** The five destinations and the Settings screens M0a renders (01 M0 checklist step 16). */

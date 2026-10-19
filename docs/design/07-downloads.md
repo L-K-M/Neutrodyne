@@ -576,6 +576,39 @@ Serves R4.2, R8.7, N2. Delivered in M6. Honours [D47](../PLAN.md#3-key-decisions
 
 Everything from [Runner matrix](#runner-matrix) to [Platform constraints](#platform-constraints) is Android (`androidMain`, `AndroidDownloadScheduler`), unchanged by the scope revision; the desktop lanes are in [Desktop runners](#desktop-runners). Both drive the same common `DownloadEngine`.
 
+Implementation note (2026-10-19, M6a): W6 implements only the MANUAL Android
+hosts. Its `AndroidDownloadRuntime` composition provider fails explicitly until
+W4/W5 supply the common runner, stop/wake hooks, reconciler and controller;
+tests use the frozen runner contracts with fakes. The Android index binding
+is replaced with W5 during integration, and the desktop binding stays with W7.
+The pinned SDK/WorkManager API gate compiles the service notification and byte
+methods and exercises persisted UIDT network/backoff builders on host API34/36.
+These host results do not prove real UIDT execution. The AC3/AC10 device smoke
+sources compile; the 20-minute, reboot, playback and permission journeys still
+require device execution with the integrated engine.
+
+The scheduler uses a queued-row snapshot to correlate due time and metered
+permission. The frozen aggregate cannot distinguish an allowed-metered row in
+backoff from a due Wi-Fi-only row; broadening a UIDT network request from that
+aggregate would be incorrect. No schema or entity change is needed. Full
+queue-read cost remains a profiling consideration for large libraries.
+
+`DrainRequest.claimsAllowed()` is an additive default claim gate: the common
+engine checks it before every claim so a worker yields new rows to a live UIDT
+job without cancelling its active transfers. `DrainRequest.cancellationIntent()`
+lets cancellation cleanup read WorkManager's stop reason before its transition;
+`CoroutineWorker.onStopped` is final in the pinned library, and the host catch
+runs after engine cleanup. `StopIntent.RunnerStopped.mode`
+defaults to REQUEUE; PAUSE preserves the real callback stop reason while pausing
+the stopped job's rows. These are W4 integration obligations.
+
+`DrainReporter.transferred(bytes)` is an additive default callback for network
+bytes received by this invocation. W4 must emit deltas excluding the resumed
+file prefix; UIDT reports those independently of aggregate file progress. The
+assigned JobParameters network versus the existing DOWNLOAD client's process
+default remains unverified on devices with Wi-Fi/mobile/VPN/Data Saver. W6
+retains the documented client path and does not bind the process or add a client.
+
 ### Runner matrix
 
 | Lane | API 34+ | API 31–33 | API 26–30 |
@@ -746,6 +779,14 @@ class ManualDownloadJobService : JobService() {          // ch.lkmc.neutrodyne.d
 - A `MANUAL` worker running with `setForeground` has no soft deadline (it is a long-running worker on API ≤ 33, where neither the Android 15 `dataSync` cap nor the Android 16 quota rule exists).
 
 ### Wake work
+
+Implementation note (2026-10-19, M6a): below API28, WorkManager's CONNECTED
+fallback cannot require VALIDATED. While connected but unvalidated, the manual
+wake therefore waits at least one minute to prevent a captive-portal wake loop.
+API28+ retains the validated NetworkRequest constraint. Empty queues also clear
+the foreground-wait notification, including when cancellation emptied the queue
+before the next foreground event.
+
 
 `download-wake-{lane}` (`DownloadWakeWorker`, one-time, policy `REPLACE`, tag `download`) re-arms a lane when rows wait for a time or a condition. Its `doWork()` only calls `withContext(NonCancellable) { ensureScheduled(lane) }`. `ensureScheduled` usually re-arms the wake work with `REPLACE`, which cancels the running wake worker itself; `NonCancellable` lets the call finish. From the background, `MANUAL` on API 34+ falls back to `download-lane-MANUAL`, because UIDT is never scheduled while invisible.
 
@@ -1258,6 +1299,14 @@ Persistence ([D17](../PLAN.md#3-key-decisions)): bytes are never written per buf
 08's `EpisodeLiveStateSource` ([08 Live row state](08-ui-ux.md#live-row-state)) builds `RowLive.downloadState`, `waitReason`, `downloadedBytes` and `totalBytes` for visible IDs from two inputs: `DownloadDao.observeLiveFor(ids)` ([02 Live row state](02-data-model.md#live-row-state)) and `DownloadProgressSource.observe(ids)`. Merge rule: a live entry wins (state and bytes); otherwise the row (`downloadedBytes`; `totalBytes ?: estimatedBytes` for display, marked approximate). `DownloadController.observe(id)` applies the same rule for a single episode.
 
 ### Notifications
+
+Implementation note (2026-10-19, M6a): with no common `DownloadAlerts` producer
+in the frozen parallel-work base, W6's Android observer drives MANUAL failure
+and storage summaries from low-churn row transitions. The app supplies the
+existing shared `DownloadStatusText` wording without a dependency from downloads
+to UI. Common alert ownership and desktop/AUTO alert delivery remain integration
+work; this observer must not duplicate a later common alert collector.
+
 
 `DownloadAlerts` (common) decides *when* the user is told something outside the window: the failure summary (a `MANUAL` row became `FAILED`; updated, never one per row; dismissed until the next failure), the storage-full alert (once until the wait clears) and, on Android only, the progress and `NEEDS_FOREGROUND` notifications below. It hands `DownloadAlert` values (`FailuresChanged(count, firstTitle, errorText)`, `StorageFull(waiting)`, `Cleared(kind)`) to the platform `DownloadAlertPoster`: `DownloadNotifications` on Android (this table), `DesktopDownloadAlertPoster` in `:desktopApp` on the desktop (below).
 

@@ -21,6 +21,8 @@ internal data class Conditions(
     val validated: Boolean,
 )
 
+internal enum class RunnerStopMode { REQUEUE, PAUSE }
+
 internal sealed interface StopIntent {
     data object Pause : StopIntent
 
@@ -39,6 +41,7 @@ internal sealed interface StopIntent {
 
     data class RunnerStopped(
         val platformStopReason: Int,
+        val mode: RunnerStopMode = RunnerStopMode.REQUEUE,
     ) : StopIntent
 }
 
@@ -58,6 +61,11 @@ internal data class DrainRequest(
     val waitHorizonMs: Long,
     val reporter: DrainReporter,
     val exit: DrainExit,
+    /** Check before each claim. A WorkManager runner yields new claims to a live UIDT job. */
+    val claimsAllowed: () -> Boolean = { true },
+    /** Read inside cancellation cleanup, before committing the runner's stopped rows.
+     * CoroutineWorker.onStopped is final; a host catch runs after engine cleanup. */
+    val cancellationIntent: () -> StopIntent? = { null },
 )
 
 internal sealed interface DrainOutcome {
@@ -75,6 +83,10 @@ internal sealed interface DrainOutcome {
 }
 
 internal interface DrainReporter {
+    /** Bytes received by this invocation, excluding any existing resume prefix.
+     * Android UIDT reports this separately from aggregate file offsets. */
+    fun transferred(bytes: Long) {}
+
     fun active(episodeIds: Set<Long>)
 
     fun bytes(
