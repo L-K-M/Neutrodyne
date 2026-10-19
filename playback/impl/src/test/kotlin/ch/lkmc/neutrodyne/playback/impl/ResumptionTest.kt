@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.playback.impl
 
 import androidx.media3.common.Player
+import androidx.media3.session.MediaConstants
 import ch.lkmc.neutrodyne.core.model.QueueItem
 import ch.lkmc.neutrodyne.core.model.QueueOrigin
 import ch.lkmc.neutrodyne.core.model.SourceType
@@ -12,6 +13,7 @@ import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.PlaybackIssue
 import ch.lkmc.neutrodyne.playback.core.StartRequest
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -200,6 +202,55 @@ class ResumptionTest {
                 bridge.detach()
                 player.release()
             }
+        }
+    }
+
+    @Test fun falseResumptionWaitsForDatabaseAndReadsOneSavedCardWithoutPinsOrWrites() {
+        LifecycleHarness(RuntimeEnvironment.getApplication(), delayed = true).use { h ->
+            h.seedCurrent(positionMs = 25_000)
+            h.lookup.items.value += 1L to media().copy(measuredDurationMs = 100_000)
+            var bridges = 0
+            val provider =
+                ResumptionProvider(h.access.savedResumption::load) {
+                    bridges++
+                    error("Card started playback")
+                }
+            val loading = h.scope.async { provider.resume(false, StartOrigin.EXTERNAL) }
+            pumpUntil { h.openStarted.count == 0L }
+            assertFalse(loading.isCompleted)
+            assertEquals(0, h.dbProviderReads)
+            h.allowOpen.countDown()
+            val result = h.run { loading.await() }
+            assertEquals(listOf("episode:1"), result.mediaItems.map { it.mediaId })
+            assertEquals(25_000L, result.startPositionMs)
+            val metadata = result.mediaItems.single().mediaMetadata
+            assertEquals("content", metadata.artworkUri?.scheme)
+            assertTrue(metadata.artworkUri.toString().contains("podcast-art"))
+            assertEquals(
+                0.25,
+                metadata.extras!!.getDouble(MediaConstants.EXTRAS_KEY_COMPLETION_PERCENTAGE),
+                0.0001,
+            )
+            assertEquals(0, bridges)
+            assertEquals(0, h.dbProviderReadsOnMain.get())
+            assertTrue(h.store.calls.isEmpty())
+            assertTrue(h.store.requestedWindows.isEmpty())
+            assertNull(h.index[1])
+            assertNull(h.resolver.streamKind(1))
+            assertNull(h.hub.bridge)
+        }
+    }
+
+    @Test fun falseResumptionFailsForMissingCurrentRemovedEpisodeAndExternalYouTube() {
+        LifecycleHarness(RuntimeEnvironment.getApplication()).use { h ->
+            val provider = ResumptionProvider(h.access.savedResumption::load) { error("Unexpected playback") }
+            assertFailsWith<UnsupportedOperationException> { h.run { provider.resume(false, StartOrigin.EXTERNAL) } }
+            h.seedCurrent()
+            h.lookup.items.value = emptyMap()
+            assertFailsWith<UnsupportedOperationException> { h.run { provider.resume(false, StartOrigin.EXTERNAL) } }
+            h.lookup.items.value = mapOf(1L to media(type = SourceType.YOUTUBE_CHANNEL))
+            assertFailsWith<UnsupportedOperationException> { h.run { provider.resume(false, StartOrigin.EXTERNAL) } }
+            assertTrue(h.store.calls.isEmpty())
         }
     }
 

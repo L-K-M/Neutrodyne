@@ -39,6 +39,27 @@ internal class PlayerFactory(
         val snapshot = prefs().current.value
         val renderers =
             object : DefaultRenderersFactory(ctx) {
+                // Video-as-audio never instantiates a video/text renderer, even if a controller
+                // attempts to override track selection. M14 owns adding a visual surface.
+                override fun buildVideoRenderers(
+                    context: Context,
+                    extensionRendererMode: Int,
+                    mediaCodecSelector: androidx.media3.exoplayer.mediacodec.MediaCodecSelector,
+                    enableDecoderFallback: Boolean,
+                    eventHandler: android.os.Handler,
+                    eventListener: androidx.media3.exoplayer.video.VideoRendererEventListener,
+                    allowedVideoJoiningTimeMs: Long,
+                    out: ArrayList<androidx.media3.exoplayer.Renderer>,
+                ) = Unit
+
+                override fun buildTextRenderers(
+                    context: Context,
+                    output: androidx.media3.exoplayer.text.TextOutput,
+                    outputLooper: android.os.Looper,
+                    extensionRendererMode: Int,
+                    out: ArrayList<androidx.media3.exoplayer.Renderer>,
+                ) = Unit
+
                 override fun buildAudioSink(
                     context: Context,
                     enableFloatOutput: Boolean,
@@ -82,6 +103,7 @@ internal class PlayerFactory(
                                 .setAudioOffloadMode(AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED)
                                 .build(),
                         ).build()
+                PlaybackTestHooks.playerCreated?.invoke(this)
                 setSeekParameters(SeekParameters.EXACT)
                 repeatMode = Player.REPEAT_MODE_OFF
                 shuffleModeEnabled = false

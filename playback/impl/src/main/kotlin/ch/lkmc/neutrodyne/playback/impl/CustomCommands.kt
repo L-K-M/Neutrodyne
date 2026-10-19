@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.playback.impl
 import android.os.Bundle
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
+import ch.lkmc.neutrodyne.core.domain.StartMembership
 import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.ExternalReason
 import ch.lkmc.neutrodyne.core.model.FeedFilters
@@ -37,11 +38,15 @@ internal object CustomCommands {
                 }
 
                 is StartRequest.Episode -> {
+                    require(request.externalQueue == null) { "External lists enter through Media3" }
                     putLong("startEpisodeId", request.episodeId)
                     request.positionMs?.let { putLong("startPositionMs", it) }
                 }
 
                 is StartRequest.Feed -> {
+                    require(request.membership == StartMembership.ANY) {
+                        "Browse validation enters through Media3"
+                    }
                     val type =
                         when (val source = request.source) {
                             FeedSource.All -> {

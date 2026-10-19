@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.playback.impl
 
 import android.app.Application
 import android.os.Looper
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -100,6 +101,26 @@ class SessionPlayerTest {
         player.seekToPreviousMediaItem()
         player.seekToPrevious()
         assertEquals(2, previous)
+    }
+
+    @Test fun controllersCannotReenableVideoOrTextSelection() {
+        exo.trackSelectionParameters =
+            exo.trackSelectionParameters
+                .buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                .build()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertFalse(player.isCommandAvailable(Player.COMMAND_SET_TRACK_SELECTION_PARAMETERS))
+        player.trackSelectionParameters =
+            exo.trackSelectionParameters
+                .buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, false)
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                .build()
+        assertTrue(
+            exo.trackSelectionParameters.disabledTrackTypes.containsAll(listOf(C.TRACK_TYPE_VIDEO, C.TRACK_TYPE_TEXT)),
+        )
     }
 
     @Test fun neverResumesWhenGateRefuses() {

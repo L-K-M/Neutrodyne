@@ -145,6 +145,7 @@ dependencies {
 
     androidTestImplementation(libs.androidx.media3.common)
     androidTestImplementation(libs.androidx.media3.session)
+    androidTestImplementation(libs.androidx.media3.exoplayer)
     androidTestImplementation(libs.kotlinx.coroutines.guava)
     androidTestImplementation(platform(libs.okhttp.bom))
     androidTestImplementation(libs.okhttp.mockwebserver3)

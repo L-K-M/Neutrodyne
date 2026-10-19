@@ -99,9 +99,9 @@ internal class EpisodeResolver(
         }
         // 04 delivers stream extraction in M9a. Never fall through to a YouTube watch/enclosure URL.
         if (source.sourceType != SourceType.RSS) throw YouTubeResolveException(ResolveResult.Unsupported)
-        val url = source.enclosureUrl ?: throw NoMediaException()
-        if (url.toUri().scheme !in REMOTE_SCHEMES) throw NoMediaException()
-        val key = EnclosureFingerprint.cacheKey(id, url, source.enclosureLength)
+        val selected = source.audioSource() ?: throw NoMediaException()
+        val url = selected.url
+        val key = EnclosureFingerprint.cacheKey(id, url, selected.length)
         streamingCache.pinRemote(key)
         return Pin.Remote(url, key)
     }
@@ -142,7 +142,6 @@ internal class EpisodeResolver(
 
     private companion object {
         val LOCAL_SCHEMES = setOf("file", "content")
-        val REMOTE_SCHEMES = setOf("http", "https")
     }
 }
 

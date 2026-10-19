@@ -79,7 +79,7 @@ class CustomCommandsTest {
             listOf(
                 "https://evil.test/file",
                 "episode:0",
-                "episode:1@group:7",
+                "episode:1@group:0",
                 "episode:1@upnext/trailing",
                 "episode:01",
             )

@@ -39,6 +39,7 @@ internal class SessionPlayer private constructor(
                 .buildUpon()
                 .remove(Player.COMMAND_SET_REPEAT_MODE)
                 .remove(Player.COMMAND_SET_SHUFFLE_MODE)
+                .remove(Player.COMMAND_SET_TRACK_SELECTION_PARAMETERS)
         if (exo.mediaItemCount > 0) {
             commands.addAll(
                 Player.COMMAND_SEEK_TO_NEXT,
