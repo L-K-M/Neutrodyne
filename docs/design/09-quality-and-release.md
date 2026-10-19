@@ -708,7 +708,32 @@ The instrumented job's preamble (as AntennaPod does): `sudo rm -rf /usr/share/do
 
 ### `nightly.yml`
 
-`schedule: cron "17 2 * * *"` plus `workflow_dispatch` with input `scope` (`full`, default; `youtube-smoke` = only `release-build-smoke` and the `api36` debug leg of `instrumented-full` filtered to `YouTubeReleaseSmokeTest` and `SmokeTest`, plus, from MD3, `:youtube:ytdlp-desktop:shimTestStdio` and `StdioYtxTransportTest` on Linux x64 — ≈ 15 min, used by the hotfix path; `desktop` = only `desktop-matrix`, dispatched by PRs that change native code or a bundled component; `first-launch-restore` = only `first-launch-restore`, M3's seeded first-launch restore gate — `:app:api26DebugAndroidTest :app:api36DebugAndroidTest` with `firstLaunchSeed=restore` and the `FirstLaunchRestoreDeviceTest` class filter, [05 Testing](05-groups-opml-backup.md#testing); an opt-in scope because a run without the seed argument would only report the class's skip). Changed 2026-10-06: the `ref` dispatch input is gone — every job checks out `github.sha`, the exact commit the run's `head_sha` records, because the input's `main` default let a dispatched run test a different commit than the one `release.sh` gates on (a dispatch on another branch now selects it with GitHub's native ref picker). The Ubuntu GMD jobs (`instrumented-full`, `release-build-smoke`) install the emulator and platform-tools before their Gradle runs (`sdkmanager --install`), as `ci.yml`'s `instrumented` does: the runner image no longer ships the emulator package (added 2026-10-06). A failing job runs `scripts/ci/report-nightly.sh <job>`, which opens or updates one issue per job (label `nightly-failure`, `permissions: issues: write`) and closes it after the next green run.
+`schedule: cron "17 2 * * *"` plus `workflow_dispatch` with input `scope`:
+
+- `full` is the default.
+- `youtube-smoke` runs `release-build-smoke` and the `api36` debug leg of
+  `instrumented-full`, currently filtered to `ExternalYouTubeModeTest` (E8).
+  Release execution selects the existing `ReleaseSmoke` suite, including E8.
+  The informational feed-only `youtube-canary` also runs; its result neither
+  blocks a release nor supplies successful gating evidence. M9a adds E7; MD3
+  adds `:youtube:ytdlp-desktop:shimTestStdio` and `StdioYtxTransportTest` on
+  Linux x64. The two required smoke jobs remain the hotfix gate.
+- `desktop` selects `desktop-matrix` for native or bundled-component changes.
+- `downloads` selects M6 download journeys on API26/33/34/36.
+- `first-launch-restore` selects only M3's seeded logical restore gate:
+  `:app:api26DebugAndroidTest :app:api36DebugAndroidTest` with
+  `firstLaunchSeed=restore` and the `FirstLaunchRestoreDeviceTest` class filter
+  ([05 Testing](05-groups-opml-backup.md#testing)). An unseeded run cannot
+  supply the required named execution evidence.
+
+Since 2026-10-06, the `ref` dispatch input is gone: every job checks out
+`github.sha`, the exact commit recorded by `head_sha`. Select the branch through
+GitHub's native ref picker. The Ubuntu GMD jobs install the emulator and
+platform-tools with `sdkmanager --install`, as `ci.yml`'s instrumented job does;
+the runner image no longer ships the emulator package. A failing job invokes
+`scripts/ci/report-nightly.sh <job>` to open or update its `nightly-failure`
+issue; the next green main run closes it. Branch probes retain diagnostics
+without changing main's issues.
 
 | Job | From | Runs | Blocks a release? |
 |---|---|---|---|

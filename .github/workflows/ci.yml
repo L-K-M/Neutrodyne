@@ -106,6 +106,7 @@ jobs:
           python3 scripts/ci/tests/assert-download-tests.test.py
           python3 scripts/ci/tests/assert-discovery-tests.test.py
           python3 scripts/ci/tests/youtube-feed-canary.test.py
+          python3 scripts/ci/tests/release-nightly-gate.test.py
           python3 scripts/ci/tests/playback-reboot.test.py
           python3 scripts/ci/tests/assert-system-tests.test.py
           python3 scripts/ci/tests/first-launch-restore-results.test.py
