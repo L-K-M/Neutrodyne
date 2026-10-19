@@ -10,6 +10,12 @@ object YouTubeVariantBits {
     const val LONG_FORM = 1
     const val SHORTS = 2
     const val LIVE = 4
+    const val ALL = LONG_FORM or SHORTS or LIVE
+
+    fun isValid(variants: Int): Boolean = variants != 0 && variants and ALL == variants
+
+    /** Imported Shorts-only/live-only values are valid; interactive settings keep LONG_FORM. */
+    fun isValidForSettings(variants: Int): Boolean = isValid(variants) && variants and LONG_FORM != 0
 }
 
 /**

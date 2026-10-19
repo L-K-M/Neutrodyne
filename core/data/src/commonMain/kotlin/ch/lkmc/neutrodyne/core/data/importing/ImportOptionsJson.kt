@@ -11,6 +11,7 @@ import ch.lkmc.neutrodyne.core.model.LinkedRestoreReach
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.RestoreMode
 import ch.lkmc.neutrodyne.core.model.SourceGroup
+import ch.lkmc.neutrodyne.core.model.YouTubeVariantBits
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -43,6 +44,8 @@ internal data class ImportOptionsJson(
     val laneAttempts: Int = 0,
     val sourceGroups: List<SourceGroupJson> = emptyList(),
     val itemCustomTitles: Map<Int, String> = emptyMap(),
+    val itemYouTubeInputs: Map<Int, String> = emptyMap(),
+    val itemYouTubeVariants: Map<Int, Int> = emptyMap(),
     val committedAt: Long? = null,
     val attemptMarkerAt: Long? = null,
 ) {
@@ -64,6 +67,11 @@ internal data class ImportOptionsJson(
             laneAttempts = laneAttempts,
             sourceGroups = sourceGroups.map(SourceGroupJson::toModel),
             itemCustomTitles = itemCustomTitles,
+            itemYouTubeInputs = itemYouTubeInputs,
+            itemYouTubeVariants =
+                itemYouTubeVariants.filterValues(
+                    YouTubeVariantBits::isValid,
+                ),
             committedAt = committedAt,
             attemptMarkerAt = attemptMarkerAt,
         )
@@ -87,6 +95,11 @@ internal data class ImportOptionsJson(
                 laneAttempts = options.laneAttempts,
                 sourceGroups = options.sourceGroups.map(SourceGroupJson::fromModel),
                 itemCustomTitles = options.itemCustomTitles,
+                itemYouTubeInputs = options.itemYouTubeInputs,
+                itemYouTubeVariants =
+                    options.itemYouTubeVariants.filterValues(
+                        YouTubeVariantBits::isValid,
+                    ),
                 committedAt = options.committedAt,
                 attemptMarkerAt = options.attemptMarkerAt,
             )

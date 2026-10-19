@@ -8,6 +8,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(project(":youtube:api"))
+            implementation(libs.kotlinx.coroutines.core)
             implementation(project(":core:model"))
             implementation(project(":core:common"))
             implementation(project(":core:network"))

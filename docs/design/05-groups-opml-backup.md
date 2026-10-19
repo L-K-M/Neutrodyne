@@ -1337,6 +1337,8 @@ close as if deletion succeeded.
 
 ## Other import formats
 
+Implementation note (2026-10-19, M8): W1 adds parser-owned ordinal maps `itemYouTubeInputs` and `itemYouTubeVariants` to `optionsJson`, defaulting to empty for old sessions and preserved across preview edits. They retain a classified `htmlUrl` input and validated variant precedence without schema changes. W5 resolves unfinished old sessions lazily on retry/re-preview, dedupes canonical channel identities transactionally and unions memberships; historical reports stay intact (adopted resolution 7).
+
 Serves R1.6, R1.7, R8.1. Delivered in [M3](../PLAN.md#m3-import-export-and-backup) on both platforms (sniffing, backups, YouTube reported as unsupported) and [M8](../PLAN.md#m8-youtube-subscriptions-in-all-builds) (YouTube formats). Format specifications and parsers: [04 Import and export formats](04-youtube.md#import-and-export-formats); this section is how they enter the pipeline.
 
 ### Sniffing

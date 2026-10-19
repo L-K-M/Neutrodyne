@@ -36,7 +36,8 @@ internal interface SourceAdapter {
         mode: FetchMode,
     ): AdapterResult
 
-    /** May only raise [base] (03 policy table: YouTube's 15-minute floor uses it). */
+    /** May raise [base]; only YouTube's bounded gap rule may lower a normal success interval.
+     * Server/backoff/deferred deadlines still win; the 15-minute floor always applies there. */
     fun nextRefreshAt(
         feed: DueFeed,
         result: AdapterResult,

@@ -327,6 +327,8 @@ Capabilities are all-or-nothing in v1 (`externalReason == null` ⇔ all five `tr
 
 ### DI bindings
 
+Implementation note (2026-10-19, M8): Both shells bind named external implementations in M8: all five capabilities false, `NOT_YET_AVAILABLE`, regardless of packaged self-test scaffolding (adopted resolution 1).
+
 Bound only in the shells' YouTube binding containers — `:app`'s `YouTubeBindingsModule` and `:desktopApp`'s `DesktopYouTubeBindingsModule` ([01 YouTube bindings](01-foundation.md#youtube-bindings)); `YouTubeChannelResolver` (→ `DefaultYouTubeChannelResolver`, `:youtube:impl`), `YouTubeHealth` (→ `DefaultYouTubeHealth`, `:core:data`), `YouTubeChannelRepository` and `YouTubeAvailabilityRecorder` (`:core:data`) are capability-independent bindings contributed by their modules (Metro), the same on both platforms. The host ports of [Shared engine module](#shared-engine-module) are contributed by the host modules, never by the shells' containers.
 
 | Interface | Engine-backed (default builds: APKs from M9a, desktop builds from MD3; serves every build and state) | External-only (before M9a / MD3; emergency builds) |
@@ -579,6 +581,8 @@ The prefixes are undocumented; if YouTube drops them, the `channel_id` fallback 
 
 ### Fetch policy
 
+Implementation note (2026-10-19, M8): Primary 404/410 always tries canonical first, even for Shorts/live-only masks. Only secondary 404/410 is empty; failed fallback keeps its real diagnostic (adopted resolution 2).
+
 | Rule | Value |
 |---|---|
 | Requests per refresh | One per set bit, **sequentially** in bit order inside the feed's 03 permit (so at most 2 concurrent requests to `www.youtube.com`, [D25](../PLAN.md#3-key-decisions)); plus one `channel_id` fallback when the primary (lowest set bit) returns 404 |
@@ -627,6 +631,8 @@ Episode columns (subset; full entity in [02 episode](02-data-model.md#episode)):
 
 ### Merge algorithm
 
+Implementation note (2026-10-19, M8): Feed-independent W1 DTOs retain published/raw-published and D19 sortDate. Generic Atom keeps its fallback; YouTube ignores updated. The digest adds normalized authorName, and item hashes include sticky Shorts changes (adopted resolution 4; W3 implements).
+
 `YouTubeEntryRules.merge(results, enabledBits): MergedChannel` (pure), called by `YouTubeSourceAdapter` with one `VariantResult` per polled URL (`Ok(bit, entries, authorName)`, `Empty(bit)`, `Failed(bit, httpCode, cause)`; the `channel_id` fallback reports under the primary's bit with `fallback = true`):
 
 1. If the primary variant failed and its `channel_id` fallback failed too → channel failure; no ingest (see [Errors and global outage](#errors-and-global-outage)). A failed **secondary** variant (`UUSH`, `UULV`) does not fail the channel: the others are ingested and step 7 marks no absences.
@@ -648,9 +654,13 @@ YouTube feeds show only the newest 15 entries per variant, so "absent from this 
 
 ### Gap detection
 
+Implementation note (2026-10-19, M8): The bounded gap rule may lower ordinary success intervals for three refreshes, retaining the 15-minute floor and server/backoff/deferred deadlines; manual bypass is unchanged (adopted resolution 3; W3 implements).
+
 On a non-initial refresh, if every entry of a 15-entry variant is unknown, items may have been missed between refreshes (high-volume channels, or the device was offline). Then: with the engine, the enrichment step also requests `uploadsPage(channelId, bit, null)` (one page, ~30 items) and ingests unknown IDs through 03's `FeedIngestor` in `OLDER_PAGE` mode (never `isNew`, never flips absence; [D66](../PLAN.md#3-key-decisions)); in both capability modes `nextRefreshAt` is pulled in to `now + max(15 min, interval / 2)` for the next three refreshes of that channel (in memory, best effort). The 15 newest unknown items of the triggering refresh stay `isNew = 1` subject to 03's dump guard.
 
 ### Errors and global outage
+
+Implementation note (2026-10-19, M8): W1 freezes cancellable, 20-second probe/finalization APIs; controls share the host permit limit. Global outage alone suppresses channel badges (adopted resolution 5). Named controls are YouTube `UCBR8-60-B28hp2BmDPdntcQ` and Google `UCK8sQmJBp8GCxrOtXWBpyEA`. W4/W9 disclose their extra canonical-feed requests before enabling them; W1 makes none.
 
 Since December 2025 the feed endpoint has repeatedly answered 404 for every feed for hours. A YouTube-wide outage must never mark channels dead or unsubscribe them (R3.3).
 
@@ -1312,6 +1322,8 @@ Export (05 writes the XML, [D31](../PLAN.md#3-key-decisions)): each channel as `
 
 ### Pipeline rules for YouTube items (05 implements)
 
+Implementation note (2026-10-19, M8): Parser-owned ordinal maps `itemYouTubeInputs` and `itemYouTubeVariants` retain htmlUrl-selected inputs and validated nd-over-hint-over-LONG_FORM masks in optionsJson. Old maps default empty. W5 lazily upgrades unfinished sessions on retry/re-preview, preserves historical reports and unions duplicate memberships transactionally without handle identities (adopted resolution 7).
+
 1. Before M8: YouTube items get `YOUTUBE_UNSUPPORTED_YET` and are not selectable.
 2. Statically known channels: commit inserts `PENDING_FIRST_FETCH` podcasts with the canonical feed URL, `youtubeChannelId`, `youtubeVariants`, title from the file, `initialFetch = 1`, `channelMetadataAt = null`. Dedupe by `feedKey`; duplicates within one file merge with the union of group names.
 3. Items needing resolution (handle, legacy path, video URL) are not inserted by the commit transaction; their `import_item` stays `QUEUED`. `ImportFetchWorker` resolves them (`ID_ONLY` depth, 2 concurrently, 0.5–1.5 s jitter), then inserts each podcast in its own transaction with the same semantics, then lets the refresh engine fetch it. Resolution failure → `FETCH_FAILED` with "Couldn't find this YouTube channel" and the usual Edit URL / Remove actions. These rare items may miss R1.3's 2-second library appearance; no handle is ever stored.
@@ -1599,6 +1611,8 @@ Rejected: NewPipe Extractor (GPL-3.0-or-later; the previous design), youtubedl-a
 ---
 
 ## Settings
+
+Implementation note (2026-10-19, M8): W1 registers M8 keys only: portable preferences, device-only health, no youtube-key sync. Zero stored deadline means null in health APIs. External mode cannot classify all live/premiere/member items; disabling LIVE changes future polls only (adopted resolution 6).
 
 | Key | Type | Default | File | UI location | Milestone |
 |---|---|---|---|---|---|

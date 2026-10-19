@@ -1013,6 +1013,8 @@ Expected cost: 300 feeds at 6 parallel and 1–2 s each ≈ 1–2 min on a fresh
 
 ### nextRefreshAt policy
 
+Implementation note (2026-10-19, M8): The YouTube gap rule may lower the ordinary success interval for three refreshes, with a 15-minute minimum. Server, backoff and deferred deadlines still win, and manual refresh bypass remains unchanged. This is the narrow exception to the adapter hook's raise-only rule (adopted resolution 3); W3 implements it.
+
 `I` = effective interval of the podcast (D45); `NEVER = 253_402_300_799_000` (9999-12-31) for "Manual only".
 
 | Outcome | `nextRefreshAt` | Other columns |

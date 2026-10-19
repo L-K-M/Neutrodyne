@@ -36,6 +36,7 @@ import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
+import ch.lkmc.neutrodyne.youtube.api.ChannelResolution
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
@@ -69,6 +70,12 @@ internal class SubscribeUseCaseImpl(
     private val orderKeys: OrderKeys,
     private val clock: Clock,
 ) : SubscribeUseCase {
+    override suspend fun youTube(
+        resolution: ChannelResolution.Resolved,
+        variants: Int,
+        groupIds: Set<Long>,
+    ): Outcome<Long, SubscribeError> = Outcome.Failure(SubscribeError.YouTubeNotYetAvailable)
+
     override suspend fun invoke(
         previewId: String,
         groupIds: Set<Long>,
