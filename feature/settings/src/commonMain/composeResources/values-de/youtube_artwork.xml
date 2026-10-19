@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="appearance_youtube_row_art">YouTube-Zeilenbilder</string>
+    <string name="appearance_youtube_video_thumbnail">Video-Vorschaubild</string>
+    <string name="appearance_youtube_channel_avatar">Kanalbild</string>
+</resources>

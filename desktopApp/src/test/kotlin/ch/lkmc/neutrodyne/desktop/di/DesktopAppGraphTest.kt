@@ -248,6 +248,11 @@ class DesktopAppGraphTest {
         try {
             assertThat(loader.memoryCache).isNotNull()
             assertThat(loader.diskCache).isNotNull()
+            assertThat(
+                loader.components.interceptors.any {
+                    it is ch.lkmc.neutrodyne.core.artwork.YouTubeThumbnailInterceptor
+                },
+            ).isTrue()
 
             val ref = ArtworkRef(key = ArtworkKeys.forUrl(ARTWORK_URL), url = ARTWORK_URL, version = 0)
             val mapper =

@@ -741,6 +741,13 @@ With the engine, M9a; `YouTubeChannelRepository.loadOlder(podcastId)` from the p
 
 Serves R3.2, R5.2, R5.3, R5.8. Delivered in M8. 08 owns rendering, `ArtworkStore`, Coil and the interceptor code; this section defines the sources.
 
+Implementation note (2026-10-19, M8): W7 supplies the common URL rules and
+thumbnail interceptor. Avatar normalization defaults to 900 px; video URLs
+default to `mqdefault`. Banner selection returns only a URL and does not
+fetch or pin it; W3/W6 own metadata persistence and lazy detail loading.
+All M8 artwork works in external mode without engine lookup (adopted
+resolution 1).
+
 ```kotlin
 object YouTubeThumbnails {
     val THUMB = Regex("""^https?://i\d?\.ytimg\.com/vi(?:_webp)?/([\w-]{11})/(\w+)\.(?:jpg|webp)$""")
