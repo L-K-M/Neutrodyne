@@ -104,10 +104,12 @@ import kotlin.uuid.Uuid
  * same transaction's rows ("from the in-memory library", 05 Writing), so it cannot disagree
  * with `library.json`.
  *
- * The R1.9 warning counts [preflight] reports are derived from the same rows and the same
- * credential rule the write path uses; the write itself re-derives the numbers from its own
- * in-transaction snapshot, so a warning can only drift when the library or a credential changes
- * between the dialog and the save (05 Writing).
+ * The R1.9 warning counts come in two shapes (05 Writing): [preflight] is advisory — it
+ * derives numbers from the same rows and the same credential rule the write path uses,
+ * but its own earlier snapshot, so a library or credential change between the dialog and
+ * the save can make it stale. [writeMeasured] instead reports counts measured on the
+ * very rows and `CredentialV1`s the archive carries, which is what the prepared-backup
+ * flow's warning shows.
  * Passwords travel only on opt-in and only in manual backups (D33, 05): snapshots never carry
  * credentials or `subscriptions.opml`. Secret I/O stays outside the Room transaction — 05 keeps
  * `SecretStore` calls (Android Keystore, the desktop secrets file) out of Room transactions.
@@ -151,7 +153,25 @@ internal class BackupWriter(
         includeCredentials: Boolean,
         level: SnapshotLevel = SnapshotLevel.FULL,
         maxCompressedBytes: Long = MAX_IMPORT_PAYLOAD_BYTES,
-    ): Outcome<BackupSummary, BackupError> {
+    ): Outcome<BackupSummary, BackupError> =
+        when (val written = writeMeasured(kind, target, includeCredentials, level, maxCompressedBytes)) {
+            is Outcome.Failure -> written
+            is Outcome.Success -> Outcome.Success(written.value.summary)
+        }
+
+    /**
+     * [write] plus its receipt: the summary and the R1.9 counts are measured on the rows
+     * and `CredentialV1`s this pass actually emitted — no second library read, no second
+     * secret read, no archive re-parse — so the prepared-backup flow can warn about the
+     * exact bytes it later hands to a destination.
+     */
+    suspend fun writeMeasured(
+        kind: BackupKind,
+        target: Path,
+        includeCredentials: Boolean,
+        level: SnapshotLevel = SnapshotLevel.FULL,
+        maxCompressedBytes: Long = MAX_IMPORT_PAYLOAD_BYTES,
+    ): Outcome<WrittenBackup, BackupError> {
         require(kind == BackupKind.AUTO_SNAPSHOT || level == SnapshotLevel.FULL) {
             "history levels apply to AUTO_SNAPSHOT writes; a $kind write carries every line"
         }
@@ -161,8 +181,10 @@ internal class BackupWriter(
     /**
      * The R1.9 warning counts (05 Writing): private feed links in the library and the passwords
      * an opted-in write would embed. Counted over the same `libraryPodcasts` rows and the same
-     * `SecretStore.forPodcast != null` rule [write] applies, so on an unchanged library the
-     * numbers describe exactly the content the next write produces.
+     * `SecretStore.forPodcast != null` rule [write] applies — but in its own earlier
+     * snapshot, so the result is advisory only: library or credential changes between the
+     * dialog and the save make it drift (05 Writing). The frozen-consent flow warns from
+     * [writeMeasured]'s receipt instead.
      */
     suspend fun preflight(includePasswords: Boolean): PrivacyCounts {
         val podcasts = db.backupReadTransaction { libraryPodcasts() }
@@ -177,7 +199,7 @@ internal class BackupWriter(
         includeCredentials: Boolean,
         level: SnapshotLevel,
         maxCompressedBytes: Long,
-    ): Outcome<BackupSummary, BackupError> =
+    ): Outcome<WrittenBackup, BackupError> =
         withContext(io) {
             val staged = stagedPath(target)
             try {
@@ -209,7 +231,7 @@ internal class BackupWriter(
         includeCredentials: Boolean,
         level: SnapshotLevel,
         maxCompressedBytes: Long,
-    ): BackupSummary {
+    ): WrittenBackup {
         // 05 Writing step 1: the portable snapshot is read once, outside the transaction.
         val settingValues = settingValues()
         val installationId = installationId()
@@ -217,6 +239,7 @@ internal class BackupWriter(
 
         val writer = archives.create(staged)
         val read: Read
+        val credentials: List<CredentialV1>
         try {
             // Step 2: one read transaction — every export row plus the streamed
             // `episodes.jsonl` (the archive's first entry) and the OPML's rows. Queue and
@@ -242,7 +265,7 @@ internal class BackupWriter(
                 }
 
             // Step 3: secrets outside the transaction, then the remaining entries in order.
-            val credentials =
+            credentials =
                 if (kind == BackupKind.MANUAL && includeCredentials) credentials(read.podcasts) else emptyList()
 
             val entries = ArrayList<EntryInfo>(ENTRY_SLOTS)
@@ -318,10 +341,21 @@ internal class BackupWriter(
         fileSystem.openReadWrite(staged).use { it.flush() }
         currentCoroutineContext().ensureActive()
         fileSystem.atomicMove(staged, target)
-        return BackupSummary(
-            bytes = bytes,
-            podcasts = read.podcasts.size,
-            episodeLines = read.episodes.lines,
+        return WrittenBackup(
+            summary =
+                BackupSummary(
+                    bytes = bytes,
+                    podcasts = read.podcasts.size,
+                    episodeLines = read.episodes.lines,
+                ),
+            // The warning counts describe this archive: private links among the podcast
+            // rows `library.json` carries, and the credentials that were actually
+            // selected and written — never a second read of either.
+            privacy =
+                PrivacyCounts(
+                    privateLinks = read.podcasts.count { PrivateFeedUrls.looksPrivate(it.feedUrl) },
+                    passwords = credentials.size,
+                ),
         )
     }
 
@@ -832,6 +866,16 @@ internal class BackupWriter(
         const val TYPE_CHOICE = "Choice"
     }
 }
+
+/**
+ * One [BackupWriter.writeMeasured] pass's receipt: the public [BackupSummary] plus the
+ * R1.9 [PrivacyCounts] measured on the rows and credentials that pass actually wrote,
+ * so a prepared-backup descriptor warns about the exact bytes it owns.
+ */
+internal class WrittenBackup(
+    val summary: BackupSummary,
+    val privacy: PrivacyCounts,
+)
 
 /**
  * 05 Snapshot production's episode-line levels — the producer asks for one and

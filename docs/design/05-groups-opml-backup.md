@@ -30,7 +30,7 @@ Since the scope revision ([D81](../PLAN.md#3-key-decisions)) all of it is common
 
 | Module | Contents from this document |
 |---|---|
-| `:core:model` (common) | `Group`, `GroupDraft`, `GroupEdit`, `GroupPalette`, `GroupIcons`, `FeedTab`, `FeedCounts`, `VirtualCounts`, `FeedPrefs`, `DownloadAllEstimate`, `PlayContextSpec`, `SettingOverrides`, `SettingSource`, `Effective`, `EffectivePlayback`, `EffectiveAutoDownload`, `ImportOptions`, `SourceGroup`, `ImportSessionView`, `ImportItemView`, `GroupProposal`, `ExportRequest`, `PreparedExport`, `ExportLayout`, `BackupPreview`, `RestoreRequest`, `LinkedRestoreReach`, `RestoreProgress`, `SnapshotStatus`, `PrivacyCounts`, `MergePolicy`, `MergeSummary` |
+| `:core:model` (common) | `Group`, `GroupDraft`, `GroupEdit`, `GroupPalette`, `GroupIcons`, `FeedTab`, `FeedCounts`, `VirtualCounts`, `FeedPrefs`, `DownloadAllEstimate`, `PlayContextSpec`, `SettingOverrides`, `SettingSource`, `Effective`, `EffectivePlayback`, `EffectiveAutoDownload`, `ImportOptions`, `SourceGroup`, `ImportSessionView`, `ImportItemView`, `GroupProposal`, `ExportRequest`, `PreparedExport`, `ExportLayout`, `BackupPreview`, `RestoreRequest`, `LinkedRestoreReach`, `RestoreProgress`, `SnapshotStatus`, `PrivacyCounts`, `PreparedBackup`, `MergePolicy`, `MergeSummary` |
 | `:core:domain` (common) | Interfaces `FeedRepository`, `GroupRepository`, `ScopeSettingsRepository`, `EffectiveSettingsResolver`, `PlayContextResolver`, `ImportRepository`, `ExportRepository`, `BackupRepository`, `LibraryMerger` (the port through which 10's `FirstLinkMerger` reaches `RestoreMerger`), `GroupChannelSync` (the channel port 10's `SyncApplier` calls; moved here 2026-10-05 so `:sync:impl` never depends on `:core:data`); errors `GroupError`, `ImportError`, `BackupError`, `ExportError` |
 | `:feeds` (common only; its JVM variant also runs in the sync server) | `GroupNames` (moved from `:core:model`), the OPML model, `OpmlWriter` and the `OpmlReader` interface, `ImportSourceSniffer`, `ImportDocuments`, `BackupCodec`, the backup DTOs, the archive interfaces `ArchiveReaderFactory`, `ArchiveReader`, `ArchiveWriterFactory`, `ArchiveWriter`, `ArchiveCaps`, `ArchiveException` (packages `ch.lkmc.neutrodyne.feeds.groups`, `.opml`, `.importing`, `.backup`); 04's YouTube parsers sit beside them (`.youtube`) |
 | `:feeds:jvm` (JVM island, [D81](../PLAN.md#3-key-decisions)) | `XmlPullOpmlReader` with `MarkupGapGuard` and the salvage scanner, `ZipGuard` (the `ArchiveReaderFactory`), `ZipArchiveWriter` (the `ArchiveWriterFactory`) (packages `ch.lkmc.neutrodyne.feeds.jvm.opml`, `.archive`); bound in `:core:data`'s `androidMain` and `desktopMain` |
@@ -965,7 +965,7 @@ cancelled caller's still-queued or modal dialog is disposed on the EDT.
 
 File names: OPML `neutrodyne-subscriptions-{yyyy-MM-dd}.opml`, MIME `text/x-opml`; a group `neutrodyne-{slug}-{yyyy-MM-dd}.opml` (slug = `nameKey` with non-`[a-z0-9]` runs → `-`, trimmed, ≤ 40 chars, fallback `group`); NewPipe JSON `neutrodyne-youtube-{yyyy-MM-dd}.json`, MIME `application/json` ([04 NewPipe subscriptions JSON](04-youtube.md#newpipe-subscriptions-json-import-and-export)).
 
-`res/xml/file_paths.xml` (`:app`, Android) contains `<cache-path name="export" path="export/"/>` (07 adds the download roots to the same file). `ExportFilesCleaner` (an `AppInitializer`, order 300, both platforms) deletes files in the export cache directory (Android `cacheDir/export/`, desktop `<cache>/export/`, [11 AppDirs](11-desktop.md#appdirs)) older than 24 h; each export also deletes older files with the same name.
+`res/xml/file_paths.xml` (`:app`, Android) contains `<cache-path name="export" path="export/"/>` (07 adds the download roots to the same file). `ExportFilesCleaner` (an `AppInitializer`, order 300, both platforms) deletes files in the export cache directory (Android `cacheDir/export/`, desktop `<cache>/export/`, [11 AppDirs](11-desktop.md#appdirs)) older than 24 h — it owns every abandoned prepared artifact there, `prepared-*.zip` backup leaves included; each export also deletes older files with the same name.
 
 **Single-group export** ([R1.5](../PLAN.md#21-functional-requirements); shared on Android, saved on the desktop): `ExportKey(groupId)` writes one folder for that group with all its members (YouTube per the option) and `category` = that group only; Flat writes the members with `category` = that group. The OPML inside a full backup is the grouped export without passwords.
 
@@ -1280,6 +1280,8 @@ Status derivation, from the `FeedOutcome` ([03 API](03-feeds-and-discovery.md#ap
 
 The progress screen observes `ImportDao.observeProgress` ("Fetched 87 of 139"). At `DONE` the runner posts one notification, "139 added, 3 need attention", whose click opens `neutrodyne://open/import/{sessionId}` through 01's `IntentRouter` ([01 Intent routing](01-foundation.md#intent-routing)); it is skipped while that session's screen is visible. Android: channel `import_backup` (ID 3001, tag `import-{sessionId}`), skipped when `POST_NOTIFICATIONS` is not granted (never requested for imports). Desktop: `DesktopNotifier` through the OS notification centre ([11 Notifications](11-desktop.md#notifications)).
 
+Implementation note (2026-10-18, M3 C3b): the desktop `import-backup` lane runs local restores and cleanup offline, isolating a failed import session so later imports and cleanup still run. A user fix-up starts a fresh `laneAttempts` campaign, matching Android's new work request. Until MD2 supplies OS-centre delivery, the bound notifier uses 11's in-app banner fallback with a bounded pending queue. Replacing or cancelling pending notices keeps an already-visible banner's original Open action usable; discarded unshown callbacks are released. The added count includes newly subscribed items, not existing or merged subscriptions.
+
 | Action | Effect |
 |---|---|
 | Retry | `PodcastRepository.retry(podcastId, refresh = false)` (03: clears `gone`/`needsCredentials`/backoff without its own refresh), items → `QUEUED`, `attemptMarkerAt = now`, state `FETCHING`, `ImportWorkScheduler.schedule` (Android `import-{sessionId}` with `APPEND_OR_REPLACE`; desktop: lane poke) |
@@ -1509,9 +1511,11 @@ A backup does not depend on the ABI or capabilities of the app that wrote it (`A
 2. Open one read transaction ([02 Backup export](02-data-model.md#backup-export)): read podcasts (with `syncId`), aliases, settings rows, groups and members (with their `orderKey`s; `sortOrder` = rank in group order), queue (with `orderKey`) and session in full; stream episode lines in keyset chunks of 1,000 into the `episodes.jsonl` entry of the `ArchiveWriter` on `target.tmp` (a local file; no `ContentResolver` or other platform I/O inside the transaction), each entry through an Okio `HashingSink.sha256` and a byte/record counter. The archive is a point-in-time snapshot (WAL reader isolation).
 3. After the transaction: `library.json` (credentials read through `SecretStore` only when opted in; `credentialOrigin` is always written so a restore can flag `needsCredentials`), `queue.json`, `settings.json`, `subscriptions.opml` (manual only, from the in-memory library), then `manifest.json`.
 4. Close, flush to disk, atomic move `target.tmp` → `target` (Okio `FileSystem.atomicMove`).
-5. Manual backups: `target` = `<cache>/export/neutrodyne-backup-{yyyy-MM-dd-HHmm}.zip`; then, through `ExportDestination` as for OPML ([Destinations](#destinations)), Android copies it to the `CreateDocument("application/zip")` destination with `"wt"` and the desktop replaces the file chosen in the save dialog atomically; delete `target`, set `backup.last_manual_backup_at`. Snapshots: see [Auto Backup](#auto-backup) (Android).
+5. Manual backups are prepared once, then saved after consent: `BackupRepository.prepareBackup(includePasswords)` runs the same write into an owned `<cache>/export/prepared-{uuid}.zip` leaf — unique across calls, never the friendly name, so two same-minute prepares with different password choices can never share a source — and returns an opaque `PreparedBackup` whose `fileName` (`neutrodyne-backup-{yyyy-MM-dd-HHmm}.zip`), `summary` and `privacy` are all measured by that one write. `savePreparedBackup(prepared, uri)` copies exactly those bytes through `ExportDestination` as for OPML ([Destinations](#destinations)) — Android to the `CreateDocument("application/zip")` result with `"wt"`, the desktop replacing the file chosen in the save dialog atomically — consumes the descriptor, attempts to delete the leaf and sets `backup.last_manual_backup_at`. A descriptor not issued by that repository, already consumed by a successful save, or whose leaf the cleaner removed, fails `PreparedExpired` before any destination I/O; the archive is never rebuilt, a failed copy keeps the leaf for a warned retry, and a Cancel leaves the app-private file to `ExportFilesCleaner` like every export artifact. `createBackup(uri, includePasswords)` remains the one-shot non-interactive call — no warning can be checked against its bytes — and `preflight` survives only as an advisory preview: its counts come from a separate, earlier snapshot and can drift from what a later write saves. Snapshots: see [Auto Backup](#auto-backup) (Android).
 
-Write order is therefore `episodes.jsonl` (inside the read transaction), `library.json`, `queue.json`, `settings.json`, `subscriptions.opml`, `manifest.json`. The "Create backup" flow (`BackupKey`): switch "Include passwords for private feeds" (off every time); then `preflight(includePasswords)`, and when it reports private links or passwords the same warning dialog as [OPML export](#options-and-warnings) ("This backup contains private access links for N feeds…", "…and N passwords in plain text.", [R1.9](../PLAN.md#21-functional-requirements)); then the `CreateDocument` launcher (Android) or the save dialog (desktop: File › Back up library…, 11); then `createBackup(uri, includePasswords)` on `@ApplicationScope`.
+Write order is therefore `episodes.jsonl` (inside the read transaction), `library.json`, `queue.json`, `settings.json`, `subscriptions.opml`, `manifest.json`. The "Create backup" flow (`BackupKey`): switch "Include passwords for private feeds" (off every time); then `prepareBackup(includePasswords)`, and when the descriptor's `privacy` reports private links or passwords the same warning dialog as [OPML export](#options-and-warnings) ("This backup contains private access links for N feeds…", "…and N passwords in plain text.", [R1.9](../PLAN.md#21-functional-requirements)) — the counts are the saved archive's own, so the warning can never lag a library or credential change ([AC10](../PLAN.md#m3-import-export-and-backup)); then the `CreateDocument` launcher (Android) or the save dialog (desktop: File › Back up library…, 11); then `savePreparedBackup(prepared, uri)` on `@ApplicationScope`.
+
+*Implementation note (2026-10-18, M3 D4a):* the frozen-consent seam — `BackupWriter.writeMeasured` returns an internal `WrittenBackup` receipt carrying the `BackupSummary` and the `PrivacyCounts` measured on the very rows and `CredentialV1`s the pass emitted (no second library read, no second secret read, no archive re-parse); `BackupRepositoryImpl` mints `PreparedBackupFile` (`:core:data`), the only `PreparedBackup` `savePreparedBackup` accepts, registering each descriptor by reference in a repository-private set guarded by `backupMutex`. Save rejects unknown or foreign descriptors before filesystem access and checks that the resolved leaf stays under the private cache. A successful destination copy consumes the descriptor before any suspension; timestamp bookkeeping and best-effort leaf deletion run in `NonCancellable`, with undeleted leaves left to the cache cleaner. A failed copy keeps the descriptor retryable. Not a D33 change: archive format, entries, caps and the plain-text opt-in are untouched.
 
 **Implementation note (2026-10-17, M3 B9):** Before publication, the writer enforces the JSON/JSONL codec caps and the 50 MiB acquisition limit, then streams the completed stage through the bound archive reader with `ArchiveCaps.BACKUP`. A limit failure returns `TooLarge`, deletes the stage and preserves the previous target; installation-ID persistence failure returns `Storage`. Snapshot production retries the next drop level on `TooLarge`. `SCHEDULED` uses the manual archive shape, including OPML, but never passwords.
 
@@ -1531,12 +1535,22 @@ A backup arrives through the import pipeline ([Sniffing](#sniffing) → `NEUTROD
 // :core:domain — canonical interface, owned here
 interface BackupRepository {
     suspend fun createBackup(destinationUri: String, includePasswords: Boolean): Outcome<BackupSummary, BackupError>
+                                                                                // one shot, non-interactive callers; the
+                                                                                // warning cannot be checked against its bytes
+    suspend fun prepareBackup(includePasswords: Boolean): Outcome<PreparedBackup, BackupError>
+                                                                                // writes once to an owned unique cache leaf;
+                                                                                // the descriptor's counts are that write's own
+    suspend fun savePreparedBackup(prepared: PreparedBackup, destinationUri: String): Outcome<Unit, BackupError>
+                                                                                // copies exactly those bytes; PreparedExpired
+                                                                                // for a foreign descriptor or a gone leaf
     suspend fun inspect(sessionId: Long): Outcome<BackupPreview, BackupError>
     suspend fun restore(sessionId: Long, request: RestoreRequest): Outcome<Unit, BackupError>   // schedules RestoreRunner
     fun observeRestore(): Flow<RestoreProgress?>
     fun observeSnapshotStatus(): Flow<SnapshotStatus>                         // desktop: supported = false
     suspend fun setSnapshotEnabled(enabled: Boolean)                          // Android; desktop: no-op
-    suspend fun preflight(includePasswords: Boolean): PrivacyCounts            // R1.9 warning before createBackup
+    suspend fun preflight(includePasswords: Boolean): PrivacyCounts            // advisory R1.9 preview only — an earlier
+                                                                                // snapshot can drift; the interactive warning
+                                                                                // reads PreparedBackup.privacy
     suspend fun restoreAndroidBackup(): Outcome<Long, BackupError>              // Android: foreign snapshot → restore session id;
                                                                                 // desktop: Unsupported
     suspend fun discardAndroidBackup()                                          // Android: foreign snapshot → restored-{ts}.zip
@@ -1568,6 +1582,9 @@ data class SnapshotStatus(val supported: Boolean,               // false on the 
                            val foreignPending: Boolean)   // a snapshot from another installation waits (First-launch restore)
 data class SnapshotWrite(val before: SnapshotStatus, val after: SnapshotStatus)
 data class PrivacyCounts(val privateLinks: Int, val passwords: Int)
+// the frozen-consent descriptor — opaque; only :core:data's PreparedBackupFile implements it,
+// so a caller cannot fabricate a path or a metadata receipt
+interface PreparedBackup { val fileName: String; val summary: BackupSummary; val privacy: PrivacyCounts }
 ```
 
 **Implementation note (2026-10-18, M3 C5).** `writeSnapshotNow` returns
@@ -1976,7 +1993,7 @@ The reinstall deliberately omits the `-t` of the official script, so it also pro
 - Local debug builds (`BuildInfo.debug`, [D2](../PLAN.md#3-key-decisions)) additionally show a "Write snapshot now" row in Settings › Backup (08) that calls the same function; release builds do not have it.
 - The script cannot list `files/backup/` with `run-as` (the release build is not debuggable; the debuggable-build exposure, risk P11, was retired 2026-10-05); its assertions use only the receiver's result line and the local transport's file list.
 
-Pass: after reinstall the library, groups, played state, positions and Up next are back, and the local transport's backup data for the package contains only the two included files (no `databases/`, no `Podcasts/`). Device-to-device: the D2D script of the same page (Android 12+; its `D2dTransport` lives in Google Play services, so it needs a Google APIs image and is manual only). An automated `FirstLaunchRestoreTest` (GMD) covers the logic without `bmgr`: place a snapshot file, start with an empty database, assert the restored library.
+Pass: after reinstall the library, groups, played state, positions and Up next are back, and the local transport's backup data for the package contains only the two included files (no `databases/`, no `Podcasts/`). Device-to-device: the D2D script of the same page (Android 12+; its `D2dTransport` lives in Google Play services, so it needs a Google APIs image and is manual only). An automated `FirstLaunchRestoreDeviceTest` (GMD, `nightly.yml`'s opt-in `first-launch-restore` scope) covers the logic without `bmgr`: place a snapshot file written by the real writer, start with an empty database, assert the restored library (implementation note under [Testing](#testing)).
 
 ---
 
@@ -2150,6 +2167,34 @@ inside the 20 MB compressed cap; counts, timing, heap and size evidence go to
 `build/review-e2/`. The `SnapshotWorkerTest` row above still owns the Robolectric host legs
 (guards, watcher, worker lifecycle).
 
+**Implementation note (2026-10-18, M3):** the `FirstLaunchRestoreTest` row is implemented as
+`FirstLaunchRestoreDeviceTest` (`:app` `androidTest`), run on the `api26` and `api36` GMDs by
+`nightly.yml`'s opt-in `first-launch-restore` scope, which passes
+`-Pandroid.testInstrumentationRunnerArguments.firstLaunchSeed=restore` plus the class filter
+([09 `nightly.yml`](09-quality-and-release.md#nightlyyml)). `NeutrodyneTestRunner` seeds
+`files/backup/auto-snapshot.zip` through a throwaway `AndroidAppGraph` and the real
+`BackupRepository.writeSnapshotNow()` before production `onCreate`, then removes exactly what a
+reinstall loses — the database family and the *device* DataStore file — while the snapshot and
+the *portable* DataStore file stand in for what Auto Backup delivers; a portable preference
+changed after the write proves the restore's SETTINGS skip. The test then only observes
+production behaviour: band 100's `OpenResult.created`, the `backup-restore` work's `SUCCEEDED`
+`WorkInfo` (its public `restore-session-{id}` tag yields the session id), the session's
+`fromAndroidBackup` flag and exact HISTORY+UP_NEXT `MERGE` request, content equality of the
+seeded library, and the snapshot's retirement to `restored-*.zip` (or a valid, different
+replacement a periodic write may already have produced). Without the seed argument the class
+skips through `Assume`, and a skip is never a pass — the seeded scope is the evidence.
+The gate clears the two device result directories before GMD runs, then
+`scripts/ci/check-first-launch-restore-results.py` requires the named
+`firstLaunchRestoresTheSeededSnapshot` case in `FirstLaunchRestoreDeviceTest` to pass
+without skips, failures or errors in each device's own XML (`api26` and `api36`, with
+matching GMD device properties) before recovery reporting. Missing, malformed or duplicate
+reports cannot supply a device leg. The replacement-writer evidence check also requires
+every physical ZIP payload to be declared and hashed in the manifest, as [Writing](#writing)
+specifies; imports still ignore undeclared entries as
+[Validation and preview](#validation-and-preview) specifies. The `bmgr`, device-to-device
+and reference-device checks stay separate gates
+([Testing with bmgr](#testing-with-bmgr)).
+
 ---
 
 ## Error handling and failure modes
@@ -2178,6 +2223,8 @@ sealed interface BackupError {
     data object Storage : BackupError
     data object RestoreRunning : BackupError
     data object DestinationUnavailable : BackupError
+    data object PreparedExpired : BackupError                // foreign descriptor, or the owned leaf was
+                                                           // swept or consumed — prepare again; never rebuilds
     data object Unsupported : BackupError                    // Android-only members called on the desktop
 }
 sealed interface ExportError { data object Io : ExportError; data object Storage : ExportError
@@ -2253,7 +2300,7 @@ Shared code lands for both platforms in the milestone named; "Android" and "desk
 | `PlayContextResolver`, `PlayContextSpec` | play contexts | `:core:domain` / `:core:model` |
 | `ImportOptions`, `SourceGroup`, `CreateImportOptions`, `ImportSessionView`, `ImportItemView`, `ImportItemFilter`, `GroupProposal`, `ImportWarning`, `ImportError` | import API | `:core:model` / `:core:domain` |
 | `ExportRepository`, `ExportRequest`, `ExportFormat`, `ExportLayout`, `PreparedExport` | export API | `:core:domain` / `:core:model` |
-| `RestoreMode` (`MERGE`, `REPLACE`), `RestoreCategory`, `RestoreRequest`, `RestoreProgress`, `BackupPreview`, `BackupSummary`, `SnapshotStatus`, `SnapshotWrite`, `PrivacyCounts`, `BackupError`, `ExportError`; `BackupRepository` members `preflight`, `restoreAndroidBackup`, `discardAndroidBackup`, `writeSnapshotNow` | backup API | `:core:model` / `:core:domain` |
+| `RestoreMode` (`MERGE`, `REPLACE`), `RestoreCategory`, `RestoreRequest`, `RestoreProgress`, `BackupPreview`, `BackupSummary`, `SnapshotStatus`, `SnapshotWrite`, `PrivacyCounts`, `PreparedBackup`, `BackupError`, `ExportError`; `BackupRepository` members `preflight`, `prepareBackup`, `savePreparedBackup`, `restoreAndroidBackup`, `discardAndroidBackup`, `writeSnapshotNow`; `BackupError.PreparedExpired` | backup API | `:core:model` / `:core:domain` |
 | `LinkedRestoreReach` (`THIS_DEVICE`, `ALL_DEVICES`), `RestoreRequest.linkedReach`, `BackupPreview.linkedServerHost` and `writtenOn`, `SnapshotStatus.supported`, `BackupError.Unsupported`, `PreparedExport.shareUri` nullable *(2026-10-05)* | backup API additions | `:core:model` / `:core:domain` |
 | `LibraryMerger` (`mergeStaged`), `MergePolicy` (`RESTORE_MERGE`, `RESTORE_REPLACE`, `LINK_MERGE`, `LINK_REPLACE`), `MergeSummary`, `GroupChannelSync` (`sync`, `onUuidChanged`, `onDeleted`) *(2026-10-05)* | ports used by 10 | `:core:domain` / `:core:model` |
 | `RestoreMerger`, `StagedLibrary`, `LibraryMergerImpl`, `RestoreRunner`, `ImportFetchRunner`, `GroupMerger`; ports `PayloadSource`, `ExportDestination`, `ImportWorkScheduler`, `SnapshotScheduler` *(2026-10-05)* | shared implementation | `:core:data` `commonMain` |
@@ -2290,7 +2337,7 @@ Numbering is stable; resolved items stay listed with their resolution.
 8. Resolved in 06 ([06 QueueProjector](06-playback.md#queueprojector) edge cases): a `play_session` rewritten by a restore is loaded paused and never auto-plays (D43).
 9. Resolved: 07 consumes `observeAutoDownload()` and confirms the six `downloads.*` keys named in [Rules](#rules) (07 open question 10); `downloadAllEstimate` uses [07 Estimates](07-downloads.md#estimates).
 10. Resolved: 03 provides `PodcastRepository.retry(podcastId, refresh = false)` and `FeedRefresher.run` with `force = true`, origins `IMPORT`/`RESTORE`; the add sheet's `SubscriptionList(url)` action calls `ImportRepository.create(ImportSource(url, null))`; 03's `FeedOutcome.Deferred` notes that an import item ends as `FETCH_FAILED(DEFERRED)`.
-11. **Owner 08:** visit rule, banners, preview models, palette and icon rendering, `observeMemberships` and `writeSnapshotNow` are settled (08 open question 11; since 2026-10-05 the "Write snapshot now" row is for debug builds only, 18). New for 08: the export flow is `ExportRepository.prepare` → private-link warning → save or share ([Destinations](#destinations)); the backup flow adds `BackupRepository.preflight` before `CreateDocument`; the report gains a "Will load later" group (`FETCH_FAILED` with `DEFERRED`); the Library banner for `SnapshotStatus.foreignPending` with Restore / Discard.
+11. **Owner 08:** visit rule, banners, preview models, palette and icon rendering, `observeMemberships` and `writeSnapshotNow` are settled (08 open question 11; since 2026-10-05 the "Write snapshot now" row is for debug builds only, 18). New for 08: the export flow is `ExportRepository.prepare` → private-link warning → save or share ([Destinations](#destinations)); the backup flow is `BackupRepository.prepareBackup` → R1.9 warning off the descriptor's own counts → `CreateDocument` → `savePreparedBackup` (`preflight` stays advisory); the report gains a "Will load later" group (`FETCH_FAILED` with `DEFERRED`); the Library banner for `SnapshotStatus.foreignPending` with Restore / Discard.
 12. Moved to [PO-25](../PLAN.md#48-further-product-owner-decisions) (defaults: Replace exposed behind a confirmation; Merge leaves settings unchecked; flat OPML export keeps no empty groups, group order, colours or icons).
 13. **Unverified** (checked in their milestone): duplicate `<include>` paths with different `requireFlags`, an include of a non-existent path on API 26–27, and the API 28–30 local-transport key `fake_encryption_flag` (M3, `bmgr`); providers that reject `"wt"` (M3); Google Drive's file naming for `text/x-opml` (M3); Overcast basic export shape (partially verified), Podcast Addict's OPML shape and OPML support in Apple Podcasts on iOS 26 (fixtures added when samples exist).
 14. Overcast "extended" OPML carries per-episode played state and progress; importing it as listening history (match by enclosure URL) is proposed for M15, not v1.

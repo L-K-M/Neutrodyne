@@ -33,6 +33,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
+import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
@@ -44,6 +45,7 @@ import ch.lkmc.neutrodyne.core.ui.root.RootActions
 import ch.lkmc.neutrodyne.core.ui.root.RootSlots
 import ch.lkmc.neutrodyne.core.ui.root.RootUiState
 import ch.lkmc.neutrodyne.core.ui.root.StartupGateState
+import ch.lkmc.neutrodyne.desktop.notifications.DesktopBannerNotifier
 import ch.lkmc.neutrodyne.desktop.resources.Res
 import ch.lkmc.neutrodyne.desktop.resources.tray_quit
 import ch.lkmc.neutrodyne.desktop.resources.tray_show
@@ -79,6 +81,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     installers: Set<EntryProviderInstaller>,
     menuActions: DesktopMenuActions,
     activator: WindowActivator,
+    banners: DesktopBannerNotifier,
     background: Boolean,
     databaseOpener: DatabaseOpener,
     appScope: CoroutineScope,
@@ -111,6 +114,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
         NeutrodyneWindowContent(
             installers = installers,
             menuActions = menuActions,
+            banners = banners,
             startup = openState.toGateState(),
             onRetryStartup = { appScope.launch { suspendRunCatching { databaseOpener.awaitOpen() } } },
             dataDir = dataDir,
@@ -255,19 +259,55 @@ private fun DesktopApplicationMenu(
  * the data folder (08 Banners and the startup gate). [viewModelFactory] is the graph's
  * `metroViewModel()` seam: every VM-backed entry resolves through it here, exactly where the
  * window, the UI test and smoke mode compose the same tree (01 Feature entry installers).
- * The remaining callbacks stay inert until playback, notices and sync wire their milestones.
+ * [banners] is the bound `DesktopNotifier` (11's in-app banner fallback until MD2's OS
+ * notifier lands): its stream feeds the root snackbar and its taps come back through
+ * `userMessageAction`, where the notification's route is applied.
  */
 @Composable
 internal fun NeutrodyneWindowContent(
     installers: Set<EntryProviderInstaller>,
     menuActions: DesktopMenuActions,
     viewModelFactory: MetroViewModelFactory,
+    banners: DesktopBannerNotifier? = null,
     startup: StartupGateState = StartupGateState.Ready,
     onRetryStartup: () -> Unit = {},
     dataDir: Path? = null,
 ) {
     val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
     val platformActions = rememberDesktopPlatformActions()
+    // `NeutrodyneRoot` keys its snackbar effect on `slots` identity — a per-recomposition
+    // `RootSlots` would cancel and re-show the in-flight banner, so both contracts are
+    // remembered (they were all-no-op until the banner stream landed).
+    val actions =
+        remember(platformActions, dataDir, onRetryStartup, banners) {
+            RootActions(
+                retryStartup = onRetryStartup,
+                dismissNotice = {},
+                continueHere = {},
+                dismissRemoteSession = {},
+                playbackKey = { false },
+                manageStorage =
+                    dataDir?.let { dir ->
+                        { platformActions.reveal?.reveal(dir.toString()) }
+                    },
+                // A banner's "Open" reports here — the notifier maps it back to the
+                // notification's route (11 Notifications' in-app fallback).
+                userMessageAction = { id -> banners?.messageAction(id) },
+            )
+        }
+    val slots =
+        remember(menuActions, banners) {
+            RootSlots(
+                // No player before M4; the slot composes inside the root, where the
+                // navigator is readable — it hands the shell's menus the root's push
+                // (recorded in 11, 2026-10-06).
+                player = {
+                    menuActions.attachPush(it.navigate)
+                    menuActions.attachNavigator(LocalAppNavigator.current)
+                },
+                userMessages = banners?.userMessages ?: emptyFlow(),
+            )
+        }
     CompositionLocalProvider(
         LocalPlatformActions provides platformActions,
         // 07 Storage rows: without a provider the local falls back to ANDROID wording.
@@ -278,26 +318,8 @@ internal fun NeutrodyneWindowContent(
     ) {
         NeutrodyneRoot(
             state = RootUiState.READY.copy(startup = startup),
-            actions =
-                RootActions(
-                    retryStartup = onRetryStartup,
-                    dismissNotice = {},
-                    continueHere = {},
-                    dismissRemoteSession = {},
-                    playbackKey = { false },
-                    manageStorage =
-                        dataDir?.let { dir ->
-                            { platformActions.reveal?.reveal(dir.toString()) }
-                        },
-                ),
-            slots =
-                RootSlots(
-                    // No player before M4; the slot composes inside the root, where the
-                    // navigator is readable — it hands the shell's menus the root's push
-                    // (recorded in 11, 2026-10-06).
-                    player = { menuActions.attachPush(it.navigate) },
-                    userMessages = emptyFlow(),
-                ),
+            actions = actions,
+            slots = slots,
             installers = installers,
             systemUi = systemUi,
             platform = BuildInfo.Platform.DESKTOP,

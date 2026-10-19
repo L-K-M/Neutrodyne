@@ -94,4 +94,25 @@ class FakeBackupRepositoryTest {
                 repo.calls,
             )
         }
+
+    @Test fun prepareAndSaveRecordCallsAndReturnFixtures() =
+        runTest {
+            val repo = FakeBackupRepository()
+            val prepared =
+                (repo.prepareBackup(includePasswords = true) as Outcome.Success).value
+
+            repo.savePreparedOutcome = Outcome.Failure(BackupError.PreparedExpired)
+            assertEquals(
+                Outcome.Failure(BackupError.PreparedExpired),
+                repo.savePreparedBackup(prepared, "content://dest"),
+            )
+            assertEquals(
+                listOf(
+                    "prepareBackup(true)",
+                    "savePreparedBackup(${prepared.fileName}, content://dest)",
+                ),
+                repo.calls,
+            )
+            assertEquals(listOf(prepared to "content://dest"), repo.savePreparedCalls)
+        }
 }

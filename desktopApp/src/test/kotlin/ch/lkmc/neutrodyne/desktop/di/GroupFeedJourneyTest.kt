@@ -30,6 +30,8 @@ import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.CrashContext
 import ch.lkmc.neutrodyne.core.common.CrashReporter
+import ch.lkmc.neutrodyne.core.common.DesktopNotification
+import ch.lkmc.neutrodyne.core.common.DesktopNotifier
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
@@ -322,6 +324,17 @@ internal interface M2JourneyGraph {
     @Provides fun database(opener: DatabaseOpener): NeutrodyneDatabase = opener.requireDatabase()
 
     @Provides fun poster(): NewEpisodePoster = FakeNewEpisodePoster()
+
+    // C3b's report poster reaches `DesktopNotifier` through the contributed `ImportReportPoster`;
+    // the journey never posts, so a silent stand-in keeps the graph complete without the shell's
+    // banner fallback.
+    @Provides
+    fun notifier(): DesktopNotifier =
+        object : DesktopNotifier {
+            override suspend fun post(n: DesktopNotification) = Unit
+
+            override fun cancel(id: String) = Unit
+        }
 
     @DependencyGraph.Factory
     fun interface Factory {

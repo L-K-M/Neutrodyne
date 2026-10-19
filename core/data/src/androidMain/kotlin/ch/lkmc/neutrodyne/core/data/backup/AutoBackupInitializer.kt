@@ -52,7 +52,13 @@ internal class AutoBackupInitializer
         override val order: Int = 200
 
         override suspend fun run() {
-            if (!settings().get(BackupSettingKeys.AUTO_SNAPSHOT_ENABLED)) {
+            // An unreadable flag reads as enabled: the worker and producer re-check it, while
+            // reading it as disabled would cancel a pending debounced write.
+            val enabled =
+                suspendRunCatching { settings().get(BackupSettingKeys.AUTO_SNAPSHOT_ENABLED) }
+                    .onFailure { Log.w(TAG, it) { "auto-snapshot flag read failed" } }
+                    .getOrDefault(true)
+            if (!enabled) {
                 suspendRunCatching { snapshots().cancelSoon() }
                     .onFailure { Log.w(TAG, it) { "snapshot debounce cancel failed" } }
             }

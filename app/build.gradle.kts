@@ -60,6 +60,9 @@ android {
     // Corpus leg c (03 Testing): the shared fixture/golden tree reaches the device through the
     // test APK's assets under `feeds/`; the production APK's source sets stay untouched.
     sourceSets["androidTest"].assets.srcDir(rootProject.layout.projectDirectory.dir("feeds/src/test/resources"))
+    // Exercise the device gate's decisions on the host without copying its implementation.
+    sourceSets["androidTest"].kotlin.srcDir("src/restoreTest/kotlin")
+    sourceSets["test"].kotlin.srcDir("src/restoreTest/kotlin")
 }
 
 dependencies {
@@ -160,6 +163,8 @@ dependencies {
     testImplementation(libs.cmp.resources)
     // Startup recovery verifies the real periodic work against WorkManager's host backend.
     testImplementation(libs.androidx.work.testing)
+    testImplementation(project(":feeds:jvm"))
+    testImplementation(libs.kotlinx.serialization.json)
 }
 
 // The production graph uses the Android bundled driver, whose JNI loader needs a host library
