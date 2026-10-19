@@ -8,8 +8,10 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
@@ -31,8 +33,12 @@ import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.designsystem.components.DesktopScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
+import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
+import ch.lkmc.neutrodyne.core.designsystem.theme.BrandColors
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
+import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.model.settings.ThemeMode
 import ch.lkmc.neutrodyne.core.model.settings.YouTubeRowArt
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
@@ -58,9 +64,11 @@ import ch.lkmc.neutrodyne.desktop.resources.window_title
 import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
 import ch.lkmc.neutrodyne.feature.player.PlayerRoute
 import ch.lkmc.neutrodyne.feature.queue.PlayerUpNextRoute
+import ch.lkmc.neutrodyne.feature.settings.observeAppearance
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
@@ -94,6 +102,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     appScope: CoroutineScope,
     dataDir: Path,
     viewModelFactory: MetroViewModelFactory,
+    settings: SettingsRepository,
     onQuitRequest: () -> Unit,
     openHandler: DesktopOpenHandler? = null,
     rowArt: YouTubeRowArt = YouTubeRowArt.VIDEO_THUMBNAIL,
@@ -103,6 +112,22 @@ internal fun ApplicationScope.NeutrodyneWindow(
     val icon = remember { WindowIcons.windowIconPainter() }
     var hidden by remember { mutableStateOf(false) }
     val openState by databaseOpener.openState.collectAsState()
+
+    val appearance by produceState<AppearancePrefs?>(null, settings) {
+        launch {
+            delay(APPEARANCE_GATE_MS)
+            if (value == null) value = AppearancePrefs()
+        }
+        settings.observeAppearance().collect { value = it }
+    }
+    val osDark = isSystemInDarkTheme()
+    val prefs = appearance ?: AppearancePrefs()
+    val dark =
+        when (prefs.theme) {
+            ThemeMode.SYSTEM -> osDark
+            ThemeMode.DARK -> true
+            ThemeMode.LIGHT -> false
+        }
 
     // The Compose-side `hidden` owns visibility; a hand-off reveal clears it first, so the
     // activator's direct `isVisible` never fights the next recomposition.
@@ -114,17 +139,29 @@ internal fun ApplicationScope.NeutrodyneWindow(
     Window(
         onCloseRequest = { requestClose(onQuitRequest) { hidden = it } },
         state = state,
-        visible = !hidden,
+        visible = !hidden && appearance != null,
         title = stringResource(Res.string.window_title),
         icon = icon,
         onKeyEvent = { event -> windowShortcut(event) { requestClose(onQuitRequest) { hidden = it } } },
     ) {
+        // Set the AWT background during apply, before Window's visibility side effect.
+        DisposableEffect(window, dark, prefs.pureBlack) {
+            val argb =
+                if (dark && prefs.pureBlack) {
+                    0xFF000000.toInt()
+                } else {
+                    BrandColors.scheme(dark, 0.0).background.toArgb()
+                }
+            window.background = java.awt.Color(argb, true)
+            onDispose { }
+        }
         WindowEffects(activator = activator, background = background)
         DesktopMenuBar(menuActions, enabled = openState is DatabaseOpenState.Opened)
         DesktopApplicationMenu(menuActions = menuActions, onQuit = onQuitRequest)
         val content: @Composable () -> Unit = {
             NeutrodyneWindowContent(
                 rowArt = rowArt,
+                prefs = prefs,
                 installers = installers,
                 menuActions = menuActions,
                 banners = banners,
@@ -285,6 +322,7 @@ internal fun NeutrodyneWindowContent(
     installers: Set<EntryProviderInstaller>,
     menuActions: DesktopMenuActions,
     viewModelFactory: MetroViewModelFactory,
+    prefs: AppearancePrefs = AppearancePrefs(),
     banners: DesktopBannerNotifier? = null,
     startup: StartupGateState = StartupGateState.Ready,
     onRetryStartup: () -> Unit = {},
@@ -346,7 +384,10 @@ internal fun NeutrodyneWindowContent(
             slots = slots,
             installers = installers,
             systemUi = systemUi,
+            prefs = prefs,
             platform = BuildInfo.Platform.DESKTOP,
         )
     }
 }
+
+private const val APPEARANCE_GATE_MS = 1_000L

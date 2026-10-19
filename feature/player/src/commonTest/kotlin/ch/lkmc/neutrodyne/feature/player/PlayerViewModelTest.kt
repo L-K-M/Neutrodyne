@@ -4,6 +4,8 @@ package ch.lkmc.neutrodyne.feature.player
 
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsError
+import ch.lkmc.neutrodyne.core.model.ArtworkColors
+import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.Effective
 import ch.lkmc.neutrodyne.core.model.EffectivePlayback
@@ -15,6 +17,7 @@ import ch.lkmc.neutrodyne.core.model.ShowNoteSpan
 import ch.lkmc.neutrodyne.core.model.ShowNotes
 import ch.lkmc.neutrodyne.core.model.SleepTimerMode
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
+import ch.lkmc.neutrodyne.core.testing.FakeArtworkRepository
 import ch.lkmc.neutrodyne.core.testing.FakeChapterRepository
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
@@ -53,6 +56,8 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalCoroutinesApi::class)
 class PlayerViewModelTest : MainDispatcherTest() {
     private val controller = FakePlaybackController()
+    private val artwork =
+        FakeArtworkRepository()
     private val settings = FakeSettingsRepository()
     private val chapters =
         FakeChapterRepository()
@@ -69,12 +74,49 @@ class PlayerViewModelTest : MainDispatcherTest() {
                 Provider { chapters },
                 Provider { episodeRepo },
                 FakeNetworkMonitor(),
+                artwork = artwork,
             )
         backgroundScope.launch { vm.uiState.collect {} }
         backgroundScope.launch { vm.position.collect {} }
         runCurrent()
         return vm
     }
+
+    @Test fun tintFollowsCurrentArtworkAndClearsOnSwitchOrDismiss() =
+        runTest {
+            val first =
+                sampleNow().copy(
+                    artwork =
+                        ArtworkRef("first", null, 1),
+                )
+            val second =
+                first.copy(
+                    episodeId = first.episodeId + 1,
+                    artwork =
+                        ArtworkRef("second", null, 2),
+                )
+            val red =
+                ArtworkColors("first", 1, 0xFFDD4400.toInt(), 0xFFAA4400.toInt())
+            artwork.colors.value = mapOf("first" to red)
+            controller.state.nowPlaying.value = first
+            val vm = player()
+            runCurrent()
+            assertEquals(red, vm.uiState.value.colors)
+            controller.state.nowPlaying.value = second
+            runCurrent()
+            assertNull(vm.uiState.value.colors)
+            artwork.colors.value = mapOf("first" to red.copy(version = 2))
+            runCurrent()
+            assertNull(vm.uiState.value.colors)
+            val mono =
+                ArtworkColors("second", 2, null, 0xFF888888.toInt())
+            artwork.colors.value = mapOf("first" to red, "second" to mono)
+            runCurrent()
+            assertEquals(mono, vm.uiState.value.colors)
+            controller.state.nowPlaying.value = null
+            runCurrent()
+            assertNull(vm.uiState.value.colors)
+        }
 
     @Test fun sleepPersistsOnlyValidMinuteChoicesAndReportsWriteFailure() =
         runTest {

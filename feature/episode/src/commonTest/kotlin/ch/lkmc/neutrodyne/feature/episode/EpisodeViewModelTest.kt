@@ -2,11 +2,14 @@
 
 package ch.lkmc.neutrodyne.feature.episode
 
+import ch.lkmc.neutrodyne.core.model.ArtworkColors
+import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.settings.FeedsSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.ShowNotesImages
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
+import ch.lkmc.neutrodyne.core.testing.FakeArtworkRepository
 import ch.lkmc.neutrodyne.core.testing.FakeChapterRepository
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
@@ -52,6 +55,7 @@ class EpisodeViewModelTest : MainDispatcherTest() {
     private val liveSource =
         ch.lkmc.neutrodyne.core.testing
             .FakeEpisodeLiveStateSource()
+    private val artwork = FakeArtworkRepository()
     private val episodes = FakeEpisodeRepository()
     private val chapters =
         FakeChapterRepository()
@@ -74,11 +78,31 @@ class EpisodeViewModelTest : MainDispatcherTest() {
             network,
             downloadController = downloads,
             liveStateSource = liveSource,
+            artwork = artwork,
         )
 
     private fun TestScope.collect(viewModel: EpisodeViewModel) {
         backgroundScope.launch { viewModel.uiState.collect {} }
     }
+
+    @Test fun headerColoursFollowArtworkKeyAndPreserveMonochrome() =
+        runTest {
+            val detail = testEpisodeDetail(5, artwork = ArtworkRef("first", null, 1))
+            episodes.episodes.value = mapOf(5L to detail)
+            val first = ArtworkColors("first", 1, 0xFF2244DD.toInt(), 0xFF3344AA.toInt())
+            artwork.colors.value = mapOf("first" to first)
+            val vm = viewModel()
+            collect(vm)
+            advanceUntilIdle()
+            assertEquals(first, vm.uiState.value.colors)
+            episodes.episodes.value = mapOf(5L to detail.copy(artwork = ArtworkRef("second", null, 2)))
+            advanceUntilIdle()
+            assertNull(vm.uiState.value.colors)
+            val monochrome = ArtworkColors("second", 2, null, 0xFF888888.toInt())
+            artwork.colors.value = mapOf("first" to first.copy(version = 3), "second" to monochrome)
+            advanceUntilIdle()
+            assertEquals(monochrome, vm.uiState.value.colors)
+        }
 
     @Test fun progressWindowTracksVisibilityAndClearsDuringTheSharingGrace() =
         runTest {

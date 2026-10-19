@@ -270,6 +270,7 @@ internal object DesktopShell {
                     .observe(AppearanceSettingKeys.YOUTUBE_ROW_ART)
                     .collectAsState(initial = AppearanceSettingKeys.YOUTUBE_ROW_ART.default)
             NeutrodyneWindow(
+                settings = graph.settingsRepository,
                 rowArt = rowArt.value,
                 installers = graph.entryInstallers,
                 failedDownloads =

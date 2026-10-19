@@ -61,7 +61,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
@@ -87,6 +89,8 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
 import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdIconButton
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.designsystem.theme.ArtworkSurface
+import ch.lkmc.neutrodyne.core.designsystem.theme.ArtworkTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.LocalReducedMotion
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneMotion
 import ch.lkmc.neutrodyne.core.model.EpisodeChapter
@@ -275,6 +279,62 @@ public fun PlayerSheet(
     onNotesVisible: (Boolean) -> Unit = {},
     onLink: (String) -> Unit = {},
 ) {
+    ArtworkTheme(
+        ui.colors?.seedArgb,
+        if (state.progress > MINI_SEMANTICS_END) ArtworkSurface.FULL else ArtworkSurface.MINI,
+    ) {
+        PlayerSheetContent(
+            ui,
+            position,
+            slot,
+            positionAt,
+            toggle,
+            back,
+            forward,
+            previous,
+            next,
+            seek,
+            dismiss,
+            stop,
+            markPlayed,
+            consent,
+            declineConsent,
+            modifier,
+            state,
+            upNext,
+            nextEpisode,
+            notes,
+            onNotesVisible,
+            onLink,
+        )
+    }
+}
+
+@Composable
+private fun PlayerSheetContent(
+    ui: PlayerUiState,
+    position: PositionSnapshot?,
+    slot: PlayerSlotState,
+    positionAt: (PositionSnapshot) -> Long,
+    toggle: () -> Unit,
+    back: () -> Unit,
+    forward: () -> Unit,
+    previous: () -> Unit,
+    next: () -> Unit,
+    seek: (Long) -> Unit,
+    dismiss: () -> Unit,
+    stop: () -> Unit,
+    markPlayed: () -> Unit,
+    consent: () -> Unit,
+    declineConsent: () -> Unit,
+    modifier: Modifier = Modifier,
+    state: PlayerSheetState = rememberPlayerSheetState(),
+    upNext: @Composable () -> Unit = {},
+    nextEpisode: () -> Unit = next,
+    notes: PlayerNotesState = PlayerNotesState(),
+    onNotesVisible: (Boolean) -> Unit = {},
+    onLink: (String) -> Unit = {},
+) {
     var selectedTab by rememberSaveable { mutableStateOf(PlayerTab.UP_NEXT.name) }
     var panelOpen by rememberSaveable { mutableStateOf(false) }
     val activeTab = PlayerTab.entries.firstOrNull { it.name == selectedTab } ?: PlayerTab.UP_NEXT
@@ -435,9 +495,26 @@ public fun PlayerSheet(
             ) {
                 // Pointer ownership follows the settled anchor, so fading controls cannot cancel a drag.
                 Box(
-                    Modifier.fillMaxSize().then(
-                        if (state.drag.settledValue != PlayerSheetValue.Expanded) dragModifier else Modifier,
-                    ),
+                    Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                0f to
+                                    lerp(
+                                        MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        MaterialTheme.colorScheme.primaryContainer,
+                                        morph.backgroundMix,
+                                    ),
+                                0.35f to
+                                    lerp(
+                                        MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        MaterialTheme.colorScheme.surface,
+                                        morph.backgroundMix,
+                                    ),
+                            ),
+                        ).then(
+                            if (state.drag.settledValue != PlayerSheetValue.Expanded) dragModifier else Modifier,
+                        ),
                 ) {
                     if (progress < MINI_SEMANTICS_END) {
                         Row(
@@ -766,6 +843,7 @@ public fun PlayerSheet(
                             .fillMaxWidth()
                             .height(PLAYER_HEADER_HEIGHT)
                             .graphicsLayer { alpha = morph.controlsAlpha }
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = HEADER_SCRIM_ALPHA))
                             .then(
                                 if (state.drag.settledValue == PlayerSheetValue.Expanded) {
                                     dragModifier.clickable(onClick = collapse)
@@ -788,6 +866,7 @@ public fun PlayerSheet(
                     }
                     CoverArt(
                         ref = now.artwork,
+                        avgArgb = ui.colors?.avgArgb,
                         monogram = rememberMonogram(now.podcastTitle),
                         title = now.podcastTitle,
                         tier = if (progress >= MINI_SEMANTICS_END) CoverTier.HERO else CoverTier.THUMB,
@@ -799,7 +878,12 @@ public fun PlayerSheet(
                                     morph.artworkX.dp,
                                     morph.artworkY.dp,
                                 ).size(morph.artworkSize.dp, artworkHeight.dp)
-                                .then(dragModifier)
+                                .shadow(
+                                    (ART_SHADOW_DP * progress).dp,
+                                    RoundedCornerShape(morph.artworkCorner.dp),
+                                    ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = ART_SHADOW_ALPHA),
+                                    spotColor = MaterialTheme.colorScheme.primary.copy(alpha = ART_SHADOW_ALPHA),
+                                ).then(dragModifier)
                                 .testTag("playerArtwork"),
                     )
                     if (expanded) {
@@ -1077,6 +1161,9 @@ private const val SECONDS_PER_MINUTE = 60L
 private const val WIDE_ART_ASPECT = 16f / 9f
 private const val UP_NEXT_HEIGHT_FRACTION = 0.5f
 private const val SETTLE_FRACTION = 0.5f
+private const val HEADER_SCRIM_ALPHA = 0.8f
+private const val ART_SHADOW_DP = 12f
+private const val ART_SHADOW_ALPHA = 0.3f
 private const val MINI_SEMANTICS_END = 0.2f
 private const val FULL_SEMANTICS_START = 0.6f
 

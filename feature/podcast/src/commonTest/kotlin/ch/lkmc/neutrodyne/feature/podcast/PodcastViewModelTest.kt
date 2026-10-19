@@ -8,6 +8,8 @@ import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.RefreshScope
 import ch.lkmc.neutrodyne.core.domain.RefreshStatus
 import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
+import ch.lkmc.neutrodyne.core.model.ArtworkColors
+import ch.lkmc.neutrodyne.core.model.ArtworkRef
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedFilters
 import ch.lkmc.neutrodyne.core.model.FeedOrder
@@ -17,6 +19,7 @@ import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.ShowType
+import ch.lkmc.neutrodyne.core.testing.FakeArtworkRepository
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeFeedRepository
@@ -70,6 +73,7 @@ class PodcastViewModelTest : MainDispatcherTest() {
             .FakeDownloadController()
     private val podcasts = FakePodcastRepository()
     private val feeds = FakeFeedRepository()
+    private val artwork = FakeArtworkRepository()
     private val episodes = FakeEpisodeRepository()
     private val groups = FakeGroupRepository()
     private val liveSource = FakeEpisodeLiveStateSource()
@@ -101,6 +105,7 @@ class PodcastViewModelTest : MainDispatcherTest() {
         liveSource,
         clock,
         downloadController = downloads,
+        artwork = artwork,
     )
 
     private fun TestScope.collect(viewModel: PodcastViewModel) {
@@ -109,6 +114,25 @@ class PodcastViewModelTest : MainDispatcherTest() {
 
     private suspend fun FakeGroupRepository.createId(name: String): Long =
         (create(GroupDraft(name)) as Outcome.Success).value
+
+    @Test fun headerColoursFollowArtworkKeyAndPreserveMonochrome() =
+        runTest {
+            val detail = testPodcastDetail(7, artwork = ArtworkRef("first", null, 1))
+            podcasts.detail.value = detail
+            val first = ArtworkColors("first", 1, 0xFF2244DD.toInt(), 0xFF3344AA.toInt())
+            artwork.colors.value = mapOf("first" to first)
+            val vm = viewModel()
+            collect(vm)
+            advanceUntilIdle()
+            assertEquals(first, vm.uiState.value.colors)
+            podcasts.detail.value = detail.copy(artwork = ArtworkRef("second", null, 2))
+            advanceUntilIdle()
+            assertNull(vm.uiState.value.colors)
+            val monochrome = ArtworkColors("second", 2, null, 0xFF888888.toInt())
+            artwork.colors.value = mapOf("first" to first.copy(version = 3), "second" to monochrome)
+            advanceUntilIdle()
+            assertEquals(monochrome, vm.uiState.value.colors)
+        }
 
     @Test
     fun episodeSelectionUsesTheSharedBulkPlayedService() =

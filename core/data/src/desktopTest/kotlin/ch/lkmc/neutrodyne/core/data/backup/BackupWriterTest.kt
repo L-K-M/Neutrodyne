@@ -25,7 +25,9 @@ import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.PrivacyCounts
 import ch.lkmc.neutrodyne.core.model.settings.AllSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.BackupSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.LibraryDensity
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingsFile
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
@@ -299,6 +301,10 @@ class BackupWriterTest {
     fun portablePlaybackSettingsRoundTripWithoutDeviceKeys() =
         runTest {
             seedPodcast()
+            settings.set(AppearanceSettingKeys.ARTWORK_TINT, false)
+            settings.set(AppearanceSettingKeys.PURE_BLACK, true)
+            settings.set(AppearanceSettingKeys.LIBRARY_DENSITY, LibraryDensity.LARGE)
+            settings.set(AppearanceSettingKeys.PLAYER_PANEL_HIDDEN, true)
             settings.set(PlaybackSettingKeys.SPEED, 1.8f)
             settings.set(PlaybackSettingKeys.SKIP_SILENCE, true)
             settings.set(PlaybackSettingKeys.SPEED_PRESETS, "2.0,0.75,1.25")
@@ -314,6 +320,18 @@ class BackupWriterTest {
                 val restored = FakeSettingsRepository()
                 assertIs<Outcome.Success<*>>(RestoreSettingsMerge(restored).apply(reader.settings()))
                 assertEquals(expected, restored.observePortableSnapshot().first())
+                assertEquals(false, restored.get(AppearanceSettingKeys.ARTWORK_TINT))
+                assertEquals(true, restored.get(AppearanceSettingKeys.PURE_BLACK))
+                assertEquals(LibraryDensity.LARGE, restored.get(AppearanceSettingKeys.LIBRARY_DENSITY))
+                assertEquals(false, restored.get(AppearanceSettingKeys.PLAYER_PANEL_HIDDEN))
+                for (key in listOf(
+                    AppearanceSettingKeys.ARTWORK_TINT,
+                    AppearanceSettingKeys.PURE_BLACK,
+                    AppearanceSettingKeys.LIBRARY_DENSITY,
+                    AppearanceSettingKeys.PLAYER_PANEL_HIDDEN,
+                )) {
+                    assertFalse(key.synced)
+                }
                 // Exactly the portable registry, nothing else — installation_id is DEVICE.
                 assertEquals(portableKeys().toSet(), values.map { it.key }.toSet())
                 assertEquals(portableKeys().size, values.size)

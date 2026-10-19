@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
+import ch.lkmc.neutrodyne.core.domain.ArtworkRepository
 import ch.lkmc.neutrodyne.core.domain.EpisodeLiveStateSource
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
 import ch.lkmc.neutrodyne.core.domain.FeedRepository
@@ -28,6 +29,7 @@ import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
 import ch.lkmc.neutrodyne.core.domain.YouTubeChannelRepository
 import ch.lkmc.neutrodyne.core.model.AVAILABLE_FEED_FILTER_CAPABILITIES
+import ch.lkmc.neutrodyne.core.model.ArtworkColors
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.EpisodeRow
 import ch.lkmc.neutrodyne.core.model.FeedFilters
@@ -75,7 +77,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -104,6 +108,7 @@ public class PodcastViewModel
         liveStateSource: EpisodeLiveStateSource,
         clock: Clock,
         downloadController: DownloadController,
+        private val artwork: ArtworkRepository,
     ) : ViewModel() {
         init {
             viewModelScope.launch {
@@ -151,6 +156,23 @@ public class PodcastViewModel
                 feedRepository.pagedFeed(FeedSource.Podcast(podcastId), f, order)
             }.cachedIn(viewModelScope)
 
+        @OptIn(ExperimentalCoroutinesApi::class)
+        private val artworkColors =
+            detail
+                .map { item -> item?.let { Triple(it.id, it.artwork.key, null) } }
+                .distinctUntilChanged()
+                .flatMapLatest { identity ->
+                    if (identity == null) {
+                        flowOf(null to null)
+                    } else {
+                        artwork
+                            .observeColors(identity.second, identity.third)
+                            .map { identity to it }
+                            .onStart { emit(identity to null) }
+                    }
+                }
+
+        @OptIn(ExperimentalCoroutinesApi::class)
         public val uiState: StateFlow<PodcastUiState> =
             combine(
                 detail,
@@ -171,6 +193,14 @@ public class PodcastViewModel
                 state.copy(groups = memberships.toImmutableList())
             }.combine(userMessages.flow) { state, messages ->
                 state.copy(messages = messages)
+            }.combine(artworkColors) { state, result ->
+                state.copy(
+                    colors =
+                        result.second.takeIf {
+                            result.first ==
+                                state.detail?.let { Triple(it.id, it.artwork.key, null) }
+                        },
+                )
             }.stateIn(viewModelScope, SHARING, PodcastUiState())
 
         public val episodeSelection =

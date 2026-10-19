@@ -41,6 +41,7 @@ import ch.lkmc.neutrodyne.core.model.ShowNotes
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
+import ch.lkmc.neutrodyne.core.testing.FakeArtworkRepository
 import ch.lkmc.neutrodyne.core.testing.FakeChapterRepository
 import ch.lkmc.neutrodyne.core.testing.FakeEpisodeRepository
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
@@ -489,6 +490,8 @@ class EpisodeScreenTest {
                 liveStateSource =
                     ch.lkmc.neutrodyne.core.testing
                         .FakeEpisodeLiveStateSource(),
+                artwork =
+                    FakeArtworkRepository(),
             )
         val owner =
             object : LifecycleOwner {

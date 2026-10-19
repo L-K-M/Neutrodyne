@@ -28,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -41,15 +42,15 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdFilterChip
 import ch.lkmc.neutrodyne.core.designsystem.components.NdInputChip
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
-import ch.lkmc.neutrodyne.core.designsystem.theme.LocalSystemUiState
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneShapes
+import ch.lkmc.neutrodyne.core.designsystem.theme.groupTones
+import ch.lkmc.neutrodyne.core.model.ArtworkColors
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.PodcastDetail
 import ch.lkmc.neutrodyne.core.model.ShowNoteBlock
 import ch.lkmc.neutrodyne.core.model.ShowNoteSpan
 import ch.lkmc.neutrodyne.core.model.ShowNotes
 import ch.lkmc.neutrodyne.core.model.SourceType
-import ch.lkmc.neutrodyne.core.model.art.ArtColors
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_add_group
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_episode_count
@@ -65,7 +66,7 @@ import org.jetbrains.compose.resources.stringResource
 
 /**
  * 08 "Podcast header" — the first item of the podcast screen's `LazyColumn` (it scrolls away; the
- * pinned transparent top bar is the screen's). The header has no artwork-scheme tint (M10). Cover
+ * pinned transparent top bar is the screen's). The header has a scoped artwork scheme. Cover
  * 160 dp at 24 dp corners, the title `headlineSmall` (2 lines), author, the "Subscribed" chip,
  * three lines of plain description with a "More"/"Less" toggle, and the meta line
  * "{n} episodes · Updated {relative} · Private". M2 adds the membership chips below the
@@ -80,13 +81,26 @@ public fun PodcastHeader(
     onRemoveGroup: (Group) -> Unit,
     onAddToGroups: () -> Unit,
     modifier: Modifier = Modifier,
+    colors: ArtworkColors? = null,
 ) {
     Column(
-        modifier = modifier.fillMaxWidth().padding(horizontal = HEADER_PADDING),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(horizontal = HEADER_PADDING),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
-            modifier = Modifier.fillMaxWidth().padding(top = HEADER_TOP_GAP),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .background(
+                        Brush.verticalGradient(
+                            0f to MaterialTheme.colorScheme.primaryContainer,
+                            0.7f to MaterialTheme.colorScheme.surface,
+                        ),
+                    ).padding(top = HEADER_TOP_GAP),
             contentAlignment = Alignment.BottomCenter,
         ) {
             if (detail.sourceType == SourceType.YOUTUBE_CHANNEL && detail.bannerUrl != null) {
@@ -110,8 +124,14 @@ public fun PodcastHeader(
                 title = detail.displayTitle,
                 tier = CoverTier.HERO,
                 shape = NeutrodyneShapes.PlayerArt,
-                avgArgb = null,
-                modifier = Modifier.size(HERO_SIZE),
+                avgArgb = colors?.avgArgb,
+                modifier =
+                    Modifier.size(HERO_SIZE).shadow(
+                        elevation = 12.dp,
+                        shape = NeutrodyneShapes.PlayerArt,
+                        ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                        spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                    ),
             )
         }
         Spacer(Modifier.height(COVER_TITLE_GAP))
@@ -194,10 +214,7 @@ private fun MembershipChips(
  */
 @Composable
 private fun GroupDot(colorArgb: Int?) {
-    val dark = LocalSystemUiState.current.dark
-    val color =
-        colorArgb?.let { Color(ArtColors.tone(it, if (dark) DOT_TONE_DARK else DOT_TONE_LIGHT)) }
-            ?: MaterialTheme.colorScheme.primary
+    val color = groupTones(colorArgb).dot
     // The chip's leading slot is an uncentered icon-size box: center the smaller dot inside it.
     Box(Modifier.size(ICON_SLOT_SIZE), contentAlignment = Alignment.Center) {
         Box(Modifier.size(DOT_SIZE).clip(CircleShape).background(color))
@@ -328,8 +345,6 @@ private val META_GAP = 12.dp
 private val DOT_SIZE = 12.dp
 private val ICON_SLOT_SIZE = 18.dp
 private val CLOSE_ICON_SIZE = 18.dp
-private const val DOT_TONE_LIGHT = 40.0
-private const val DOT_TONE_DARK = 80.0
 private const val DESCRIPTION_LINES = 3
 
 private const val BANNER_ASPECT = 6f

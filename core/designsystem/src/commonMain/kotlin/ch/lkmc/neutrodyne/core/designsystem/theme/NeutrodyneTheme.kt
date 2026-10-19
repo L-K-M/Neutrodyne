@@ -35,6 +35,8 @@ public fun NeutrodyneTheme(
 
     CompositionLocalProvider(
         LocalArtworkTintEnabled provides prefs.artworkTint,
+        LocalPureBlack provides (dark && prefs.pureBlack),
+        LocalAppColorScheme provides scheme,
         LocalReducedMotion provides system.reducedMotion,
         LocalSystemUiState provides system,
         LocalAppDarkTheme provides dark,
