@@ -6,6 +6,7 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
+import ch.lkmc.neutrodyne.playback.api.PlaybackSessionCommands
 import dev.zacsweers.metro.Provider
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -64,11 +65,26 @@ class SessionCallbackConnectTest {
                     assertTrue(
                         result.availableSessionCommands.contains(CustomCommands.command(CustomCommands.PLAY_CONTEXT)),
                     )
+                    assertTrue(
+                        result.availableSessionCommands.contains(
+                            CustomCommands.command(PlaybackSessionCommands.CHAPTER_NEXT),
+                        ),
+                    )
+                    assertTrue(
+                        result.availableSessionCommands.contains(
+                            CustomCommands.command(PlaybackSessionCommands.CHAPTER_PREV),
+                        ),
+                    )
                 }
                 val unknown = callback.onConnectAsync(session, controllerInfo("untrusted.app", false)).get()
                 assertFalse(unknown.availablePlayerCommands.contains(Player.COMMAND_PLAY_PAUSE))
                 assertFalse(
                     unknown.availableSessionCommands.contains(CustomCommands.command(CustomCommands.PLAY_CONTEXT)),
+                )
+                assertFalse(
+                    unknown.availableSessionCommands.contains(
+                        CustomCommands.command(PlaybackSessionCommands.CHAPTER_NEXT),
+                    ),
                 )
                 assertEquals(0, h.dbProviderReads)
             } finally {

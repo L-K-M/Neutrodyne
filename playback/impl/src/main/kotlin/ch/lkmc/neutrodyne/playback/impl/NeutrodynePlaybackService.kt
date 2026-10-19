@@ -28,6 +28,7 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
     private var bridge: AndroidServiceBridge? = null
     private var starting: Deferred<AndroidServiceBridge>? = null
     private var startReserved = false
+    private var chapters: Chapters? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -63,6 +64,7 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
                 buttons,
                 lifecycleScope,
                 access.io,
+                chapterCommand = { chapters?.command(it) },
                 beforeStart = {
                     startReserved = true
                     bridge?.reserveStart()
@@ -116,6 +118,13 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
                 ).also { live ->
                     bridge = live
                     live.attach(hasPendingStart = startReserved)
+                    chapters =
+                        Chapters(
+                            player,
+                            access.chapters(),
+                            lifecycleScope,
+                            seek = wrapper::seekTo,
+                        ) { access.hub.currentChapter.value = it }.also { it.attach() }
                     wrapper.orderAfterPlaybackAdapters()
                     player.addListener(
                         object : Player.Listener {
@@ -158,6 +167,8 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        chapters?.detach()
+        chapters = null
         starting?.cancel()
         bridge?.let { live ->
             live.detach()

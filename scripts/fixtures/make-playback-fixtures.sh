@@ -18,3 +18,5 @@ ffmpeg_bin="${FFMPEG:-ffmpeg}"
   -i 'aevalsrc=if(lt(mod(t\,1)\,0.5)\,0.15*sin(2*PI*440*t)\,0):s=44100:d=3' \
   -map_metadata -1 -c:a libmp3lame -b:a 128k -write_xing 0 -id3v2_version 0 \
   "$out/silence_gaps_3s.mp3"
+# ID3 CHAP plus separate Nero, QuickTime and competing MP4 chapter sources.
+FFMPEG="$ffmpeg_bin" python3 "$root/scripts/fixtures/make-chapter-fixtures.py"

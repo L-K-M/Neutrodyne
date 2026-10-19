@@ -19,6 +19,7 @@ import ch.lkmc.neutrodyne.core.model.SleepTimerMode
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackEvent
+import ch.lkmc.neutrodyne.playback.api.PlaybackSessionCommands
 import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
 import ch.lkmc.neutrodyne.playback.core.StartRequest
 import dev.zacsweers.metro.Inject
@@ -117,9 +118,13 @@ internal class PlaybackControllerImpl(
 
     override fun extendSleepTimer(minutes: Int) = Unit
 
-    override fun nextChapter() = Unit
+    override fun nextChapter() {
+        scope.launch(Dispatchers.Main.immediate) { command(PlaybackSessionCommands.CHAPTER_NEXT) }
+    }
 
-    override fun previousChapter() = Unit
+    override fun previousChapter() {
+        scope.launch(Dispatchers.Main.immediate) { command(PlaybackSessionCommands.CHAPTER_PREV) }
+    }
 
     override suspend fun setSpeed(
         speed: Float,

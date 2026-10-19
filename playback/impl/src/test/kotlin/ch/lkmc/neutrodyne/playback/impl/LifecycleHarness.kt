@@ -247,6 +247,10 @@ internal class LifecycleHarness(
             deferred(positions),
             deferred(lookup),
             deferred(items),
+            Provider {
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeChapterRepository()
+            },
         )
     val connection =
         PlayerConnection(
