@@ -10,7 +10,9 @@ import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.PositionStore
 import ch.lkmc.neutrodyne.core.domain.QueueRepository
+import ch.lkmc.neutrodyne.core.model.CurrentChapter
 import ch.lkmc.neutrodyne.core.model.EffectivePlayback
+import ch.lkmc.neutrodyne.core.model.SleepTimerState
 import ch.lkmc.neutrodyne.playback.api.NowPlaying
 import ch.lkmc.neutrodyne.playback.api.PlaybackEvent
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
@@ -55,6 +57,8 @@ internal class PlaybackStateHub(
     val bridge: ServiceBridge? get() = active.value
     private val emitted = MutableSharedFlow<PlaybackEvent>(extraBufferCapacity = 8)
     override val events = emitted.asSharedFlow()
+    override val sleepTimer = MutableStateFlow<SleepTimerState>(SleepTimerState.Off)
+    override val currentChapter = MutableStateFlow<CurrentChapter?>(null)
     override val pendingMeteredConsent = gate.pendingConsent
 
     private val durable =

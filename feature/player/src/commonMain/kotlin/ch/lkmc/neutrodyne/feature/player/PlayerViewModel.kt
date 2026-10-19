@@ -139,7 +139,7 @@ public class PlayerViewModel(
                         )
                     }
 
-                    is PlaybackEvent.MarkedPlayed -> {
+                    is PlaybackEvent.MarkedPlayed, PlaybackEvent.SleepTimerFired -> {
                         Unit
                     }
                 }

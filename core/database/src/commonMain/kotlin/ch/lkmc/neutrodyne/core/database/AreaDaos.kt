@@ -8,6 +8,7 @@ import androidx.room3.Insert
 import androidx.room3.Query
 import androidx.room3.Upsert
 import ch.lkmc.neutrodyne.core.model.FeedOrder
+import ch.lkmc.neutrodyne.core.model.MEASURED_DURATION_TOLERANCE_MS
 import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import kotlinx.coroutines.flow.Flow
@@ -410,6 +411,18 @@ interface EpisodeStateDao {
             " FROM episode_state WHERE episodeId IN (:ids)",
     )
     fun observeFor(ids: List<Long>): Flow<List<EpisodeStateLiveRow>>
+
+    /** Enrichment only; the difference guard prevents metadata invalidation loops. */
+    @Query(
+        "UPDATE episode_state SET measuredDurationMs = :durationMs, updatedAt = :now" +
+            " WHERE episodeId = :id AND :durationMs > 0 AND (measuredDurationMs IS NULL" +
+            " OR ABS(measuredDurationMs - :durationMs) > $MEASURED_DURATION_TOLERANCE_MS)",
+    )
+    suspend fun setMeasuredDuration(
+        id: Long,
+        durationMs: Long,
+        now: Long,
+    )
 
     /** Written once at the first positive position, never at tick cadence. */
     @Query(

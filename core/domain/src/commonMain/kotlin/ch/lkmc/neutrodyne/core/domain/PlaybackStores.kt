@@ -86,6 +86,14 @@ data class Departure(
 interface PositionStore {
     fun observe(episodeId: Long): Flow<StoredPosition?>
 
+    /** Positive measured duration only; <=0 is unknown and ignored. Ensures state, preserves all
+     * user marks/positions/feed duration, and writes only if absent or differing by >1 second.
+     * Missing episodes are ignored; callers reject stale current occurrences before dispatch. */
+    suspend fun setMeasuredDuration(
+        episodeId: Long,
+        durationMs: Long,
+    )
+
     /** allowed is a fast thread-safe predicate read INSIDE the transaction. False writes nothing. */
     suspend fun save(
         episodeId: Long,

@@ -983,6 +983,8 @@ What each save means for sync (all through the capture triggers, [02 Sync captur
 
 ### Start position
 
+**Implementation note (2026-10-19, M5).** Cold loads keep `StartPositionRule`; live resume after a user pause strictly longer than five minutes only rewinds the valid current position five seconds once. Timestamp/chapter seeks cancel that rewind. Durable savedAt uses epoch time; live pause uses elapsed time, excluding buffering/focus interruptions. Sync pickup remains MS2.
+
 `StartPositionRule(saved, savedAt, durationMs, played, now, smartResume)`:
 
 ```kotlin
@@ -1057,6 +1059,8 @@ Serves R2.7, R4.8. Delivered in M4 (speed, skip silence), M12 (boost, intro/outr
 
 ## Sleep timer
 
+**Implementation note (2026-10-19, M5).** Buffering holds the fade factor; explicit pause restores normal volume and resume recomputes it. Expiry, Off, extension, replacement and teardown restore the adapter normal factor (Android 1, desktop separate `setFade`). Reject minutes outside 1–240; extension affects only a minute timer and caps remaining time at 240 minutes. EOE follows manual item changes; no current means Off. Sleep clears only `sleepTimerArmed`, never metered `blockBeforeNext`; run the played chain once without projector advance, emit `SleepTimerFired` once, and discard state with the service.
+
 Serves R4.8, R8.5. Delivered in M5. Honours [PO-20](../PLAN.md#48-further-product-owner-decisions) (counts only while playing, 10 s fade), [D84](../PLAN.md#3-key-decisions).
 
 The state machine, the counting rule, the fade steps and end-of-episode arming are `SleepTimerCore` (`:playback:core`, PLAN M5 AC8): it consumes "advancing" changes and elapsed-clock ticks and emits volume factors, pause and arm/disarm commands. Android's `SleepTimer` (below) executes them with the player volume and `EndOfItemPauseArbiter`; the desktop drives `setFade` and its end-of-item pause ([11 DesktopPlaybackController](11-desktop.md#desktopplaybackcontroller)). The timer is device-local and never synced; `playback.sleep_last_minutes` is a synced setting.
@@ -1089,6 +1093,8 @@ stateDiagram-v2
 
 ## Chapters
 
+**Implementation note (2026-10-19, M5).** W1 places `EpisodeChapter`, `CurrentChapter`, `SleepTimerMode` and `SleepTimerState` in `core.model`, superseding their earlier API attribution. `ChapterRepository` observes winning visible rows, loads JSON with `ensureLoaded(episodeId)`, and replaces one source including hidden rows. Local-file support waits for M6. Selection belongs to model, scheduling to playback core, writes to core data; no `core:data → playback:core` dependency. Intervals are start-inclusive/end-exclusive; explicit shorter ends leave gaps, unknown final ends are open. Navigation never wraps; previous uses strictly >3 seconds.
+
 Serves R4.8, R3.5, R8.5. Delivered in M5 (P2.0 JSON, PSC, ID3, MP4), M6 (download-time extraction), M9a (YouTube descriptions). Table: [02 chapter](02-data-model.md#chapter). Placement: the priority, the current chapter and the next/previous targets are `ChapterIndex` (`:playback:core`); `ChapterRepositoryImpl` and `Podcasting20ChaptersParser` are `:core:data` code for both platforms; reading container chapters is the platform's `EmbeddedChapterReader` (Android `MetadataRetrieverChapterReader`, desktop `DesktopChapterExtractor`, [11 Chapters and metadata](11-desktop.md#chapters-and-metadata)) and, during playback, the adapter (Android `Chapters`, desktop `TracksKnown`). Chapters are device-local: each device fetches and extracts its own ([10 Never synced](10-sync.md#never-synced)).
 
 ### Sources and priority
@@ -1106,6 +1112,8 @@ The first source with at least one visible (non-hidden) chapter wins; sources ar
 Writers replace all rows of one `(episodeId, source)` pair per transaction ([02 chapter](02-data-model.md#chapter)). Each source is written at most once each time the item becomes current (ID3/MP4 rows only when the extracted list differs from the stored one).
 
 ### Podcasting 2.0 JSON
+
+**Implementation note (2026-10-19, M5).** Successful empty/hidden-only results complete the occurrence without hot loops or winning. Failure preserves cached/lower sources, with 24-hour per-episode/URL in-memory backoff; offline skips consume no attempt. URL changes reset retry state and invalidate/cancel old work; recheck URL and episode existence inside the save transaction. Use finite starts and next-start bounds for invalid ends. ID3 ChapterFrame maps to ID3; Nero/QuickTime maps to MP4 by container/format.
 
 `Podcasting20ChaptersParser` (`:core:data` `commonMain`, `Json.parseToJsonElement`, no generated serializers): fetch `chaptersUrl` with `NeutrodyneHttpClients.client(HttpClientKind.API)` (Ktor over the island's API client, 8 s call timeout, [01 One client family](01-foundation.md#one-client-family)), body cap 1 MiB, accept `application/json+chapters` and `application/json` (and anything that parses). Rules: `version` must be a string and `chapters` an array, else reject; each chapter needs a numeric `startTime` ≥ 0 (seconds, float) else that chapter is dropped; `title`, `img`, `url` optional (`img`/`url` resolved against the chapters URL, only `http(s)` kept); `toc: false` → `hidden = true`; `endTime` → `endMs`; `location` ignored. Sort by start, drop duplicate starts (keep first), `endMs` defaults to the next start; cap 1,000 chapters. Failure → no rows; retried the next time the item becomes current, at most once per 24 h per episode (in-memory). When ingestion sees `chaptersUrl` change it deletes that episode's `PODCASTING20_JSON` rows, so the next time the item becomes current they are fetched again ([03 Diff algorithm](03-feeds-and-discovery.md#diff-algorithm)). The fetch needs a connected network and is skipped offline (no failure is recorded).
 
@@ -1173,6 +1181,8 @@ Serves R4.7, R5.2. Delivered in M4 (lock screen, System UI, Bluetooth metadata),
 
 ### Android Auto and Assistant
 
+**Implementation note (2026-10-19, M5).** M5 ships an empty Downloads root and not-downloaded metadata defaults; M6 supplies real files/status and Downloads starts. Seeded tests prove mapping only. Include eligible queued episodes in browse; cap roots even at limits 0/1. Automotive controllers share library/trust behavior; prove Auto with DHU. Retail AAOS stays unverified under D64, with no AAOS module, specific tests or distribution channel; polish stays M13.
+
 `MediaLibraryTree` (`onGetLibraryRoot`, `onGetChildren`, `onGetItem`, `onSearch`, `onGetSearchResult`) reads the database through DAOs on IO and builds items with `MediaItemFactory`. Browse items carry `EXTRAS_KEY_CONTENT_STYLE_*` hints (lists for episodes, grid for podcasts).
 
 | Media ID | Children (≤ 100 playable items per node, paged by `page`/`pageSize`) |
@@ -1191,6 +1201,8 @@ Serves R4.7, R5.2. Delivered in M4 (lock screen, System UI, Bluetooth metadata),
 
 ### Resumption
 
+**Implementation note (2026-10-19, M5).** M4 owns the existing standard `MediaButtonReceiver`; M5 adds false resumption and cold-key validation without duplicate registration.
+
 `ResumptionProvider.onPlaybackResumption(session, controller, isForPlayback)`, from the database only — never the network. Every call first awaits `DatabaseOpener.awaitOpen()` (which runs migrations) — never a raw query on an unmigrated file.
 
 - `isForPlayback = true` (M4): Media3 calls it for **any** play request on an empty player — the own UI's `play()` after `dismiss()` or session end, a fresh service whose projector has not loaded yet, a media key or Bluetooth play while the service is dead, a tap on the resumption card. If `currentEpisodeId == null` and Up next is non-empty, `SessionWriter.commitStart` makes the Up next head current (context unchanged). Returns the projected window (`QueueProjector.buildWindow()`, which also fills `EpisodeSourceIndex` and sets `appliedGeneration`), start index 0, `StartPositionRule` position; effective settings are applied before Media3 prepares.
@@ -1204,6 +1216,8 @@ Serves R4.7, R5.2. Delivered in M4 (lock screen, System UI, Bluetooth metadata),
 ---
 
 ## Video
+
+**Implementation note (2026-10-19, M5).** Use default audio rows first, then ordinal, trying rows until a usable HTTP(S) source; otherwise keep the original muxed enclosure. This supersedes 02’s single-row interpretation and also governs M6. Preserve `isVideo` and disabled VIDEO/TEXT tracks. W1 exposes the candidate; W8 selects it.
 
 Serves R4.7. Delivered in M5 (audio-only), M14 (video surface, PiP, YouTube video). Honours [D64](../PLAN.md#3-key-decisions), PO-9 (YouTube audio-only). The desktop also plays video podcasts as audio in v1.0 (video through libmpv in v1.x, M17; [11 Desktop playback engine](11-desktop.md#desktop-playback-engine)).
 
@@ -1291,6 +1305,8 @@ The full player's scrubber interpolates every frame with `PositionSnapshot.posit
 
 ### Threading rules
 
+**Implementation note (2026-10-19, M5).** `playback.api.PlaybackSessionCommands` freezes sleep mode String/minutes Int payloads and chapter names. Reject missing/wrong types, unknown modes and out-of-range minutes with `SessionError.ERROR_BAD_VALUE`; valid no-ops return `SessionResult.RESULT_SUCCESS`, unimplemented commands `SessionError.ERROR_NOT_SUPPORTED`. Keep M4 trust policy and ordered main-thread dispatch. Defaults are Off/null; W2/W4 own dispatch and teardown.
+
 | Code | Thread | Rule |
 |---|---|---|
 | Player, session, `SessionPlayer`, projector diffs, listeners, `SleepTimer`, `Chapters` and the per-player `:playback:core` objects they wrap | Application main looper (Media3 1.11 makes session getters throw elsewhere) | Never block; DB and network via `withContext(IO)` and back. On the desktop the same core objects live on `nd-playback` ([11 Threading model](11-desktop.md#threading-model)) |
@@ -1330,6 +1346,8 @@ Per-podcast and per-group overrides (`podcast_settings.playbackSpeed`, `.skipSil
 ---
 
 ## Testing
+
+**Implementation note (2026-10-19, M5).** Run applicable M5 matrix rows now; real playing-download deletion belongs to M6 and the M11 rerun. Fake local files can prove timer/chapter semantics. W1 does not claim later behavior or device/DHU evidence.
 
 Serves N1, N2, N11; risk [M3r](../PLAN.md#8-risks-and-mitigations) (Media3 `@UnstableApi` churn). Runners and CI wiring: [09 Test strategy](09-quality-and-release.md#test-strategy). Three layers: **`:playback:core`'s `commonTest`** on the desktop JVM (`TestClock` and the `:core:testing` fakes; no Media3, no Robolectric; the same suites guard the desktop adapter — PLAN M4 AC17, M5 AC8, MD1 AC1); **`:core:data`'s store tests** on the desktop JVM with an in-memory Room database on the bundled driver (02's convention); **Android adapter tests** with Robolectric, `media3-test-utils(-robolectric)` (`TestExoPlayerBuilder`, `FakeClock`, `TestPlayerRunHelper`, `FakeMediaSource`) and an in-memory `TestDb` with `AndroidSQLiteDriver`. The desktop adapter's tests are 11's ([11 Testing](11-desktop.md#testing)).
 

@@ -1245,6 +1245,8 @@ Boot-card resumption and hardware `SKIP` mapping remain M5.
 
 #### M5: Playback features and system surfaces
 
+**Implementation note (2026-10-19, M5).** The adopted M5 plan resolutions freeze interface/storage/settings foundations first. Downloads is an empty Auto root with not-downloaded defaults until M6 supplies content and real Downloads starts. AAOS uses the same automotive library/trust policy, with retail availability unverified per D64 and polish in M13; no new app module or distribution channel. Real playing-download deletion is verified in M6 and repeated in M11. These clarify milestone boundaries without changing D-ids.
+
 - **Goal:** complete the table-stakes listening features and system integrations.
 - **Deliverables:**
   - Sleep timer (duration with 10 s fade, end of episode) via `nd.SLEEP_SET` / `nd.SLEEP_EXTEND`.

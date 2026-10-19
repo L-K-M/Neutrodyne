@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.model.settings
 
+import ch.lkmc.neutrodyne.core.model.SleepTimerMode
 import kotlinx.collections.immutable.persistentListOf
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -13,7 +14,10 @@ enum class StreamOnMetered {
     NEVER,
 }
 
-/** Eight portable M4 keys (06); five sync while "Sync playback settings" is on. */
+/** How hardware next/previous buttons route; explicit episode commands ignore this setting. */
+enum class HardwareButtons { EPISODE, SKIP }
+
+/** Portable playback keys (06); synced keys follow "Sync playback settings". */
 object PlaybackSettingKeys {
     val SPEED: SettingKey.Float32 = SettingKey.Float32("playback.speed", DEFAULT_SPEED, synced = true)
 
@@ -41,6 +45,17 @@ object PlaybackSettingKeys {
 
     val STREAM_CACHE_MB: SettingKey.Int32 = SettingKey.Int32("playback.stream_cache_mb", 500)
 
+    val HARDWARE_BUTTONS: SettingKey.Choice<HardwareButtons> =
+        SettingKey.Choice(
+            "playback.hardware_buttons",
+            HardwareButtons.EPISODE,
+            persistentListOf(HardwareButtons.EPISODE, HardwareButtons.SKIP),
+        )
+
+    val SMART_RESUME: SettingKey.Bool = SettingKey.Bool("playback.smart_resume", true, synced = true)
+
+    val SLEEP_LAST_MINUTES: SettingKey.Int32 = SettingKey.Int32("playback.sleep_last_minutes", 30, synced = true)
+
     val ALL: List<SettingKey<*>> =
         listOf(
             SPEED,
@@ -51,6 +66,9 @@ object PlaybackSettingKeys {
             PAUSE_FOR_NAVIGATION,
             STREAM_ON_METERED,
             STREAM_CACHE_MB,
+            HARDWARE_BUTTONS,
+            SMART_RESUME,
+            SLEEP_LAST_MINUTES,
         )
 
     const val SPEED_MIN = 0.5f
@@ -103,6 +121,7 @@ object PlaybackSettingKeys {
         value: Any,
     ): Boolean =
         when (key) {
+            SLEEP_LAST_MINUTES -> value is Int && SleepTimerMode.isValidMinutes(value)
             SPEED -> value is Float && isValidSpeed(value)
             SPEED_PRESETS -> value is String && parseSpeedPresets(value) != null
             SKIP_BACK_MS -> value is Long && value in SKIP_BACK_MS_VALUES
