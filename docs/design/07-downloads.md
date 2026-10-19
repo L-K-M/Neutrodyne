@@ -1499,6 +1499,14 @@ Serves R4.5, N6. Delivered in M6 (common planner on both platforms). [PO-12](../
 
 ### Cleanup triggers
 
+**Implementation note (2026-10-19, M6b).** W3 exposes `CleanupPlannerImpl.run`
+and a suspending `observePlayed()` collector with a 30 s debounce. W5/W7 own
+launching the collector and binding startup, policy, session and periodic
+triggers. The engine calls cleanup before committing a storage wait; if disk IO
+also prevents cleanup, it retains the storage wait and its retry. Startup/daily
+hosts verify completed rows before cleanup; cleanup itself repeats journal
+draining, the partial sweep and orphan reporting without resetting runners.
+
 `CleanupPlanner.run(reason)` (single flight) is called by `CleanupWorker` (`download-cleanup`, daily; on the desktop the `downloads-auto` lane's daily pass, [Desktop runners](#desktop-runners)), by the played-downloads observer (`DownloadDao.observePlayedCompletedIds()`, debounced 30 s, so "delete immediately" happens shortly after an episode is marked played — here, or on another device when sync applies the played state), when `play_session.currentEpisodeId` changes (deferred deletes, outgoing item), when `downloads.delete_after_played` or a scope override changes, and synchronously by the engine before a `STORAGE` wait for that root.
 
 ### Eligibility
@@ -1519,6 +1527,17 @@ Cleanup deletes with `byUser = false`: no `downloadDismissedAt`, so an episode r
 
 ### Deferral while playing
 
+**Implementation note (2026-10-19, M6b).** Cleanup journals candidates before
+the deletion transaction, then rechecks the SQL protected set and row snapshots
+inside that transaction. Index events occur outside the transaction so a
+subscriber can read the database; skipped or rolled-back rows regain their
+index entries. The frozen W1 port comment proposed releasing the claim mutex
+before disk work. M6a's `DeferredDeletes` requires it through the ownership
+check and file deletion to prevent a new claim reusing a checked path. Cleanup
+retains that existing barrier, with all disk IO outside DB transactions. A
+file that becomes current after its row is removed stays journaled until the
+session changes.
+
 06 may hold an open `Local` pin on the current item's file and re-open it on every seek ([06 EpisodeResolver](06-playback.md#episoderesolver)); on the desktop 11's engine keeps the current file open through its `FileByteSource` ([11 Sources and SpanCache](11-desktop.md#sources-and-spancache)), and Windows refuses to delete an open file. Therefore any deletion (user, cleanup, unsubscribe, move source) of a file whose episode is `play_session.currentEpisodeId` — read through `PlaySessionDao.observeCurrentEpisodeId()` (02; `:download:impl` may not depend on `:playback:api`, [01 Dependency rules](01-foundation.md#dependency-rules)) — removes the row and the index entry at once but hands the file to `DeferredDeletes`:
 
 - `DeferredDeletes` persists `"{episodeId}|{rootId}|{path}"` entries in `downloads.deferred_deletes` (`device_settings`) and deletes a file when `currentEpisodeId` changes away from its episode. The same set is the crash journal of every deletion ([Deleting a download](#deleting-a-download)).
@@ -1527,6 +1546,16 @@ Cleanup deletes with `byUser = false`: no `downloadDismissedAt`, so an episode r
 - If the file disappears anyway, 06's recovery re-pins to the stream at the same position and calls `reportFileMissing` ([06 Error recovery](06-playback.md#error-recovery)).
 
 ### Quota
+
+**Implementation note (2026-10-19, M6b).** `DownloadQuota` is the common
+AUTO admission budget. W2 calls `resetAdmission()` at the start of its
+admission pass and `admitsAuto(latestRows, estimate)` under the shared claim
+mutex before each insert. Exact fits are admitted; an unknown estimate uses
+150 binary MB. `DownloadStorage` observes the cap and rejected estimate and
+recomputes `autoBlockedByCap` as rows or settings change, so cleanup frees
+capacity without retaining a stale notice. Partials and orphans are reported
+separately and do not consume the admission budget. Manual requests never
+consult it. W3 does not implement or modify W2's planner.
 
 `StorageUsage.usedBytes` = `SUM(totalBytes)` of `COMPLETED` rows ([02 Downloads](02-data-model.md#downloads)), never a file-system walk; `partialBytes` = sum of `.part` lengths of rows with a `tempPath` (cheap `stat` calls, refreshed on observation). The cap (`downloads.storage_cap_mb`: unlimited, 1 / 2 / 5 / 10 / 20 GB) only gates `AUTO` admission ([Planner algorithm](#planner-algorithm) step 7); manual downloads ignore it; reaching it shows `CAP_REACHED`.
 

@@ -6,6 +6,8 @@ import ch.lkmc.neutrodyne.core.common.Clock
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.database.DownloadEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.domain.CleanupPlanner
+import ch.lkmc.neutrodyne.core.domain.CleanupReason
 import ch.lkmc.neutrodyne.core.model.DownloadError
 import ch.lkmc.neutrodyne.core.model.DownloadLane
 import ch.lkmc.neutrodyne.core.model.DownloadState
@@ -53,6 +55,7 @@ internal class DownloadEngine(
     val claimMutex: Mutex,
     private val resetOrphanedRunners: suspend () -> Unit,
     private val onCompleted: suspend (DownloadEntity) -> Unit,
+    private val cleanup: CleanupPlanner,
     private val mayClaim: (RunnerToken) -> Boolean = { true },
     private val jitter: () -> Double = { Random.nextDouble(MIN_JITTER, MAX_JITTER) },
 ) : DownloadRunner {
@@ -338,6 +341,14 @@ internal class DownloadEngine(
             if (entry.intent != null) throw CancellationException("Download stopped before transfer")
             currentCoroutineContext().ensureActive()
             val result = transfer.run()
+            if (result is TransferResult.Wait && result.reason == WaitReason.STORAGE) {
+                try {
+                    cleanup.run(CleanupReason.STORAGE)
+                } catch (_: IOException) {
+                    // Full/unmounted storage can also prevent journaling cleanup. Retain the
+                    // actionable STORAGE wait and its retry instead of failing this transfer.
+                }
+            }
             currentCoroutineContext().ensureActive()
             end = TransferEnd.Finished(result)
         } catch (cancelled: CancellationException) {

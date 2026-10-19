@@ -13,8 +13,9 @@ interface AutoDownloadPlanner {
     suspend fun plan(podcastIds: Collection<Long>)
 }
 
-/** W3 owner. Single flight on a cleanup mutex. Share claimMutex for row removal only;
- * use DeferredDeletes for disk work after commit, without holding the claim mutex. */
+/** W3 owner. Single flight on a cleanup mutex. Recheck protections in the removal transaction;
+ * disk work uses DeferredDeletes after commit. M6a's journal drain also holds claimMutex so
+ * a new claim cannot reuse a path between the ownership check and its filesystem delete. */
 interface CleanupPlanner {
     suspend fun run(reason: CleanupReason)
 }

@@ -8,6 +8,7 @@ import androidx.sqlite.SQLiteStatement
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.database.DownloadEntity
 import ch.lkmc.neutrodyne.core.model.SourceKind
+import ch.lkmc.neutrodyne.core.testing.FakeCleanupPlanner
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
@@ -67,6 +68,7 @@ internal class EngineRig(
     var onSchedule: suspend () -> Unit = {}
     var resets = 0
     var mayClaim = true
+    val cleanup = FakeCleanupPlanner()
     val scheduler =
         object : DownloadScheduler {
             override suspend fun ensureScheduled(lane: Lane) {
@@ -152,6 +154,7 @@ internal class EngineRig(
             Mutex(),
             { resets++ },
             { completed += it.episodeId },
+            cleanup,
             { mayClaim },
             { 1.0 },
         )
