@@ -3,6 +3,9 @@ package ch.lkmc.neutrodyne
 
 import android.app.Application
 import android.content.Context
+import android.os.Build
+import android.os.Bundle
+import android.util.Log
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.AndroidJUnitRunner
 
@@ -17,6 +20,21 @@ import androidx.test.runner.AndroidJUnitRunner
  * test asserts on — no production hook, receiver or flag is involved.
  */
 class NeutrodyneTestRunner : AndroidJUnitRunner() {
+    override fun onCreate(arguments: Bundle) {
+        // Select before discovery/execution, including orchestrator discovery. AGP 9.4.1's
+        // Android Test Engine 1.0.1 writes assumption status -4 as an XML failure.
+        val excluded =
+            selectSupportedDeviceTests(
+                arguments,
+                Build.VERSION.SDK_INT,
+                Build.SUPPORTED_ABIS.first(),
+                BuildConfig.SHIPPED_LOCALES.split(',').map { it.trim() },
+                FirstLaunchRestoreSeed.isRequested(arguments),
+            )
+        excluded.forEach { (selector, reason) -> Log.i("DeviceTestSelection", "Not selected: $selector ($reason)") }
+        super.onCreate(arguments)
+    }
+
     override fun newApplication(
         cl: ClassLoader?,
         className: String?,

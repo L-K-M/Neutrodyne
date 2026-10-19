@@ -51,6 +51,7 @@ import androidx.paging.compose.itemContentType
 import androidx.paging.compose.itemKey
 import androidx.paging.insertSeparators
 import androidx.paging.map
+import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.designsystem.components.CoverArt
 import ch.lkmc.neutrodyne.core.designsystem.components.NdActionRole
 import ch.lkmc.neutrodyne.core.designsystem.components.NdAssistChip
@@ -91,10 +92,12 @@ import ch.lkmc.neutrodyne.core.ui.platform.NotificationPermissionNotice
 import ch.lkmc.neutrodyne.core.ui.rememberMonogram
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.action_cancel
+import ch.lkmc.neutrodyne.core.ui.resources.action_retry
 import ch.lkmc.neutrodyne.core.ui.resources.action_save
 import ch.lkmc.neutrodyne.core.ui.resources.back
 import ch.lkmc.neutrodyne.core.ui.resources.group_edit_name_empty
 import ch.lkmc.neutrodyne.core.ui.resources.group_edit_name_long
+import ch.lkmc.neutrodyne.core.ui.resources.group_edit_no_members
 import ch.lkmc.neutrodyne.core.ui.resources.import_cancelled_title
 import ch.lkmc.neutrodyne.core.ui.resources.import_chip_duplicate
 import ch.lkmc.neutrodyne.core.ui.resources.import_chip_invalid
@@ -120,6 +123,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.import_group_rename_title
 import ch.lkmc.neutrodyne.core.ui.resources.import_groups_master
 import ch.lkmc.neutrodyne.core.ui.resources.import_groups_section
 import ch.lkmc.neutrodyne.core.ui.resources.import_header_in
+import ch.lkmc.neutrodyne.core.ui.resources.import_load_error
 import ch.lkmc.neutrodyne.core.ui.resources.import_no_media_hint
 import ch.lkmc.neutrodyne.core.ui.resources.import_opt_notify
 import ch.lkmc.neutrodyne.core.ui.resources.import_opt_treat_played
@@ -479,7 +483,30 @@ private fun SessionBody(
             if (paging.itemCount == 0 && preview) {
                 item(key = "empty", contentType = "header") {
                     Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                        NdLoading()
+                        when {
+                            paging.loadState.hasError -> {
+                                NdBanner(
+                                    message = stringResource(Res.string.import_load_error),
+                                    primary =
+                                        NdDialogAction(
+                                            stringResource(Res.string.action_retry),
+                                            onClick = paging::retry,
+                                        ),
+                                )
+                            }
+
+                            paging.loadState.isIdle -> {
+                                Text(
+                                    stringResource(Res.string.group_edit_no_members),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+
+                            else -> {
+                                NdLoading()
+                            }
+                        }
                     }
                 }
             }
@@ -1178,10 +1205,15 @@ private fun NameDialog(
         title = title,
         confirm =
             NdDialogAction(label = stringResource(Res.string.action_save)) {
+                if (submitting) return@NdDialogAction
                 submitting = true
                 scope.launch {
-                    error = onSubmit(name)
-                    submitting = false
+                    try {
+                        // The ViewModel reports storage failures; keep the form open on failure.
+                        suspendRunCatching { error = onSubmit(name) }
+                    } finally {
+                        submitting = false
+                    }
                 }
             },
         dismiss = NdDialogAction(label = stringResource(Res.string.action_cancel), onClick = onDismiss),
@@ -1194,6 +1226,7 @@ private fun NameDialog(
                     error = null
                 },
                 singleLine = true,
+                enabled = !submitting,
                 isError = error != null,
                 supportingText = { error?.let { Text(groupErrorText(it)) } },
                 label = { Text(stringResource(Res.string.import_target_name)) },
@@ -1217,7 +1250,7 @@ private fun TargetGroupDialog(
         NameDialog(
             title = stringResource(Res.string.import_target_new),
             initial = selectedName?.let(::displayMetadata) ?: "",
-            onDismiss = onDismiss,
+            onDismiss = { naming = false },
         ) { name ->
             val error = onNewName(name)
             if (error == null) onDismiss()
