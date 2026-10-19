@@ -132,9 +132,13 @@ internal class PlaybackControllerImpl(
         }
     }
 
-    override fun nextChapter() = Unit
+    override fun nextChapter() {
+        scope.launch(Dispatchers.Main.immediate) { command(PlaybackSessionCommands.CHAPTER_NEXT) }
+    }
 
-    override fun previousChapter() = Unit
+    override fun previousChapter() {
+        scope.launch(Dispatchers.Main.immediate) { command(PlaybackSessionCommands.CHAPTER_PREV) }
+    }
 
     override suspend fun setSpeed(
         speed: Float,

@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.model.FeedSource
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.playback.api.PlayResult
+import ch.lkmc.neutrodyne.playback.api.PlaybackSessionCommands
 import ch.lkmc.neutrodyne.playback.api.UnplayableReason
 import ch.lkmc.neutrodyne.playback.core.StartRequest
 
@@ -25,7 +26,16 @@ internal object CustomCommands {
     const val RESULT = "nd.result"
     const val EPISODE_ID = "nd.episodeId"
     const val REASON = "nd.reason"
-    val names = listOf(PLAY_CONTEXT, SPEED_SET_SCOPE, SKIP_SILENCE, SPEED_CYCLE, DISMISS)
+    val names =
+        listOf(
+            PLAY_CONTEXT,
+            SPEED_SET_SCOPE,
+            SKIP_SILENCE,
+            SPEED_CYCLE,
+            DISMISS,
+            PlaybackSessionCommands.CHAPTER_NEXT,
+            PlaybackSessionCommands.CHAPTER_PREV,
+        )
 
     fun command(name: String): SessionCommand = SessionCommand(name, Bundle.EMPTY)
 
