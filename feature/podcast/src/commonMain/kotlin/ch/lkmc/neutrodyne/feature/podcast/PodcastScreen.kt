@@ -118,6 +118,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.podcast_unsubscribe_downloads
 import ch.lkmc.neutrodyne.core.ui.resources.podcast_unsubscribe_title
 import ch.lkmc.neutrodyne.core.ui.resources.ps_edit_url
 import ch.lkmc.neutrodyne.core.ui.resources.ps_feed_copied
+import ch.lkmc.neutrodyne.core.ui.resources.yt_empty_channel
 import ch.lkmc.neutrodyne.core.ui.root.LocalSnackbarHost
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.pluralStringResource
@@ -315,21 +316,37 @@ internal fun PodcastScreen(
                     // 08's `emptyFeed` doubles as the filtered-empty state: a fetched feed
                     // holding zero episodes gets the bare copy, while an active filter adds
                     // the reset action.
-                    if (items.itemCount == 0 && items.loadState.refresh is LoadState.NotLoading) {
+                    val pendingChannel =
+                        detail.sourceType == SourceType.YOUTUBE_CHANNEL &&
+                            detail.status == PodcastStatus.PENDING_FIRST_FETCH
+                    if (items.itemCount == 0 && items.loadState.refresh is LoadState.NotLoading && !pendingChannel) {
                         item(key = "empty", contentType = "empty") {
                             EmptyState(
                                 icon = NdIcons.FilterList,
-                                title = stringResource(Res.string.podcast_no_episodes),
+                                title =
+                                    stringResource(
+                                        if (detail.sourceType == SourceType.YOUTUBE_CHANNEL &&
+                                            state.filters == FeedFilters()
+                                        ) {
+                                            Res.string.yt_empty_channel
+                                        } else {
+                                            Res.string.podcast_no_episodes
+                                        },
+                                    ),
                                 body = "",
                                 actionLabel =
                                     if (state.filters != FeedFilters()) {
                                         stringResource(Res.string.feeds_show_played)
+                                    } else if (detail.sourceType == SourceType.YOUTUBE_CHANNEL) {
+                                        stringResource(Res.string.podcast_settings)
                                     } else {
                                         null
                                     },
                                 onAction =
                                     if (state.filters != FeedFilters()) {
                                         { onFiltersChange(FeedFilters()) }
+                                    } else if (detail.sourceType == SourceType.YOUTUBE_CHANNEL) {
+                                        onOpenSettings
                                     } else {
                                         null
                                     },
@@ -638,7 +655,7 @@ private fun FeedStateBanner(
             )
         }
 
-        detail.status == PodcastStatus.PENDING_FIRST_FETCH -> {
+        detail.status == PodcastStatus.PENDING_FIRST_FETCH && health.lastErrorKind == null -> {
             NdBanner(
                 message = stringResource(Res.string.podcast_fetching),
                 icon = NdIcons.ProgressActivity,

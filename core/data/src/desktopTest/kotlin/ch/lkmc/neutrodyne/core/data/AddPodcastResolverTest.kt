@@ -274,18 +274,42 @@ class AddPodcastResolverTest {
     // --- Host checks (03 Host recognition; YouTube is M8) -------------------------------------------
 
     @Test
-    fun youTubeInputFailsWithoutFetching() =
+    fun youTubeInputsRouteBeforeFetchingOrDirectorySearch() =
         runTest {
+            val channelUrl = "https://youtube.com/channel/UCBR8-60-B28hp2BmDPdntcQ"
             for (input in listOf(
                 "https://www.youtube.com/@someone",
-                "youtu.be/abc",
+                "@東京",
+                "Shared @someone now",
+                "UCBR8-60-B28hp2BmDPdntcQ",
+                "youtu.be/3iRUwVzRDZQ",
                 "check https://youtube.com/c/x out",
+                "pcast://youtube.com/@someone",
+                "neutrodyne://subscribe?url=${URLEncoder.encode(channelUrl, Charsets.UTF_8)}",
+                "https://antennapod.org/deeplink/subscribe?url=${URLEncoder.encode(channelUrl, Charsets.UTF_8)}",
             )) {
-                val r = bundle.resolver.resolve(input)
-                val failure = assertIs<AddResolution.Failure>(r)
-                assertEquals(AddPodcastError.YouTubeNotYetSupported, failure.error)
+                assertIs<AddResolution.YouTube>(bundle.resolver.resolve(input), input)
             }
+            assertIs<AddResolution.Failure>(bundle.resolver.resolve("https://youtube.com/results?search_query=x"))
             assertEquals(0, server.requestCount)
+            assertTrue(db.podcastDao().youtubeChannelIds().isEmpty())
+        }
+
+    @Test
+    fun discoveredYouTubeFeedTakesTheChannelBranchWithoutAtomPreview() =
+        runTest {
+            server.enqueue(
+                mockResponse(
+                    body =
+                        "<html><head><link rel=\"alternate\" type=\"application/atom+xml\" " +
+                            "href=\"https://www.youtube.com/feeds/videos.xml?channel_id=UCBR8-60-B28hp2BmDPdntcQ\">" +
+                            "</head></html>",
+                    headers = arrayOf("Content-Type" to "text/html"),
+                ),
+            )
+            assertIs<AddResolution.YouTube>(bundle.resolver.resolve(feedUrl("/page")))
+            assertEquals(1, server.requestCount)
+            assertTrue(db.podcastDao().youtubeChannelIds().isEmpty())
         }
 
     @Test

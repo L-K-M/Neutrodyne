@@ -29,6 +29,8 @@ import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SubscribeError
 import ch.lkmc.neutrodyne.core.domain.SubscribeUseCase
+import ch.lkmc.neutrodyne.core.domain.YouTubeDuplicatePolicy
+import ch.lkmc.neutrodyne.core.domain.YouTubeSubscriptionWriter
 import ch.lkmc.neutrodyne.core.model.AliasReason
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.MemberSource
@@ -69,12 +71,30 @@ internal class SubscribeUseCaseImpl(
     private val settings: SettingsRepository,
     private val orderKeys: OrderKeys,
     private val clock: Clock,
+    private val channelWriter: YouTubeSubscriptionWriter,
 ) : SubscribeUseCase {
     override suspend fun youTube(
         resolution: ChannelResolution.Resolved,
         variants: Int,
         groupIds: Set<Long>,
-    ): Outcome<Long, SubscribeError> = Outcome.Failure(SubscribeError.YouTubeNotYetAvailable)
+    ): Outcome<Long, SubscribeError> {
+        val result =
+            channelWriter.write(
+                resolution,
+                variants,
+                groupIds,
+                YouTubeDuplicatePolicy.REJECT,
+            )
+        if (result is Outcome.Failure) return result
+        val id = (result as Outcome.Success).value.podcastId
+        // A refresh/scheduler failure cannot roll back an already confirmed subscription.
+        suspendRunCatching {
+            scheduler.enqueueNow(RefreshScope.Podcasts(listOf(id)), false, false, RefreshOrigin.SUBSCRIBE)
+        }.onFailure { Log.w(TAG, it) { "Channel initial refresh enqueue failed" } }
+        suspendRunCatching { scheduler.reschedulePeriodic() }
+            .onFailure { Log.w(TAG, it) { "Channel periodic reschedule failed" } }
+        return Outcome.Success(id)
+    }
 
     override suspend fun invoke(
         previewId: String,

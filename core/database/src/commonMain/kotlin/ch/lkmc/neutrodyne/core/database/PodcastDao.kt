@@ -22,7 +22,13 @@ import kotlinx.coroutines.flow.Flow
 abstract class PodcastDao(
     private val db: NeutrodyneDatabase,
 ) {
-    /** Atom cannot write page metadata. Null lookup values preserve existing page values. */
+    @Query("UPDATE podcast SET youtubeVariants = :variants WHERE id = :id AND sourceType = 'YOUTUBE_CHANNEL'")
+    abstract suspend fun setYouTubeVariants(
+        id: Long,
+        variants: Int,
+    )
+
+    /** Page metadata never overwrites Atom's authoritative title. Null keeps prior page data. */
     @Query(
         "UPDATE podcast SET artworkUrl = COALESCE(:artworkUrl, artworkUrl)," +
             " artworkKey = COALESCE(:artworkKey, artworkKey), bannerUrl = COALESCE(:bannerUrl, bannerUrl)," +

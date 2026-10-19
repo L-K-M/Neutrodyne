@@ -56,7 +56,7 @@ internal class FeedFetcher(
             if (req.purpose == FeedRequestPurpose.ADD &&
                 (youTube.classify(url) != null || youTube.isYouTubeHost(url))
             ) {
-                return FetchOutcome.Network(ADD_YOUTUBE_REJECTED)
+                return FetchOutcome.Network(ADD_YOUTUBE_REJECTED, rejectedYouTubeUrl = url)
             }
             val result =
                 try {

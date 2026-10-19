@@ -16,6 +16,7 @@ import ch.lkmc.neutrodyne.core.domain.YouTubeOpenContext
 import ch.lkmc.neutrodyne.core.domain.YouTubeSubscription
 import ch.lkmc.neutrodyne.core.domain.YouTubeSubscriptionWriter
 import ch.lkmc.neutrodyne.core.model.Availability
+import ch.lkmc.neutrodyne.core.model.YouTubeVariantBits
 import ch.lkmc.neutrodyne.youtube.api.ChannelResolution
 import ch.lkmc.neutrodyne.youtube.api.ChannelSearchResult
 import ch.lkmc.neutrodyne.youtube.api.EnrichResult
@@ -190,6 +191,10 @@ class FakeYouTubeFeedOutageMonitor : YouTubeFeedOutageMonitor {
 }
 
 class FakeYouTubeChannelRepository : YouTubeChannelRepository {
+    var subscribedId: Long? = null
+
+    override suspend fun subscribedPodcastId(channelId: String): Long? = subscribedId
+
     val variants = mutableMapOf<Long, Int>()
     val art = mutableListOf<Long>()
     val older = mutableListOf<Long>()
@@ -204,7 +209,7 @@ class FakeYouTubeChannelRepository : YouTubeChannelRepository {
         variants: Int,
     ) {
         require(
-            ch.lkmc.neutrodyne.core.model.YouTubeVariantBits
+            YouTubeVariantBits
                 .isValid(variants),
         )
         this.variants[podcastId] = variants
@@ -252,7 +257,7 @@ class FakeYouTubeSubscriptionWriter : YouTubeSubscriptionWriter {
         customTitle: String?,
     ): Outcome<YouTubeSubscription, SubscribeError> {
         require(
-            ch.lkmc.neutrodyne.core.model.YouTubeVariantBits
+            YouTubeVariantBits
                 .isValid(variants),
         )
         val call = Call(channel, variants, groupIds.toSet(), duplicatePolicy, customTitle)

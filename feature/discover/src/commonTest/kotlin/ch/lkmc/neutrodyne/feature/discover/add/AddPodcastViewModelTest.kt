@@ -5,19 +5,28 @@ package ch.lkmc.neutrodyne.feature.discover.add
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.domain.AddPodcastError
 import ch.lkmc.neutrodyne.core.domain.AddResolution
+import ch.lkmc.neutrodyne.core.domain.RssAlternative
 import ch.lkmc.neutrodyne.core.domain.SubscribeError
+import ch.lkmc.neutrodyne.core.domain.YouTubeChannelRepository
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedCandidate
 import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.testing.FakeAddPodcastResolver
 import ch.lkmc.neutrodyne.core.testing.FakeSubscribeUseCase
+import ch.lkmc.neutrodyne.core.testing.FakeYouTubeChannelRepository
+import ch.lkmc.neutrodyne.core.testing.FakeYouTubeChannelResolver
 import ch.lkmc.neutrodyne.core.testing.MainDispatcherTest
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.add_error_invalid_url
+import ch.lkmc.neutrodyne.youtube.api.ChannelResolution
+import ch.lkmc.neutrodyne.youtube.api.ResolvedVia
+import ch.lkmc.neutrodyne.youtube.api.YtRef
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -37,7 +46,112 @@ class AddPodcastViewModelTest : MainDispatcherTest() {
         ch.lkmc.neutrodyne.core.testing
             .FakeGroupRepository()
     private val subscribe = FakeSubscribeUseCase()
-    private val viewModel by lazy { AddPodcastViewModel(resolver, subscribe, groups) }
+    private val channelResolver = FakeYouTubeChannelResolver()
+    private val channels = FakeYouTubeChannelRepository()
+    private val viewModel by lazy { AddPodcastViewModel(resolver, subscribe, groups, channelResolver, channels) }
+    private val channel =
+        ChannelResolution.Resolved(
+            "UCBR8-60-B28hp2BmDPdntcQ",
+            "Channel",
+            null,
+            null,
+            null,
+            ResolvedVia.STATIC,
+        )
+
+    @Test fun channelPreviewUsesMetadataAndOnlyConfirmSubscribes() =
+        runTest {
+            resolver.nextResolution = AddResolution.YouTube(YtRef.Channel(channel.channelId, 3))
+            channelResolver.resolve = { _, _ -> channel }
+            viewModel.resolve("@channel")
+            advanceUntilIdle()
+            val step = assertIs<AddSheetStep.Channel>(viewModel.uiState.value.step)
+            assertEquals(3, step.variants)
+            assertTrue(subscribe.youtubeSubscriptions.isEmpty())
+            assertTrue(subscribe.subscribed.isEmpty())
+            viewModel.subscribe(setOf(9))
+            advanceUntilIdle()
+            assertEquals(Triple(channel, 3, setOf(9L)), subscribe.youtubeSubscriptions.single())
+            assertEquals(
+                "Channel",
+                viewModel.uiState.value.done
+                    ?.title,
+            )
+        }
+
+    @Test fun exactChannelDuplicateOffersOpenBeforeConfirm() =
+        runTest {
+            resolver.nextResolution = AddResolution.YouTube(YtRef.Handle("@channel"))
+            channelResolver.resolve = { _, _ -> channel }
+            channels.subscribedId = 42
+            viewModel.resolve("@channel")
+            advanceUntilIdle()
+            assertEquals(42, assertIs<AddSheetStep.Channel>(viewModel.uiState.value.step).alreadySubscribedId)
+            viewModel.subscribe()
+            advanceUntilIdle()
+            assertTrue(subscribe.youtubeSubscriptions.isEmpty())
+        }
+
+    @Test fun slowRssMatchNeverBlocksChannelAndUsePodcastReentersResolver() =
+        runTest {
+            val release = CompletableDeferred<Unit>()
+            val alternative = RssAlternative("https://example.org/rss", "Podcast", null, "Apple")
+            val slow =
+                object : YouTubeChannelRepository by channels {
+                    override suspend fun findRssAlternative(channelTitle: String): RssAlternative {
+                        release.await()
+                        return alternative
+                    }
+                }
+            val vm = AddPodcastViewModel(resolver, subscribe, groups, channelResolver, slow)
+            resolver.nextResolution = AddResolution.YouTube(YtRef.Handle("@channel"))
+            channelResolver.resolve = { _, _ -> channel }
+            vm.resolve("@channel")
+            runCurrent()
+            assertIs<AddSheetStep.Channel>(vm.uiState.value.step)
+            release.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(alternative, assertIs<AddSheetStep.Channel>(vm.uiState.value.step).alternative)
+            resolver.nextResolution = AddResolution.Feed(Preview)
+            vm.usePodcast()
+            advanceUntilIdle()
+            assertIs<AddSheetStep.Preview>(vm.uiState.value.step)
+            assertEquals(alternative.feedUrl, resolver.inputs.last())
+        }
+
+    @Test fun cancelledChannelResolutionCannotResurrectOrSubscribeOldInput() =
+        runTest {
+            val release = CompletableDeferred<Unit>()
+            resolver.nextResolution = AddResolution.YouTube(YtRef.Handle("@old"))
+            channelResolver.resolve = { _, _ ->
+                kotlinx.coroutines.withContext(NonCancellable) { release.await() }
+                channel
+            }
+            viewModel.resolve("@old")
+            runCurrent()
+            viewModel.cancelResolve()
+            viewModel.onInputChanged("@new")
+            release.complete(Unit)
+            advanceUntilIdle()
+            assertIs<AddSheetStep.Input>(viewModel.uiState.value.step)
+            viewModel.subscribe()
+            assertTrue(subscribe.youtubeSubscriptions.isEmpty())
+        }
+
+    @Test fun playlistOwnerActionResolvesCanonicalChannelAndFailureCanRetry() =
+        runTest {
+            resolver.nextResolution = AddResolution.YouTube(YtRef.Playlist("PL1234567890123"))
+            channelResolver.resolve =
+                { _, _ -> ChannelResolution.PlaylistUnsupported("PL1234567890123", channel.channelId, "Owner") }
+            viewModel.resolve("https://youtube.com/playlist?list=PL1234567890123")
+            advanceUntilIdle()
+            assertIs<AddSheetStep.ChannelFailure>(viewModel.uiState.value.step)
+            channelResolver.resolve = { _, _ -> channel }
+            viewModel.subscribeOwner()
+            advanceUntilIdle()
+            assertEquals("https://www.youtube.com/channel/${channel.channelId}", resolver.inputs.last())
+            assertIs<AddSheetStep.Channel>(viewModel.uiState.value.step)
+        }
 
     @Test
     fun chosenGroupsArePassedToSubscribe() =

@@ -1019,11 +1019,9 @@ Implementation note (2026-10-19, M8): W3 applies the source scheduling hook
 to a successfully committed body as well as Unchanged. The schedule-only
 conditional write preserves a concurrent manual force mark. Under adopted
 resolution 3, only YouTube's bounded gap rule may lower ordinary success
-scheduling; the 15-minute minimum, publisher deadline, failure backoff,
+scheduling for the triggering success and next two successes; the 15-minute minimum, publisher deadline, failure backoff,
 Deferred deadline and Manual only remain authoritative. Source-specific
 metadata selection and YouTube-only hashes preserve the RSS ingest path.
-
-Implementation note (2026-10-19, M8): The YouTube gap rule may lower the ordinary success interval for three refreshes, with a 15-minute minimum. Server, backoff and deferred deadlines still win, and manual refresh bypass remains unchanged. This is the narrow exception to the adapter hook's raise-only rule (adopted resolution 3); W3 implements it.
 
 `I` = effective interval of the podcast (D45); `NEVER = 253_402_300_799_000` (9999-12-31) for "Manual only".
 
@@ -1344,6 +1342,13 @@ data class FeedCandidate(val url: String, val title: String?, val episodeCount: 
 data class AlreadySubscribed(val podcastId: Long, val exact: Boolean)   // exact: URL identity; else same real podcast:guid
 data class BasicCredentials(val username: String, val password: String)
 ```
+
+Implementation note (2026-10-19, M8): W6 recognizes shared bare handles and
+channel IDs before normalization, and channel URLs again after wrapper,
+directory lookup or HTML feed discovery. These inputs return the YouTube
+branch without an RSS fetch or directory name search; direct Edit-feed
+probes still reject source-type changes. Confirming a channel queues normal
+initial refresh and preserves the pending subscription on first-fetch failure.
 
 ### Input normalisation
 

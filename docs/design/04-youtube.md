@@ -465,9 +465,9 @@ limits in common code, counting UTF-8 bytes before decoding. FULL alone scans
 for banners. FEED redirects are explicit, bounded to five hops and restricted
 to HTTPS YouTube page hosts; consent redirects produce CONSENT_WALL. The
 20 s deadline spans every lookup and request; known identity survives a
-metadata timeout, while caller cancellation still propagates. W1 left no
-shell resolver binding point, so W2 supplies the resolver constructor with
-an app-locale supplier for later shell integration, keeping capabilities false.
+metadata timeout, while caller cancellation still propagates. Both shells
+now supply the resolver constructor with the current app locale, keeping
+capabilities false.
 The feed-owned metadata-reader port is implemented in core data using the
 existing Atom parser, outside the YouTube modules.
 
@@ -537,9 +537,35 @@ sequenceDiagram
 | `Failed(CONSENT_WALL or PAGE_UNREADABLE)` | "Couldn't read this YouTube page. Paste the channel's /channel/UC… link or a link to one of its videos." | Edit |
 | Typed name in external mode | "To add a YouTube channel, share it from the YouTube app or paste its link." | — |
 
+Implementation note (2026-10-19, M8): W6 implements the same metadata-only
+Add branch on Android and desktop. Canonical identity, pending initial state,
+sync ID and memberships commit together through `YouTubeSubscriptionWriter`;
+normal SUBSCRIBE refresh runs after commit, with no preview Atom ingest.
+`subscribedPodcastId(channelId)` extends the frozen repository contract for
+an exact duplicate's Open action before confirmation. Metadata-only titles
+fall back to the channel ID. Page descriptions are escaped before storage
+because the existing description column is rendered as HTML. All capability
+bindings remain external (`NOT_YET_AVAILABLE`), implementing adopted plan
+resolution 1 for these screens.
+
+Implementation note (2026-10-19, M8): W6 implements adopted plan resolution 6:
+Include past live streams affects future polls, and disabling it keeps
+previously fetched recordings visible. The settings explanation also states
+that external mode cannot reliably distinguish live streams or premieres.
+Shorts changes instead invalidate existing feed pages immediately through
+the targeted variants write. No per-row live provenance or schema change is
+introduced.
+
 ### Prefer the show's RSS feed
 
 [PO-9](../PLAN.md#48-further-product-owner-decisions) default. When the preview opens and `youtube.suggest_rss` is on, `YouTubeChannelRepository.findRssAlternative(title)` queries 03's `SearchRepository` (enabled podcast directories only; never YouTube search) with an 8 s timeout. A hit matches when `norm(channelTitle)` equals `norm(collectionName)` or `norm(artistName)`, where `norm` = NFKC, lowercase, remove everything except letters and digits. The first match is shown as a card "This show also has a podcast feed — Subscribe to the podcast instead"; the preview is never blocked. The query only goes to directories the user already has enabled ([03 Search and discovery](03-feeds-and-discovery.md#search-and-discovery) privacy text applies).
+
+Implementation note (2026-10-19, M8): W6 uses the enabled M7 search service,
+with an eight-second deadline, NFKC name/artist comparison and no persistence.
+The optional suggestion runs after the channel preview becomes subscribable;
+Use podcast re-enters the same Add resolver and discards the old channel state.
+Editing or cancelling invalidates the resolution generation, including late
+metadata and directory answers.
 
 ### Channel search
 
@@ -547,15 +573,20 @@ With the engine only, M9a. Discover offers an explicit "Search YouTube channels"
 
 ### Channel metadata refresh
 
-Implementation note (2026-10-19, M8): W3 implements the frozen
-`YouTubeChannelMetadata` port as one app-scoped coordinator shared with
-channel detail. It owns the 100-new/30-stale sliding budget, two lookup
-permits, jitter, coalescing and the 20-second bound. Detail requests upgrade
-an in-flight avatar lookup to FULL. The page-metadata transaction explicitly
-re-pins changed avatar keys; Atom uses `applyYouTubeFeedMetadata` and
-cannot erase page artwork, banner, description or link. Both shells provide
-W2's resolver with the current app locale when wiring this new consumer;
-the external capability bindings stay unchanged.
+Implementation note (2026-10-19, M8): W3 and W6 share one app-scoped
+`DefaultYouTubeChannelMetadata` binding for adapter after-ingest and channel
+detail. It owns the 100-new/30-stale sliding budget, two lookup permits,
+jitter, coalescing and the 20-second bound. Detail upgrades an in-flight
+AVATAR request to FULL; concurrent detail opens share its banner result.
+Both callers refresh at the 30-day boundary. A fresh AVATAR-only preview
+with no banner does not force another page request. Failed metadata leaves
+the timestamp unchanged; NotFound stamps it without affecting feed health.
+The transaction preserves missing page values, escapes plain descriptions
+for HTML storage and explicitly re-pins changed avatar keys through W7's
+900 px helper. Banners stay unpinned. Atom uses `applyYouTubeFeedMetadata`
+and cannot erase page artwork, banner, description or link. Both shells
+provide one W2 resolver with the current app locale and keep external
+capabilities (`NOT_YET_AVAILABLE`, adopted resolution 1).
 
 - Atom `author/name` updates the title on every refresh (via 03's metadata update).
 - Avatar and description: in `afterIngest` (after a successful fetch, ingested or unchanged; after the enrichment step), `YouTubeSourceAdapter` re-resolves `Channel(id)` with `AVATAR` depth when `channelMetadataAt` is null or older than 30 days, under `withTimeoutOrNull(20 s)`. Budget (in-memory sliding window of 10 min, which covers one 8-min run): at most 100 never-fetched (`channelMetadataAt IS NULL`, typically fresh imports) plus 30 stale channels, 2 concurrently with 0.5–1.5 s jitter. With the engine, a denied extraction gate makes the lookup fall back to HTML ([Engine channel lookup](#engine-channel-lookup)). Channels over budget keep their monogram until a later run. New avatar URL → new `artworkKey`. 03's pin on an `artworkUrl` change runs before `afterIngest` and never sees this write, so whenever `applyYouTubeChannelMetadata` changes `artworkKey` (first avatar after a monogram, or a new avatar URL; the caller compares the stored key), the caller (`YouTubeSourceAdapter.afterIngest` here, `YouTubeChannelRepository.ensureChannelArt` below) calls `ArtworkStore.pin(ArtworkRef(newKey, avatarUrl, 0), PinReason.SUBSCRIPTION, podcastId)`, which schedules `artwork-sync` ([08 ArtworkStore](08-ui-ux.md#artworkstore)).
@@ -613,13 +644,13 @@ The prefixes are undocumented; if YouTube drops them, the `channel_id` fallback 
 ### Fetch policy
 
 Implementation note (2026-10-19, M8): W3 applies adopted resolution 2 to
-all seven masks. Selected variants run sequentially under the refresher's
+all seven masks: primary 404/410 always tries canonical first, including
+Shorts/live-only selections; failed fallback keeps its real diagnostic.
+Selected variants run sequentially under the refresher's
 host permit, with unconditional Atom requests and a 2 MiB cap. Secondary
 404/410 is empty; other secondary failures disable absence marking.
 403/429 abort the merge and defer without a failure count. An admitted
 health probe always reports, including cancellation as inconclusive.
-
-Implementation note (2026-10-19, M8): Primary 404/410 always tries canonical first, even for Shorts/live-only masks. Only secondary 404/410 is empty; failed fallback keeps its real diagnostic (adopted resolution 2).
 
 | Rule | Value |
 |---|---|
@@ -680,8 +711,6 @@ text; a malformed published value contributes its raw text. Item hashes
 include Shorts after OR with stored Shorts, and variant-only reclassification
 therefore writes even when the text stays equal. No schema change is needed.
 
-Implementation note (2026-10-19, M8): Feed-independent W1 DTOs retain published/raw-published and D19 sortDate. Generic Atom keeps its fallback; YouTube ignores updated. The digest adds normalized authorName, and item hashes include sticky Shorts changes (adopted resolution 4; W3 implements).
-
 `YouTubeEntryRules.merge(results, enabledBits): MergedChannel` (pure), called by `YouTubeSourceAdapter` with one `VariantResult` per polled URL (`Ok(bit, entries, authorName)`, `Empty(bit)`, `Failed(bit, httpCode, cause)`; the `channel_id` fallback reports under the primary's bit with `fallback = true`):
 
 1. If the primary variant failed and its `channel_id` fallback failed too → channel failure; no ingest (see [Errors and global outage](#errors-and-global-outage)). A failed **secondary** variant (`UUSH`, `UULV`) does not fail the channel: the others are ingested and step 7 marks no absences.
@@ -710,15 +739,22 @@ lower bound even during pull-in. The normal success hook now also runs
 after a body ingest commits, before the post-ingest announcement. Manual
 requests still bypass due-time selection. Gap counters are in-memory only.
 
-Implementation note (2026-10-19, M8): The bounded gap rule may lower ordinary success intervals for three refreshes, retaining the 15-minute floor and server/backoff/deferred deadlines; manual bypass is unchanged (adopted resolution 3; W3 implements).
-
 On a non-initial refresh, if every entry of a 15-entry variant is unknown, items may have been missed between refreshes (high-volume channels, or the device was offline). Then: with the engine, the enrichment step also requests `uploadsPage(channelId, bit, null)` (one page, ~30 items) and ingests unknown IDs through 03's `FeedIngestor` in `OLDER_PAGE` mode (never `isNew`, never flips absence; [D66](../PLAN.md#3-key-decisions)); in both capability modes `nextRefreshAt` is pulled in to `now + max(15 min, interval / 2)` for the next three refreshes of that channel (in memory, best effort). The 15 newest unknown items of the triggering refresh stay `isNew = 1` subject to 03's dump guard.
 
 ### Errors and global outage
 
-Implementation note (2026-10-19, M8): W1 freezes cancellable, 20-second probe/finalization APIs; controls share the host permit limit. Global outage alone suppresses channel badges (adopted resolution 5). Named controls are YouTube `UCBR8-60-B28hp2BmDPdntcQ` and Google `UCK8sQmJBp8GCxrOtXWBpyEA`. W4/W9 disclose their extra canonical-feed requests before enabling them; W1 makes none.
-
-Implementation note (2026-10-19, M8): W4 implements adopted resolution 5 with serialized device health writes and probe admission. Only global outage state suppresses channel badges; ordinary failures retain their diagnostics and never set `gone` or unsubscribe. Control checks use the existing FEED transport under the adapter's current host permit, or after refresh fan-out, and are bounded to 20 seconds with caller cancellation. The privacy inventory and PRIVACY.md disclose the two named control channels. The refresher counts the whole library at finalization, including rows outside the requested scope; cancellation during that read still resets accounting without control requests. Failed probes read the current library count again. Engine health remains M9 work in external mode.
+Implementation note (2026-10-19, M8): W4 implements adopted resolution 5
+with serialized device health writes and probe admission. Only global outage
+state suppresses channel badges; ordinary failures retain their diagnostics
+and never set `gone` or unsubscribe. Control checks use the existing FEED
+transport under the adapter's current host permit, or after refresh fan-out,
+and are bounded to 20 seconds with caller cancellation. The privacy
+inventory and PRIVACY.md disclose canonical-feed requests to YouTube
+`UCBR8-60-B28hp2BmDPdntcQ` and Google `UCK8sQmJBp8GCxrOtXWBpyEA`. The
+refresher counts the whole library at finalization, including rows outside
+the requested scope; cancellation during that read still resets accounting
+without control requests. Failed probes read the current library count
+again. Engine health remains M9 work in external mode.
 
 Since December 2025 the feed endpoint has repeatedly answered 404 for every feed for hours. A YouTube-wide outage must never mark channels dead or unsubscribe them (R3.3).
 
@@ -1684,7 +1720,10 @@ Rejected: NewPipe Extractor (GPL-3.0-or-later; the previous design), youtubedl-a
 
 ## Settings
 
-Implementation note (2026-10-19, M8): W1 registers M8 keys only: portable preferences, device-only health, no youtube-key sync. Zero stored deadline means null in health APIs. External mode cannot classify all live/premiere/member items; disabling LIVE changes future polls only (adopted resolution 6).
+Implementation note (2026-10-19, M8): W1 registers M8 keys only: portable
+preferences, device-only health, no youtube-key sync. Zero stored deadline
+means null in health APIs; the external-mode live limitation and switches
+follow the Add and ingestion notes above (adopted resolution 6).
 
 | Key | Type | Default | File | UI location | Milestone |
 |---|---|---|---|---|---|

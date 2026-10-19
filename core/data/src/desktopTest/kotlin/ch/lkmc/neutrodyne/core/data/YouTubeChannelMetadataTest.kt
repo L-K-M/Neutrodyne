@@ -18,6 +18,7 @@ import ch.lkmc.neutrodyne.youtube.api.ResolvedVia
 import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedUrls
 import ch.lkmc.neutrodyne.youtube.api.YtRef
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
@@ -221,6 +222,104 @@ class YouTubeChannelMetadataTest {
                 )
                 f.resolver.resolve = { ref, _ -> f.resolved((ref as YtRef.Channel).id) }
                 assertEquals(ChannelMetadataResult.UPDATED, f.refresh(id))
+            }
+        }
+
+    @Test fun concurrentDetailCallsCoalesceAndRefreshAtThirtyDays() =
+        runTest {
+            Fixture(this).use { f ->
+                val id = f.channel()
+                val entered = CompletableDeferred<Unit>()
+                val release = CompletableDeferred<Unit>()
+                val channel =
+                    f.resolved(YouTubeFeedUrls.YOUTUBE_CONTROL_CHANNEL_ID).copy(
+                        avatarUrl = "https://yt3.ggpht.com/avatar=s900",
+                        bannerUrl = "https://yt3.ggpht.com/banner",
+                        description = "Plain <text>",
+                    )
+                f.resolver.resolve = { ref, depth ->
+                    assertEquals(MetadataDepth.FULL, depth)
+                    entered.complete(Unit)
+                    release.await()
+                    channel.copy(channelId = (ref as YtRef.Channel).id)
+                }
+                val a = async { f.metadata.refresh(id, ChannelMetadataReason.DETAIL) }
+                entered.await()
+                val b =
+                    async(start = CoroutineStart.UNDISPATCHED) {
+                        f.metadata.refresh(id, ChannelMetadataReason.DETAIL)
+                    }
+                release.complete(Unit)
+                assertEquals(ChannelMetadataResult.UPDATED, a.await())
+                assertEquals(ChannelMetadataResult.UPDATED, b.await())
+                val row = f.db.podcastDao().byId(id)!!
+                assertEquals(channel.bannerUrl, row.bannerUrl)
+                assertEquals("Seeded", row.title)
+                assertEquals("Plain &lt;text&gt;", row.descriptionHtml)
+                assertEquals(ArtworkKeys.forUrl(channel.avatarUrl!!), row.artworkKey)
+                assertEquals(1, f.art.pins.size)
+                assertEquals(ChannelMetadataResult.FRESH, f.metadata.refresh(id, ChannelMetadataReason.DETAIL))
+                f.clock.nowMs += 30 * DAY
+                assertEquals(ChannelMetadataResult.UPDATED, f.metadata.refresh(id, ChannelMetadataReason.DETAIL))
+                assertEquals(2, f.resolver.calls.size)
+                assertEquals(1, f.art.pins.size)
+            }
+        }
+
+    @Test fun failedMetadataRemainsRetryableAndNotFoundIsStamped() =
+        runTest {
+            Fixture(this).use { f ->
+                val id = f.channel()
+                f.resolver.resolve = { ref, _ ->
+                    f.resolved((ref as YtRef.Channel).id).copy(
+                        title = null,
+                        avatarUrl = null,
+                        bannerUrl = null,
+                        description = null,
+                    )
+                }
+                assertEquals(ChannelMetadataResult.FAILED, f.metadata.refresh(id, ChannelMetadataReason.DETAIL))
+                assertNull(
+                    f.db
+                        .podcastDao()
+                        .byId(id)!!
+                        .channelMetadataAt,
+                )
+                f.resolver.resolve = { _, _ -> ChannelResolution.NotFound }
+                assertEquals(ChannelMetadataResult.UPDATED, f.metadata.refresh(id, ChannelMetadataReason.DETAIL))
+                assertEquals(
+                    f.clock.now(),
+                    f.db
+                        .podcastDao()
+                        .byId(id)!!
+                        .channelMetadataAt,
+                )
+            }
+        }
+
+    @Test fun detailOpeningDuringAvatarFetchUpgradesSharedRequest() =
+        runTest {
+            Fixture(this).use { f ->
+                val id = f.channel()
+                val entered = CompletableDeferred<Unit>()
+                val release = CompletableDeferred<Unit>()
+                f.resolver.resolve = { ref, depth ->
+                    if (depth == MetadataDepth.AVATAR) {
+                        entered.complete(Unit)
+                        release.await()
+                    }
+                    f.resolved((ref as YtRef.Channel).id)
+                }
+                val ingest = async { f.refresh(id) }
+                entered.await()
+                val detail =
+                    async(start = CoroutineStart.UNDISPATCHED) {
+                        f.metadata.refresh(id, ChannelMetadataReason.DETAIL)
+                    }
+                release.complete(Unit)
+                assertEquals(ChannelMetadataResult.UPDATED, ingest.await())
+                assertEquals(ChannelMetadataResult.UPDATED, detail.await())
+                assertEquals(listOf(MetadataDepth.AVATAR, MetadataDepth.FULL), f.resolver.calls.map { it.second })
             }
         }
 

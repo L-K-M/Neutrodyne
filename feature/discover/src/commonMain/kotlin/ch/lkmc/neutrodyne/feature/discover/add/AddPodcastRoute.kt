@@ -66,6 +66,8 @@ internal fun AddPodcastRoute(
         initialInput = key.input,
         state = state,
         onResolve = viewModel::resolve,
+        onUsePodcast = viewModel::usePodcast,
+        onSubscribeOwner = viewModel::subscribeOwner,
         onCredentials = viewModel::resolveWithCredentials,
         onCancelResolve = viewModel::cancelResolve,
         onInputChange = viewModel::onInputChanged,

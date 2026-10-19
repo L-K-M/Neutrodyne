@@ -82,6 +82,8 @@ class PodcastViewModelTest : MainDispatcherTest() {
     ) = PodcastViewModel(
         podcastId,
         podcasts,
+        ch.lkmc.neutrodyne.core.testing
+            .FakeYouTubeChannelRepository(),
         feeds,
         episodes,
         groups,

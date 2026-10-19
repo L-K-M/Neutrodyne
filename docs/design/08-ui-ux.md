@@ -1506,6 +1506,17 @@ enum class CoverAspect { SQUARE, WIDE_16_9 }
 
 `PodcastHeader` (`:core:ui`) is the first item of the podcast screen's `LazyColumn` and scrolls away; a pinned transparent `NdTopAppBar` overlays it and fades its container and title in as `firstVisibleItemScrollOffset` passes the cover's bottom (simpler and more robust than nested-scroll large app bars with a 300 dp header). Background: vertical gradient from the artwork scheme's `primaryContainer` (top) to `surface` at 70 % of the header height. Cover 160 dp, 24 dp corners, `dropShadow` in the seed colour at 30 % (M10). YouTube: the banner (`podcast.bannerUrl`, never pinned, 04) fills the top 6:1 strip behind the avatar with a 40 % bottom scrim; without a banner (offline, missing): the avatar blurred (`Modifier.blur(24.dp)`, API 31+) or the artwork gradient below 31. Group chips are `NdInputChip`s with the group dot; the trailing "x" removes the membership (snackbar with Undo) and "+ Group" opens `AddToGroupsKey(listOf(id))`.
 
+Implementation note (2026-10-19, M8): W6 renders the channel banner as an
+unpinned 6:1 image with a bottom scrim and requests coalesced metadata on
+podcast detail open. The existing avatar/monogram remains the fallback when
+no banner exists; the blurred avatar and artwork gradient remain M10 polish.
+The Add sheet supplies channel metadata, variant guidance, groups, exact
+Open, playlist-owner and optional Use podcast actions. Channel settings expose
+Shorts and past-live switches with the future-poll explanation. Pending/error
+banners continue to use the existing feed-state presentation; an active
+channel without visible episodes offers the channel-specific empty message
+and Podcast settings.
+
 ### Show notes renderer
 
 `@Composable fun LazyListScope.showNotes(notes: ShowNotes, ...)` (`:core:ui`) emits one lazy item per block of 03's `:core:model` mirror (`ShowNotes`, `ShowNoteBlock`, `ShowNoteSpan`, [03 Sanitiser and block model](03-feeds-and-discovery.md#sanitiser-and-block-model)), so a 2,000-block note never composes at once.

@@ -7,6 +7,8 @@ import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.FeedCandidate
 import ch.lkmc.neutrodyne.core.model.FeedPreview
 import ch.lkmc.neutrodyne.core.model.NetError
+import ch.lkmc.neutrodyne.core.model.ProviderId
+import ch.lkmc.neutrodyne.youtube.api.YtRef
 
 /**
  * The add-podcast pipeline's front door (03 Add podcast flow): normalisation, host recognition,
@@ -30,9 +32,13 @@ interface AddPodcastResolver {
 }
 
 sealed interface AddResolution {
+    data class YouTube(
+        val ref: YtRef,
+    ) : AddResolution
+
     data class LookupRequired(
         val input: String,
-        val provider: ch.lkmc.neutrodyne.core.model.ProviderId,
+        val provider: ProviderId,
     ) : AddResolution
 
     data class Feed(

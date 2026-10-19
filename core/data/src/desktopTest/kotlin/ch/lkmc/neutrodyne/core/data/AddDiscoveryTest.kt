@@ -346,6 +346,27 @@ class AddDiscoveryTest {
             }
         }
 
+    @Test fun mixedRssAndYouTubeAlternatesKeepTheChooser() =
+        runBlocking {
+            val channelUrl = "https://youtube.com/@someone"
+            server.enqueue(
+                mockResponse(
+                    body =
+                        "<html><head>" +
+                            "<link rel='alternate' type='application/rss+xml' href='/rss'>" +
+                            "<link rel='alternate' type='application/atom+xml' href='$channelUrl'>" +
+                            "</head></html>",
+                ),
+            )
+            server.enqueue(mockResponse(body = rssBody(title = "Podcast")))
+            val choices = assertIs<AddResolution.Choose>(bundle.resolver.resolve(url("/mixed")))
+            assertEquals(2, choices.candidates.size)
+            assertTrue(choices.candidates.any { it.title == "Podcast" })
+            val channel = choices.candidates.single { it.url == channelUrl }
+            assertIs<AddResolution.YouTube>(bundle.resolver.resolve(channel.url))
+            assertEquals(2, server.requestCount)
+        }
+
     @Test fun youtubeIsCheckedForRawTokensLookupCandidatesAndRedirects() =
         runBlocking {
             for (raw in listOf(
@@ -354,10 +375,7 @@ class AddDiscoveryTest {
                 "UCBJycsmduvYEL83R_U4JriQ",
                 "neutrodyne://subscribe?url=https%3A%2F%2Fyoutube.com%2F%40someone",
             )) {
-                assertEquals(
-                    AddPodcastError.YouTubeNotYetSupported,
-                    assertIs<AddResolution.Failure>(bundle.resolver.resolve(raw)).error,
-                )
+                assertIs<AddResolution.YouTube>(bundle.resolver.resolve(raw))
             }
             appleAnswer =
                 Outcome.Success(
@@ -369,10 +387,7 @@ class AddDiscoveryTest {
                         ),
                     ),
                 )
-            assertEquals(
-                AddPodcastError.YouTubeNotYetSupported,
-                assertIs<AddResolution.Failure>(bundle.resolver.resolve("https://pod.link/12")).error,
-            )
+            assertIs<AddResolution.YouTube>(bundle.resolver.resolve("https://pod.link/12"))
             server.enqueue(
                 mockResponse(
                     body =
@@ -380,22 +395,13 @@ class AddDiscoveryTest {
                             "href='https://youtube.com/@someone'></head></html>",
                 ),
             )
-            assertEquals(
-                AddPodcastError.YouTubeNotYetSupported,
-                assertIs<AddResolution.Failure>(bundle.resolver.resolve(url("/page"))).error,
-            )
+            assertIs<AddResolution.YouTube>(bundle.resolver.resolve(url("/page")))
             server.enqueue(mockResponse(302, "", "Location" to "https://youtube.com/@someone"))
-            assertEquals(
-                AddPodcastError.YouTubeNotYetSupported,
-                assertIs<AddResolution.Failure>(bundle.resolver.resolve(url("/redirect"))).error,
-            )
+            assertIs<AddResolution.YouTube>(bundle.resolver.resolve(url("/redirect")))
             assertEquals(2, server.requestCount)
             server.enqueue(mockResponse(body = "<html>No links</html>"))
             server.enqueue(mockResponse(302, "", "Location" to "https://youtube.com/@someone"))
-            assertEquals(
-                AddPodcastError.YouTubeNotYetSupported,
-                assertIs<AddResolution.Failure>(bundle.resolver.resolve(url("/probe-page"))).error,
-            )
+            assertIs<AddResolution.YouTube>(bundle.resolver.resolve(url("/probe-page")))
             assertEquals(4, server.requestCount)
             assertTempFilesEmpty()
         }
@@ -499,10 +505,7 @@ class AddDiscoveryTest {
                         providers = persistentSetOf(ProviderId.PODCAST_INDEX),
                     ),
                 )
-            assertEquals(
-                AddPodcastError.YouTubeNotYetSupported,
-                assertIs<AddResolution.Failure>(bundle.resolver.resolve("https://podcastindex.org/podcast/2")).error,
-            )
+            assertIs<AddResolution.YouTube>(bundle.resolver.resolve("https://podcastindex.org/podcast/2"))
             assertEquals(1, server.requestCount)
         }
 
