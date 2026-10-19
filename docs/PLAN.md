@@ -1289,6 +1289,17 @@ this integration; the milestone remains open pending those runs and owner checks
 
 #### M6: Downloads
 
+**Implementation note (2026-10-19, M6b).** W1–W10 are integrated locally at
+`8ab74ff0`; W11's [AC-by-AC ledger](evidence/m6b-acceptance.md) names host tests
+and the unexecuted device/nightly/owner checks. AC2's E10 half and AC4/5/11/13/15
+remain open for that evidence. AC5 means eligibility at 24 h, followed by the
+next cleanup opportunity, not an exact OS wake time. AC11 retains the pending-job
+inference and its OEM Recents limitation. AC15 permits same-store atomic rename
+instead of copy/verify and keeps the playing source pending. W10 currently uses
+the adopted `benchmarkRelease` fallback, including its opt-in fixture driver;
+neither assembly nor that variant proves published-release APK acceptance.
+No device run, CI/review or milestone completion is claimed by this local work.
+
 **Implementation note (2026-10-19, M6b).** All eleven resolutions in the
 M6b plan's ambiguity table are adopted; the owning sections in 05, 07, 08 and 09
 record the individual decisions. W1 freezes settings resolution, settings keys,

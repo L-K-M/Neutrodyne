@@ -1763,6 +1763,13 @@ Auto Backup includes `getExternalFilesDir()` by default. 05's include-only rules
 
 ## Settings
 
+**Implementation note (2026-10-19, M6b).** W11 records the integrated state:
+W2–W7 now bind the planner, cleanup, root registry, mover and both platform
+hosts, including W6's historical-exit inference. Earlier W1/W4 freeze notes
+describe delivery order. The [acceptance ledger](../evidence/m6b-acceptance.md)
+separates host assertions from device behavior; neither Task Manager/Recents,
+SD-card moves nor the real 24 h cleanup clock is device-verified here.
+
 **Implementation note (2026-10-19, M6b).** Adopted resolution 1 assigns
 `desktop_roots`, `move_target`, `cleanup_last_at`, folder registration, the folder
 picker and MOVE_EXISTING to M6b. The Podcasts bmgr assertion remains M6a.
@@ -1793,8 +1800,8 @@ registration is not a promise of working automatic policy in M6a.
 | `downloads.deferred_deletes` | TextSet (`{episodeId}\|{rootId}\|{path}`, split at the first two `\|` because desktop paths may contain one) | empty | `device_settings` | none (deferred deletes and deletion journal) | M6 |
 | `downloads.planner_baseline_at` | Long (epoch ms) | absent = 0 | `device_settings` | none (planner state, [No backfill watermark](#no-backfill-watermark)) | M6 |
 | `downloads.desktop_roots` (2026-10-05) | TextSet (`{rootId}\|{absolute path}`, split at the first `\|`) | empty | `device_settings` | none (desktop root registry, [Roots](#roots)) | M6b (desktop) |
-| `downloads.move_target` (2026-10-05) | Text (`rootId`) | absent | `device_settings` | none (pending desktop move, [Moving between roots](#moving-between-roots)) | M6b (desktop) |
-| `downloads.cleanup_last_at` (2026-10-05) | Long (epoch ms) | absent | `device_settings` | none (desktop daily pass, [Desktop runners](#desktop-runners)) | M6b (desktop) |
+| `downloads.move_target` (2026-10-05) | Text (`rootId`) | absent | `device_settings` | none (pending move on both platforms, [Moving between roots](#moving-between-roots)) | M6b |
+| `downloads.cleanup_last_at` (2026-10-05) | Long (epoch ms) | absent | `device_settings` | none (daily pass on both platforms; [Desktop runners](#desktop-runners)) | M6b |
 | `youtube.auto_download`, `youtube.auto_download_keep_latest`, `youtube.audio_quality` | 04's keys | — | — | Settings › Downloads › YouTube channels (with the engine) | M9a; MD3 (desktop) |
 
 Fixed in v1 (not settings): 3 parallel downloads (2 per host, 1 YouTube), retry schedule, free-space margin, 14-day `.part` age. Settings › Downloads also hosts "Clean up unknown files" (orphans) and shows `StorageUsage`.

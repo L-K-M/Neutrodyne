@@ -4,6 +4,22 @@ This file lets another person or agent take over the work at any point. **Last u
 
 ## 0. Implementation status
 
+### M6b W11 documentation and acceptance (2026-10-19)
+
+`impl/m6b-p1` includes W1–W10 at `8ab74ff0`, including W6 `f945bae6`
+(after I2 below). W11 preserves dated notes and adds the
+[AC-by-AC ledger](docs/evidence/m6b-acceptance.md) plus PLAN/07/08/09/11
+qualifications. No M7 ledger existed. M6b acceptance remains open.
+
+The full gate passed once: allTests 6,592 passed/1 skipped; test 796/2;
+mutationTest 40/0. Benchmark assembly, Android instrumented/debug and desktop
+compilation, release lint and static gates passed. Both doc checks passed.
+Per-task counts/receipts/sizes: `.nd-context/m6b-w11-report.md`.
+No emulator/device/nightly/packaged desktop run; Task Manager/Recents,
+24 h cleanup and SD moves need operator evidence. No desktop-matrix job;
+published-release coverage remains open under benchmarkRelease; audio awaits MD1.
+Local commits only, no push/PR/external review (0 rounds). No new worktree.
+
 ### M6b I2 local integration (2026-10-19)
 
 `impl/m6b-p1` integrates completed M6a (`38f139e2`) and M6b W9
