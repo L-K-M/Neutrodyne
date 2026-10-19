@@ -108,12 +108,13 @@ class GroupFeedJourneyTest {
             var showing by mutableStateOf(true)
             try {
                 setContent { if (showing) fixture.Content() }
-                awaitNode(hasText("Create your first group"))
-                onNodeWithText("Create your first group").performClick()
+                onNodeWithTag("nav_library").performClick()
+                awaitNode(hasText("+ New group"))
+                onNodeWithText("+ New group").performClick()
                 createGroup("Science", listOf(1, 2))
                 val science = fixture.group("Science")
+                onNodeWithTag("nav_feeds").performClick()
                 awaitNode(hasTestTag(science.tabTag()))
-                onNodeWithText("Create your first group").assertDoesNotExist()
                 assertCount(science, 1)
 
                 onNodeWithTag(science.tabTag()).performClick()

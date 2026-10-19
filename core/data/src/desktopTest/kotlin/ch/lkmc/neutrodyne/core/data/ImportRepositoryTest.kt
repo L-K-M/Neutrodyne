@@ -17,6 +17,7 @@ import ch.lkmc.neutrodyne.core.data.importing.ImportSessions
 import ch.lkmc.neutrodyne.core.data.importing.ImportWarningJson
 import ch.lkmc.neutrodyne.core.data.importing.ImportWorkPolicy
 import ch.lkmc.neutrodyne.core.data.importing.PayloadStore
+import ch.lkmc.neutrodyne.core.data.youtube.YouTubeSubscriptionWriterImpl
 import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
 import ch.lkmc.neutrodyne.core.domain.DiscardPreviewResult
 import ch.lkmc.neutrodyne.core.domain.ImportError
@@ -140,6 +141,7 @@ class ImportRepositoryTest {
                 channels = channels,
                 orderKeys = TestOrderKeys,
                 clock = clock,
+                channelWriter = YouTubeSubscriptionWriterImpl(db, clock, TestOrderKeys),
             )
         val cascading = CascadingPodcasts()
         val fixUps =
@@ -246,13 +248,12 @@ class ImportRepositoryTest {
             assertEquals(ImportState.PREVIEW, view.state)
             assertEquals(
                 mapOf(
-                    ImportItemStatus.PREVIEW to 1,
-                    ImportItemStatus.YOUTUBE_UNSUPPORTED_YET to 1,
+                    ImportItemStatus.PREVIEW to 2,
                     ImportItemStatus.INVALID_URL to 1,
                 ),
                 view.counts,
             )
-            assertEquals(1, view.selectedCount)
+            assertEquals(2, view.selectedCount)
             assertEquals(1, view.youtubeCount)
             assertEquals("Everywhere", view.options.targetGroupName)
             assertEquals(3, view.options.laneAttempts)

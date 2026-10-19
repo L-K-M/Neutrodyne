@@ -1,0 +1,4 @@
+# mixed subscriptions
+UCBJycsmduvYEL83R_U4JriQ
+@science
+https://example.test/feed.xml

@@ -12,12 +12,14 @@ import ch.lkmc.neutrodyne.core.database.PodcastEntity
 import ch.lkmc.neutrodyne.core.database.PodcastGroupEntity
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.model.ExportRequest
+import ch.lkmc.neutrodyne.core.model.PreparedExport
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.feeds.identity.PrivateFeedUrls
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.opml.ExportDocument
 import ch.lkmc.neutrodyne.feeds.opml.ExportFeed
 import ch.lkmc.neutrodyne.feeds.opml.ExportGroup
+import ch.lkmc.neutrodyne.youtube.api.YouTubeFeedUrls
 import dev.zacsweers.metro.Inject
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
@@ -115,7 +117,13 @@ internal class OpmlExporter(
             val membership = memberGroups[podcast.id]
             if (request.groupId != null && membership == null) continue
 
-            var xmlUrl = podcast.feedUrl
+            var xmlUrl =
+                if (youtube) {
+                    podcast.youtubeChannelId?.let(YouTubeFeedUrls::canonical)
+                        ?: podcast.feedUrl
+                } else {
+                    podcast.feedUrl
+                }
             // Passwords only on opt-in (R1.9); a credential the store cannot read leaves the
             // URL bare (05 Options and warnings).
             if (request.includePasswords) {
@@ -137,7 +145,7 @@ internal class OpmlExporter(
                     displayTitle = podcast.customTitle ?: podcast.title,
                     feedTitle = podcast.title,
                     xmlUrl = xmlUrl,
-                    htmlUrl = podcast.link ?: youtubeChannelLink(podcast),
+                    htmlUrl = if (youtube) youtubeChannelLink(podcast) else podcast.link,
                     language = podcast.language,
                     groupKeys =
                         membership
@@ -293,7 +301,7 @@ internal class OpmlExporter(
 
 /**
  * [OpmlExporter]'s result: the document for `OpmlWriter`, the destination's file name and the
- * counts [ch.lkmc.neutrodyne.core.model.PreparedExport] carries into the R1.9 warning
+ * counts [PreparedExport] carries into the R1.9 warning
  * ([feeds] is `document.feeds.size`).
  */
 internal class BuiltExport(

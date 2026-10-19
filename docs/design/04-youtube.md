@@ -1428,9 +1428,31 @@ Export (05 writes the XML, [D31](../PLAN.md#3-key-decisions)): each channel as `
 
 `ImportFormat.URL_LIST` (02's constant, 05's pipeline; stored as TEXT, no migration): UTF-8 text ≤ 1 MB, ≤ 5,000 lines; lines trimmed; empty and `#` lines skipped; each line is an http(s) URL (RSS or YouTube), a `UC…` ID or an `@handle`. Sniffed when ≥ 80 % of the remaining lines are such tokens. Covers LibreTube's "list of URLs/IDs" export and hand-made lists.
 
+Implementation note (2026-10-19, M8): W5 implements the four pure format parsers,
+OPML canonical channel export and full-library NewPipe export in external mode.
+JSON row caps apply during decoding, and ignored JSON structures have a 64-level
+nesting bound. W5 and W6 use one app-scoped `YouTubeSubscriptionWriter`
+implementation for Add, static imports and durable resolved imports. It commits
+canonical identity, sync ID, pending initial state, variants and memberships
+together. Import preserves existing settings and unions groups; Add rejects an
+existing identity. New rows retain the initial GUID coverage timestamp and mark
+external paging complete. Invalid masks return a typed failure, and invalid group
+memberships roll back the subscription. Page descriptions are escaped as HTML.
+Static channels commit without a resolver request. Unresolved items retain validated
+inputs and masks by ordinal, use two ID_ONLY lookups with 0.5–1.5 s jitter, and
+recheck cancellation and input ownership before canonical insertion and group union.
+
+Implementation note (2026-10-19, M8): Import format examples live under
+`feeds/src/test/resources/import/` and shared parser tests replay on the desktop
+and Android host targets (adopted resolution 8). They are small synthetic examples
+with provenance, not current owner exports. NewPipe interoperability is an M8 manual
+check despite its placement in the M9 checklist below. A current localized Takeout
+ZIP, grouped LibreTube owner export and application interoperability remain owner
+acceptance evidence; deterministic tests do not claim those checks.
+
 ### Pipeline rules for YouTube items (05 implements)
 
-Implementation note (2026-10-19, M8): Parser-owned ordinal maps `itemYouTubeInputs` and `itemYouTubeVariants` retain htmlUrl-selected inputs and validated nd-over-hint-over-LONG_FORM masks in optionsJson. Old maps default empty. W5 lazily upgrades unfinished sessions on retry/re-preview, preserves historical reports and unions duplicate memberships transactionally without handle identities (adopted resolution 7).
+Implementation note (2026-10-19, M8): Parser-owned ordinal maps `itemYouTubeInputs` and `itemYouTubeVariants` retain htmlUrl-selected inputs and validated nd-over-hint-over-LONG_FORM masks in optionsJson. Old maps default empty. W5 lazily upgrades unfinished sessions on retry/re-preview, preserves historical reports and unions duplicate memberships through the same canonical-key writer as Add, without storing handle aliases (adopted resolution 7).
 
 1. Before M8: YouTube items get `YOUTUBE_UNSUPPORTED_YET` and are not selectable.
 2. Statically known channels: commit inserts `PENDING_FIRST_FETCH` podcasts with the canonical feed URL, `youtubeChannelId`, `youtubeVariants`, title from the file, `initialFetch = 1`, `channelMetadataAt = null`. Dedupe by `feedKey`; duplicates within one file merge with the union of group names.

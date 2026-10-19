@@ -673,4 +673,10 @@
     <string name="yt_live_future_note">This changes future polls. Previously fetched past live streams remain visible. Without the YouTube engine, live streams and premieres may appear as ordinary videos.</string>
     <string name="yt_empty_channel">No long-form videos yet. This channel may post only Shorts or live streams.</string>
     <string name="yt_edit_input">Edit</string>
+    <string name="export_format_opml">OPML</string>
+    <string name="export_format_newpipe">NewPipe JSON (YouTube channels only)</string>
+    <string name="import_youtube_resolution_failed">Couldn’t find this YouTube channel. Edit the URL or retry.</string>
+    <string name="import_newpipe_service">This NewPipe service is not supported (%1$s).</string>
+    <string name="import_err_format_size">This file exceeds its format’s size limit: JSON 10 MB, URL lists 1 MB, CSV 5 MB.</string>
+    <string name="import_err_tgz">Takeout .tgz archives aren’t supported. In Google Takeout, choose the .zip file type.</string>
 </resources>

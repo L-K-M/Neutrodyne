@@ -256,10 +256,7 @@ class FakeYouTubeSubscriptionWriter : YouTubeSubscriptionWriter {
         duplicatePolicy: YouTubeDuplicatePolicy,
         customTitle: String?,
     ): Outcome<YouTubeSubscription, SubscribeError> {
-        require(
-            YouTubeVariantBits
-                .isValid(variants),
-        )
+        if (!YouTubeVariantBits.isValid(variants)) return Outcome.Failure(SubscribeError.InvalidUrl)
         val call = Call(channel, variants, groupIds.toSet(), duplicatePolicy, customTitle)
         calls += call
         return write.invoke(call)

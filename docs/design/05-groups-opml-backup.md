@@ -1337,7 +1337,25 @@ close as if deletion succeeded.
 
 ## Other import formats
 
-Implementation note (2026-10-19, M8): W1 adds parser-owned ordinal maps `itemYouTubeInputs` and `itemYouTubeVariants` to `optionsJson`, defaulting to empty for old sessions and preserved across preview edits. They retain a classified `htmlUrl` input and validated variant precedence without schema changes. W5 resolves unfinished old sessions lazily on retry/re-preview, dedupes canonical channel identities transactionally and unions memberships; historical reports stay intact (adopted resolution 7).
+Implementation note (2026-10-19, M8): W5 activates NewPipe, LibreTube/Piped,
+Takeout CSV/ZIP and mixed URL-list imports through the existing durable session
+pipeline. Takeout uses the existing ZipGuard factory with no extraction: 10,000
+central-directory entries, at most 50 CSV candidates, 5 MB per entry and 250 MB
+inflated total. JSON is limited to 10 MB and 10,000 rows while decoding; URL lists
+to 1 MB and 5,000 physical lines. All MB limits here are decimal. Invalid NewPipe
+services remain per-item errors. No schema, entity or index changes are made.
+Resolution failures have Retry, Edit URL and Remove even before a podcast exists.
+A cancel keeps committed channels
+and prevents late lookups from inserting new ones. Imported channel art continues
+through the ordinary refresh metadata coordinator. Full-library NewPipe export
+uses build identity and canonical channel page URLs (adopted resolution 8).
+Parser byte-limit failures use `Hostile(DOCUMENT_BYTES)` with format-specific size
+text, preserving `TooLarge` for the 50 MiB acquisition cap. Android keeps the narrow
+file-intent filters below and accepts JSON/CSV/text through its existing unrestricted
+picker. Desktop file hand-off additionally accepts `.json`, `.csv`, `.txt` and `.tgz`;
+all inputs are still sniffed, and `.tgz` gives the explicit choose-ZIP message.
+
+Implementation note (2026-10-19, M8): Parser-owned ordinal maps `itemYouTubeInputs` and `itemYouTubeVariants` in `optionsJson` default to empty for old sessions and survive preview edits. They retain a classified `htmlUrl` input and validated variant precedence without schema changes. Unfinished M3 previews upgrade when reopened or confirmed, while historical reports retain their old meaning. Static and resolved imports use the same canonical-key transaction writer as Add to dedupe channels and union memberships without handle aliases (adopted resolution 7).
 
 Serves R1.6, R1.7, R8.1. Delivered in [M3](../PLAN.md#m3-import-export-and-backup) on both platforms (sniffing, backups, YouTube reported as unsupported) and [M8](../PLAN.md#m8-youtube-subscriptions-in-all-builds) (YouTube formats). Format specifications and parsers: [04 Import and export formats](04-youtube.md#import-and-export-formats); this section is how they enter the pipeline.
 

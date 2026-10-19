@@ -164,16 +164,26 @@ class DesktopOpenHandlerTest {
             val handler =
                 DesktopOpenHandler(backgroundScope, { imports }, routes::add, { error("Rejected valid file") })
             handler.afterFirstFrame()
-            val files = listOf("a.opml", "b.XML", "backup.zip").map { temp.newFile(it).toPath() }
+            val files =
+                listOf("a.opml", "b.XML", "backup.zip", "channels.json", "subscriptions.csv", "urls.txt").map {
+                    temp.newFile(it).toPath()
+                }
             handler.submit(files.map { it.toUri().toString() })
             runCurrent()
-            assertThat(imports.observeOpenSessions().first()).hasSize(3)
+            assertThat(imports.observeOpenSessions().first()).hasSize(files.size)
             assertThat(routes).containsExactly(Route.Navigate(LibraryKey, listOf(ImportKey("1"))))
             assertThat(
                 imports.sessions.value.values.map {
                     it.sourceName
                 },
-            ).containsExactly("a.opml", "b.XML", "backup.zip").inOrder()
+            ).containsExactly(
+                "a.opml",
+                "b.XML",
+                "backup.zip",
+                "channels.json",
+                "subscriptions.csv",
+                "urls.txt",
+            ).inOrder()
         }
 
     @Test fun droppedUrlTextRoutesToAddSheet() =
@@ -232,7 +242,7 @@ class DesktopOpenHandlerTest {
             handler.submit(
                 listOf(
                     temp.newFolder("directory.opml").absolutePath,
-                    temp.newFile("a.json").absolutePath,
+                    temp.newFile("a.exe").absolutePath,
                     temp.root.resolve("missing.xml").absolutePath,
                     huge.absolutePath,
                 ),

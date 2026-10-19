@@ -20,6 +20,7 @@ import ch.lkmc.neutrodyne.core.data.importing.ImportCommitter
 import ch.lkmc.neutrodyne.core.data.importing.ImportSessions
 import ch.lkmc.neutrodyne.core.data.importing.PayloadStore
 import ch.lkmc.neutrodyne.core.data.repo.GroupMerger
+import ch.lkmc.neutrodyne.core.data.youtube.YouTubeSubscriptionWriterImpl
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.SyncStateEntity
 import ch.lkmc.neutrodyne.core.model.CreateImportOptions
@@ -150,6 +151,7 @@ class SyncInertTest {
                 channels = channels,
                 orderKeys = ProtocolOrderKeys,
                 clock = clock,
+                channelWriter = YouTubeSubscriptionWriterImpl(db, clock, ProtocolOrderKeys),
                 newSyncId = { Uuid.random().toString() },
             )
         val merger =

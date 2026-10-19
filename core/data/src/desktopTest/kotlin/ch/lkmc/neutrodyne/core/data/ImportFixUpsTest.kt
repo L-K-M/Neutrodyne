@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.domain.UnsubscribeUseCase
 import ch.lkmc.neutrodyne.core.model.AliasReason
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.ChangeOrigin
+import ch.lkmc.neutrodyne.core.model.ImportItemKind
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
 import ch.lkmc.neutrodyne.core.model.ImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportState
@@ -62,6 +63,49 @@ class ImportFixUpsTest {
     }
 
     // --- Retry -------------------------------------------------------------------------------------
+
+    @Test
+    fun unresolvedChannelsSupportRetryEditAndRemoveWithoutPodcastRows() =
+        runTest {
+            val sid =
+                db.seedImportSession(
+                    state = ImportState.DONE,
+                    options =
+                        ImportOptions(
+                            itemYouTubeInputs = mapOf(1 to "@old"),
+                            itemYouTubeVariants = mapOf(1 to 6),
+                        ),
+                    items =
+                        listOf(
+                            importItem(
+                                1,
+                                "@old",
+                                normalizedUrl = null,
+                                kind = ImportItemKind.YOUTUBE,
+                                status = ImportItemStatus.FETCH_FAILED,
+                                errorDetail = "YOUTUBE_RESOLUTION_FAILED",
+                            ),
+                        ),
+                )
+            fixUps.retry(sid, setOf(1))
+            assertEquals(
+                ImportItemStatus.QUEUED,
+                db
+                    .importDao()
+                    .itemsOf(sid)
+                    .single()
+                    .status,
+            )
+            assertEquals(ImportState.FETCHING, db.importDao().sessionById(sid)!!.state)
+            assertIs<Outcome.Failure<*>>(fixUps.editUrl(sid, 1, "https://example.test/not-youtube"))
+            assertIs<Outcome.Success<*>>(fixUps.editUrl(sid, 1, "@new"))
+            assertEquals("@new", optionsOf(sid).itemYouTubeInputs[1])
+            assertEquals(6, optionsOf(sid).itemYouTubeVariants[1])
+            assertTrue(podcasts.inner.calls.isEmpty())
+            fixUps.remove(sid, setOf(1))
+            assertTrue(db.importDao().itemsOf(sid).isEmpty())
+            assertTrue(db.podcastDao().allForExport().isEmpty())
+        }
 
     @Test
     fun retryClearsBlocksRequeuesAndSchedulesAppend() =

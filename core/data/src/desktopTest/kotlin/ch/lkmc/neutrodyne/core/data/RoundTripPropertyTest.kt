@@ -8,6 +8,7 @@ import ch.lkmc.neutrodyne.core.data.importing.ImportClassifier
 import ch.lkmc.neutrodyne.core.data.importing.ImportCommitter
 import ch.lkmc.neutrodyne.core.data.importing.ImportSessions
 import ch.lkmc.neutrodyne.core.data.importing.PayloadStore
+import ch.lkmc.neutrodyne.core.data.youtube.YouTubeSubscriptionWriterImpl
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.ImportError
 import ch.lkmc.neutrodyne.core.model.CreateImportOptions
@@ -310,6 +311,7 @@ class RoundTripPropertyTest {
                 channels = FakeGroupChannelSync(),
                 orderKeys = ProtocolOrderKeys,
                 clock = clock,
+                channelWriter = YouTubeSubscriptionWriterImpl(db, clock, ProtocolOrderKeys),
                 newSyncId = { Uuid.random().toString() },
             )
         return Target(db, payloads, sessions, committer)

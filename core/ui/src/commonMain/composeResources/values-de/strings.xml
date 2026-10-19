@@ -635,4 +635,10 @@
     </plurals>
     <string name="notification_import_ready_source">Datei</string>
     <string name="notification_import_ready_file">Aus %1$s</string>
+    <string name="export_format_opml">OPML</string>
+    <string name="export_format_newpipe">NewPipe-JSON (nur YouTube-Kanäle)</string>
+    <string name="import_youtube_resolution_failed">Dieser YouTube-Kanal wurde nicht gefunden. Bearbeite die URL oder versuche es erneut.</string>
+    <string name="import_newpipe_service">Dieser NewPipe-Dienst wird nicht unterstützt (%1$s).</string>
+    <string name="import_err_format_size">Die Datei überschreitet die Formatgrenze: JSON 10 MB, URL-Listen 1 MB, CSV 5 MB.</string>
+    <string name="import_err_tgz">Takeout-Archive im Format .tgz werden nicht unterstützt. Wähle in Google Takeout den Dateityp .zip.</string>
 </resources>

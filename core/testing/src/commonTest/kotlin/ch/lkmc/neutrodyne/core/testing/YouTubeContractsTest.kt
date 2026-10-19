@@ -111,6 +111,11 @@ class YouTubeContractsTest {
             assertEquals(listOf(2L), repo.rechecks)
             val writer = FakeYouTubeSubscriptionWriter()
             assertEquals(
+                Outcome.Failure(SubscribeError.InvalidUrl),
+                writer.write(channel, 0, emptySet(), YouTubeDuplicatePolicy.REJECT),
+            )
+            assertEquals(emptyList(), writer.calls)
+            assertEquals(
                 Outcome.Failure(SubscribeError.YouTubeNotYetAvailable),
                 writer.write(channel, 2, setOf(3), YouTubeDuplicatePolicy.KEEP_EXISTING, "custom"),
             )

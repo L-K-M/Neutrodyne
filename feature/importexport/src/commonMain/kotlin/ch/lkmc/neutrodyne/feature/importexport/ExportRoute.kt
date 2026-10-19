@@ -73,6 +73,7 @@ internal fun ExportRoute(
         state = state,
         canShare = actions.share != null,
         onLayout = viewModel::setLayout,
+        onFormat = viewModel::setFormat,
         onYouTube = viewModel::setYouTube,
         onPasswords = viewModel::setPasswords,
         onShare = { scope.launch { viewModel.export(ExportAction.SHARE, destinations) } },
