@@ -460,6 +460,27 @@ flowchart TD
 
 The page is about 2.5 MB; reading it fully for every subscribe is wasteful, hence head-first. Unverified: the byte size of `<head>`; M8 measures it on the recorded fixture. If the median head exceeds 512 KiB, imports fetch avatars only for the first 20 channels per refresh run on metered networks (rest on unmetered); the decision is recorded here.
 
+Implementation note (2026-10-19, M8): W2 implements the head and total byte
+limits in common code, counting UTF-8 bytes before decoding. FULL alone scans
+for banners. FEED redirects are explicit, bounded to five hops and restricted
+to HTTPS YouTube page hosts; consent redirects produce CONSENT_WALL. The
+20 s deadline spans every lookup and request; known identity survives a
+metadata timeout, while caller cancellation still propagates. W1 left no
+shell resolver binding point, so W2 supplies the resolver constructor with
+an app-locale supplier for later shell integration, keeping capabilities false.
+The feed-owned metadata-reader port is implemented in core data using the
+existing Atom parser, outside the YouTube modules.
+
+Implementation note (2026-10-19, M8): Adopted plan resolution 8 places Layer A
+replay fixtures under `youtube/impl/src/test/resources/recorded/`, shared by
+desktop and Android host tests. Successful response shapes are reconstructed
+from this document's recorded research and explicitly labelled in
+`PROVENANCE.md`. Live requests for two channels on this worker both reached
+the consent host despite the cookie. Each consent head was 19,890 bytes;
+neither measures a channel head. A valid median and the resulting metered
+avatar policy remain unverified pending an owner capture. Scrubbed fixture
+sizes are not evidence for changing that policy.
+
 ### oEmbed, user feed and watch page
 
 - **oEmbed** (`OEmbedClient`, 01's API client): `GET https://www.youtube.com/oembed?url={urlencoded https://www.youtube.com/watch?v={id}}&format=json` → `author_url` (a handle URL, sometimes `/channel/` or `/user/`) and `author_name`; the URL is classified and resolved again (one hop, no loops).
