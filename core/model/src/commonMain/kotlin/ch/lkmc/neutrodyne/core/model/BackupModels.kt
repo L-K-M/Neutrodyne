@@ -104,8 +104,8 @@ data class PrivacyCounts(
  * Writing). `BackupRepository.prepareBackup` writes the archive once and returns this
  * descriptor; [summary] and [privacy] are measured from that same write, so the warning
  * shown to the user always matches the bytes `savePreparedBackup` later copies out.
- * Opaque on purpose: only `:core:data` can build one, so a caller cannot fabricate a
- * cache path or a receipt.
+ * The concrete implementation is opaque: this interface exposes no cache path or
+ * receipt. `savePreparedBackup` enforces issuance by that repository at runtime.
  */
 interface PreparedBackup {
     /** Display/document name, `neutrodyne-backup-{yyyy-MM-dd-HHmm}.zip` (05 Writing). */
