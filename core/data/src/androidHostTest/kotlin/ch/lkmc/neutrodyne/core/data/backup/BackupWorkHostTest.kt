@@ -39,9 +39,14 @@ import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import com.google.common.truth.Truth.assertThat
 import dev.zacsweers.metro.Provider
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -241,6 +246,42 @@ class BackupWorkHostTest {
         }
 
     @Test
+    fun `a library change before the watcher's first read still pokes the debounced write`() =
+        runTest {
+            val db = openDb()
+            // The watcher's scope only runs when the test advances it, so the insert below
+            // lands before its first query — that emission already contains the new podcast.
+            val watcherScheduler = TestCoroutineScheduler()
+            val watcherScope = CoroutineScope(StandardTestDispatcher(watcherScheduler) + Job())
+            try {
+                initializer(db, appScope = watcherScope).run()
+
+                seedPodcast(db, "https://early.test/feed.xml")
+
+                awaitReal {
+                    watcherScheduler.advanceUntilIdle()
+                    snapshots.soonWorkLive()
+                }
+            } finally {
+                watcherScope.cancel()
+            }
+        }
+
+    @Test
+    fun `start-up completes when the database cannot be read`() =
+        runTest {
+            val db = openDb()
+            db.close()
+            this@BackupWorkHostTest.db = null
+
+            // Every database step fails; each is logged and the periodic arm still stands.
+            initializer(db).run()
+            advanceUntilIdle()
+
+            assertThat(infoOf(RestoreWorkData.WORK_SNAPSHOT).state).isEqualTo(WorkInfo.State.ENQUEUED)
+        }
+
+    @Test
     fun `start-up does not schedule intents the restore runner cannot consume`() =
         runTest {
             val db = openDb()
@@ -271,7 +312,10 @@ class BackupWorkHostTest {
 
     private fun openDb(): NeutrodyneDatabase = newDb(app, clock).also { db = it }
 
-    private fun TestScope.initializer(db: NeutrodyneDatabase): AutoBackupInitializer {
+    private fun TestScope.initializer(
+        db: NeutrodyneDatabase,
+        appScope: CoroutineScope = backgroundScope,
+    ): AutoBackupInitializer {
         val payloads =
             PayloadStore(
                 storagePaths = storagePaths,
@@ -287,7 +331,7 @@ class BackupWorkHostTest {
             db = Provider { db },
             settings = Provider { settings },
             cleaner = Provider { ImportSessionCleaner(db, payloads, clock, Dispatchers.IO) },
-            appScope = backgroundScope,
+            appScope = appScope,
         )
     }
 

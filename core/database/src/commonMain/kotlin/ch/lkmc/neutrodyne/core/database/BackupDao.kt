@@ -25,9 +25,9 @@ import kotlinx.coroutines.flow.Flow
 interface BackupDao {
     /**
      * 05 Auto Backup's library watcher: counts only. The watcher pipes this through
-     * `distinctUntilChanged().drop(1)`, so refresh writes to `podcast` (which re-emit an
-     * identical shape) and position/played writes (which emit nothing) never request a snapshot;
-     * subscribe, unsubscribe and membership changes do.
+     * `distinctUntilChanged()` and skips the start-up baseline shape, so refresh writes to
+     * `podcast` (which re-emit an identical shape) and position/played writes (which emit
+     * nothing) never request a snapshot; subscribe, unsubscribe and membership changes do.
      */
     @Query(
         "SELECT (SELECT COUNT(*) FROM podcast) AS podcasts," +
