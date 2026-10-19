@@ -239,8 +239,9 @@ internal class ImportViewModel
             }
 
         /**
-         * "New group…" in the target picker. `NameTaken` becomes the existing group's id directly
-         * (`targetGroupId`), matching the commit's nameKey reuse instead of creating a duplicate.
+         * "New group…" in the target picker. `NameTaken` reuses the typed name, clearing any
+         * [setTargetGroup] id. The commit resolves that nameKey onto the existing group, as
+         * [renameGroup] does, instead of creating a duplicate.
          */
         suspend fun setTargetGroupName(name: String): GroupError? =
             validateName(name) { validated ->

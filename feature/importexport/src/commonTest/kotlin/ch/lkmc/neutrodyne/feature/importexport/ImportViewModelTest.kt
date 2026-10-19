@@ -161,7 +161,7 @@ class ImportViewModelTest : MainDispatcherTest() {
 
     @Test fun acceptedRenameAndConfirmSurviveClearingTheViewModel() =
         runTest {
-            val id = seed()
+            val id = seed(sessionProposals = listOf(proposal("tech")))
             val gate = CompletableDeferred<Unit>()
             val repo =
                 object : ImportRepository by imports {
