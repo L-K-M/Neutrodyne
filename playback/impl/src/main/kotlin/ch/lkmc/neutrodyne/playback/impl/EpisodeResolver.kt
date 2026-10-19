@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.playback.impl
 
 import android.net.Uri
+import androidx.core.net.toUri
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.ResolvingDataSource
 import ch.lkmc.neutrodyne.core.common.AppScope
@@ -92,14 +93,14 @@ internal class EpisodeResolver(
     private fun createPin(id: Long): Pin {
         val source = index.getOrLoad(id)
         localMedia.localUriOrNull(id)?.let {
-            val uri = Uri.parse(it)
+            val uri = it.toUri()
             if (uri.scheme !in LOCAL_SCHEMES) throw NoMediaException()
             return Pin.Local(uri)
         }
         // 04 delivers stream extraction in M9a. Never fall through to a YouTube watch/enclosure URL.
         if (source.sourceType != SourceType.RSS) throw YouTubeResolveException(ResolveResult.Unsupported)
         val url = source.enclosureUrl ?: throw NoMediaException()
-        if (Uri.parse(url).scheme !in REMOTE_SCHEMES) throw NoMediaException()
+        if (url.toUri().scheme !in REMOTE_SCHEMES) throw NoMediaException()
         val key = EnclosureFingerprint.cacheKey(id, url, source.enclosureLength)
         streamingCache.pinRemote(key)
         return Pin.Remote(url, key)

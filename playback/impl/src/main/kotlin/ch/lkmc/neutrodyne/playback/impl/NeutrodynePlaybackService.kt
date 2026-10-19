@@ -116,6 +116,14 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
                 ).also { live ->
                     bridge = live
                     live.attach(hasPendingStart = startReserved)
+                    wrapper.orderAfterPlaybackAdapters()
+                    player.addListener(
+                        object : Player.Listener {
+                            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                                if (isPlaying) notification.cancel()
+                            }
+                        },
+                    )
                     access.hub.attach(live)
                     lifecycleScope.launch {
                         access.prefs.current.collect {
@@ -133,13 +141,6 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
                     }
                 }
             }
-        player.addListener(
-            object : Player.Listener {
-                override fun onIsPlayingChanged(isPlaying: Boolean) {
-                    if (isPlaying) notification.cancel()
-                }
-            },
-        )
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
@@ -178,6 +179,7 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
 }
 
 /** Null in all normal runs. Tests arm it before framework creation; no runtime setting exposes it. */
-internal object PlaybackTestHooks {
-    var foregroundServiceTimeoutMs: Long? = null
+@androidx.annotation.VisibleForTesting
+public object PlaybackTestHooks {
+    @Volatile public var foregroundServiceTimeoutMs: Long? = null
 }

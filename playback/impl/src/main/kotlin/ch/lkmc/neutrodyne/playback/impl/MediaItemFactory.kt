@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Unlicense
 package ch.lkmc.neutrodyne.playback.impl
 
-import android.net.Uri
 import android.os.Bundle
+import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.session.MediaConstants
@@ -74,7 +74,7 @@ internal class MediaItemFactory(
                     .setArtist(row.podcastTitle)
                     .setAlbumTitle(row.podcastTitle)
                     .setAlbumArtist(row.podcastAuthor)
-                    .setArtworkUri(Uri.parse(artwork.contentUri(art.key, art.version)))
+                    .setArtworkUri(artwork.contentUri(art.key, art.version).toUri())
                     .setDurationMs(duration)
                     .setMediaType(MediaMetadata.MEDIA_TYPE_PODCAST_EPISODE)
                     .setIsPlayable(true)

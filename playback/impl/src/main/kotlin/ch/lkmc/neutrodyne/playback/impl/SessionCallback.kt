@@ -64,7 +64,7 @@ internal class SessionCallback(
                 controller,
             )
         ) {
-            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_PERMISSION_DENIED))
+            return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
         }
         return scope.future {
             commands.withLock {
@@ -101,11 +101,11 @@ internal class SessionCallback(
                         }
 
                         else -> {
-                            SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED)
+                            SessionResult(SessionError.ERROR_NOT_SUPPORTED)
                         }
                     }
                 } catch (_: IllegalArgumentException) {
-                    SessionResult(SessionResult.RESULT_ERROR_BAD_VALUE)
+                    SessionResult(SessionError.ERROR_BAD_VALUE)
                 }
             }
         }

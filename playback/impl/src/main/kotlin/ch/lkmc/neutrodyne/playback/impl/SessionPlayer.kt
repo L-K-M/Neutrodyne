@@ -2,6 +2,7 @@
 package ch.lkmc.neutrodyne.playback.impl
 
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.ForwardingSimpleBasePlayer
 import androidx.media3.common.Player
 import com.google.common.util.concurrent.Futures
@@ -10,13 +11,27 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.guava.future
 
 /** Session transports go through this wrapper; internal projection uses the underlying player. */
-internal class SessionPlayer(
+internal class SessionPlayer private constructor(
     private val exo: Player,
     private val scope: CoroutineScope,
     private val beforePlay: suspend () -> Boolean,
     private val previous: suspend () -> Unit,
     private val stopAction: suspend () -> Unit,
-) : ForwardingSimpleBasePlayer(exo) {
+    private val sessionSource: SessionSource,
+) : ForwardingSimpleBasePlayer(sessionSource) {
+    constructor(
+        exo: Player,
+        scope: CoroutineScope,
+        beforePlay: suspend () -> Boolean,
+        previous: suspend () -> Unit,
+        stopAction: suspend () -> Unit,
+    ) : this(exo, scope, beforePlay, previous, stopAction, SessionSource(exo))
+
+    /** The session exists during database open, but its callbacks must follow position capture. */
+    fun orderAfterPlaybackAdapters() {
+        sessionSource.orderAfterPlaybackAdapters()
+    }
+
     override fun getState(): State {
         val state = super.getState()
         val commands =
@@ -74,4 +89,28 @@ internal class SessionPlayer(
         }
 
     override fun handleStop(): ListenableFuture<*> = scope.future { stopAction() }
+}
+
+/** Media3 installs its forwarding listener during construction, before the database-backed adapters. */
+private class SessionSource(
+    player: Player,
+) : ForwardingPlayer(player) {
+    private val listeners = linkedSetOf<Player.Listener>()
+
+    override fun addListener(listener: Player.Listener) {
+        listeners += listener
+        super.addListener(listener)
+    }
+
+    override fun removeListener(listener: Player.Listener) {
+        listeners -= listener
+        super.removeListener(listener)
+    }
+
+    fun orderAfterPlaybackAdapters() {
+        listeners.forEach {
+            super.removeListener(it)
+            super.addListener(it)
+        }
+    }
 }

@@ -7,9 +7,9 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.net.toUri
 import androidx.media3.common.Player
 import androidx.media3.session.PlaybackPendingIntentBuilder
 
@@ -56,7 +56,7 @@ internal class TapToResumeNotifier(
             PendingIntent.getActivity(
                 application,
                 0,
-                Intent(Intent.ACTION_VIEW, Uri.parse("neutrodyne://open/player"))
+                Intent(Intent.ACTION_VIEW, "neutrodyne://open/player".toUri())
                     .setClassName(application.packageName, "ch.lkmc.neutrodyne.MainActivity")
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,

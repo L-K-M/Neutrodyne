@@ -54,6 +54,35 @@ class SessionPlayerTest {
         shadowOf(Looper.getMainLooper()).idle()
     }
 
+    @Test fun sessionForwarderMovesBehindAdaptersAndReleasesPlayer() {
+        val listeners = mutableListOf<Player.Listener>()
+        val ordered =
+            object : androidx.media3.common.ForwardingPlayer(exo) {
+                override fun addListener(listener: Player.Listener) {
+                    listeners += listener
+                    super.addListener(listener)
+                }
+
+                override fun removeListener(listener: Player.Listener) {
+                    listeners -= listener
+                    super.removeListener(listener)
+                }
+            }
+        val wrapper = SessionPlayer(ordered, scope, { true }, {}, {})
+        assertEquals(1, listeners.size)
+        val tracker = object : Player.Listener {}
+        val projector = object : Player.Listener {}
+        val applier = object : Player.Listener {}
+        ordered.addListener(tracker)
+        ordered.addListener(projector)
+        ordered.addListener(applier)
+        wrapper.orderAfterPlaybackAdapters()
+        assertEquals(4, listeners.size)
+        assertEquals(listOf(tracker, projector, applier), listeners.take(3))
+        wrapper.release()
+        assertTrue(exo.isReleased)
+    }
+
     @Test fun advertisesBothEpisodeAndHardwareTransportsWithoutRepeat() {
         load()
         assertTrue(player.isCommandAvailable(Player.COMMAND_SEEK_TO_NEXT))
