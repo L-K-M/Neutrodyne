@@ -848,19 +848,25 @@ There is no eager per-video description refresh or schema addition. W7 owns
 requesting these notes from its cancellable current-item scope and parsing/
 persisting description chapters.
 
-**Parent contract gap before chapter reuse/activation:** stored Atom blobs carry
-text and format but no completeness provenance. The real parser can emit
-`TEXT_TRUNCATED` and trim the retained prefix to a short string; ingestion does
-not carry that warning into the blob. W9 therefore leaves existing nonempty
-notes unchanged and returns no chapter text from them. Reusing a known full
-Atom description requires the parent to freeze completeness on the description
-read boundary, including UNKNOWN for legacy/unmarked blobs, and propagate the
-producer's completeness through the existing codec. No new wire field is
-needed for W3 facts (`descriptionTruncated` already exists). W9 does not invent
-a competing schema or waive complete-chapter requirements.
+The parent-authorized I3 expansion carries producer completeness through the
+existing description codec and read boundary (see [02 episode_description](02-data-model.md#episode_description)).
+Legacy/unmarked notes are `UNKNOWN`; actual parser `TEXT_TRUNCATED` warnings
+remain `TRUNCATED`, including a default-cap prefix trimmed to a plausible short
+chapter list. Variant union preserves the selected entry's actual parser
+warning across reordering; identical text from another variant is not provenance.
+Missing or untyped wire truncation flags fail through the existing extraction
+error path, rather than letting the DTO default authorize chapters.
+Unknown and truncated stored notes remain byte-identical and return no chapter snapshot.
+Known complete stored Atom/facts notes are reused before requesting facts;
+there is no per-video refresh storm or inference from length, contents or
+nonempty blobs. The loader rechecks episode ownership and deadline and returns
+the immutable complete snapshot it acquired. A later blob replacement during
+an async call cannot change that snapshot. W7 must parse only the returned
+snapshot in its cancellable current-item service. No W7 implementation or
+production activation is included.
 
 These services remain behind ordinary external `NOT_YET_AVAILABLE` bindings.
-W4 transport, W6 lifecycle/health integration, W7/W8 consumers, W10 lookup/search,
+W4 transport, W7/W8 consumers, W10 lookup/search,
 W11 activation and the reference-device spike remain separate owner work.
 Portable controlled-transport/database evidence is not live or Android-host
 acceptance. No startup Python work, runtime update or JS provider is enabled.
@@ -1697,7 +1703,11 @@ context and default-network callback registration/removal for that resolver's
 lifetime. The callback clears all URL representations and fences stale puts
 before later admission; network changes also clear the IP-family hint. These
 are outstanding real-host/graph contracts, not proven by scripted transport
-transitions. W9 facts/ingest remains a separately integrated owner slice.
+transitions. Portable W9 facts/composites and paging now exercise the same real
+health/client/mapper boundaries, including expired health loading before any
+reservation, once-only completion, half-open cancellation/rate persistence,
+committed promotion under cancellation and page transaction rollback. W5/W6
+and W9 remain separate measured publication slices.
 
 
 ```mermaid

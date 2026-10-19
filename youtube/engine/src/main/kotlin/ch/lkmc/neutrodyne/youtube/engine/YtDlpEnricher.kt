@@ -19,6 +19,9 @@ import ch.lkmc.neutrodyne.youtube.api.YouTubeExtractionHealth
 import ch.lkmc.neutrodyne.youtube.api.YouTubeIds
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.jsonObject
 
 /** Portable facts/tab adapter. Refresh pacing and candidate selection belong to the data owner. */
 class YtDlpEnricher(
@@ -34,14 +37,22 @@ class YtDlpEnricher(
         if (!capabilities.capabilities.value.enrichment) return VideoFactsResult.Unsupported
         return try {
             operation(45_000, videoId) {
-                val wire =
-                    YtDlpClient.decode(
-                        call(
-                            YtxMethod.FACTS,
-                            Json.encodeToString(YtxVideoRequest.serializer(), YtxVideoRequest(context(), videoId)),
-                        ),
-                        YtxFacts.serializer(),
+                val raw =
+                    call(
+                        YtxMethod.FACTS,
+                        Json.encodeToString(YtxVideoRequest.serializer(), YtxVideoRequest(context(), videoId)),
                     )
+                val wire = YtDlpClient.decode(raw, YtxFacts.serializer())
+                if (wire.description != null) {
+                    // The frozen DTO default is not producer evidence. The real shim emits this
+                    // boolean explicitly; missing or string-valued provenance is a malformed reply.
+                    val flag = Json.parseToJsonElement(raw).jsonObject["descriptionTruncated"] as? JsonPrimitive
+                    if (flag == null || flag.isString ||
+                        flag.booleanOrNull == null
+                    ) {
+                        throw YtxCallException("EXTRACTION")
+                    }
+                }
                 if (wire.videoId != videoId) throw YtxCallException("EXTRACTION")
                 checkDeadline()
                 VideoFactsResult.Ok(map(wire))

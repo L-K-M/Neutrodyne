@@ -22,6 +22,7 @@ import ch.lkmc.neutrodyne.core.database.PodcastFeedMetadata
 import ch.lkmc.neutrodyne.core.database.YouTubeFeedMetadata
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.AliasReason
+import ch.lkmc.neutrodyne.core.model.DescriptionCompleteness
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.GuidKnowledge
 import ch.lkmc.neutrodyne.core.model.OwnerType
@@ -756,6 +757,10 @@ internal class FeedIngestor(
                 ?.url
                 ?.let(UrlNormalizer::forIdentity)
         val warnings = parsed.warnings.toMutableList()
+        val truncatedTextItems =
+            parsed.warnings
+                .filter { it.code == WarningCode.TEXT_TRUNCATED }
+                .mapTo(mutableSetOf()) { it.itemIndex }
         val usedKeys = mutableSetOf<String>()
         val items = mutableListOf<PreparedItem>()
         val seenIdenticals = HashMap<String, MutableSet<Long>>()
@@ -818,6 +823,13 @@ internal class FeedIngestor(
                             EpisodeDescriptionCodec.encode(
                                 it,
                                 if (e.descriptionIsHtml) DescriptionFormat.HTML else DescriptionFormat.PLAIN_TEXT,
+                                // Warnings are item-scoped, not field-scoped. Conservatively deny
+                                // completeness for any truncated text on this item or the feed.
+                                if (null in truncatedTextItems || e.feedOrder in truncatedTextItems) {
+                                    DescriptionCompleteness.TRUNCATED
+                                } else {
+                                    DescriptionCompleteness.COMPLETE
+                                },
                             )
                         },
                     snippet = e.descriptionHtml?.let { sanitizer.snippet(it, e.descriptionIsHtml) },

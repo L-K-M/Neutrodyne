@@ -96,6 +96,7 @@ class YouTubeFactsIntegrationTest {
                 val id = f.episode(channel)
                 val text = "0:00 First\n0:10 Next\n0:20 Last <plain> " + "Notes ".repeat(150)
                 f.writer.fillDescriptionIfAbsent(id, text, DescriptionCompleteness.TRUNCATED)
+                f.writer.fillDescriptionIfAbsent(id, text, DescriptionCompleteness.UNKNOWN)
                 assertNull(f.db.episodeDao().description(id))
                 f.writer.fillDescriptionIfAbsent(id, text, DescriptionCompleteness.COMPLETE)
                 assertEquals(text, EpisodeDescriptionCodec.decode(f.db.episodeDao().description(id)!!).text)
@@ -349,12 +350,12 @@ class YouTubeFactsIntegrationTest {
                 release.complete(Unit)
                 assertEquals("Complete notes", b.await())
                 assertEquals(1, f.engine.factCalls.size)
-                assertNull(loader.load(id))
+                assertEquals("Complete notes", loader.load(id))
                 assertEquals(1, f.engine.factCalls.size)
             }
         }
 
-    @Test fun existingBlobWithoutCompletenessCannotAuthorizeChapters() =
+    @Test fun realDefaultParserTruncationCannotAuthorizeChapters() =
         runTest {
             FactsFixture(this).use { f ->
                 val channel = f.channel()
@@ -400,7 +401,9 @@ class YouTubeFactsIntegrationTest {
                 val loader = YouTubeDescriptionLoader(f.db, f.engine, f.writer, f.clock, backgroundScope)
                 assertNull(loader.load(id))
                 assertTrue(f.engine.factCalls.isEmpty())
-                assertEquals(partial, EpisodeDescriptionCodec.decode(f.db.episodeDao().description(id)!!).text)
+                val stored = EpisodeDescriptionCodec.decode(f.db.episodeDao().description(id)!!)
+                assertEquals(partial, stored.text)
+                assertEquals(DescriptionCompleteness.TRUNCATED, stored.completeness)
             }
         }
 

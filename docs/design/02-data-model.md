@@ -663,14 +663,50 @@ Show notes, kept out of the hot `episode` table. Read only by episode detail, ch
 data class EpisodeDescriptionEntity(@PrimaryKey val episodeId: Long, val html: ByteArray)
 
 object EpisodeDescriptionCodec {             // the only way to read or write `html`
-    fun encode(text: String, format: DescriptionFormat): ByteArray   // header byte + UTF-8 (< 512 B) or raw DEFLATE (nowrap, level 6)
-    fun decode(bytes: ByteArray): DecodedDescription     // the text plus its stored format
+    fun encode(text: String, format: DescriptionFormat, completeness: DescriptionCompleteness = UNKNOWN): ByteArray
+    fun decode(bytes: ByteArray): DecodedDescription     // immutable text, stored format and completeness
 }
 ```
 
 `decode` never throws only on the unknown-header UTF-8 fallback (corrupt or pre-codec blobs decode as themselves, as HTML). The codec-owned `0x00`–`0x03` forms fail with `IllegalStateException` on a corrupt or truncated deflate body or on decoded output past the producer bound — every supported producer is capped at 03's `ParseLimits.maxTextChars` (512 Ki chars per element), so legitimate decoded output is at most 2 MiB of UTF-8; anything past it is a corruption signal, not show notes. `encode` enforces the same bound on its input (`IllegalArgumentException`), so a custom `ParseLimits` raised past the codec bound fails before persistence instead of writing an unreadable blob — a successful encode always round-trips.
 
 **Format headers (2026-10-12, M1a):** the header now also carries the description format, with no schema change. `encode(text, format)` writes `[0x00]` raw / `[0x01]` DEFLATE for `DescriptionFormat.HTML` and `[0x02]`/`[0x03]` for `DescriptionFormat.PLAIN_TEXT` under the same 512-byte threshold; `decode` returns a `DecodedDescription(text, format)`. Legacy and unknown-header payloads still decode as HTML, matching what every pre-format blob meant. `FeedIngestor` passes the parser's `descriptionIsHtml`; `observeShowNotes` feeds the decoded format to the sanitiser's `isHtml`, so Atom `type="text"` (and YouTube / `media:description`) literals such as `<b>` and `&copy;` no longer render as markup.
+
+**Completeness expansion (2026-10-19, local M9a I3):** `DecodedDescription`
+also returns the existing typed `DescriptionCompleteness`, now shared from
+`:core:model` (the domain name remains a Kotlin type alias). Legacy, raw and
+unmarked compressed blobs are `UNKNOWN`. Two-argument encoding keeps exactly
+the old bytes and 512-byte threshold. A producer marking `COMPLETE` or
+`TRUNCATED` forces the existing `0x01`/`0x03` raw-DEFLATE form, even for short
+or empty text. Immediately after the DEFLATE end, the codec appends UTF-8
+`\u0000Neutrodyne.description\u0000` followed by ASCII `C` or `T` (25 bytes
+total). This is an optional trailer within the existing compressed
+representation, with no new header or format version. The frozen old reader
+stops at the DEFLATE end and ignores trailing bytes; old and new readers render
+identical text and format. The new reader accepts provenance only when the
+inflater's entire remaining input is exactly that trailer. Missing, partial,
+extra or unrecognised trailers are `UNKNOWN`; corrupt/truncated DEFLATE and
+oversized output retain the existing controlled errors. In-band publisher text
+cannot mark provenance. The 2 MiB bound applies to decoded UTF-8, excluding the
+trailer, and still applies before persistence.
+
+`FeedIngestor` supplies `COMPLETE` only without a parser `TEXT_TRUNCATED`
+warning for the item's `feedOrder` or the feed. Warnings are item-scoped rather
+than field-scoped, so any such item warning conservatively marks its notes
+`TRUNCATED`. An item-count cap does not truncate an already parsed item's
+text. The YouTube variant adapter retains truncation provenance for the selected
+producer entry and remaps it after union/reordering, even when another variant
+has identical retained text. Facts supply `COMPLETE` only after an explicit
+Boolean `descriptionTruncated` in the frozen wire reply and the 32 KiB check;
+the DTO default, missing or string-valued flags are not evidence. Unknown or truncated text never authorizes complete chapter
+extraction. Existing unknown blobs, including blank ones, remain intact; no
+unchanged-row promotion, backfill or opportunistic migration is performed.
+Rollback to the old reader preserves display and backup matching, while losing
+completeness authorization. Old-writer data remains readable as `UNKNOWN`.
+Backup V1 records and SQL/schema/entities/indices/exports do not change;
+backups carry identity/hints/state, not description blobs. Restore matching
+still decodes the same description head and never derives completeness from
+hints or snippets.
 
 The column holds raw HTML from the feed (or plain text for YouTube and Atom); sanitising happens at display time ([D27](../PLAN.md#3-key-decisions), [03 Show notes](03-feeds-and-discovery.md#show-notes)). Compression shrinks the largest table to roughly a third (see [Expected size](#expected-size)). Encoding runs in the ingest's prepare step — off the write transaction for a refresh ingest, inside it for subscribe's single-transaction path, where an encode rejection aborts the whole subscribe: no podcast, alias, membership or episode row survives it (03 Subscribe transaction; covered by `SubscribeFlowTest`'s over-bound rollback and exact-bound commit cases).
 

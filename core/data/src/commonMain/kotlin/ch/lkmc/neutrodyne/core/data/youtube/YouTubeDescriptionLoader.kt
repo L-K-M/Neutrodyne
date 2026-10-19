@@ -25,9 +25,9 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
-/** W7 receives an immutable complete facts description, never a later read of an unmarked blob.
- * Existing blob completeness is unknown until the parent freezes read provenance; keep its text
- * unchanged and return null. Last waiter owns cancellation; incomplete facts never reach storage.
+/** W7 parses the returned immutable complete snapshot, never a mutable blob read after a call.
+ * Unmarked/truncated existing text stays unchanged and cannot authorize chapters. Last waiter
+ * owns cancellation; incomplete facts never reach storage.
  */
 @SingleIn(AppScope::class)
 @Inject
@@ -54,7 +54,18 @@ internal class YouTubeDescriptionLoader(
             val video = row.externalMediaId ?: return@withTimeoutOrNull null
             if (channel.sourceType != SourceType.YOUTUBE_CHANNEL) return@withTimeoutOrNull null
             db.episodeDao().description(episodeId)?.let {
-                if (EpisodeDescriptionCodec.decode(it).text.isNotBlank()) return@withTimeoutOrNull null
+                val snapshot = EpisodeDescriptionCodec.decode(it)
+                if (snapshot.completeness != DescriptionCompleteness.COMPLETE || snapshot.text.isBlank()) {
+                    return@withTimeoutOrNull null
+                }
+                currentCoroutineContext().ensureActive()
+                val current = db.episodeDao().byId(episodeId) ?: return@withTimeoutOrNull null
+                if (current.podcastId != row.podcastId || current.externalMediaId != video ||
+                    clock.elapsedRealtime() >= deadline
+                ) {
+                    return@withTimeoutOrNull null
+                }
+                return@withTimeoutOrNull snapshot.text
             }
             val flight =
                 lock.withLock {

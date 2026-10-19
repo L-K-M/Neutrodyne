@@ -58,7 +58,7 @@ internal class YouTubeFactsWriterImpl(
         description: String,
         completeness: DescriptionCompleteness,
     ) {
-        val prepared = prepare(description, completeness == DescriptionCompleteness.TRUNCATED) ?: return
+        val prepared = prepare(description, completeness != DescriptionCompleteness.COMPLETE) ?: return
         currentCoroutineContext().ensureActive()
         db.withWriteTransaction {
             val row = db.episodeDao().byId(episodeId) ?: return@withWriteTransaction
@@ -76,7 +76,8 @@ internal class YouTubeFactsWriterImpl(
         truncated: Boolean,
     ): Pair<ByteArray, String>? {
         if (text.isNullOrBlank() || truncated || text.encodeToByteArray().size > 32 * 1024) return null
-        return EpisodeDescriptionCodec.encode(text, DescriptionFormat.PLAIN_TEXT) to sanitizer.snippet(text, false)
+        return EpisodeDescriptionCodec.encode(text, DescriptionFormat.PLAIN_TEXT, DescriptionCompleteness.COMPLETE) to
+            sanitizer.snippet(text, false)
     }
 
     private suspend fun fill(
@@ -84,7 +85,11 @@ internal class YouTubeFactsWriterImpl(
         prepared: Pair<ByteArray, String>,
     ) {
         val stored = db.episodeDao().description(id)
-        if (stored != null && EpisodeDescriptionCodec.decode(stored).text.isNotBlank()) return
+        if (stored != null) {
+            val snapshot = EpisodeDescriptionCodec.decode(stored)
+            // Unknown legacy blobs stay byte-identical, even when their text is blank.
+            if (snapshot.completeness == DescriptionCompleteness.UNKNOWN || snapshot.text.isNotBlank()) return
+        }
         currentCoroutineContext().ensureActive()
         db.ingestDao().fillYouTubeDescription(id, prepared.first, prepared.second)
     }
