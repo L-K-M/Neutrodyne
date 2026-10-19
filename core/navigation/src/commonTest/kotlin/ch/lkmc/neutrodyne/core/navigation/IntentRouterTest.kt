@@ -94,6 +94,14 @@ class IntentRouterTest {
     }
 
     @Test
+    fun backupSettingsRoutePushesBackupKey() {
+        assertEquals(
+            Route.Push(BackupKey),
+            IntentRouter.route(internalView("neutrodyne://open/settings/backup")),
+        )
+    }
+
+    @Test
     fun updatesReleaseRoutePushesSettingsKeyWithOpenRelease() {
         val route = IntentRouter.route(internalView("neutrodyne://open/settings/updates/release"))
 

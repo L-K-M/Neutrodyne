@@ -346,14 +346,14 @@ sequenceDiagram
 | Import history (`import_item.groupNamesJson`) | unaffected (names, not IDs) |
 
 **Implementation note (2026-10-16, M2)** — C1 lands the mechanism with two slices deferred to
-their owning milestones: `SnapshotScheduler.requestSoon()` does not run on delete yet because the
-port itself arrives with M3's backup work; the 10-second undo window runs as a `delay` job on the
-injected `@ApplicationScope` and `GroupChannelSync.onDeleted(uuid)` fires at its end — process
-death still finalizes the delete, and the start-up sweep spares exactly the uuids the repository
-reports through `GroupRepository.pendingUndoUuids()` (the "live undo tokens" the sweep rule above
-refers to). `NoGroupChannels` sits in `:core:domain` next to the port rather than
-`:core:data` `desktopMain`, so both shells bind the same interim no-op until C5's
-`GroupNotificationChannels` replaces it on Android. `GroupMerger` exists in `:core:data` with the
+their owning milestones: `SnapshotScheduler.requestSoon()` on delete was deferred to M3's backup
+work, whose C6b slice wired the call site once the port existed; the 10-second undo window runs
+as a `delay` job on the injected `@ApplicationScope` and `GroupChannelSync.onDeleted(uuid)` fires
+at its end — process death still finalizes the delete, and the start-up sweep spares exactly the
+uuids the repository reports through `GroupRepository.pendingUndoUuids()` (the "live undo tokens"
+the sweep rule above refers to). `NoGroupChannels` sits in `:core:domain` next to the port and is
+bound only on the desktop. Android binds `AndroidGroupChannelSync` in `:app`, delivered by M2's
+C5 slice as described below. `GroupMerger` exists in `:core:data` with the
 transaction this document specifies — union memberships, keep the survivor's settings, move a
 GROUP play context, then `sync()` — but has no callers until the restore path (M3) and
 `SyncApplier` (M10) land.
@@ -689,8 +689,8 @@ hooks below are implemented by C3 after the interval write commits, with a lazy
 `Provider<RefreshController>` to avoid a dependency cycle. Unchanged intervals,
 notification-only writes, invalid writes and missing scopes do not reschedule.
 A post-commit scheduling failure is logged; it does not turn a committed write
-into `SettingsError.WriteFailed`. Channel reconciliation arrives with C5, and
-snapshot requests with M3.
+into `SettingsError.WriteFailed`. Android channel reconciliation is bound by M2's C5; snapshot
+requests arrived with M3's C6b write-site wiring.
 
 - Writes are a read-modify-write inside one write transaction (`@Upsert` is allowed on these single-writer tables, [02 DAO rules](02-data-model.md#dao-rules)); a row whose fields are all `null` is deleted. Rule 1 (dependent fields) and validation run before the write; an invalid value returns 01's `SettingsError.OutOfRange(field name)` and writes nothing. A podcast or group that no longer exists makes the write a no-op returning success (the screen is closing anyway).
 - After a write: refresh interval changed → `RefreshController.reschedulePeriodic()`; `notifyNewEpisodes` changed → `GroupChannelSync.sync()` (Android; the screen requests `POST_NOTIFICATIONS` per 03's permission rule); always → `SnapshotScheduler.requestSoon()` (Android). 07 and 06 observe the resolver flows; nothing else is pushed. Sync needs no call: the triggers capture the synced columns (02).
@@ -1540,7 +1540,7 @@ interface BackupRepository {
     suspend fun restoreAndroidBackup(): Outcome<Long, BackupError>              // Android: foreign snapshot → restore session id;
                                                                                 // desktop: Unsupported
     suspend fun discardAndroidBackup()                                          // Android: foreign snapshot → restored-{ts}.zip
-    suspend fun writeSnapshotNow(): Outcome<SnapshotStatus, BackupError>        // Android: SnapshotNowReceiver (shell, bmgr) and the
+    suspend fun writeSnapshotNow(): Outcome<SnapshotWrite, BackupError>         // Android: SnapshotNowReceiver (shell, bmgr) and the
                                                                                 // debug build's "Write snapshot now"; desktop: Unsupported
 }
 // :core:model
@@ -1565,9 +1565,21 @@ sealed interface RestoreProgress {
 data class SnapshotStatus(val supported: Boolean,               // false on the desktop (no Auto Backup)
                           val enabled: Boolean, val lastWrittenAt: Long?, val bytes: Long?, val level: Int,
                           val lastError: String?,
-                          val foreignPending: Boolean)   // a snapshot from another installation waits (First-launch restore)
+                           val foreignPending: Boolean)   // a snapshot from another installation waits (First-launch restore)
+data class SnapshotWrite(val before: SnapshotStatus, val after: SnapshotStatus)
 data class PrivacyCounts(val privateLinks: Int, val passwords: Int)
 ```
+
+**Implementation note (2026-10-18, M3 C5).** `writeSnapshotNow` returns
+`Outcome<SnapshotWrite, BackupError>`: `SnapshotWrite(before, after)` carries the
+`SnapshotStatus` pair the producer reads inside its write mutex, so the receiver's
+`ok` proves this invocation published (the publication fields `lastWrittenAt`,
+`bytes` and `level` moved) instead of reporting a status a concurrent second write
+could have produced. The verdict rule below is unchanged: `enabled = false` reads
+`disabled`, no publication move reads `guarded`, a timed-out wait reads `pending`,
+typed failures read `error …`.
+
+The receiver starts its reporting coroutine undispatched so an already-cancelled application scope still enters the finalizer. Injection failures and cancellation also complete the ordered-broadcast result; they never claim a successful write. The write remains an independent application-owned job, so the eight-second wait cannot cancel it.
 
 Preview text: "Backup from 4 Oct 2026 (Neutrodyne 1.3): 142 podcasts, 6 groups, 3,214 played episodes, 12 in Up next, settings." Checkboxes: Listening history, Up next, Settings (Merge default: history and Up next on, settings off; Replace: all on). Mode: **Merge** (default, [canonical defaults](#settings)) or **Replace**; Replace requires a confirmation naming its effect ("Removes 9 podcasts and 2 groups that are not in the backup, and replaces your listening history"). Confirming Replace first calls `PlaybackController.pause()` from the feature layer. A backup made on the other platform says so ("Backup from 4 Oct 2026, made on Android"). While the device is linked the preview adds "This device syncs with sync.example.org", and Replace asks how far it reaches ([Restore while linked](#restore-while-linked)).
 
@@ -1843,7 +1855,7 @@ Both Android sections must stay present: a missing `<cloud-backup>` or `<device-
 | `backup-auto-snapshot` | periodic 24 h, `setRequiresDeviceIdle(true)`, `setRequiresCharging(true)`, policy `UPDATE` | start-up initializer, order 200 ([01 Application start-up](01-foundation.md#application-start-up)) |
 | `backup-auto-snapshot-now` | one-time, initial delay 10 min, `setRequiresBatteryNotLow(true)`, policy `REPLACE` (debounce) | `SnapshotScheduler.requestSoon()` (`WorkManagerSnapshotScheduler`): called directly by 05's own writes (group create/rename/delete/reorder/look, membership changes, scope-settings writes, import `DONE`, restore finished) and by a library watcher for 03's subscribe and unsubscribe (below) — not after played-state changes (the daily run covers them) |
 
-**Library watcher.** The order-200 initializer that schedules `backup-auto-snapshot` also launches, on `@ApplicationScope`, a collector of `BackupDao.observeLibraryShape()` (`SELECT (SELECT COUNT(*) FROM podcast), (SELECT COUNT(*) FROM podcast_group_member)`, requested from 02) with `distinctUntilChanged().drop(1)` → `requestSoon()`. Refreshes write `podcast` but never change these counts, so they trigger nothing; customTitle and `includeInAll` edits wait for the daily run.
+**Library watcher.** The order-200 initializer that schedules `backup-auto-snapshot` also launches, on `@ApplicationScope`, a collector of `BackupDao.observeLibraryShape()` (`SELECT (SELECT COUNT(*) FROM podcast), (SELECT COUNT(*) FROM podcast_group_member)`, requested from 02) with `distinctUntilChanged()`, skipping leading emissions equal to a baseline shape the initializer reads before it returns (so a change landing before the collector's first query still counts; `drop(1)` if that read fails) → `requestSoon()`. Refreshes write `podcast` but never change these counts, so they trigger nothing; customTitle and `includeInAll` edits wait for the daily run.
 
 Algorithm:
 
@@ -1879,6 +1891,10 @@ debounced write; disable cancels
 both work names. Status observes settings, backup previews and control changes without
 polling. Desktop automatic operations remain unsupported/no-op without IO. Native
 worker/initializer/receiver registration follows in C2/C4/C5/C6b.
+
+Implementation note (2026-10-18, M3 C2/C4): the Android workers and order-200 initializer use the real WorkManager hosts. Restore follow-up and startup reconciliation schedule only requests the runner can consume: decodable options with a request stamp and mode, plus a payload path. Unreadable or unsupported intent metadata stays protected by the fail-closed ownership guard, but never creates a no-op re-enqueue loop. Admission accepts unfinished same-session work or completion of the exact newly enqueued request; an old completed spec is not proof that `KEEP` accepted a new request. Unknown acceptance preserves the durable intent for reconciliation. First-launch restore and the shell receiver follow in C5/C6b.
+
+Staging note (2026-10-18, M3 C2/C4): notification targets already register `ImportKey` and `BackupKey` with an explicit unavailable screen and Back action, so a tap cannot crash while D1/D4 are being implemented. Those UI slices replace the interim entries before M3 is complete. The `settings/backup` deep link targets `BackupKey` rather than the settings dispatcher's Appearance fallback.
 
 ### First-launch restore
 
@@ -1955,7 +1971,7 @@ The reinstall deliberately omits the `-t` of the official script, so it also pro
 
 - No intent filter: only an explicit broadcast reaches it, and only from a sender holding `DUMP`, whose protection level is `signature|privileged|development`. The shell user (`adb shell`) holds it; a third-party app cannot, except after an `adb shell pm grant`. It follows the pattern of 09's `BenchmarkSeedReceiver`.
 - Member-injected: `onReceive` first calls `graph.inject(this)` (`AndroidAppGraph.inject(target: SnapshotNowReceiver)`, [01 Dependency injection](01-foundation.md#dependency-injection)), which sets `BackupRepository` as a Metro `Lazy` (01's rule for framework components created before the database is open). `onReceive` calls `goAsync()`, starts `BackupRepository.writeSnapshotNow()` on `@ApplicationScope` and waits for it at most 8 s (`withTimeoutOrNull` on the `Deferred`, so a slow write is never cancelled; a receiver must finish "under 10 seconds" even with `goAsync()`). It then sets `resultCode = Activity.RESULT_OK` with `resultData = "ok at=<lastWrittenAt> bytes=<bytes> level=<level>"`, or `RESULT_CANCELED` with `"disabled"`, `"guarded"`, `"pending"` or `"error <BackupError>"`, and calls `finish()`. `am broadcast` sends an ordered broadcast, waits for it to finish and prints the result code and data, so the script asserts on that line.
-- `writeSnapshotNow()` runs the [Snapshot production](#snapshot-production) algorithm at once under the backup mutex, without the work's constraints, and returns the resulting `SnapshotStatus`. The receiver maps it: `enabled = false` → `disabled` (nothing written); `lastWrittenAt` not advanced because a guard held (a pending restore or a foreign snapshot) → `guarded` (the file stays); otherwise `ok`.
+- `writeSnapshotNow()` runs the [Snapshot production](#snapshot-production) algorithm at once under the backup mutex, without the work's constraints, and returns `SnapshotWrite(before, after)` read under that mutex. The receiver maps `after.enabled = false` to `disabled`; unchanged publication fields (`lastWrittenAt`, `bytes`, `level`) to `guarded`; otherwise `ok`.
 - Harmless if misused: it does only what the daily work does. It is the one named exception to PLAN N7's and 7.2's test-hook rule ([D2](../PLAN.md#3-key-decisions); [01 Debug build type](01-foundation.md#debug-build-type)): shell-only, `DUMP`-protected and running only production code. It ships in every APK, so the check runs on exactly what users install; it works on the non-debuggable release build because the shell holds `DUMP` whatever the app's flags. R8 keeps it, because manifest-declared components are entry points ([shrink code](https://developer.android.com/build/shrink-code)), and its name stays readable (`-dontobfuscate`, [01 Release build and baseline profiles](01-foundation.md#release-build-and-baseline-profiles)).
 - Local debug builds (`BuildInfo.debug`, [D2](../PLAN.md#3-key-decisions)) additionally show a "Write snapshot now" row in Settings › Backup (08) that calls the same function; release builds do not have it.
 - The script cannot list `files/backup/` with `run-as` (the release build is not debuggable; the debuggable-build exposure, risk P11, was retired 2026-10-05); its assertions use only the receiver's result line and the local transport's file list.
@@ -2121,6 +2137,19 @@ code in `:feeds` (`ch.lkmc.neutrodyne.feeds.opml`), so both the apps and the syn
 write identical bytes. The writer goldens stay separate from the reader fixtures
 (`neutrodyne_*.opml`) in the same corpus directory.
 
+**Implementation note (2026-10-18, M3):** the 400,000-episode scale leg runs on the desktop
+JVM as `SnapshotScaleTest` (`:core:data` `desktopTest`, discovered only by the capped-heap
+`mutationTest` task, which excludes it from `desktopTest`). It seeds a real Room database
+with 400,000 distinct state-bearing episodes — 4,000-row `insertEpisodes` batches plus one
+reused `episode_state` prepared statement, so no 400,000-object collection is retained — then
+runs `AutoSnapshotProducer` → `BackupWriter` → `ZipArchiveWriter` at the format's deflate
+level 6 and re-reads the closed archive through `ZipGuard` and `BackupCodec`: manifest counts
+(`episodeLines`, `played`, `inProgress`), per-entry SHA-256 and byte counts, and a streamed
+line count of exactly 400,000 with independent state recounts. `FULL` (level 0) must land
+inside the 20 MB compressed cap; counts, timing, heap and size evidence go to
+`build/review-e2/`. The `SnapshotWorkerTest` row above still owns the Robolectric host legs
+(guards, watcher, worker lifecycle).
+
 ---
 
 ## Error handling and failure modes
@@ -2224,7 +2253,7 @@ Shared code lands for both platforms in the milestone named; "Android" and "desk
 | `PlayContextResolver`, `PlayContextSpec` | play contexts | `:core:domain` / `:core:model` |
 | `ImportOptions`, `SourceGroup`, `CreateImportOptions`, `ImportSessionView`, `ImportItemView`, `ImportItemFilter`, `GroupProposal`, `ImportWarning`, `ImportError` | import API | `:core:model` / `:core:domain` |
 | `ExportRepository`, `ExportRequest`, `ExportFormat`, `ExportLayout`, `PreparedExport` | export API | `:core:domain` / `:core:model` |
-| `RestoreMode` (`MERGE`, `REPLACE`), `RestoreCategory`, `RestoreRequest`, `RestoreProgress`, `BackupPreview`, `BackupSummary`, `SnapshotStatus`, `PrivacyCounts`, `BackupError`, `ExportError`; `BackupRepository` members `preflight`, `restoreAndroidBackup`, `discardAndroidBackup`, `writeSnapshotNow` | backup API | `:core:model` / `:core:domain` |
+| `RestoreMode` (`MERGE`, `REPLACE`), `RestoreCategory`, `RestoreRequest`, `RestoreProgress`, `BackupPreview`, `BackupSummary`, `SnapshotStatus`, `SnapshotWrite`, `PrivacyCounts`, `BackupError`, `ExportError`; `BackupRepository` members `preflight`, `restoreAndroidBackup`, `discardAndroidBackup`, `writeSnapshotNow` | backup API | `:core:model` / `:core:domain` |
 | `LinkedRestoreReach` (`THIS_DEVICE`, `ALL_DEVICES`), `RestoreRequest.linkedReach`, `BackupPreview.linkedServerHost` and `writtenOn`, `SnapshotStatus.supported`, `BackupError.Unsupported`, `PreparedExport.shareUri` nullable *(2026-10-05)* | backup API additions | `:core:model` / `:core:domain` |
 | `LibraryMerger` (`mergeStaged`), `MergePolicy` (`RESTORE_MERGE`, `RESTORE_REPLACE`, `LINK_MERGE`, `LINK_REPLACE`), `MergeSummary`, `GroupChannelSync` (`sync`, `onUuidChanged`, `onDeleted`) *(2026-10-05)* | ports used by 10 | `:core:domain` / `:core:model` |
 | `RestoreMerger`, `StagedLibrary`, `LibraryMergerImpl`, `RestoreRunner`, `ImportFetchRunner`, `GroupMerger`; ports `PayloadSource`, `ExportDestination`, `ImportWorkScheduler`, `SnapshotScheduler` *(2026-10-05)* | shared implementation | `:core:data` `commonMain` |

@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.data.importing
 
 import ch.lkmc.neutrodyne.core.database.ImportSessionEntity
+import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportOptions
 import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.ImportWarning
@@ -127,6 +128,17 @@ internal fun ImportSessionEntity.hasRestoreIntent(): Boolean {
     val encoded = optionsJson ?: return false
     val options = ImportOptionsJson.decodeOrNull(encoded) ?: return true
     return options.restoreRequestedAt != null
+}
+
+/** Scheduling is stricter than ownership: unreadable intents stay protected, but cannot run. */
+internal fun ImportSessionEntity.hasRunnableRestoreIntent(): Boolean {
+    if (sourceFormat != ImportFormat.NEUTRODYNE_BACKUP || state != ImportState.PREVIEW ||
+        payloadPath == null
+    ) {
+        return false
+    }
+    val options = optionsJson?.let(ImportOptionsJson::decodeOrNull) ?: return false
+    return options.restoreRequestedAt != null && options.restoreMode != null
 }
 
 /** The `SourceGroup` mirror (05 §4: proposals ride in `optionsJson` — empty folders have no item rows). */

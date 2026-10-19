@@ -17,6 +17,7 @@ import ch.lkmc.neutrodyne.core.domain.RefreshController
 import ch.lkmc.neutrodyne.core.domain.ScopeSettingsRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsError
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.domain.SnapshotScheduler
 import ch.lkmc.neutrodyne.core.model.ScopedSettingsView
 import ch.lkmc.neutrodyne.core.model.SettingOverrides
 import dev.zacsweers.metro.ContributesBinding
@@ -37,6 +38,7 @@ internal class ScopeSettingsRepositoryImpl(
     private val settings: SettingsRepository,
     private val refresh: Provider<RefreshController>,
     private val channelSync: GroupChannelSync,
+    private val snapshots: SnapshotScheduler,
 ) : ScopeSettingsRepository {
     private val dao get() = db.scopeSettingsDao()
 
@@ -55,7 +57,7 @@ internal class ScopeSettingsRepositoryImpl(
         change: (SettingOverrides) -> SettingOverrides,
     ): Outcome<Unit, SettingsError> =
         write {
-            if (db.podcastDao().byId(podcastId) == null) return@write Outcome.Success(false)
+            if (db.podcastDao().byId(podcastId) == null) return@write Outcome.Success(ScopeWrite.UNCHANGED)
             val previous = dao.forPodcast(podcastId)?.o ?: ScopeOverrides()
             val next = change(previous.toModel())
             if (!next.hasSupportedRefreshInterval()) return@write invalidRefresh()
@@ -65,7 +67,12 @@ internal class ScopeSettingsRepositoryImpl(
             } else if (stored != previous) {
                 dao.upsertPodcast(PodcastSettingsEntity(podcastId, stored))
             }
-            Outcome.Success(previous.refreshIntervalMinutes != stored.refreshIntervalMinutes)
+            Outcome.Success(
+                ScopeWrite(
+                    intervalChanged = previous.refreshIntervalMinutes != stored.refreshIntervalMinutes,
+                    mutated = stored != previous,
+                ),
+            )
         }
 
     override suspend fun updateGroup(
@@ -73,7 +80,7 @@ internal class ScopeSettingsRepositoryImpl(
         change: (SettingOverrides) -> SettingOverrides,
     ): Outcome<Unit, SettingsError> =
         write(afterCommit = ::syncGroupChannels) {
-            if (db.groupDao().groupById(groupId) == null) return@write Outcome.Success(false)
+            if (db.groupDao().groupById(groupId) == null) return@write Outcome.Success(ScopeWrite.UNCHANGED)
             val previous = dao.forGroup(groupId)?.o ?: ScopeOverrides()
             val next = change(previous.toModel())
             if (!next.hasSupportedRefreshInterval()) return@write invalidRefresh()
@@ -83,7 +90,12 @@ internal class ScopeSettingsRepositoryImpl(
             } else if (stored != previous) {
                 dao.upsertGroup(PodcastGroupSettingsEntity(groupId, stored))
             }
-            Outcome.Success(previous.refreshIntervalMinutes != stored.refreshIntervalMinutes)
+            Outcome.Success(
+                ScopeWrite(
+                    intervalChanged = previous.refreshIntervalMinutes != stored.refreshIntervalMinutes,
+                    mutated = stored != previous,
+                ),
+            )
         }
 
     // Reconcile channels after committing and releasing the Room writer.
@@ -93,16 +105,18 @@ internal class ScopeSettingsRepositoryImpl(
     }
 
     /**
-     * One write transaction, then the effects it owes: a reschedule when the interval changed and
-     * [afterCommit]. Both finish with the commit as one unit even if the screen closes: Room
-     * re-checks cancellation as a transaction returns, so a cancellable caller would drop them.
+     * One write transaction, then the effects it owes: a reschedule when the interval changed, the
+     * snapshot poke when the row actually moved (05 Writing overrides — a missing scope or an
+     * unchanged row writes nothing) and [afterCommit]. All finish with the commit as one unit even
+     * if the screen closes: Room re-checks cancellation as a transaction returns, so a cancellable
+     * caller would drop them.
      */
     private suspend fun write(
         afterCommit: suspend () -> Unit = {},
-        block: suspend () -> Outcome<Boolean, SettingsError>,
+        block: suspend () -> Outcome<ScopeWrite, SettingsError>,
     ): Outcome<Unit, SettingsError> =
         withContext(NonCancellable) {
-            val result: Outcome<Boolean, SettingsError> =
+            val result: Outcome<ScopeWrite, SettingsError> =
                 try {
                     db.withWriteTransaction { block() }
                 } catch (error: SQLiteException) {
@@ -110,19 +124,36 @@ internal class ScopeSettingsRepositoryImpl(
                     return@withContext Outcome.Failure(SettingsError.WriteFailed)
                 }
 
-            val intervalChanged =
+            val write =
                 when (result) {
                     is Outcome.Failure -> return@withContext result
                     is Outcome.Success -> result.value
                 }
-            if (intervalChanged) {
+            if (write.intervalChanged) {
                 suspendRunCatching { refresh().reschedulePeriodic() }
                     .onFailure { Log.w("ScopeSettings", it) { "Post-write refresh reschedule failed" } }
             }
             afterCommit()
+            if (write.mutated) {
+                suspendRunCatching { snapshots.requestSoon() }
+                    .onFailure { Log.w("ScopeSettings", it) { "Snapshot request failed after settings write" } }
+            }
 
             Outcome.Success(Unit)
         }
+
+    /**
+     * What one committed scope write changed: [intervalChanged] drives the refresh reschedule and
+     * [mutated] the snapshot request (05's "always → requestSoon" applies to durable mutations).
+     */
+    private class ScopeWrite(
+        val intervalChanged: Boolean,
+        val mutated: Boolean,
+    ) {
+        companion object {
+            val UNCHANGED = ScopeWrite(intervalChanged = false, mutated = false)
+        }
+    }
 
     private fun ScopeOverrides.toModel(): SettingOverrides = SettingOverrides(refreshIntervalMinutes, notifyNewEpisodes)
 

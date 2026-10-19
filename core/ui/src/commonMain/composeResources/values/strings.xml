@@ -491,6 +491,18 @@
     <string name="notification_episode_line">%1$s — %2$s</string>
     <string name="notification_other_podcasts">Other podcasts</string>
 
+    <!-- M3 import/backup reports (05 §8). -->
+    <string name="notification_import_done_title">Import finished</string>
+    <string name="notification_import_done">%1$d added · %2$d need attention</string>
+    <string name="notification_restore_failed_title">Restore failed</string>
+    <string name="notification_restore_failed">The backup could not be restored.</string>
+    <string name="notification_restore_failed_auto">The backed-up library could not be restored.</string>
+    <string name="notification_snapshot_pending_title">Backup found</string>
+    <string name="notification_snapshot_pending">A Neutrodyne backup is ready to restore.</string>
+    <string name="notification_snapshot_needs_newer">Your backup needs a newer version of Neutrodyne</string>
+    <string name="import_backup_title">Import and backup</string>
+    <string name="import_backup_pending">Import and backup details are not available in this build yet.</string>
+
     <!-- M3 OPML export (05 OPML export, 08 Export dialog). -->
     <string name="export_title">Export subscriptions</string>
     <string name="export_group_title_share">Share '%1$s' as OPML</string>

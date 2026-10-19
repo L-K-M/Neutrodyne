@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.model.GroupDraft
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
+import ch.lkmc.neutrodyne.core.testing.FakeSnapshotScheduler
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.TestDb
 import kotlinx.coroutines.CoroutineScope
@@ -42,6 +43,7 @@ class GroupOrderTest {
             TestOrderKeys,
             FakeGroupChannelSync(),
             FakeRefreshController(),
+            FakeSnapshotScheduler(),
             appScope,
         )
 
@@ -154,6 +156,7 @@ class GroupOrderTest {
                     OverlongKeys,
                     FakeGroupChannelSync(),
                     FakeRefreshController(),
+                    FakeSnapshotScheduler(),
                     appScope,
                 )
             assertEquals(Outcome.Success(Unit), longKeys.reorder(listOf(g1, g3, g2)))

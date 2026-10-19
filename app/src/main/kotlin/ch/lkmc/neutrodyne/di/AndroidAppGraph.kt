@@ -3,6 +3,7 @@ package ch.lkmc.neutrodyne.di
 
 import android.app.Application
 import androidx.work.WorkerFactory
+import ch.lkmc.neutrodyne.SnapshotNowReceiver
 import ch.lkmc.neutrodyne.core.artwork.NeutrodyneImageLoaderFactory
 import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.AppScope
@@ -10,8 +11,11 @@ import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.domain.BackupRepository
 import ch.lkmc.neutrodyne.core.domain.ExportRepository
 import ch.lkmc.neutrodyne.core.domain.GroupChannelSync
+import ch.lkmc.neutrodyne.core.domain.ImportReportPoster
+import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.domain.NewEpisodePoster
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
@@ -70,6 +74,16 @@ interface AndroidAppGraph {
      */
     val exportRepository: ExportRepository
 
+    /**
+     * M3 C2: the import and backup lanes' repositories — bound to the real impls so a feature
+     * row (D-rows) never resolves a stub, and the `import_backup` report poster.
+     */
+    val importRepository: ImportRepository
+
+    val backupRepository: BackupRepository
+
+    val importReportPoster: ImportReportPoster
+
     /** The Coil `SingletonImageLoader.Factory` installed in `NeutrodyneApplication` (08 Coil ImageLoader). */
     val imageLoaderFactory: NeutrodyneImageLoaderFactory
 
@@ -81,6 +95,13 @@ interface AndroidAppGraph {
 
     @Binds
     val MetroWorkerFactory.bindWorkerFactory: WorkerFactory
+
+    /**
+     * Member injection for the framework-created bmgr trigger (05 Testing with bmgr): the
+     * manifest receiver is constructed before the graph, so `onReceive` asks for its
+     * `Lazy<BackupRepository>` and `@ApplicationScope` scope here.
+     */
+    fun inject(receiver: SnapshotNowReceiver)
 
     /**
      * The one database accessor (02 Error handling and recovery): blocks a background caller until

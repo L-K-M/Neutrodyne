@@ -10,9 +10,20 @@ import androidx.work.WorkerParameters
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.WorkerCreator
 import ch.lkmc.neutrodyne.core.common.WorkerKey
+import ch.lkmc.neutrodyne.core.data.backup.AutoSnapshotWorker
+import ch.lkmc.neutrodyne.core.data.backup.BackupRepositoryImpl
+import ch.lkmc.neutrodyne.core.data.backup.RestoreWorker
+import ch.lkmc.neutrodyne.core.data.backup.WorkManagerSnapshotScheduler
 import ch.lkmc.neutrodyne.core.data.exporting.ExportRepositoryImpl
+import ch.lkmc.neutrodyne.core.data.importing.ImportFetchWorker
+import ch.lkmc.neutrodyne.core.data.importing.ImportRepositoryImpl
+import ch.lkmc.neutrodyne.core.data.importing.ImportWorkScheduler
+import ch.lkmc.neutrodyne.core.data.importing.WorkManagerImportWorkScheduler
 import ch.lkmc.neutrodyne.core.data.refresh.RefreshWorker
+import ch.lkmc.neutrodyne.core.domain.BackupRepository
 import ch.lkmc.neutrodyne.core.domain.ExportRepository
+import ch.lkmc.neutrodyne.core.domain.ImportRepository
+import ch.lkmc.neutrodyne.core.domain.SnapshotScheduler
 import ch.lkmc.neutrodyne.feeds.backup.ArchiveReaderFactory
 import ch.lkmc.neutrodyne.feeds.backup.ArchiveWriterFactory
 import ch.lkmc.neutrodyne.feeds.html.ShowNotesSanitizer
@@ -72,10 +83,47 @@ object AndroidDataBindings {
     @Provides
     internal fun exportRepository(impl: ExportRepositoryImpl): ExportRepository = impl
 
+    /** The M3 lanes' repositories — the impl types are `internal` to this module like the export's. */
+    @Provides
+    internal fun importRepository(impl: ImportRepositoryImpl): ImportRepository = impl
+
+    @Provides
+    internal fun backupRepository(impl: BackupRepositoryImpl): BackupRepository = impl
+
+    /**
+     * The M3 lanes' schedulers (05 §6, Snapshot production): provided rather than
+     * `@ContributesBinding` so `RestoreWorker`/`AutoBackupInitializer` can inject the concrete
+     * scheduler for the follow-up and periodic-arm calls the ports do not carry.
+     */
+    @Provides
+    internal fun importWorkScheduler(impl: WorkManagerImportWorkScheduler): ImportWorkScheduler = impl
+
+    @Provides
+    internal fun snapshotScheduler(impl: WorkManagerSnapshotScheduler): SnapshotScheduler = impl
+
     /** `RefreshWorker`'s entry in the map `MetroWorkerFactory` reads (01 Dependency injection). */
     @Provides
     @IntoMap
     @WorkerKey(RefreshWorker::class)
     fun refreshWorker(factory: RefreshWorker.Factory): WorkerCreator =
+        { context: Context, params: WorkerParameters -> factory.create(context, params) }
+
+    /** The M3 work hosts' entries (05 §6 step 4, Restore, Snapshot production). */
+    @Provides
+    @IntoMap
+    @WorkerKey(ImportFetchWorker::class)
+    fun importFetchWorker(factory: ImportFetchWorker.Factory): WorkerCreator =
+        { context: Context, params: WorkerParameters -> factory.create(context, params) }
+
+    @Provides
+    @IntoMap
+    @WorkerKey(RestoreWorker::class)
+    fun restoreWorker(factory: RestoreWorker.Factory): WorkerCreator =
+        { context: Context, params: WorkerParameters -> factory.create(context, params) }
+
+    @Provides
+    @IntoMap
+    @WorkerKey(AutoSnapshotWorker::class)
+    fun autoSnapshotWorker(factory: AutoSnapshotWorker.Factory): WorkerCreator =
         { context: Context, params: WorkerParameters -> factory.create(context, params) }
 }

@@ -42,7 +42,7 @@ import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.RestoreMode
 import ch.lkmc.neutrodyne.core.model.RestoreRequest
-import ch.lkmc.neutrodyne.core.model.SnapshotStatus
+import ch.lkmc.neutrodyne.core.model.SnapshotWrite
 import ch.lkmc.neutrodyne.core.model.settings.BackupSettingKeys
 import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
@@ -619,14 +619,23 @@ class BackupRepositoryImplTest {
             // Disabled is a status answer, not an error (05's receiver wording).
             settings.set(BackupSettingKeys.AUTO_SNAPSHOT_ENABLED, false)
             val disabled = repository.writeSnapshotNow()
-            assertFalse(assertIs<Outcome.Success<SnapshotStatus>>(disabled).value.enabled)
+            val disabledPair = assertIs<Outcome.Success<SnapshotWrite>>(disabled).value
+            assertFalse(disabledPair.after.enabled)
+            assertEquals(disabledPair.before, disabledPair.after)
 
             settings.set(BackupSettingKeys.AUTO_SNAPSHOT_ENABLED, true)
             val foreign = backupDirOf(storagePaths) / AUTO_SNAPSHOT_FILE
             fileSystem.createDirectories(checkNotNull(foreign.parent))
             fileSystem.write(foreign) { writeUtf8("someone else's snapshot") }
             val guarded = repository.writeSnapshotNow()
-            assertTrue(assertIs<Outcome.Success<SnapshotStatus>>(guarded).value.foreignPending)
+            assertTrue(assertIs<Outcome.Success<SnapshotWrite>>(guarded).value.after.foreignPending)
+
+            // A real write moves the publication fields the receiver compares (05 bmgr).
+            fileSystem.delete(foreign)
+            val written = repository.writeSnapshotNow()
+            val pair = assertIs<Outcome.Success<SnapshotWrite>>(written).value
+            assertEquals(null, pair.before.lastWrittenAt)
+            checkNotNull(pair.after.lastWrittenAt)
         }
 
     @Test

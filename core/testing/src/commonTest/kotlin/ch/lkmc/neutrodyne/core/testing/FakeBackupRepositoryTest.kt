@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.model.BackupSummary
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.RestoreMode
 import ch.lkmc.neutrodyne.core.model.RestoreRequest
+import ch.lkmc.neutrodyne.core.model.SnapshotWrite
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -68,10 +69,13 @@ class FakeBackupRepositoryTest {
             assertEquals(null, repo.observeRestore().first())
         }
 
-    @Test fun writeSnapshotNowReturnsTheStatusOrTheFixtureError() =
+    @Test fun writeSnapshotNowReturnsTheBeforeAfterPairOrTheFixtureError() =
         runTest {
             val repo = FakeBackupRepository()
-            assertEquals(Outcome.Success(repo.snapshotStatus.value), repo.writeSnapshotNow())
+            val before = repo.snapshotStatus.value
+            val after = before.copy(enabled = true, lastWrittenAt = 42L, bytes = 99L, level = 1)
+            repo.onWriteSnapshotNow = { repo.snapshotStatus.value = after }
+            assertEquals(Outcome.Success(SnapshotWrite(before, after)), repo.writeSnapshotNow())
 
             repo.snapshotNowError = BackupError.Io
             assertEquals(Outcome.Failure(BackupError.Io), repo.writeSnapshotNow())
