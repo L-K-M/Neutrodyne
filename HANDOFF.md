@@ -26,10 +26,15 @@ This file lets another person or agent take over the work at any point. **Last u
 
 ### M3 candidate and remaining acceptance evidence
 
-At the 2026-10-19 checkpoint, `origin/main` is `79642710` (#212). Its reviewed
-head `66af0a04` passed two GLM rounds, all required CI including server, and
+At the 2026-10-19 checkpoint, `origin/main` is `ef5fec26` (#213). The preceding
+L9 reviewed head `66af0a04` passed two GLM rounds, all required CI including server, and
 the fresh seeded [39257853895](https://github.com/L-K-M/Neutrodyne/actions/runs/39257853895)
-device gate on both APIs. Subsequent local UI layers remain work in progress.
+device gate on both APIs. [#215](https://github.com/L-K-M/Neutrodyne/pull/215)
+owns preview and Android receiving; report and final backup/desktop UI layers
+remain local work in progress. A repeated-cancellation regression exposed an
+interrupted desktop handshake leaking an I/O exception into later tests. The
+narrow cancellation correction now passes all 110 executed desktop tests;
+two native-menu cases remain headless skips. CI and review are still required.
 The candidate uses the existing schema V2, preserves the unlinked sync state
 and keeps YouTube imports external until M8.
 
@@ -37,18 +42,20 @@ and keeps YouTube imports external until M8.
 |---|---|---|
 | 1 | OPML reader fixtures and preview assertions | Latest-candidate CI/review |
 | 2, 7 | `RoundTripPropertyTest`, import commit and membership tests | Latest-candidate CI/review |
-| 3 | Hostile-input, bounded JSON, archive and mutation tests; real 400k-row snapshot test in a 128 MiB JVM | Scheduled `mutation-full` is red: [#211](https://github.com/L-K-M/Neutrodyne/issues/211), UTF-16 fixture iteration 708 exceeded 5 s in [39217888638](https://github.com/L-K-M/Neutrodyne/actions/runs/39217888638). A signed UTF-32 word stalled the markup guard. [#213](https://github.com/L-K-M/Neutrodyne/pull/213) fixes it with failing-first regressions and a passing full local 1,000-iteration gate; hosted CI/review/recovery remain pending. |
+| 3 | Hostile-input, bounded JSON, archive and mutation tests; real 400k-row snapshot test in a 128 MiB JVM. [#213](https://github.com/L-K-M/Neutrodyne/pull/213) fixes the signed UTF-32 word stall with failing-first regressions, full local 1,000-iteration proof and hosted `mutation-full` recovery in [39265477995](https://github.com/L-K-M/Neutrodyne/actions/runs/39265477995); [#211](https://github.com/L-K-M/Neutrodyne/issues/211) is closed. | Latest-candidate CI/review and a green scheduled release gate |
 | 4 | `ImportPipelineTest`, no-new-notification and inert-download assertions | Confirm the 300-feed/two-second acceptance measurement on the candidate |
 | 5, 11 | Restore merger/runner tests and `BackupCrossPlatformTest` | Actual Android-to-desktop and desktop-to-Android file round trip; native desktop drop/dialog checks |
 | 6, 8 | Real first-launch logical restore on API26/API36 in [39257853895](https://github.com/L-K-M/Neutrodyne/actions/runs/39257853895), including the named non-skipped-result gate; host foreign-snapshot and startup-race regressions | Local-transport `bmgr` uninstall/reinstall on API29/API36 and manual API26/28/31 checks. The logical device test is not transport evidence. |
 | 9, 10 | OPML writer, export warning/share and prepared-backup consent tests; route tests for backup/restore | Real share-sheet/SAF/provider journeys and latest-candidate UI checks |
 | 12 | `SyncInertTest` and round-trip tests cover unique/colliding `syncId` values and empty unlinked sync tables | Latest-candidate CI/review |
 
-The scheduled nightly [39217888638](https://github.com/L-K-M/Neutrodyne/actions/runs/39217888638)
-passed its device, API37/16 KiB and release-smoke jobs on `b7062d1f`, but failed
-mutation robustness. This is neither a green scheduled run nor current-candidate
-release approval. Preserve the downloaded failure XML and first-launch device
-XML under `~/nd-wt/reviews/evidence/`.
+The dispatched full nightly [39265477995](https://github.com/L-K-M/Neutrodyne/actions/runs/39265477995)
+on `ef5fec26` passed mutation robustness, API37/16 KiB, release smoke and repro,
+but `instrumented-full` failed ([#214](https://github.com/L-K-M/Neutrodyne/issues/214)).
+Its API26/API33 XML records assumption failures; API33 also has two smoke-test
+Settings-selector failures. Investigation is in progress. This is not a green
+scheduled run or release approval. Preserve both nightly failure artifacts and
+the separate seeded first-launch XML under `~/nd-wt/reviews/evidence/`.
 
 **Toolchain used locally:** Temurin 21 and 25 (Gradle toolchains via `org.gradle.java.installations.paths` in `~/.gradle/gradle.properties`), Android SDK with build tools 36/37 and platform 37. The configured Chaquopy `buildPython` path for CPython 3.14 is currently unavailable; local Kotlin compilation does not prove Python bytecode compilation. Available host CPython is 3.11.2; record any fallback explicitly. Builds need `LANG=C.UTF-8` and `LC_ALL=C.UTF-8`. Local software-emulator attempts have not supplied usable device evidence; run instrumented tests and Gradle Managed Devices in CI. Compose UI tests on the desktop JVM need a GL library; locally a user-level Mesa is unpacked in `~/.local/gfx` (`source ~/.local/gfx/env.sh`).
 
