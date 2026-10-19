@@ -28,6 +28,7 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import okio.IOException
+import okio.fakefilesystem.FakeFileSystem
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
@@ -36,6 +37,8 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Clock
+import kotlin.time.Instant
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class CleanupPlannerTest {
@@ -418,7 +421,12 @@ class CleanupPlannerTest {
 
     @Test fun dailyPassSweepsPartsAtFourteenDaysAndReportsOrphansWithoutDeletingThem() =
         runTest {
-            EngineRig(this).use { engine ->
+            // All parts must share a timestamp to test the exact age boundary together.
+            val fileClock =
+                object : Clock {
+                    override fun now() = Instant.fromEpochMilliseconds(TestClock.DEFAULT_NOW)
+                }
+            EngineRig(this, faults = FaultFiles(FakeFileSystem(fileClock))).use { engine ->
                 val f = CleanupRig(engine)
                 val restartable = listOf(DownloadState.PAUSED, DownloadState.QUEUED, DownloadState.FAILED)
                 val ids =

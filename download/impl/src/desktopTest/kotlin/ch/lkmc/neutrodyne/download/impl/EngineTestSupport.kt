@@ -45,6 +45,7 @@ internal class EngineRig(
     private val scope: TestScope,
     credentials: CredentialLookup = CredentialLookup.None,
     driver: SQLiteDriver = TestDb.bundledDriver(),
+    val faults: FaultFiles = FaultFiles(),
 ) : AutoCloseable,
     CoroutineScope by scope {
     fun runCurrent() = scope.testScheduler.runCurrent()
@@ -55,7 +56,6 @@ internal class EngineRig(
     val dao = db.downloadDao()
     val conditions = MutableStateFlow(Conditions(true, true, true, true, true))
     val roots = TestRoots()
-    val faults = FaultFiles()
     val files = OkioDownloadFileSystem(roots, faults, dispatcher)
     val verification = DownloadFiles(files, roots, PlatformSriHasher(roots, faults), PlatformLocalUris())
     val progress = DownloadProgressHub(scope.backgroundScope, clock)

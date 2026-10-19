@@ -477,12 +477,7 @@ internal class DownloadControllerImpl(
             }
         }
 
-        fun estimate(): Long? =
-            length?.takeIf { it >= MIN_ENCLOSURE_BYTES }
-                ?: row.durationMs?.takeIf { it > 0 }?.let {
-                    it.coerceAtMost(Long.MAX_VALUE / BYTES_PER_MILLISECOND) *
-                        BYTES_PER_MILLISECOND
-                }
+        fun estimate(): Long? = downloadEstimate(length, row.durationMs)
     }
 
     private fun DownloadEntity.status() =
@@ -529,8 +524,6 @@ internal class DownloadControllerImpl(
         const val MANUAL_PRIORITY = 100
         const val NEXT_PRIORITY = 200
         const val BIND_CHUNK = 500
-        const val MIN_ENCLOSURE_BYTES = 100_000L
-        const val BYTES_PER_MILLISECOND = 16L
         val HLS_TYPES =
             setOf(
                 "application/x-mpegurl",

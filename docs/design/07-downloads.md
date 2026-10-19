@@ -383,12 +383,11 @@ At `RESOLVING`, before any network request, the engine checks for a process deat
 
 #### Estimates
 
-Implementation note (2026-10-19, M6a): the 128 kbit/s duration estimate is
-`durationMs × 16` bytes (16,000 bytes per second). The formula below uses a
-seconds multiplier with a milliseconds field; W2 corrects the units and clamps
-large duration hints to avoid overflow.
+**Implementation note (2026-10-19, M6b).** W2 shares the manual and automatic
+estimate helper: 128 kbit/s is `durationMs × 16` bytes (16,000 bytes per second).
+Duration hints are clamped before multiplication to avoid overflow.
 
-`estimatedBytes` = `enclosureLength` when ≥ 100 KB (smaller values are bogus placeholders, never used for integrity); else `durationMs × 16 000` (128 kbit/s) when a duration is known; else `null`. The free-space check then falls back to 150 MB ([Free space](#free-space-and-allocation)). 05's "Download all" confirmation uses the same rule.
+`estimatedBytes` = `enclosureLength` when ≥ 100 KB (smaller values are bogus placeholders, never used for integrity); else `durationMs × 16` (128 kbit/s) when a positive duration is known; else `null`. The free-space check then falls back to 150 MB ([Free space](#free-space-and-allocation)). 05's "Download all" confirmation uses the same rule.
 
 ### Other controller operations
 
@@ -1393,7 +1392,7 @@ work; this observer must not duplicate a later common alert collector.
 | `DATA_SAVER` | `ConnectivityManager.getRestrictBackgroundStatus() == RESTRICT_BACKGROUND_STATUS_ENABLED` and the network is metered | "Data Saver is on. Downloads over mobile data may pause while Neutrodyne is in the background." | open `Settings.ACTION_IGNORE_BACKGROUND_DATA_RESTRICTIONS_SETTINGS` for the package |
 | `BACKGROUND_RESTRICTED` | `ActivityManager.isBackgroundRestricted()` | "Background activity is restricted for Neutrodyne. Automatic downloads only run while the app is open." | open the app's details settings |
 | `NOTIFICATIONS_OFF` | API 33+, permission denied, `MANUAL` rows active | "Allow notifications to see download progress outside the app." | permission prompt (08) |
-| `CAP_REACHED` | `capBytes != null && usedBytes ≥ capBytes` | "Storage limit of {5 GB} reached. Automatic downloads are paused." | open Settings › Downloads |
+| `CAP_REACHED` | `StorageUsage.autoBlockedByCap` (shared quota, including AUTO reservations and the first refused estimate) | "Storage limit of {5 GB} reached. Automatic downloads are paused." | open Settings › Downloads |
 | `STORAGE_LOW` | rows waiting in `STORAGE` with `STORAGE_FULL` | "Not enough storage. {n} downloads are waiting." | "Manage storage" (Android); "Show folder" (desktop: 11's `RevealInFolder` on the current root) |
 | `ROOT_UNAVAILABLE` | the current root unavailable, or `MISSING(STORAGE_UNAVAILABLE)` rows | "The SD card is not available." (desktop: "The download folder isn't available.") | — (desktop: "Change folder…", Settings › Desktop) |
 | `YOUTUBE_PAUSED` | YouTube rows waiting on the breaker or rate limit | 04's breaker banner text | 04's "Try now" |
@@ -1448,9 +1447,7 @@ network/charging values in effective policy attribution, but desktop admission
 must write `allowMetered = true`, `requireCharging = false`; neither network nor
 charging holds desktop rows or gates cleanup. Adopted resolution 11 keeps the
 full-library watermark pass, with reads/writes batched at 500 bind variables
-and no write when watermarks are unchanged. W2 measures the pass in its tests;
-W1 adds no planner cache or runtime behavior.
-
+and no write when watermarks are unchanged. W2 measures the pass in its tests; no planner cache is added.
 
 `AutoDownloadPlanner.plan(podcastIds)` (single flight; `@Dispatcher(IO)`):
 
@@ -1555,7 +1552,10 @@ mutex before each insert. Exact fits are admitted; an unknown estimate uses
 recomputes `autoBlockedByCap` as rows or settings change, so cleanup frees
 capacity without retaining a stale notice. Partials and orphans are reported
 separately and do not consume the admission budget. Manual requests never
-consult it. W3 does not implement or modify W2's planner.
+consult it. The integrated W2 planner and storage share the W3 quota instance;
+there is no planner-owned blocked flag or second reservation calculation.
+The notice table uses this admission result rather than completed bytes alone,
+because a candidate can be refused while completed bytes remain below the cap.
 
 `StorageUsage.usedBytes` = `SUM(totalBytes)` of `COMPLETED` rows ([02 Downloads](02-data-model.md#downloads)), never a file-system walk; `partialBytes` = sum of `.part` lengths of rows with a `tempPath` (cheap `stat` calls, refreshed on observation). The cap (`downloads.storage_cap_mb`: unlimited, 1 / 2 / 5 / 10 / 20 GB) only gates `AUTO` admission ([Planner algorithm](#planner-algorithm) step 7); manual downloads ignore it; reaching it shows `CAP_REACHED`.
 
