@@ -4,6 +4,36 @@ This file lets another person or agent take over the work at any point. **Last u
 
 ## 0. Implementation status
 
+### M10 I1 artwork and appearance integration (2026-10-19)
+
+`impl/m10-p1` integrates fetched main `95a769c1`, M3 `8f34b2cb`, frozen
+M8 W8 `9ac0d720` and completed M10 W4 `40ae6955`, retaining W2/W3.
+Code candidate `c8d2179d` preserves M3 startup/OPML/evidence fixes, W8's
+external actions and download guards, and W3's tint consumers. W4 uses
+W2's guarded publication path, without a competing store. The player
+keeps artwork resolution lazy; the desktop licence test scrolls its
+now-offscreen Settings row before clicking. The shared licence policy
+recognizes the pinned MCU MIT metadata without changing dependencies.
+
+The [integration report](.nd-context/m10-i1-report.md) records exact tips,
+conflicts, regression proof, commands, counts and measured diff sizes.
+Focused checks initially yielded 2,971 passes, 29 failures and three
+skips. Twenty-eight failures are existing screenshot references requiring
+W9 review after the theme change; the remaining licence test was repaired,
+then the desktop shell suite passed 126 tests with two existing skips.
+Both shell compilations, Spotless, dependency/API/module gates, app and
+playback release lint, and both doc checks pass. The full allTests/test/
+mutationTest attempt was interrupted under the owner's low-disk rule when
+free space fell back to 9.6 GiB; it supplies no complete gate or mutation
+claim. Earlier playback convergence uncertainty remains unproven despite
+the focused 161-test pass.
+
+M10 remains open for W5–W11, including Import/Downloads average-colour
+plumbing and reviewed references, plus production desktop pixels/OS UX
+and physical Auto/artwork evidence. No push, PR, CI, external review
+(0 rounds) or main merge was performed. Later M5–M8 and M3 notes below
+are retained as dated evidence, not replaced by an earlier checkpoint.
+
 ### M8 I3 download integration (2026-10-19)
 
 `impl/m8-p1` integrates M6a/M6b through the requested `8ab74ff0`, over
