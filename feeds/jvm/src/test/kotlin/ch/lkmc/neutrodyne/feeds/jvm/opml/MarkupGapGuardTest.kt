@@ -56,6 +56,29 @@ class MarkupGapGuardTest {
         drain(BOM_UTF32BE + utf32Be(doc))
     }
 
+    @Test(timeout = 5_000)
+    fun malformedUtf32WordsCannotStopTheGuard() {
+        for (unit in intArrayOf(Int.MIN_VALUE, -3, -2, -1)) {
+            val littleEndian = utf32Le(unit)
+            drain(BOM_UTF32LE + littleEndian)
+            drain(BOM_UTF32BE + littleEndian.reversedArray())
+        }
+    }
+
+    @Test(timeout = 5_000)
+    fun malformedUtf32WordsCannotHideFollowingDeclarations() {
+        val declaration = "<!DOCTYPE opml [<!ENTITY x \"y\">]><opml/>"
+        for (unit in intArrayOf(Int.MIN_VALUE, -3, -2, -1)) {
+            val littleEndian = utf32Le(unit)
+            assertFailsWith<HostileEntityDeclaration> {
+                drain(BOM_UTF32LE + littleEndian + utf32Le(declaration))
+            }
+            assertFailsWith<HostileEntityDeclaration> {
+                drain(BOM_UTF32BE + littleEndian.reversedArray() + utf32Be(declaration))
+            }
+        }
+    }
+
     /** In four-byte modes the markup gap still bounds `<`-free payload runs. */
     @Test
     fun utf32MarkupGapIsBounded() {
@@ -74,6 +97,9 @@ class MarkupGapGuardTest {
         }
         return out
     }
+
+    private fun utf32Le(unit: Int): ByteArray =
+        ByteArray(Int.SIZE_BYTES) { index -> (unit ushr (index * Byte.SIZE_BITS)).toByte() }
 
     private fun utf32Be(text: String): ByteArray {
         val out = ByteArray(text.length * 4)
