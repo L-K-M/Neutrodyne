@@ -1209,6 +1209,8 @@ Serves R4.7, R5.2. Delivered in M4 (lock screen, System UI, Bluetooth metadata),
 
 ### Resumption
 
+**Implementation note (2026-10-19, M5).** Service creation and read-only browsing leave the playback runtime dormant. Only a playback command starts its adapters/projector; Media3's recent-root bridge calls the saved-card reader on gated IO. This prevents boot-card discovery from pinning sources or loading chapters. Multi-item unparented starts prepend the remainder in the same transaction as current/context, using additive `SessionStart.queueHead` and `StartRequest.Episode.externalQueue` fields. Browse feed starts carry `StartMembership.CONTEXT` through to `SessionWriter`, which rechecks parent existence and episode eligibility inside the start transaction.
+
 **Implementation note (2026-10-19, M5).** M4 owns the existing standard `MediaButtonReceiver`; M5 adds false resumption and cold-key validation without duplicate registration.
 
 `ResumptionProvider.onPlaybackResumption(session, controller, isForPlayback)`, from the database only — never the network. Every call first awaits `DatabaseOpener.awaitOpen()` (which runs migrations) — never a raw query on an unmigrated file.
@@ -1224,6 +1226,8 @@ Serves R4.7, R5.2. Delivered in M4 (lock screen, System UI, Bluetooth metadata),
 ---
 
 ## Video
+
+**Implementation note (2026-10-19, M5).** The selected audio URL and its length travel together into the resolver pin and RSS cache fingerprint. The audio player creates no video or text renderers and session controllers cannot change track selection; no surface is attached. Decoder-event and audio-progress device tests cover muxed H.264/AAC fallback; audible listening and optimized-release screen-off evidence are recorded during W9.
 
 **Implementation note (2026-10-19, M5).** Use default audio rows first, then ordinal, trying rows until a usable HTTP(S) source; otherwise keep the original muxed enclosure. This supersedes 02’s single-row interpretation and also governs M6. Preserve `isVideo` and disabled VIDEO/TEXT tracks. W1 exposes the candidate; W8 selects it.
 

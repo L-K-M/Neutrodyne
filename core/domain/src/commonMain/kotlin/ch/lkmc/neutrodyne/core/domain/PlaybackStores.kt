@@ -56,6 +56,9 @@ interface PlaySessionStore {
 
 enum class ContextRetention { REPLACE, KEEP }
 
+/** External browse taps must still belong to their parent at the transaction boundary. */
+enum class StartMembership { ANY, CONTEXT }
+
 /** KEEP ignores context/anchor fields; REPLACE with null context means EXTERNAL, no tail. */
 data class SessionStart(
     val currentEpisodeId: Long,
@@ -65,6 +68,9 @@ data class SessionStart(
     val anchorSortDate: Long?,
     /** Interrupted current, captured after start gates; save/mark before promoting arrival. */
     val departure: Departure? = null,
+    /** Explicit multi-item external start: prepend these IDs atomically with current/context. */
+    val queueHead: List<Long> = emptyList(),
+    val membership: StartMembership = StartMembership.ANY,
 )
 
 /** Core-decided save/played flags; pinStartedAt is wall-clock start time, never a tick timestamp. */

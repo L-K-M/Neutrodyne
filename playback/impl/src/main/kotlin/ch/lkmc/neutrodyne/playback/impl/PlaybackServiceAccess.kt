@@ -37,6 +37,7 @@ public class PlaybackServiceAccess internal constructor(
     internal val hub: PlaybackStateHub,
     internal val gate: MeteredStreamingGate,
     internal val tree: MediaLibraryTree,
+    internal val savedResumption: SavedResumption,
     internal val network: NetworkMonitor,
     internal val clock: Clock,
     internal val local: LocalMediaIndex,

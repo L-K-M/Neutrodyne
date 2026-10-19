@@ -75,6 +75,10 @@ interface FeedDao {
      */
     @RawQuery
     suspend fun contextTail(query: RoomRawQuery): List<ContextItem>
+
+    /** Browse shares context eligibility but includes queued episodes and has no anchor. */
+    @RawQuery
+    suspend fun contextList(query: RoomRawQuery): List<ContextItem>
 }
 
 /** Empty groups have a row with zero counts, including groups whose members have no episodes. */
@@ -249,8 +253,38 @@ object FeedQueryBuilder {
         k: Int,
         youtubePlayable: Boolean,
         boundBySubscription: Boolean = false,
+    ): RoomRawQuery =
+        contextSelection(
+            spec,
+            anchorEpisodeId,
+            anchorSortDate,
+            k,
+            youtubePlayable,
+            boundBySubscription,
+            ContextSelection.TAIL,
+            null,
+        )
+
+    fun contextList(
+        spec: PlayContextSpec,
+        k: Int,
+        youtubePlayable: Boolean,
+        episodeId: Long? = null,
+    ): RoomRawQuery = contextSelection(spec, null, null, k, youtubePlayable, false, ContextSelection.BROWSE, episodeId)
+
+    private enum class ContextSelection { TAIL, BROWSE }
+
+    private fun contextSelection(
+        spec: PlayContextSpec,
+        anchorEpisodeId: Long?,
+        anchorSortDate: Long?,
+        k: Int,
+        youtubePlayable: Boolean,
+        boundBySubscription: Boolean,
+        selection: ContextSelection,
+        episodeId: Long?,
     ): RoomRawQuery {
-        require(k >= 0) { "contextTail k must be >= 0: $k" }
+        require(k >= 0) { "context selection k must be >= 0: $k" }
         require(spec.type != ContextType.EXTERNAL) { "EXTERNAL contexts have no tail (05)" }
         require((anchorEpisodeId == null) == (anchorSortDate == null)) {
             "the keyset anchor is a (sortDate, id) pair: $anchorSortDate / $anchorEpisodeId"
@@ -300,7 +334,13 @@ object FeedQueryBuilder {
         where += VISIBLE
         where += "e.availability = 'AVAILABLE'"
         where += "s.playedAt IS NULL"
-        where += "NOT EXISTS (SELECT 1 FROM queue_entry q WHERE q.episodeId = e.id)"
+        if (selection == ContextSelection.TAIL) {
+            where += "NOT EXISTS (SELECT 1 FROM queue_entry q WHERE q.episodeId = e.id)"
+        }
+        if (episodeId != null) {
+            where += "e.id = ?"
+            args += episodeId
+        }
         where += "(? = 1 OR p.sourceType = 'RSS')"
         args += if (youtubePlayable) 1L else 0L
         where += "e.sortDate >= ?"

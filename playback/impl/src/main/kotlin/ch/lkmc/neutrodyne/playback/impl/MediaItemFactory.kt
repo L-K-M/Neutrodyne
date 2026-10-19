@@ -7,6 +7,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.session.MediaConstants
 import ch.lkmc.neutrodyne.core.artwork.ArtworkStore
+import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.PlaybackMediaInfo
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
@@ -20,6 +21,8 @@ internal class MediaItemFactory(
     private val artwork: ArtworkStore,
     private val localMedia: LocalMediaIndex,
 ) {
+    fun artworkUri(key: String): android.net.Uri = artwork.contentUri(key, 0).toUri()
+
     fun build(
         row: PlaybackMediaInfo,
         positionMs: Long? = null,
@@ -36,6 +39,14 @@ internal class MediaItemFactory(
             }
         val duration = (row.measuredDurationMs ?: row.durationMs)?.takeIf { it > 0 }
         val extras = Bundle()
+        extras.putLong(
+            MediaConstants.EXTRAS_KEY_DOWNLOAD_STATUS,
+            when (row.downloadState) {
+                DownloadState.COMPLETED -> MediaConstants.EXTRAS_VALUE_STATUS_DOWNLOADED
+                DownloadState.DOWNLOADING -> MediaConstants.EXTRAS_VALUE_STATUS_DOWNLOADING
+                else -> MediaConstants.EXTRAS_VALUE_STATUS_NOT_DOWNLOADED
+            },
+        )
         val status =
             when {
                 row.playedAt != null -> MediaConstants.EXTRAS_VALUE_COMPLETION_STATUS_FULLY_PLAYED
@@ -51,7 +62,7 @@ internal class MediaItemFactory(
         }
         val key =
             if (row.sourceType == SourceType.RSS) {
-                row.enclosureUrl?.let { EnclosureFingerprint.cacheKey(row.episodeId, it, row.enclosureLength) }
+                row.audioSource()?.let { EnclosureFingerprint.cacheKey(row.episodeId, it.url, it.length) }
             } else {
                 row.externalMediaId?.let { "yt:$it" }
             }
