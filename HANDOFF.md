@@ -4,6 +4,77 @@ This file lets another person or agent take over the work at any point. **Last u
 
 ## 0. Implementation status
 
+### M11a settings and release guidance (2026-10-19)
+
+Job E on `impl/m11a-e`, based on `f38031e3`, implements W6/W7. The owner
+requested local commits only: no push, PR, CI, merge or review (0 rounds).
+Job D independently owns platform scheduling/notification/startup bindings.
+Shared shell edits here only add checker/notices accessors and presentation.
+No domain contract, dependency, Room schema/entity/index or permission changes.
+The UI-only `PlatformActions.developerOptions` callback is additive, defaults
+to null and keeps existing implementations/fakes compatible.
+
+| Acceptance | Local evidence | Remaining gate |
+|---|---|---|
+| AC3 settings/card/badge | VM and Compose tests cover manual-off/debug, every state, stale errors, minSdk/ABI gates, links/hash semantics, help navigation and write failure | Integrate W4/W5; optimized APK identity, API26/API37 scheduled work and both notification taps |
+| AC6 install guidance | Bundled English/German help, selected sections, Android Auto, verification pre/post copy, 32→64-bit preservation guidance, desktop ZIP/DMG and OS gates; Compose large-text/RTL semantics | Certified enforcing device, OEM labels, actual browser/installer flow, screen readers/keyboard on physical Windows/macOS; MD4/MD5 |
+| Release manifest | Real producer/validator fixtures in temporary roots: Android-only, 0.x/1.x full desktop, server digest, malformed/missing/extra targets and corrupt files | Two consecutive normal GitHub releases; M0b complete packaging/publication pipeline and same-kind upgrades on every OS |
+| Privacy | Disabled automatic checks distinguished from explicit Check now; GitHub/CDN hosts, no API/auth/cookies, separate engine controls | Shipped-client network capture, redirect-host smoke with signed queries redacted |
+| Notices | Durable Turn off/Undo and dismissal, permission after success, restored-key duplicate guard | Process recreation/device route evidence; PO-36 release-time wording confirmation |
+
+Native desktop OS notification delivery remains MD2; the existing banner port
+is not OS-delivery proof. Server admin notice delivery is assigned to MS1,
+with optional server-field validation retained here. PO-48 packaging licensing
+remains open. No claim is made that full M11a or M11b acceptance has passed.
+
+Local validation (JDK 21, Android SDK and graphics environment loaded; every
+Gradle invocation used `--no-daemon -Pkotlin.incremental=false
+-Pkotlin.compiler.execution.strategy=in-process`, with `--max-workers=2`):
+
+| Task | Passed | Skipped | Failures |
+|---|---|---|---|
+| `:feature:settings:desktopTest` | 62 | 0 | 0 |
+| `:core:ui:desktopTest` | 156 | 0 | 0 |
+| `:core:ui:testAndroidHostTest` | 136 | 0 | 0 |
+| `:core:navigation:desktopTest` | 25 | 0 | 0 |
+| `python3 scripts/ci/tests/update-json.test.py` | 8 | 0 | 0 |
+
+There are 379 passing Kotlin/UI cases plus 8 script cases. Unchanged task
+reports reused by Gradle are included. `spotlessApply` ran alone first;
+final `spotlessCheck` and `checkBannedApis` pass. The merged release manifest
+matches all **8** entries in `app/policy/permissions.txt`; no install API or
+permission was introduced. Both workflow files parse as YAML. Both doc
+checks pass: 0 problems across 14 files and 0 invalid of 78 Mermaid diagrams.
+
+Both shell compilation commands were attempted on the final sources:
+`:app:compileDebugKotlin` and `:desktopApp:compileKotlin` stop at Metro graph
+resolution. This base lacks visible bindings for `UpdateAssetSelector`,
+`UpdateCheckRunner`, `UpdateJitter`, `UpdateNotificationAdapter`,
+`UpdateSource`, `UpdateStore` and `VerificationTimeline`. Job D owns the
+runner/notifier and common binding-container integration. No production
+stub was added here. Consequently `:app:testDebugUnitTest` and
+`:app:compileDebugAndroidTestKotlin` are blocked. The two explicit intent
+host cases and one new device route/recreation case are authored but not
+executed. The device case joins the existing debug and ReleaseSmoke
+selections, including the nightly's explicit smoke class selection.
+
+Desktop restoration coverage uses an actual saveable-registry save,
+disposal and restoration with stable composition keys. Compose 1.12.1's
+`StateRestorationTester` desktop encode/decode hook throws NotImplementedError;
+this test does not substitute for the Android/native process recreation
+gate. One unchanged root snackbar assertion failed transiently in an earlier
+run; the subsequent complete 156-case root suite passed without changing
+that assertion. An incompatible-release checksum command regression was
+observed failing before fixing its tag/file pairing, then passed. Commands
+also cover 0.x macOS DEV→ZIP and Windows Arm→x64 filenames.
+
+The initial character estimates were exceeded: approximately 135k changed
+characters for W6 and 30k for W7, including bilingual bundled instructions,
+UI/VM/semantics tests and this evidence ledger. The requested scope was
+retained; no runtime dependency, packaging pipeline or extra product feature
+was added. This size overrun is an explicit deviation from the work-item
+estimates, not a claim that their limits were met.
+
 ### M5 local integration (2026-10-19)
 
 Branch `impl/m5-p1` integrates the M5 features on baseline `30eef445`.

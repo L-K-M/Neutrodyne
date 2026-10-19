@@ -10,6 +10,8 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -112,9 +114,10 @@ class SettingsScreensTest {
             openSettings()
             onAllNodesWithText("About").onFirst().performClick()
             onNodeWithText("Install & updates").performScrollTo().performClick()
+            onNodeWithText("Android Auto", substring = false).performScrollTo().performClick()
             onNodeWithText("Unknown sources", substring = true).assertExists()
             onNodeWithText("10 times", substring = true).assertExists()
-            onNodeWithText("Close").performClick()
+            onAllNodesWithContentDescription("Back").onLast().performClick()
             onNodeWithText("Unknown sources", substring = true).assertDoesNotExist()
         }
 
@@ -276,6 +279,14 @@ class SettingsScreensTest {
                                 licencesSource,
                                 settingsRepository,
                                 platformInfo,
+                                ch.lkmc.neutrodyne.core.testing
+                                    .FakeAppUpdateChecker(),
+                                ch.lkmc.neutrodyne.core.testing
+                                    .FakeUpdateNotices(),
+                                ch.lkmc.neutrodyne.core.testing.FakeUpdateRuntimeInputs(
+                                    ch.lkmc.neutrodyne.core.model.update.UpdateRuntimeTarget
+                                        .Android("arm64-v8a", 34),
+                                ),
                             ),
                     platform = BuildInfo.Platform.DESKTOP,
                 )

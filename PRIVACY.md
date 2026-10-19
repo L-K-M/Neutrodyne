@@ -34,7 +34,8 @@ The full network inventory is maintained in 09's
 `app-updates`). In short: subscribed feeds and their enclosures, artwork and
 chapter hosts, the search directories you enabled, `www.youtube.com` and its
 media hosts when you use YouTube channels, and `github.com` /
-`{owner}.github.io` for the update check and engine updates. A connection
+`release-assets.githubusercontent.com` for app releases, and `{owner}.github.io`
+for engine updates. A connection
 carries the app's version and a standard user agent; no identifier, cookie or
 token leaves the device for it.
 
@@ -85,11 +86,22 @@ is declared anywhere: the app never downloads or installs an update.
 
 The engine update check contacts `{owner}.github.io` (approved manifest),
 `github.com` and `release-assets.githubusercontent.com`; turn it off in
-Settings › YouTube › "Engine updates". The app update check makes one
-`releases/latest/download/neutrodyne-update.json` request per day to
-`github.com`; turn it off in Settings › Updates › "Check for updates". The apps
-download no update: your browser does, from GitHub. On the `armeabi-v7a` APK
-YouTube always opens in the YouTube app (external mode).
+Settings › YouTube › "Engine updates". These engine controls are separate
+from app updates.
+
+The app update check requests
+`github.com/L-K-M/Neutrodyne/releases/latest/download/neutrodyne-update.json`,
+following GitHub redirects to `release-assets.githubusercontent.com`. One
+logical check can include several redirect requests. It sends the app version
+and standard user agent, without authentication, cookies or a device identifier;
+it does not call `api.github.com`. Signed CDN URL queries are not logged.
+Automatic checks run daily (on desktop, only while the app runs). Turn them off
+in Settings › Updates › "Check for updates" to stop automatic app-update
+traffic. **Check now still contacts GitHub when automatic checks are off**,
+as an explicit one-off action. Debug builds make no app-update requests.
+The apps download only the small manifest, never an app package: your browser
+downloads the update from GitHub after you open a link. On the `armeabi-v7a`
+APK YouTube always opens in the YouTube app (external mode).
 
 ## Contact and change history
 

@@ -11,6 +11,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
+import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -529,6 +531,60 @@ class NeutrodyneRootTest {
             onNodeWithText("Turn off").assertExists()
         }
 
+    @Test fun firstRunDisclosureStaysOnFeedsAndLibraryAndBadgeIsLabelled() =
+        runComposeUiTest {
+            setContent {
+                TestRoot(
+                    state = RootUiState.READY.copy(notice = RootNotice.FIRST_RUN_CHOICE, settingsBadge = true),
+                )
+            }
+            onNodeWithText("Turn off").assertExists()
+            onAllNodesWithContentDescription("Settings, update available").onFirst().assertExists()
+            onNodeWithTag("nav_discover").performClick()
+            onNodeWithText("Turn off").assertDoesNotExist()
+            onNodeWithTag("nav_library").performClick()
+            onNodeWithText("Turn off").assertExists()
+        }
+
+    @Test fun pendingVerificationDoesNotDuplicateAnExistingKey() =
+        runComposeUiTest {
+            var state by mutableStateOf(RootUiState.READY.copy(notice = RootNotice.VERIFICATION_ENFORCEMENT))
+            var observed: ch.lkmc.neutrodyne.core.ui.navigation.NavigationState? = null
+            val slots =
+                RootSlots(player = {
+                    observed = LocalAppNavigator.current as ch.lkmc.neutrodyne.core.ui.navigation.NavigationState
+                }, userMessages = emptyFlow())
+            var visible by mutableStateOf(true)
+            var saved: Map<String, List<Any?>>? = null
+            var registry: SaveableStateRegistry? = null
+            setContent {
+                if (visible) {
+                    val entryRegistry = androidx.compose.runtime.remember { SaveableStateRegistry(saved) { true } }
+                    registry = entryRegistry
+                    CompositionLocalProvider(LocalSaveableStateRegistry provides entryRegistry) {
+                        TestRoot(state = state, slots = slots)
+                    }
+                }
+            }
+            onNodeWithText("verification-notice").assertExists()
+            runOnIdle {
+                saved = registry!!.performSave()
+                visible = false
+                state = state.copy(notice = null)
+            }
+            runOnIdle { visible = true }
+            onNodeWithText("verification-notice").assertExists()
+            runOnIdle { state = state.copy(notice = RootNotice.VERIFICATION_ENFORCEMENT) }
+            runOnIdle {
+                val navigation = checkNotNull(observed)
+                val notices =
+                    navigation.tabs.sumOf { tab ->
+                        navigation.stack(tab).count { it == ch.lkmc.neutrodyne.core.navigation.VerificationNoticeKey }
+                    }
+                kotlin.test.assertEquals(1, notices)
+            }
+        }
+
     private fun ComposeUiTest.setRootContent() {
         setContent { TestRoot() }
     }
@@ -619,6 +675,11 @@ private val TestInstallers: Set<EntryProviderInstaller> =
             }
         }
         add { entry<ImportKey>(metadata = NdSceneMetadata.paneDetail()) { Text("import-${it.sessionId}") } }
+        add {
+            entry<ch.lkmc.neutrodyne.core.navigation.VerificationNoticeKey>(metadata = NdSceneMetadata.paneDetail()) {
+                Text("verification-notice")
+            }
+        }
         add { entry<SettingsHomeKey>(metadata = NdSceneMetadata.paneList()) { Text("settings-home") } }
         add {
             entry<PodcastKey>(metadata = NdSceneMetadata.paneDetail()) { key ->

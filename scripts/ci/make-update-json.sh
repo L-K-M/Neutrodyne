@@ -10,7 +10,8 @@
 # <assets-dir>/neutrodyne-update.json.
 #
 # `desktop[]` (M0b) and `server` (MS1) are additive schema-1 fields (D78): each
-# is emitted only when its asset file exists in <assets-dir> — M0a therefore
+# is emitted when its assets exist; desktop requires the complete canonical
+# set. M0a therefore
 # writes apks[] only. A server JAR additionally needs the attested image digest
 # in NEUTRODYNE_SERVER_IMAGE (decided by release.yml's server-image jobs).
 
@@ -36,10 +37,12 @@ MIN_SDK=26 # 01 Toolchain and versions: the manifest repeats it (09 Update manif
 CHANGELOG="$REPO_ROOT/changelogs/$VERSION_CODE.txt"
 [ -f "$CHANGELOG" ] || { echo "make-update-json: $CHANGELOG missing" >&2; exit 1; }
 
-python3 - "$OUT" "$ASSETS" "$TAG" "$VERSION_NAME" "$VERSION_CODE" "$MIN_SDK" "$REPO_URL" "$CHANGELOG" <<'PYEOF'
+python3 - "$OUT" "$ASSETS" "$TAG" "$VERSION_NAME" "$VERSION_CODE" "$MIN_SDK" "$REPO_URL" "$CHANGELOG" "$REPO_ROOT" <<'PYEOF'
 import datetime, hashlib, json, os, sys
 
-out, assets, tag, vname, vcode, min_sdk, repo_url, changelog = sys.argv[1:9]
+out, assets, tag, vname, vcode, min_sdk, repo_url, changelog, repo_root = sys.argv[1:10]
+sys.path.insert(0, os.path.join(repo_root, "scripts", "ci"))
+from update_manifest_assets import desktop_assets
 version = tag[1:]
 notes = open(changelog, encoding="utf-8").read().strip()
 if not notes or len(notes) > 500:
@@ -82,20 +85,14 @@ manifest = {
 # Additive fields: desktop[] (M0b) and server (MS1) join when their release
 # jobs produce the assets; absent fields stay absent (09 Update manifest).
 desktop = []
-mac_1_0 = int(vname.split(".")[0]) >= 1
-mac_kind = "dmg" if mac_1_0 else "mac-zip"              # D63/PO-39
-mac_ext = "dmg" if mac_1_0 else "zip"
-candidates = [
-    ("windows", "x64",   "msi",    f"neutrodyne-{version}-windows-x64.msi",      "10.0"),
-    ("windows", "x64",   "zip",    f"neutrodyne-{version}-windows-x64.zip",      "10.0"),
-    ("macos",   "arm64", mac_kind, f"neutrodyne-{version}-macos-arm64.{mac_ext}", "13.0"),
-]
-for arch in ("x64", "arm64"):
-    for kind in ("deb", "rpm", "tar.gz"):
-        candidates.append(("linux", arch, kind, f"neutrodyne-{version}-linux-{arch}.{kind}", None))
-for os_, arch, kind, fname, min_os in candidates:
-    if not os.path.isfile(os.path.join(assets, fname)):
+candidates = desktop_assets(repo_root, version)
+present = set(os.listdir(assets)) & set(candidates.values())
+if present and present != set(candidates.values()):
+    sys.exit("make-update-json: incomplete desktop asset set")
+for (os_, arch, kind), fname in candidates.items():
+    if fname not in present:
         continue
+    min_os = {"windows": "10.0", "macos": "13.0"}.get(os_)
     e = asset(fname)
     e.update(os=os_, arch=arch, kind=kind)
     if min_os:
@@ -110,6 +107,10 @@ if os.path.isfile(os.path.join(assets, jar_name)):
     image = os.environ.get("NEUTRODYNE_SERVER_IMAGE", "")
     if not image:
         sys.exit("make-update-json: server JAR present but NEUTRODYNE_SERVER_IMAGE unset")
+    import re
+    owner = repo_url.rstrip("/").split("/")[-2].lower()
+    if not re.fullmatch(rf"ghcr\.io/{re.escape(owner)}/neutrodyne-server@sha256:[0-9a-f]{{64}}", image):
+        sys.exit("make-update-json: server image must be this repository owner's digest reference")
     manifest["server"] = {"jar": asset(jar_name), "image": image, "minJava": 21}
 with open(out, "w", encoding="utf-8") as f:
     json.dump(manifest, f, indent=2, ensure_ascii=False)

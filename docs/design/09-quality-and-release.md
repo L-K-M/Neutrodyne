@@ -1110,6 +1110,8 @@ Serves R6.1, R6.5, R6.7, N8, N12; mitigates risks P3, P7, P10, P12, P13, P15, L5
 
 ### Release assets
 
+**Implementation note (2026-10-19, M11a).** W7 derives desktop manifest targets from `release-assets.json` in both scripts. Android-only releases remain valid; the first desktop asset activates the complete canonical set. Missing, unknown, duplicate or mismatched desktop targets fail publication validation. Synthetic fixture roots run the actual producer and validator for 0.x ZIP, 1.x DMG, Android-only and server stages without changing checkout versions. CI and nightly run `scripts/ci/tests/update-json.test.py`. This does not supply M0b packaging/publication evidence or resolve PO-48; a ZIP-only Windows packaging decision must first change the canonical inventory. Registry digest owners are lowercase, matching the app parser; raw URL checks retain empty segments and accept explicit port 443.
+
 Per tag `vX.Y.Z` ([D79](../PLAN.md#3-key-decisions)); always a normal release, never a pre-release; "latest" when its `versionCode` is higher than the current latest release's ([release.yml](#releaseyml) step 1). Each milestone's release carries every product built so far (PLAN 7.2):
 
 | Asset | Content | From |
@@ -1558,6 +1560,8 @@ Consequences the guidance must state: with "7 days", or after switching the sett
 - **Testing:** CI never sees enforcement — Gradle Managed Devices and emulators install over ADB, which is exempt — and the app has no install path of its own to test. The help text and the notice are checked by hand on an enforcing certified device once the global rollout starts (2027): a fresh install and an update downloaded from the update card, with the advanced flow off, on an expired "7 days" and on "indefinitely". `UpdateNoticesTest` covers the notice dates.
 
 ### README "Install and update"
+
+**Implementation note (2026-10-19, M11a).** README and bundled help use the rechecked official timeline/FAQ: the initial participating-store regional rollout is distinct from global expansion during 2027; no exact global date or installer wording is asserted. Keep the advanced flow, indefinite choice, ADB exemption and per-source install grant. Desktop help covers 0.x ZIP and 1.0 DMG, repeated OS prompts and Windows ZIP fallback, with MSI conditional on PO-48. Actual certified-device/OS wording remains a release gate. W6/W7 local acceptance and remaining M0b/MD2/MS1/device gaps are recorded in [HANDOFF](../../HANDOFF.md).
 
 The README section's content is owned here (the README is maintained with the PLAN); 08's help page mirrors it and the [release checklist](#minor-and-stable-release-additions) compares both. Draft (M0a, finalised in M11a; `{…}` filled in):
 

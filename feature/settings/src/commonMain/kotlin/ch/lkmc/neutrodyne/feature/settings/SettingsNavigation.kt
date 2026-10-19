@@ -2,16 +2,23 @@
 
 package ch.lkmc.neutrodyne.feature.settings
 
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.PlatformInfo
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.domain.update.AppUpdateChecker
+import ch.lkmc.neutrodyne.core.domain.update.UpdateNotices
+import ch.lkmc.neutrodyne.core.domain.update.UpdateRuntimeInputs
 import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
+import ch.lkmc.neutrodyne.core.navigation.InstallHelpKey
 import ch.lkmc.neutrodyne.core.navigation.LicencesKey
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
+import ch.lkmc.neutrodyne.core.navigation.VerificationNoticeKey
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesTo
 import dev.zacsweers.metro.IntoSet
@@ -37,6 +44,9 @@ public object SettingsNavigation {
         licencesSource: LicencesSource?,
         settingsRepository: SettingsRepository,
         platformInfo: PlatformInfo,
+        checker: AppUpdateChecker,
+        notices: UpdateNotices,
+        runtime: UpdateRuntimeInputs,
     ): EntryProviderInstaller =
         {
             // 08: the wallpaper-colour row exists only where Android 12+ can serve it.
@@ -60,7 +70,7 @@ public object SettingsNavigation {
                         },
                     ),
             ) {
-                SettingsHomeRoute(settingsRepository)
+                SettingsHomeRoute(settingsRepository, checker)
             }
             entry<SettingsKey>(metadata = NdSceneMetadata.paneDetail()) { key ->
                 SettingsRoute(
@@ -69,7 +79,22 @@ public object SettingsNavigation {
                     settingsRepository,
                     dynamicColorSupport,
                     platformInfo.kind,
+                    runtime.target,
                 )
+            }
+            entry<InstallHelpKey>(metadata = NdSceneMetadata.paneDetail()) { key ->
+                val phase by notices.verificationPhase.collectAsStateWithLifecycle()
+                val update by checker.state.collectAsStateWithLifecycle()
+                InstallHelpPage(
+                    buildInfo,
+                    runtime.target,
+                    key.section,
+                    phase,
+                    (update as? ch.lkmc.neutrodyne.core.model.update.UpdateCheckState.Available)?.info,
+                )
+            }
+            entry<VerificationNoticeKey>(metadata = NdSceneMetadata.dialog()) {
+                VerificationNoticeDialog(notices)
             }
             entry<LicencesKey>(metadata = NdSceneMetadata.paneDetail()) {
                 LicencesRoute(licencesSource, buildInfo)
