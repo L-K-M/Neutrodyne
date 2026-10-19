@@ -1416,6 +1416,9 @@ D76's build-time signature/hash gate and the shared Python shim are integrated
 locally. The official 2026.08.19 pin is unchanged. Portable implementation and
 deterministic testing may precede the reference-device spike; host selection
 and production activation still require owner approval, **spike pending**.
+W6's portable lifecycle and synchronous extraction reservations now use the
+frozen host/settings/cache ports; Android adapters, consumer wiring and device
+proof remain pending. M8 feed health stays independent.
 Both shells remain external with `NOT_YET_AVAILABLE`. Status/preparation hooks
 and worker creators stay unbound; ordinary startup never compiles or imports
 Python. No runtime updater, JS provider or engine-backed playback is activated.
@@ -1423,9 +1426,10 @@ Host CPython 3.11.2 is a disclosed test fallback, not CPython 3.14 acceptance;
 replay fixtures are synthetic and successful residential captures remain open.
 W5 now supplies portable client admission, strict DTO/audio/error mapping, the
 pure selector and memory-only resolver single flight/cache. Its network-identity
-adapter is unbound. W4 host enforcement, W6 health, consumer integration and
-reference-device evidence remain separate gates; these local tests do not
-accept the milestone.
+adapter is unbound. Portable W5/W6 health/cache boundaries are tested together
+against real shared implementations. W4 host enforcement, W9 facts/ingest, W11
+bindings and reference-device evidence remain separate gates; these local
+tests do not accept the milestone.
 See [04 Host and packaging](design/04-youtube.md#host-and-packaging) and
 [09 Recorded responses](design/09-quality-and-release.md#recorded-responses).
 

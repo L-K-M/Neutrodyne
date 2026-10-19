@@ -1661,7 +1661,43 @@ one per admitted operation, completed once including cancellation, visible
 before persistence. Resolver, enrichment and search own extraction reports; composite enrichment
 shares one reservation. Playback/download loaders alone report media 429/fresh-URL 403. Cache
 hits/claims reserve nothing; breaker opening invalidates URLs before gates.
-The current integration leaves feed-health behavior unchanged.
+W6 implements this portable state and lifecycle against the frozen ports;
+M8 feed-health behavior stays independent. The health constructor receives the
+app version and a synchronous cache `invalidateAll` callback. Admission is
+blocked during that callback. Snapshot revisions discard stale queued writes;
+the app-version key commits each multi-key snapshot last, with zero marking
+an interrupted write. Reservations and failure history stay in memory.
+Lifecycle waits for health loading before reporting the bundled version.
+Portable W5/W6 integration exercises the real client, mapper, resolver cache,
+lifecycle and persistent health together in `core:data` desktop tests. Opening
+first blocks admission, synchronously calls resolver `invalidateAll` to fence
+cached and in-flight representations, then releases the invalidation fence.
+Health loading consumes the operation deadline; recheck it before reserving.
+W4 still supplies the settings/preflight/host adapters, and W11 supplies the
+singleton aliases, application bindings and notices. Ordinary shells remain
+external `NOT_YET_AVAILABLE`. Host selection and the device spike remain
+**PENDING**; this is no production activation or M9a acceptance.
+
+Before production, W4/W11 must establish a lossless observation boundary for
+every actual start attempt: the lifecycle observer must receive its start
+(`STARTING`/`COMPILING`) and its outcome (`READY`, failed start as
+`STOPPED` with `lastExit = START_FAILED`, or `UNUSABLE`) before another attempt
+can overwrite them. Each attempt has exactly one start outcome. The frozen conflating `HostStatus` StateFlow has no outcome
+sequence; snapshots cannot reconstruct arbitrarily lost transitions. W4/W11
+must prove ordered delivery/acknowledgement or agree an outcome contract before
+activation; this portable integration adds neither a port nor policy counters.
+Shutdown must fence callbacks from the old host, expose a restartable state
+before retry prewarm, or queue that prewarm through teardown. Direct call starts
+must await real settings and platform preflight, as well as prepared artifacts.
+W4 must persist start failures with full app/engine/Python identity while
+atomically preserving enabled state; extraction snapshot markers are separate.
+W11 must alias both health interfaces to one singleton, provide the positive app
+version and a synchronous nonblocking resolver invalidation callback, and own
+context and default-network callback registration/removal for that resolver's
+lifetime. The callback clears all URL representations and fences stale puts
+before later admission; network changes also clear the IP-family hint. These
+are outstanding real-host/graph contracts, not proven by scripted transport
+transitions. W9 facts/ingest remains a separately integrated owner slice.
 
 
 ```mermaid
@@ -1680,7 +1716,7 @@ stateDiagram-v2
 | Counted | `ExtractionOutcome.ParseFailure` from resolve, enrichment, search, back catalogue and `YtDlpChannelLookup` (including the "content not available" cluster rule of [Exception classification](#exception-classification)); at most one per `videoId` per 10 min (Media3 retries must not trip it alone). `ForbiddenFreshUrl` outcomes count like parse failures once 3 distinct videos produced one within 1 h (a new PO-token requirement looks like this; one or two are treated as per-video glitches; a 403 before `availableAtMs` never counts). Never counted: `Unavailable`, `Inconclusive` (network, timeout, rate limit, cancellation, `ENGINE_UNAVAILABLE`) |
 | Open duration | 6 h; 12 h when the previous opening was less than 24 h earlier (PLAN glossary "Circuit breaker": 6–12 h) |
 | While open | `extractionGate` returns `Deny(breakerOpenUntil, BREAKER_OPEN)` to resolve, enrichment, search, back catalogue and `YtDlpChannelLookup` (which then returns `null`, so the HTML fallback keeps subscribing working); `ResolvedUrlCache.invalidateAll()` on opening |
-| Half-open | Entered lazily: the first `extractionGate` call with `now ≥ breakerOpenUntil`, or `retryNow()`. Exactly one caller gets `AllowTrial` (any purpose); every other call gets `Deny(now + 60 s, BREAKER_OPEN)` until the trial reports. `Success` → CLOSED (failure history cleared); `ParseFailure`/counted `ForbiddenFreshUrl` → OPEN again (12 h rule); `Inconclusive` → the trial slot is released and the next call becomes the trial |
+| Half-open | Entered lazily: the first `extractionGate` call with `now ≥ breakerOpenUntil`, or `retryNow()`. Gate views return `AllowTrial` without reserving. Exactly one admitted operation reserves the trial (any purpose); other reservations get `Deny(now + 60 s, BREAKER_OPEN)` until it completes. `Success` → CLOSED (failure history cleared); `ParseFailure`/counted `ForbiddenFreshUrl` → OPEN again (12 h rule); `Inconclusive` → the trial slot is released and the next call becomes the trial |
 | Opening | From M9b also asks for a fix: `YtDlpEngine` observes `YouTubeHealth.state` and, on each transition to `OPEN`, calls `EngineUpdateScheduler.requestNow(BREAKER)` (Android `engine-update-now`; desktop a poke of the `engine-update` lane, from MD3) when the policy is not `OFF` and the last check is more than 3 h old ([Update flow](#update-flow)) |
 | Persisted (`device_settings`) | `youtube.breaker_open_until`, `youtube.breaker_last_opened_at`, `youtube.breaker_version_code`, `youtube.breaker_engine_version`; failure timestamps are memory-only |
 | Reset | A different `versionCode` at start, or a different active engine version (reported by `YtDlpEngine` through `reportEngineVersion` at load and after every activation, rollback or reset), closes the breaker: the fix is an engine update or, failing that, an app update |
