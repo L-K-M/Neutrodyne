@@ -832,6 +832,12 @@ before the next foreground event.
 
 Because the delay only considers rows whose needs the request already guarantees, a wake always finds at least one runnable row or rows whose `nextAttemptAt` moved (gates, storage re-check), so wakes never spin. Rows with stricter needs than the request (e.g. Wi-Fi-only rows when another row allows mobile data) are picked up by any later runner, by the in-process `NetworkMonitor` trigger, or by the next wake; the worst case while the process is dead is the covered rows' backoff (≤ 6 h).
 
+**Implementation note (2026-10-19, M6b).** The aggregate wake constraints
+can cover no row when network and charging needs are disjoint (one row needs
+Wi-Fi without charging, another allows mobile but needs charging). Android then
+uses the earliest row's complete constraints and retry time, including the
+pre-28 portal delay. This preserves the guarantee that a wake covers a row.
+
 ### Work requests
 
 | Unique name | Request | Constraints | Policy | Enqueued by |
@@ -1599,6 +1605,16 @@ Then, in `DownloadReconcileWorker` on Android (`download-reconcile`, every proce
 6. `YouTubeEngineRules.sync(capabilities.value)` (M9a): with `ExternalReason.NOT_IN_THIS_APK` only, non-completed YouTube rows → `FAILED(UNSUPPORTED_STREAM)` and their `.part` files deleted; the other reasons never fail rows, they only wait as `YOUTUBE_ENGINE_OFF` ([Engine absent or disabled](#engine-absent-or-disabled)).
 7. Reloads `LocalMediaIndex` if anything changed.
 8. `ensureScheduled(MANUAL)` and `ensureScheduled(AUTO)`, then a planner pass. On Android the reconcile worker runs in the background, so on API 34+ `MANUAL` usually gets `download-lane-MANUAL` here; when the user opens the app, the `ON_START` hook upgrades the lane to a UIDT job. This also re-arms work lost to a force stop. On the desktop the lanes simply continue with their drain.
+
+**Implementation note (2026-10-19, M6b).** Android's startup worker verifies
+files, schedules both lanes, runs the enabled-podcast planner pass (including
+its full-library watermark pass), then runs `CleanupPlanner.run(STARTUP)`.
+Its daily worker verifies files, runs cleanup, plans, schedules both lanes and
+records `cleanup_last_at` only after success. Both resume a persisted move target.
+The Android charging monitor supplies both scheduler and engine conditions; the
+desktop retains its unconditional charging policy. `DownloadHost.beforeRunnerReset`
+is the W6 seam under the shared claim mutex, before generic orphan reset, and
+receives the live token snapshot. W5 supplies no Task Manager inference.
 
 `CleanupWorker` (Android) and the `downloads-auto` lane's daily pass (desktop) repeat steps 3–5 daily. A full pass over 1,000 completed files is about 1,000 `stat` calls (well under a second on IO).
 

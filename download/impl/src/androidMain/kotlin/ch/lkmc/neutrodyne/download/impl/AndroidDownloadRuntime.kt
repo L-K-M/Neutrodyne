@@ -12,6 +12,8 @@ internal class AndroidDownloadRuntime(
     val stop: (RunnerToken, StopIntent) -> Unit,
     val wake: (DownloadLane) -> Unit,
     val controller: () -> DownloadController,
+    val startup: suspend () -> Unit = reconcile,
+    val daily: suspend () -> Unit = reconcile,
 )
 
 /** The app resolves shared UI wording without adding a download:impl dependency on core:ui. */

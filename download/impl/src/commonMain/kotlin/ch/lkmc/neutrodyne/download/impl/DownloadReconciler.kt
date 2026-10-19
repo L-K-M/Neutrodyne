@@ -22,6 +22,7 @@ internal class DownloadReconciler(
     private val claimMutex: Mutex,
     private val liveTokens: () -> Set<String>,
     private val clock: Clock,
+    private val beforeRunnerReset: suspend (Set<String>) -> Unit = {},
 ) {
     private val dao = db.downloadDao()
     private var reset = false
@@ -39,7 +40,10 @@ internal class DownloadReconciler(
             if (reset) return@withLock
             // Claims share this mutex. A newly registered token cannot claim until this reset ends;
             // owners unregister only after their final commits, so the snapshot cannot reset a live row.
-            dao.resetOrphanedRunners(liveTokens(), DownloadStopReasons.PROCESS_DEATH)
+            val live = liveTokens()
+            // Android W6 applies its MANUAL rule here before the generic reset, under claimMutex.
+            beforeRunnerReset(live)
+            dao.resetOrphanedRunners(live, DownloadStopReasons.PROCESS_DEATH)
             reset = true
         }
 

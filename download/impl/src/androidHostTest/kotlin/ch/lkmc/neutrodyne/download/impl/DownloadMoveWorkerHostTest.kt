@@ -29,7 +29,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [30, 34])
+@Config(sdk = [30, 33, 34, 36])
 class DownloadMoveWorkerHostTest {
     private val context = RuntimeEnvironment.getApplication()
     private val store = MoveHostStore()
@@ -47,6 +47,7 @@ class DownloadMoveWorkerHostTest {
             val request = DownloadMoveWorker.request("new")
             assertEquals("download-move", DownloadMoveWorker.NAME)
             assertEquals("new", request.workSpec.input.getString(DownloadMoveWorker.KEY_TARGET))
+            assertTrue(request.workSpec.constraints.requiresStorageNotLow())
             assertFalse(request.workSpec.expedited)
             assertEquals(0L, request.workSpec.initialDelay)
         }
