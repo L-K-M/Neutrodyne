@@ -67,6 +67,11 @@ android {
     sourceSets["test"].kotlin.srcDir("src/deviceSelectionTest/kotlin")
 }
 
+tasks.withType<Test>().configureEach {
+    // The selection test invokes this negative control through the pinned runner itself.
+    exclude("ch/lkmc/neutrodyne/DeviceTestSelectionTest\$FailureFixture.class")
+}
+
 dependencies {
     for (feature in listOf(
         "feeds",
