@@ -15,11 +15,14 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.moveBy
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
@@ -32,9 +35,13 @@ import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
+import ch.lkmc.neutrodyne.core.model.UpNextItem
 import ch.lkmc.neutrodyne.core.navigation.PaneLayout
 import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
+import ch.lkmc.neutrodyne.core.ui.RowCaps
+import ch.lkmc.neutrodyne.core.ui.UpNextList
 import ch.lkmc.neutrodyne.core.ui.root.PlayerSlotState
 import ch.lkmc.neutrodyne.playback.api.NowPlaying
 import ch.lkmc.neutrodyne.playback.api.PlayResult
@@ -60,6 +67,43 @@ class PlayerSheetTest {
     @AfterTest fun restoreLocale() {
         Locale.setDefault(previousLocale)
     }
+
+    @Test fun fullPlayerQueueSlotShowsAndEditsTheSharedList() =
+        runComposeUiTest {
+            val fixture = SheetFixture(PlayerSheetValue.Expanded)
+            var queued by mutableStateOf(
+                (2L..3L).map {
+                    UpNextItem(it, testEpisodeRow(it))
+                },
+            )
+            val moves = mutableListOf<Pair<Long, Int>>()
+            setContent {
+                fixture.Content(upNext = {
+                    UpNextList(
+                        current = null,
+                        upNext = queued,
+                        context = null,
+                        live = emptyMap(),
+                        caps = RowCaps.FULL.copy(downloads = false),
+                        onAction = {},
+                        onMove = { id, target ->
+                            moves += id to target
+                            queued =
+                                queued.toMutableList().apply { add(target, removeAt(indexOfFirst { it.row.id == id })) }
+                        },
+                        onRemove = { id -> queued = queued.filterNot { it.row.id == id } },
+                        onStopAfter = {},
+                    )
+                })
+            }
+            onNodeWithTag("fullPlayer").assertIsDisplayed()
+            onNodeWithTag("upNextList").performScrollToNode(hasText("Episode 3"))
+            onNodeWithText("Episode 3").performCustomAccessibilityActionWithLabel("Move to top")
+            runOnIdle { assertEquals(listOf(3L to 0), moves) }
+            onNodeWithText("Episode 3").performCustomAccessibilityActionWithLabel("Remove from Up next")
+            runOnIdle { assertEquals(listOf(2L), queued.map { it.row.id }) }
+            onNodeWithText("Episode 3").assertDoesNotExist()
+        }
 
     @Test fun hidingMiniSkipKeepsFullPlayerSkip() =
         runComposeUiTest {
@@ -319,7 +363,10 @@ private class SheetFixture(
     var expanded = false
 
     @androidx.compose.runtime.Composable
-    fun Content(sheetState: PlayerSheetState = state) {
+    fun Content(
+        sheetState: PlayerSheetState = state,
+        upNext: @androidx.compose.runtime.Composable () -> Unit = {},
+    ) {
         NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT.copy(reducedMotion = true)) {
             PlayerSheet(
                 ui = PlayerUiState(now = now, consent = pending, miniSkip = miniSkip),
@@ -334,6 +381,7 @@ private class SheetFixture(
                         onExpandedSettled = { expanded = it },
                     ),
                 state = sheetState,
+                upNext = upNext,
                 positionAt = { it.positionAt(1_000) },
                 toggle = { calls += "toggle" },
                 back = { calls += "back" },

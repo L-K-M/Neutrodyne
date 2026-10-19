@@ -55,6 +55,7 @@ import ch.lkmc.neutrodyne.desktop.resources.tray_tooltip
 import ch.lkmc.neutrodyne.desktop.resources.window_title
 import ch.lkmc.neutrodyne.feature.importexport.importResumeBanner
 import ch.lkmc.neutrodyne.feature.player.PlayerRoute
+import ch.lkmc.neutrodyne.feature.queue.PlayerUpNextRoute
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import dev.zacsweers.metrox.viewmodel.MetroViewModelFactory
 import kotlinx.coroutines.CoroutineScope
@@ -315,7 +316,7 @@ internal fun NeutrodyneWindowContent(
                     menuActions.attachPush(it.navigate)
                     menuActions.attachNavigator(LocalAppNavigator.current)
                     openHandler?.let { DesktopInputFeedback(it) }
-                    PlayerRoute(it)
+                    PlayerRoute(it, upNext = { PlayerUpNextRoute(it.navigate) })
                 },
                 userMessages = banners?.userMessages ?: emptyFlow(),
                 importResume = { available, open -> importResumeBanner(available, open) },

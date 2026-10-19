@@ -22,6 +22,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -136,6 +137,11 @@ class NeutrodyneRootTest {
             runOnIdle { requireNotNull(slot).navigate(PodcastKey(3)) }
             onNodeWithText("podcast-3").assertIsDisplayed()
             runOnIdle { kotlin.test.assertEquals(1, slot?.collapseRequest) }
+            runOnIdle { requireNotNull(slot).navigate(DiscoverKey) }
+            onAllNodesWithText("discover-content").onFirst().assertIsDisplayed()
+            runOnIdle { kotlin.test.assertTrue(requireNotNull(slot).collapseRequest > 1) }
+            onNodeWithTag("nav_feeds").performClick()
+            onNodeWithText("podcast-3").assertIsDisplayed()
         }
 
     @Test
