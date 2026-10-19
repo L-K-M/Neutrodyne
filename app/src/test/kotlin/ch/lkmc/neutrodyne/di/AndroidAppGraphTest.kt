@@ -229,6 +229,22 @@ class AndroidAppGraphTest {
     }
 
     @Test
+    fun artworkWorkerRemainsAvailableAlongsideTheUpdateWorker() {
+        val app: Application = RuntimeEnvironment.getApplication()
+        try {
+            val worker =
+                androidx.work.testing
+                    .TestListenableWorkerBuilder<ch.lkmc.neutrodyne.core.artwork.ArtworkSyncWorker>(app)
+                    .setWorkerFactory(graph.workerFactory)
+                    .build()
+            assertThat(worker).isNotNull()
+            assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
+        } finally {
+            graph.appScope.cancel()
+        }
+    }
+
+    @Test
     fun updateWorkerFactoryAndStartupStayLazyBeforeDatabaseOpen() {
         val app: Application = RuntimeEnvironment.getApplication()
         val worker =

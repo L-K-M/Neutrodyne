@@ -29,9 +29,10 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** Metro must see this container across modules to include the artwork worker in the app graph. */
 @BindingContainer
 @ContributesTo(AppScope::class)
-internal object AndroidArtworkBindings {
+public object AndroidArtworkBindings {
     @Provides
     fun context(application: Application): PlatformContext = application
 
