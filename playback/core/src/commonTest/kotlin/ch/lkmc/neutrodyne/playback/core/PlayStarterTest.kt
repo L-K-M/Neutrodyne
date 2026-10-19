@@ -337,6 +337,20 @@ class PlayStarterTest {
             assertEquals(500L, committed(StartRequest.Episode(8, 500)).startPositionMs)
         }
 
+    @Test fun smartResumeSettingReachesColdStartsAndExplicitPositionsWin() =
+        runTest {
+            positions.positions.value = mapOf(8L to StoredPosition(8, 70_000, clock.now() - 300_001, null))
+            val enabled = starter().start(StartRequest.Episode(8), smartResume = true)
+            assertEquals(65_000, assertIs<StartOutcome.Committed>(enabled).startPositionMs)
+            val disabled = starter().start(StartRequest.Episode(8), smartResume = false)
+            assertEquals(70_000, assertIs<StartOutcome.Committed>(disabled).startPositionMs)
+            val explicit = starter().start(StartRequest.Episode(8, 754_000), smartResume = true)
+            assertEquals(754_000, assertIs<StartOutcome.Committed>(explicit).startPositionMs)
+            sessions.queue = queue(current = 8)
+            val resumed = starter().start(StartRequest.Resume, smartResume = true)
+            assertEquals(65_000, assertIs<StartOutcome.Committed>(resumed).startPositionMs)
+        }
+
     @Test fun failuresMapToServiceUnavailableAndCancellationPropagates() =
         runTest {
             lookup.failure = IllegalStateException("read failure")

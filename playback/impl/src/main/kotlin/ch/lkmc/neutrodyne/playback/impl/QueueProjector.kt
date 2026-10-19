@@ -66,6 +66,9 @@ internal class QueueProjector(
     private val playerScope: CoroutineScope,
     private val io: CoroutineDispatcher,
     private val reportFailure: (Exception) -> Unit = { android.util.Log.w(TAG, "Queue projection failed") },
+    private val smartResume: () -> Boolean = { false },
+    private val pauseAtBoundary: () -> Boolean = { false },
+    private val boundaryCompleted: (Long) -> Unit = {},
 ) : Player.Listener {
     private var player: Player? = null
     private var observing: Job? = null
@@ -76,6 +79,7 @@ internal class QueueProjector(
     private var revision = 0L
     private var skipExit: PlaybackExit? = null
     private var ending = false
+    private var completedBoundary: Pair<Long, Long>? = null
     private var external: ExternalApply? = null
     private var externalTimeout: Job? = null
     private var latest: Input? = null
@@ -289,7 +293,10 @@ internal class QueueProjector(
             val beforeIds = live.mediaIds()
             val beforeIndex = live.currentMediaItemIndex.coerceAtLeast(0)
             val window = playerWindow(live)
-            val plan = planner.plan(snapshot, media, window) ?: return@withLock
+            val plan =
+                planner.plan(snapshot, media, window, smartResume = smartResume(), frozen = { id ->
+                    completedBoundary == (id to tracker.currentSinceMs)
+                }) ?: return@withLock
             // Pause a foreign load before IO yields, so a discarded plan cannot later autoplay.
             if (plan.playback == WindowPlayback.LOAD_PAUSED && before == revision) live.pause()
             val built = build(plan.entries)
@@ -463,6 +470,7 @@ internal class QueueProjector(
                             row?.measuredDurationMs ?: row?.durationMs,
                             row?.playedAt != null || stored?.playedAt != null,
                             clock.now(),
+                            smartResume = smartResume(),
                         )
                     tracker.coreSeek { live.seekTo(startMs) }
                     tracker.startPositionApplied()
@@ -484,7 +492,42 @@ internal class QueueProjector(
     }
 
     override fun onPlaybackStateChanged(playbackState: Int) {
-        if (playbackState == Player.STATE_ENDED && !applying && external == null) end(tracker.capture(PlaybackExit.END))
+        if (playbackState != Player.STATE_ENDED || applying || external != null) return
+        val boundary = player?.episodeIdOrNull()?.let { it to tracker.currentSinceMs }
+        if (pauseAtBoundary() || (boundary != null && completedBoundary == boundary)) {
+            completeBoundary()
+        } else {
+            end(tracker.capture(PlaybackExit.END))
+        }
+    }
+
+    override fun onPlayWhenReadyChanged(
+        playWhenReady: Boolean,
+        reason: Int,
+    ) {
+        if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) completeBoundary()
+    }
+
+    /** End-of-item pause keeps the durable current and queue tail; only the played chain runs. */
+    private fun completeBoundary() {
+        val capture = tracker.capture(PlaybackExit.END)?.departure ?: return
+        if (!capture.writePosition || !capture.markPlayed) return
+        val occurrence = capture.episodeId to tracker.currentSinceMs
+        if (completedBoundary == occurrence) return
+        completedBoundary = occurrence
+        beginOwnWrite()
+        launchWrite {
+            try {
+                positions.markPlayed(capture.episodeId, clock.now())
+                boundaryCompleted(capture.episodeId)
+            } catch (failure: Exception) {
+                completedBoundary = null
+                throw failure
+            } finally {
+                endOwnWrite(null)
+                latest?.let { refresh(it.queue) }
+            }
+        }
     }
 
     private fun end(capture: PositionCapture?) {

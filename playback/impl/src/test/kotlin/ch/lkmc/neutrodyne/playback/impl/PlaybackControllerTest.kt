@@ -27,6 +27,11 @@ class PlaybackControllerTest {
             h.controller.pause()
             h.controller.seekTo(0)
             h.controller.skipToNext()
+            h.controller.setSleepTimer(
+                ch.lkmc.neutrodyne.core.model.SleepTimerMode
+                    .Minutes(1),
+            )
+            h.controller.extendSleepTimer(5)
             assertEquals(0, h.dbProviderReads)
             assertNull(h.connection.controller)
         }

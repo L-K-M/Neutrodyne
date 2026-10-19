@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.playback.impl
 import androidx.media3.session.MediaSession
 import ch.lkmc.neutrodyne.core.model.EffectivePlayback
 import ch.lkmc.neutrodyne.core.model.SettingScope
+import ch.lkmc.neutrodyne.core.model.SleepTimerMode
 import ch.lkmc.neutrodyne.playback.api.NowPlaying
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.ScopeWriteResult
@@ -15,6 +16,10 @@ internal interface ServiceBridge {
     val nowPlaying: StateFlow<NowPlaying?>
     val effectivePlayback: StateFlow<EffectivePlayback?>
     val isPlaying: Boolean
+
+    fun setSleepTimer(mode: SleepTimerMode)
+
+    fun extendSleepTimer(minutes: Int)
 
     fun pause()
 

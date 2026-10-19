@@ -77,10 +77,11 @@ class PlayStarter(
     suspend fun start(
         request: StartRequest,
         loadedEpisodeId: Long? = null,
+        smartResume: Boolean = false,
         captureDeparture: () -> Departure? = { null },
     ): StartOutcome =
         try {
-            startChecked(request, loadedEpisodeId, captureDeparture)
+            startChecked(request, loadedEpisodeId, smartResume, captureDeparture)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
@@ -90,6 +91,7 @@ class PlayStarter(
     private suspend fun startChecked(
         request: StartRequest,
         loadedEpisodeId: Long?,
+        smartResume: Boolean,
         captureDeparture: () -> Departure?,
     ): StartOutcome {
         val queue = queues.observeVirtualQueue(QueueWindowPlanner.CONTEXT_SIZE).first()
@@ -171,6 +173,7 @@ class PlayStarter(
                 playedRule.duration(null, item.measuredDurationMs, item.durationMs),
                 item.playedAt != null || stored?.playedAt != null,
                 clock.now(),
+                smartResume = smartResume,
             )
         if (selected.alreadyCurrent) {
             val latest =

@@ -50,6 +50,9 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
                     runtime().beforePlay(origin)
                 },
                 previous = { runtime().previous() },
+                hardwareButtons = { access.prefs.current.value.hardwareButtons },
+                userPaused = { bridge?.userPaused() },
+                transportProtocol = { session.transportProtocol() },
                 stopAction = {
                     runtime().stop()
                     pauseAllPlayersAndStopSelf()

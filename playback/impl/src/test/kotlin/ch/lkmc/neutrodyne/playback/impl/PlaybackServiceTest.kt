@@ -5,6 +5,8 @@ import android.os.Bundle
 import androidx.media3.session.MediaSession
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
 import ch.lkmc.neutrodyne.core.model.SettingScope
+import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
+import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.core.StartRequest
 import kotlinx.coroutines.CompletableDeferred
@@ -50,6 +52,10 @@ class PlaybackServiceTest {
                     ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered.NEVER,
                 )
             }
+            h.run {
+                h.settings.set(PlaybackSettingKeys.SMART_RESUME, false)
+                h.settings.set(PlaybackSettingKeys.HARDWARE_BUTTONS, HardwareButtons.SKIP)
+            }
             val opening = h.scope.async { h.access.open() }
             h.run { h.opener.awaitOpen() }
             val early =
@@ -60,6 +66,8 @@ class PlaybackServiceTest {
             assertEquals(0, h.dbProviderReads)
             firstSettings.complete(Unit)
             h.run { opening.await() }
+            assertFalse(h.prefs.current.value.smartResume)
+            assertEquals(HardwareButtons.SKIP, h.prefs.current.value.hardwareButtons)
             h.network.setStatus(
                 ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor.ONLINE
                     .copy(isMetered = true),
@@ -131,6 +139,49 @@ class PlaybackServiceTest {
                 h.run { bridge.dismiss() }
                 assertNull(h.store.queue.current)
                 assertEquals(0, player.mediaItemCount)
+            } finally {
+                service.destroy()
+            }
+        }
+    }
+
+    @Test fun sessionAndUiPausePathsUseElapsedSmartResumeWithoutReloading() {
+        LifecycleHarness(app()).use { h ->
+            h.seedCurrent()
+            install(h)
+            val service = Robolectric.buildService(NeutrodynePlaybackService::class.java).create()
+            try {
+                pumpUntil { h.hub.bridge != null }
+                val player = service.get().onGetSession(controllerInfo())!!.player
+                pumpUntil { player.mediaItemCount == 1 && player.currentPosition == 12_000L }
+                player.play()
+                pumpUntil { player.playWhenReady }
+                player.pause()
+                h.clock.elapsedMs += 300_000
+                player.play()
+                pumpUntil { player.playWhenReady }
+                assertEquals(12_000L, player.currentPosition)
+                h.controller.pause()
+                h.clock.elapsedMs += 300_001
+                h.clock.nowMs -= 1_000_000
+                player.play()
+                pumpUntil { player.currentPosition == 7_000L }
+                assertEquals(1, player.mediaItemCount)
+                player.pause()
+                h.run { h.settings.set(PlaybackSettingKeys.SMART_RESUME, false) }
+                pumpUntil { !h.prefs.current.value.smartResume }
+                h.clock.elapsedMs += 300_001
+                player.play()
+                pumpUntil { player.playWhenReady }
+                assertEquals(7_000L, player.currentPosition)
+                h.run { h.settings.set(PlaybackSettingKeys.SMART_RESUME, true) }
+                pumpUntil { h.prefs.current.value.smartResume }
+                player.pause()
+                h.clock.elapsedMs += 300_001
+                h.run { checkNotNull(h.hub.bridge).start(StartRequest.Episode(1, 754_000), StartOrigin.UI) }
+                player.play()
+                pumpUntil { player.playWhenReady }
+                assertEquals(754_000L, player.currentPosition)
             } finally {
                 service.destroy()
             }

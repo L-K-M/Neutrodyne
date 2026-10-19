@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.feature.settings
 
 import ch.lkmc.neutrodyne.core.domain.SettingsError
+import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
 import ch.lkmc.neutrodyne.core.testing.FakePlaybackMaintenance
@@ -54,6 +55,18 @@ class PlaybackSettingsViewModelTest : MainDispatcherTest() {
             assertEquals(StreamOnMetered.NEVER, state.streamOnMetered)
             assertEquals(250, state.streamCacheMb)
             assertEquals(8, settings.calls.size)
+        }
+
+    @Test fun hardwareAndSmartResumeDefaultsAndLiveWrites() =
+        runTest {
+            val vm = page()
+            assertEquals(HardwareButtons.EPISODE, vm.uiState.value.hardwareButtons)
+            assertTrue(vm.uiState.value.smartResume)
+            vm.setHardwareButtons(HardwareButtons.SKIP)
+            vm.setSmartResume(false)
+            runCurrent()
+            assertEquals(HardwareButtons.SKIP, vm.uiState.value.hardwareButtons)
+            assertFalse(vm.uiState.value.smartResume)
         }
 
     @Test fun rejectedAndFailedWritesDoNotChangeDisplayedValues() =

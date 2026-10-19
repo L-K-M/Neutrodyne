@@ -84,4 +84,8 @@
     <string name="swipe_left">Swipe left</string>
     <string name="swipe_mark_played">Mark played / unplayed</string>
     <string name="swipe_none">None</string>
+    <string name="playback_hardware_buttons">Hardware next and previous</string>
+    <string name="playback_hardware_episode">Next and previous episode</string>
+    <string name="playback_hardware_skip">Skip forward and back</string>
+    <string name="playback_smart_resume">Smart resume</string>
 </resources>

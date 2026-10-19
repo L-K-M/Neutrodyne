@@ -28,6 +28,7 @@ import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTextButton
 import ch.lkmc.neutrodyne.core.designsystem.components.NdTopAppBar
 import ch.lkmc.neutrodyne.core.designsystem.icons.NdIcons
+import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
 import ch.lkmc.neutrodyne.core.ui.SettingsChoiceDialog
@@ -42,6 +43,9 @@ import ch.lkmc.neutrodyne.feature.settings.resources.playback_clear
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_clear_cache
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_clear_cache_confirm
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_default_speed
+import ch.lkmc.neutrodyne.feature.settings.resources.playback_hardware_buttons
+import ch.lkmc.neutrodyne.feature.settings.resources.playback_hardware_episode
+import ch.lkmc.neutrodyne.feature.settings.resources.playback_hardware_skip
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_metered_allow
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_metered_ask
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_metered_never
@@ -52,6 +56,7 @@ import ch.lkmc.neutrodyne.feature.settings.resources.playback_seconds
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_skip_back
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_skip_forward
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_skip_silence
+import ch.lkmc.neutrodyne.feature.settings.resources.playback_smart_resume
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_speed_presets
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_speed_value
 import ch.lkmc.neutrodyne.feature.settings.resources.playback_storage
@@ -64,7 +69,7 @@ import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 import ch.lkmc.neutrodyne.core.ui.resources.Res as UiRes
 
-/** Only the eight M4 playback defaults; scoped overrides are edited in the speed sheet. */
+/** Playback defaults; scoped overrides are edited in the speed sheet. */
 @Composable
 internal fun PlaybackPage(
     platform: PlatformKind,
@@ -119,7 +124,19 @@ internal fun PlaybackPage(
                         PlaybackDialog.FORWARD.name
                 },
             )
+            SettingsSwitchRow(
+                stringResource(Res.string.playback_smart_resume),
+                null,
+                state.smartResume,
+                viewModel::setSmartResume,
+            )
             if (platform == PlatformKind.ANDROID) {
+                SettingsRow(
+                    NdIcons.PlayArrow,
+                    stringResource(Res.string.playback_hardware_buttons),
+                    stringResource(hardwareLabel(state.hardwareButtons)),
+                    { dialog = PlaybackDialog.HARDWARE.name },
+                )
                 SettingsSwitchRow(
                     stringResource(Res.string.playback_pause_for_navigation),
                     null,
@@ -205,6 +222,21 @@ internal fun PlaybackPage(
                 label = { stringResource(Res.string.playback_cache_mb, it) },
                 onSelect = {
                     viewModel.setStreamCacheMb(it)
+                    dialog = null
+                },
+                onDismissRequest = { dialog = null },
+            )
+        }
+
+        PlaybackDialog.HARDWARE -> {
+            SettingsChoiceDialog(
+                icon = NdIcons.PlayArrow,
+                title = stringResource(Res.string.playback_hardware_buttons),
+                options = HardwareButtons.entries,
+                selected = state.hardwareButtons,
+                label = { stringResource(hardwareLabel(it)) },
+                onSelect = {
+                    viewModel.setHardwareButtons(it)
                     dialog = null
                 },
                 onDismissRequest = { dialog = null },
@@ -320,8 +352,23 @@ private fun meteredLabel(policy: StreamOnMetered): StringResource =
         StreamOnMetered.NEVER -> Res.string.playback_metered_never
     }
 
-private enum class PlaybackDialog { SPEED, PRESETS, BACK, FORWARD, METERED, CACHE, CLEAR }
+private enum class PlaybackDialog {
+    HARDWARE,
+    SPEED,
+    PRESETS,
+    BACK,
+    FORWARD,
+    METERED,
+    CACHE,
+    CLEAR,
+}
 
 private const val MILLIS_PER_SECOND = 1_000L
 private const val BYTES_PER_MB = 1_000_000L
 private const val SPEED_SLIDER_STEPS = 49
+
+private fun hardwareLabel(mode: HardwareButtons): StringResource =
+    when (mode) {
+        HardwareButtons.EPISODE -> Res.string.playback_hardware_episode
+        HardwareButtons.SKIP -> Res.string.playback_hardware_skip
+    }

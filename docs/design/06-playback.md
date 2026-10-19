@@ -1023,6 +1023,8 @@ stateDiagram-v2
 
 ### Measured duration
 
+**Implementation note (2026-10-19, M5).** If READY initially has no duration, the Android adapter also checks later timeline updates. It captures the current occurrence before suspending, cancels stale work on item change or teardown, and dispatches at most one valid measurement per occurrence. Metadata-only enrichment keeps the current source and position.
+
 When the player reports a duration for the current item (Android: `onPlaybackStateChanged(READY)`, not `C.TIME_UNSET`; desktop: `TracksKnown`) and it differs from the stored `measuredDurationMs` by > 1 s (or none is stored): `PositionStore.setMeasuredDuration` (`EpisodeStateDao.ensure` + `setMeasuredDuration`; a synced hint, [10 Episode, Up next and session fields](10-sync.md#episode-up-next-and-session-fields)) once per time the item becomes current (`itunes:duration` is often wrong; YouTube Atom feeds carry none). Lists read `COALESCE(s.measuredDurationMs, e.durationMs)` ([02 Feed pages](02-data-model.md#feed-pages)). Delivered in M5.
 
 ---
@@ -1058,6 +1060,8 @@ Serves R2.7, R4.8. Delivered in M4 (speed, skip silence), M12 (boost, intro/outr
 ---
 
 ## Sleep timer
+
+**Implementation note (2026-10-19, M5).** On Android, `PositionTracker` captures and flushes first; `QueueProjector` owns the boundary mark-played write, using the existing `PositionStore` chain. It suppresses advance from that completion's metadata, retains the current item and tail, and emits one `MarkedPlayed`. `SleepTimer` clears only its arbiter reason and emits `SleepTimerFired`, including on the final item.
 
 **Implementation note (2026-10-19, M5).** Buffering holds the fade factor; explicit pause restores normal volume and resume recomputes it. Expiry, Off, extension, replacement and teardown restore the adapter normal factor (Android 1, desktop separate `setFade`). Reject minutes outside 1–240; extension affects only a minute timer and caps remaining time at 240 minutes. EOE follows manual item changes; no current means Off. Sleep clears only `sleepTimerArmed`, never metered `blockBeforeNext`; run the played chain once without projector advance, emit `SleepTimerFired` once, and discard state with the service.
 
@@ -1145,6 +1149,8 @@ Serves R4.7, R5.2. Delivered in M4 (notification), M5 (hardware button setting).
 System UI (API 33+) shows play/pause, then `SLOT_BACK`, `SLOT_FORWARD`, then overflow buttons; the compact layout (lock screen, Wear, partly Auto) shows the first three — hence seek back/forward in slots 2–3. Changes of skip intervals or effective speed call `session.setMediaButtonPreferences(MediaButtons.current())` on main.
 
 ### Hardware buttons and SessionPlayer
+
+**Implementation note (2026-10-19, M5).** Media3 1.11.1 routes legacy skip controls through media-item commands. The adapter recovers hardware routing from the requesting controller's legacy version. Modern explicit media-item commands still navigate episodes.
 
 `SessionPlayer : ForwardingSimpleBasePlayer(exo)` (Media3 ≥ 1.5.0) is the player given to the session (own UI, notification, media keys, Bluetooth, Auto all go through it); 06's components keep using `exo` directly, and `ForwardingSimpleBasePlayer` re-reads `exo`'s state on every change. Its default `handleSeek` forwards each seek command to the matching `exo` method; the overrides below replace that for four commands. `BasePlayer.seekToNext()` with no next item still calls `handleSeek(C.INDEX_UNSET, C.TIME_UNSET, COMMAND_SEEK_TO_NEXT)`, so the hardware mapping also works on a one-item window.
 

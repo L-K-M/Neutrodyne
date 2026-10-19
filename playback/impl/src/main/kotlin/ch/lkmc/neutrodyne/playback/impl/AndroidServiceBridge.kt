@@ -8,6 +8,7 @@ import androidx.media3.session.MediaSession
 import ch.lkmc.neutrodyne.core.model.PlayContextInfo
 import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.SettingScope
+import ch.lkmc.neutrodyne.core.model.SleepTimerMode
 import ch.lkmc.neutrodyne.playback.api.NowPlaying
 import ch.lkmc.neutrodyne.playback.api.PlayResult
 import ch.lkmc.neutrodyne.playback.api.PlaybackEvent
@@ -68,6 +69,14 @@ internal class AndroidServiceBridge(
             },
         )
     private val applier = EffectivePlaybackApplier(ports.effective, scope)
+    private val arbiter = EndOfItemPauseArbiter(player)
+    private val sleep =
+        SleepTimer(player, arbiter, access.clock, scope, { access.hub.sleepTimer.value = it }, access.hub::event)
+    private val smartResume =
+        SmartResume(player, access.clock, { access.prefs.current.value.smartResume }) { position ->
+            tracker.coreSeek { player.seekTo(position) }
+        }
+    private val measuredDuration = MeasuredDuration(player, ports.lookup, ports.positions, scope, access.io)
     private val projector =
         QueueProjector(
             ports.planner,
@@ -86,6 +95,9 @@ internal class AndroidServiceBridge(
             // Schedule initial collection after attach so a pending session start can reserve it.
             CoroutineScope(scope.coroutineContext + Dispatchers.Main),
             access.io,
+            smartResume = { access.prefs.current.value.smartResume },
+            pauseAtBoundary = { arbiter.sleepTimerArmed || arbiter.blockBeforeNext },
+            boundaryCompleted = { access.hub.event(PlaybackEvent.MarkedPlayed(it)) },
         )
     private val recovery =
         ErrorRecovery(
@@ -99,7 +111,6 @@ internal class AndroidServiceBridge(
             isForeground,
             access.hub::event,
         )
-    private val arbiter = EndOfItemPauseArbiter(player)
     private val current = MutableStateFlow<NowPlaying?>(null)
     override val nowPlaying = current.asStateFlow()
     override val effectivePlayback = ports.effective.effectivePlayback
@@ -118,6 +129,9 @@ internal class AndroidServiceBridge(
     fun attach(hasPendingStart: Boolean = false) {
         tracker.attach(player)
         projector.attach(player)
+        sleep.attach()
+        player.addListener(smartResume)
+        measuredDuration.attach()
         if (hasPendingStart) reserveStart()
         applier.attach(player)
         player.addListener(this)
@@ -166,7 +180,14 @@ internal class AndroidServiceBridge(
         projector.endOwnWrite(null)
     }
 
+    override fun setSleepTimer(mode: SleepTimerMode) = sleep.set(mode)
+
+    override fun extendSleepTimer(minutes: Int) = sleep.extend(minutes)
+
+    fun userPaused() = smartResume.userPaused()
+
     override fun pause() {
+        userPaused()
         tracker.flush(PositionFlushReason.PAUSE)
         player.pause()
     }
@@ -216,7 +237,9 @@ internal class AndroidServiceBridge(
         try {
             val outcome =
                 access.gate.withOrigin(origin) {
-                    ports.starter.start(request, player.episodeIdOrNull()) { tracker.capture()?.departure }
+                    ports.starter.start(request, player.episodeIdOrNull(), access.prefs.current.value.smartResume) {
+                        tracker.capture()?.departure
+                    }
                 }
             return when (outcome) {
                 is StartOutcome.Refused -> {
@@ -287,7 +310,11 @@ internal class AndroidServiceBridge(
         if (held == null) projector.beginOwnWrite()
         releaseReservation()
         try {
-            val outcome = held ?: access.gate.withOrigin(origin) { ports.starter.start(StartRequest.Resume) }
+            val outcome =
+                held
+                    ?: access.gate.withOrigin(origin) {
+                        ports.starter.start(StartRequest.Resume, smartResume = access.prefs.current.value.smartResume)
+                    }
             val committed =
                 outcome as? StartOutcome.Committed ?: run {
                     if (outcome is StartOutcome.Refused) reportRefusal(outcome.result)
@@ -322,6 +349,7 @@ internal class AndroidServiceBridge(
                 reportRefusal(refusal)
                 return@withLock false
             }
+            smartResume.resume()
             serviceIssue = null
             boundaryPaused = false
             updateBoundary()
@@ -407,6 +435,7 @@ internal class AndroidServiceBridge(
                                 row?.measuredDurationMs ?: row?.durationMs,
                                 row?.playedAt != null,
                                 access.clock.now(),
+                                smartResume = access.prefs.current.value.smartResume,
                             )
                         projector.applyStart(StartOutcome.Committed(queue, position))
                         access.history.consume(action.item)
@@ -529,6 +558,9 @@ internal class AndroidServiceBridge(
         cancelPending()
         releaseReservation()
         jobs.forEach(Job::cancel)
+        sleep.detach()
+        measuredDuration.detach()
+        player.removeListener(smartResume)
         projector.detach()
         recovery.detach()
         player.removeListener(this)

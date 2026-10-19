@@ -77,4 +77,8 @@
     <string name="swipe_left">Nach links wischen</string>
     <string name="swipe_mark_played">Als gespielt / ungespielt markieren</string>
     <string name="swipe_none">Keine</string>
+    <string name="playback_hardware_buttons">Hardwaretasten Weiter und Zurück</string>
+    <string name="playback_hardware_episode">Nächste und vorherige Episode</string>
+    <string name="playback_hardware_skip">Vor- und zurückspringen</string>
+    <string name="playback_smart_resume">Intelligent fortsetzen</string>
 </resources>

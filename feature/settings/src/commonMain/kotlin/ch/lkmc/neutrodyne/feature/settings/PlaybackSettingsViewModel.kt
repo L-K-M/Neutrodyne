@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.model.settings.HardwareButtons
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.SettingKey
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
@@ -35,8 +36,8 @@ import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.StringResource
 
 /**
- * The values Settings › Playback renders (06 Settings; 08 Settings screen structure): the eight
- * M4 `playback.*` keys plus the streaming cache's usage and busy state. [cacheBytes] is null while
+ * The values Settings › Playback renders (06 Settings; 08 Settings screen structure): the
+ * playback defaults plus the streaming cache's usage and busy state. [cacheBytes] is null while
  * the first [PlaybackMaintenance.streamingCacheBytes] read is in flight or failed.
  */
 public data class PlaybackSettingsUiState(
@@ -48,6 +49,8 @@ public data class PlaybackSettingsUiState(
     val pauseForNavigation: Boolean = PlaybackSettingKeys.PAUSE_FOR_NAVIGATION.default,
     val streamOnMetered: StreamOnMetered = PlaybackSettingKeys.STREAM_ON_METERED.default,
     val streamCacheMb: Int = PlaybackSettingKeys.STREAM_CACHE_MB.default,
+    val hardwareButtons: HardwareButtons = PlaybackSettingKeys.HARDWARE_BUTTONS.default,
+    val smartResume: Boolean = PlaybackSettingKeys.SMART_RESUME.default,
     val cacheBytes: Long? = null,
     val cacheBusy: Boolean = false,
     val messages: ImmutableList<UserMessage> = persistentListOf(),
@@ -88,6 +91,10 @@ public class PlaybackSettingsViewModel(
             state.copy(streamOnMetered = policy)
         }.combine(settings.observe(PlaybackSettingKeys.STREAM_CACHE_MB)) { state, mb ->
             state.copy(streamCacheMb = mb)
+        }.combine(settings.observe(PlaybackSettingKeys.HARDWARE_BUTTONS)) { state, hardware ->
+            state.copy(hardwareButtons = hardware)
+        }.combine(settings.observe(PlaybackSettingKeys.SMART_RESUME)) { state, smart ->
+            state.copy(smartResume = smart)
         }.combine(cacheBytes) { state, bytes ->
             state.copy(cacheBytes = bytes)
         }.combine(cacheBusy) { state, busy ->
@@ -121,6 +128,14 @@ public class PlaybackSettingsViewModel(
 
     public fun setSkipForwardMs(ms: Long) {
         set(PlaybackSettingKeys.SKIP_FORWARD_MS, ms)
+    }
+
+    public fun setHardwareButtons(mode: HardwareButtons) {
+        set(PlaybackSettingKeys.HARDWARE_BUTTONS, mode)
+    }
+
+    public fun setSmartResume(enabled: Boolean) {
+        set(PlaybackSettingKeys.SMART_RESUME, enabled)
     }
 
     public fun setPauseForNavigation(enabled: Boolean) {

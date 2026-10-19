@@ -113,6 +113,7 @@ internal class AdapterFixture(
     val factory = MediaItemFactory(TestArtwork, local)
     val planner =
         QueueWindowPlanner(queue, caps, positions, local, clock, WindowDiff(), StartPositionRule(), PlayedRule())
+    var smartResume = false
     val projector =
         QueueProjector(
             planner,
@@ -131,6 +132,8 @@ internal class AdapterFixture(
             playerScope,
             Dispatchers.Unconfined,
             failures::add,
+            boundaryCompleted = { events += PlaybackEvent.MarkedPlayed(it) },
+            smartResume = { smartResume },
         )
 
     fun attach() {
