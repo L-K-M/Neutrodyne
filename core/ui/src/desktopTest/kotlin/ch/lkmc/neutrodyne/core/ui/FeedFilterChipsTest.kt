@@ -51,7 +51,7 @@ class FeedFilterChipsTest {
         }
 
     @Test
-    fun inProgressIsAvailableWhileDownloadedRemainsGated() =
+    fun progressAndDownloadsAreAvailableWithTheirProducers() =
         runComposeUiTest {
             val previous = Locale.getDefault()
             Locale.setDefault(Locale.ENGLISH)
@@ -63,7 +63,7 @@ class FeedFilterChipsTest {
                         AVAILABLE_FEED_FILTER_CAPABILITIES,
                     )
                 }
-                onNodeWithText("Downloaded").assertDoesNotExist()
+                onNodeWithText("Downloaded").assertIsSelected()
                 onNodeWithText("In progress").assertIsSelected()
                 onNodeWithText("Clear filters").assertExists()
             } finally {

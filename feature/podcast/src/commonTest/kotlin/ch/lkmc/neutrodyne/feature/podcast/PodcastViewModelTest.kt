@@ -50,6 +50,7 @@ import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -64,6 +65,9 @@ import kotlin.time.Duration.Companion.days
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class PodcastViewModelTest : MainDispatcherTest() {
+    private val downloads =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeDownloadController()
     private val podcasts = FakePodcastRepository()
     private val feeds = FakeFeedRepository()
     private val episodes = FakeEpisodeRepository()
@@ -94,6 +98,7 @@ class PodcastViewModelTest : MainDispatcherTest() {
         network,
         liveSource,
         clock,
+        downloadController = downloads,
     )
 
     private fun TestScope.collect(viewModel: PodcastViewModel) {
@@ -158,7 +163,7 @@ class PodcastViewModelTest : MainDispatcherTest() {
         runTest {
             val model = viewModel()
             collect(model)
-            val effective = FeedFilters(unplayedOnly = true, inProgressOnly = true)
+            val effective = FeedFilters(unplayedOnly = true, inProgressOnly = true, downloadedOnly = true)
             model.onFiltersChange(effective.copy(downloadedOnly = true))
             model.feed.take(1).asSnapshot()
             advanceUntilIdle()
@@ -800,5 +805,17 @@ class PodcastViewModelTest : MainDispatcherTest() {
                 PlaybackMessageAction.OpenPlaybackSettings,
                 viewModel.playback.onMessageAction(message.id),
             )
+        }
+
+    @Test fun downloadToggleReachesTheManualRequestHandler() =
+        runTest {
+            val vm = viewModel()
+            vm.onRowAction(EpisodeAction.DownloadToggle(5))
+            runCurrent()
+            assertEquals(
+                ch.lkmc.neutrodyne.core.testing.FakeDownloadController.Action.REQUEST,
+                downloads.calls.single().action,
+            )
+            assertEquals(listOf(5L), downloads.calls.single().ids)
         }
 }

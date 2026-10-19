@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
+import ch.lkmc.neutrodyne.core.ui.DownloadDialogs
 import ch.lkmc.neutrodyne.core.ui.EnterPasswordDialog
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeRouteResult
@@ -37,6 +38,7 @@ internal fun EpisodeRoute(
             create(key.episodeId)
         },
 ) {
+    DownloadDialogs(viewModel.downloads)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val consent by viewModel.playback.meteredConsent.collectAsStateWithLifecycle()
     val credentials by viewModel.pendingCredentials.collectAsStateWithLifecycle()

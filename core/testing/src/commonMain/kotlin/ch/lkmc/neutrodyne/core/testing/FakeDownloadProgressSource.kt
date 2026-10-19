@@ -11,10 +11,12 @@ import kotlinx.coroutines.flow.map
 
 /** Explicit snapshots; tests drive time and publish ticks themselves. */
 class FakeDownloadProgressSource : DownloadProgressSource {
+    val observedIds = mutableListOf<Set<Long>>()
     val progress = MutableStateFlow<Map<Long, LiveProgress>>(emptyMap())
 
     override fun observe(ids: Set<Long>): Flow<Map<Long, LiveProgress>> {
         val selected = ids.toSet()
+        observedIds += selected
         return progress.map { rows -> rows.filterKeys { it in selected } }.distinctUntilChanged()
     }
 }

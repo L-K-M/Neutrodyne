@@ -46,6 +46,9 @@ import kotlin.test.assertTrue
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class EpisodeViewModelTest : MainDispatcherTest() {
+    private val downloads =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeDownloadController()
     private val episodes = FakeEpisodeRepository()
     private val chapters =
         FakeChapterRepository()
@@ -66,6 +69,10 @@ class EpisodeViewModelTest : MainDispatcherTest() {
             playbackStates,
             testPlatformInfo,
             network,
+            downloadController = downloads,
+            liveStateSource =
+                ch.lkmc.neutrodyne.core.testing
+                    .FakeEpisodeLiveStateSource(),
         )
 
     private fun TestScope.collect(viewModel: EpisodeViewModel) {
@@ -431,5 +438,17 @@ class EpisodeViewModelTest : MainDispatcherTest() {
             advanceUntilIdle()
             assertNull(viewModel.pendingCredentials.value)
             assertEquals(listOf("setCredentials(7, user)"), podcasts.calls)
+        }
+
+    @Test fun downloadToggleReachesTheManualRequestHandler() =
+        runTest {
+            val vm = viewModel()
+            vm.onAction(EpisodeAction.DownloadToggle(5))
+            runCurrent()
+            assertEquals(
+                ch.lkmc.neutrodyne.core.testing.FakeDownloadController.Action.REQUEST,
+                downloads.calls.single().action,
+            )
+            assertEquals(listOf(5L), downloads.calls.single().ids)
         }
 }

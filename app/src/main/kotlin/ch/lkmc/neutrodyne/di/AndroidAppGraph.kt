@@ -72,6 +72,8 @@ interface AndroidAppGraph : DownloadComponentsInjector {
     val playbackMediaLookup: Provider<PlaybackMediaLookup>
     val chapterRepository: Provider<ChapterRepository>
 
+    val downloadController: Provider<ch.lkmc.neutrodyne.download.api.DownloadController>
+
     val workerFactory: WorkerFactory
 
     val buildInfo: BuildInfo

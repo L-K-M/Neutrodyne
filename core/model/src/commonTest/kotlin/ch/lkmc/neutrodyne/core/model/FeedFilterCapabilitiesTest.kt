@@ -9,11 +9,11 @@ import kotlin.test.assertTrue
 class FeedFilterCapabilitiesTest {
     /** M4 (W10): In progress is the only producer-backed chip; Downloaded waits for M6. */
     @Test
-    fun availableCapabilitiesEnableInProgressOnly() {
+    fun availableCapabilitiesEnableProgressAndDownloads() {
         assertTrue(FeedFilterCapability.IN_PROGRESS in AVAILABLE_FEED_FILTER_CAPABILITIES)
-        assertFalse(FeedFilterCapability.DOWNLOADED in AVAILABLE_FEED_FILTER_CAPABILITIES)
+        assertTrue(FeedFilterCapability.DOWNLOADED in AVAILABLE_FEED_FILTER_CAPABILITIES)
         assertEquals(
-            setOf(FeedFilterCapability.IN_PROGRESS),
+            setOf(FeedFilterCapability.IN_PROGRESS, FeedFilterCapability.DOWNLOADED),
             FeedFilterCapability.entries.toSet() intersect AVAILABLE_FEED_FILTER_CAPABILITIES,
         )
     }
@@ -46,10 +46,10 @@ class FeedFilterCapabilitiesTest {
 
     /** The milestone set keeps a stored In-progress flag but still hides a stored Downloaded one. */
     @Test
-    fun milestoneSetKeepsInProgressAndDropsDownloaded() {
+    fun milestoneSetPreservesBothStoredFlags() {
         val stored = FeedFilters(downloadedOnly = true, inProgressOnly = true)
         assertEquals(
-            FeedFilters(inProgressOnly = true),
+            stored,
             stored.withCapabilities(AVAILABLE_FEED_FILTER_CAPABILITIES),
         )
     }
