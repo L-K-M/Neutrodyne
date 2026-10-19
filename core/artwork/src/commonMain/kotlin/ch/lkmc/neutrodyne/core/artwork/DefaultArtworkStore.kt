@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.database.ArtworkEntity
 import ch.lkmc.neutrodyne.core.database.ArtworkSyncResult
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
+import ch.lkmc.neutrodyne.core.model.MosaicSnapshot
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.ExposeImplBinding
 import dev.zacsweers.metro.Inject
@@ -118,6 +119,34 @@ public class DefaultArtworkStore
             produced: List<ArtworkProduction>,
             now: Long,
         ) = files.withLock {
+            applyBatchLocked(produced, now)
+            refreshIndexLocked()
+        }
+
+        /** Files and source rows cannot change between this check and publication. */
+        internal suspend fun applyMosaic(
+            snapshot: MosaicSnapshot,
+            produced: ArtworkProduction,
+            now: Long,
+        ): Boolean =
+            files.withLock {
+                val applied =
+                    db.withWriteTransaction {
+                        val current = MosaicSources(db).snapshots().firstOrNull { it.groupId == snapshot.groupId }
+                        if (current != snapshot) return@withWriteTransaction false
+                        require(produced.key == ArtworkKeys.mosaic(snapshot.groupUuid))
+                        require(produced.descriptor == mosaicDescriptor(snapshot))
+                        applyBatchLocked(listOf(produced), now)
+                        true
+                    }
+                if (applied) refreshIndexLocked()
+                applied
+            }
+
+        private suspend fun applyBatchLocked(
+            produced: List<ArtworkProduction>,
+            now: Long,
+        ) {
             val rows =
                 produced.map { result ->
                     val old = db.artworkDao().byKey(result.key) ?: ArtworkEntity(result.key)
@@ -149,7 +178,6 @@ public class DefaultArtworkStore
                         ).syncResult()
                 }
             db.artworkDao().applyBatch(rows)
-            refreshIndexLocked()
         }
 
         /** Opens the descriptor while still holding the lock, so GC/replacement cannot unlink it first. */

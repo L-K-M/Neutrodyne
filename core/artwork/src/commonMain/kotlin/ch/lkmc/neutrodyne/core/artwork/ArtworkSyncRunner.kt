@@ -34,6 +34,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 
 /** One bounded, restartable pass; all retry state lives in artwork rows, never work input. */
 @SingleIn(AppScope::class)
@@ -51,7 +52,10 @@ public class ArtworkSyncRunner internal constructor(
 ) {
     private val runs = Mutex()
 
-    public suspend fun runOnce(deadline: Duration? = null): Unit =
+    public suspend fun runOnce(
+        deadline: Duration? = null,
+        systemMosaics: (suspend (Duration?) -> Unit)? = null,
+    ): Unit =
         withContext(io) {
             runs.withLock {
                 val end = deadline?.let { clock.elapsedRealtime() + it.inWholeMilliseconds }
@@ -97,6 +101,7 @@ public class ArtworkSyncRunner internal constructor(
                     store.applyBatch(results, clock.now())
                     yield()
                 }
+                systemMosaics?.invoke(end?.let { (it - clock.elapsedRealtime()).coerceAtLeast(0).milliseconds })
                 store.collectGarbage()
             }
         }
