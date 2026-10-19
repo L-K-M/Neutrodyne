@@ -14,6 +14,10 @@ interface DownloadLifecycle {
         winnerEpisodeId: Long,
     )
 
+    /** Always called after the attempt, including rollback/cancellation; re-publish surviving
+     * owners and drain the journal only after the caller has released the database writer. */
+    suspend fun afterEpisodeMerges(episodeIds: List<Long>)
+
     suspend fun beforeLibraryReplace()
 }
 

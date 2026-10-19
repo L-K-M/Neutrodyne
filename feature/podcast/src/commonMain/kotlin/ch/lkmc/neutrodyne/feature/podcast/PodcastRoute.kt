@@ -18,6 +18,7 @@ import ch.lkmc.neutrodyne.core.navigation.PodcastSettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.ui.BindEpisodeSelection
+import ch.lkmc.neutrodyne.core.ui.DownloadDialogs
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeRouteResult
 import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedDialog
@@ -49,6 +50,7 @@ internal fun PodcastRoute(key: PodcastKey) {
         assistedMetroViewModel<PodcastViewModel, PodcastViewModel.Factory> {
             create(key.podcastId)
         }
+    DownloadDialogs(viewModel.downloads)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val markPlayed by viewModel.markPlayed.state.collectAsStateWithLifecycle()
     val consent by viewModel.playback.meteredConsent.collectAsStateWithLifecycle()

@@ -28,7 +28,15 @@ class RestoreProgressOwnershipTest : MainDispatcherTest() {
         runTest {
             val backups = FakeBackupRepository().apply { inspectOutcome = Outcome.Success(restorePreview()) }
             val imports = FakeImportRepository()
-            val vm = RestoreViewModel(7, backups, imports, FakePlaybackController(), backgroundScope)
+            val vm =
+                RestoreViewModel(
+                    7,
+                    backups,
+                    imports,
+                    FakePlaybackController(),
+                    backgroundScope,
+                    restoreDownloads(),
+                )
             runCurrent()
             vm.requestRestore()
             val running = RestoreProgress.Running(7, "library", 3, 12)
@@ -73,7 +81,15 @@ class RestoreProgressOwnershipTest : MainDispatcherTest() {
                             ),
                     )
             )
-            val vm = RestoreViewModel(id, backups, imports, FakePlaybackController(), backgroundScope)
+            val vm =
+                RestoreViewModel(
+                    id,
+                    backups,
+                    imports,
+                    FakePlaybackController(),
+                    backgroundScope,
+                    restoreDownloads(),
+                )
             runCurrent()
             assertTrue(vm.uiState.value.requested)
             assertNull(vm.uiState.value.error, "Queued session B must not inherit failed session A's Storage error")
@@ -93,7 +109,15 @@ class RestoreProgressOwnershipTest : MainDispatcherTest() {
                             id,
                         ).copy(options = ImportOptions(restoreRequestedAt = 20L, restoreMode = RestoreMode.MERGE))
             )
-            val vm = RestoreViewModel(id, backups, imports, FakePlaybackController(), backgroundScope)
+            val vm =
+                RestoreViewModel(
+                    id,
+                    backups,
+                    imports,
+                    FakePlaybackController(),
+                    backgroundScope,
+                    restoreDownloads(),
+                )
             runCurrent()
             backups.restoreProgress.value = RestoreProgress.Running(id, "library", 0, 12)
             runCurrent()
@@ -103,3 +127,11 @@ class RestoreProgressOwnershipTest : MainDispatcherTest() {
 }
 
 private const val PREVIOUS_SESSION_ID = 99L
+
+private fun restoreDownloads() =
+    ch.lkmc.neutrodyne.core.domain.RestoreDownloadRequests(
+        ch.lkmc.neutrodyne.core.testing
+            .FakeDownloadController(),
+        ch.lkmc.neutrodyne.core.testing
+            .FakePlaybackMediaLookup(),
+    )

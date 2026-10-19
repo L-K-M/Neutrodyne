@@ -7,12 +7,17 @@ import ch.lkmc.neutrodyne.core.data.ingest.IngestContext
 import ch.lkmc.neutrodyne.core.data.ingest.IngestMode
 import ch.lkmc.neutrodyne.core.data.playback.ChapterRepositoryImpl
 import ch.lkmc.neutrodyne.core.data.playback.Podcasting20ChaptersParser
+import ch.lkmc.neutrodyne.core.domain.EmbeddedChapterReader
+import ch.lkmc.neutrodyne.core.domain.EmbeddedChapterResult
 import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
+import ch.lkmc.neutrodyne.core.testing.FakeEmbeddedChapterReader
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.TestClock
+import ch.lkmc.neutrodyne.core.testing.database.downloadEntity
+import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.feeds.jvm.parse.XmlPullFeedParser
 import ch.lkmc.neutrodyne.feeds.parse.ParseResult
@@ -39,6 +44,8 @@ class ChapterRepositoryTest {
     private val clients = OkHttpNeutrodyneHttpClients(newNetworkClients(), testUserAgent())
     private val client = clients.client(HttpClientKind.API)
     private val network = FakeNetworkMonitor(FakeNetworkMonitor.ONLINE)
+    private val embedded =
+        FakeEmbeddedChapterReader()
     private val repo =
         ChapterRepositoryImpl(
             db,
@@ -49,12 +56,101 @@ class ChapterRepositoryTest {
             ),
             network,
             clock,
+            embedded,
         )
 
     @After fun close() {
         clients.close()
         db.close()
     }
+
+    @Test fun localChaptersLoadOfflineWithoutJsonAndPreserveHigherPriority() =
+        runBlocking {
+            val podcast = db.podcastDao().insertPodcast(podcastEntity())
+            val id =
+                db.episodeDao().insertStub(
+                    episodeEntity(podcastId = podcast),
+                )
+            val uri = "file:///download.mp3"
+            db.downloadDao().insert(
+                downloadEntity(id)
+                    .copy(finalUri = uri),
+            )
+            network.setStatus(FakeNetworkMonitor.OFFLINE)
+            embedded.result =
+                EmbeddedChapterResult.Read(
+                    listOf(row(ChapterSource.ID3), row(ChapterSource.MP4)),
+                )
+            repo.ensureLocalLoaded(id, uri)
+            assertEquals(
+                ChapterSource.ID3,
+                repo
+                    .observe(id)
+                    .first()
+                    .single()
+                    .source,
+            )
+            assertEquals(listOf(uri), embedded.reads)
+            repo.replace(id, ChapterSource.PSC, listOf(row(ChapterSource.PSC)))
+            repo.ensureLocalLoaded(id, uri)
+            assertEquals(
+                ChapterSource.PSC,
+                repo
+                    .observe(id)
+                    .first()
+                    .single()
+                    .source,
+            )
+            repo.replace(id, ChapterSource.PODCASTING20_JSON, listOf(row(ChapterSource.PODCASTING20_JSON)))
+            repo.ensureLocalLoaded(id, uri)
+            assertEquals(
+                ChapterSource.PODCASTING20_JSON,
+                repo
+                    .observe(id)
+                    .first()
+                    .single()
+                    .source,
+            )
+            assertEquals(0, serverRule.server.requestCount)
+        }
+
+    @Test fun reDownloadToSameUriRejectsOldChapterInspection() =
+        runBlocking {
+            val id = seed()
+            val uri = "file:///same.mp3"
+            val original = downloadEntity(id).copy(finalUri = uri)
+            db.downloadDao().insert(original)
+            val existing = listOf(row(ChapterSource.ID3))
+            repo.replace(id, ChapterSource.ID3, existing)
+            val reader =
+                object : EmbeddedChapterReader {
+                    override suspend fun read(fileUri: String): EmbeddedChapterResult {
+                        db.downloadDao().removeUnclaimed(listOf(id))
+                        db.downloadDao().insert(original.copy(completedAt = 99))
+                        return EmbeddedChapterResult.Read(
+                            listOf(row(ChapterSource.ID3).copy(title = "obsolete")),
+                        )
+                    }
+                }
+            val repository = ChapterRepositoryImpl(db, Podcasting20ChaptersParser(clients), network, clock, reader)
+            repository.ensureLocalLoaded(id, uri)
+            assertEquals(existing, repo.observe(id).first())
+        }
+
+    @Test fun staleOrMissingLocalReadCannotOverwriteChapters() =
+        runBlocking {
+            val id = seed()
+            val uri = "file:///old.mp3"
+            repo.replace(id, ChapterSource.ID3, listOf(row(ChapterSource.ID3)))
+            embedded.result =
+                EmbeddedChapterResult
+                    .Read(emptyList())
+            repo.ensureLocalLoaded(id, uri)
+            assertEquals(1, db.chapterDao().ofSource(id, ChapterSource.ID3).size)
+            embedded.result = EmbeddedChapterResult.MissingFile
+            repo.ensureLocalLoaded(id, uri)
+            assertEquals(1, db.chapterDao().ofSource(id, ChapterSource.ID3).size)
+        }
 
     @Test fun prioritySourceIsolationAndHiddenFallback() =
         runBlocking {

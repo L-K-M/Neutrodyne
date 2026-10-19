@@ -31,6 +31,7 @@ import ch.lkmc.neutrodyne.core.model.PositionSource
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.SettingSource
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
@@ -49,6 +50,7 @@ import ch.lkmc.neutrodyne.feeds.backup.OverridesV1
 import ch.lkmc.neutrodyne.feeds.backup.PodcastV1
 import ch.lkmc.neutrodyne.feeds.backup.QueueV1
 import ch.lkmc.neutrodyne.feeds.backup.SettingsV1
+import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -75,6 +77,7 @@ class RestoreMergerTest {
     private val coordinator = FakeCredentialCommitCoordinator()
     private val channels = FakeGroupChannelSync()
     private val scheduler = FakeRefreshScheduler()
+    private val downloads = FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
     private val merger =
         RestoreMerger(
             db = db,
@@ -87,6 +90,8 @@ class RestoreMergerTest {
             channelSync = channels,
             orderKeys = TestOrderKeys,
             clock = clock,
+            downloads =
+                Provider { downloads },
         )
 
     @AfterTest fun close() = db.close()
@@ -967,9 +972,11 @@ class RestoreMergerTest {
             assertNotNull(db.podcastDao().byId(only))
             assertNotNull(db.groupDao().groupById(onlyGroup))
 
+            assertEquals(0, downloads.replacements)
             // Replace unsubscribes the local-only podcast (episodes cascade, D24) and deletes
             // the local-only group without undo; matched rows stay.
             merger.mergeLibrary(staged, MergePolicy.RESTORE_REPLACE, ALL_CATEGORIES)
+            assertEquals(1, downloads.replacements)
             assertNotNull(db.podcastDao().byId(matched))
             assertNull(db.podcastDao().byId(only))
             assertNull(db.episodeDao().byId(ep))
@@ -1526,6 +1533,10 @@ class RestoreMergerTest {
             channelSync = channels,
             orderKeys = orderKeys,
             clock = clock,
+            downloads =
+                Provider {
+                    FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                },
         )
 
     /**

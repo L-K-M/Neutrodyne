@@ -10,3 +10,8 @@ import kotlinx.coroutines.flow.Flow
 interface LocalMediaChanges {
     val changes: Flow<Set<Long>>
 }
+
+/** Main-safe initial snapshot barrier, separate from the non-blocking lookup. Failures propagate. */
+fun interface LocalMediaReadiness {
+    suspend fun awaitReady()
+}

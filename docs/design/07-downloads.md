@@ -409,6 +409,23 @@ Android only (on the desktop both lanes are equally privileged, so an in-flight 
 
 ### Deleting a download
 
+**Implementation note (2026-10-19, M6a).** Core data calls the domain
+`DownloadLifecycle` before unsubscribe cascades, duplicate-episode merges and
+restore Replace. Cleanup stops transfers, removes index hints, journals paths
+and unpins download artwork before a Room writer is acquired. Matched losers are
+removed when a winner already has a download. Otherwise the
+row and its recorded paths move to the winning episode ID, as required by design
+02; `DownloadLifecycle.afterEpisodeMerges` republishes surviving index owners and
+drains the journal after commit or rollback. Re-parented unmatched episodes keep
+their IDs and files. Incomplete moved transfers pause with their partial bytes
+preserved; manual resume uses the winning ID. Writer rechecks abort
+unsubscribe/merge if a concurrent request or ingest invalidates that preparation;
+the caller can retry. Failed database cascades cannot roll back prior file cleanup.
+Current duplicate merges and Replace also pause and flush through the existing
+`PlaybackBeforeUnsubscribe` port. No lifecycle cleanup writes a dismissal tombstone.
+Current-file deletion remains journaled until the durable current episode changes.
+
+
 `delete(ids, byUser)` for each row, in this order:
 
 1. In flight → set `StopIntent.Delete(byUser)`, cancel the transfer and await it; its `finish` then performs steps 2–6.

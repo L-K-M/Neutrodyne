@@ -20,9 +20,11 @@ import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.parse.FeedParser
+import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
@@ -631,7 +633,21 @@ class FeedMovesTest {
             server.enqueue(redirect(301, "/target"))
             server.enqueue(mockResponse(200, body))
             newRssAdapter(root, clock).use { bundle ->
-                val moves = FeedMoveCommitter(db, PodcastMerger(db, coordinator, clock), clock)
+                val moves =
+                    FeedMoveCommitter(
+                        db,
+                        PodcastMerger(
+                            db,
+                            coordinator,
+                            clock,
+                            downloads =
+                                dev.zacsweers.metro
+                                    .Provider {
+                                        FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                                    },
+                        ),
+                        clock,
+                    )
                 val engine =
                     newRefresher(
                         db,

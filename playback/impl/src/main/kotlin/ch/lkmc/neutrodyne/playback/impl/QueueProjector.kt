@@ -13,6 +13,7 @@ import ch.lkmc.neutrodyne.core.model.PlaybackMediaInfo
 import ch.lkmc.neutrodyne.core.model.QueueItem
 import ch.lkmc.neutrodyne.core.model.QueueOrigin
 import ch.lkmc.neutrodyne.core.model.VirtualQueue
+import ch.lkmc.neutrodyne.download.api.LocalMediaChanges
 import ch.lkmc.neutrodyne.playback.core.CurrentAction
 import ch.lkmc.neutrodyne.playback.core.PlaybackExit
 import ch.lkmc.neutrodyne.playback.core.PlaybackHistory
@@ -69,9 +70,11 @@ internal class QueueProjector(
     private val smartResume: () -> Boolean = { false },
     private val pauseAtBoundary: () -> Boolean = { false },
     private val boundaryCompleted: (Long) -> Unit = {},
+    private val localChanges: LocalMediaChanges? = null,
 ) : Player.Listener {
     private var player: Player? = null
     private var observing: Job? = null
+    private var observingLocal: Job? = null
     private val writes = mutableSetOf<Job>()
     private val mutex = Mutex()
     private var entries = emptyList<WindowEntry>()
@@ -108,6 +111,14 @@ internal class QueueProjector(
         checkPlayerThread(player)
         this.player = player
         player.addListener(this)
+        observingLocal =
+            playerScope.launch {
+                localChanges?.changes?.collect { changed ->
+                    if (entries.any { it.item.episodeId in changed && it.item.episodeId != player.episodeIdOrNull() }) {
+                        latest?.let { refresh(it.queue) }
+                    }
+                }
+            }
         observing =
             playerScope.launch {
                 try {
@@ -596,6 +607,8 @@ internal class QueueProjector(
         player = null
         observing?.cancel()
         observing = null
+        observingLocal?.cancel()
+        observingLocal = null
         externalTimeout?.cancel()
         externalTimeout = null
         external = null

@@ -5,10 +5,12 @@ import ch.lkmc.neutrodyne.core.common.AppDirs
 import ch.lkmc.neutrodyne.core.common.AppInitializer
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.ApplicationScope
+import ch.lkmc.neutrodyne.core.common.Dispatcher
 import ch.lkmc.neutrodyne.core.common.JobLane
 import ch.lkmc.neutrodyne.core.common.JobLanePoker
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
+import ch.lkmc.neutrodyne.core.common.NeutrodyneDispatchers
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.datastore.DeviceSettingsStore
@@ -24,6 +26,7 @@ import ch.lkmc.neutrodyne.download.api.DownloadController
 import ch.lkmc.neutrodyne.download.api.DownloadProgressSource
 import ch.lkmc.neutrodyne.download.api.LocalMediaChanges
 import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
+import ch.lkmc.neutrodyne.download.api.LocalMediaReadiness
 import dev.zacsweers.metro.BindingContainer
 import dev.zacsweers.metro.ContributesIntoSet
 import dev.zacsweers.metro.ContributesTo
@@ -31,10 +34,12 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.IntoSet
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.SingleIn
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 @ContributesTo(AppScope::class)
 @BindingContainer
@@ -156,6 +161,11 @@ object DesktopDownloadBindings {
     @Provides internal fun controller(components: DownloadComponents): DownloadController = components.controller
 
     @Provides internal fun progress(components: DownloadComponents): DownloadProgressSource = components.progress
+
+    @Provides internal fun readiness(
+        components: Lazy<DownloadComponents>,
+        @Dispatcher(NeutrodyneDispatchers.IO) io: CoroutineDispatcher,
+    ): LocalMediaReadiness = LocalMediaReadiness { withContext(io) { components.value.reconciler.initialLoad() } }
 
     @Provides internal fun lifecycle(components: DownloadComponents): DownloadLifecycle = components.lifecycle
 

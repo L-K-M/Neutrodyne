@@ -10,7 +10,9 @@ import ch.lkmc.neutrodyne.core.database.EpisodePositionEntity
 import ch.lkmc.neutrodyne.core.database.EpisodeStateLiveRow
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.EpisodeLiveStateSource
+import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.RowLive
+import ch.lkmc.neutrodyne.download.api.DownloadProgressSource
 import ch.lkmc.neutrodyne.playback.api.NowPlaying
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
 import ch.lkmc.neutrodyne.playback.api.PositionSnapshot
@@ -39,9 +41,8 @@ import kotlin.time.Duration.Companion.milliseconds
  * `EpisodeLiveStateSource` (08 Live row state) over the three persisted `IN (:ids)` flows of
  * 02 (`episode_position`, `download` transitions and `episode_state.measuredDurationMs`), chunked
  * at 200 ids per query and merged by 08's merge rules with the optional playback
- * (`PlaybackStateSource`, present from M4) producer. The download-progress
- * (`DownloadProgressSource`, M6) producer joins this same combine as a Metro optional binding when
- * it lands. Visible-id sets are distinct, the first passes immediately and later sets debounce by
+ * (`PlaybackStateSource`, present from M4) producer. Download progress joins only the visible IDs' subscription; terminal database
+ * states win over late runner ticks. Visible-id sets are distinct, the first passes immediately and later sets debounce by
  * 100 ms (scrolling); the merged map is distinct and conflated on `@Dispatcher(Default)`; merging
  * runs off the main thread.
  */
@@ -52,6 +53,7 @@ internal class EpisodeLiveStateSourceImpl(
     private val db: NeutrodyneDatabase,
     @Dispatcher(NeutrodyneDispatchers.Default) private val defaultDispatcher: CoroutineDispatcher,
     private val playback: PlaybackStateSource? = null,
+    private val progress: DownloadProgressSource? = null,
 ) : EpisodeLiveStateSource {
     @OptIn(ExperimentalCoroutinesApi::class)
     override fun observe(visibleIds: Flow<Set<Long>>): Flow<Map<Long, RowLive>> =
@@ -80,6 +82,23 @@ internal class EpisodeLiveStateSourceImpl(
                         ?: flowOf(null),
                 ) { (positions, downloads, states), now, tick ->
                     merge(ids, positions, downloads, states, now, tick)
+                }.combine(progress?.observe(ids)?.onStart { emit(emptyMap()) } ?: flowOf(emptyMap())) { rows, ticks ->
+                    rows.mapValues { (id, row) ->
+                        val tick = ticks[id]
+                        // Terminal DB transitions win over a late tick from a released runner.
+                        if (tick == null ||
+                            row.downloadState !in setOf(DownloadState.RESOLVING, DownloadState.DOWNLOADING)
+                        ) {
+                            row
+                        } else {
+                            row.copy(
+                                downloadState = tick.state,
+                                downloadedBytes = tick.downloadedBytes,
+                                totalBytes =
+                                    tick.totalBytes ?: row.totalBytes,
+                            )
+                        }
+                    }
                 }
             }.distinctUntilChanged()
             .flowOn(defaultDispatcher)
@@ -95,7 +114,7 @@ internal class EpisodeLiveStateSourceImpl(
 }
 
 /**
- * 08's merge rules (the download-progress producer arrives in M6): an id gets an entry only if a
+ * 08's persisted merge rules: an id gets an entry only if a
  * live field carries data or it is now playing; an all-empty `RowLive` means "use the paged row".
  * `playedAt`/`startedAt`/`isFavorite` deliberately never become `RowLive` fields.
  *

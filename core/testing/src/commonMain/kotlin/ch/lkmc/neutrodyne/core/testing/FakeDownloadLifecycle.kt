@@ -7,9 +7,13 @@ import ch.lkmc.neutrodyne.core.domain.EmbeddedChapterReader
 import ch.lkmc.neutrodyne.core.domain.EmbeddedChapterResult
 import ch.lkmc.neutrodyne.core.domain.MissingLocalMediaReporter
 
-class FakeDownloadLifecycle : DownloadLifecycle {
+class FakeDownloadLifecycle(
+    private val remove: suspend (List<Long>) -> Unit = {},
+) : DownloadLifecycle {
     val removals = mutableListOf<List<Long>>()
     val merges = mutableListOf<Pair<Long, Long>>()
+    val mergeCompletions = mutableListOf<List<Long>>()
+    var mergeEffect: (suspend (Long, Long) -> Unit)? = null
     var replacements = 0
         private set
     var failure: Throwable? = null
@@ -17,6 +21,7 @@ class FakeDownloadLifecycle : DownloadLifecycle {
     override suspend fun beforeEpisodeRemoval(episodeIds: List<Long>) {
         failure?.let { throw it }
         removals += episodeIds.toList()
+        remove(episodeIds)
     }
 
     override suspend fun beforeEpisodeMerge(
@@ -25,6 +30,12 @@ class FakeDownloadLifecycle : DownloadLifecycle {
     ) {
         failure?.let { throw it }
         merges += loserEpisodeId to winnerEpisodeId
+        val effect = mergeEffect
+        if (effect == null) remove(listOf(loserEpisodeId)) else effect(loserEpisodeId, winnerEpisodeId)
+    }
+
+    override suspend fun afterEpisodeMerges(episodeIds: List<Long>) {
+        mergeCompletions += episodeIds.toList()
     }
 
     override suspend fun beforeLibraryReplace() {
@@ -52,5 +63,16 @@ class FakeEmbeddedChapterReader : EmbeddedChapterReader {
         reads += fileUri
         failure?.let { throw it }
         return result
+    }
+}
+
+class FakeLocalMediaReadiness : ch.lkmc.neutrodyne.download.api.LocalMediaReadiness {
+    var awaits = 0
+        private set
+    var failure: Throwable? = null
+
+    override suspend fun awaitReady() {
+        awaits++
+        failure?.let { throw it }
     }
 }

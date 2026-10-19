@@ -24,6 +24,7 @@ import ch.lkmc.neutrodyne.core.model.ChangeOrigin
 import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.TestClock
@@ -80,7 +81,16 @@ class PodcastRepositoryTest {
         scheduler = scheduler,
         sanitizer = JsoupShowNotesSanitizer(),
         clock = clock,
-        merger = PodcastMerger(db, coordinator, clock),
+        merger =
+            PodcastMerger(
+                db,
+                coordinator,
+                clock,
+                downloads =
+                    Provider {
+                        FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                    },
+            ),
         resolver = unusedPreviewResolver,
         secrets = secrets,
         coordinator = coordinator,
@@ -91,6 +101,7 @@ class PodcastRepositoryTest {
                     storagePathsFor(File("build/tmp/m1b-repo").resolve(UUID.randomUUID().toString())),
                     FileSystem.SYSTEM,
                 ),
+        downloads = Provider { FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) } },
     )
 
     @Test
@@ -368,12 +379,22 @@ class PodcastRepositoryTest {
                         scheduler = scheduler,
                         sanitizer = JsoupShowNotesSanitizer(),
                         clock = clock,
-                        merger = PodcastMerger(db, coordinator, clock),
+                        merger =
+                            PodcastMerger(
+                                db,
+                                coordinator,
+                                clock,
+                                downloads =
+                                    Provider {
+                                        FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                                    },
+                            ),
                         resolver = unusedPreviewResolver,
                         secrets = store,
                         coordinator = coordinator,
                         fetcher = Provider { bundle.fetcher },
                         tempFiles = bundle.tempFiles,
+                        downloads = Provider { FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) } },
                     )
 
                 val first =

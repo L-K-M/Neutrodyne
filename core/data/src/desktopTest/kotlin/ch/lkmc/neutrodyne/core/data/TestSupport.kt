@@ -45,6 +45,7 @@ import ch.lkmc.neutrodyne.core.model.FeedErrorKind
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.FakeNetworkMonitor
 import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
@@ -619,6 +620,8 @@ internal fun newUnsubscribe(
     secrets: SecretStore = FakeSecretStore(),
     coordinator: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
     poster: NewEpisodePoster = FakeNewEpisodePoster(),
+    downloads: ch.lkmc.neutrodyne.core.domain.DownloadLifecycle =
+        FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) },
     fetcher: Provider<FeedFetcher> = Provider { error("setCredentials is not wired in this fixture") },
     tempFiles: FeedTempFiles =
         FeedTempFiles(
@@ -639,12 +642,20 @@ internal fun newUnsubscribe(
             scheduler = scheduler,
             sanitizer = JsoupShowNotesSanitizer(),
             clock = clock,
-            merger = PodcastMerger(db, coordinator, clock),
+            merger =
+                PodcastMerger(
+                    db,
+                    coordinator,
+                    clock,
+                    downloads =
+                        Provider { downloads },
+                ),
             resolver = unusedPreviewResolver,
             secrets = secrets,
             coordinator = coordinator,
             fetcher = fetcher,
             tempFiles = tempFiles,
+            downloads = Provider { downloads },
         ),
         poster,
     )
@@ -653,7 +664,16 @@ private fun newFeedMoves(
     db: NeutrodyneDatabase,
     clock: TestClock,
     coordinator: CredentialCommitCoordinator = FakeCredentialCommitCoordinator(),
-) = FeedMoveCommitter(db, PodcastMerger(db, coordinator, clock), clock)
+) = FeedMoveCommitter(
+    db,
+    PodcastMerger(
+        db,
+        coordinator,
+        clock,
+        downloads = Provider { FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) } },
+    ),
+    clock,
+)
 
 /** `setCredentials`'s probe fetcher for fixtures that never set credentials. */
 internal val unusedProbeFetcher: Provider<FeedFetcher> =

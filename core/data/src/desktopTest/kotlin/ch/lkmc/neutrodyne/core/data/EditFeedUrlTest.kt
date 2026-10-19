@@ -27,11 +27,13 @@ import ch.lkmc.neutrodyne.core.model.NetError
 import ch.lkmc.neutrodyne.core.model.PodcastStatus
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.database.episodeStateEntity
 import ch.lkmc.neutrodyne.feeds.identity.UrlNormalizer
 import ch.lkmc.neutrodyne.feeds.jvm.html.JsoupShowNotesSanitizer
+import dev.zacsweers.metro.Provider
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -96,12 +98,24 @@ class EditFeedUrlTest {
             scheduler,
             JsoupShowNotesSanitizer(),
             clock,
-            PodcastMerger(db, coordinator, clock),
+            PodcastMerger(
+                db,
+                coordinator,
+                clock,
+                downloads =
+                    Provider {
+                        FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                    },
+            ),
             resolver.resolver,
             store,
             coordinator,
             unusedProbeFetcher,
             scratchTempFiles("edit-feed-url"),
+            downloads =
+                Provider {
+                    FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                },
         )
 
     @AfterTest
@@ -235,12 +249,24 @@ class EditFeedUrlTest {
             scheduler,
             JsoupShowNotesSanitizer(),
             clock,
-            PodcastMerger(db, coordinator, clock),
+            PodcastMerger(
+                db,
+                coordinator,
+                clock,
+                downloads =
+                    Provider {
+                        FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                    },
+            ),
             probe,
             store,
             coordinator,
             unusedProbeFetcher,
             scratchTempFiles("edit-feed-url"),
+            downloads =
+                Provider {
+                    FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                },
         )
     }
 
@@ -688,12 +714,24 @@ class EditFeedUrlTest {
                     failingScheduler,
                     JsoupShowNotesSanitizer(),
                     clock,
-                    PodcastMerger(db, coordinator, clock),
+                    PodcastMerger(
+                        db,
+                        coordinator,
+                        clock,
+                        downloads =
+                            Provider {
+                                FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                            },
+                    ),
                     resolver.resolver,
                     store,
                     coordinator,
                     unusedProbeFetcher,
                     scratchTempFiles("edit-feed-url"),
+                    downloads =
+                        Provider {
+                            FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                        },
                 )
             server.enqueue(mockResponse(body = body()))
             assertEquals(Outcome.Success(Unit), repo.editFeedUrl(id, url()))

@@ -483,6 +483,12 @@ class EpisodeScreenTest {
                 FakePlaybackStateSource(),
                 testPlatformInfo,
                 FakeNetworkMonitor(FakeNetworkMonitor.ONLINE),
+                downloadController =
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeDownloadController(),
+                liveStateSource =
+                    ch.lkmc.neutrodyne.core.testing
+                        .FakeEpisodeLiveStateSource(),
             )
         val owner =
             object : LifecycleOwner {

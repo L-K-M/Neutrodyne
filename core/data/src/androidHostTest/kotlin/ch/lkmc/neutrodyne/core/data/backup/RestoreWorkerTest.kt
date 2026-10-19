@@ -42,6 +42,7 @@ import ch.lkmc.neutrodyne.core.model.ImportState
 import ch.lkmc.neutrodyne.core.model.RestoreCategory
 import ch.lkmc.neutrodyne.core.model.RestoreMode
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
+import ch.lkmc.neutrodyne.core.testing.FakeDownloadLifecycle
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
 import ch.lkmc.neutrodyne.core.testing.FakeImportReportPoster
 import ch.lkmc.neutrodyne.core.testing.FakeNewEpisodePoster
@@ -306,12 +307,25 @@ class RestoreWorkerTest {
                             scheduler = FakeRefreshScheduler(),
                             sanitizer = JsoupShowNotesSanitizer(),
                             clock = clock,
-                            merger = PodcastMerger(db, coordinator, clock),
+                            merger =
+                                PodcastMerger(
+                                    db,
+                                    coordinator,
+                                    clock,
+                                    downloads =
+                                        Provider {
+                                            FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                                        },
+                                ),
                             resolver = unusedPreviewResolver,
                             secrets = secrets,
                             coordinator = coordinator,
                             fetcher = Provider { error("setCredentials is not wired in this fixture") },
                             tempFiles = FeedTempFiles(storagePaths, fileSystem),
+                            downloads =
+                                Provider {
+                                    FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) }
+                                },
                         ),
                         FakeNewEpisodePoster(),
                     ),
@@ -320,6 +334,7 @@ class RestoreWorkerTest {
                 channelSync = channels,
                 orderKeys = ProtocolOrderKeys,
                 clock = clock,
+                downloads = Provider { FakeDownloadLifecycle { db.downloadDao().removeUnclaimed(it) } },
             )
         return RestoreRunner(
             db = db,
