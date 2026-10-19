@@ -1,0 +1,19 @@
+<resources>
+    <string name="sleep_title">Sleep timer</string>
+    <string name="sleep_minutes">%1$d min</string>
+    <string name="sleep_custom">Custom…</string>
+    <string name="sleep_range">Minutes (1–240)</string>
+    <string name="sleep_start">Start timer</string>
+    <string name="sleep_end">End of episode</string>
+    <string name="sleep_end_active">Stops at the end of this episode</string>
+    <string name="sleep_waiting">Waiting while paused</string>
+    <string name="sleep_extend">+%1$d min</string>
+    <string name="sleep_off">Turn off</string>
+    <string name="player_chapters">Chapters (%1$d)</string>
+    <string name="player_chapter">Ch. %1$d · %2$s</string>
+    <string name="player_previous_chapter">Previous chapter</string>
+    <string name="player_next_chapter">Next chapter</string>
+    <string name="player_chapter_image">Chapter image: %1$s</string>
+    <string name="player_notes">Notes</string>
+    <string name="player_no_notes">No show notes</string>
+</resources>

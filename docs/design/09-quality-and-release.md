@@ -329,6 +329,28 @@ JUnit XML, including the 30-minute duration on API 34. Successful instrumented,
 API 37 and release-smoke runs upload reports as evidence; merely discovering or
 skipping the suite does not satisfy playback acceptance.
 
+**Implementation note (2026-10-19, M5).** The app-hosted playback evidence gate
+now requires sleep end-of-episode, chapter/timestamp seeks, both video decoder
+journeys, legacy browse/search and both hardware transport modes on each CI
+image and optimized release smoke image. Nightly also requires the one-minute
+screen-off listening timer and real ID3/Nero/QuickTime chapter extraction;
+API 34 retains its 30-minute continuity check. Missing, duplicate, failed or
+skipped required cases fail `scripts/ci/assert-playback-tests.py`. The same gate
+checks all nine nonempty synthetic media/chapter assets in the selected app
+test APK. Longer streams are assembled from the short fixture at runtime.
+
+The API 37 release route additionally runs `scripts/ci/playback-reboot.py`:
+three independent instrumentation processes seed/pause, inspect the offline
+System UI card and local blue artwork after a host reboot/unlock, then tap
+its play action with the controlled source restored. It enables audio
+hardening `throw` after reboot and archives phase results, screenshots,
+hierarchy, state, image fingerprint, tested SHA and logs under
+`app/build/reports/playback-reboot`. These host-only methods intentionally
+skip in ordinary suites and do not count toward their required cases. The
+host rejects any phase without exactly one non-skipped pass. No local
+emulator, release, reboot or DHU execution is claimed by this wiring; see
+[the M5 acceptance ledger](../PLAN.md#m5-playback-features-and-system-surfaces).
+
 Rule: an interface added to `:core:domain`, `:*:api` or `:sync:api` by any document gets its `Fake<Name>` in the same PR. Fakes are backed by `MutableStateFlow`, expose test-only mutators (`emit…`, `failNext: <ErrorType>?`) and a call log (`calls: List<String>`), and never sleep.
 
 **Not in `:core:testing`** (rule 9 forbids the dependencies, or the helper is one platform's):

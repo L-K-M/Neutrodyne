@@ -1270,6 +1270,23 @@ Boot-card resumption and hardware `SKIP` mapping remain M5.
 - **Design refs:** [06 Sleep timer](design/06-playback.md#sleep-timer), [06 Chapters](design/06-playback.md#chapters), [06 Shared playback core](design/06-playback.md#shared-playback-core), [06 System surfaces](design/06-playback.md#system-surfaces), [06 Video](design/06-playback.md#video), [06 Notification and media buttons](design/06-playback.md#notification-and-media-buttons), [03 Show notes](design/03-feeds-and-discovery.md#show-notes).
 - **Advances:** R4.7, R4.8 (sleep timer, chapters), N2.
 
+**Implementation note (2026-10-19, M5).** Integration evidence is tracked below.
+Host checks and device execution are separate acceptance evidence. Local
+validation totals are recorded in [HANDOFF](../HANDOFF.md).
+No emulator, optimized-release journey, reboot or DHU run was performed during
+this integration; the milestone remains open pending those runs and owner checks.
+
+| AC | Status | Host proof and device gate | Remaining evidence |
+|---|---|---|---|
+| 1 | Host verified; device pending | `SleepTimerCoreTest`, `SleepTimerTest`, strict session bundles; device end-of-episode and nightly screen-off timer cases | Execute device cases; listen to fade/restoration and buffering |
+| 2 | Host verified; device pending | Chapter index/parser, Room repository, extractor fixtures; nightly real ID3/Nero/QuickTime session case | Execute device extraction/seeks; listen to boundaries and 3× silence skipping |
+| 3 | Host verified; device pending | Metadata-only startup and false-resumption tests; host reboot/unlock/card/art/tap phases wired on API 37 release | Execute host journey on final SHA and check OEM card behavior |
+| 4 | Host verified; device pending | Room browse, modern/legacy browser tests; release browse/search/group-context cases | DHU on optimized release: four roots, queued group tap and retained context; hidden before Unknown sources and visible afterward |
+| 5 | Host verified; device pending | Renderer/Compose/ViewModel timestamp assertions; release current/non-current 754,000 ms session seek | Execute release journey; TalkBack chapter/timer actions and keyboard checks |
+| 6 | Host verified; device pending | Alternate mapping/cache tests; release screen-off rendered-audio and zero-video-decoder cases | Execute both decoder journeys and confirm audible audio |
+| 7 | Host verified; device pending | Session transport/MediaButton tests; release legacy EPISODE/SKIP case; API 37 cold-start and card hardening gates | DHU with hardening `throw`, Bluetooth/AVRCP in both modes, calls/navigation/unplug and airplane recovery |
+| 8 | Host verified | `SleepTimerCoreTest` and `ChapterIndexTest` in commonTest on desktop JVM | Pure shared rules verified; audible desktop execution remains MD1b |
+
 #### M6: Downloads
 
 **Implementation note (2026-10-19, M6a).** Adopted resolutions 2, 3, 5 and 7:

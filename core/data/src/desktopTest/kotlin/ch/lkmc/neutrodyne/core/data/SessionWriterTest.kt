@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.domain.ContextRetention
 import ch.lkmc.neutrodyne.core.domain.Departure
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.domain.SessionStart
+import ch.lkmc.neutrodyne.core.domain.StartMembership
 import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.MediaFilter
@@ -277,6 +278,47 @@ class SessionWriterTest {
                     }
                 }
             }
+        }
+
+    @Test fun externalListPrependsRemainderWithOneGenerationAndRollsBackOnFailure() =
+        runTest {
+            val ids = seed(5)
+            queue(listOf(ids[4], ids[2]))
+            val request =
+                SessionStart(
+                    ids[0],
+                    null,
+                    ContextRetention.REPLACE,
+                    null,
+                    null,
+                    queueHead = listOf(ids[1], ids[2], ids[1]),
+                )
+            val generation = writer.commitStart(request, 100)
+            assertEquals(1, generation)
+            assertEquals(ContextType.EXTERNAL, db.playSessionDao().get()?.contextType)
+            assertEquals(listOf(ids[1], ids[2], ids[4]), writer.virtualQueue(0).upNext.map { it.episodeId })
+            assertFailsWith<IllegalArgumentException> {
+                writer.commitStart(request.copy(currentEpisodeId = ids[3], queueHead = listOf(Long.MAX_VALUE)), 200)
+            }
+            assertEquals(generation, db.playSessionDao().get()?.generation)
+            assertEquals(ids[0], db.playSessionDao().get()?.currentEpisodeId)
+            assertEquals(listOf(ids[1], ids[2], ids[4]), writer.virtualQueue(0).upNext.map { it.episodeId })
+        }
+
+    @Test fun staleBrowseParentIsRejectedInsideStartTransaction() =
+        runTest {
+            val before = db.playSessionDao().get()
+            val ids = seed(2)
+            val podcast = db.episodeDao().byId(ids[0])!!.podcastId
+            val other = db.podcastDao().insertPodcast(podcastEntity())
+            val spec = context.copy(type = ContextType.PODCAST, contextId = other)
+            val request =
+                SessionStart(ids[0], spec, ContextRetention.REPLACE, ids[0], 200, membership = StartMembership.CONTEXT)
+            assertFailsWith<IllegalArgumentException> { writer.commitStart(request, 100) }
+            assertEquals(before, db.playSessionDao().get())
+            val accepted = request.copy(context = spec.copy(contextId = podcast))
+            writer.commitStart(accepted, 100)
+            assertEquals(podcast, db.playSessionDao().get()?.contextId)
         }
 
     private suspend fun seed(count: Int): List<Long> {

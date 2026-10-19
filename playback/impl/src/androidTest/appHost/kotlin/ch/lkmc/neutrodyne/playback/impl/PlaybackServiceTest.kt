@@ -17,6 +17,7 @@ import android.os.Build
 import android.os.Process
 import android.os.SystemClock
 import androidx.lifecycle.Lifecycle
+import androidx.media3.common.MediaItem
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.test.core.app.ActivityScenario
@@ -30,11 +31,16 @@ import ch.lkmc.neutrodyne.MainActivity
 import ch.lkmc.neutrodyne.NeutrodyneApplication
 import ch.lkmc.neutrodyne.core.artwork.ArtworkKeys
 import ch.lkmc.neutrodyne.core.database.ArtworkEntity
+import ch.lkmc.neutrodyne.core.database.ChapterEntity
+import ch.lkmc.neutrodyne.core.model.ChapterSource
+import ch.lkmc.neutrodyne.core.model.SleepTimerMode
+import ch.lkmc.neutrodyne.core.model.SleepTimerState
 import ch.lkmc.neutrodyne.core.testing.Nightly
 import ch.lkmc.neutrodyne.core.testing.ReleaseSmoke
 import ch.lkmc.neutrodyne.core.testing.database.episodeEntity
 import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.playback.api.PlayResult
+import ch.lkmc.neutrodyne.playback.api.PlaybackEvent
 import ch.lkmc.neutrodyne.playback.api.StreamKind
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -60,6 +66,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 
 /**
@@ -188,6 +195,136 @@ class PlaybackServiceTest {
             }
             tapNotification("Play")
             awaitAudio()
+        }
+
+    @Test @ReleaseSmoke
+    fun sleepEndOfEpisodeKeepsQueueAndMarksPlayedOnce() =
+        runBlocking {
+            seed()
+            graph.queueRepository().addLast(ids)
+            val events = CopyOnWriteArrayList<PlaybackEvent>()
+            val collecting = observation.launch { graph.playbackStateSource.events.collect { events += it } }
+            try {
+                start()
+                graph.playbackController.setSleepTimer(SleepTimerMode.EndOfEpisode)
+                await { graph.playbackStateSource.sleepTimer.value == SleepTimerState.EndOfEpisode(ids.first()) }
+                withContext(Dispatchers.Main) {
+                    val live = connect()
+                    live.seekTo(live.duration - 1_000)
+                }
+                await { events.contains(PlaybackEvent.SleepTimerFired) }
+                val db = graph.databaseOpener.requireDatabase()
+                await { db.episodeStateDao().byEpisode(ids.first())?.playedAt != null }
+                delay(500)
+                assertEquals(ids.first(), nowId())
+                assertEquals(
+                    listOf(ids[1]),
+                    graph
+                        .playSessionStore()
+                        .virtualQueue(0)
+                        .upNext
+                        .map { it.episodeId },
+                )
+                assertEquals(1, events.count { it == PlaybackEvent.SleepTimerFired })
+                assertEquals(1, events.count { it == PlaybackEvent.MarkedPlayed(ids.first()) })
+                assertEquals(SleepTimerState.Off, graph.playbackStateSource.sleepTimer.value)
+                withContext(Dispatchers.Main) {
+                    assertFalse(connect().playWhenReady)
+                    assertEquals(1f, connect().volume)
+                }
+            } finally {
+                collecting.cancel()
+            }
+        }
+
+    @Test @ReleaseSmoke
+    fun chaptersAndTimestampSeekThroughRealSession() =
+        runBlocking {
+            // A generated long stream makes 12:34 a valid seek without committing a large asset.
+            seed(repeats = 480)
+            val db = graph.databaseOpener.requireDatabase()
+            db.chapterDao().replace(
+                ids.first(),
+                ChapterSource.PSC,
+                listOf(
+                    ChapterEntity(ids.first(), ChapterSource.PSC, 0, 0, title = "Opening"),
+                    ChapterEntity(ids.first(), ChapterSource.PSC, 1, 30_000, title = "Second"),
+                ),
+            )
+            assertEquals(PlayResult.Started, graph.playbackController.playEpisode(ids.first()))
+            awaitAudio()
+            await {
+                graph.playbackStateSource.currentChapter.value
+                    ?.index == 0
+            }
+            withContext(Dispatchers.Main) { graph.playbackController.nextChapter() }
+            await {
+                graph.playbackStateSource.currentChapter.value
+                    ?.index == 1
+            }
+            withContext(Dispatchers.Main) { graph.playbackController.previousChapter() }
+            await { snapshotPosition() < 3_000 }
+            withContext(Dispatchers.Main) { graph.playbackController.seekTo(754_000) }
+            await { snapshotPosition() in 754_000..758_000 }
+            assertTrue(withContext(Dispatchers.Main) { connect().playWhenReady })
+            assertEquals(PlayResult.Started, graph.playbackController.playEpisodeAt(ids[1], 754_000))
+            await { nowId() == ids[1] && snapshotPosition() in 754_000..758_000 }
+            assertTrue(withContext(Dispatchers.Main) { connect().playWhenReady })
+        }
+
+    @Test @Nightly
+    fun screenOffListeningTimerExpiresAndRestoresVolume() =
+        runBlocking {
+            seed()
+            graph.queueRepository().addLast(ids)
+            start()
+            val timerStarted = SystemClock.elapsedRealtime()
+            graph.playbackController.setSleepTimer(SleepTimerMode.Minutes(1))
+            await { graph.playbackStateSource.sleepTimer.value is SleepTimerState.Running }
+            scenario?.moveToState(Lifecycle.State.CREATED)
+            device.sleep()
+            withTimeout(75_000) {
+                while (graph.playbackStateSource.sleepTimer.value != SleepTimerState.Off) delay(250)
+            }
+            assertTrue(SystemClock.elapsedRealtime() - timerStarted >= 60_000)
+            assertFalse(device.isScreenOn)
+            assertEquals(ids.first(), nowId())
+            withContext(Dispatchers.Main) {
+                assertFalse(connect().playWhenReady)
+                assertEquals(1f, connect().volume)
+            }
+        }
+
+    @Test @Nightly
+    fun embeddedId3NeroAndQuickTimeChaptersReachSession() =
+        runBlocking {
+            for ((asset, source) in listOf(
+                "chapters_id3.mp3" to ChapterSource.ID3,
+                "chapters_nero.m4b" to ChapterSource.MP4,
+                "chapters_quicktime.m4b" to ChapterSource.MP4,
+                "chapters_both.m4b" to ChapterSource.MP4,
+            )) {
+                seed(repeats = 1, asset = asset)
+                withContext(Dispatchers.Main) {
+                    val live = connect()
+                    live.setMediaItem(MediaItem.Builder().setMediaId("episode:${ids.first()}").build())
+                    live.prepare()
+                }
+                await {
+                    graph.playbackStateSource.currentChapter.value?.let {
+                        it.episodeId == ids.first() && it.count == 2 && it.chapter.source == source
+                    } == true
+                }
+                assertFalse(withContext(Dispatchers.Main) { connect().playWhenReady })
+                withContext(Dispatchers.Main) { graph.playbackController.nextChapter() }
+                await { snapshotPosition() in 1_000..1_100 }
+                assertEquals(
+                    "Closing",
+                    graph.playbackStateSource.currentChapter.value
+                        ?.chapter
+                        ?.title,
+                )
+            }
         }
 
     @Test fun focusLossAndNoisyPause() =
@@ -349,10 +486,13 @@ class PlaybackServiceTest {
             assertTrue(server.requestCount >= 2)
         }
 
-    private suspend fun seed(repeats: Int = SHORT_STREAM_REPEATS) {
+    private suspend fun seed(
+        repeats: Int = SHORT_STREAM_REPEATS,
+        asset: String = "cbr_128k_2s.mp3",
+    ) {
         val frame =
             instrumentation.context.assets
-                .open("media/cbr_128k_2s.mp3")
+                .open("media/$asset")
                 .use { it.readBytes() }
         val body = Buffer().apply { repeat(repeats) { write(frame) } }.readByteArray()
         server.dispatcher =
@@ -367,7 +507,7 @@ class PlaybackServiceTest {
                     return MockResponse
                         .Builder()
                         .code(if (offset == 0) 200 else 206)
-                        .addHeader("Content-Type", "audio/mpeg")
+                        .addHeader("Content-Type", if (asset.endsWith("m4b")) "audio/mp4" else "audio/mpeg")
                         .addHeader("Accept-Ranges", "bytes")
                         .apply {
                             if (offset >

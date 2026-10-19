@@ -109,6 +109,8 @@ data class PlaybackMediaInfo(
     val chaptersType: String? = null,
     /** Audio candidate only; null means use the original enclosure. isVideo remains feed metadata. */
     val audioAlternate: AudioAlternate? = null,
+    /** System surfaces map this saved status; null is not downloaded until M6 supplies files. */
+    val downloadState: DownloadState? = null,
 )
 
 data class AudioAlternate(

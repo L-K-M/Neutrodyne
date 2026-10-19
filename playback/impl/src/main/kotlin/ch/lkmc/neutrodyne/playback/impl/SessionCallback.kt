@@ -3,11 +3,7 @@ package ch.lkmc.neutrodyne.playback.impl
 
 import android.os.Bundle
 import android.os.Process
-import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.session.LibraryResult
-import androidx.media3.session.MediaLibraryService.LibraryParams
-import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSession.ConnectionResult
 import androidx.media3.session.MediaSession.ControllerInfo
@@ -15,9 +11,6 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
 import ch.lkmc.neutrodyne.core.model.SettingScope
-import ch.lkmc.neutrodyne.playback.api.PlayResult
-import ch.lkmc.neutrodyne.playback.core.StartRequest
-import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CoroutineDispatcher
@@ -35,21 +28,35 @@ internal class SessionCallback(
     private val io: CoroutineDispatcher,
     private val beforeStart: () -> Unit = {},
     private val chapterCommand: (String) -> SessionResult? = { null },
-) : MediaLibrarySession.Callback {
+) : LibraryCallbacks(tree, scope, io) {
     private val commands = Mutex()
 
     override fun onConnectAsync(
         session: MediaSession,
         controller: ControllerInfo,
     ): ListenableFuture<ConnectionResult> {
-        val builder = ConnectionResult.AcceptedResultBuilder(session, controller)
+        val builder =
+            ConnectionResult
+                .AcceptedResultBuilder(session, controller)
+                .setAvailablePlayerCommands(androidx.media3.common.Player.Commands.EMPTY)
+                .setAvailableSessionCommands(
+                    ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS
+                        .buildUpon()
+                        .remove(
+                            SessionCommand.COMMAND_CODE_SESSION_SET_RATING,
+                        ).build(),
+                )
         if (canControl(session, controller)) {
             val custom = ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
             CustomCommands.names.forEach { custom.add(CustomCommands.command(it)) }
-            SleepTimerCommands.names.forEach { custom.add(CustomCommands.command(it)) }
             builder
-                .setAvailablePlayerCommands(ConnectionResult.DEFAULT_PLAYER_COMMANDS)
-                .setAvailableSessionCommands(custom.build())
+                .setAvailablePlayerCommands(
+                    ConnectionResult.DEFAULT_PLAYER_COMMANDS
+                        .buildUpon()
+                        .remove(
+                            androidx.media3.common.Player.COMMAND_SET_TRACK_SELECTION_PARAMETERS,
+                        ).build(),
+                ).setAvailableSessionCommands(custom.build())
             if (session.isMediaNotificationController(controller)) builder.setMediaButtonPreferences(buttons.current())
         }
         return Futures.immediateFuture(builder.build())
@@ -145,46 +152,14 @@ internal class SessionCallback(
         scope.future {
             require(canControl(session, controller))
             commands.withLock {
-                require(mediaItems.size == 1) { "M4 accepts one episode start" }
-                val id = parseBrowseEpisode(mediaItems.single().mediaId)
-                val position = startPositionMs.takeIf { it != C.TIME_UNSET }
-                require(position == null || position >= 0)
+                val request =
+                    kotlinx.coroutines.withContext(
+                        io,
+                    ) { tree.startRequest(mediaItems, startIndex, startPositionMs) }
                 beforeStart()
                 val live = bridge()
-                live.setMediaItems(StartRequest.Episode(id, position), origin(session, controller))
+                live.setMediaItems(request, origin(session, controller))
             }
-        }
-
-    override fun onGetLibraryRoot(
-        session: MediaLibrarySession,
-        browser: ControllerInfo,
-        params: LibraryParams?,
-    ): ListenableFuture<LibraryResult<MediaItem>> = Futures.immediateFuture(LibraryResult.ofItem(tree.root(), params))
-
-    override fun onGetChildren(
-        session: MediaLibrarySession,
-        browser: ControllerInfo,
-        parentId: String,
-        page: Int,
-        pageSize: Int,
-        params: LibraryParams?,
-    ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> =
-        scope.future(io) {
-            try {
-                LibraryResult.ofItemList(tree.children(parentId, page, pageSize), params)
-            } catch (_: IllegalArgumentException) {
-                LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
-            }
-        }
-
-    override fun onGetItem(
-        session: MediaLibrarySession,
-        browser: ControllerInfo,
-        mediaId: String,
-    ): ListenableFuture<LibraryResult<MediaItem>> =
-        scope.future(io) {
-            tree.item(mediaId)?.let { LibraryResult.ofItem(it, null) }
-                ?: LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
         }
 
     private fun canControl(
@@ -213,9 +188,6 @@ internal class SessionCallback(
         SessionResult(SessionResult.RESULT_SUCCESS, Bundle().apply { putString(CustomCommands.RESULT, result.name) })
 
     companion object {
-        fun parseBrowseEpisode(id: String): Long {
-            require(id.matches(Regex("episode:[1-9][0-9]*(@upnext)?")))
-            return id.removePrefix("episode:").substringBefore('@').toLong()
-        }
+        fun parseBrowseEpisode(id: String): Long = MediaLibraryTree.parseEpisode(id).id
     }
 }

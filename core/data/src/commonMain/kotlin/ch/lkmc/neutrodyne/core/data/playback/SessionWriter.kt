@@ -15,12 +15,15 @@ import ch.lkmc.neutrodyne.core.domain.Departure
 import ch.lkmc.neutrodyne.core.domain.OrderKeys
 import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.SessionStart
+import ch.lkmc.neutrodyne.core.domain.StartMembership
+import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.FeedOrder
 import ch.lkmc.neutrodyne.core.model.MediaFilter
 import ch.lkmc.neutrodyne.core.model.PlayContextSpec
 import ch.lkmc.neutrodyne.core.model.QueueItem
 import ch.lkmc.neutrodyne.core.model.QueueOrigin
+import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.VirtualQueue
 import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import dev.zacsweers.metro.ContributesBinding
@@ -74,8 +77,47 @@ internal class SessionWriter(
         now: Long,
     ): Long =
         mutate(now) { session ->
+            if (start.membership == StartMembership.CONTEXT) {
+                val spec = requireNotNull(start.context)
+                when (spec.type) {
+                    ContextType.GROUP -> requireNotNull(db.groupDao().groupById(requireNotNull(spec.contextId)))
+                    ContextType.PODCAST -> requireNotNull(db.podcastDao().byId(requireNotNull(spec.contextId)))
+                    else -> throw IllegalArgumentException("Unsupported browse context")
+                }
+                require(
+                    db
+                        .feedDao()
+                        .contextList(
+                            FeedQueryBuilder.contextList(
+                                spec,
+                                1,
+                                capabilities.capabilities.value.inAppPlayback,
+                                start.currentEpisodeId,
+                            ),
+                        ).isNotEmpty(),
+                ) {
+                    "Episode left browse context before start"
+                }
+            }
             saveDeparture(start.departure, now)
             promote(start.currentEpisodeId, now)
+            if (start.queueHead.isNotEmpty()) {
+                val ids = start.queueHead.distinct().filter { it != start.currentEpisodeId }
+                val rows = db.episodeDao().queueEligibility(ids)
+                require(
+                    rows.size == ids.size &&
+                        rows.all {
+                            it.availability == Availability.AVAILABLE &&
+                                (
+                                    it.sourceType == SourceType.RSS ||
+                                        capabilities.capabilities.value.inAppPlayback
+                                )
+                        },
+                ) { "External queue changed before start" }
+                val entries = db.queueDao().entries()
+                val desired = ids + entries.filter { it.episodeId !in ids }.map { it.episodeId }
+                db.applyQueueWrites(planQueueWrites(entries, desired, orderKeys), now)
+            }
             val current = session.copy(currentEpisodeId = start.currentEpisodeId)
             if (start.contextRetention == ContextRetention.KEEP) return@mutate current
 

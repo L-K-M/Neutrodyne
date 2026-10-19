@@ -29,6 +29,7 @@ import ch.lkmc.neutrodyne.core.navigation.PodcastSettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
+import ch.lkmc.neutrodyne.core.navigation.SleepTimerKey
 import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import ch.lkmc.neutrodyne.desktop.buildinfo.BuildInfoLoader
@@ -81,6 +82,7 @@ class DesktopAppGraphTest {
                         graph.playSessionStore() to "SessionWriter",
                         graph.positionStore() to "PositionWriter",
                         graph.playbackMediaLookup() to "PlaybackMediaLookupImpl",
+                        graph.chapterRepository() to "ChapterRepositoryImpl",
                     )
                 for ((binding, expectedName) in bindings) {
                     assertThat(binding::class.simpleName).isEqualTo(expectedName)
@@ -93,6 +95,7 @@ class DesktopAppGraphTest {
                 assertThat(graph.playSessionStore()).isSameInstanceAs(graph.playSessionStore())
                 assertThat(graph.positionStore()).isSameInstanceAs(graph.positionStore())
                 assertThat(graph.playbackMediaLookup()).isSameInstanceAs(graph.playbackMediaLookup())
+                assertThat(graph.chapterRepository()).isSameInstanceAs(graph.chapterRepository())
             } finally {
                 graph.databaseOpener.requireDatabase().close()
             }
@@ -101,6 +104,9 @@ class DesktopAppGraphTest {
     @Test
     fun playerSpeedEntryAndWindowViewModelResolveWithoutOpeningDatabase() {
         val provider = entryProvider<NavKey> { graph.entryInstallers.forEach { it() } }
+        assertThat(
+            provider(SleepTimerKey).metadata[NdSceneMetadata.KEY_OVERLAY],
+        ).isEqualTo(NdSceneMetadata.OVERLAY_SHEET)
         assertThat(provider(SpeedKey).metadata[NdSceneMetadata.KEY_OVERLAY]).isEqualTo(NdSceneMetadata.OVERLAY_SHEET)
         val player = graph.metroViewModelFactory.create(PlayerViewModel::class, CreationExtras.Empty)
         assertThat(player.uiState.value.now).isNull()
@@ -148,6 +154,7 @@ class DesktopAppGraphTest {
             assertThat(graph.playSessionStore).isNotNull()
             assertThat(graph.positionStore).isNotNull()
             assertThat(graph.playbackMediaLookup).isNotNull()
+            assertThat(graph.chapterRepository).isNotNull()
             assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
         }
 
@@ -341,6 +348,7 @@ class DesktopAppGraphTest {
                 LibraryKey,
                 UpNextKey,
                 SpeedKey,
+                SleepTimerKey,
                 DownloadsKey,
                 DiscoverKey,
                 SettingsHomeKey,

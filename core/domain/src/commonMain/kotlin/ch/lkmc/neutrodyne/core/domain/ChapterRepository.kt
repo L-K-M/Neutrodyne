@@ -6,7 +6,7 @@ import ch.lkmc.neutrodyne.core.model.ChapterSource
 import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import kotlinx.coroutines.flow.Flow
 
-/** Main-safe local enrichment, implemented/bound in core:data (M5 W3). No player dependency. */
+/** Main-safe local enrichment, implemented/bound in core:data (M5). No player dependency. */
 interface ChapterRepository {
     /** Normalized winning source, hidden rows excluded; empty for absent/deleted episodes. */
     fun observe(episodeId: Long): Flow<List<EpisodeChapter>>

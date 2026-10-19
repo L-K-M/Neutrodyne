@@ -9,6 +9,7 @@ import ch.lkmc.neutrodyne.core.domain.PlaySessionStore
 import ch.lkmc.neutrodyne.core.domain.SessionStart
 import ch.lkmc.neutrodyne.core.domain.StartGate
 import ch.lkmc.neutrodyne.core.domain.StoredPosition
+import ch.lkmc.neutrodyne.core.model.AudioAlternate
 import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.ContextType
 import ch.lkmc.neutrodyne.core.model.ExternalReason
@@ -131,6 +132,44 @@ class PlayStarterTest {
         contexts.specResult = contexts.specResult.copy(type = ContextType.GROUP, contextId = 7)
         contexts.startResult = 4
     }
+
+    @Test fun videoWithSelectedAudioCanStartWithoutOriginalEnclosure() =
+        runTest {
+            lookup.items.value +=
+                2L to
+                media(
+                    2,
+                ).copy(
+                    isVideo = true,
+                    enclosureUrl = null,
+                    audioAlternate =
+                        AudioAlternate(
+                            "https://cdn.example/audio",
+                            "audio/mpeg",
+                            null,
+                        ),
+                )
+            assertIs<StartOutcome.Committed>(starter().start(StartRequest.Episode(2)))
+        }
+
+    @Test fun externalListCarriesAtomicQueueHeadAndReplacesQueuedContextAfterGates() =
+        runTest {
+            committed(StartRequest.Episode(2, externalQueue = listOf(3, 4, 3)))
+            val start = sessions.calls.single().start!!
+            assertEquals(ContextRetention.REPLACE, start.contextRetention)
+            assertNull(start.context)
+            assertEquals(listOf(3L, 4L), start.queueHead)
+        }
+
+    @Test fun invalidExternalRemainderAndRefusedFirstLeaveQueueUntouched() =
+        runTest {
+            lookup.items.value = lookup.items.value - 3L
+            assertIs<StartOutcome.Refused>(starter().start(StartRequest.Episode(2, externalQueue = listOf(3))))
+            assertTrue(sessions.calls.isEmpty())
+            gate.refusal = PlayResult.MeteredBlocked
+            assertIs<StartOutcome.Refused>(starter().start(StartRequest.Episode(2, externalQueue = listOf(4))))
+            assertTrue(sessions.calls.isEmpty())
+        }
 
     @Test fun groupStartSelectsFirstQueuedAndKeepsAnchorNullAndRemainingOrder() =
         runTest {

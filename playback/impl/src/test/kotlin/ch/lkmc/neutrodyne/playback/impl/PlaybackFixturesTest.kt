@@ -23,6 +23,62 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class PlaybackFixturesTest {
+    @Test fun videoFixtureContainsRealH264AndAacTracks() {
+        val bytes = checkNotNull(javaClass.getResourceAsStream("/media/h264_aac_8s.mp4")).use { it.readBytes() }
+        val extractor =
+            androidx.media3.extractor.mp4
+                .Mp4Extractor()
+        val types = mutableSetOf<String>()
+        extractor.init(
+            object : ExtractorOutput {
+                override fun track(
+                    id: Int,
+                    type: Int,
+                ): TrackOutput =
+                    object : TrackOutput by DiscardingTrackOutput() {
+                        override fun format(format: androidx.media3.common.Format) {
+                            format.sampleMimeType?.let(types::add)
+                        }
+                    }
+
+                override fun endTracks() = Unit
+
+                override fun seekMap(seekMap: SeekMap) = Unit
+            },
+        )
+        val source = ByteArrayDataSource(bytes)
+        val holder = PositionHolder()
+        try {
+            source.open(DataSpec.Builder().setUri("test://video.mp4").build())
+            var input = DefaultExtractorInput(source, 0, bytes.size.toLong())
+            assertTrue(extractor.sniff(input))
+            input.resetPeekPosition()
+            while (true) {
+                when (extractor.read(input, holder)) {
+                    Extractor.RESULT_END_OF_INPUT -> {
+                        break
+                    }
+
+                    Extractor.RESULT_SEEK -> {
+                        source.close()
+                        source.open(
+                            DataSpec
+                                .Builder()
+                                .setUri("test://video.mp4")
+                                .setPosition(holder.position)
+                                .build(),
+                        )
+                        input = DefaultExtractorInput(source, holder.position, bytes.size.toLong())
+                    }
+                }
+            }
+            assertEquals(setOf("video/avc", "audio/mp4a-latm"), types)
+        } finally {
+            source.close()
+            extractor.release()
+        }
+    }
+
     @Test fun syntheticCbrVbrAndSilenceFixturesHaveSeekableAudio() {
         for ((name, duration) in listOf("cbr_128k_2s.mp3" to 2, "vbr_xing_2s.mp3" to 2, "silence_gaps_3s.mp3" to 3)) {
             val bytes = checkNotNull(javaClass.getResourceAsStream("/media/$name")).use { it.readBytes() }

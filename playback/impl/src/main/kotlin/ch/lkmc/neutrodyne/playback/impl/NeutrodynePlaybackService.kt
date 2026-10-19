@@ -62,7 +62,7 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
         val callback =
             SessionCallback(
                 runtime,
-                ResumptionProvider(runtime),
+                ResumptionProvider(access.savedResumption::load, runtime),
                 access.tree,
                 buttons,
                 lifecycleScope,
@@ -103,7 +103,7 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
                 ).setMediaButtonPreferences(buttons.current())
                 .build()
         starting =
-            lifecycleScope.async {
+            lifecycleScope.async(start = kotlinx.coroutines.CoroutineStart.LAZY) {
                 val ports = access.open()
                 AndroidServiceBridge(
                     player,
@@ -193,7 +193,11 @@ public class NeutrodynePlaybackService : MediaLibraryService() {
 }
 
 /** Null in all normal runs. Tests arm it before framework creation; no runtime setting exposes it. */
-@androidx.annotation.VisibleForTesting
+@androidx.annotation.VisibleForTesting(otherwise = androidx.annotation.VisibleForTesting.PACKAGE_PRIVATE)
+@androidx.annotation.Keep
 public object PlaybackTestHooks {
     @Volatile public var foregroundServiceTimeoutMs: Long? = null
+
+    /** Attach decoder-event probes before first prepare; normally null. */
+    @Volatile public var playerCreated: ((ExoPlayer) -> Unit)? = null
 }

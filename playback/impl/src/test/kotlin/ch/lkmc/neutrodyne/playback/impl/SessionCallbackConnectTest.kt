@@ -65,6 +65,11 @@ class SessionCallbackConnectTest {
                     assertTrue(
                         result.availableSessionCommands.contains(CustomCommands.command(CustomCommands.PLAY_CONTEXT)),
                     )
+                    assertEquals(CustomCommands.names.size, CustomCommands.names.distinct().size)
+                    for (name in CustomCommands.names) {
+                        assertTrue(result.availableSessionCommands.contains(CustomCommands.command(name)))
+                    }
+
                     assertTrue(
                         result.availableSessionCommands.contains(
                             CustomCommands.command(PlaybackSessionCommands.CHAPTER_NEXT),

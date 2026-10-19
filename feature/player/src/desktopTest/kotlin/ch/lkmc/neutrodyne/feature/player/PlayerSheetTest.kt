@@ -17,11 +17,14 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.moveBy
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performCustomAccessibilityActionWithLabel
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
@@ -35,8 +38,11 @@ import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
 import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
+import ch.lkmc.neutrodyne.core.model.ChapterSource
+import ch.lkmc.neutrodyne.core.model.EpisodeChapter
 import ch.lkmc.neutrodyne.core.model.UpNextItem
 import ch.lkmc.neutrodyne.core.navigation.PaneLayout
+import ch.lkmc.neutrodyne.core.navigation.SleepTimerKey
 import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.testing.TestClock
 import ch.lkmc.neutrodyne.core.testing.testEpisodeRow
@@ -97,12 +103,46 @@ class PlayerSheetTest {
                 })
             }
             onNodeWithTag("fullPlayer").assertIsDisplayed()
+            onAllNodesWithText("Up next").onLast().performClick()
             onNodeWithTag("upNextList").performScrollToNode(hasText("Episode 3"))
             onNodeWithText("Episode 3").performCustomAccessibilityActionWithLabel("Move to top")
             runOnIdle { assertEquals(listOf(3L to 0), moves) }
             onNodeWithText("Episode 3").performCustomAccessibilityActionWithLabel("Remove from Up next")
             runOnIdle { assertEquals(listOf(2L), queued.map { it.row.id }) }
             onNodeWithText("Episode 3").assertDoesNotExist()
+        }
+
+    @Test fun chaptersLabelsTabsOverflowSleepAndEmptyFallback() =
+        runComposeUiTest {
+            val fixture = SheetFixture(PlayerSheetValue.Expanded)
+            fixture.chapters =
+                listOf(
+                    EpisodeChapter(
+                        0,
+                        null,
+                        "Opening",
+                        null,
+                        null,
+                        ChapterSource.PSC,
+                        false,
+                    ),
+                )
+            setContent { fixture.Content() }
+            onNodeWithContentDescription("Next chapter").performClick()
+            onNodeWithContentDescription("Previous chapter").performClick()
+            onNodeWithText("Chapters (1)").performScrollTo().performClick()
+            onNodeWithText("Opening").performScrollTo().performClick()
+            onNodeWithContentDescription("More options").performClick()
+            onNodeWithText("Next episode").performClick()
+            onNodeWithText("Sleep timer").performScrollTo().performClick()
+            assertEquals(listOf("next", "previous", "seek:0", "nextEpisode"), fixture.calls)
+            assertEquals(
+                listOf<androidx.navigation3.runtime.NavKey>(SleepTimerKey),
+                fixture.navigated,
+            )
+            runOnIdle { fixture.chapters = emptyList() }
+            onNodeWithText("Chapters (1)").assertDoesNotExist()
+            onNodeWithContentDescription("Next episode").performScrollTo().assertIsDisplayed()
         }
 
     @Test fun hidingMiniSkipKeepsFullPlayerSkip() =
@@ -272,6 +312,12 @@ class PlayerSheetTest {
             setContent {
                 CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides owner) { fixture.Content() }
             }
+            onNodeWithText("Notes").performScrollTo().performClick()
+            runOnIdle {
+                input.backStarted(NavigationEvent())
+                input.backCompleted()
+            }
+            onNodeWithTag("fullPlayer").assertIsDisplayed()
             runOnIdle {
                 input.backStarted(NavigationEvent())
                 input.backProgressed(NavigationEvent(progress = 0.5f))
@@ -353,6 +399,7 @@ private class SheetFixture(
 ) {
     val state = PlayerSheetState(initial)
     var now by mutableStateOf<NowPlaying?>(sampleNow())
+    var chapters by mutableStateOf<List<EpisodeChapter>>(emptyList())
     var pending by mutableStateOf<PlayResult.NeedsMeteredConsent?>(null)
     var expandToken by mutableIntStateOf(0)
     var collapseToken by mutableIntStateOf(0)
@@ -369,7 +416,7 @@ private class SheetFixture(
     ) {
         NeutrodyneTheme(AppearancePrefs(), SystemUiState.DEFAULT.copy(reducedMotion = true)) {
             PlayerSheet(
-                ui = PlayerUiState(now = now, consent = pending, miniSkip = miniSkip),
+                ui = PlayerUiState(now = now, consent = pending, miniSkip = miniSkip, chapters = chapters),
                 position = now?.position,
                 slot =
                     PlayerSlotState(
@@ -388,6 +435,7 @@ private class SheetFixture(
                 forward = { calls += "forward" },
                 previous = { calls += "previous" },
                 next = { calls += "next" },
+                nextEpisode = { calls += "nextEpisode" },
                 seek = { calls += "seek:$it" },
                 dismiss = { calls += "dismiss" },
                 stop = { calls += "stop" },

@@ -68,6 +68,8 @@ class PlayerFactoryTest {
         assertThat(player.audioAttributes.contentType).isEqualTo(C.AUDIO_CONTENT_TYPE_SPEECH)
         assertThat(player.trackSelectionParameters.disabledTrackTypes)
             .containsAtLeast(C.TRACK_TYPE_VIDEO, C.TRACK_TYPE_TEXT)
+        assertThat((0 until player.rendererCount).map { player.getRendererType(it) })
+            .containsNoneOf(C.TRACK_TYPE_VIDEO, C.TRACK_TYPE_TEXT)
         assertThat(player.repeatMode).isEqualTo(Player.REPEAT_MODE_OFF)
         assertThat(player.shuffleModeEnabled).isFalse()
         assertThat(player.trackSelectionParameters.audioOffloadPreferences.audioOffloadMode)

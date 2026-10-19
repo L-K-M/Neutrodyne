@@ -161,6 +161,19 @@ interface EpisodeDao : DownloadSourceQueries {
     @RawQuery(observedEntities = [EpisodeEntity::class, PodcastEntity::class, EpisodeStateEntity::class])
     suspend fun unplayedIds(query: RoomRawQuery): List<Long>
 
+    /** Caller escapes LIKE wildcards; values are bound, never interpolated into SQL. */
+    @Query(
+        "SELECT e.id FROM episode e JOIN podcast p ON p.id = e.podcastId" +
+            " WHERE e.title LIKE :pattern ESCAPE '\\' AND " + FeedQueryBuilder.VISIBLE +
+            " AND e.availability = 'AVAILABLE' AND (:youtubePlayable = 1 OR p.sourceType = 'RSS')" +
+            " ORDER BY e.sortDate DESC, e.id DESC LIMIT :limit",
+    )
+    suspend fun searchTitles(
+        pattern: String,
+        limit: Int,
+        youtubePlayable: Boolean,
+    ): List<Long>
+
     // --- Playback media lookup (02 Media lookup, M4) -------------------------------------------------
 
     /**
