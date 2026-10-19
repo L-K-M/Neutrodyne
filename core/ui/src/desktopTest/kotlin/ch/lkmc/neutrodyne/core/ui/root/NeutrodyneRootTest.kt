@@ -21,9 +21,7 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.click
-import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.onAllNodesWithContentDescription
-import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -42,12 +40,10 @@ import ch.lkmc.neutrodyne.core.navigation.DownloadsKey
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.ExportKey
 import ch.lkmc.neutrodyne.core.navigation.FeedsKey
-import ch.lkmc.neutrodyne.core.navigation.ImportKey
 import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.PodcastKey
-import ch.lkmc.neutrodyne.core.navigation.Route
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import ch.lkmc.neutrodyne.core.ui.platform.ExternalUrlOpener
@@ -60,10 +56,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.nav_feeds
 import ch.lkmc.neutrodyne.core.ui.resources.nav_library
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
-import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.StringResource
@@ -94,113 +87,6 @@ class NeutrodyneRootTest {
     fun tearDown() {
         Locale.setDefault(previousLocale)
     }
-
-    @Test
-    fun groupNotificationSelectsFeedsInsteadOfDroppingTheRoute() =
-        runComposeUiTest {
-            val pending = Channel<Route>(Channel.UNLIMITED)
-            val routes = pending.receiveAsFlow()
-            val selected = mutableListOf<String?>()
-            setContent {
-                TestRoot(routes = routes, selectFeedSource = {
-                    selected += it
-                    true
-                })
-            }
-            onNodeWithTag("nav_library").performClick()
-            onNodeWithText("count:0").assertIsDisplayed()
-            val route =
-                ch.lkmc.neutrodyne.core.navigation.IntentRouter.route(
-                    ch.lkmc.neutrodyne.core.navigation.RouteInput(
-                        ch.lkmc.neutrodyne.core.navigation.RouteInput.Action.VIEW,
-                        "neutrodyne://open/group/tech",
-                        internal = true,
-                    ),
-                )
-            kotlin.test.assertEquals(Route.SelectFeed("tech"), route)
-            runOnIdle { pending.trySend(route) }
-            onNodeWithText("count:0").assertDoesNotExist()
-            onNodeWithText("feeds-content").assertIsDisplayed()
-            runOnIdle { kotlin.test.assertEquals<List<String?>>(listOf("tech"), selected) }
-        }
-
-    @Test
-    fun selectingAllFeedsClearsTheFeedsDetailStack() =
-        runComposeUiTest {
-            val pending = Channel<Route>(Channel.UNLIMITED)
-            val selected = mutableListOf<String?>()
-            setContent {
-                TestRoot(routes = pending.receiveAsFlow(), selectFeedSource = {
-                    selected += it
-                    true
-                })
-            }
-            onNodeWithText("open-podcast").performClick()
-            onNodeWithText("podcast-3").assertIsDisplayed()
-
-            runOnIdle { pending.trySend(Route.SelectFeed(null)) }
-            onNodeWithText("podcast-3").assertDoesNotExist()
-            onNodeWithText("feeds-content").assertIsDisplayed()
-            runOnIdle { kotlin.test.assertEquals<List<String?>>(listOf(null), selected) }
-        }
-
-    @Test
-    fun failedFeedSelectionKeepsTheCurrentTabAndReportsTheFailure() =
-        runComposeUiTest {
-            val pending = Channel<Route>(Channel.UNLIMITED)
-            setContent { TestRoot(routes = pending.receiveAsFlow(), selectFeedSource = { false }) }
-            onNodeWithTag("nav_library").performClick()
-
-            runOnIdle { pending.trySend(Route.SelectFeed("tech")) }
-            onNodeWithText("count:0").assertIsDisplayed()
-            val message = "Couldn't save the change"
-            // The queued route and snackbar transition settle after the tab's unchanged frame.
-            waitUntil(timeoutMillis = 5_000) {
-                onAllNodesWithText(message).fetchSemanticsNodes().size == 1 && onNodeWithText(message).isDisplayed()
-            }
-            onNodeWithText(message).assertIsDisplayed()
-        }
-
-    @Test
-    fun failedFeedSelectionDoesNotHoldTheNextImportRoute() =
-        runComposeUiTest {
-            val pending = Channel<Route>(Channel.UNLIMITED)
-            setContent { TestRoot(routes = pending.receiveAsFlow(), selectFeedSource = { false }) }
-            onNodeWithTag("nav_library").performClick()
-
-            mainClock.autoAdvance = false
-            try {
-                runOnIdle {
-                    pending.trySend(Route.SelectFeed("missing"))
-                    pending.trySend(Route.Navigate(LibraryKey, listOf(ImportKey("44"))))
-                }
-                // Navigation must finish while the error notice is still visible, not after its timeout.
-                mainClock.advanceTimeBy(1_000)
-                onNodeWithText("import-44").assertIsDisplayed()
-                onNodeWithText("Couldn't save the change").assertIsDisplayed()
-            } finally {
-                mainClock.autoAdvance = true
-            }
-        }
-
-    @Test
-    fun importRoutesWaitForStartupAndWarmDeliveryReplacesThePreview() =
-        runComposeUiTest {
-            val pending = Channel<Route>(Channel.UNLIMITED)
-            val routes = pending.receiveAsFlow()
-            var startup by mutableStateOf<StartupGateState>(StartupGateState.Pending)
-            pending.trySend(Route.Navigate(LibraryKey, listOf(ImportKey("42"))))
-            setContent { TestRoot(startup, routes) }
-            onNodeWithText("import-42").assertDoesNotExist()
-
-            runOnIdle { startup = StartupGateState.Ready }
-            onNodeWithText("import-42").assertIsDisplayed()
-            runOnIdle { pending.trySend(Route.Navigate(LibraryKey, listOf(ImportKey("43")))) }
-            onNodeWithText("import-43").assertIsDisplayed()
-            onNodeWithText("import-42").assertDoesNotExist()
-            pressEscape()
-            onNodeWithText("count:0").assertIsDisplayed()
-        }
 
     @Test
     fun fiveDestinationsAreLabelled() =
@@ -432,14 +318,13 @@ private val TestPlatformActions =
         override val notifications = null
     }
 
-private fun testActions(selectFeedSource: suspend (String?) -> Boolean = { true }): RootActions =
+private fun testActions(): RootActions =
     RootActions(
         retryStartup = {},
         dismissNotice = {},
         continueHere = {},
         dismissRemoteSession = {},
         playbackKey = { false },
-        selectFeedSource = selectFeedSource,
     )
 
 private val TestSlots = RootSlots(player = {}, userMessages = emptyFlow())
@@ -449,16 +334,11 @@ private val TestSlots = RootSlots(player = {}, userMessages = emptyFlow())
  * composes it.
  */
 @Composable
-private fun TestRoot(
-    startup: StartupGateState = StartupGateState.Ready,
-    routes: Flow<Route> = emptyFlow(),
-    selectFeedSource: suspend (String?) -> Boolean = { true },
-) {
+private fun TestRoot() {
     CompositionLocalProvider(LocalPlatformActions provides TestPlatformActions) {
         NeutrodyneRoot(
-            state = RootUiState.READY.copy(startup = startup),
-            routes = routes,
-            actions = testActions(selectFeedSource),
+            state = RootUiState.READY,
+            actions = testActions(),
             slots = TestSlots,
             installers = TestInstallers,
             platform = BuildInfo.Platform.DESKTOP,
@@ -486,7 +366,6 @@ private val TestInstallers: Set<EntryProviderInstaller> =
                 TabStub("discover-content", NdIcons.Explore)
             }
         }
-        add { entry<ImportKey>(metadata = NdSceneMetadata.paneDetail()) { Text("import-${it.sessionId}") } }
         add { entry<SettingsHomeKey>(metadata = NdSceneMetadata.paneList()) { Text("settings-home") } }
         add {
             entry<PodcastKey>(metadata = NdSceneMetadata.paneDetail()) { key ->

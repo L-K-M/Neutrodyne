@@ -462,7 +462,7 @@ class ImportRouteTest {
             setState(id, ImportState.DONE)
             setRouteContent(ImportKey(id.toString()))
 
-            assertDisplayedWhenReady("Feed no longer available. Check its address or remove it.")
+            onNodeWithText("Feed no longer available. Check its address or remove it.").assertExists()
         }
 
     @Test fun queuedRowShowsPendingFetch() =
@@ -471,7 +471,7 @@ class ImportRouteTest {
             setState(id, ImportState.FETCHING)
             setRouteContent(ImportKey(id.toString()))
 
-            assertDisplayedWhenReady("Queued")
+            onNodeWithText("Queued").assertExists()
         }
 
     @Test fun unsupportedYoutubeDoesNotPromiseLaterRefresh() =

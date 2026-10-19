@@ -17,7 +17,6 @@ import ch.lkmc.neutrodyne.core.model.ImportSource
 import ch.lkmc.neutrodyne.core.network.OkHttpNeutrodyneHttpClients
 import ch.lkmc.neutrodyne.core.testing.FakeCredentialCommitCoordinator
 import ch.lkmc.neutrodyne.core.testing.FakeGroupChannelSync
-import ch.lkmc.neutrodyne.core.testing.FakeImportReportPoster
 import ch.lkmc.neutrodyne.core.testing.FakeRefreshController
 import ch.lkmc.neutrodyne.core.testing.FakeSecretStore
 import ch.lkmc.neutrodyne.core.testing.ProtocolOrderKeys
@@ -296,7 +295,6 @@ class RoundTripPropertyTest {
                 opmlReader = XmlPullOpmlReader.discovered(),
                 archives = ZipGuard(),
                 clock = clock,
-                reports = FakeImportReportPoster(),
                 appScope = appScope,
                 io = Dispatchers.Default,
             )

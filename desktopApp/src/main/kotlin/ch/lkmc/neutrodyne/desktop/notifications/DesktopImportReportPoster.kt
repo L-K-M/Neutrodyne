@@ -42,13 +42,6 @@ internal class DesktopImportReportPoster
         private val notifier: DesktopNotifier,
         private val visibility: ImportScreenVisibility,
     ) : ImportReportPoster {
-        // 05 Receiving files: desktop inputs already reach the running window directly.
-        override suspend fun postReady(
-            sessionId: Long,
-            itemCount: Int,
-            sourceName: String?,
-        ) = Unit
-
         override suspend fun postDone(
             sessionId: Long,
             counts: Map<ImportItemStatus, Int>,

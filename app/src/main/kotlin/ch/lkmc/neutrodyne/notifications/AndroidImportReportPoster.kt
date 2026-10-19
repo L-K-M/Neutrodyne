@@ -11,7 +11,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.net.toUri
-import ch.lkmc.neutrodyne.INTERNAL_MAIN_ACTIVITY
+import ch.lkmc.neutrodyne.MainActivity
 import ch.lkmc.neutrodyne.R
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Dispatcher
@@ -24,10 +24,6 @@ import ch.lkmc.neutrodyne.core.model.ImportItemStatus
 import ch.lkmc.neutrodyne.core.ui.resources.Res
 import ch.lkmc.neutrodyne.core.ui.resources.notification_import_done
 import ch.lkmc.neutrodyne.core.ui.resources.notification_import_done_title
-import ch.lkmc.neutrodyne.core.ui.resources.notification_import_ready
-import ch.lkmc.neutrodyne.core.ui.resources.notification_import_ready_file
-import ch.lkmc.neutrodyne.core.ui.resources.notification_import_ready_source
-import ch.lkmc.neutrodyne.core.ui.resources.notification_import_ready_title
 import ch.lkmc.neutrodyne.core.ui.resources.notification_restore_failed
 import ch.lkmc.neutrodyne.core.ui.resources.notification_restore_failed_auto
 import ch.lkmc.neutrodyne.core.ui.resources.notification_restore_failed_title
@@ -41,7 +37,6 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import org.jetbrains.compose.resources.getPluralString
 import org.jetbrains.compose.resources.getString
 
 /**
@@ -65,31 +60,6 @@ internal class AndroidImportReportPoster(
 ) : ImportReportPoster {
     private val manager get() = application.getSystemService(NotificationManager::class.java)
     private val mutex = Mutex()
-
-    override suspend fun postReady(
-        sessionId: Long,
-        itemCount: Int,
-        sourceName: String?,
-    ) = locked {
-        if (visibility.visibleSessionId.value == sessionId) return@locked
-        if (!canPost()) return@locked
-
-        val name = sourceName ?: getString(Res.string.notification_import_ready_source)
-        // Backup previews have no parsed import items yet; do not invent a podcast count.
-        val text =
-            if (itemCount == 0) {
-                getString(Res.string.notification_import_ready_file, name)
-            } else {
-                getPluralString(Res.plurals.notification_import_ready, itemCount, itemCount, name)
-            }
-        post(
-            ImportBackupChannels.ID_IMPORT_READY,
-            sessionId.toString(),
-            getString(Res.string.notification_import_ready_title),
-            text,
-            sessionIntent("import/$sessionId"),
-        )
-    }
 
     override suspend fun postDone(
         sessionId: Long,
@@ -218,7 +188,7 @@ internal class AndroidImportReportPoster(
         PendingIntent.getActivity(
             application,
             route.hashCode(),
-            Intent().setClassName(application, INTERNAL_MAIN_ACTIVITY).apply {
+            Intent(application, MainActivity::class.java).apply {
                 action = Intent.ACTION_VIEW
                 data = "neutrodyne://open/$route".toUri()
                 addCategory("ch.lkmc.neutrodyne.import_backup.$route")

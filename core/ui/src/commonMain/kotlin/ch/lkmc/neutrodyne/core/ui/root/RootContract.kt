@@ -136,8 +136,6 @@ public class RootActions(
      * catalogue).
      */
     public val userMessageAction: (Long) -> Unit = {},
-    /** Persist the pager selection through the shell's settings service before opening Feeds. */
-    public val selectFeedSource: suspend (String?) -> Boolean = { false },
 )
 
 /**

@@ -8,7 +8,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Intent
-import ch.lkmc.neutrodyne.INTERNAL_MAIN_ACTIVITY
+import ch.lkmc.neutrodyne.MainActivity
 import ch.lkmc.neutrodyne.R
 import ch.lkmc.neutrodyne.core.common.Log
 import ch.lkmc.neutrodyne.core.common.LogSink
@@ -263,7 +263,7 @@ class AndroidNewEpisodePosterTest {
             val a = line()
             poster.post(listOf(notice(a)))
             assertThat(intent(DEFAULT).dataString).isEqualTo("neutrodyne://open/episode/${a.episodeId}")
-            assertThat(intent(DEFAULT).component!!.className).isEqualTo(INTERNAL_MAIN_ACTIVITY)
+            assertThat(intent(DEFAULT).component!!.className).isEqualTo(MainActivity::class.java.name)
             assertThat(intent(DEFAULT).component!!.packageName).isEqualTo(application.packageName)
             assertThat(notification(DEFAULT).contentIntent.isImmutable).isTrue()
 

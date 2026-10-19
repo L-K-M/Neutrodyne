@@ -43,8 +43,7 @@ import java.io.File
  * `NeutrodyneApplication`'s start-up out of the test.
  */
 @RunWith(RobolectricTestRunner::class)
-// Share the startup tests' sandbox so SQLite JNI is loaded by one classloader.
-@Config(application = Application::class, sdk = [34])
+@Config(application = Application::class)
 class AndroidAppGraphTest {
     private val graph = createGraphFactory<AndroidAppGraph.Factory>().create(RuntimeEnvironment.getApplication())
 

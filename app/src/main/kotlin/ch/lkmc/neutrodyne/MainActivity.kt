@@ -13,22 +13,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.splashscreen.SplashScreen
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import androidx.lifecycle.DEFAULT_ARGS_KEY
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.flowWithLifecycle
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.viewmodel.MutableCreationExtras
-import ch.lkmc.neutrodyne.core.common.GraphHolder
-import ch.lkmc.neutrodyne.core.common.Outcome
 import ch.lkmc.neutrodyne.core.common.PlatformKind
 import ch.lkmc.neutrodyne.core.common.suspendRunCatching
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenException
 import ch.lkmc.neutrodyne.core.database.DatabaseOpenState
-import ch.lkmc.neutrodyne.core.designsystem.components.NdDialog
-import ch.lkmc.neutrodyne.core.designsystem.components.NdDialogAction
 import ch.lkmc.neutrodyne.core.designsystem.theme.AppearancePrefs
-import ch.lkmc.neutrodyne.core.designsystem.theme.NeutrodyneTheme
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
 import ch.lkmc.neutrodyne.core.model.BuildInfo
@@ -47,7 +39,6 @@ import ch.lkmc.neutrodyne.core.ui.root.RootSlots
 import ch.lkmc.neutrodyne.core.ui.root.RootUiState
 import ch.lkmc.neutrodyne.core.ui.root.StartupFailure
 import ch.lkmc.neutrodyne.core.ui.root.StartupGateState
-import ch.lkmc.neutrodyne.di.AndroidAppGraph
 import dev.zacsweers.metrox.viewmodel.LocalMetroViewModelFactory
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
@@ -66,22 +57,12 @@ class MainActivity : AppCompatActivity() {
     /** `appearance.*` once the settings file has emitted; null until then (08 App scheme). */
     private val appearance = mutableStateOf<AppearancePrefs?>(null)
 
-    internal val routing: MainIntentViewModel by lazy {
-        // Intent extras are untrusted; only restored routing state may seed the handle.
-        val extras =
-            MutableCreationExtras(defaultViewModelCreationExtras).apply {
-                this[DEFAULT_ARGS_KEY] = Bundle.EMPTY
-            }
-        ViewModelProvider(viewModelStore, defaultViewModelProviderFactory, extras)[MainIntentViewModel::class.java]
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
-        val graph = (application as GraphHolder).graph as AndroidAppGraph
-        if (savedInstanceState == null) routing.receive(intent, packageName)
+        val graph = (application as NeutrodyneApplication).graph
         holdSplashForAppearance(splash, graph.settingsRepository)
 
         setContent {
@@ -102,14 +83,6 @@ class MainActivity : AppCompatActivity() {
                     state = ROOT_STATE_BASE.copy(startup = openState.toGateState()),
                     actions =
                         RootActions(
-                            selectFeedSource = { uuid ->
-                                suspendRunCatching {
-                                    graph.settingsRepository.set(
-                                        AppearanceSettingKeys.FEEDS_SELECTED_SOURCE,
-                                        uuid?.let { "group:$it" } ?: "all",
-                                    )
-                                }.getOrNull() is Outcome.Success
-                            },
                             retryStartup = { graph.appScope.launch { suspendRunCatching { opener.awaitOpen() } } },
                             dismissNotice = {},
                             continueHere = {},
@@ -122,31 +95,13 @@ class MainActivity : AppCompatActivity() {
                             },
                         ),
                     slots = M0_ROOT_SLOTS,
-                    routes = routing.routes,
                     installers = graph.entryInstallers,
                     prefs = appearance.value ?: AppearancePrefs(),
                     systemUi = systemUi,
                     platform = BuildInfo.Platform.ANDROID,
                 )
-                val importError by routing.error.collectAsStateWithLifecycle()
-                importError?.let { error ->
-                    NeutrodyneTheme(prefs = appearance.value ?: AppearancePrefs(), system = systemUi) {
-                        NdDialog(
-                            onDismissRequest = { routing.dismissError() },
-                            title = getString(R.string.import_into_neutrodyne),
-                            text = getString(error.message),
-                            confirm = NdDialogAction(getString(android.R.string.ok)) { routing.dismissError() },
-                        )
-                    }
-                }
             }
         }
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        routing.receive(intent, packageName)
     }
 
     /**

@@ -11,15 +11,4 @@
   <string name="channel_group_new_episodes">New episodes</string>
   <string name="channel_new_episodes_default">Other podcasts</string>
   <string name="channel_import_backup">Import and backup</string>
-  <string name="import_into_neutrodyne">Import into Neutrodyne</string>
-  <string name="nothing_to_import">Nothing to import</string>
-  <string name="import_unreadable">Couldn\'t open this file. Try choosing it from inside Neutrodyne.</string>
-  <string name="import_too_large">This file is too large to be a subscription list (limit 50 MB).</string>
-  <string name="import_unsupported">This file isn\'t a supported subscription list or backup.</string>
-  <string name="import_single_feed">This is a podcast feed, not a list of subscriptions.</string>
-  <string name="import_hostile">This file can\'t be imported safely.</string>
-  <string name="import_empty">No podcasts found in this file.</string>
-  <string name="import_storage">Not enough storage space.</string>
-  <string name="import_gone">This import is no longer available</string>
-  <string name="import_network">No connection. Check the network and try again.</string>
 </resources>

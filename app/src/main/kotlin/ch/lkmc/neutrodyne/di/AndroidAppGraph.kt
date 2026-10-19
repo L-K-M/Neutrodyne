@@ -3,7 +3,6 @@ package ch.lkmc.neutrodyne.di
 
 import android.app.Application
 import androidx.work.WorkerFactory
-import ch.lkmc.neutrodyne.ExternalImportActivity
 import ch.lkmc.neutrodyne.SnapshotNowReceiver
 import ch.lkmc.neutrodyne.core.artwork.NeutrodyneImageLoaderFactory
 import ch.lkmc.neutrodyne.core.common.AppInitializer
@@ -103,8 +102,6 @@ interface AndroidAppGraph {
      * `Lazy<BackupRepository>` and `@ApplicationScope` scope here.
      */
     fun inject(receiver: SnapshotNowReceiver)
-
-    fun inject(activity: ExternalImportActivity)
 
     /**
      * The one database accessor (02 Error handling and recovery): blocks a background caller until
