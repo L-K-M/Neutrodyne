@@ -622,6 +622,16 @@ The instrumented job's preamble (as AntennaPod does): `sudo rm -rf /usr/share/do
 | `youtube-canary` | M9a (04) | 04's subscribe-resolve-chunk smoke through the shim on a host CPython, plus a fetch of the control feeds of 04's small-library outage check (live; runner IPs are bot-checked, so it is noisy by design); from MD3 also through the stdio host | no |
 | `engine-nightly-canary` | M9a (04) | `shimTest` and, from MD3, `shimTestStdio` with yt-dlp's latest nightly build (`yt-dlp/yt-dlp-nightly-builds`, signature checked with the same pinned key) in place of the bundled version: the early warning for plugin or internal API drift (risk M8r). Informational; it never approves anything ([D76](../PLAN.md#3-key-decisions): nightlies are never shipped) | no |
 
+**Implementation note (2026-10-19, MS0).** `sync-convergence` checks out
+`github.sha` and runs `:sync:impl:desktopTest --tests '*SyncConvergenceTest'
+-PsyncSeeds=100000`, with a 65-minute step timeout inside a 75-minute job.
+The seed count is an explicit Gradle test input, so a cached 1,000-seed PR
+run cannot satisfy this gate. XML (including failing seeds and traces) and
+HTML reports are uploaded on success or failure. Failure and recovery use
+`report-nightly.sh sync-convergence`. The real-server suite joins in MS1,
+and E12 joins in MS2 as above; neither is claimed by the MS0 simulator.
+
+
 Removed 2026-10-05 (scope revision): `dev-tools-build` (developer tooling lives in `debug`, which `assemble` builds on every PR) and the `instrumented-full` leg against the `benchmark` build type (the published `release` build is tested directly). The former `mirror` job was removed with [PO-34](../PLAN.md#48-further-product-owner-decisions) ([GitHub takedown](#github-takedown)).
 
 ### `release.yml`

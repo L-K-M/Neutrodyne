@@ -2,9 +2,9 @@
 #
 # nightly.yml — 09's overnight jobs. M0a carries `instrumented-full` (debug
 # leg), `api37-16k`, `release-build-smoke` and the report-only `repro`; M1a
-# adds `mutation-full`. The other jobs land with their milestones
+# adds `mutation-full`; MS0 adds `sync-convergence`. The other jobs land with their milestones
 # (`system-tests` M6b, `no-engine-build` M9a, `desktop-matrix` M0b,
-# `sync-convergence` MS0, `server-image-smoke` MS1, `benchmark-dryrun` M10,
+# `server-image-smoke` MS1, `benchmark-dryrun` M10,
 # `screenshots-full` M10, `live-canary`, `youtube-canary` and
 # `engine-nightly-canary` M9a).
 #
@@ -455,6 +455,47 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: scripts/ci/report-nightly.sh repro --label repro --close
+
+  sync-convergence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      issues: write # report-nightly.sh
+    if: inputs.scope == '' || inputs.scope == 'full'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+          cache-read-only: true
+      - name: Five-replica convergence (100,000 seeds)
+        timeout-minutes: 65
+        run: ./gradlew --max-workers=2 :sync:impl:desktopTest -PsyncSeeds=100000 --tests '*SyncConvergenceTest' --continue
+      # MS1 adds ServerConvergenceTest against RecordWriter; MS2 adds E12.
+      - name: Report failure
+        if: ${{ !success() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh sync-convergence
+      - name: Report recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/report-nightly.sh sync-convergence --close
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: sync-convergence-results
+          path: |
+            sync/impl/build/test-results/desktopTest/
+            sync/impl/build/reports/tests/desktopTest/
 
   mutation-full:
     runs-on: ubuntu-24.04

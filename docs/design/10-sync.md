@@ -1944,6 +1944,29 @@ S15 and `SyncConvergenceTest` (`:sync:impl` `commonTest`):
 - After quiescence: every replica equals the server's state and each other; invariants: no position 0 replaced a non-zero one without `reset`; an effectively played episode is never in Up next; no podcast or group exists twice by key or `nameKey`; every Up next list has unique keys after tie-break.
 - 1,000 seeds in PR CI (`unit`), 100,000 nightly (`sync-convergence`); a failing seed is printed and becomes a regression test.
 
+**Implementation note (2026-10-19, MS0).** The common-code generator and
+`InMemorySyncServer` in `:core:testing` start five offline replicas with
+colliding feeds/names. Every seed exercises every operation, then a random
+suffix, duplicated/reordered writes and randomly cut full-record pages.
+Expiry and content rollback exercise original-clock replay. The fake reuses
+`RecordMerger`, `SurvivorRule`, feed identity and group-name normalization.
+
+Canonical comparison folds raw payloads into terminal IDs and compares
+redirects over all known addresses, retaining clocks, resets, sets and hint
+provenance. It also compares episode, membership, settings and list
+projections; tied keys sort by stable record ID. Short regression resources
+and the intermediate-parent rekey case pin failures. Desktop code only
+supplies configuration/resources; failing seeds and traces appear in XML.
+
+Seed 2 exposed an out-of-domain identity rollback: a restored server can
+reassign an already known redirect, which W2 rejects as `invalid`. The
+minimized `identityRollbackCanViolateTheSingleAuthorityDomain` test pins
+this rejection. S15 retains one authoritative identity ledger; full identity
+restore convergence is an open MS1 gap. D92's field-kind fallback is unchanged.
+The simulator does not certify GC scheduling, the MS2 database applier or
+user effects. `ServerConvergenceTest` awaits MS1's real `RecordWriter`;
+S15 still requires the 100,000-seed nightly evidence.
+
 ### Client database tests
 
 S14 plus MS2, in `desktopTest` with the bundled SQLite driver and a subset as Android instrumented tests:

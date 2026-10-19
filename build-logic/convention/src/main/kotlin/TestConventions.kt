@@ -33,7 +33,9 @@ internal fun Project.configureNeutrodyneTestTasks() {
             "neutrodyne.tightPerf",
             providers.gradleProperty("tightPerf").getOrElse("false").ifEmpty { "true" },
         )
-        systemProperty("neutrodyne.syncSeeds", providers.gradleProperty("syncSeeds").getOrElse("1000"))
+        val syncSeeds = providers.gradleProperty("syncSeeds").getOrElse("1000")
+        inputs.property("syncSeeds", syncSeeds)
+        systemProperty("neutrodyne.syncSeeds", syncSeeds)
         if (updateGoldens) outputs.upToDateWhen { false }
         // E12's host test lives in :desktopApp; only there is the category class on the test classpath (09)
         if (path in CROSS_DEVICE_HOSTS && !providers.gradleProperty("crossDevice").isPresent) {
