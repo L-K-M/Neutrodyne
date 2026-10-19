@@ -133,6 +133,7 @@ class YtDlpStreamResolver(
             return client.operation(priority, deadline) {
                 if (!capabilities.capabilities.value.inAppPlayback) return@operation ResolveResult.Unsupported
                 health.awaitLoaded()
+                checkDeadline()
                 val admission = health.reserveExtraction(clock.now())
                 if (admission is ExtractionAdmission.Denied) {
                     return@operation YtDlpErrorMapper.transient(

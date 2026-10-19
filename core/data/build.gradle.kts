@@ -10,6 +10,7 @@ plugins {
 kotlin {
     sourceSets.named("desktopTest") {
         resources.srcDir(rootProject.file("feeds/src/test/resources"))
+        resources.srcDir(rootProject.file("youtube/engine/src/test/resources"))
         kotlin.srcDir("src/test/kotlin")
         kotlin.srcDir(project.file("src/jvmTest/kotlin"))
         kotlin.srcDir(rootProject.file("feeds/src/replay/kotlin"))
@@ -79,6 +80,8 @@ kotlin {
         // Wiring DataStoreBindings' providers in desktopTest mentions the DataStore type
         // (implementation deps of :core:datastore are otherwise invisible here).
         desktopTest.dependencies {
+            // Real client/cache against the internal health actor, without an engine -> data edge.
+            implementation(project(":youtube:engine"))
             implementation(libs.androidx.datastore.preferences.core)
             implementation(libs.androidx.paging.testing)
             implementation(libs.okhttp.mockwebserver3)

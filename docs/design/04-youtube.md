@@ -1617,9 +1617,36 @@ blocked during that callback. Snapshot revisions discard stale queued writes;
 the app-version key commits each multi-key snapshot last, with zero marking
 an interrupted write. Reservations and failure history stay in memory.
 Lifecycle waits for health loading before reporting the bundled version.
-W4 still supplies the settings/preflight/host adapters, W5 the cache callback,
-and W11 the application bindings and notices. Host selection and the device
-spike remain **PENDING**; this is no production activation or M9a acceptance.
+Portable W5/W6 integration exercises the real client, mapper, resolver cache,
+lifecycle and persistent health together in `core:data` desktop tests. Opening
+first blocks admission, synchronously calls resolver `invalidateAll` to fence
+cached and in-flight representations, then releases the invalidation fence.
+Health loading consumes the operation deadline; recheck it before reserving.
+W4 still supplies the settings/preflight/host adapters, and W11 supplies the
+singleton aliases, application bindings and notices. Ordinary shells remain
+external `NOT_YET_AVAILABLE`. Host selection and the device spike remain
+**PENDING**; this is no production activation or M9a acceptance.
+
+Before production, W4/W11 must establish a lossless observation boundary for
+every actual start attempt: the lifecycle observer must receive its start
+(`STARTING`/`COMPILING`) and its outcome (`READY`, failed start as
+`STOPPED` with `lastExit = START_FAILED`, or `UNUSABLE`) before another attempt
+can overwrite them. Each attempt has exactly one start outcome. The frozen conflating `HostStatus` StateFlow has no outcome
+sequence; snapshots cannot reconstruct arbitrarily lost transitions. W4/W11
+must prove ordered delivery/acknowledgement or agree an outcome contract before
+activation; this portable integration adds neither a port nor policy counters.
+Shutdown must fence callbacks from the old host, expose a restartable state
+before retry prewarm, or queue that prewarm through teardown. Direct call starts
+must await real settings and platform preflight, as well as prepared artifacts.
+W4 must persist start failures with full app/engine/Python identity while
+atomically preserving enabled state; extraction snapshot markers are separate.
+W11 must alias both health interfaces to one singleton, provide the positive app
+version and a synchronous nonblocking resolver invalidation callback, and own
+context and default-network callback registration/removal for that resolver's
+lifetime. The callback clears all URL representations and fences stale puts
+before later admission; network changes also clear the IP-family hint. These
+are outstanding real-host/graph contracts, not proven by scripted transport
+transitions. W9 facts/ingest remains a separately integrated owner slice.
 
 
 ```mermaid
