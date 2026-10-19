@@ -32,6 +32,7 @@ import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.NdSceneMetadata
 import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
+import ch.lkmc.neutrodyne.core.testing.FakePodcastRepository
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.ui.platform.ExternalUrlOpener
 import ch.lkmc.neutrodyne.core.ui.platform.FilePicker
@@ -48,6 +49,7 @@ import ch.lkmc.neutrodyne.core.ui.root.RootUiState
 import com.mikepenz.aboutlibraries.Libs
 import com.mikepenz.aboutlibraries.entity.Library
 import com.mikepenz.aboutlibraries.entity.License
+import dev.zacsweers.metro.Provider
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentSetOf
 import kotlinx.coroutines.flow.emptyFlow
@@ -276,6 +278,7 @@ class SettingsScreensTest {
                                 licencesSource,
                                 settingsRepository,
                                 platformInfo,
+                                Provider { FakePodcastRepository() },
                             ),
                     platform = BuildInfo.Platform.DESKTOP,
                 )

@@ -35,6 +35,7 @@ import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
 import ch.lkmc.neutrodyne.core.ui.AndroidDrawnReporter
 import ch.lkmc.neutrodyne.core.ui.LocalDrawnReporter
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
+import ch.lkmc.neutrodyne.core.ui.LocalYouTubeRowArt
 import ch.lkmc.neutrodyne.core.ui.UiText
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.rememberAndroidPlatformActions
@@ -91,11 +92,15 @@ class MainActivity : AppCompatActivity() {
             val openState by opener.openState.collectAsStateWithLifecycle()
 
             val nowPlaying by graph.playbackStateSource.nowPlaying.collectAsStateWithLifecycle()
+            val rowArt by graph.settingsRepository
+                .observe(AppearanceSettingKeys.YOUTUBE_ROW_ART)
+                .collectAsStateWithLifecycle(initialValue = AppearanceSettingKeys.YOUTUBE_ROW_ART.default)
             val systemUi = rememberAndroidSystemUiState()
             CompositionLocalProvider(
                 LocalPlatformActions provides rememberAndroidPlatformActions(),
                 // 07 Storage rows pick per-platform wording from this local.
                 LocalPlatformKind provides PlatformKind.ANDROID,
+                LocalYouTubeRowArt provides rowArt,
                 // 08 Feeds / 09 ColdStartToFeeds: ReportDrawnWhen once the feed settles.
                 LocalDrawnReporter provides AndroidDrawnReporter,
                 // 01 Feature entry installers: metroViewModel()/assistedMetroViewModel() resolve here.

@@ -33,12 +33,14 @@ import ch.lkmc.neutrodyne.core.designsystem.components.DesktopScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.components.LocalScrollbars
 import ch.lkmc.neutrodyne.core.designsystem.theme.SystemUiState
 import ch.lkmc.neutrodyne.core.model.BuildInfo
+import ch.lkmc.neutrodyne.core.model.settings.YouTubeRowArt
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsHomeKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
 import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
+import ch.lkmc.neutrodyne.core.ui.LocalYouTubeRowArt
 import ch.lkmc.neutrodyne.core.ui.platform.LocalPlatformActions
 import ch.lkmc.neutrodyne.core.ui.platform.rememberDesktopPlatformActions
 import ch.lkmc.neutrodyne.core.ui.root.NeutrodyneRoot
@@ -94,6 +96,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
     viewModelFactory: MetroViewModelFactory,
     onQuitRequest: () -> Unit,
     openHandler: DesktopOpenHandler? = null,
+    rowArt: YouTubeRowArt = YouTubeRowArt.VIDEO_THUMBNAIL,
 ) {
     val state = rememberNeutrodyneWindowState()
     val icon = remember { WindowIcons.windowIconPainter() }
@@ -120,6 +123,7 @@ internal fun ApplicationScope.NeutrodyneWindow(
         DesktopApplicationMenu(menuActions = menuActions, onQuit = onQuitRequest)
         val content: @Composable () -> Unit = {
             NeutrodyneWindowContent(
+                rowArt = rowArt,
                 installers = installers,
                 menuActions = menuActions,
                 banners = banners,
@@ -284,6 +288,7 @@ internal fun NeutrodyneWindowContent(
     onRetryStartup: () -> Unit = {},
     dataDir: Path? = null,
     openHandler: DesktopOpenHandler? = null,
+    rowArt: YouTubeRowArt = YouTubeRowArt.VIDEO_THUMBNAIL,
 ) {
     val systemUi = SystemUiState.DEFAULT.copy(dark = isSystemInDarkTheme())
     val platformActions = rememberDesktopPlatformActions()
@@ -326,6 +331,7 @@ internal fun NeutrodyneWindowContent(
         LocalPlatformActions provides platformActions,
         // 07 Storage rows: without a provider the local falls back to ANDROID wording.
         LocalPlatformKind provides PlatformKind.DESKTOP,
+        LocalYouTubeRowArt provides rowArt,
         LocalScrollbars provides DesktopScrollbars.style,
         // 01 Feature entry installers: metroViewModel()/assistedMetroViewModel() resolve here.
         LocalMetroViewModelFactory provides viewModelFactory,

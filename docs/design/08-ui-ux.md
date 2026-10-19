@@ -2495,6 +2495,18 @@ Coil 3's computed memory key omits the size unless transformations are set, so w
 
 ### YouTube thumbnails
 
+Implementation note (2026-10-19, M8): W7 registers the interceptor in the
+singleton loader on both platforms. Candidate URLs have separate disk keys;
+explicit request-tier memory keys are retained so hero placeholders can find
+row art. Pinned references retain their original data and keys. `LetterboxCrop169` shares its rectangle calculation in common
+code, with Android Bitmap and desktop Skia crop implementations. It precedes
+any caller transformations, including square crops. The Appearance chooser
+is shown only while the unfiltered library contains a YouTube channel;
+its saved choice is collected once by each shell and applied to shared
+feed, queue and podcast rows; RSS artwork/date layouts stay unchanged.
+The default remains
+`VIDEO_THUMBNAIL`; system artwork continues to use the channel avatar.
+
 `YouTubeThumbnailInterceptor` (M8) implements 04's contract ([04 Artwork and thumbnails](04-youtube.md#artwork-and-thumbnails)):
 
 1. Skip unless the request data is an `ArtworkRef` that is not pinned (or a `String`) whose URL matches `YouTubeThumbnails.THUMB`.
