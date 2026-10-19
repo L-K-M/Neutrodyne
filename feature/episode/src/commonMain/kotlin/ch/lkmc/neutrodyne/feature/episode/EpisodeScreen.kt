@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -56,6 +57,7 @@ import ch.lkmc.neutrodyne.core.ui.AvailabilityText
 import ch.lkmc.neutrodyne.core.ui.EmptyState
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.FeedDates
+import ch.lkmc.neutrodyne.core.ui.LocalPlatformKind
 import ch.lkmc.neutrodyne.core.ui.NavBackButton
 import ch.lkmc.neutrodyne.core.ui.ShowNotesImageMode
 import ch.lkmc.neutrodyne.core.ui.UiText
@@ -423,7 +425,7 @@ private fun ActionRow(
     isYouTube: Boolean,
     onAction: (EpisodeAction) -> Unit,
 ) {
-    val downloaded = episode.downloadState == DownloadState.COMPLETED
+    val downloaded = (state.downloadLive?.downloadState ?: episode.downloadState) == DownloadState.COMPLETED
     val playableOffline = state.isNowPlaying || !state.offline || downloaded
     var upNextMenu by remember { mutableStateOf(false) }
 
@@ -474,14 +476,38 @@ private fun ActionRow(
             }
         }
 
-        IconLabelButton(
-            icon = if (downloaded) NdIcons.DownloadDone else NdIcons.Download,
-            label =
-                stringResource(
-                    if (downloaded) Res.string.summary_downloaded else Res.string.action_download,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.clickable { onAction(EpisodeAction.DownloadToggle(episode.id)) },
+        ) {
+            ch.lkmc.neutrodyne.core.ui.DownloadStateButton(
+                state = state.downloadLive?.downloadState ?: episode.downloadState,
+                waitReason = state.downloadLive?.waitReason,
+                progress = state.downloadLive?.downloadProgress(),
+                onClick = { onAction(EpisodeAction.DownloadToggle(episode.id)) },
+                modifier = Modifier.clearAndSetSemantics {},
+            )
+            val status =
+                ch.lkmc.neutrodyne.core.ui.DownloadStatusText.describe(
+                    state.downloadLive?.downloadState ?: episode.downloadState,
+                    state.downloadLive?.waitReason,
+                    state.downloadLive?.downloadProgress(),
+                    state.downloadLive?.lastError,
+                    state.downloadLive?.nextAttemptAt,
+                    ch.lkmc.neutrodyne.core.ui.LocalUiClock.current
+                        .now(),
+                    LocalPlatformKind.current,
+                )
+            Text(
+                status?.asString() ?: stringResource(
+                    if (downloaded) {
+                        Res.string.summary_downloaded
+                    } else {
+                        Res.string.action_download
+                    },
                 ),
-            onClick = { onAction(EpisodeAction.DownloadToggle(episode.id)) },
-        )
+            )
+        }
 
         Box {
             IconLabelButton(

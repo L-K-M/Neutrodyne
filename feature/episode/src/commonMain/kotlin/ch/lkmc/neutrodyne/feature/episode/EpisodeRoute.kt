@@ -7,11 +7,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.lkmc.neutrodyne.core.navigation.EpisodeKey
 import ch.lkmc.neutrodyne.core.navigation.LocalAppNavigator
 import ch.lkmc.neutrodyne.core.navigation.SettingsKey
 import ch.lkmc.neutrodyne.core.navigation.SettingsPage
+import ch.lkmc.neutrodyne.core.ui.DownloadDialogs
 import ch.lkmc.neutrodyne.core.ui.EnterPasswordDialog
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeRouteResult
@@ -37,6 +39,11 @@ internal fun EpisodeRoute(
             create(key.episodeId)
         },
 ) {
+    LifecycleStartEffect(viewModel) {
+        viewModel.onVisible()
+        onStopOrDispose { viewModel.onHidden() }
+    }
+    DownloadDialogs(viewModel.downloads)
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val consent by viewModel.playback.meteredConsent.collectAsStateWithLifecycle()
     val credentials by viewModel.pendingCredentials.collectAsStateWithLifecycle()

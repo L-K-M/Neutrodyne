@@ -33,11 +33,14 @@ import ch.lkmc.neutrodyne.core.model.FeedSourceRef
 import ch.lkmc.neutrodyne.core.model.FeedTab
 import ch.lkmc.neutrodyne.core.model.Group
 import ch.lkmc.neutrodyne.core.model.GroupCounts
+import ch.lkmc.neutrodyne.core.model.ManualMeteredPolicy
 import ch.lkmc.neutrodyne.core.model.RowLive
 import ch.lkmc.neutrodyne.core.model.settings.AppearanceSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.PlaybackSettingKeys
 import ch.lkmc.neutrodyne.core.model.settings.StreamOnMetered
 import ch.lkmc.neutrodyne.core.model.withCapabilities
+import ch.lkmc.neutrodyne.core.ui.DownloadRequestHandler
 import ch.lkmc.neutrodyne.core.ui.EpisodeAction
 import ch.lkmc.neutrodyne.core.ui.EpisodeSelectionController
 import ch.lkmc.neutrodyne.core.ui.MarkFeedPlayedController
@@ -60,6 +63,7 @@ import ch.lkmc.neutrodyne.core.ui.resources.feeds_all
 import ch.lkmc.neutrodyne.core.ui.resources.feeds_ungrouped
 import ch.lkmc.neutrodyne.core.ui.resources.no_handler
 import ch.lkmc.neutrodyne.core.ui.resources.write_failed
+import ch.lkmc.neutrodyne.download.api.DownloadController
 import ch.lkmc.neutrodyne.playback.api.PlaybackController
 import ch.lkmc.neutrodyne.playback.api.PlaybackStateSource
 import dev.zacsweers.metro.ContributesIntoMap
@@ -107,6 +111,7 @@ public class FeedsViewModel(
     private val playbackStates: PlaybackStateSource,
     platformInfo: PlatformInfo,
     @Dispatcher(Default) private val defaultDispatcher: CoroutineDispatcher,
+    downloadController: DownloadController,
 ) : ViewModel() {
     // Accessed from Main, like the ViewModel's callbacks and Compose pagingFor calls.
     private val pages = linkedMapOf<FeedSource, PageEntry>()
@@ -119,6 +124,20 @@ public class FeedsViewModel(
     private val reportedSources = mutableMapOf<FeedSourceRef, FeedSource>()
     private val baselines = MutableStateFlow<Map<FeedSource, Long>>(emptyMap())
     private val userMessages = UserMessages()
+    public val downloads =
+        DownloadRequestHandler(
+            viewModelScope,
+            downloadController,
+            userMessages,
+            allowAlways = {
+                check(settings.set(DownloadSettingKeys.MANUAL_METERED, ManualMeteredPolicy.ALWAYS) is Outcome.Success)
+            },
+            markNotificationPrompted = {
+                check(settings.set(DownloadSettingKeys.NOTIFICATION_PROMPTED, true) is Outcome.Success)
+            },
+            onFailure = ::reportWriteFailed,
+        )
+
     private val visiblePages = MutableStateFlow<Map<FeedSource, Set<Long>>>(emptyMap())
 
     public val live: StateFlow<Map<Long, RowLive>> =
@@ -490,6 +509,10 @@ public class FeedsViewModel(
                 playEpisode(selection.value.source, action.episodeId)
             }
 
+            is EpisodeAction.DownloadToggle -> {
+                downloads.toggle(action.episodeId)
+            }
+
             is EpisodeAction.PlayNext -> {
                 playback.playNext(listOf(action.episodeId))
             }
@@ -498,8 +521,7 @@ public class FeedsViewModel(
                 playback.playLast(listOf(action.episodeId))
             }
 
-            // DownloadToggle needs the download engine (M6), CheckAvailability the YouTube
-            // engine (M8).
+            // Availability checks need the YouTube engine (M8).
             else -> {
                 Unit
             }

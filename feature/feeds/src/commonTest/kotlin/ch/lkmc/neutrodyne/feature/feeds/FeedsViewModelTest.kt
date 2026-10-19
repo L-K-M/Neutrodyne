@@ -96,6 +96,9 @@ import kotlin.time.Duration.Companion.seconds
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class FeedsViewModelTest : MainDispatcherTest() {
+    private val downloads =
+        ch.lkmc.neutrodyne.core.testing
+            .FakeDownloadController()
     private val feeds = FakeFeedRepository()
     private val episodes = FakeEpisodeRepository()
     private val liveSource = FakeEpisodeLiveStateSource()
@@ -129,6 +132,7 @@ class FeedsViewModelTest : MainDispatcherTest() {
         playbackStates = playbackController.state,
         platformInfo = testPlatformInfo,
         defaultDispatcher = dispatcher,
+        downloadController = downloads,
     ).also { store.put("feeds${vmNumber++}", it) }
 
     private fun viewModelTest(block: suspend TestScope.() -> Unit) =
@@ -306,7 +310,7 @@ class FeedsViewModelTest : MainDispatcherTest() {
         }
 
     @Test
-    fun downloadedIsGatedWhileInProgressPreservesStoredFlags() =
+    fun downloadedAndInProgressPreserveStoredFlags() =
         viewModelTest {
             val group = group()
             val stored = FeedFilters(downloadedOnly = true, inProgressOnly = true, unplayedOnly = true)
@@ -316,9 +320,9 @@ class FeedsViewModelTest : MainDispatcherTest() {
                 feeds.setFilters(source, stored)
                 model.pagingFor(source).take(1).asSnapshot()
                 runCurrent()
-                assertEquals(stored.copy(downloadedOnly = false), feeds.lastRequest?.second)
+                assertEquals(stored, feeds.lastRequest?.second)
                 assertEquals(
-                    stored.copy(downloadedOnly = false),
+                    stored,
                     model.prefsFor(source).first().filters,
                 )
                 assertEquals(
@@ -328,23 +332,23 @@ class FeedsViewModelTest : MainDispatcherTest() {
                         .filters,
                 )
             }
-            assertEquals(stored.copy(downloadedOnly = false), model.uiState.value.filters)
+            assertEquals(stored, model.uiState.value.filters)
         }
 
     @Test
-    fun gatedOnlyPreferenceChangesKeepTheCurrentPager() =
+    fun downloadedPreferenceChangesRebuildThePager() =
         viewModelTest {
             val model = viewModel()
             backgroundScope.launch { model.pagingFor(FeedSource.All).collect {} }
             runCurrent()
             feeds.setFilters(FeedSource.All, FeedFilters(downloadedOnly = true))
             runCurrent()
-            assertEquals(1, feeds.pagingRequests.size)
-            assertEquals(FeedFilters(), feeds.lastRequest?.second)
+            assertEquals(2, feeds.pagingRequests.size)
+            assertEquals(FeedFilters(downloadedOnly = true), feeds.lastRequest?.second)
             feeds.setFilters(FeedSource.All, FeedFilters(downloadedOnly = true, inProgressOnly = true))
             runCurrent()
-            assertEquals(2, feeds.pagingRequests.size)
-            assertEquals(FeedFilters(inProgressOnly = true), feeds.lastRequest?.second)
+            assertEquals(3, feeds.pagingRequests.size)
+            assertEquals(FeedFilters(downloadedOnly = true, inProgressOnly = true), feeds.lastRequest?.second)
         }
 
     @Test
@@ -562,7 +566,7 @@ class FeedsViewModelTest : MainDispatcherTest() {
         }
 
     @Test
-    fun downloadActionStaysInertWhilePlayStartsTheFeed() =
+    fun downloadAndPlayDispatchToTheirControllers() =
         viewModelTest {
             playbackController.playResult = PlayResult.Started
             val viewModel = viewModel()
@@ -582,11 +586,12 @@ class FeedsViewModelTest : MainDispatcherTest() {
                 ),
                 playbackController.calls,
             )
-            // A started play is silent; DownloadToggle waits for M6.
-            assertTrue(
-                viewModel.uiState.value.messages
-                    .isEmpty(),
+            assertEquals(
+                ch.lkmc.neutrodyne.core.testing.FakeDownloadController.Action.REQUEST,
+                downloads.calls.single().action,
             )
+            // The fake rejects download admission; the shared handler reports that rejection.
+            assertEquals(1, viewModel.uiState.value.messages.size)
         }
 
     /** 08's row table: a refused offline start answers with the offline snackbar. */
@@ -1605,6 +1610,18 @@ class FeedsViewModelTest : MainDispatcherTest() {
             runCurrent()
             assertNull(model.pendingCredentials.value)
             assertEquals(listOf("setCredentials(7, user)"), podcasts.calls)
+        }
+
+    @Test fun downloadToggleReachesTheManualRequestHandler() =
+        viewModelTest {
+            val vm = viewModel()
+            vm.onRowAction(EpisodeAction.DownloadToggle(5))
+            runCurrent()
+            assertEquals(
+                ch.lkmc.neutrodyne.core.testing.FakeDownloadController.Action.REQUEST,
+                downloads.calls.single().action,
+            )
+            assertEquals(listOf(5L), downloads.calls.single().ids)
         }
 
     private companion object {
