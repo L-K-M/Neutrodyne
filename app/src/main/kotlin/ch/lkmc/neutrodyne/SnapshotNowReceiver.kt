@@ -142,6 +142,7 @@ class SnapshotNowReceiver : BroadcastReceiver() {
                 BackupError.Storage -> "storage"
                 BackupError.RestoreRunning -> "restore_running"
                 BackupError.DestinationUnavailable -> "destination_unavailable"
+                BackupError.PreparedExpired -> "prepared_expired"
                 BackupError.Unsupported -> "unsupported"
             }
     }

@@ -9,11 +9,14 @@ import ch.lkmc.neutrodyne.core.common.ApplicationScope
 import ch.lkmc.neutrodyne.core.common.CrashContext
 import ch.lkmc.neutrodyne.core.common.CrashReporter
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
+import ch.lkmc.neutrodyne.core.common.DesktopNotifier
 import ch.lkmc.neutrodyne.core.common.NetworkMonitor
 import ch.lkmc.neutrodyne.core.data.refresh.DesktopJobRunner
 import ch.lkmc.neutrodyne.core.database.DatabaseOpener
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
+import ch.lkmc.neutrodyne.core.domain.BackupRepository
 import ch.lkmc.neutrodyne.core.domain.ExportRepository
+import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.domain.NewEpisodePoster
 import ch.lkmc.neutrodyne.core.domain.SecretStore
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
@@ -22,6 +25,7 @@ import ch.lkmc.neutrodyne.core.model.BuildInfo
 import ch.lkmc.neutrodyne.core.model.NewEpisodeNotice
 import ch.lkmc.neutrodyne.core.navigation.EntryProviderInstaller
 import ch.lkmc.neutrodyne.desktop.crash.DesktopCrashReporter
+import ch.lkmc.neutrodyne.desktop.notifications.DesktopBannerNotifier
 import ch.lkmc.neutrodyne.desktop.youtube.DesktopYouTubeBindingsModule
 import dev.zacsweers.metro.Binds
 import dev.zacsweers.metro.DependencyGraph
@@ -85,6 +89,19 @@ interface DesktopAppGraph {
     /** M3 C3a: D34's no-op scheduler — the desktop has no Auto Backup. */
     val snapshotScheduler: SnapshotScheduler
 
+    /** M3 C3b: the desktop `import-backup` lane's session host. */
+    val importRepository: ImportRepository
+
+    /** M3 C3b: backup writes and restore claims through `LaneImportWorkScheduler`. */
+    val backupRepository: BackupRepository
+
+    /**
+     * The bound [DesktopNotifier] — 11's documented in-app banner fallback while
+     * `OsDesktopNotifier` is MD2. The window feeds its [DesktopBannerNotifier.userMessages]
+     * into `RootSlots.userMessages` and attaches the route dispatch.
+     */
+    val bannerNotifier: DesktopBannerNotifier
+
     /**
      * The runner the shutdown stops (11 Shutdown step 2). Resolving pulls the lane chain through
      * [provideDatabase], which blocks until the band-100 open finishes — held behind a lambda at
@@ -108,6 +125,14 @@ interface DesktopAppGraph {
 
     @Binds
     val DesktopCrashReporter.asCrashContext: CrashContext
+
+    /**
+     * The `DesktopNotifier` binding: the in-app banner fallback until MD2's
+     * `OsDesktopNotifier` (`:desktop:system`) replaces it — 11 Notifications' fallback
+     * column. No OS-centre delivery exists before then.
+     */
+    @Binds
+    val DesktopBannerNotifier.asDesktopNotifier: DesktopNotifier
 
     /**
      * The one database accessor (02 Error handling and recovery): blocks a background caller until

@@ -202,7 +202,7 @@ internal class ImportFixUps(
                     dao.setOptionsJson(
                         sessionId,
                         ImportOptionsJson.encode(
-                            (options ?: ImportOptions()).copy(attemptMarkerAt = clock.now()),
+                            (options ?: ImportOptions()).copy(attemptMarkerAt = clock.now(), laneAttempts = 0),
                         ),
                     )
                     if (session.state == ImportState.DONE) dao.setState(sessionId, ImportState.FETCHING)
