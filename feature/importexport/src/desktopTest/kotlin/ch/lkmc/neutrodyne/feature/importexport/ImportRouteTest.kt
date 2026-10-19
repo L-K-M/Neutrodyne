@@ -1045,7 +1045,7 @@ class ImportRouteTest {
         id: Long,
         repository: ImportRepository = imports,
         groupRepository: GroupRepository = groups,
-    ) = ImportViewModel(id, repository, groupRepository, visibility, appScope)
+    ) = ImportViewModel(id, repository, groupRepository, visibility, appScope, podcasts, ImportSessionOperations(appScope))
 
     private fun optionsRepository(write: suspend (Long, (ImportOptions) -> ImportOptions) -> Unit) =
         object : ImportRepository by imports {
