@@ -1031,7 +1031,8 @@ class ImportViewModelTest : MainDispatcherTest() {
                     ): Outcome<String, GroupError> = error("check failed")
                 }
             val id = seed()
-            val vm = ImportViewModel(id, imports, broken, visibility, appScope())
+            val vm =
+                ImportViewModel(id, imports, broken, visibility, appScope(), podcasts, ImportSessionOperations(appScope()))
             advanceUntilIdle()
             assertFailsWith<IllegalStateException> { vm.setTargetGroupName("News") }
             assertNull(session(id)!!.options.targetGroupName)
@@ -1083,7 +1084,8 @@ class ImportViewModelTest : MainDispatcherTest() {
                         pagingSourceFactory = rows.asPagingSourceFactory(),
                     ).flow
                 }
-            val vm = ImportViewModel(id, repo, groups, visibility, appScope())
+            val vm =
+                ImportViewModel(id, repo, groups, visibility, appScope(), podcasts, ImportSessionOperations(appScope()))
             advanceUntilIdle()
             val initial = vm.items.take(1).asSnapshot()
             assertTrue(initial.size < 275, "The distant matches must start beyond the initial load")
