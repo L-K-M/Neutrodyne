@@ -2228,3 +2228,27 @@ Privacy, crash reporting, localisation and platform:
 - Android local network permission (`ACCESS_LOCAL_NETWORK`) (2026-10-05) — https://developer.android.com/privacy-and-security/local-network-permission
 - Android 17 behaviour changes and background audio — https://developer.android.com/about/versions/17/behavior-changes-17 · https://developer.android.com/about/versions/17/changes/bg-audio
 - Prior-art reliability lessons (position-loss bug class, database growth) — https://github.com/AntennaPod/AntennaPod/releases/tag/3.12.0 · https://github.com/AntennaPod/AntennaPod/issues/4426
+
+## M6a integration evidence
+
+**Implementation note (2026-10-19, M6a).** AC7's Podcasts exclusion belongs
+to M6a, as PLAN requires, rather than waiting for M6b. The implemented
+`bmgr-download-exclusion` nightly job uses release builds on rootable API29
+and API36, seeds completed internal and external downloads through the real
+controller, invokes the M3 snapshot receiver, and checks the LocalTransport
+archive for exactly the snapshot and portable settings (plus platform
+metadata/APK). It does not claim the M3 reinstall/restore journey.
+`DownloadJourneyTest.downloadServerOffPlaysLocalArtworkChaptersAndDefersDelete`
+is E4 and release smoke. The API33 foreground-worker case and API34/36
+20-minute UIDT-with-playback case run in nightly full and the explicit
+`downloads` dispatch scope; CI API26/36, API37 and release selectors require
+E4. `scripts/ci/assert-playback-tests.py` shares the XML and fixture
+gate and rejects absent, skipped, failed, duplicate or too-short evidence.
+No device or packaged desktop execution is inferred from compilation or
+host green. The [M6a ledger](../../HANDOFF.md)
+records the AC-by-AC gaps, including MD1 for desktop audio and the missing
+desktop executor matrix. Benchmark/E10 and Task Manager inference stay M6b.
+The pre-existing W6 `:download:impl` device component remains an exception
+to the device-module list above: its smoke tests access internal builders.
+W10 adds all integrated journeys to `:app`; it does not widen production
+visibility merely to relocate those internal smoke tests.

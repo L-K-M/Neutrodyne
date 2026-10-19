@@ -101,6 +101,7 @@ jobs:
           scripts/ci/tests/install-android-sdk.test.sh
           python3 scripts/ci/tests/report-nightly.test.py
           python3 scripts/ci/tests/assert-playback-tests.test.py
+          python3 scripts/ci/tests/assert-download-tests.test.py
           python3 scripts/ci/tests/playback-reboot.test.py
 
   unit:

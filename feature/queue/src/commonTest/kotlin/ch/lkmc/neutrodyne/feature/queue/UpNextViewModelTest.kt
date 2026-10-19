@@ -296,7 +296,7 @@ class UpNextViewModelTest : MainDispatcherTest() {
             assertEquals(source, call.source)
             assertEquals(FeedOrder.OLDEST_FIRST, call.order)
             assertTrue(call.filters.inProgressOnly)
-            assertFalse(call.filters.downloadedOnly)
+            assertTrue(call.filters.downloadedOnly)
             assertEquals(null, call.startId)
         }
 }
