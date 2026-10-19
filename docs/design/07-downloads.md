@@ -287,6 +287,12 @@ private suspend fun claimOne(lanes: List<DownloadLane>, token: String, c: Condit
 
 `claimNext` is 02's transaction (candidates ordered `priority DESC, requestedAt ASC, episodeId ASC`, then `claim` sets `RESOLVING`, `waitReason = NONE`, `runnerToken`; [02 Downloads](02-data-model.md#downloads)). Paging matters for throughput: after "Download all" of 200 episodes from one host, the first 20 candidates all wait for that host's 2 slots, and a row from another host further down must still get the third slot. `Conditions` comes from `NetworkMonitor.status` (`connected = isConnected`, `unmetered = isConnected && !isMetered`; on the desktop `isMetered` is always false, [01 NetworkMonitor](01-foundation.md#networkmonitor)), `ChargingMonitor.isCharging` (Android; the desktop sets `charging = true`, so charging rules never hold a row there), and `youtubeAllowed = capabilities.value.downloads && YouTubeGateView.blockedUntil(health.state.value, now) == null`, where `capabilities` is 04's `YouTubeCapabilitiesSource.capabilities`, read at every claim and never cached (it flips at run time, [04 Capability computation](04-youtube.md#capability-computation)). `YouTubeGateView` is a pure read of 04's `YouTubeHealthState` (breaker `OPEN` with `breakerOpenUntil > now`, or `rateLimitedUntil > now`). The engine never calls `YouTubeHealth.extractionGate` for claims: that call hands out the breaker's single half-open trial ([04 Circuit breaker](04-youtube.md#circuit-breaker)), which must go to the resolver's own call. Slots are released in the transfer's `finally`. `pause`, `cancel` and `delete` of queued rows also take `claimMutex`, so a row is never paused in the database while a runner is claiming it.
 
+**Implementation note (2026-10-19, M6a).** Candidate selection also excludes IDs still
+registered in `ActiveTransfers`, even after a final requeue clears the database
+token. Registration lasts through post-commit cleanup and slot release. A runner
+stop received during a suspended claim is applied to the registered child before
+it starts transfer work.
+
 ### Drain loop
 
 `suspend fun drain(req: DrainRequest): DrainOutcome` where `DrainRequest(lanes, runnerToken, softDeadlineElapsed: Long?, waitHorizonMs, reporter, exit: DrainExit)`; `DrainExit` is the platform scheduler's hook for steps 2 and 3.3 (Android: `LaneRegistry` and the exit protocol; desktop: a plain return, [Desktop runners](#desktop-runners)):
@@ -299,6 +305,13 @@ private suspend fun claimOne(lanes: List<DownloadLane>, token: String, c: Condit
    3. If nothing is active and nothing was claimed: call `exit` (on Android the [exit protocol](#lane-registry-and-the-exit-protocol)); return `Empty`, `Waiting(earliest)` or `Blocked(reason)`.
    4. Otherwise suspend until one of: a transfer ended; `wake(lane)` was signalled (new request, resume, freed slot, network or charging change, freed storage); the soft deadline; the earliest due `nextAttemptAt` of the lane within the **wait horizon** `waitHorizonMs` — 5 min for the UIDT job, 60 s for Android lane workers and for the desktop lanes. The UIDT job is quota-exempt, so it can wait out the first backoffs (about 1, 2 and 4 min) of a user's download instead of handing it to a quota-bound worker. Its notification then shows "Retrying in {t}". Lane workers must not burn quota waiting; the desktop has no quota but 11's runner ticks every 60 s anyway, so a longer horizon would only hold the lane open.
 4. `finally`: unregister the token.
+
+**Implementation note (2026-10-19, M6a).** The wait horizon limits an otherwise
+idle drain. While it still owns transfers, the drain arms the earliest future
+retry even when older due candidates are blocked by host slots, and even beyond
+the idle horizon. Otherwise two long transfers from one host could leave the
+third slot unused when another host's backoff expires. A wake or the soft
+deadline still interrupts this timer.
 
 The engine also collects `NetworkMonitor.status` and (Android) `ChargingMonitor` while any transfer is active; on the desktop only the disconnect rule can fire:
 - on "metered", transfers whose row has `allowMetered = false` get `StopIntent.Requeue(UNMETERED_NETWORK)`;

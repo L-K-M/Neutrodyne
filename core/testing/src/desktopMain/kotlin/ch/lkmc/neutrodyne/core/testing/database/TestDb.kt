@@ -24,6 +24,9 @@ import kotlin.coroutines.CoroutineContext
  * `TestDb.linked(…)` arrives with MS0 (fixed `nodeId` + capture triggers).
  */
 object TestDb {
+    /** Host driver behind its port, for tests that inject faults at SQL/commit boundaries. */
+    fun bundledDriver(): SQLiteDriver = BundledSQLiteDriver()
+
     /** `Room.inMemoryDatabaseBuilder` (name confirmed by S10), bundled driver on host natives. */
     fun inMemory(
         driver: SQLiteDriver = BundledSQLiteDriver(),
