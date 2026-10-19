@@ -1,0 +1,120 @@
+// SPDX-License-Identifier: Unlicense
+
+package ch.lkmc.neutrodyne.download.impl
+
+import ch.lkmc.neutrodyne.core.database.DownloadEntity
+import ch.lkmc.neutrodyne.core.model.DownloadError
+import ch.lkmc.neutrodyne.core.model.SourceKind
+import ch.lkmc.neutrodyne.core.model.WaitReason
+
+/** One attempt; resolved URLs are memory-only. Engine owns every database transition. */
+internal interface TransferSource {
+    val kind: SourceKind
+
+    suspend fun prepare(
+        row: DownloadEntity,
+        part: PartFile,
+    ): Prepared
+
+    suspend fun transfer(
+        plan: TransferPlan,
+        part: PartFile,
+        sink: ProgressSink,
+    ): TransferResult
+}
+
+internal data class TransferPlan(
+    val episodeId: Long,
+    val url: String,
+    val offset: Long,
+    val expectedTotal: Long?,
+    val ifRange: String?,
+    val itag: Int? = null,
+    val mimeType: String? = null,
+)
+
+internal sealed interface Prepared {
+    data class Go(
+        val plan: TransferPlan,
+        val rootId: String,
+        val tempPath: String,
+        val sourceRef: String,
+    ) : Prepared
+
+    data class Wait(
+        val reason: WaitReason,
+        val error: DownloadError?,
+        val untilMs: Long?,
+        val countsAsAttempt: Boolean,
+    ) : Prepared
+
+    data class Fail(
+        val error: DownloadError,
+        val httpStatus: Int?,
+    ) : Prepared
+}
+
+internal enum class MediaKind { MP3, M4B, MP4, OGG, FLAC, WAV, WEBM, AAC, HLS, NOT_MEDIA, UNKNOWN_BINARY }
+
+internal data class TransferMetadata(
+    val offset: Long,
+    val total: Long?,
+    val mimeType: String?,
+    val etag: String?,
+    val lastModified: String?,
+    val resolvedItag: Int? = null,
+)
+
+internal interface ProgressSink {
+    /** Await the engine's token-owned DOWNLOADING commit before writing the first accepted byte.
+     * The engine writes this once per claim; subsequent in-attempt restarts remain in memory. */
+    suspend fun started(metadata: TransferMetadata)
+
+    fun bytes(
+        downloaded: Long,
+        total: Long?,
+    )
+}
+
+internal sealed interface TransferResult {
+    data class Complete(
+        val total: Long,
+        val mimeType: String?,
+        val etag: String?,
+        val lastModified: String?,
+        val media: MediaKind,
+    ) : TransferResult
+
+    data class Restart(
+        val reason: String,
+    ) : TransferResult
+
+    data class Transient(
+        val error: DownloadError,
+        val httpStatus: Int?,
+        val retryAfterMs: Long?,
+    ) : TransferResult
+
+    data class Permanent(
+        val error: DownloadError,
+        val httpStatus: Int?,
+    ) : TransferResult
+
+    data class Wait(
+        val reason: WaitReason,
+        val error: DownloadError?,
+        val untilMs: Long?,
+    ) : TransferResult
+}
+
+internal sealed interface TransferEnd {
+    data class Finished(
+        val result: TransferResult,
+    ) : TransferEnd
+
+    data class Stopped(
+        val intent: StopIntent,
+    ) : TransferEnd
+
+    data object Unknown : TransferEnd
+}

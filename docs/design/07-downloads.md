@@ -30,6 +30,24 @@ Neutrodyne downloads episodes with its **own small engine** that writes real, us
 
 ### Modules and public API
 
+**Implementation note (2026-10-19, M6a).** Kotlin declarations are the frozen
+boundary: download:api plus download:impl's TransferContracts, StorageContracts
+and RunnerContracts. DeleteReason replaces byUser; RootChangeMode replaces
+moveExisting. Moves return Unsupported; folder registration rejects UNSUPPORTED
+until M6b. Orphan deletion returns Deleted(bytes) or Unavailable. AUTO admission
+rejects IDs as UNAVAILABLE in M6a. LocalMediaChanges publishes changed IDs after
+index updates; LocalMediaIndexStore freezes the internal replace/put/remove writer.
+DownloadQueries, DownloadSourceQueries, DownloadStateQueries and
+DownloadSessionQueries freeze SQL-facing contracts without changing Room/schema.
+Engine owns claimMutex through paging/claim/slot reservation; pause/cancel/delete
+share it. Engine alone commits transfer states, including ProgressSink.started
+before accepted bytes; token ownership lasts through child cleanup/final commits.
+Scheduler owns lane exit mutex/rechecks; reconcile and deletion each serialize.
+File ports use byte arrays with Okio behind the implementation boundary.
+ChapterRepository.ensureLocalLoaded(id, fileUri) returns EmbeddedChapterResult;
+it and PlaybackController.playDownloads explicitly report unavailable until W8.
+
+
 | Module | Package | Contents |
 |---|---|---|
 | `:download:api` (`neutrodyne.kmp.library`, `commonMain` only, Unlicense) | `ch.lkmc.neutrodyne.download.api` | `DownloadController`, `LocalMediaIndex`, `DownloadProgressSource` and the data types below; depends on `:core:{model, common}` only ([01 Dependency rules](01-foundation.md#dependency-rules)) |
@@ -48,7 +66,7 @@ interface DownloadController {
     suspend fun cancel(episodeIds: Collection<Long>)                    // user: drops row and .part, writes tombstone
     suspend fun retry(episodeIds: Collection<Long>)
     suspend fun promote(episodeId: Long): RequestResult                 // "Download now": AUTO → MANUAL, priority 200
-    suspend fun delete(episodeIds: Collection<Long>, byUser: Boolean)   // any state; tombstone only when byUser
+    suspend fun delete(episodeIds: Collection<Long>, reason: DeleteReason)   // any state; tombstone only for USER
     suspend fun setAllowMetered(episodeIds: Collection<Long>, allowed: Boolean)  // + "Use mobile data"
     suspend fun pauseAll()                                              // +
     suspend fun resumeAll()                                             // +
@@ -60,8 +78,8 @@ interface DownloadController {
     fun observeBusy(): Flow<Boolean>                                    // + (2026-10-05) desktop close behaviour (11); see Desktop runners
     suspend fun storageRoots(): List<StorageRootInfo>                   // +
     suspend fun registerFolderRoot(absolutePath: String): FolderRootResult   // + (2026-10-05) desktop "Change folder…"; Android: Rejected(UNSUPPORTED)
-    suspend fun changeRoot(rootId: String, moveExisting: Boolean)       // + settings; Android enqueues download-move, desktop pokes downloads-move
-    suspend fun deleteOrphanFiles(): Long                               // + bytes freed
+    suspend fun changeRoot(rootId: String, mode: RootChangeMode): RootChangeResult       // + settings; moves are M6b only
+    suspend fun deleteOrphanFiles(): OrphanDeleteResult                               // + bytes freed or explicitly unavailable
     suspend fun shareableFile(episodeId: Long): ShareableFile?          // + "Share file" (Android); null unless COMPLETED on a shareable root; always null on the desktop
 }
 fun interface LocalMediaIndex { fun localUriOrNull(episodeId: Long): String? }   // canonical, synchronous
@@ -105,7 +123,7 @@ enum class DownloadNotice { DATA_SAVER, BACKGROUND_RESTRICTED, NOTIFICATIONS_OFF
                             ROOT_UNAVAILABLE, YOUTUBE_PAUSED, MOVE_IN_PROGRESS, ORPHAN_FILES }
 ```
 
-Callers: features (`:feature:downloads`, `:feature:episode`, `:feature:podcast`, `:feature:feeds`, and Settings › Desktop for `registerFolderRoot`/`changeRoot` on the desktop) call `DownloadController` with `trigger = MANUAL` only; `AUTO` is used by `AutoDownloadPlanner` inside `:download:impl`. 03's unsubscribe and merge (including unsubscribes pulled by sync), 06's error recovery and 11's desktop playback resolver take `DownloadController` and `LocalMediaIndex` as optional bindings (a nullable constructor parameter defaulting to `null` before M6; Metro's exact form is S8's, [06 Open questions](06-playback.md#open-questions) 23). `DownloadController`, `LocalMediaIndex` and `DownloadProgressSource` are `@SingleIn(AppScope::class)` bindings contributed by `:download:impl` to both app graphs ([01 Dependency injection](01-foundation.md#dependency-injection)); 11's close behaviour reads `observeBusy()` and 08's Downloads tab badge reads `observeFailedCount()` (a `COUNT(*)` over `download` rows in `FAILED`, so the badge does not load the full lists).
+Callers: features (`:feature:downloads`, `:feature:episode`, `:feature:podcast`, `:feature:feeds`, and Settings › Desktop for `registerFolderRoot`/`changeRoot` on the desktop) call `DownloadController` with `trigger = MANUAL` only; `AUTO` is used by `AutoDownloadPlanner` inside `:download:impl`. 03's unsubscribe and merge (including unsubscribes pulled by sync) use core:domain lifecycle ports; 06's error recovery and 11's desktop playback resolver take `DownloadController` and `LocalMediaIndex` as optional bindings (a nullable constructor parameter defaulting to `null` before M6; Metro's exact form is S8's, [06 Open questions](06-playback.md#open-questions) 23). `DownloadController`, `LocalMediaIndex` and `DownloadProgressSource` are `@SingleIn(AppScope::class)` bindings contributed by `:download:impl` to both app graphs ([01 Dependency injection](01-foundation.md#dependency-injection)); 11's close behaviour reads `observeBusy()` and 08's Downloads tab badge reads `observeFailedCount()` (a `COUNT(*)` over `download` rows in `FAILED`, so the badge does not load the full lists).
 
 ### Threading and coroutines
 
@@ -115,7 +133,7 @@ Callers: features (`:feature:downloads`, `:feature:episode`, `:feature:podcast`,
 | `DownloadEngine.drain(...)` | the runner's coroutine (Android: UIDT service scope or `CoroutineWorker.doWork`; desktop: the lane's `run` on 11's `DesktopJobRunner`, `Dispatchers.IO`) | transfers are **children** of the runner, so stopping a runner cancels exactly its transfers; shared state (slots, active registry, progress) is thread-safe |
 | One transfer | `@Dispatcher(IO)` | Ktor `prepareGet(…).execute { }` on the DOWNLOAD client: cancelling the coroutine cancels the underlying OkHttp call (Ktor's OkHttp engine; S12 checks it, [01 One client family](01-foundation.md#one-client-family)); `bodyAsChannel()` reads suspend, so no `runInterruptible` is needed; 256 KiB buffer into an Okio sink |
 | State writes on stop | `withContext(NonCancellable)` in `finally` | at most one write transaction; never network or file I/O inside it |
-| `LocalMediaIndexImpl` | any thread, including Media3's loader thread and the main thread (Android) and 11's `nd-prepare` and `nd-engine` threads and the Swing EDT (desktop) | an immutable map in a `MutableStateFlow` (copy-on-write; writes are rare — one per completion, deletion or move — and reads are lock-free in `commonMain`); on the UI thread it never blocks; elsewhere it waits ≤ 2 s for the initial load |
+| `LocalMediaIndexImpl` | any thread, including Media3's loader thread and the main thread (Android) and 11's `nd-prepare` and `nd-engine` threads and the Swing EDT (desktop) | an immutable map in a `MutableStateFlow` (copy-on-write; writes are rare — one per completion, deletion or move — and reads are lock-free in `commonMain`); on the UI thread it never blocks; all threads return the current memory snapshot immediately |
 | `DownloadProgressHub` | ticker on `@Dispatcher(Default)` | publishes a snapshot every 250 ms while any transfer is active, idle otherwise |
 | `AutoDownloadPlanner`, `CleanupPlanner`, `DownloadReconciler`, `DownloadMover` | `@ApplicationScope`, the calling worker or the calling desktop lane | each guarded by its own `Mutex` (single flight) |
 | `ManualDownloadJobService` callbacks (Android) | main thread | return within milliseconds (Android 14 ANR rule); work runs in a service scope (`SupervisorJob() + Default`) |
@@ -525,6 +543,11 @@ Other states: `RESOLVING` and `VERIFYING` show an indeterminate ring; `DOWNLOADI
 
 ### Pause, cancel and Task Manager stops
 
+**Implementation note (2026-10-19, M6a).** Adopted resolution 7: M6a handles actual
+callback stop reasons and stale-runner recovery only. ApplicationExitInfo historical
+Task Manager inference is M6b AC11. Stop may bypass onStopJob; callback tests do
+not prove AC11 or distinguish every process death.
+
 - **User pause** is persistent: `PAUSED` rows are never claimed, never auto-resumed after a reboot or an app update, and are not removed by the planner (the user touched them).
 - **Runner stops** (job stopped, quota, soft deadline, desktop quit, process death) are not user intent: rows return to `QUEUED(SYSTEM)` and resume automatically.
 - **Task Manager stop** (Android API 34+ "Stop" on the UIDT entry; the desktop has no equivalent — quitting the app is not a pause): the platform kills the process at once, does not call `onStopJob`, and never reschedules the job. If a stop through a system affordance does reach `onStopJob`, its return value is treated as `false` ([UIDT](https://developer.android.com/develop/background-work/background-tasks/uidt), [JobService.onStopJob](https://developer.android.com/reference/android/app/job/JobService)).
@@ -539,6 +562,10 @@ Other states: `RESOLVING` and `VERIFYING` show an indeterminate ring; `DOWNLOADI
 ---
 
 ## Runners and scheduling
+
+**Implementation note (2026-10-19, M6a).** Adopted resolution 4: manual wake work is M6a;
+AUTO wake is M6b. Startup/initializer310 schedules manual work and deferred deletes
+only. Planner, played cleanup, daily AUTO pass and periodic cleanup remain M6b.
 
 Serves R4.2, R8.7, N2. Delivered in M6. Honours [D47](../PLAN.md#3-key-decisions), [D85](../PLAN.md#3-key-decisions). Mitigates risks [T3](../PLAN.md#8-risks-and-mitigations) and [T10](../PLAN.md#8-risks-and-mitigations).
 
@@ -763,6 +790,13 @@ Each runner stop writes `lastStopReason` on the affected rows (platform `STOP_RE
 
 ### Platform constraints
 
+**Implementation note (2026-10-19, M6a).** Adopted resolution 9: W6 must verify assigned job network
+versus process default under Wi-Fi/mobile/VPN/Data Saver before fixing transport
+policy. If binding is needed, extend the network island with a scoped DOWNLOAD
+socket/DNS transport seam and record the D10/D47 amendment in its owning docs.
+Never bind the whole process or construct a client inside downloads. W1 makes no
+claim that this platform experiment has passed.
+
 | Rule | Consequence here | Source |
 |---|---|---|
 | UIDT (API 34): `RUN_USER_INITIATED_JOBS`; schedulable only while visible or allowed to start activities; must specify a network; `setNotification` within 10 s; not subject to quotas; "should not be used for automatic features"; a Task Manager stop prevents rescheduling; no Jetpack wrapper | `MANUAL` only; own `JobService`; fallbacks above | [UIDT](https://developer.android.com/develop/background-work/background-tasks/uidt), [setUserInitiated](https://developer.android.com/reference/android/app/job/JobInfo.Builder#setUserInitiated(boolean)), [JobService](https://developer.android.com/reference/android/app/job/JobService) |
@@ -777,6 +811,10 @@ Each runner stop writes `lastStopReason` on the affected rows (platform `STOP_RE
 | Google's transfer guidance: WorkManager for background or automatic transfers, UIDT for user-initiated transfers needing progress | matches D47 | [Data transfer options](https://developer.android.com/develop/background-work/background-tasks/data-transfer-options), [dataSync migration](https://developer.android.com/about/versions/15/changes/datasync-migration) |
 
 ### Desktop runners
+
+**Implementation note (2026-10-19, M6a).** Adopted resolution 2: transfer/restart mechanics can ship
+independently, but AC14's audible offline playback requires MD1. M6a acceptance
+remains open until that proof exists. MD2 owns tray/native alerts, not M6a.
 
 Serves R4.2, R8.7, R8.8, N2 (desktop). Delivered in M6a (`downloads-manual`, the start-up pass, the default root), M6b (`downloads-auto`, the daily pass, `downloads-move`), MD2 (the busy signal behind 11's close behaviour, desktop alerts, wake catch-up through 11's hardened runner), MD3 (YouTube rows). Honours [D47](../PLAN.md#3-key-decisions) (desktop note), [D48](../PLAN.md#3-key-decisions), [D85](../PLAN.md#3-key-decisions); runner contract, tick, pokes, wake detection and quit: [11 Background work](11-desktop.md#background-work).
 
@@ -933,6 +971,11 @@ Client: `NeutrodyneHttpClients.client(HttpClientKind.DOWNLOAD)` (connect 15 s, r
 
 ### Sniffing
 
+**Implementation note (2026-10-19, M6a).** Adopted resolution 3: HTML on validated Android networks and
+on desktop is FAILED(NOT_MEDIA). Only an unvalidated Android network produces a
+NETWORK wait without a file. Test that branch with injected conditions even if
+validated job constraints prevent it in production; PLAN AC12 is qualified.
+
 Before writing the first byte at offset 0, the engine reads up to 512 bytes from the body channel into memory (nothing is written while deciding, which satisfies "≤ 64 KB written" of the M6 acceptance criteria; the bytes are then written first if accepted) and `MediaSniffer.classify(bytes, contentType)` returns a `MediaKind`:
 
 | Signature | `MediaKind` → extension |
@@ -1086,6 +1129,12 @@ interface StorageRoots {
 
 ### Roots
 
+**Implementation note (2026-10-19, M6a).** Adopted resolution 6: Android selection means "Use this location
+for new downloads". Completed files stay on recorded roots; in-flight parts follow
+the safe reassignment rule in RSS prepare. Moves, desktop folder registration and
+the desktop_roots key wait for M6b; desktop uses dir:default. Empty Downloads UI
+links to available manual settings, not unavailable automatic controls.
+
 **Android** (`AndroidStorageRoots`):
 
 | `rootId` | Directory | Permission | Visible to the user | Survives uninstall | Default |
@@ -1134,6 +1183,12 @@ Folder: `component(customTitle ?: title, "[p$podcastId]")`; before creating it, 
 
 ### Free space and allocation
 
+**Implementation note (2026-10-19, M6a).** Adopted resolution 8 supersedes the allocation
+sketch below: probe on IO, reserve via UUID only when required bytes are within
+getAllocatableBytes, then recheck. Otherwise wait STORAGE and offer Manage storage.
+Never use file-descriptor preallocation, which changes resume length. M6a has no
+CleanupPlanner fallback on either platform.
+
 Before `DOWNLOADING` (and before each YouTube chunk sequence): `required = (totalBytes ?: estimatedBytes ?: 150 MB) + 200 MB − part.length()`, on both platforms. **Android:** `available = StorageManager.getAllocatableBytes(getUuidForPath(rootDir))` (API 26); if `available < required`, call `allocateBytes(uuid, required)` (lets the system clear other apps' caches); if still short, run `CleanupPlanner` for that root synchronously when a cleanup would free space, then re-check; else `Wait(STORAGE, STORAGE_FULL)` with `nextAttemptAt = now + 30 min`. Removable public volumes where `getUuidForPath` or `getAllocatableBytes` throws fall back to `StatFs(rootDir).availableBytes` without allocation (Unverified which volumes throw). Sources: [App-specific storage](https://developer.android.com/training/data-storage/app-specific), [StorageManager](https://developer.android.com/reference/android/os/storage/StorageManager). **Desktop:** `available = FileStore.getUsableSpace()` of the root's file store, with no allocation call; the same cleanup fallback and `STORAGE_FULL` wait; a FAT32 store refuses a file of known size above 4 GiB before the transfer as `FAILED(STORAGE_UNAVAILABLE)` ([11 Disk full](11-desktop.md#disk-full)). On both, freed storage (user delete, cleanup, a folder change) runs `DownloadDao.clearStorageWaits()` and `ensureScheduled` for both lanes.
 
 Runtime storage errors go through `StorageRoots.classify(e, dir)`. **Android:** `ErrnoException.errno` in the cause chain — `ENOSPC` → `FULL`, `EFBIG` (FAT32 4 GB file limit) → `TOO_LARGE`, `EROFS`, `EIO` or a vanished root → `UNAVAILABLE`. **Desktop:** the JVM reports these only as `IOException`s with OS-specific messages, so after a write failure `DesktopStorageRoots` re-reads the store's usable space (below 1 MiB → `FULL`) and the root's reachability (gone → `UNAVAILABLE`) ([11 Disk full](11-desktop.md#disk-full)). Then on both: `FULL` stops the transfer as `QUEUED(STORAGE)`, `lastError = STORAGE_FULL`, keeps the `.part`, stops every other transfer on the same root the same way and raises the storage-full alert — on Android `NOTIF_ID_STORAGE_FULL` on `download_errors` with a "Manage storage" action (`StorageManager.ACTION_MANAGE_STORAGE`, optionally `EXTRA_UUID` and `EXTRA_REQUESTED_BYTES`), on the desktop 11's notification "Storage full — downloads paused"; `TOO_LARGE` is `FAILED(STORAGE_UNAVAILABLE)`; `UNAVAILABLE` → `QUEUED(STORAGE)` with `STORAGE_UNAVAILABLE`; anything else is a transfer error ([Retries and backoff](#retries-and-backoff)).
@@ -1150,10 +1205,18 @@ Android only. The desktop has no share sheet: `shareableFile` returns null there
 
 ### LocalMediaIndex
 
+**Implementation note (2026-10-19, M6a).** Adopted resolution 1 preserves the shipped synchronous,
+thread-safe, non-blocking contract on every thread. Initial load130 completes
+before playback restoration; lazy early reads return null. If ordering cannot
+establish readiness, use a separate suspend readiness seam, never runBlocking
+inside this lookup. Publish completion only after the COMPLETED commit and index
+update; remove before deletion/MISSING. Cold-start and DB-held-open proof belongs
+to W5/W8.
+
 `LocalMediaIndexImpl` (common) mirrors `episodeId → finalUri` for `COMPLETED` rows (02's load query) for 06's `EpisodeResolver` (Android) and 11's `DesktopEpisodeSourceResolver` (desktop); both read `file:` URIs ([Verification and finalisation](#verification-and-finalisation)).
 
 - Loaded by an `AppInitializer` (order 130, after the database open at 100) and fully reloaded by reconcile.
-- `localUriOrNull(id)`: on the UI thread (Android main thread, Swing EDT) returns the current map value without waiting (06 uses it only as a seek-accuracy hint there); on any other thread (Media3's loader thread, 11's `nd-prepare` thread) waits up to 2 s for the initial load, then falls back to a single-row `runBlocking` query with a 2 s timeout ([01 Coroutines and threading](01-foundation.md#coroutines-and-threading)).
+- `localUriOrNull(id)` returns the current memory snapshot immediately on every thread, including loader threads. It performs no storage access or blocking fallback; an early lookup may return null.
 - Ordering rules: `put` only after the `COMPLETED` commit; `remove` before a row is deleted or set `MISSING`; a root change (`download-move`, `downloads-move`, a re-pointed desktop root) updates the entry after the row update.
 
 ### SAF folder (v1.x design notes)
@@ -1419,6 +1482,15 @@ Desktop: installing a new MSI, DMG, DEB or RPM, or unpacking a new ZIP or tar.gz
 
 ### Unsubscribe, merge and retention
 
+**Implementation note (2026-10-19, M6a).** Adopted resolution 10: core:data uses the narrow
+core:domain DownloadLifecycle port before cascades, rather than consuming the
+download controller or adding an implementation dependency. beforeEpisodeRemoval,
+beforeEpisodeMerge(loser,winner) and beforeLibraryReplace await durable journaling
+and transfer stop acknowledgement; failure aborts the destructive operation.
+Cover PodcastMerger's raw moveDownload and restore Replace, including ID-based
+paths, index invalidation and artwork references. These lifecycle operations write
+no user-dismissal tombstone.
+
 03's `UnsubscribeUseCase`, and for unsubscribes pulled by sync `PodcastRepository.unsubscribe(ids, origin = SYNC)` after the mass-change guard let them through, call `delete(ids, byUser = false)` for the podcast's downloads before 02's cascade ([03 Unsubscribe and other podcast operations](03-feeds-and-discovery.md#unsubscribe-and-other-podcast-operations)); the current episode's file is deferred and deleted when the cascade clears `currentEpisodeId`. A podcast merge (03, including a merge the sync server arbitrated, [10 Identity mapping](10-sync.md#identity-mapping)) deletes only the downloads of matched loser episodes whose winner already has one; other `download` rows move to the winner's episodes with their files, which keep their old folder (files are never renamed). Retention never deletes episodes that have a `download` row ([02 Retention and maintenance](02-data-model.md#retention-and-maintenance)), so an episode that left its feed stays playable offline until its download is deleted.
 
 ### Sync interplay
@@ -1446,6 +1518,12 @@ Serves R7.3, N1. Delivered in MS2. Honours [D93](../PLAN.md#3-key-decisions), [P
 
 ## Backup exclusion
 
+**Implementation note (2026-10-19, M6a).** Adopted resolution 5: PLAN AC7 makes the real Podcasts bmgr
+transport assertion M6a, despite 09's M6b assignment. This baseline has no bmgr
+script/job or desktop matrix job. W10 must add honest transport evidence using
+the M3 snapshot trigger and a real completed media file. Static XML tests alone
+leave AC7 open; no absent CI lane is claimed as running.
+
 Serves R1.8, N1, N3. Delivered by 05's rules in M3; verified in M6 ([PLAN M6](../PLAN.md#m6-downloads) acceptance 7). Android: everything below. The desktop has no Auto Backup ([11 Behaviour differences from Android](11-desktop.md#behaviour-differences-from-android)); see the end of this section.
 
 Must never be in cloud backup or device-to-device transfer (Android):
@@ -1465,6 +1543,11 @@ Auto Backup includes `getExternalFilesDir()` by default. 05's include-only rules
 ---
 
 ## Settings
+
+**Implementation note (2026-10-19, M6a).** W1 registers only MANUAL_METERED (portable), ROOT_ID,
+NOTIFICATION_PROMPTED and DEFERRED_DELETES (device store), all unsynced. The
+remaining policy/registry/move/cleanup keys in the full table are deferred to M6b;
+registration is not a promise of working automatic policy in M6a.
 
 `DownloadSettingKeys` (`:core:model`, registered in 01's `AllSettingKeys`; conventions in [01 DataStore files and typed setting keys](01-foundation.md#datastore-files-and-typed-setting-keys)). These are the `downloads.*` globals that 05's resolver reads ([05 Effective settings resolution](05-groups-opml-backup.md#effective-settings-resolution)). Every key here is device-local: `SettingKey.synced = false`, so sync never carries any of them ([D93](../PLAN.md#3-key-decisions), [10 What syncs](10-sync.md#what-syncs)); the `settings`-file keys still travel in manual backups as 05's whitelist says. Both platforms show Settings › Downloads; rows marked "desktop: hidden" have no effect there (every network is unmetered and charging is ignored, [Desktop runners](#desktop-runners)), and 08 shows them as "Not used on computers" or hides them.
 

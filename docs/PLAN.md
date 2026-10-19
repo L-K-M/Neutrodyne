@@ -1272,6 +1272,16 @@ Boot-card resumption and hardware `SKIP` mapping remain M5.
 
 #### M6: Downloads
 
+**Implementation note (2026-10-19, M6a).** Adopted resolutions 2, 3, 5 and 7:
+AC14's audible offline half requires MD1; transfer mechanics are independent and
+cannot close all M6a acceptance. AC1/AC14's HTML failure applies to validated
+Android networks and desktop; AC12's NETWORK wait applies only to unvalidated
+Android networks (test with injected conditions). AC7's real bmgr transport proof
+is M6a, overriding 09's delivery table; static backup XML assertions alone do not
+close it. M6a stop callbacks and stale-runner recovery do not close M6b AC11's
+historical Task Manager inference. No device or desktop-audio proof is claimed by
+the W1 contract freeze.
+
 - **Goal:** reliable manual and automatic downloads that play offline transparently.
 - **Increments** ([7.1](#71-milestone-overview)): **M6a** (manual downloads, storage, reconciliation, offline playback, Downloads screen) and **M6b** (automatic downloads, cleanup and quota, Task Manager rule, moves between roots, "Download all", out-of-process system tests). Untagged deliverables and criteria are M6a.
 - **Deliverables:**
@@ -1293,11 +1303,11 @@ Boot-card resumption and hardware `SKIP` mapping remain M5.
   9. Two concurrent drains never claim the same row; slots hold at 3 / 2 per host / 1 YouTube; a completed download writes its `download` row exactly 3 times after the insert (`DownloadEngineTest`, [07 Claiming and slots](design/07-downloads.md#claiming-and-slots)).
   10. On API 34+ a manual request while visible schedules the UIDT job and while invisible enqueues `download-lane-MANUAL`; while every `MANUAL` row is in backoff no job runs, and the wake work never fires without a runnable row (`DownloadSchedulerTest`, [07 Runners and scheduling](design/07-downloads.md#runners-and-scheduling)).
   11. (M6b) Task Manager "Stop" on the UIDT job leaves the `MANUAL` rows `PAUSED`, while swiping the app from Recents does not pause them (`DownloadReconcilerTest` and the M6 device checklist, [07 Lifecycle and reconciliation](design/07-downloads.md#lifecycle-and-reconciliation)).
-  12. A captive-portal HTML page ends as a `NETWORK` wait without a stored file; a full disk keeps the `.part` and waits with `STORAGE`; an unmounted root marks rows `MISSING` until it returns (`RssTransferSourceTest`, `DownloadEngineTest`, `DownloadReconcilerTest`).
+  12. On an unvalidated Android network, a captive-portal HTML page ends as a `NETWORK` wait without a stored file (validated Android and desktop HTML fail as `NOT_MEDIA`, AC1/14); a full disk keeps the `.part` and waits with `STORAGE`; an unmounted root marks rows `MISSING` until it returns (`RssTransferSourceTest`, `DownloadEngineTest`, `DownloadReconcilerTest`).
   13. (M6b) Moving downloads to the other storage root copies, verifies and renames every file, defers deleting the playing file, and continues after a stop (`DownloadMoveWorkerTest`).
   14. On the desktop JVM a manual download cut at 50 % resumes from the `.part` length after the app is quit and restarted (fixture with a strong ETag; without a reliable validator it restarts from 0, AC1), a completed file plays offline with its artwork (from MD1), and a `text/html` 200 ends `FAILED(NOT_MEDIA)` exactly as on Android (`DesktopDownloadLaneTest`, the shared transfer-core suite).
   15. (M6b) Desktop auto-download for a group with keep 3 queues the same rows as AC4's scenario (the shared planner test on the desktop JVM), and "Change folder…" copies, verifies and renames every file, defers the playing one and continues after an interruption (`DesktopMoveTest`).
-- **Dependencies:** M3 (backup rules), M4 (resolver, artwork store); PO-12 default. M6b depends on M6a.
+- **Dependencies:** M3 (backup rules), M4 (resolver, artwork store); MD1 for AC14 offline audio; PO-12 default. M6b depends on M6a.
 - **Design refs:** [07](design/07-downloads.md), [07 Desktop runners](design/07-downloads.md#desktop-runners), [06 Media items and URI resolution](design/06-playback.md#media-items-and-uri-resolution), [05 Effective settings resolution](design/05-groups-opml-backup.md#effective-settings-resolution), [08 Live row state](design/08-ui-ux.md#live-row-state), [08 Downloads](design/08-ui-ux.md#downloads), [09 Out-of-process system tests](design/09-quality-and-release.md#out-of-process-system-tests), [11 Desktop downloads and storage](design/11-desktop.md#desktop-downloads-and-storage).
 - **Advances:** M6a: R4.2, R4.3, R4.6, R1.8, R2.5 (downloaded), R5.3, R8.7, R8.8, N1, N2, N6; M6b: R4.4, R4.5, R2.6 (download all), R2.7 (auto-download), R8.8, N1, N2.
 

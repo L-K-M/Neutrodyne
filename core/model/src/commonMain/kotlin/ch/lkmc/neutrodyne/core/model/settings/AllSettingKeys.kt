@@ -20,6 +20,7 @@ object AllSettingKeys {
             FeedsSettingKeys.ALL +
             GroupsSettingKeys.ALL +
             PlaybackSettingKeys.ALL +
+            DownloadSettingKeys.ALL +
             BackupSettingKeys.ALL +
             DesktopSettingKeys.ALL
 

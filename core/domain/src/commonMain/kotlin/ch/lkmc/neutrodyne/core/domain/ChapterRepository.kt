@@ -17,6 +17,12 @@ interface ChapterRepository {
      * Local-file/EmbeddedChapterReader support is M6. */
     suspend fun ensureLoaded(episodeId: Long)
 
+    /** Local enrichment port; W8 implements offline extraction, including absent JSON URLs. */
+    suspend fun ensureLocalLoaded(
+        episodeId: Long,
+        fileUri: String,
+    ): EmbeddedChapterResult = EmbeddedChapterResult.Unavailable
+
     /** Atomic source-only replacement including hidden rows; require matching sources. Identical
      * normalized lists and deleted episodes are no-ops; failure rolls back/propagates. Caller must
      * reject stale occurrences. JSON additionally guards URL in its save transaction. */
