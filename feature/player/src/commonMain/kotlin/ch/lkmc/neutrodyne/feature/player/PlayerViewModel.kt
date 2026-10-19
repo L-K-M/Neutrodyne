@@ -13,9 +13,9 @@ import ch.lkmc.neutrodyne.core.domain.ArtworkRepository
 import ch.lkmc.neutrodyne.core.domain.ChapterRepository
 import ch.lkmc.neutrodyne.core.domain.EpisodeRepository
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
-import ch.lkmc.neutrodyne.core.model.ArtworkColors
 import ch.lkmc.neutrodyne.core.domain.YouTubeExternalOpen
 import ch.lkmc.neutrodyne.core.domain.YouTubeOpenContext
+import ch.lkmc.neutrodyne.core.model.ArtworkColors
 import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.CurrentChapter
 import ch.lkmc.neutrodyne.core.model.EffectivePlayback
@@ -122,7 +122,7 @@ public class PlayerViewModel(
     private val chapters: Provider<ChapterRepository>,
     private val episodes: Provider<EpisodeRepository>,
     private val network: NetworkMonitor,
-    private val artwork: ArtworkRepository,
+    private val artwork: Provider<ArtworkRepository>,
     externalOpenService: Provider<YouTubeExternalOpen>,
 ) : ViewModel() {
     private val messages = UserMessages()
@@ -204,7 +204,7 @@ public class PlayerViewModel(
                 if (identity == null) {
                     flowOf(null to null)
                 } else {
-                    artwork
+                    artwork()
                         .observeColors(identity.second, identity.third)
                         .map { identity to it }
                         .onStart { emit(identity to null) }

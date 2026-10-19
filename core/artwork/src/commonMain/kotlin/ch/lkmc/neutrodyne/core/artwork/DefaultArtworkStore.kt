@@ -12,8 +12,8 @@ import ch.lkmc.neutrodyne.core.database.ArtworkEntity
 import ch.lkmc.neutrodyne.core.database.ArtworkSyncResult
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.model.ArtworkRef
-import ch.lkmc.neutrodyne.core.model.art.MonogramMode
 import ch.lkmc.neutrodyne.core.model.MosaicSnapshot
+import ch.lkmc.neutrodyne.core.model.art.MonogramMode
 import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.ExposeImplBinding
 import dev.zacsweers.metro.Inject

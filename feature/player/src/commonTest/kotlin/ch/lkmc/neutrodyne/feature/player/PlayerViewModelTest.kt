@@ -78,7 +78,7 @@ class PlayerViewModelTest : MainDispatcherTest() {
                 Provider { chapters },
                 Provider { episodeRepo },
                 FakeNetworkMonitor(),
-                artwork = artwork,
+                artwork = Provider { artwork },
                 externalOpenService = Provider { FakeYouTubeExternalOpen() },
             )
         backgroundScope.launch { vm.uiState.collect {} }

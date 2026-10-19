@@ -141,6 +141,19 @@ class DesktopAppGraphTest {
         assertThat(graph.databaseOpener.openState.value is DatabaseOpenState.Opened).isFalse()
     }
 
+    @Test
+    fun idlePlayerWithArtworkCanBeCreatedOnTheEventThread() {
+        java.awt.EventQueue.invokeAndWait {
+            val player = graph.metroViewModelFactory.create(PlayerViewModel::class, CreationExtras.Empty)
+            try {
+                assertThat(player.uiState.value.colors).isNull()
+                assertThat(graph.databaseOpener.openState.value).isEqualTo(DatabaseOpenState.Pending)
+            } finally {
+                player.viewModelScope.cancel()
+            }
+        }
+    }
+
     @Test fun externalPlaybackRefusesRowsAndDistinguishesMixedFeeds() =
         runBlocking {
             graph.databaseOpener.awaitOpen()

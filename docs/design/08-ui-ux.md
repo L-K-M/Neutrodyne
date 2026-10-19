@@ -2518,6 +2518,14 @@ seed is null or the average is transparent zero. Repository fallback follows
 podcast key changes and clears obsolete observations. No Room schema change or
 desktop raster adapter is introduced; production desktop sampling remains MD1.
 
+**Integration follow-up (2026-10-19, M10 I1):** Import report covers observe only
+`ArtworkRef`, and Downloads entry covers do not pass a persisted average to
+`CoverArt`. W7's surface completion must carry the available average through
+these projections and calls, with W2/W3 retaining ownership of colour mechanics.
+W5 preserves it through transitions; W9 supplies the missing loading/failure
+placeholder cases and W11 tracks closure. The local W1–W4 integration does not
+claim average-colour placeholders on every surface or complete M10 acceptance.
+
 ### Monograms and mosaics
 
 - In-app monograms are painted live by `MonogramPainter` (crisp, light/dark aware); rows and tiles never load monogram files.

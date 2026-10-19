@@ -215,8 +215,8 @@ public class PodcastViewModel
                             result.first ==
                                 state.detail?.let { Triple(it.id, it.artwork.key, null) }
                         },
-                    )
-                }.combine(capabilities.capabilities) { state, caps ->
+                )
+            }.combine(capabilities.capabilities) { state, caps ->
                 state.copy(
                     rowCaps =
                         RowCaps(

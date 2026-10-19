@@ -2216,6 +2216,14 @@ Any further permissive licence on a Gradle dependency (e.g. ISC; a weak-copyleft
 
 First `allowUrl` (2026-10-06, M0b): slf4j-api and slf4j-simple 2.0.20 name their MIT licence only by the URL `https://opensource.org/license/mit`, which Licensee cannot map to an SPDX id, so the server's build file scopes `allowUrl("https://opensource.org/license/mit")` with a `because(...)`; the entry lives in `:sync:server`'s `build.gradle.kts` for now (the shared `configureLicensee()` in build-logic belongs to another package) and should move there when a second module needs it.
 
+**Implementation note (2026-10-19, M10 I1):** The shared policy pins allowances
+for `com.materialkolor:material-color-utilities`, its `-android` variant and its
+`-jvm` variant to 5.0.1. Their published POMs declare "The MIT License" with an
+upstream repository licence URL that Licensee does not recognize. MIT is already
+allowed by D3; this resolves metadata recognition without a global URL allowance,
+a version change or an additional dependency. The Compose `material-kolor`
+artifact remains banned.
+
 ### Python and native components
 
 Four lockfiles list every component that ships but is not a Gradle dependency with a POM. Each is edited by hand in the PR that changes a component and reviewed like code; the allow-lists live in build-logic (`PythonLicencePolicy.kt`, `NativeLicencePolicy.kt`), not in the lockfiles, so widening one is a visible build-logic change, never a side effect of a lockfile edit.

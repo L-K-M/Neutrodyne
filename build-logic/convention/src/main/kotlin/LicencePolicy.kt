@@ -20,6 +20,15 @@ internal fun Project.configureLicensee() {
         allowDependency("org.jsoup", "jsoup", jsoup) {
             because("MIT; POM declares the licence as the URL https://jsoup.org/license only")
         }
+        for (artifact in listOf(
+            "material-color-utilities",
+            "material-color-utilities-android",
+            "material-color-utilities-jvm",
+        )) {
+            allowDependency("com.materialkolor", artifact, "5.0.1") {
+                because("MIT declared in the 5.0.1 POM; Licensee does not recognize the upstream licence URL")
+            }
+        }
         // slf4j lands on different resolved versions per classpath (transitively capped to 2.0.19 on
         // some), so the pinned allowDependency misses; the URL itself is unambiguous MIT (01, 2026-10-06).
         allowUrl("https://opensource.org/license/mit") {
