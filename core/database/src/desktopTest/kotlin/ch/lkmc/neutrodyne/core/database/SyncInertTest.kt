@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.database
 
+import androidx.room3.useWriterConnection
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportItemKind
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
@@ -97,7 +98,15 @@ class SyncInertTest {
                 db.podcastDao().deleteCascade(b, now = 2)
                 assertNull(db.podcastDao().byId(b))
 
-                // The groundwork stays inert.
+                db.useWriterConnection { c ->
+                    assertEquals(
+                        24L,
+                        c.longQuery(
+                            "SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name GLOB 'sync_cap_*'",
+                        ),
+                    )
+                }
+                // Installed capture stays inert.
                 assertEquals(0, db.syncOutboxDao().count())
                 assertEquals(0, db.syncClockDao().count())
                 assertEquals(0, db.syncParkedDao().count())

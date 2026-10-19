@@ -59,6 +59,7 @@ class MigrateAllTest {
             val before =
                 helper.createDatabase(1).use { conn ->
                     fixtureStatements().forEach { conn.exec(it) }
+                    MigrationInvariants.populateSync(conn)
                     MigrationInvariants.capture(conn)
                 }
 
@@ -68,6 +69,7 @@ class MigrateAllTest {
                         NeutrodyneDatabase.VERSION,
                         ALL_MIGRATIONS.toList(),
                     ).use { conn ->
+                        MigrationInvariants.assertCaptureInstalled(conn)
                         MigrationInvariants.capture(conn)
                     }
 

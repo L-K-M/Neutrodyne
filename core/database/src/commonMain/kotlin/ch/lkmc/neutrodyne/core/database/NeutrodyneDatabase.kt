@@ -102,7 +102,7 @@ abstract class NeutrodyneDatabase : RoomDatabase() {
     abstract fun syncHeldDao(): SyncHeldDao
 
     companion object {
-        const val VERSION = 2
+        const val VERSION = 3
         const val FILE_NAME = "neutrodyne.db"
 
         /**

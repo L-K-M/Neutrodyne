@@ -2057,6 +2057,35 @@ Each scenario is a test; the property test generates the first four at random, t
 | S16 Server on a Raspberry Pi (MS1) | Footprint and speed on the smallest supported hardware | Pi 4 (4 GB, 64-bit Raspberry Pi OS), the JAR on Temurin 21 and the image; the documented flags; idle RSS after 10 min; 50,000-record initial upload with `SyncLoadTool` (server test sources); start-up time; repeat on a Pi 3 or Zero 2 W (arm64) | PB30: idle ≤ 160 MB RSS, upload ≤ 60 s; recorded in the MS1 release issue | tighter flags (`-Xmx64m`, `-XX:ReservedCodeCacheSize=32m`, `-XX:MaxMetaspaceSize=64m`); recommend ≥ 2 GB devices; streaming record merge |
 | S17 Network paths (MS2–MS3) | Android 17 `ACCESS_LOCAL_NETWORK` for LAN servers; public names resolving to LAN addresses; a global IPv6 server on the same Wi-Fi (directly-connected route); a `10.x` server reached through a VPN; Tailscale `100.64.0.0/10`; SSE through Caddy and nginx (buffering, idle timeouts); no `502` from proxy keep-alive reuse against CIO's idle timeout (`/sync` calls spaced 40–200 s apart through both proxies); the macOS Local Network prompt with the ad-hoc identity, before and after an update | Physical Android 17 phone on Wi-Fi with a server on `192.168.x.x`; split-horizon DNS; a Tailscale node; `server-image-smoke` with the reference compose and a test certificate plus an nginx variant holding an SSE stream for 2 h; a desktop build updated over itself on macOS 15 | MS2 acceptance 5, MS3 acceptance 4; documented results for the unverified cases | polling-only mode for problematic paths; documentation of the macOS switch; treat CGNAT ranges as local in the gate if Android does |
 
+**Implementation note (2026-10-19, MS0).** W3/W4 install all 24 triggers
+and the trigger-only 2→3 migration. Database-layer capture, replay, transaction,
+rekey, migration and linked invalidation assertions run on the bundled JVM
+driver and Robolectric's framework driver; Android device tests compile for
+both drivers. Existing `core/data` writer integration remains W5.
+
+S14 development measurements below are from Linux x86_64, Temurin
+21.0.12.1, in-memory Room databases, the non-zero position-save DAO sequence
+(including safety reads and lazy state writes), 50 warm-up saves per mode and
+250 samples per mode in alternating blocks. Times include the transaction;
+the bulk operation marks 5,000 episodes played in one transaction, producing
+10,000 outbox fields with 5,000 distinct clocks. These are development timing
+trends under concurrent build load, not reference-phone acceptance.
+
+| Runtime / driver | Clock step | Capture off p50 / p95 | Capture on p50 / p95 | Bulk mark-played |
+|---|---|---|---|---|
+| JVM, bundled SQLite 3.50.1 | 1 ms | 479 / 824 µs | 517 / 782 µs | 80 ms |
+| Robolectric SDK 34, framework SQLite 3.32.2 | 1 ms | 1,872 / 4,971 µs | 2,233 / 6,217 µs | 80 ms |
+
+Available-driver cascades find the podcast parent gone before child deletes:
+only the podcast tombstone and the current-session change are captured. A
+group delete similarly captures only its tombstone, including when its
+settings contain non-null overrides.
+Linked position writes preserve the existing feed invalidation counts.
+**Open:** API 26/36 device execution, the reference Pixel 7a's ≤1 ms extra
+position-save budget, and release cold-start comparison. No reference phone
+is attached; ADB only exposes an offline emulator. MS0 acceptance remains
+open for that evidence. No trigger fallback was selected.
+
 ### Budgets
 
 PB30 (server on a Pi 4) and PB31 (propagation ≤ 10 s) live in [09 Performance budgets](09-quality-and-release.md#performance-budgets); S16 measures PB30 in MS1 and again in M11b; E12 and MS3 acceptance 1 measure PB31. Sync's cold-start cost is part of PB1: with sync not configured nothing in `:sync:impl` is constructed before the first frame (R7.1).

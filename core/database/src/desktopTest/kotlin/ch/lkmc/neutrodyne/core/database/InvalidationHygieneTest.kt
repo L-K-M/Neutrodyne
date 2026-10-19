@@ -41,6 +41,28 @@ class InvalidationHygieneTest {
             }
         }
 
+    @Test
+    fun linkedPositionWritesDoNotInvalidateOpenFeeds() =
+        runTest {
+            val db = TestDb.linked(queryContext = StandardTestDispatcher(testScheduler))
+            try {
+                FeedInvalidationProbe.positionWrites(db, this)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun linkedStartedStateTransitionInvalidatesOnlyOnce() =
+        runTest {
+            val db = TestDb.linked(queryContext = StandardTestDispatcher(testScheduler))
+            try {
+                FeedInvalidationProbe.firstPositionStartsStateOnce(db, this)
+            } finally {
+                db.close()
+            }
+        }
+
     /**
      * W10: an open `inProgressOnly` feed observes `episode_state`. Position ticks on an
      * already-started episode never invalidate it (the high-churn table stays unobserved), the

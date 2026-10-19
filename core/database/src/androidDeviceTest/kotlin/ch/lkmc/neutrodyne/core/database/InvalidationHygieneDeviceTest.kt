@@ -2,6 +2,7 @@
 
 package ch.lkmc.neutrodyne.core.database
 
+import androidx.sqlite.driver.AndroidSQLiteDriver
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -35,6 +36,70 @@ class InvalidationHygieneDeviceTest {
         runTest {
             val db =
                 TestDb.inMemory(
+                    InstrumentationRegistry.getInstrumentation().targetContext,
+                    BundledSQLiteDriver(),
+                    queryContext = StandardTestDispatcher(testScheduler),
+                )
+            try {
+                FeedInvalidationProbe.firstPositionStartsStateOnce(db, this)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun linkedPositionWritesFramework() =
+        runTest {
+            val db =
+                TestDb.linked(
+                    InstrumentationRegistry.getInstrumentation().targetContext,
+                    AndroidSQLiteDriver(),
+                    queryContext = StandardTestDispatcher(testScheduler),
+                )
+            try {
+                FeedInvalidationProbe.positionWrites(db, this)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun linkedFirstPositionStartsStateOnceFramework() =
+        runTest {
+            val db =
+                TestDb.linked(
+                    InstrumentationRegistry.getInstrumentation().targetContext,
+                    AndroidSQLiteDriver(),
+                    queryContext = StandardTestDispatcher(testScheduler),
+                )
+            try {
+                FeedInvalidationProbe.firstPositionStartsStateOnce(db, this)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun linkedPositionWritesBundled() =
+        runTest {
+            val db =
+                TestDb.linked(
+                    InstrumentationRegistry.getInstrumentation().targetContext,
+                    BundledSQLiteDriver(),
+                    queryContext = StandardTestDispatcher(testScheduler),
+                )
+            try {
+                FeedInvalidationProbe.positionWrites(db, this)
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun linkedFirstPositionStartsStateOnceBundled() =
+        runTest {
+            val db =
+                TestDb.linked(
                     InstrumentationRegistry.getInstrumentation().targetContext,
                     BundledSQLiteDriver(),
                     queryContext = StandardTestDispatcher(testScheduler),

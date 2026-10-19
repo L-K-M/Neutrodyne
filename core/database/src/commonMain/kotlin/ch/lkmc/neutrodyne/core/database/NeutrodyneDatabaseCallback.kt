@@ -9,9 +9,9 @@ import ch.lkmc.neutrodyne.core.common.Clock
 
 /**
  * The open callbacks of 02 Database builder and connections. [onCreate] inserts the two singleton
- * rows (`play_session`, `sync_state`; the `sync_cap_*` capture triggers arrive with MS0's
- * `SyncTriggers.create`). [onOpen] runs `PRAGMA optimize` (`=0x10002` under the bundled driver —
- * [optimizeMask] — plain under the framework driver) and defensively resets `sync_state.applying`.
+ * rows (`play_session`, `sync_state`) and installs capture triggers. [onOpen] ensures the trigger
+ * set, runs `PRAGMA optimize` (`=0x10002` with [optimizeMask], plain on the framework driver), and
+ * defensively resets `sync_state.applying`.
  * Callbacks touch only the [connection] they receive — never the database instance (02 Opening).
  */
 class NeutrodyneDatabaseCallback(
@@ -29,9 +29,11 @@ class NeutrodyneDatabaseCallback(
             bindLong(1, clock.now())
         }
         exec(connection, "INSERT OR IGNORE INTO sync_state(id) VALUES (0)")
+        SyncTriggers.create(connection)
     }
 
     override suspend fun onOpen(connection: SQLiteConnection) {
+        SyncTriggers.ensure(connection)
         exec(connection, if (optimizeMask) "PRAGMA optimize=0x10002" else "PRAGMA optimize")
         exec(connection, "UPDATE sync_state SET applying = 0 WHERE id = 0 AND applying <> 0")
     }

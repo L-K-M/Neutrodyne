@@ -3,6 +3,7 @@
 package ch.lkmc.neutrodyne.core.database.migration
 
 import androidx.sqlite.SQLiteConnection
+import ch.lkmc.neutrodyne.core.database.SyncTriggers
 
 /**
  * The table-rebuild procedure every manual migration uses (02 Writing migrations): Room's own
@@ -32,7 +33,7 @@ object TableRebuild {
         check(foreignKeysOff(connection)) {
             "TableRebuild requires PRAGMA foreign_keys = 0 (the migration connection)"
         }
-        dropSyncCaptureTriggers(connection)
+        SyncTriggers.dropAll(connection)
 
         val oldSeq = readSequence(connection, table)
         val newTable = "new_$table"
@@ -55,20 +56,6 @@ object TableRebuild {
         connection.prepare("PRAGMA foreign_keys").use { stmt ->
             return stmt.step() && stmt.getLong(0) == 0L
         }
-    }
-
-    /**
-     * M1a has no `SyncTriggers` class (MS0), but step 2 of the procedure must still remove any
-     * `sync_cap_*` trigger — its body can name the dropped table and block the rename.
-     */
-    private suspend fun dropSyncCaptureTriggers(connection: SQLiteConnection) {
-        val names = mutableListOf<String>()
-        connection
-            .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'sync_cap_%'")
-            .use { stmt ->
-                while (stmt.step()) names += stmt.getText(0)
-            }
-        names.forEach { exec(connection, "DROP TRIGGER IF EXISTS $it") }
     }
 
     private suspend fun readSequence(

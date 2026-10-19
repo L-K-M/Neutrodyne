@@ -4,6 +4,7 @@ package ch.lkmc.neutrodyne.core.testing.database
 
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.SQLiteStatement
+import ch.lkmc.neutrodyne.core.database.SyncTriggers
 
 /**
  * The migration invariant snapshot of 02 Invariants: `capture` runs each documented projection in
@@ -164,6 +165,36 @@ object MigrationInvariants {
         val shrunk =
             before.sequences.filter { (table, seq) -> (after.sequences[table] ?: 0L) < seq }.keys
         check(shrunk.isEmpty()) { "migration lowered sqlite_sequence of: $shrunk" }
+    }
+
+    /** Schema validation alone does not see triggers; compare their installed SQL as well. */
+    suspend fun assertCaptureInstalled(connection: SQLiteConnection) {
+        val actual =
+            connection
+                .prepare(
+                    "SELECT sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'sync_cap_*'",
+                ).use { statement ->
+                    buildSet { while (statement.step()) add(statement.getText(0)) }
+                }
+        check(actual == SyncTriggers.sql().map { it.removeSuffix(";") }.toSet()) {
+            "Migration did not install the exact current capture trigger set"
+        }
+        check(connection.prepare("PRAGMA foreign_key_check").use { !it.step() }) {
+            "Migration left foreign key violations"
+        }
+    }
+
+    /** Populated raw/effect and replay rows must survive byte-for-byte, without clock rewriting. */
+    suspend fun populateSync(connection: SQLiteConnection) {
+        val statements =
+            listOf(
+                "INSERT INTO sync_outbox(coll, rid, field, hlc, nodeId, captureKind, value)" +
+                    " VALUES ('episode', 'migration-raw', 'played', 111411200000000007, '0000000000000002', 'REPLAY', 'false')",
+                "INSERT INTO sync_clock(coll, rid, clocks) VALUES ('episode', 'migration-raw'," +
+                    " '{\"raw\":{\"played\":false,\"unknown\":42},\"pendingSetting\":{\"v\":null}," +
+                    "\"pendingAuth\":{\"ref\":\"protected-stage\"},\"redirect\":\"opaque\"}')",
+            )
+        for (sql in statements) connection.prepare(sql).use { it.step() }
     }
 
     private suspend fun digest(

@@ -10,6 +10,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import ch.lkmc.neutrodyne.core.database.migration.ALL_MIGRATIONS
 import ch.lkmc.neutrodyne.core.testing.database.MigrationInvariants
+import ch.lkmc.neutrodyne.core.testing.database.TestDb
+import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
 import org.junit.Test
@@ -36,7 +38,13 @@ class MigrateAllDeviceTest {
         get() = InstrumentationRegistry.getInstrumentation()
 
     private val dbFile: File
-        get() = File(instrumentation.targetContext.cacheDir, "migrate-all.db")
+        get() =
+            File(
+                File(instrumentation.targetContext.cacheDir, "migrate-all").apply {
+                    mkdirs()
+                },
+                NeutrodyneDatabase.FILE_NAME,
+            )
 
     @get:Rule
     val helper =
@@ -59,7 +67,16 @@ class MigrateAllDeviceTest {
             migrate(BundledSQLiteDriver())
         }
 
-    private suspend fun migrate(driver: androidx.sqlite.SQLiteDriver) {
+    @Test
+    fun v2FixtureSurvivesOnTheFrameworkDriver() = runTest { migrate(AndroidSQLiteDriver(), 2) }
+
+    @Test
+    fun v2FixtureSurvivesOnTheBundledDriver() = runTest { migrate(BundledSQLiteDriver(), 2) }
+
+    private suspend fun migrate(
+        driver: androidx.sqlite.SQLiteDriver,
+        start: Int = 1,
+    ) {
         // The rule's helper is bound to the bundled driver; for the framework run a second
         // helper instance is needed (managed connections close with it).
         val h =
@@ -74,14 +91,16 @@ class MigrateAllDeviceTest {
                 )
             }
         val before =
-            h.createDatabase(1).use { conn ->
+            h.createDatabase(start).use { conn ->
                 fixtureStatements(instrumentation.context).forEach { conn.exec(it) }
+                MigrationInvariants.populateSync(conn)
                 MigrationInvariants.capture(conn)
             }
         val after =
             h
                 .runMigrationsAndValidate(NeutrodyneDatabase.VERSION, ALL_MIGRATIONS.toList())
                 .use { conn ->
+                    MigrationInvariants.assertCaptureInstalled(conn)
                     val snapshot = MigrationInvariants.capture(conn)
                     assertEquals(0L, conn.longQuery("SELECT COUNT(*) FROM episode_guid_provenance"))
                     assertEquals(
@@ -91,6 +110,14 @@ class MigrateAllDeviceTest {
                     snapshot
                 }
         MigrationInvariants.assertPreserved(before, after)
+        val db = TestDb.file(instrumentation.targetContext, dbFile.parentFile!!, driver)
+        try {
+            val previous = db.syncOutboxDao().count()
+            db.podcastDao().insertPodcast(podcastEntity())
+            assertEquals(previous + 1, db.syncOutboxDao().count())
+        } finally {
+            db.close()
+        }
     }
 }
 
