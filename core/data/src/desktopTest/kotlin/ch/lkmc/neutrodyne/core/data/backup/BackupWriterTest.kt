@@ -332,6 +332,9 @@ class BackupWriterTest {
     fun updateChoiceRoundTripsButDeviceBookkeepingDoesNot() =
         runTest {
             seedPodcast()
+            val updateCache = dir / "updates" / "last-check.json"
+            fileSystem.createDirectories(updateCache.parent!!)
+            fileSystem.sink(updateCache).buffer().use { it.writeUtf8("Private update cache") }
             settings.set(UpdateSettingKeys.CHECK_ENABLED, false)
             settings.set(UpdateSettingKeys.LAST_CHECK_AT, 123L)
             settings.set(UpdateSettingKeys.SKIPPED_VERSION_CODE, 1000095L)
@@ -340,6 +343,7 @@ class BackupWriterTest {
             settings.set(UpdateSettingKeys.VERIFICATION_NOTICE_SHOWN_AT, 456L)
             assertIs<Outcome.Success<*>>(newWriter().write(BackupKind.MANUAL, target(), includeCredentials = false))
             reader(target()).use { archive ->
+                assertFalse(archive.entryNames.any { it.contains("updates/") || it.endsWith("last-check.json") })
                 val exported = archive.settings()
                 assertEquals(
                     listOf(UpdateSettingKeys.CHECK_ENABLED.name),
@@ -350,6 +354,9 @@ class BackupWriterTest {
                 assertEquals(false, restored.get(UpdateSettingKeys.CHECK_ENABLED))
                 assertEquals(-1L, restored.get(UpdateSettingKeys.LAST_CHECK_AT))
                 assertEquals(false, restored.get(UpdateSettingKeys.FIRST_RUN_CHOICE_DONE))
+                assertEquals(-1L, restored.get(UpdateSettingKeys.SKIPPED_VERSION_CODE))
+                assertEquals(-1L, restored.get(UpdateSettingKeys.NOTIFIED_VERSION_CODE))
+                assertEquals(-1L, restored.get(UpdateSettingKeys.VERIFICATION_NOTICE_SHOWN_AT))
             }
         }
 

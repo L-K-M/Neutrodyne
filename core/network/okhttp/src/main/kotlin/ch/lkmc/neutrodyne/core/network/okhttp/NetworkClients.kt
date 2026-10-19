@@ -42,6 +42,8 @@ class NetworkClients(
     val api: OkHttpClient =
         base
             .newBuilder()
+            .addInterceptor(UpdateManifestGuard)
+            .addNetworkInterceptor(UpdateManifestHopGuard)
             .callTimeout(API_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .build()
 

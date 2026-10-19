@@ -1244,6 +1244,8 @@ GitHub is the only channel and most users never install Obtainium, so both apps 
 
 ### Modules and API
 
+**Implementation note (2026-10-19, M11a).** W2/W3 bindings remain lazy, with no shell accessor or startup/UI contribution until W4–W6. The atomic cache stores the validated schema-1 manifest and scheduling metadata together, rather than only the selected card, so restart revalidates every known link before selecting for the current runtime. Cache/settings write failures are exposed through `writeError`; an in-memory result and due time may advance while the durable snapshot remains unchanged. On restart, the cache timestamp repairs an interrupted subsequent preferences write. Desktop enforces its persisted due times; Android WorkManager owns periodic and retry timing.
+
 **Implementation note (2026-10-19, M11a).** W1 freezes domain checker/notices/runtime ports with core:testing fakes and internal data parser/source/selector/executor/runner/store/jitter/notifier seams. `UpdateInfo.desktopSelection` carries compatibility reasons; `desktopAsset` is derived. `skip`/`dismiss` keep their signatures, adding `writeError: StateFlow<SettingsError?>`; retain card/notice until durable success, retain it on failure, clear error on successful retry. `UpdateNotices.verificationPhase` exposes pre/post copy without UI access to data-layer constants. One app-scoped coordinator serializes writes and coalesces checks. W4/W5 own platform contributions; W6 owns shared shell accessors/settings/root/help wiring.
 
 No modules of its own ([D13](../PLAN.md#3-key-decisions)): interfaces in `:core:domain` (package `ch.lkmc.neutrodyne.core.domain.update`), state types in `:core:model` (`ch.lkmc.neutrodyne.core.model.update`), the implementation in `:core:data` (`ch.lkmc.neutrodyne.core.data.update`): the logic in `commonMain`, the scheduling and notification in `androidMain` and `desktopMain`, bound through Metro contributions ([01 Dependency injection](01-foundation.md#dependency-injection)). `:feature:settings` (Settings › Updates, Install & updates help) and each shell's root (first-run card, on Android the verification notice, the gear badge) use only the interfaces. `:core:data` already hosts comparable work, and the check needs no install permission, no `PackageInstaller` and no playback or download state, which were the only reasons for separate `:update:*` modules.
@@ -1372,6 +1374,8 @@ The manifest is **not signed**, and need not be: the apps only show text and ope
 
 ### Checking
 
+**Implementation note (2026-10-19, M11a).** The existing API client applies a manifest-only network-island policy: HTTPS port 443, `github.com` and `release-assets.githubusercontent.com`, at most five redirects, and no credentials or cookies. Each redirect target is checked before following or resolving its host. The reader enforces 64 KiB independently of response length headers. Shared release-stage and URL fixtures live in `core/data/src/commonTest/resources/updates/` for W7's producer/validator tests; app tests exercise the shipped Ktor/OkHttp wrappers with socket destinations rewritten to local TLS fixtures.
+
 One request per check, on 01's Ktor API client (standard User-Agent, no cookies, no token): `GET {repoUrl}/releases/latest/download/neutrodyne-update.json` (`BuildInfo.updateManifestUrl`). `github.com` answers 302 to `/releases/download/<tag>/…`, which redirects to a short-lived signed `release-assets.githubusercontent.com` URL (≈ 1 h validity, observed 2026-10-05); no REST API is involved ([linking to releases](https://docs.github.com/en/repositories/releasing-projects-on-github/linking-to-releases)). Every tag is a normal release, so `latest` is the release `release.yml` marked latest ([Tester builds](#tester-builds)).
 
 A check finds an update when the manifest's `versionCode` is higher than `BuildInfo.versionCode` and not equal to `updates.skipped_version_code`. On Android it then picks the `apks[]` entry whose `abi` equals `Build.SUPPORTED_ABIS[0]`, the device's preferred ABI ([D78](../PLAN.md#3-key-decisions)), so a 64-bit phone that runs the `armeabi-v7a` APK is linked to the `arm64-v8a` APK (08's "Get the 64-bit version", risk T16); no such entry → `UpdateInfo.apk = null`, and the card offers only the release page. On the desktop `DesktopAssetSelector` picks the entry for this OS, architecture and install kind ([11 Desktop update check](11-desktop.md#desktop-update-check)); none (a `DEV` run, no entry, or `minOs` above the running OS) → `desktopAsset = null` or the "needs a newer OS" card (08).
@@ -1387,6 +1391,8 @@ Failures: I/O and timeouts → `NETWORK`; HTTP 403 or 429 from GitHub → `RATE_
 `app-update-download` and `app-update-install` were removed with PO-31.
 
 ### Update card and links
+
+**Implementation note (2026-10-19, M11a).** After accepted dispatch or a manual result, an in-memory suppression marker prevents another dispatch in that process if saving `updates.notified_version_code` fails. The write error remains visible; the next successful check retries bookkeeping without posting again. A restart still has the documented delivery/storage crash window.
 
 **Implementation note (2026-10-19, M11a).** Only scheduled checks post; successful manual checks record suppression. Card/badge can precede MD2, which owns native desktop delivery acceptance.
 
@@ -1404,6 +1410,8 @@ What the card shows is 08's ([08 Updates settings](08-ui-ux.md#updates-settings)
 - **After a manual install** the OS installer replaces the app (Android also ends its processes like any update; desktop installers expect the app to be closed, and the MSI asks to close it, Unverified wording). At the next start the stored version is at or below the running one, so `state` returns to `Idle` and the notification is cancelled. Positions, the queue and downloads resume as after a restart (06, 07, 11); nothing plays by itself.
 
 ### Notices
+
+**Implementation note (2026-10-19, M11a).** Notice dates use UTC boundaries. The notice service rechecks once per minute while instantiated, and offers an internal refresh for foreground delivery integration. A failed dismissal retains the notice until its settings write succeeds; a restored-off choice suppresses the first-run card even if recording completion fails, with that failure exposed and retried on refresh.
 
 **Implementation note (2026-10-19, M11a).** Use PO-36’s default 2026-12-01 with foreground/date-boundary reevaluation in earlier builds; advance only on the documented announcement trigger. Global date stays unset. PLAN records release-time owner confirmation of this interpretation.
 
