@@ -115,6 +115,14 @@ class SmokeTest {
     }
 
     private fun openSettings() {
+        // The database opens on IO: Compose can be idle while the root still shows its
+        // startup gate. Resolve the label on each poll so a locale recreation cannot stale it.
+        compose.waitUntil(STARTUP_TIMEOUT_MS) {
+            compose
+                .onAllNodesWithContentDescription(text(Res.string.settings))
+                .fetchSemanticsNodes(atLeastOneRootRequired = false)
+                .isNotEmpty()
+        }
         compose.onAllNodesWithContentDescription(text(Res.string.settings)).onFirst().performClick()
         compose.waitForIdle()
     }
@@ -138,6 +146,7 @@ class SmokeTest {
 
     private companion object {
         const val TAG_FEEDS = "nav_feeds"
+        const val STARTUP_TIMEOUT_MS = 10_000L
 
         // Section headers render "<title> · <count>"; the separator keeps library names such as
         // "AboutLibraries" from matching.

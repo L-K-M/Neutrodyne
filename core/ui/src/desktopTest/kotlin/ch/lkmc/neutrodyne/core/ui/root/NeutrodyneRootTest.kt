@@ -72,6 +72,7 @@ import java.util.Locale
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import kotlin.test.assertFailsWith
 
 /**
  * S9's `runComposeUiTest` checks of `NeutrodyneRoot` on the desktop JVM (01 S9): the five labelled
@@ -240,6 +241,26 @@ class NeutrodyneRootTest {
             pressEscape()
             onNodeWithText("settings-home").assertDoesNotExist()
             onNodeWithText("feeds-content").assertIsDisplayed()
+        }
+
+    @Test
+    fun settingsIsAbsentWhileStartupIsPendingEvenWhenComposeIsIdle() =
+        runComposeUiTest {
+            var startup by mutableStateOf<StartupGateState>(StartupGateState.Pending)
+            setContent { TestRoot(startup = startup) }
+            waitForIdle()
+
+            // Database opening happens outside Compose's idle tracking. Reproduce the old
+            // smoke test's immediate click while the real root still displays its startup gate.
+            val settings = onAllNodesWithContentDescription("Settings")
+            assertFailsWith<AssertionError> { settings.onFirst().performClick() }
+
+            runOnIdle { startup = StartupGateState.Ready }
+            waitUntil(timeoutMillis = 10_000) {
+                settings.fetchSemanticsNodes(atLeastOneRootRequired = false).isNotEmpty()
+            }
+            settings.onFirst().performClick()
+            onNodeWithText("settings-home").assertIsDisplayed()
         }
 
     @Test
