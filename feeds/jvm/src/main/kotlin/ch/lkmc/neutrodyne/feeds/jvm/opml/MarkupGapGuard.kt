@@ -248,7 +248,8 @@ internal class MarkupGapGuard(
 
     /** One decoded unit: every unit feeds the construct walk, which runs the whole document. */
     private fun emitUnit(u: Int) {
-        pending.addLast(u)
+        // Malformed UTF-32 words can be negative; EOF and WAIT must remain internal sentinels.
+        pending.addLast(if (u < 0) '\uFFFD'.code else u)
         while (step()) {
             // one automaton step per iteration; false means "needs a unit that has not arrived"
         }
