@@ -8,6 +8,7 @@ import androidx.room3.DaoReturnTypeConverters
 import androidx.room3.Insert
 import androidx.room3.Query
 import androidx.room3.paging.PagingSourceDaoReturnTypeConverter
+import ch.lkmc.neutrodyne.core.model.IMPORT_DEFERRED_DETAIL
 import ch.lkmc.neutrodyne.core.model.ImportItemStatus
 import ch.lkmc.neutrodyne.core.model.ImportState
 import kotlinx.coroutines.flow.Flow
@@ -94,7 +95,8 @@ abstract class ImportDao {
         "SELECT COUNT(*) AS itemCount," +
             " COUNT(CASE WHEN selected = 1 THEN 1 END) AS selectedCount," +
             " COUNT(CASE WHEN kind = 'YOUTUBE' THEN 1 END) AS youtubeCount," +
-            " COUNT(CASE WHEN status = 'FETCH_FAILED' AND errorDetail = 'DEFERRED' THEN 1 END) AS deferredCount" +
+            " COUNT(CASE WHEN status = 'FETCH_FAILED' AND errorDetail = '$IMPORT_DEFERRED_DETAIL'" +
+            " THEN 1 END) AS deferredCount" +
             " FROM import_item WHERE sessionId = :sessionId",
     )
     abstract fun observeItemTallies(sessionId: Long): Flow<ImportItemTallies>
@@ -114,7 +116,7 @@ abstract class ImportDao {
             " ORDER BY CASE WHEN :sessionState = 'PREVIEW' THEN 0" +
             " WHEN status = 'QUEUED' THEN 0 WHEN status = 'SUBSCRIBED' THEN 1" +
             " WHEN status IN ('NOT_A_FEED', 'AUTH_REQUIRED', 'GONE') THEN 2" +
-            " WHEN status = 'FETCH_FAILED' AND COALESCE(errorDetail, '') != 'DEFERRED' THEN 2" +
+            " WHEN status = 'FETCH_FAILED' AND COALESCE(errorDetail, '') != '$IMPORT_DEFERRED_DETAIL' THEN 2" +
             " WHEN status = 'ALREADY_SUBSCRIBED' THEN 3 WHEN status = 'MERGED' THEN 4" +
             " WHEN status = 'NO_MEDIA' THEN 5 WHEN status = 'FETCH_FAILED' THEN 6" +
             " ELSE 7 END, ordinal",

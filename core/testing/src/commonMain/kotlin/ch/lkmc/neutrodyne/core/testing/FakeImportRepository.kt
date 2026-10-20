@@ -12,6 +12,7 @@ import ch.lkmc.neutrodyne.core.domain.ImportRepository
 import ch.lkmc.neutrodyne.core.model.BasicCredentials
 import ch.lkmc.neutrodyne.core.model.CreateImportOptions
 import ch.lkmc.neutrodyne.core.model.GroupProposal
+import ch.lkmc.neutrodyne.core.model.IMPORT_DEFERRED_DETAIL
 import ch.lkmc.neutrodyne.core.model.ImportFormat
 import ch.lkmc.neutrodyne.core.model.ImportItemFilter
 import ch.lkmc.neutrodyne.core.model.ImportItemKind
@@ -272,7 +273,7 @@ class FakeImportRepository(
             deferredCount =
                 sessionItems.count {
                     it.status == ImportItemStatus.FETCH_FAILED &&
-                        it.errorDetail == "DEFERRED"
+                        it.errorDetail == IMPORT_DEFERRED_DETAIL
                 },
             noMediaOrdinals =
                 sessionItems
