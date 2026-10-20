@@ -1891,6 +1891,13 @@ the marker preserves it through Ktor redirects. No new HTTP client is created.
 
 **`AuthInterceptor`** (Basic auth for private feeds and their same-origin enclosures, [03](03-feeds-and-discovery.md#feed-moves-auth-and-paging)):
 
+**Implementation note (2026-10-20, M9a).** `PublisherAuthPolicy.ANONYMOUS` suppresses
+stored and caller `Authorization` per request, before resolving the credential
+provider. Ktor callers use `publisherAuth`; raw drivers use the same internal
+hint. The interceptor strips the hint before wire IO and retains immutable
+policy through redirects/retries. Ordinary publisher and directory policies
+remain unchanged; clients, pools, DNS and guards are shared.
+
 ```kotlin
 // :core:common (commonMain): the lookup contract, implemented by 03's SecretStore implementations
 data class Origin(val scheme: String, val host: String, val port: Int)   // lowercase scheme/host, explicit port

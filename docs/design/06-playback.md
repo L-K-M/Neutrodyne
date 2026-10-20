@@ -722,7 +722,9 @@ shared eligibility gate before local selection, so external YouTube cannot use
 a completed file. Eligible local and RSS routing retain their existing owners.
 Remote YouTube pins snapshot durable audio quality/levelling and app language;
 automatic repins retain those preferences and the per-occurrence invalidation
-budget. Each cache-hole upstream open resolves through the same W5 owner before
+budget. Each actual MEDIA open explicitly selects anonymous publisher auth through
+01's shared request policy, including redirects and cache holes. RSS keeps its auth.
+Each cache-hole upstream open resolves through the same W5 owner before
 accepting bytes, with full formatId/itag/clen/lmt checks. The cache protects shared
 video keys until the last pin leaves. A cancelled resolve compensates only a
 reference acquired by that invocation; release already removes a published pin's

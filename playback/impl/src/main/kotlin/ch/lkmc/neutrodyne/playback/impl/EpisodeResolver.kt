@@ -9,6 +9,7 @@ import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.Clock
+import ch.lkmc.neutrodyne.core.common.PublisherAuthPolicy
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.download.api.LocalMediaIndex
 import ch.lkmc.neutrodyne.playback.api.StreamKind
@@ -376,7 +377,11 @@ internal class EpisodeResolver internal constructor(
                             spec
                                 .buildUpon()
                                 .setUri(audio.url)
-                                .setCustomData(lease.original)
+                                .setHttpRequestHeaders(
+                                    spec.httpRequestHeaders.filterKeys {
+                                        !it.equals(PublisherAuthPolicy.HEADER, ignoreCase = true)
+                                    } + (PublisherAuthPolicy.HEADER to PublisherAuthPolicy.ANONYMOUS.name),
+                                ).setCustomData(lease.original)
                                 .build(),
                         )
                     if (entry.released) throw InterruptedIOException("Episode pin released")

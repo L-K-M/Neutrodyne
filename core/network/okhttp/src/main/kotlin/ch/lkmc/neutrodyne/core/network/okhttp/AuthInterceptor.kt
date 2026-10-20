@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.core.network.okhttp
 import ch.lkmc.neutrodyne.core.common.AppScope
 import ch.lkmc.neutrodyne.core.common.CredentialLookup
 import ch.lkmc.neutrodyne.core.common.Origin
+import ch.lkmc.neutrodyne.core.common.PublisherAuthPolicy
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.SingleIn
@@ -36,6 +37,22 @@ class AuthInterceptor(
 ) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         var request = chain.request()
+        val policy = request.header(PublisherAuthPolicy.HEADER)
+        if (policy == PublisherAuthPolicy.ANONYMOUS.name ||
+            request.tag(PublisherAuthPolicy::class.java) == PublisherAuthPolicy.ANONYMOUS
+        ) {
+            // Follow-ups retain the immutable request policy, never the credential provider.
+            return chain.proceed(
+                request
+                    .newBuilder()
+                    .removeHeader(PublisherAuthPolicy.HEADER)
+                    .removeHeader(DIRECTORY_ORIGIN_HEADER)
+                    .removeHeader("Authorization")
+                    .tag(PublisherAuthPolicy::class.java, PublisherAuthPolicy.ANONYMOUS)
+                    .build(),
+            )
+        }
+        if (policy != null) request = request.newBuilder().removeHeader(PublisherAuthPolicy.HEADER).build()
         val directoryOrigin =
             request.header(DIRECTORY_ORIGIN_HEADER)
                 ?: request.tag(DirectoryAuthOrigin::class.java)?.value

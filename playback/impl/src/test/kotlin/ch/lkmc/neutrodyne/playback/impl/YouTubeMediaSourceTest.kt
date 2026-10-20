@@ -11,6 +11,8 @@ import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.ContentMetadata
 import androidx.media3.datasource.cache.ContentMetadataMutations
+import ch.lkmc.neutrodyne.core.common.CredentialLookup
+import ch.lkmc.neutrodyne.core.common.PublisherAuthPolicy
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.testing.FakeSettingsRepository
 import ch.lkmc.neutrodyne.core.testing.PortableYouTubePlayback
@@ -54,6 +56,72 @@ import java.util.concurrent.locks.LockSupport
 @Config(sdk = [34])
 class YouTubeMediaSourceTest {
     @get:Rule val temporary = TemporaryFolder()
+
+    @Test fun youtubeOpensStayAnonymousAcrossNativeRedirectsAndCacheHoles() {
+        var lookups = 0
+        Fixture(
+            credentials =
+                CredentialLookup { origin ->
+                    lookups++
+                    "Basic stored-${origin.port}"
+                },
+        ).use { f ->
+            MockWebServer().use { second ->
+                second.start()
+                val requests = mutableListOf<mockwebserver3.RecordedRequest>()
+                for ((offset, body) in listOf(1L to "bcd", 4L to "ef")) {
+                    f.server.enqueue(
+                        MockResponse
+                            .Builder()
+                            .code(302)
+                            .addHeader("Location", "/same")
+                            .build(),
+                    )
+                    f.server.enqueue(
+                        MockResponse
+                            .Builder()
+                            .code(302)
+                            .addHeader("Location", second.url("/other"))
+                            .build(),
+                    )
+                    second.enqueue(
+                        MockResponse
+                            .Builder()
+                            .code(206)
+                            .body(body)
+                            .addHeader("Content-Range", "bytes $offset-${offset + body.length - 1}/6")
+                            .build(),
+                    )
+                    val headers =
+                        buildMap {
+                            put("X-Caller", "untouched")
+                            put(PublisherAuthPolicy.HEADER.lowercase(), PublisherAuthPolicy.DEFAULT.name)
+                            if (offset == 4L) put("Authorization", "Bearer caller")
+                        }
+                    val spec =
+                        f
+                            .spec(offset, body.length.toLong())
+                            .buildUpon()
+                            .setHttpRequestHeaders(headers)
+                            .setCustomData(Any())
+                            .build()
+                    assertEquals(body, f.read(spec))
+                    requests += f.server.takeRequest()
+                    requests += f.server.takeRequest()
+                    requests += second.takeRequest()
+                }
+                assertEquals("bcdef", f.read(f.spec(1, 5)))
+                assertEquals(1, f.port.nativeCalls())
+                assertEquals(List(3) { "bytes=1-3" } + List(3) { "bytes=4-5" }, requests.map { it.headers["Range"] })
+                assertEquals(List(6) { "untouched" }, requests.map { it.headers["X-Caller"] })
+                assertEquals(List(6) { "identity" }, requests.map { it.headers["Accept-Encoding"] })
+                assertEquals(List<String?>(6) { null }, requests.map { it.headers["Authorization"] })
+                assertEquals(List<String?>(6) { null }, requests.map { it.headers[PublisherAuthPolicy.HEADER] })
+                assertTrue(requests.all { it.headers["User-Agent"]?.startsWith("Neutrodyne/test") == true })
+                assertEquals(0, lookups)
+            }
+        }
+    }
 
     @Test fun failedCacheInitializationStillStreamsOnRetryThroughTheSameOwner() {
         Fixture(temporary.newFile()).use { f ->
@@ -515,6 +583,7 @@ class YouTubeMediaSourceTest {
 
     private inner class Fixture(
         directory: java.io.File = temporary.newFolder(),
+        credentials: CredentialLookup = CredentialLookup.None,
     ) : AutoCloseable {
         val clock = TestClock()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -544,7 +613,7 @@ class YouTubeMediaSourceTest {
             port.reply { reply() }
         }
 
-        private val clients = mediaClients()
+        private val clients = mediaClients(credentials)
         val cacheFactory: DataSource.Factory get() =
             CacheDataSource
                 .Factory()
