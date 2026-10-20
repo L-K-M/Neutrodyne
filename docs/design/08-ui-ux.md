@@ -379,6 +379,13 @@ Selection mode registers its handler inside the screen's entry (composed inside 
   remain open; no first-child fallback or deferred retry is permitted. Two
   existing Escape/Back dismissal cases are also red: their injected keys do not
   reach the root key callback or navigation pop in the captured trace.
+  Read-only pinned native inspection finds no active focus target in those cases;
+  both key phases require a focused path. No-focus modifier-order controls also
+  receive no keys, so a boundary-placement repair is not established. The lazy
+  trace identifies the missing saved child at the intermediate Never-focusable
+  container, while row 20 remains attached, placed and eligible. Retaining only
+  the entry's immediate child does not retain that nested exact-descendant path.
+  Both contracts need an owner decision before broader implementation.
 - Known IME limitation: expanded detail-only scene changes move the shared list pane, ending an in-progress IME composition and its input connection; keyboard focus is restored. The follow-up post-decoration pane animator would avoid this reparenting.
 - Known fling limitation: expanded detail-only scene changes move the shared list pane, stopping an in-progress fling while preserving its scroll offset. The follow-up post-decoration pane animator would avoid this reparenting.
 - Shared elements (M10, `SharedTransitionLayout` around `NavDisplay`, 01): Library tile cover ↔ podcast header cover (`SharedKeys.cover(tab, podcastId)`); feed, Up next and Downloads row thumbnail ↔ episode detail art (`SharedKeys.episodeArt(tab, episodeId)`). Keys include `LocalNavTab` because the same podcast can be visible in two tab stacks. Shared elements run only when `LocalPaneLayout.partitions == 1`. Expanded layouts disable NavDisplay's automatic whole-entry shared-bounds decorator while retaining its movable entry state; pane cover/wipe applies instead.
