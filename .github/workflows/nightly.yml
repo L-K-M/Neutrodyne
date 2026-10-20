@@ -26,7 +26,7 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: "full | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | desktop (M0b) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36)"
+        description: "full | youtube-smoke (release smoke + api36 debug YouTube smoke; the hotfix path) | desktop (M0b) | first-launch-restore (M3's seeded first-launch restore gate on api26 + api36) | bmgr-api29-probe (synthetic stock-image diagnostic, not acceptance)"
         default: full
 
 permissions:
@@ -510,3 +510,52 @@ jobs:
           path: |
             **/build/reports/tests/
             **/build/test-results/
+
+  # Diagnostic collection only: BLOCKED is not positive M3 acceptance.
+  bmgr-api29-probe:
+    if: inputs.scope == 'bmgr-api29-probe'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - name: Start raw evidence
+        run: mkdir -p build/bmgr-api29-probe && git rev-parse HEAD > build/bmgr-api29-probe/source.txt
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install pinned SDK tools
+        timeout-minutes: 6
+        run: scripts/ci/install-android-sdk.sh
+      - name: Build synthetic APKs before boot (no Gradle)
+        timeout-minutes: 3
+        run: python3 scripts/ci/bmgr-api29-probe.py build
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Measure stock API29 (diagnostic only)
+        timeout-minutes: 18
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        env:
+          BMGR_DISPOSABLE_API29: "1"
+        with:
+          api-level: "29"
+          target: default
+          arch: x86_64
+          avd-name: nd-bmgr-api29-probe
+          force-avd-creation: true
+          cores: 2
+          ram-size: 4096M
+          emulator-boot-timeout: 300
+          disable-animations: false
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot -camera-back none -camera-front none
+          script: python3 scripts/ci/bmgr-api29-probe.py probe
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: bmgr-api29-probe-diagnostic
+          path: build/bmgr-api29-probe/
+          if-no-files-found: error

@@ -694,6 +694,18 @@ Pushing commits from workflows is deliberately avoided: pushes made with `GITHUB
 
 ### CI scripts
 
+The opt-in `nightly.yml` scope `bmgr-api29-probe` builds SDK-only synthetic
+`ch.lkmc.neutrodyne.transportprobe.*` APKs and collects stock API29 LocalTransport
+capability evidence with `scripts/ci/bmgr-api29-probe.py`. A green diagnostic can
+record BLOCKED; it is not M3 acceptance, real-app archive/restore, encryption or
+D2D transfer proof. No scheduled/full job or production backup rule is changed.
+Offline `verify` rechecks retained TARs without extraction; `result.json` separates
+collection, observed capability and untested acceptance. Missing control/root or
+transport errors cannot establish exclusion.
+The final outcome is written after owned cleanup; offline verification rejects
+incomplete/failed runs and rechecks raw receipts. Historical attempts are retained
+separately. The installed LocalTransport APK is collected only as image evidence.
+
 | Script | Purpose |
 |---|---|
 | `scripts/ci/check-apk.sh [--published\|--no-engine\|--alignment-only] <apk…>` | per-ABI size budgets, 16 KB alignment including Chaquopy's asset-extracted `.so` files, forbidden content (debug code included), allowed native libraries and Python packages, manifest facts of a published release build (not debuggable, no `testOnly`), locale config, metadata hygiene, signer ([Build-output checks](#build-output-checks)) |
