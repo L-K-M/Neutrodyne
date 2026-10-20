@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Unlicense
+import org.gradle.api.tasks.testing.Test
+
 plugins {
     alias(libs.plugins.neutrodyne.android.library)
     id("com.chaquo.python")
@@ -12,6 +14,16 @@ android {
         ndk { abiFilters += setOf("arm64-v8a", "x86_64") }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
+}
+
+extensions.configure<com.android.build.api.dsl.LibraryExtension> {
+    sourceSets["androidTest"].kotlin.directories += "src/deviceSelectionTest/kotlin"
+    sourceSets["test"].kotlin.directories += "src/deviceSelectionTest/kotlin"
+}
+
+tasks.withType<Test>().configureEach {
+    // The selection test invokes this negative control through the pinned runner itself.
+    exclude("ch/lkmc/neutrodyne/youtube/ytdlp/ytx/SupportedPythonDeviceTest\$FailureFixture.class")
 }
 
 chaquopy {
@@ -44,6 +56,7 @@ dependencies {
     implementation(project(":core:network:okhttp"))
 
     androidTestImplementation(libs.androidx.test.runner)
+    testImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.junit4)
     androidTestImplementation(libs.truth)

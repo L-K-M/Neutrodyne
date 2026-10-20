@@ -14,6 +14,7 @@ import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.database.PodcastUrlAliasEntity
 import ch.lkmc.neutrodyne.core.domain.HostileInput
 import ch.lkmc.neutrodyne.core.domain.ImportError
+import ch.lkmc.neutrodyne.core.domain.ImportReportPoster
 import ch.lkmc.neutrodyne.core.domain.UnsupportedSource
 import ch.lkmc.neutrodyne.core.model.AliasReason
 import ch.lkmc.neutrodyne.core.model.CreateImportOptions
@@ -30,24 +31,36 @@ import ch.lkmc.neutrodyne.core.testing.database.podcastEntity
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipArchiveWriter
 import ch.lkmc.neutrodyne.feeds.jvm.archive.ZipGuard
 import ch.lkmc.neutrodyne.feeds.jvm.opml.XmlPullOpmlReader
+import ch.lkmc.neutrodyne.feeds.opml.OpmlLimits
+import ch.lkmc.neutrodyne.feeds.opml.OpmlReadResult
+import ch.lkmc.neutrodyne.feeds.opml.OpmlReader
 import ch.lkmc.neutrodyne.youtube.api.YouTubeUrlClassifier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import okio.FileSystem
 import okio.Path.Companion.toPath
+import okio.Source
 import okio.buffer
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -533,6 +546,96 @@ class ImportPipelineTest {
         }
 
     @Test
+    fun detachedUnexpectedStageFailureSweepsTheAcquiredCopy() =
+        runBlocking {
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val reader =
+                object : OpmlReader {
+                    override fun read(
+                        open: () -> Source,
+                        limits: OpmlLimits,
+                    ): OpmlReadResult {
+                        entered.countDown()
+                        check(release.await(STAGE_TIMEOUT_MS, TimeUnit.MILLISECONDS))
+                        throw IllegalStateException("injected stage failure")
+                    }
+                }
+            val detached = newSessions(db, appScope, Dispatchers.Default, reader = reader)
+            payloads.register(URI, file = opmlFixture("antennapod_flat_atom"))
+            val caller = launch { detached.create(ImportSource(URI, "a.opml"), CreateImportOptions()) }
+            try {
+                assertTrue(withContext(Dispatchers.IO) { entered.await(STAGE_TIMEOUT_MS, TimeUnit.MILLISECONDS) })
+                caller.cancelAndJoin()
+                release.countDown()
+                withTimeout(STAGE_TIMEOUT_MS) {
+                    appScope.coroutineContext[Job]!!
+                        .children
+                        .toList()
+                        .joinAll()
+                }
+
+                assertTrue(noSessions())
+                assertEquals(emptyList(), importDirFiles(), "a detached stage failure must not orphan its temp")
+            } finally {
+                release.countDown()
+                caller.cancelAndJoin()
+            }
+        }
+
+    @Test
+    fun detachedNoticeFailureKeepsThePublishedSessionPayload() =
+        runBlocking {
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val reader =
+                object : OpmlReader {
+                    override fun read(
+                        open: () -> Source,
+                        limits: OpmlLimits,
+                    ): OpmlReadResult {
+                        entered.countDown()
+                        check(release.await(STAGE_TIMEOUT_MS, TimeUnit.MILLISECONDS))
+                        return XmlPullOpmlReader.discovered().read(open, limits)
+                    }
+                }
+            var readyCalls = 0
+            val reports =
+                object : ImportReportPoster by FakeImportReportPoster() {
+                    override suspend fun postReady(
+                        sessionId: Long,
+                        itemCount: Int,
+                        sourceName: String?,
+                    ) {
+                        readyCalls++
+                        throw IllegalStateException("injected notice failure")
+                    }
+                }
+            val detached = newSessions(db, appScope, Dispatchers.Default, reader, reports)
+            payloads.register(URI, file = opmlFixture("antennapod_flat_atom"))
+            val caller = launch { detached.create(ImportSource(URI, "a.opml"), CreateImportOptions()) }
+            try {
+                assertTrue(withContext(Dispatchers.IO) { entered.await(STAGE_TIMEOUT_MS, TimeUnit.MILLISECONDS) })
+                caller.cancelAndJoin()
+                release.countDown()
+                withTimeout(STAGE_TIMEOUT_MS) {
+                    appScope.coroutineContext[Job]!!
+                        .children
+                        .toList()
+                        .joinAll()
+                }
+
+                assertEquals(1, readyCalls, "the failing notice path must actually execute")
+                val session = assertNotNull(db.importDao().sessionById(1))
+                assertPayloadExists(session)
+                assertEquals(listOf("1.bin"), importDirFiles())
+            } finally {
+                release.countDown()
+                caller.cancelAndJoin()
+            }
+        }
+
+    @Test
     fun obstructedImportCacheFailsCreateWithStorage() =
         runTest {
             payloads.register(URI, file = opmlFixture("antennapod_flat_atom"))
@@ -702,15 +805,17 @@ class ImportPipelineTest {
         database: NeutrodyneDatabase,
         scope: CoroutineScope,
         io: kotlinx.coroutines.CoroutineDispatcher,
+        reader: OpmlReader = XmlPullOpmlReader.discovered(),
+        reports: ImportReportPoster = FakeImportReportPoster(),
     ): ImportSessions =
         ImportSessions(
             db = database,
             payloads = store,
             classifier = ImportClassifier(database, YouTubeUrlClassifier()),
-            opmlReader = XmlPullOpmlReader.discovered(),
+            opmlReader = reader,
             archives = ZipGuard(),
             clock = clock,
-            reports = FakeImportReportPoster(),
+            reports = reports,
             appScope = scope,
             io = io,
         )
@@ -799,6 +904,7 @@ class ImportPipelineTest {
     }
 
     private companion object {
+        const val STAGE_TIMEOUT_MS = 10_000L
         const val URI = "content://provider/import.opml"
         const val HOSTILE_URI = "content://provider/hostile.opml"
         const val OVERSIZE_URI = "content://provider/huge.opml"
