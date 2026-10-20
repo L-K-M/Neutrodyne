@@ -119,7 +119,7 @@ public object IntentRouter {
             return Route.Push(AddPodcastKey(uri))
         }
         val authorityAndPath = uri.substringAfter("://", "")
-        if (scheme == SCHEME && authorityAndPath.startsWith("subscribe?")) {
+        if (scheme == SCHEME && authorityAndPath.startsWith("subscribe?", ignoreCase = true)) {
             return Route.Push(AddPodcastKey(uri))
         }
         val authority = authorityAndPath.substringBefore('/').substringBefore('?').substringBefore('#')

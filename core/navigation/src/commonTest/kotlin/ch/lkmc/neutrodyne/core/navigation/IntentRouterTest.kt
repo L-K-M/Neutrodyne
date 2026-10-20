@@ -175,6 +175,12 @@ class IntentRouterTest {
     }
 
     @Test
+    fun externalSubscribeAuthorityIgnoresCase() {
+        val uri = "NEUTRODYNE://SUBSCRIBE?url=https://example.com/feed.xml"
+        assertEquals(Route.Push(AddPodcastKey(uri)), IntentRouter.route(RouteInput(Action.VIEW, uri = uri)))
+    }
+
+    @Test
     fun schemeMatchingIgnoresCaseAndQueries() {
         assertEquals(Route.ExpandPlayer, IntentRouter.route(internalView("NEUTRODYNE://open/player")))
         assertEquals(

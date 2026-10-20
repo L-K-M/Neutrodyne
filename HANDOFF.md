@@ -426,7 +426,7 @@ and keeps YouTube imports external until M8.
 |---|---|---|
 | 1 | OPML reader fixtures and preview assertions | Latest-candidate CI/review |
 | 2, 7 | `RoundTripPropertyTest`, import commit and membership tests | Latest-candidate CI/review |
-| 3 | Hostile-input, bounded JSON, archive and mutation tests; real 400k-row snapshot test in a 128 MiB JVM. [#213](https://github.com/L-K-M/Neutrodyne/pull/213) fixes the signed UTF-32 word stall with failing-first regressions, full local 1,000-iteration proof and hosted `mutation-full` recovery in [39265477995](https://github.com/L-K-M/Neutrodyne/actions/runs/39265477995); [#211](https://github.com/L-K-M/Neutrodyne/issues/211) is closed. | Latest-candidate CI/review and a green scheduled release gate |
+| 3 | Hostile-input, bounded JSON, archive and mutation tests; real 400k-row snapshot test in a 128 MiB JVM. [#213](https://github.com/L-K-M/Neutrodyne/pull/213) fixes the signed UTF-32 word stall with failing-first regressions, full local 1,000-iteration proof and `mutation-full` recovery within [39265477995](https://github.com/L-K-M/Neutrodyne/actions/runs/39265477995) (that run's `instrumented-full` job failed under #214); [#211](https://github.com/L-K-M/Neutrodyne/issues/211) is closed. | Latest-candidate CI/review and a green scheduled release gate |
 | 4 | `ImportPipelineTest`, no-new-notification and inert-download assertions | Confirm the 300-feed/two-second acceptance measurement on the candidate |
 | 5, 11 | Restore merger/runner tests and `BackupCrossPlatformTest` | Actual Android-to-desktop and desktop-to-Android file round trip; native desktop drop/dialog checks |
 | 6, 8 | Real first-launch logical restore on API26/API36 in [39257853895](https://github.com/L-K-M/Neutrodyne/actions/runs/39257853895), including the named non-skipped-result gate; host foreign-snapshot and startup-race regressions | Local-transport `bmgr` uninstall/reinstall on API29/API36 and manual API26/28/31 checks. The logical device test is not transport evidence. |
@@ -440,6 +440,13 @@ Its API26/API33 XML records assumption failures; API33 also has two smoke-test
 Settings-selector failures. Investigation is in progress. This is not a green
 scheduled run or release approval. Preserve both nightly failure artifacts and
 the separate seeded first-launch XML under `~/nd-wt/reviews/evidence/`.
+
+Actual-main [full recovery](https://github.com/L-K-M/Neutrodyne/actions/runs/39363070031)
+and [seeded restore](https://github.com/L-K-M/Neutrodyne/actions/runs/39363072325)
+both pass on `7615ae2f`, the main ancestor before #217; #214 closed after
+actual-main recovery. Parent checked named smoke XML and the strict non-skipped
+API26/API36 seeded case. This does not approve a scheduled/tagged release,
+native dialogs/providers, physical devices or `bmgr` transport.
 
 **Toolchain used locally:** Temurin 21 and 25 (Gradle toolchains via `org.gradle.java.installations.paths` in `~/.gradle/gradle.properties`), Android SDK with build tools 36/37 and platform 37. The configured Chaquopy `buildPython` path for CPython 3.14 is currently unavailable; local Kotlin compilation does not prove Python bytecode compilation. Available host CPython is 3.11.2; record any fallback explicitly. Builds need `LANG=C.UTF-8` and `LC_ALL=C.UTF-8`. Local software-emulator attempts have not supplied usable device evidence; run instrumented tests and Gradle Managed Devices in CI. Compose UI tests on the desktop JVM need a GL library; locally a user-level Mesa is unpacked in `~/.local/gfx` (`source ~/.local/gfx/env.sh`).
 
