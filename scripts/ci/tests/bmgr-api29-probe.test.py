@@ -33,6 +33,14 @@ def archive(extra=(), payload=p.PAYLOAD, manifest=MANIFEST):
     return out.getvalue()
 
 
+def refusal(pkg, version="1"):
+    return ("Running incremental backup for 1 requested packages.\n"
+            "Package @pm@ with result: Success\n"
+            f"=> Event{{BACKUP_MANAGER_POLICY / ERROR_PREFLIGHT : package = {pkg}(v{version})}}\n"
+            f"Package {pkg} with result: {p.REJECTION}\n"
+            "Backup finished with result: Success\n")
+
+
 class ProbeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -41,8 +49,6 @@ class ProbeTest(unittest.TestCase):
     def prepare_offline(self, folder, variant, read):
         """Exercise real receipt/byte checks; subprocess and elapsed time are offline stubs."""
         clock, reads = [0.0], []
-        expected = {"files/allowed/payload": p.PAYLOAD, "files/other/excluded": b"excluded-files-canary\n",
-                    "no_backup/excluded": b"excluded-no-backup-canary\n"}
         def run(argv, capture_output, timeout):
             self.assertEqual(["adb", "-s", "emulator-5554"], argv[:3])
             if argv[3:6] == ["shell", "am", "start"]:
@@ -53,7 +59,7 @@ class ProbeTest(unittest.TestCase):
             self.assertLessEqual(timeout, min(5, 30 - clock[0]))
             path = argv[5].removeprefix("/data/user/0/" + p.PREFIX + variant + "/")
             reads.append(path)
-            code, data, elapsed = read(path, expected[path], len(reads))
+            code, data, elapsed = read(path, p.EXPECTED[path], len(reads))
             clock[0] += min(elapsed, timeout)
             if code == 124:
                 raise p.subprocess.TimeoutExpired(argv, timeout, output=data, stderr=b"read timeout")
@@ -72,6 +78,9 @@ class ProbeTest(unittest.TestCase):
             with self.subTest(variant=variant), tempfile.TemporaryDirectory(dir=ROOT / "build") as tmp:
                 reads = self.prepare_offline(Path(tmp), variant, lambda path, data, n: (0, data, 0))
                 self.assertEqual(["files/allowed/payload", "files/other/excluded", "no_backup/excluded"], reads)
+                prepared = json.loads((Path(tmp) / ("prepared-" + variant + ".json")).read_text())
+                self.assertEqual(p.PREFIX + variant, prepared["package"])
+                self.assertEqual({path: p.digest(data) for path, data in p.EXPECTED.items()}, prepared["files"])
 
     def test_not_ready_reads_require_another_complete_observation(self):
         failures = [("files/allowed/payload", 1, b""), ("files/other/excluded", 0, b"short"),
@@ -91,31 +100,89 @@ class ProbeTest(unittest.TestCase):
     def test_never_ready_times_out_and_cannot_certify_a_complete_looking_run(self):
         with tempfile.TemporaryDirectory(dir=ROOT / "build") as tmp:
             folder = Path(tmp)
-            self.complete_raw_run(folder)
-            self.complete_cleanup(folder)
+            self.complete_run(folder)
             with self.assertRaisesRegex(RuntimeError, "Fixture preparation timed out") as failure:
                 self.prepare_offline(folder, "control", lambda path, data, n: (124, b"", 5))
             with patch.object(p, "OUT", folder):
-                result = p.finish_run(str(failure.exception), "COMPLETE")
+                result = p.finish_run(str(failure.exception), "COMPLETE", "api29")
                 self.assertEqual("ERROR", result["collection"])
                 self.assertEqual("UNAVAILABLE", result["capability"])
                 self.assertEqual("NOT_TESTED", result["acceptance"])
                 self.assertEqual("ERROR", p.evaluate()["collection"])
 
-    def complete_raw_run(self, folder):
-        fixtures = {v: {"package": p.PREFIX + v, "certificate": CERT} for v in p.VARIANTS}
+    def complete_run(self, folder, profile="api29", rejected=True):
+        """Synthesize the exact receipt set a clean hosted run produces."""
+        prof = p.PROFILES[profile]
+        fixtures = {}
+        for variant in p.VARIANTS:
+            (folder / (variant + ".apk")).write_bytes(b"fixture-apk-" + variant.encode())
+            fixtures[variant] = {"package": p.PREFIX + variant, "certificate": CERT, "version": "1",
+                                 "apkSha256": p.digest(b"fixture-apk-" + variant.encode())}
         (folder / "inputs.json").write_text(json.dumps({"source": "a" * 40, "fixtures": fixtures}))
         for phase in ("cse", "d2d"):
             for variant, item in fixtures.items():
                 part = folder / phase / variant
                 part.mkdir(parents=True)
                 pkg = item["package"]
-                data = self.package_tar(pkg, variant in ("control", phase))
-                (part / "transport.tar").write_bytes(data)
-                (part / "backup.json").write_text('{"exit": 0}')
-                (part / "backup.out").write_text(f"Package {pkg} with result: Success\nBackup finished with result: Success\n")
+                p.save(part / "fresh.json", {"exit": 0})
+                p.save(part / "backup.json", {"exit": 0})
+                if rejected and variant != "control":
+                    (part / "backup.out").write_text(refusal(pkg))
+                    p.save(part / "size.json", {"exit": 1})
+                    (part / "size.err").write_text("stat: '" + prof["dataset"] + pkg + "': No such file or directory\n")
+                else:
+                    (part / "transport.tar").write_bytes(self.package_tar(pkg, True, prof["sdk"]))
+                    (part / "backup.out").write_text(
+                        f"Package {pkg} with result: Success\nBackup finished with result: Success\n")
+                    p.save(part / "size.json", {"exit": 0})
+                    (part / "size.out").write_text("4608\n")
         (folder / "build.json").write_text(json.dumps({"status": "COMPLETE",
             "inputsSha256": p.digest((folder / "inputs.json").read_bytes())}))
+        receipts = {
+            "devices": "List of devices attached\nemulator-5554\tdevice\n",
+            "avd-name": prof["avd"] + "\nOK\n", "fingerprint": "fp/test-keys\n",
+            "root": "restarting adbd as root\n", "root-wait": "", "root-id": "uid=0(root)\n",
+            "services": "package:/system/framework/framework-res.apk\n",
+            "ro.kernel.qemu": "1\n", "ro.build.version.sdk": prof["sdk"] + "\n",
+            "ro.product.cpu.abi": "x86_64\n", "transport-pm-path": "",
+            "transports": "  * " + prof["transport"] + "\n",
+            "selected": "  * " + prof["transport"] + "\n",
+            "enable": "Backup Manager now enabled\n", "autorestore": "",
+            "select": "Selected transport " + prof["transport"] + "\n",
+            "probe-source": "a" * 40 + "\n", "cse-parameters": "", "cse-init": "ok\n",
+            "cse-before": "dumpsys\n", "d2d-parameters": "", "d2d-init": "ok\n",
+            "d2d-before": "dumpsys\n", "final-backup": "dumpsys\n", "logcat": "logs\n",
+        }
+        if prof["service"]:
+            receipts["final-service"] = "service\n"
+            receipts["transport-apk-size"] = "29086\n"
+            receipts["transport-apk-pull"] = "pulled\n"
+        if prof["framework"]:
+            receipts["transport-framework-size"] = "123\n"
+            receipts["transport-framework-sha"] = "b" * 64 + "  " + prof["framework"] + "\n"
+        for name, text in receipts.items():
+            p.save(folder / (name + ".json"), {"exit": 0})
+            (folder / (name + ".out")).write_text(text)
+        for variant in p.VARIANTS:
+            p.save(folder / ("existing-" + variant + ".json"), {"exit": 1})
+            (folder / ("existing-" + variant + ".out")).write_text("")
+            for name, text in (("install-", "Success\n"), ("launch-", "Starting: Intent\n")):
+                p.save(folder / (name + variant + ".json"), {"exit": 0})
+                (folder / (name + variant + ".out")).write_text(text)
+            p.save(folder / ("prepared-" + variant + ".json"), {"package": p.PREFIX + variant,
+                   "files": {path: p.digest(data) for path, data in p.EXPECTED.items()}})
+        (folder / "image").mkdir(exist_ok=True)
+        (folder / "image/source.properties").write_text("src\n")
+        (folder / "image/package.xml").write_text("<package/>\n")
+        if prof["service"]:
+            (folder / "image/LocalTransport.apk").write_bytes(b"transport-impl")
+            p.save(folder / "image/transport-apk.json",
+                   {"path": "/system/priv-app/LocalTransport/LocalTransport.apk",
+                    "sha256": p.digest(b"transport-impl")})
+        if prof["framework"]:
+            p.save(folder / "image/framework.json",
+                   {"path": prof["framework"], "size": 123, "sha256": "b" * 64})
+        self.complete_cleanup(folder)
 
     def complete_cleanup(self, folder):
         old = {"backup_enabled": "1", "backup_auto_restore": "1",
@@ -133,10 +200,11 @@ class ProbeTest(unittest.TestCase):
         for name in names:
             p.save(folder / (name + ".json"), {"exit": 0})
 
-    def package_tar(self, pkg, payload):
+    def package_tar(self, pkg, payload, platform="29"):
         out = io.BytesIO()
         with tarfile.open(fileobj=out, mode="w", format=tarfile.USTAR_FORMAT) as tar:
-            values = [(f"apps/{pkg}/_manifest", MANIFEST.replace(PKG.encode(), pkg.encode()))]
+            manifest = MANIFEST.replace(PKG.encode(), pkg.encode()).replace(b"\n29\n", b"\n" + platform.encode() + b"\n")
+            values = [(f"apps/{pkg}/_manifest", manifest)]
             if payload:
                 values.append((f"apps/{pkg}/f/allowed/payload", p.PAYLOAD))
             for name, data in values:
@@ -145,17 +213,77 @@ class ProbeTest(unittest.TestCase):
                 tar.addfile(info, io.BytesIO(data))
         return out.getvalue()
 
+    def test_rejected_run_is_complete_and_never_acceptance(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / "build") as tmp:
+            folder = Path(tmp)
+            self.complete_run(folder)
+            with patch.object(p, "OUT", folder):
+                final = p.finish_run(None, "COMPLETE", "api29")
+                self.assertEqual("COMPLETE", final["collection"])
+                self.assertEqual("REJECTED", final["capability"])
+                self.assertEqual("NOT_TESTED", final["acceptance"])
+                for case in final["cases"]:
+                    expected = "CONTROL" if case["variant"] == "control" else "PREFLIGHT_REJECTED"
+                    self.assertEqual(expected, case["status"])
+                self.assertEqual(final, p.evaluate())
+
+    def test_refusal_requires_control_receipts_and_exact_output(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / "build") as tmp:
+            folder = Path(tmp)
+            def measure(control=True):
+                return p.measurement(folder, PKG, CERT, "29", "1", control, True)
+            self.assertEqual("UNAVAILABLE", measure())
+            p.save(folder / "backup.json", {"exit": 0})
+            (folder / "backup.out").write_text(refusal(PKG))
+            self.assertEqual("UNAVAILABLE", measure())
+            p.save(folder / "fresh.json", {"exit": 0})
+            p.save(folder / "size.json", {"exit": 1})
+            (folder / "size.err").write_text("stat: nope: No such file or directory\n")
+            self.assertEqual("PREFLIGHT_REJECTED", measure())
+            self.assertEqual("UNAVAILABLE", measure(control=False))
+            (folder / "transport.tar").write_bytes(archive())
+            self.assertEqual("ERROR", measure())
+            (folder / "transport.tar").unlink()
+            for bad, expected in ((refusal(PKG).replace("ERROR_PREFLIGHT", "ERROR_FULL_BACKUP"), "ERROR"),
+                        (refusal(PKG, version="2"), "ERROR"),
+                        (refusal(PKG).replace(p.REJECTION, "Success"), "UNAVAILABLE"),
+                        (refusal(PKG) + "Package " + PKG + " with result: Success\n", "ERROR"),
+                        (refusal(PKG).replace("Backup finished with result: Success", "Backup finished with result: Timeout"), "ERROR"),
+                        ("", "ERROR")):
+                (folder / "backup.out").write_text(bad)
+                self.assertEqual(expected, measure())
+            (folder / "backup.out").write_text(refusal(PKG))
+            p.save(folder / "size.json", {"exit": 0})
+            (folder / "size.out").write_text("0\n")
+            self.assertEqual("PREFLIGHT_REJECTED", measure())
+            (folder / "size.out").write_text("12\n")
+            self.assertEqual("ERROR", measure())
+            p.save(folder / "fresh.json", {"exit": 1})
+            self.assertEqual("ERROR", measure())
+            p.save(folder / "backup.json", {"exit": 1})
+            self.assertEqual("ERROR", measure())
+
+    def test_control_refusal_and_platform_version_are_errors(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / "build") as tmp:
+            folder = Path(tmp)
+            control = p.PREFIX + "control"
+            p.save(folder / "fresh.json", {"exit": 0})
+            p.save(folder / "backup.json", {"exit": 0})
+            (folder / "backup.out").write_text(refusal(control))
+            p.save(folder / "size.json", {"exit": 1})
+            (folder / "size.err").write_text("stat: x: No such file or directory\n")
+            self.assertEqual("ERROR", p.measurement(folder, control, CERT, "29", "1", True, False))
+
     def test_refuses_complete_looking_run_after_cleanup_failure(self):
         with tempfile.TemporaryDirectory(dir=ROOT / "build") as tmp:
             folder = Path(tmp)
-            self.complete_raw_run(folder)
-            self.complete_cleanup(folder)
+            self.complete_run(folder)
             with patch.object(p, "OUT", folder):
-                p.finish_run(None, "COMPLETE")
+                p.finish_run(None, "COMPLETE", "api29")
                 self.assertEqual("COMPLETE", p.evaluate()["collection"])
                 (folder / "restore-transport.json").write_text('{"exit": 1}')
                 self.assertNotEqual("COMPLETE", p.evaluate()["collection"])
-                final = p.finish_run("cleanup failed", "ERROR")
+                final = p.finish_run("cleanup failed", "ERROR", "api29")
                 self.assertEqual("ERROR", final["collection"])
                 self.assertEqual(final, json.loads((folder / "result.json").read_text()))
                 self.assertNotEqual("COMPLETE", p.evaluate()["collection"])
@@ -163,10 +291,9 @@ class ProbeTest(unittest.TestCase):
     def test_unfinished_and_stale_error_cannot_be_certified_or_modified(self):
         with tempfile.TemporaryDirectory(dir=ROOT / "build") as tmp:
             folder = Path(tmp)
-            self.complete_raw_run(folder)
-            self.complete_cleanup(folder)
+            self.complete_run(folder)
             with patch.object(p, "OUT", folder):
-                p.finish_run(None, "COMPLETE")
+                p.finish_run(None, "COMPLETE", "api29")
                 final = (folder / "result.json").read_bytes()
                 (folder / "error.json").write_text('{"error": "historical failure"}')
                 self.assertEqual("ERROR", p.evaluate()["collection"])
@@ -174,6 +301,40 @@ class ProbeTest(unittest.TestCase):
                 (folder / "error.json").unlink()
                 p.save(folder / "result.json", {"collection": "RUNNING", "cleanup": "PENDING"})
                 self.assertEqual("ERROR", p.evaluate()["collection"])
+
+    def test_missing_receipts_fail_verification(self):
+        required = ["avd-name", "ro.build.version.sdk", "selected", "probe-source", "prepared-control",
+                    "existing-control", "install-control", "launch-control", "cse/control/fresh",
+                    "cse/control/backup", "d2d/d2d/size", "final-backup", "logcat", "final-service",
+                    "transport-apk-pull"]
+        for name in required:
+            with self.subTest(name=name), tempfile.TemporaryDirectory(dir=ROOT / "build") as tmp:
+                folder = Path(tmp)
+                self.complete_run(folder)
+                (folder / (name + ".json")).unlink()
+                with patch.object(p, "OUT", folder):
+                    p.finish_run(None, "COMPLETE", "api29")
+                    self.assertNotEqual("COMPLETE", p.evaluate()["collection"])
+
+    def test_wrong_receipt_contents_fail_verification(self):
+        wrong = {"avd-name": "other-avd\n", "ro.build.version.sdk": "30\n",
+                 "probe-source": "b" * 40 + "\n", "ro.product.cpu.abi": "arm64\n",
+                 "selected": "  * other/transport\n"}
+        for name, text in wrong.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory(dir=ROOT / "build") as tmp:
+                folder = Path(tmp)
+                self.complete_run(folder)
+                (folder / (name + ".out")).write_text(text)
+                with patch.object(p, "OUT", folder):
+                    p.finish_run(None, "COMPLETE", "api29")
+                    self.assertNotEqual("COMPLETE", p.evaluate()["collection"])
+        with tempfile.TemporaryDirectory(dir=ROOT / "build") as tmp:
+            folder = Path(tmp)
+            self.complete_run(folder)
+            p.save(folder / "prepared-control.json", {"package": p.PREFIX + "control", "files": {}})
+            with patch.object(p, "OUT", folder):
+                p.finish_run(None, "COMPLETE", "api29")
+                self.assertNotEqual("COMPLETE", p.evaluate()["collection"])
 
     def test_fresh_build_preserves_but_isolates_historical_receipts(self):
         with tempfile.TemporaryDirectory(dir=ROOT / "build") as tmp:
@@ -187,50 +348,60 @@ class ProbeTest(unittest.TestCase):
             self.assertEqual([b"original failure"], [f.read_bytes() for f in folder.glob("history/*/error.json")])
             self.assertEqual("RUNNING", json.loads((folder / "build.json").read_text())["status"])
 
+    def test_api28_profile_run_and_receipts(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / "build") as tmp:
+            folder = Path(tmp)
+            self.complete_run(folder, profile="api28")
+            with patch.object(p, "OUT", folder):
+                final = p.finish_run(None, "COMPLETE", "api28")
+                self.assertEqual("COMPLETE", final["collection"])
+                self.assertEqual("REJECTED", final["capability"])
+                self.assertEqual("api28", final["profile"])
+                self.assertEqual(final, p.evaluate())
+                (folder / "transport-framework-sha.json").unlink()
+                self.assertNotEqual("COMPLETE", p.evaluate()["collection"])
+
     def test_blocked_diagnostic_never_becomes_acceptance(self):
         with tempfile.TemporaryDirectory(dir=ROOT / "build") as tmp:
             folder = Path(tmp)
-            self.complete_raw_run(folder)
-            self.complete_cleanup(folder)
-            for phase in ("cse", "d2d"):
-                (folder / phase / phase / "transport.tar").write_bytes(self.package_tar(p.PREFIX + phase, False))
+            self.complete_run(folder)
             with patch.object(p, "OUT", folder):
-                final = p.finish_run(None, "COMPLETE")
-                self.assertEqual("COMPLETE", final["collection"])
-                self.assertEqual("BLOCKED", final["capability"])
-                self.assertEqual("NOT_TESTED", final["acceptance"])
-                self.assertEqual(final, p.evaluate())
                 (folder / "cse/control/transport.tar").write_bytes(self.package_tar(p.PREFIX + "control", False))
-                invalid = p.finish_run(None, "COMPLETE")
+                invalid = p.finish_run(None, "COMPLETE", "api29")
                 self.assertEqual("ERROR", invalid["collection"])
-                self.assertEqual("UNAVAILABLE", invalid["cases"][1]["status"])
+                self.assertEqual("UNAVAILABLE", invalid["capability"])
 
     def test_valid_payload_and_gated_empty(self):
-        self.assertEqual("PAYLOAD", p.verify_archive(archive(), PKG, CERT))
-        self.assertEqual("EMPTY", p.verify_archive(archive(payload=None), PKG, CERT))
+        self.assertEqual("PAYLOAD", p.verify_archive(archive(), PKG, CERT, "29", "1"))
+        self.assertEqual("EMPTY", p.verify_archive(archive(payload=None), PKG, CERT, "29", "1"))
 
     def test_tamper_identity_and_invalid_archive(self):
         for raw in (archive(payload=b"bad"), archive(manifest=MANIFEST.replace(PKG.encode(), b"other")),
-                    archive(manifest=MANIFEST.replace(b"63657274", b"00")), b"not tar", archive() + b"extra"):
+                    archive(manifest=MANIFEST.replace(b"63657274", b"00")),
+                    archive(manifest=MANIFEST.replace(b"\n29\n", b"\n28\n")),
+                    archive(manifest=MANIFEST.replace(b"\n1\n29", b"\n2\n29")), b"not tar", archive() + b"extra"):
             with self.subTest(raw=hashlib.sha256(raw).hexdigest()), self.assertRaises((ValueError, tarfile.TarError)):
-                p.verify_archive(raw, PKG, CERT)
+                p.verify_archive(raw, PKG, CERT, "29", "1")
 
     def test_duplicate_extra_traversal_links_and_canaries(self):
         for name, kind in (("f/allowed/payload", b"0"), ("_manifest", b"0"), ("f/other/excluded", b"0"),
                            ("no_backup/excluded", b"0"), ("f/../allowed/payload", b"0"),
                            ("/absolute", b"0"), ("f/allowed/payload", b"2"), ("f/allowed/payload", b"1")):
             with self.subTest(name=name, kind=kind), self.assertRaises(ValueError):
-                p.verify_archive(archive([(BASE + name, b"canary", kind)]), PKG, CERT)
+                p.verify_archive(archive([(BASE + name, b"canary", kind)]), PKG, CERT, "29", "1")
 
     def test_verdicts_require_control_and_both_successes(self):
         with tempfile.TemporaryDirectory(dir=ROOT / "build") as tmp:
             folder = Path(tmp)
+            p.save(folder / "fresh.json", {"exit": 0})
             def measure(control=True, positive=True):
-                return p.measurement(folder, PKG, CERT, control, positive)
+                return p.measurement(folder, PKG, CERT, "29", "1", control, positive)
             self.assertEqual("UNAVAILABLE", measure())
-            (folder / "backup.json").write_text(json.dumps({"exit": 0}))
+            p.save(folder / "backup.json", {"exit": 0})
             success = f"Package {PKG} with result: Success\nBackup finished with result: Success\n"
             (folder / "backup.out").write_text(success)
+            p.save(folder / "size.json", {"exit": 0})
+            (folder / "size.out").write_text("4608\n")
             self.assertEqual("UNAVAILABLE", measure())
             (folder / "transport.tar").write_bytes(archive(payload=None))
             self.assertEqual("BLOCKED", measure())
@@ -246,18 +417,16 @@ class ProbeTest(unittest.TestCase):
             (folder / "backup.out").write_text(success + success)
             self.assertEqual("ERROR", measure())
             (folder / "backup.out").write_text(success)
-            (folder / "backup.json").write_text(json.dumps({"exit": 1}))
+            p.save(folder / "backup.json", {"exit": 1})
             self.assertEqual("ERROR", measure())
 
     def test_workflow_is_isolated_and_builds_before_one_probe_line(self):
         workflow = (ROOT / ".github/workflows/nightly.yml").read_text()
-        marker = "\n  bmgr-api29-probe:\n"
-        self.assertIn(marker, workflow)
-        body = workflow.split(marker, 1)[1]
         following_job = (
             "\n  unrelated:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 5\n"
             "    steps:\n      - run: ./gradlew help\n"
         )
+        body = workflow.split("\n  bmgr-api29-probe:\n", 1)[1]
         for suffix in ("", following_job):
             job = re.split(r"\n  (?=[A-Za-z0-9_-]+:)", body + suffix, maxsplit=1)[0]
             self.assertIn("if: inputs.scope == 'bmgr-api29-probe'", job)
@@ -266,6 +435,21 @@ class ProbeTest(unittest.TestCase):
             self.assertEqual(1, job.count("script: python3 scripts/ci/bmgr-api29-probe.py probe"))
             self.assertIn("if: always()", job)
             self.assertNotIn("./gradlew", job)
+        legacy = workflow.split("\n  bmgr-legacy-negative:\n", 1)[1]
+        for suffix in ("", following_job):
+            job = re.split(r"\n  (?=[A-Za-z0-9_-]+:)", legacy + suffix, maxsplit=1)[0]
+            self.assertIn("if: inputs.scope == 'bmgr-legacy-negative'", job)
+            self.assertIn('api: ["28", "29"]', job)
+            self.assertIn('api-level: "${{ matrix.api }}"', job)
+            self.assertIn('avd-name: nd-bmgr-api${{ matrix.api }}-probe', job)
+            self.assertIn("BMGR_DISPOSABLE_API28", job)
+            self.assertIn("BMGR_DISPOSABLE_API29", job)
+            self.assertIn("setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0", job)
+            self.assertLess(job.index(".py build"), job.index("android-emulator-runner@"))
+            self.assertEqual(1, job.count("script: python3 scripts/ci/bmgr-api29-probe.py probe"))
+            self.assertIn("if: always()", job)
+            self.assertNotIn("./gradlew", job)
+        self.assertNotIn("de7274f081f381c8f8158605e0321c36c376e2e6", workflow)
 
 
 if __name__ == "__main__":

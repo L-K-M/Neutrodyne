@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Unlicense
-"""SDK-only synthetic build, disposable hosted API29 probe, and offline TAR verifier.
+"""SDK-only synthetic build, disposable hosted legacy-transport probe, offline verifier.
 
-A complete diagnostic (including BLOCKED) is not M3 transport acceptance.
-Never invokes Gradle; probe mode refuses local hosts and non-owned devices.
+Two closed profiles measure the stock API 28/29 LocalTransport refusal: a
+PREFLIGHT_REJECTED case needs a verified same-phase control, exact fixture
+preparation, a fresh transport path, the named BACKUP_MANAGER_POLICY /
+ERROR_PREFLIGHT event and package rejection with overall Success, and missing
+or zero payload receipts. An observed rejection is not a successful encrypted
+backup, not an unbounded unsupported claim, and never M3 acceptance. Never
+invokes Gradle; probe mode refuses local hosts and non-owned devices.
 """
 import hashlib
 import io
@@ -23,8 +28,29 @@ OUT = ROOT / "build/bmgr-api29-probe"
 PREFIX = "ch.lkmc.neutrodyne.transportprobe."
 VARIANTS = {"control": "", "cse": "clientSideEncryption", "d2d": "deviceToDeviceTransfer"}
 PAYLOAD = b"transport-probe-v1\n"
+EXPECTED = {"files/allowed/payload": PAYLOAD, "files/other/excluded": b"excluded-files-canary\n",
+            "no_backup/excluded": b"excluded-no-backup-canary\n"}
 LIMIT = 4 * 1024 * 1024
-TRANSPORT_FILES = "/data/user/0/com.android.localtransport/files/1/_full/"
+MIN_SDK = "28"
+# Closed legacy profiles only: API28's transport is framework-owned (no standalone
+# service/APK guaranteed) under the old name and cache dataset; API29's is the
+# installed com.android.localtransport package under its app-private files path.
+PROFILES = {
+    "api28": {
+        "env": "BMGR_DISPOSABLE_API28", "sdk": "28", "avd": "nd-bmgr-api28-probe",
+        "transport": "android/com.android.internal.backup.LocalTransport",
+        "dataset": "/cache/backup/1/_full/", "image": "system-images/android-28/default/x86_64",
+        "service": None, "framework": "/system/framework/framework.jar",
+    },
+    "api29": {
+        "env": "BMGR_DISPOSABLE_API29", "sdk": "29", "avd": "nd-bmgr-api29-probe",
+        "transport": "com.android.localtransport/.LocalTransport",
+        "dataset": "/data/user/0/com.android.localtransport/files/1/_full/",
+        "image": "system-images/android-29/default/x86_64",
+        "service": "com.android.localtransport/.LocalTransportService", "framework": None,
+    },
+}
+REJECTION = "Transport rejected package because it wasn't able to process it at the time"
 
 
 def digest(data):
@@ -68,12 +94,10 @@ def prepare_fixture(call, variant):
     # not am start -W; launch acknowledgement alone can precede the writes.
     call("launch-" + variant, "shell", "am", "start", "-n",
          PREFIX + variant + "/" + PREFIX[:-1] + ".ProbeActivity", timeout=15)
-    expected = {"files/allowed/payload": PAYLOAD, "files/other/excluded": b"excluded-files-canary\n",
-                "no_backup/excluded": b"excluded-no-backup-canary\n"}
     deadline, attempt = time.monotonic() + 30, 0
     while True:
         ready = True
-        for path, data in expected.items():
+        for path, data in EXPECTED.items():
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise RuntimeError("Fixture preparation timed out: " + variant)
@@ -84,6 +108,8 @@ def prepare_fixture(call, variant):
             if status["exit"] != 0 or (OUT / (receipt + ".out")).read_bytes() != data:
                 ready = False
         if ready and time.monotonic() <= deadline:
+            save(OUT / ("prepared-" + variant + ".json"), {"package": PREFIX + variant,
+                 "files": {path: digest(data) for path, data in EXPECTED.items()}})
             return
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -120,7 +146,7 @@ def build():
     dex.mkdir(exist_ok=True)
     command(work, "javac", [tools["javac"], "-source", "8", "-target", "8", "-bootclasspath", android,
                             "-d", classes, fixture / "ProbeActivity.java"])
-    command(work, "dex", [tools["d8"], "--min-api", "29", "--lib", android, "--output", dex,
+    command(work, "dex", [tools["d8"], "--min-api", MIN_SDK, "--lib", android, "--output", dex,
                           *classes.rglob("*.class")])
     for variant, flag in VARIANTS.items():
         part = work / variant
@@ -152,15 +178,18 @@ def build():
             raise RuntimeError("Wrong packaged capability bit")
         if not all(re.search(pattern, app) for pattern in (
                 r":debuggable\([^\n]+\)=false", r":allowBackup\([^\n]+\)=true",
-                r":fullBackupContent\([^\n]+\)=@", r":targetSdkVersion\([^\n]+\)=29")):
+                r":fullBackupContent\([^\n]+\)=@", r":minSdkVersion\([^\n]+\)=" + MIN_SDK,
+                r":targetSdkVersion\([^\n]+\)=29")):
             raise RuntimeError("Wrong packaged backup/target attributes")
+        version = re.search(r"versionCode='(\d+)'", badging)
         inputs["fixtures"][variant] = {"package": PREFIX + variant, "apkSha256": digest(apk.read_bytes()),
-            "certificate": re.search(r"certificate SHA-256 digest: ([0-9a-f]+)", cert).group(1), "flag": flag}
+            "certificate": re.search(r"certificate SHA-256 digest: ([0-9a-f]+)", cert).group(1), "flag": flag,
+            "version": version.group(1) if version else "1"}
     save(OUT / "inputs.json", inputs)
     save(OUT / "build.json", {"status": "COMPLETE", "inputsSha256": digest((OUT / "inputs.json").read_bytes())})
 
 
-def verify_archive(raw, package, certificate):
+def verify_archive(raw, package, certificate, platform, version):
     """No extraction; accept only platform manifest plus the single exact file (or gated absence)."""
     if not 0 < len(raw) <= LIMIT or not re.fullmatch(re.escape(PREFIX) + r"(control|cse|d2d)", package):
         raise ValueError("Invalid archive size/package")
@@ -178,7 +207,8 @@ def verify_archive(raw, package, certificate):
             data = archive.extractfile(entry).read()
             if entry.name.endswith("/_manifest"):
                 lines = data.decode("utf-8").splitlines()
-                if len(lines) != 8 or lines[:4] != ["1", package, "1", "29"] or lines[5:7] != ["0", "1"]:
+                if (len(lines) != 8 or lines[:4] != ["1", package, version, platform]
+                        or lines[5:7] != ["0", "1"]):
                     raise ValueError("Wrong platform manifest")
                 if digest(bytes.fromhex(lines[7])) != certificate:
                     raise ValueError("Wrong archive signer")
@@ -192,16 +222,38 @@ def verify_archive(raw, package, certificate):
     return "PAYLOAD" if base + "f/allowed/payload" in seen else "EMPTY"
 
 
-def measurement(folder, package, certificate, control, positive):
+def preflight_rejected(folder, package, version, text):
+    """Only the observed stock refusal: fresh path, the named monitor event and
+    known package rejection with overall Success, and missing/zero payload.
+    Arbitrary transport, agent, timeout or tampered output is not a refusal."""
+    size = json.loads((folder / "size.json").read_text())
+    event = "=> Event{BACKUP_MANAGER_POLICY / ERROR_PREFLIGHT : package = " + package + "(v" + version + ")}"
+    result = "Package " + package + " with result: "
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    missing = size["exit"] != 0 and "No such file" in (folder / "size.err").read_text()
+    empty = size["exit"] == 0 and (folder / "size.out").read_text().strip() == "0"
+    return (not (folder / "transport.tar").exists() and (missing or empty)
+            and lines.count(event) == 1 and lines.count("Backup finished with result: Success") == 1
+            and [line for line in lines if line.startswith(result)] == [result + REJECTION])
+
+
+def measurement(folder, package, certificate, platform, version, control, positive):
     try:
+        fresh = json.loads((folder / "fresh.json").read_text())
         status = json.loads((folder / "backup.json").read_text())
         text = (folder / "backup.out").read_text()
-        if status["exit"] != 0 or any(re.findall(r"(?m)^" + re.escape(line) + r"([^\r\n]+)", text) != ["Success"]
+        if fresh["exit"] != 0 or status["exit"] != 0:
+            return "ERROR"
+        if preflight_rejected(folder, package, version, text):
+            if package == PREFIX + "control":
+                return "ERROR"
+            return "PREFLIGHT_REJECTED" if control else "UNAVAILABLE"
+        if any(re.findall(r"(?m)^" + re.escape(line) + r"([^\r\n]+)", text) != ["Success"]
                 for line in (f"Package {package} with result: ", "Backup finished with result: ")):
             return "ERROR"
         if (folder / "transport.tar").stat().st_size > LIMIT:
             return "ERROR"
-        state = verify_archive((folder / "transport.tar").read_bytes(), package, certificate)
+        state = verify_archive((folder / "transport.tar").read_bytes(), package, certificate, platform, version)
         if not control:
             return "UNAVAILABLE"
         if package == PREFIX + "control":
@@ -213,16 +265,17 @@ def measurement(folder, package, certificate, control, positive):
         return "ERROR"
 
 
-def collect_cases():
+def collect_cases(profile):
     inputs = json.loads((OUT / "inputs.json").read_text())
+    platform = PROFILES[profile]["sdk"]
     observations = []
     for phase in ("cse", "d2d"):
         control = False
         for variant in VARIANTS:
             item = inputs["fixtures"][variant]
             folder = OUT / phase / variant
-            verdict = measurement(folder, item["package"], item["certificate"],
-                                  variant == "control" or control, variant == phase)
+            verdict = measurement(folder, item["package"], item["certificate"], platform,
+                                  item["version"], variant == "control" or control, variant == phase)
             if variant == "control":
                 control = verdict == "CONTROL"
             observations.append({"phase": phase, "variant": variant, "status": verdict,
@@ -231,10 +284,14 @@ def collect_cases():
             if archive.exists() and archive.stat().st_size <= LIMIT:
                 observations[-1]["archiveSha256"] = digest(archive.read_bytes())
     complete = all(o["status"] not in ("ERROR", "UNAVAILABLE") for o in observations)
-    return {"source": inputs["source"], "inputs": "inputs.json", "image": "image",
+    # OBSERVED = a protected payload actually crossed; REJECTED = every controlled
+    # protected observation was a measured refusal or gated absence — never an
+    # unsupported claim and never application acceptance.
+    capability = "OBSERVED" if any(o["status"] == "OBSERVED" for o in observations) else "REJECTED"
+    return {"source": inputs["source"], "inputs": "inputs.json", "image": "image", "profile": profile,
             "collection": "COMPLETE" if complete else "ERROR",
-            "capability": ("BLOCKED" if any(o["status"] == "BLOCKED" for o in observations) else "OBSERVED")
-                          if complete else "UNAVAILABLE", "acceptance": "NOT_TESTED", "cases": observations}
+            "capability": capability if complete else "UNAVAILABLE",
+            "acceptance": "NOT_TESTED", "cases": observations}
 
 
 def cleanup_failure():
@@ -258,18 +315,97 @@ def cleanup_failure():
     return None
 
 
-def finish_run(error, cleanup):
+def finish_run(error, cleanup, profile):
     try:
-        result = collect_cases()
+        result = collect_cases(profile)
         result["inputsSha256"] = digest((OUT / "inputs.json").read_bytes())
     except (OSError, ValueError, KeyError) as failure:
-        result = {"source": None, "collection": "ERROR", "capability": "UNAVAILABLE", "cases": []}
+        result = {"source": None, "profile": profile, "collection": "ERROR",
+                  "capability": "UNAVAILABLE", "cases": []}
         error = error or str(failure)
     result.update(cleanup=cleanup, acceptance="NOT_TESTED")
     if error or cleanup != "COMPLETE":
         result.update(collection="ERROR", capability="UNAVAILABLE", error=error or "Cleanup incomplete")
     save(OUT / "result.json", result)
     return result
+
+
+def receipt_problem(result):
+    """First missing/incorrect receipt the new conclusion relies on, or None."""
+    profile = PROFILES.get(result.get("profile"))
+    inputs = json.loads((OUT / "inputs.json").read_text())
+    if profile is None or result.get("source") != inputs.get("source"):
+        return "profile/source"
+    def out(name):
+        try:
+            code = json.loads((OUT / (name + ".json")).read_text())["exit"]
+            return (OUT / (name + ".out")).read_text() if code == 0 else None
+        except (OSError, ValueError, KeyError):
+            return None
+    for name in ["devices", "avd-name", "fingerprint", "root", "root-wait", "root-id", "services",
+                 "ro.kernel.qemu", "ro.build.version.sdk", "ro.product.cpu.abi", "transports",
+                 "selected", "enable", "autorestore", "select", "probe-source", "cse-parameters",
+                 "cse-init", "cse-before", "d2d-parameters", "d2d-init", "d2d-before",
+                 "final-backup", "logcat"]:
+        if out(name) is None:
+            return name
+    if profile["service"] and out("final-service") is None:
+        return "final-service"
+    checks = {
+        "avd-name": lambda t: t.splitlines() and t.splitlines()[0] == profile["avd"],
+        "ro.kernel.qemu": lambda t: t == "1", "ro.build.version.sdk": lambda t: t == profile["sdk"],
+        "ro.product.cpu.abi": lambda t: t == "x86_64", "root-id": lambda t: t.startswith("uid=0"),
+        "probe-source": lambda t: t == inputs["source"],
+        "transports": lambda t: profile["transport"] in
+                                [line.strip().removeprefix("* ") for line in t.splitlines()],
+        "selected": lambda t: "* " + profile["transport"] in [line.strip() for line in t.splitlines()],
+    }
+    for name, valid in checks.items():
+        if not valid((OUT / (name + ".out")).read_text().strip()):
+            return name
+    expected = {"files": {path: digest(data) for path, data in EXPECTED.items()}}
+    for variant in VARIANTS:
+        try:
+            json.loads((OUT / ("existing-" + variant + ".json")).read_text())["exit"]
+            if "package:" in (OUT / ("existing-" + variant + ".out")).read_text():
+                return "existing-" + variant
+            for name in ("install-" + variant, "launch-" + variant):
+                if out(name) is None:
+                    return name
+            recorded = json.loads((OUT / ("prepared-" + variant + ".json")).read_text())
+            if recorded != dict(expected, package=PREFIX + variant) or \
+                    digest((OUT / (variant + ".apk")).read_bytes()) != \
+                    inputs["fixtures"][variant]["apkSha256"]:
+                return "prepared-" + variant
+        except (OSError, ValueError, KeyError):
+            return "fixture-" + variant
+    for key in ("backup_enabled", "backup_auto_restore", "backup_local_transport_parameters", "transport"):
+        if key not in json.loads((OUT / "original-settings.json").read_text()):
+            return "original-settings"
+    if not (OUT / "image/source.properties").is_file() or not (OUT / "image/package.xml").is_file():
+        return "image"
+    apk = OUT / "image/LocalTransport.apk"
+    if apk.is_file():
+        try:
+            saved = json.loads((OUT / "image/transport-apk.json").read_text())
+            if saved["sha256"] != digest(apk.read_bytes()) or out("transport-apk-pull") is None:
+                return "transport-apk"
+        except (OSError, ValueError, KeyError):
+            return "transport-apk"
+    elif profile["service"]:
+        return "transport-apk"
+    if profile["framework"]:
+        for name in ("transport-framework-size", "transport-framework-sha"):
+            if out(name) is None:
+                return name
+        try:
+            saved = json.loads((OUT / "image/framework.json").read_text())
+            if (saved["path"] != profile["framework"] or not saved["size"] > 0
+                    or not re.fullmatch(r"[0-9a-f]{64}", saved["sha256"])):
+                return "framework"
+        except (OSError, ValueError, KeyError):
+            return "framework"
+    return None
 
 
 def evaluate():
@@ -285,7 +421,10 @@ def evaluate():
             raise ValueError("Failed/incomplete cleanup receipts")
         if built["status"] != "COMPLETE" or built["inputsSha256"] != digest(inputs) or result["inputsSha256"] != digest(inputs):
             raise ValueError("Build/input mismatch")
-        observed = collect_cases()
+        problem = receipt_problem(result)
+        if problem:
+            raise ValueError("Missing/incorrect receipt: " + problem)
+        observed = collect_cases(result["profile"])
         if any(result[key] != observed[key] for key in observed):
             raise ValueError("Final outcome differs from raw measurements")
         return result
@@ -294,8 +433,12 @@ def evaluate():
 
 
 def probe():
-    if os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("RUNNER_OS") != "Linux" or os.environ.get("BMGR_DISPOSABLE_API29") != "1":
+    if os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("RUNNER_OS") != "Linux":
         raise RuntimeError("Probe requires the explicitly opted-in disposable hosted Linux AVD")
+    selected = [name for name, item in PROFILES.items() if os.environ.get(item["env"]) == "1"]
+    if len(selected) != 1:
+        raise RuntimeError("Probe requires exactly one opted-in legacy profile (api28 or api29)")
+    profile = PROFILES[selected[0]]
     inputs = json.loads((OUT / "inputs.json").read_text())
     built = json.loads((OUT / "build.json").read_text())
     if built["status"] != "COMPLETE" or built["inputsSha256"] != digest((OUT / "inputs.json").read_bytes()) or inputs["implementation"] != digest(Path(__file__).read_bytes()):
@@ -314,19 +457,21 @@ def probe():
         return call(name, "shell", *args, **kw)
     old, installed, transport, safe, changed = {}, [], None, False, False
     error = None
-    save(OUT / "result.json", {"collection": "RUNNING", "cleanup": "PENDING", "acceptance": "NOT_TESTED"})
+    save(OUT / "result.json", {"profile": selected[0], "collection": "RUNNING",
+                               "cleanup": "PENDING", "acceptance": "NOT_TESTED"})
     try:
         devices = command(OUT, "devices", [adb[0], "devices"]).splitlines()[1:]
         if [line.strip() for line in devices if line.strip()] != ["emulator-5554\tdevice"]:
             raise RuntimeError("Refusing ambiguous/non-disposable devices")
-        if call("avd-name", "emu", "avd", "name").splitlines()[0] != "nd-bmgr-api29-probe":
+        if call("avd-name", "emu", "avd", "name").splitlines()[0] != profile["avd"]:
             raise RuntimeError("Unexpected AVD")
-        for prop, value in (("ro.kernel.qemu", "1"), ("ro.build.version.sdk", "29"), ("ro.product.cpu.abi", "x86_64")):
+        for prop, value in (("ro.kernel.qemu", "1"), ("ro.build.version.sdk", profile["sdk"]),
+                            ("ro.product.cpu.abi", "x86_64")):
             if shell(prop, "getprop", prop) != value:
                 raise RuntimeError("Wrong emulator/image: " + prop)
         safe = True
         shell("fingerprint", "getprop", "ro.build.fingerprint")
-        image = Path(os.environ["ANDROID_HOME"]) / "system-images/android-29/default/x86_64"
+        image = Path(os.environ["ANDROID_HOME"]) / profile["image"]
         (OUT / "image").mkdir(exist_ok=True)
         for name in ("source.properties", "package.xml"):
             shutil.copyfile(image / name, OUT / "image" / name)
@@ -339,23 +484,37 @@ def probe():
             if time.monotonic() >= deadline:
                 raise RuntimeError("UNAVAILABLE: package service")
             time.sleep(2)
-        apk_paths = shell("transport-pm-path", "pm", "path", "com.android.localtransport").splitlines()
-        if len(apk_paths) != 1 or not re.fullmatch(r"package:/(system|product|system_ext)/[\w./-]+\.apk", apk_paths[0]):
-            raise RuntimeError("Unexpected installed LocalTransport APK path")
-        apk_path = apk_paths[0].removeprefix("package:")
-        size = shell("transport-apk-size", "stat", "-c", "%s", apk_path)
-        if not size.isdecimal() or not 0 < int(size) <= 16 * 1024 * 1024:
-            raise RuntimeError("Unexpected LocalTransport APK size")
-        local_apk = OUT / "image/LocalTransport.apk"
-        call("transport-apk-pull", "pull", apk_path, str(local_apk))
-        if local_apk.stat().st_size != int(size):
-            raise RuntimeError("Incomplete LocalTransport APK pull")
-        save(OUT / "image/transport-apk.json", {"path": apk_path, "sha256": digest(local_apk.read_bytes())})
+        apk_paths = [line.strip() for line in
+                     shell("transport-pm-path", "pm", "path", "com.android.localtransport",
+                           required=False).splitlines() if line.strip()]
+        if apk_paths:
+            if len(apk_paths) != 1 or not re.fullmatch(r"package:/(system|product|system_ext)/[\w./-]+\.apk", apk_paths[0]):
+                raise RuntimeError("Unexpected installed LocalTransport APK path")
+            apk_path = apk_paths[0].removeprefix("package:")
+            size = shell("transport-apk-size", "stat", "-c", "%s", apk_path)
+            if not size.isdecimal() or not 0 < int(size) <= 16 * 1024 * 1024:
+                raise RuntimeError("Unexpected LocalTransport APK size")
+            local_apk = OUT / "image/LocalTransport.apk"
+            call("transport-apk-pull", "pull", apk_path, str(local_apk))
+            if local_apk.stat().st_size != int(size):
+                raise RuntimeError("Incomplete LocalTransport APK pull")
+            save(OUT / "image/transport-apk.json", {"path": apk_path, "sha256": digest(local_apk.read_bytes())})
+        elif profile["service"]:
+            raise RuntimeError("Missing standalone LocalTransport APK")
+        if profile["framework"]:
+            # Stock API28's transport is framework-owned; bound metadata of the
+            # known framework file stands in for the standalone APK of API29.
+            size = shell("transport-framework-size", "stat", "-c", "%s", profile["framework"])
+            if not size.isdecimal() or not 0 < int(size) <= 128 * 1024 * 1024:
+                raise RuntimeError("Unexpected framework file size")
+            sha = shell("transport-framework-sha", "sha256sum", profile["framework"])
+            save(OUT / "image/framework.json",
+                 {"path": profile["framework"], "size": int(size), "sha256": sha.split()[0]})
         for key in ("backup_enabled", "backup_auto_restore", "backup_local_transport_parameters"):
             old[key] = shell(key, "settings", "get", "secure", key)
         listed = shell("transports", "bmgr", "list", "transports")
         names = [line.strip().removeprefix("* ") for line in listed.splitlines() if line.strip()]
-        transport = "com.android.localtransport/.LocalTransport"
+        transport = profile["transport"]
         if transport not in names:
             raise RuntimeError("UNAVAILABLE: known LocalTransport not listed")
         old["transport"] = next(line.strip()[2:] for line in listed.splitlines() if line.strip().startswith("* "))
@@ -381,7 +540,7 @@ def probe():
             shell(phase + "-before", "dumpsys", "backup")
             for variant in VARIANTS:
                 folder, pkg = OUT / phase / variant, PREFIX + variant
-                path = TRANSPORT_FILES + pkg
+                path = profile["dataset"] + pkg
                 shell("fresh", "test", "!", "-e", path, folder=folder)
                 shell("backup", "bmgr", "backupnow", "--monitor", pkg, folder=folder, required=False, timeout=120)
                 size = shell("size", "stat", "-c", "%s", path, folder=folder, required=False)
@@ -393,7 +552,8 @@ def probe():
         error = str(failure)
     finally:
         if safe:
-            shell("final-service", "dumpsys", "activity", "service", "com.android.localtransport/.LocalTransportService", required=False)
+            if profile["service"]:
+                shell("final-service", "dumpsys", "activity", "service", profile["service"], required=False)
             shell("final-backup", "dumpsys", "backup", required=False)
             shell("logcat", "logcat", "-d", "-b", "all", "-t", "1500", required=False)
         if changed:
@@ -410,13 +570,13 @@ def probe():
                     shell("restored-" + key, "settings", "get", "secure", key, required=False)
             shell("restore-selection", "bmgr", "list", "transports", required=False)
             for variant in VARIANTS:
-                shell("cleanup-empty-" + variant, "test", "!", "-e", TRANSPORT_FILES + PREFIX + variant, required=False)
+                shell("cleanup-empty-" + variant, "test", "!", "-e", profile["dataset"] + PREFIX + variant, required=False)
     failed = cleanup_failure() if changed else "cleanup not reached"
     if safe:
-        for name in ("final-service", "final-backup", "logcat"):
+        for name in ["final-backup", "logcat"] + (["final-service"] if profile["service"] else []):
             if json.loads((OUT / (name + ".json")).read_text())["exit"] != 0:
                 error = error or "Diagnostic capture failed: " + name
-    result = finish_run(error or failed, "ERROR" if failed else "COMPLETE")
+    result = finish_run(error or failed, "ERROR" if failed else "COMPLETE", selected[0])
     return 0 if result["collection"] == "COMPLETE" else 1
 
 
@@ -438,6 +598,7 @@ if __name__ == "__main__":
         if mode == "build":
             save(OUT / "build.json", {"status": "ERROR", "error": str(error)})
         elif mode == "probe":
-            finish_run(str(error), "ERROR")
+            opted = [n for n, i in PROFILES.items() if os.environ.get(i["env"]) == "1"]
+            finish_run(str(error), "ERROR", opted[0] if len(opted) == 1 else None)
         print(str(error), file=sys.stderr)
         sys.exit(1)
