@@ -129,6 +129,29 @@ def prepare_fixture(call, variant):
         attempt += 1
 
 
+def wait_for_transport(shell, transport):
+    # PackageManager can be ready before BackupManager registers transports.
+    deadline, attempt = time.monotonic() + 90, 0
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("UNAVAILABLE: known LocalTransport registration timed out")
+        listed = shell("transports", "bmgr", "list", "transports", timeout=min(15, remaining))
+        names = [line.strip().removeprefix("* ") for line in listed.splitlines()]
+        if transport in names and time.monotonic() <= deadline:
+            return listed
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("UNAVAILABLE: known LocalTransport registration timed out")
+        for suffix in (".json", ".out", ".err"):
+            saved = OUT / (f"transports-wait-{attempt}" + suffix)
+            if saved.exists():
+                raise RuntimeError("Refusing reused transport-readiness receipts")
+            (OUT / ("transports" + suffix)).rename(saved)
+        time.sleep(min(2, remaining))
+        attempt += 1
+
+
 def build():
     sdk = Path(os.environ["ANDROID_HOME"])
     bt, android = sdk / "build-tools/36.0.0", sdk / "platforms/android-37.0/android.jar"
@@ -585,11 +608,8 @@ def probe():
             dataset = cache_root(raw, code) + profile["suffix"]
         for key in ("backup_enabled", "backup_auto_restore", "backup_local_transport_parameters"):
             old[key] = shell(key, "settings", "get", "secure", key)
-        listed = shell("transports", "bmgr", "list", "transports")
-        names = [line.strip().removeprefix("* ") for line in listed.splitlines() if line.strip()]
         transport = profile["transport"]
-        if transport not in names:
-            raise RuntimeError("UNAVAILABLE: known LocalTransport not listed")
+        listed = wait_for_transport(shell, transport)
         old["transport"] = next(line.strip()[2:] for line in listed.splitlines() if line.strip().startswith("* "))
         save(OUT / "original-settings.json", old)
         for variant in VARIANTS:

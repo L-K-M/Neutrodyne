@@ -114,6 +114,77 @@ class ProbeTest(unittest.TestCase):
                 self.assertEqual("NOT_TESTED", result["acceptance"])
                 self.assertEqual("ERROR", p.evaluate()["collection"])
 
+    def probe_registration(self, folder, ready_after):
+        """Run the real guarded driver until its first pre-mutation package check."""
+        profile = p.PROFILES["api28"]
+        fixtures, calls, clock = {}, [], [0.0]
+        for variant in p.VARIANTS:
+            data = variant.encode()
+            (folder / (variant + ".apk")).write_bytes(data)
+            fixtures[variant] = {"apkSha256": p.digest(data), "package": p.PREFIX + variant,
+                                 "certificate": CERT, "version": "1"}
+        p.save(folder / "inputs.json", {"source": "a" * 40, "fixtures": fixtures,
+               "implementation": p.digest(Path(p.__file__).read_bytes())})
+        p.save(folder / "build.json", {"status": "COMPLETE",
+               "inputsSha256": p.digest((folder / "inputs.json").read_bytes())})
+        image = folder / "sdk" / profile["image"]
+        image.mkdir(parents=True)
+        for name in ("source.properties", "package.xml"):
+            (image / name).write_text("offline image metadata")
+        answers = {"probe-source": "a" * 40, "devices": "List of devices attached\nemulator-5554\tdevice",
+                   "avd-name": profile["avd"] + "\nOK", "ro.kernel.qemu": "1",
+                   "ro.build.version.sdk": "28", "ro.product.cpu.abi": "x86_64", "root-id": "uid=0(root)",
+                   "services": "package:/system/framework/framework-res.apk", "transport-framework-size": "123",
+                   "transport-framework-sha": "b" * 64 + "  " + profile["framework"], "download-cache": "/data/cache"}
+        def command(where, name, args, timeout=60, required=True):
+            calls.append(name)
+            if name.startswith("existing-"):
+                raise RuntimeError("offline stop before mutation")
+            text = answers.get(name, "null" if name.startswith("backup_") else "")
+            if name == "transports":
+                registered = ready_after is not None and calls.count(name) >= ready_after
+                text = "  * " + profile["transport"] if registered else "No transports available."
+            p.save(where / (name + ".json"), {"argv": [str(a) for a in args], "exit": 0})
+            (where / (name + ".out")).write_text(text + "\n")
+            (where / (name + ".err")).write_text("")
+            return text
+        def sleep(seconds):
+            clock[0] += seconds
+        env = {"ANDROID_HOME": str(folder / "sdk"), "GITHUB_ACTIONS": "true", "RUNNER_OS": "Linux",
+               "BMGR_DISPOSABLE_API28": "1", "BMGR_DISPOSABLE_API29": "0"}
+        with patch.object(p, "OUT", folder), patch.object(p, "command", side_effect=command), \
+                patch.dict(p.os.environ, env), patch.object(p.time, "monotonic", side_effect=lambda: clock[0]), \
+                patch.object(p.time, "sleep", side_effect=sleep):
+            self.assertEqual(1, p.probe())
+        self.assertNotIn("enable", calls)
+        self.assertFalse(any(name.startswith("install-") for name in calls))
+        return calls, clock[0]
+
+    def test_transport_registration_can_follow_package_service_readiness(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / "build") as tmp:
+            folder = Path(tmp)
+            calls, elapsed = self.probe_registration(folder, ready_after=2)
+            self.assertIn("existing-control", calls)
+            self.assertEqual(2, calls.count("transports"))
+            self.assertGreater(elapsed, 0)
+            self.assertEqual("No transports available.\n", (folder / "transports-wait-0.out").read_text())
+
+    def test_registered_transport_does_not_wait(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / "build") as tmp:
+            calls, elapsed = self.probe_registration(Path(tmp), ready_after=1)
+            self.assertIn("existing-control", calls)
+            self.assertEqual(1, calls.count("transports"))
+            self.assertEqual(0, elapsed)
+
+    def test_unregistered_transport_wait_is_bounded_and_never_mutates(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / "build") as tmp:
+            calls, elapsed = self.probe_registration(Path(tmp), ready_after=None)
+            self.assertNotIn("existing-control", calls)
+            self.assertGreater(elapsed, 0)
+            self.assertLessEqual(elapsed, 90)
+            self.assertGreater(calls.count("transports"), 1)
+            self.assertEqual("ERROR", json.loads((Path(tmp) / "result.json").read_text())["collection"])
+
     def complete_run(self, folder, profile="api29", rejected=True):
         """Synthesize the exact receipt set a clean hosted run produces."""
         prof = p.PROFILES[profile]
