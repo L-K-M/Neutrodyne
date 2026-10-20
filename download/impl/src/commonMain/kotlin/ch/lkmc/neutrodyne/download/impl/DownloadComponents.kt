@@ -23,7 +23,13 @@ import ch.lkmc.neutrodyne.core.domain.EffectiveSettingsResolver
 import ch.lkmc.neutrodyne.core.domain.PlaybackBeforeUnsubscribe
 import ch.lkmc.neutrodyne.core.domain.PlaybackMediaLookup
 import ch.lkmc.neutrodyne.core.domain.SettingsRepository
+import ch.lkmc.neutrodyne.core.domain.YouTubeAvailabilityRecorder
 import ch.lkmc.neutrodyne.core.network.NeutrodyneHttpClients
+import ch.lkmc.neutrodyne.download.api.DownloadAudioLanguage
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
+import ch.lkmc.neutrodyne.youtube.api.YouTubeEngine
+import ch.lkmc.neutrodyne.youtube.api.YouTubeHealth
+import ch.lkmc.neutrodyne.youtube.api.YouTubeStreamResolver
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.Provider
 import dev.zacsweers.metro.SingleIn
@@ -74,6 +80,12 @@ internal class DownloadComponents(
     resolver: EffectiveSettingsResolver,
     @param:ApplicationScope scope: CoroutineScope,
     chapters: Provider<ChapterRepository>,
+    private val capabilities: YouTubeCapabilitiesSource,
+    youtubeHealth: YouTubeHealth,
+    streams: YouTubeStreamResolver,
+    control: YouTubeEngine,
+    recorder: YouTubeAvailabilityRecorder,
+    audioLanguage: DownloadAudioLanguage,
     playback: PlaybackBeforeUnsubscribe = PlaybackBeforeUnsubscribe.None,
     @Dispatcher(NeutrodyneDispatchers.IO) io: CoroutineDispatcher,
 ) {
@@ -82,6 +94,7 @@ internal class DownloadComponents(
     private val uris = PlatformLocalUris()
     private val verification = DownloadFiles(fileSystem, roots, PlatformSriHasher(roots), uris)
     val deletes = DeferredDeletes(device, fileSystem, roots, db.downloadDao()::allRows)
+    val youtubeRules = YouTubeEngineRules(db, capabilities, youtubeHealth, deletes, clock)
     val reconciler =
         DownloadReconciler(
             db,
@@ -94,6 +107,7 @@ internal class DownloadComponents(
             host.liveTokens,
             clock,
             host.beforeRunnerReset,
+            youtubeRules,
         )
     val quota = DownloadQuota(settings)
     val mover = DownloadMoverImpl(db, fileSystem, roots, device, index, deletes, claimMutex, clock, quota)
@@ -122,7 +136,7 @@ internal class DownloadComponents(
                 it.isConnected,
                 desktop || !it.isMetered,
                 desktop || host.charging.value,
-                false,
+                capabilities.capabilities.value.downloads,
                 desktop || it.isValidated,
             )
         }
@@ -165,6 +179,21 @@ internal class DownloadComponents(
                     clock,
                     platform.kind,
                 ),
+                YouTubeTransferSource(
+                    clients,
+                    db.episodeDao(),
+                    settings,
+                    audioLanguage::current,
+                    streams,
+                    control,
+                    capabilities,
+                    youtubeHealth,
+                    YouTubeAutoPacer(clock),
+                    roots,
+                    fileSystem,
+                    verification,
+                    clock,
+                ),
             ),
             fileSystem,
             roots,
@@ -180,6 +209,8 @@ internal class DownloadComponents(
                 completedMedia(row)
             },
             cleanup,
+            youtubeRules = youtubeRules,
+            availability = recorder,
         )
     val planner =
         AutoDownloadPlannerImpl(
@@ -196,6 +227,7 @@ internal class DownloadComponents(
             media,
             platform.kind,
             Dispatchers.IO,
+            capabilities,
         )
     val controller =
         DownloadControllerImpl(
@@ -212,6 +244,7 @@ internal class DownloadComponents(
             host.askNotificationPermission,
             host.activity,
             host.hasActiveTransfers,
+            capabilities,
             busy = host.busy,
         )
     val lifecycle: DownloadLifecycle =

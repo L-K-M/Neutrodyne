@@ -8,6 +8,8 @@ import ch.lkmc.neutrodyne.core.database.DownloadEntity
 import ch.lkmc.neutrodyne.core.database.NeutrodyneDatabase
 import ch.lkmc.neutrodyne.core.domain.CleanupPlanner
 import ch.lkmc.neutrodyne.core.domain.CleanupReason
+import ch.lkmc.neutrodyne.core.domain.YouTubeAvailabilityRecorder
+import ch.lkmc.neutrodyne.core.model.Availability
 import ch.lkmc.neutrodyne.core.model.DownloadError
 import ch.lkmc.neutrodyne.core.model.DownloadLane
 import ch.lkmc.neutrodyne.core.model.DownloadState
@@ -58,6 +60,8 @@ internal class DownloadEngine(
     private val cleanup: CleanupPlanner,
     private val mayClaim: (RunnerToken) -> Boolean = { true },
     private val jitter: () -> Double = { Random.nextDouble(MIN_JITTER, MAX_JITTER) },
+    private val youtubeRules: YouTubeEngineRules? = null,
+    private val availability: YouTubeAvailabilityRecorder? = null,
 ) : DownloadRunner {
     private val dao = db.downloadDao()
     private val slots = DownloadSlots()
@@ -119,7 +123,7 @@ internal class DownloadEngine(
                     conditions.collect { value ->
                         for (entry in own(request)) {
                             val row = dao.byEpisode(entry.row.episodeId) ?: continue
-                            blocked(row, value)?.let { entry.stop(StopIntent.Requeue(it)) }
+                            environmentBlocked(row, value)?.let { entry.stop(StopIntent.Requeue(it)) }
                         }
                         changes.update { it + 1 }
                     }
@@ -206,7 +210,15 @@ internal class DownloadEngine(
                     val retryAt =
                         (outcome as? DrainOutcome.Waiting)?.earliest
                             ?: if (own.isNotEmpty()) {
-                                request.lanes.mapNotNull { dao.queuedNeeds(it, clock.now()).earliestRetry }.minOrNull()
+                                request.lanes
+                                    .mapNotNull {
+                                        dao
+                                            .queuedNeeds(
+                                                it,
+                                                clock.now(),
+                                                conditions.value.youtubeAllowed,
+                                            ).earliestRetry
+                                    }.minOrNull()
                             } else {
                                 null
                             }
@@ -251,6 +263,7 @@ internal class DownloadEngine(
     private fun own(request: DrainRequest) = active.snapshot.filter { it.row.runnerToken == request.runnerToken.value }
 
     private suspend fun claimOne(request: DrainRequest): DownloadEntity? {
+        youtubeRules?.syncLocked()
         val c = conditions.value
         if (!c.connected) return null
         val skipped = mutableListOf<Long>()
@@ -289,6 +302,9 @@ internal class DownloadEngine(
             if (own(request).isEmpty()) return DrainOutcome.Empty
             return DrainOutcome.Blocked(WaitReason.SLOT)
         }
+        val sources = db.episodeDao().downloadSources(rows.map { it.episodeId }).associateBy { it.episodeId }
+        rows = rows.filter { sources[it.episodeId]?.matches(it) == true }
+        if (rows.isEmpty()) return DrainOutcome.Empty
         rows =
             rows.map { row ->
                 val next = row.nextAttemptAt
@@ -321,11 +337,23 @@ internal class DownloadEngine(
         row: DownloadEntity,
         c: Conditions,
     ): WaitReason? =
+        environmentBlocked(row, c)
+            ?: if (row.sourceKind == SourceKind.YOUTUBE &&
+                (!c.youtubeAllowed || row.waitReason == WaitReason.YOUTUBE_ENGINE_OFF)
+            ) {
+                WaitReason.YOUTUBE_ENGINE_OFF
+            } else {
+                null
+            }
+
+    private fun environmentBlocked(
+        row: DownloadEntity,
+        c: Conditions,
+    ): WaitReason? =
         when {
             !c.connected -> WaitReason.NETWORK
             !row.allowMetered && !c.unmetered -> WaitReason.UNMETERED_NETWORK
             row.lane == DownloadLane.AUTO && row.requireCharging && !c.charging -> WaitReason.CHARGING
-            row.sourceKind == SourceKind.YOUTUBE && !c.youtubeAllowed -> WaitReason.BACKOFF
             else -> null
         }
 
@@ -395,6 +423,7 @@ internal class DownloadEngine(
         private var restarts = 0
         private var restartBudgetExhausted = false
         private var persistedProof: AcceptedProof? = null
+        private val context = TransferAttempt()
 
         override suspend fun started(metadata: TransferMetadata) {
             row =
@@ -466,6 +495,11 @@ internal class DownloadEngine(
                     }
 
                     is TransferResult.Transient -> {
+                        if (row.sourceKind == SourceKind.YOUTUBE &&
+                            result.error in setOf(DownloadError.YT_EXTRACTION, DownloadError.YT_FORBIDDEN)
+                        ) {
+                            return result
+                        }
                         if (result.error == DownloadError.SIZE_MISMATCH && !restartBudgetExhausted) return result
                         if (!conditions.value.connected) return TransferResult.Wait(WaitReason.NETWORK, null, null)
                         if (retries == RETRY_DELAYS.size) return result
@@ -488,7 +522,11 @@ internal class DownloadEngine(
         ): TransferResult {
             val handle = part ?: fileSystem.openPart(row.rootId, row.tempPath ?: DownloadPaths.part(row.episodeId))
             part = handle
-            return when (val next = source.prepare(row, handle)) {
+            return when (val next = source.prepare(row, handle, context)) {
+                is Prepared.Retry -> {
+                    next.result
+                }
+
                 is Prepared.Adopted -> {
                     completed = next
                     next.complete
@@ -510,7 +548,7 @@ internal class DownloadEngine(
                     }
                     row = row.copy(rootId = next.rootId, tempPath = next.tempPath, lastStopReason = null)
                     val plan = if (retryUrl == null) next.plan else next.plan.copy(url = retryUrl)
-                    source.transfer(plan, checkNotNull(part), this)
+                    source.transfer(plan, checkNotNull(part), this, context)
                 }
             }
         }
@@ -523,11 +561,23 @@ internal class DownloadEngine(
             progress.update(row.episodeId, DownloadState.VERIFYING, result.total, result.total)
             val plan = checkNotNull(prepared).plan
             return try {
-                val verified = verification.verify(checkNotNull(part), result.total, result.mimeType, plan.integrity)
+                val verified =
+                    verification.verify(
+                        checkNotNull(part),
+                        result.total,
+                        result.mimeType,
+                        plan.integrity,
+                        row.sourceKind,
+                    )
                 if (verified !is TransferResult.Complete) return verified
                 val source =
                     db.episodeDao().downloadSources(listOf(row.episodeId)).singleOrNull()
                         ?: return TransferResult.Permanent(DownloadError.HTTP_NOT_FOUND, null)
+                if (row.sourceKind == SourceKind.YOUTUBE &&
+                    (!source.matches(row) || source.youtubeIdentity() != context.identity)
+                ) {
+                    return TransferResult.Permanent(DownloadError.UNSUPPORTED_STREAM, null)
+                }
                 // Retain the final path even if cancellation arrives just after atomic rename.
                 withContext(NonCancellable) {
                     completed = verification.finish(checkNotNull(part), source, plan, result)
@@ -573,6 +623,45 @@ internal class DownloadEngine(
         suspend fun finish(end: TransferEnd) {
             val current = dao.byEpisode(row.episodeId) ?: return
             if (current.runnerToken != token) return
+            val identity = context.identity
+            val source =
+                if (row.sourceKind ==
+                    SourceKind.YOUTUBE
+                ) {
+                    db.episodeDao().downloadSources(listOf(row.episodeId)).singleOrNull()
+                } else {
+                    null
+                }
+            val obsolete =
+                row.sourceKind == SourceKind.YOUTUBE &&
+                    (source?.matches(row) != true || source.youtubeIdentity() != identity)
+            val upcoming =
+                current.lane == DownloadLane.AUTO &&
+                    context.unavailable in setOf(Availability.UPCOMING, Availability.LIVE)
+            if (obsolete || upcoming) {
+                val removal =
+                    row.copy(
+                        relativePath = completed?.relativePath ?: row.relativePath,
+                        finalUri =
+                            completed?.finalUri ?: row.finalUri,
+                    )
+                part?.close()
+                controllerFiles.prepareRemoval(listOf(removal))
+                db.withWriteTransaction {
+                    val owned = dao.byEpisode(row.episodeId)
+                    val actual = db.episodeDao().downloadSources(listOf(row.episodeId)).singleOrNull()
+                    if (owned?.runnerToken == token) {
+                        if (!obsolete &&
+                            actual?.youtubeIdentity() == identity
+                        ) {
+                            context.unavailable?.let { availability?.record(row.episodeId, it) }
+                        }
+                        dao.removeOwned(row.episodeId, token)
+                    }
+                }
+                controllerFiles.finishRemoval(listOf(removal))
+                return
+            }
             val intent = (end as? TransferEnd.Stopped)?.intent
             if (intent is StopIntent.Cancel || intent is StopIntent.Delete) {
                 val reason = if (intent is StopIntent.Cancel) intent.reason else (intent as StopIntent.Delete).reason
@@ -610,7 +699,26 @@ internal class DownloadEngine(
                     is TransferEnd.Finished -> resultRow(final, end.result)
                     TransferEnd.Unknown -> final.copy(state = DownloadState.FAILED, lastError = DownloadError.UNKNOWN)
                 }
-            if (dao.transition(final, state, token) == 0) return
+            val noEngine =
+                row.sourceKind == SourceKind.YOUTUBE && final.state == DownloadState.FAILED &&
+                    final.lastError == DownloadError.UNSUPPORTED_STREAM
+            if (noEngine) controllerFiles.prepareRemoval(listOf(final))
+            val committed =
+                db.withWriteTransaction {
+                    if (row.sourceKind == SourceKind.YOUTUBE) {
+                        val owned = dao.byEpisode(row.episodeId)
+                        val actual = db.episodeDao().downloadSources(listOf(row.episodeId)).singleOrNull()
+                        if (owned?.runnerToken != token || actual == null || actual.youtubeIdentity() != identity ||
+                            !actual.matches(row)
+                        ) {
+                            return@withWriteTransaction false
+                        }
+                        context.unavailable?.let { availability?.record(row.episodeId, it) }
+                    }
+                    dao.transition(final, state, token) > 0
+                }
+            if (!committed) return
+            if (noEngine) controllerFiles.finishRemoval(listOf(final))
             if (final.state == DownloadState.COMPLETED) {
                 index.put(final.episodeId, checkNotNull(final.finalUri))
                 onCompleted(final)

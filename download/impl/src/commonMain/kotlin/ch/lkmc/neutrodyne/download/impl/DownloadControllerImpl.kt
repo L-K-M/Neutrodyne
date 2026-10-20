@@ -21,6 +21,7 @@ import ch.lkmc.neutrodyne.core.model.SourceKind
 import ch.lkmc.neutrodyne.core.model.SourceType
 import ch.lkmc.neutrodyne.core.model.WaitReason
 import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
+import ch.lkmc.neutrodyne.core.model.settings.YouTubeSettingKeys
 import ch.lkmc.neutrodyne.download.api.DeleteReason
 import ch.lkmc.neutrodyne.download.api.DownloadController
 import ch.lkmc.neutrodyne.download.api.DownloadEntry
@@ -33,9 +34,11 @@ import ch.lkmc.neutrodyne.download.api.RejectReason
 import ch.lkmc.neutrodyne.download.api.RequestResult
 import ch.lkmc.neutrodyne.download.api.RootChangeMode
 import ch.lkmc.neutrodyne.download.api.RootChangeResult
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
@@ -57,6 +60,7 @@ internal class DownloadControllerImpl(
     private val askNotificationPermission: suspend () -> Boolean,
     private val activity: Flow<Long> = flowOf(0L),
     private val hasActiveTransfers: () -> Boolean = { false },
+    private val capabilities: YouTubeCapabilitiesSource? = null,
     private val rootRegistration: DownloadRootRegistration? = null,
     private val busy: Flow<Boolean> = flowOf(false),
 ) : DownloadController {
@@ -81,6 +85,7 @@ internal class DownloadControllerImpl(
             return RequestResult.Queued(0, 0, ids.associateWith { RejectReason.UNAVAILABLE }, false)
         }
         val sources = db.episodeDao().downloadSources(ids).associateBy { it.episodeId }
+        val snapshot = settings.observePortableSnapshot().first()
         val rejected = mutableMapOf<Long, RejectReason>()
         val accepted = mutableListOf<Source>()
         for (id in ids) {
@@ -90,13 +95,23 @@ internal class DownloadControllerImpl(
                 continue
             }
             // Reuse playback's ranked, validated alternate selection rather than a second JSON parser.
-            val alternate = if (row.isVideo) mediaLookup.get(id)?.audioAlternate else null
+            val identity = row.youtubeIdentity()
+            val alternate = if (row.isVideo && identity == null) mediaLookup.get(id)?.audioAlternate else null
             val source =
                 Source(
                     row,
-                    alternate?.url ?: row.enclosureUrl,
+                    identity?.videoId ?: alternate?.url ?: row.enclosureUrl,
                     alternate?.type ?: row.enclosureType,
                     alternate?.length ?: row.enclosureLength,
+                    if (identity != null) {
+                        (
+                            snapshot[YouTubeSettingKeys.AUDIO_QUALITY.name]
+                                as? ch.lkmc.neutrodyne.core.model.settings.YouTubeAudioQuality
+                        )?.name
+                    } else {
+                        null
+                    },
+                    identity != null,
                 )
             val reason = source.rejection()
             if (reason != null) rejected[id] = reason else accepted += source
@@ -142,11 +157,12 @@ internal class DownloadControllerImpl(
                             state = DownloadState.QUEUED,
                             priority = mode.priority,
                             requestedAt = now + index,
-                            sourceKind = SourceKind.RSS_ENCLOSURE,
+                            sourceKind = if (source.youtube) SourceKind.YOUTUBE else SourceKind.RSS_ENCLOSURE,
                             sourceRef = checkNotNull(source.url),
                             rootId = checkNotNull(root),
                             allowMetered = metered,
                             estimatedBytes = source.estimate(),
+                            formatPref = source.formatPref,
                         ),
                     )
                     continue
@@ -381,6 +397,7 @@ internal class DownloadControllerImpl(
                                 WaitReason.NEEDS_FOREGROUND,
                                 WaitReason.CHARGING,
                             ) &&
+                            row.waitReason != WaitReason.YOUTUBE_ENGINE_OFF &&
                             (row.nextAttemptAt?.let { it <= clock.now() } != false) && status.isConnected &&
                             (row.allowMetered || !status.isMetered)
                     )
@@ -440,6 +457,7 @@ internal class DownloadControllerImpl(
                     lastError = null,
                     lastHttpStatus = null,
                     estimatedBytes = source.estimate(),
+                    formatPref = source.formatPref,
                 )
             }
 
@@ -448,13 +466,23 @@ internal class DownloadControllerImpl(
             }
         }
 
-    private data class Source(
+    private inner class Source(
         val row: DownloadSourceRow,
         val url: String?,
         val mime: String?,
         val length: Long?,
+        val formatPref: String?,
+        val youtube: Boolean,
     ) {
         fun rejection(): RejectReason? {
+            if (youtube) {
+                return when {
+                    capabilities?.capabilities?.value?.downloads != true -> RejectReason.YOUTUBE_NOT_SUPPORTED
+                    row.availability != Availability.AVAILABLE -> RejectReason.UNAVAILABLE
+                    url.isNullOrBlank() -> RejectReason.NOT_DOWNLOADABLE
+                    else -> null
+                }
+            }
             val extension =
                 url
                     ?.substringBefore('?')

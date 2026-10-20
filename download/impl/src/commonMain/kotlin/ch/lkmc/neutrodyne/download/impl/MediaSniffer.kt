@@ -5,6 +5,25 @@ package ch.lkmc.neutrodyne.download.impl
 internal object MediaSniffer {
     const val HEAD_BYTES = 512
 
+    fun youtubeAudio(
+        bytes: ByteArray,
+        mime: String?,
+    ): Boolean =
+        when (mime) {
+            "audio/mp4" -> {
+                bytes.size >= 12 && bytes.copyOfRange(4, 8).decodeToString() == "ftyp"
+            }
+
+            "audio/webm" -> {
+                val magic = bytes.take(4).map { it.toInt() and 0xff }
+                bytes.size >= 4 && magic == listOf(0x1a, 0x45, 0xdf, 0xa3)
+            }
+
+            else -> {
+                false
+            }
+        }
+
     fun classify(
         bytes: ByteArray,
         contentType: String?,

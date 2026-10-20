@@ -5,6 +5,7 @@ package ch.lkmc.neutrodyne.download.impl
 import ch.lkmc.neutrodyne.core.database.DownloadEntity
 import ch.lkmc.neutrodyne.core.database.DownloadSourceRow
 import ch.lkmc.neutrodyne.core.model.DownloadError
+import ch.lkmc.neutrodyne.core.model.SourceKind
 import okio.IOException
 
 /** File-only verification/recovery. Engine owns the eventual guarded COMPLETED commit. */
@@ -19,10 +20,14 @@ internal class DownloadFiles(
         total: Long?,
         mime: String?,
         integrity: String?,
+        kind: SourceKind = SourceKind.RSS_ENCLOSURE,
     ): TransferResult {
         val size = part.length()
         if (total != null && total != size) return TransferResult.Transient(DownloadError.SIZE_MISMATCH, null, null)
         val media = MediaSniffer.classify(head(part), mime)
+        if (kind == SourceKind.YOUTUBE && !MediaSniffer.youtubeAudio(head(part), mime)) {
+            return TransferResult.Permanent(DownloadError.NOT_MEDIA, null)
+        }
         if (media == MediaKind.HLS) return TransferResult.Permanent(DownloadError.UNSUPPORTED_STREAM, null)
         if (media == MediaKind.NOT_MEDIA) return TransferResult.Permanent(DownloadError.NOT_MEDIA, null)
         if (integrity != null && !hasher.matches(part.rootId, part.path, integrity)) {
@@ -48,11 +53,16 @@ internal class DownloadFiles(
                 val part = files.openPart(row.rootId, candidate.path)
                 val verified =
                     try {
-                        verify(part, total, row.mimeType, integrity)
+                        verify(part, total, row.mimeType, integrity, row.sourceKind)
                     } finally {
                         part.close()
                     }
                 if (verified !is TransferResult.Complete) continue
+                if (row.sourceKind == SourceKind.YOUTUBE &&
+                    !candidate.path.endsWith(if (row.mimeType == "audio/mp4") ".m4a" else ".webm")
+                ) {
+                    continue
+                }
                 val root = roots.resolve(row.rootId) ?: return null
                 return Prepared.Adopted(
                     verified.copy(etag = row.etag, lastModified = row.lastModified),
@@ -83,7 +93,11 @@ internal class DownloadFiles(
                 source.episodeId,
                 source.title,
                 localDate(source.sortDate),
-                MediaSniffer.extension(complete.media, head, complete.mimeType, plan.originalUrl, source.isVideo),
+                if (plan.youtube != null) {
+                    if (complete.mimeType == "audio/mp4") "m4a" else "webm"
+                } else {
+                    MediaSniffer.extension(complete.media, head, complete.mimeType, plan.originalUrl, source.isVideo)
+                },
                 platform,
             )
         files.createDirectories(part.rootId, path.substringBeforeLast('/'))

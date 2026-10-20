@@ -23,6 +23,7 @@ import ch.lkmc.neutrodyne.core.model.DownloadLane
 import ch.lkmc.neutrodyne.core.model.DownloadState
 import ch.lkmc.neutrodyne.core.model.WaitReason
 import ch.lkmc.neutrodyne.core.model.settings.DownloadSettingKeys
+import ch.lkmc.neutrodyne.youtube.api.YouTubeCapabilitiesSource
 import dev.zacsweers.metro.ContributesIntoSet
 import dev.zacsweers.metro.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -30,6 +31,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -79,6 +83,7 @@ internal class DownloadObserversInitializer(
     private val opener: DatabaseOpener,
     private val db: Lazy<NeutrodyneDatabase>,
     private val notifications: Lazy<DownloadNotifications>,
+    private val capabilities: Lazy<YouTubeCapabilitiesSource>,
     @param:DownloadErrorText private val errorText: suspend (DownloadError?) -> String,
     @param:ApplicationScope private val scope: CoroutineScope,
 ) : AppInitializer {
@@ -127,6 +132,17 @@ internal class DownloadObserversInitializer(
         }
         scope.launch {
             network.status.collectLatest { status -> if (status.isConnected) schedule() }
+        }
+        scope.launch {
+            awaitDownloadDatabase(opener)
+            capabilities.value.capabilities
+                .map { it.downloads to it.externalReason }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect {
+                    components.value.claimMutex.withLock { components.value.youtubeRules.syncLocked() }
+                    schedule()
+                }
         }
         scope.launch {
             awaitDownloadDatabase(opener)
