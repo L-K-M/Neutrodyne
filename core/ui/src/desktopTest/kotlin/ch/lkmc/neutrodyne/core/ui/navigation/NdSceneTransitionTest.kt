@@ -3,8 +3,6 @@
 package ch.lkmc.neutrodyne.core.ui.navigation
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateOf
-import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.scene.OverlayScene
@@ -131,11 +129,7 @@ class NdSceneTransitionTest {
     @Test
     fun lastChangeWasPopTracksTheActionOrigin() {
         val state =
-            NavigationState(
-                stacks =
-                    TOP_LEVEL_TABS.associateWith { tab -> NavBackStack<NavKey>(tab) },
-                selected = mutableStateOf(LibraryKey),
-            )
+            NavigationState.create(LibraryKey)
         state.push(PodcastKey(7L))
         assertEquals(false, state.lastChangeWasPop)
 

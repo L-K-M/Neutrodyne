@@ -2,8 +2,6 @@
 
 package ch.lkmc.neutrodyne.core.ui.navigation
 
-import androidx.compose.runtime.mutableStateOf
-import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavKey
 import ch.lkmc.neutrodyne.core.navigation.AddPodcastKey
 import ch.lkmc.neutrodyne.core.navigation.DiscoverKey
@@ -25,9 +23,15 @@ import kotlin.test.assertTrue
  * root back returns to Feeds, Feeds root back returns false.
  */
 class NavigationStateTest {
-    private fun state(initial: TopLevelKey = FeedsKey): NavigationState {
-        val stacks = TOP_LEVEL_TABS.associateWith { tab -> NavBackStack<NavKey>().apply { add(tab) } }
-        return NavigationState(stacks, mutableStateOf(initial))
+    private fun state(initial: TopLevelKey = FeedsKey): NavigationState = NavigationState.create(initial)
+
+    @Test
+    fun `stack is an immutable snapshot rather than a mutable alias`() {
+        val nav = state()
+        val captured: List<NavKey> = nav.stack(FeedsKey)
+        nav.push(PodcastKey(8))
+        assertEquals(listOf(FeedsKey), captured)
+        assertEquals<List<NavKey>>(listOf(FeedsKey, PodcastKey(8)), nav.stack(FeedsKey))
     }
 
     @Test

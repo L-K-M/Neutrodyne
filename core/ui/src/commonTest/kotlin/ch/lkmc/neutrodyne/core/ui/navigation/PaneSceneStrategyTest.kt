@@ -6,8 +6,6 @@ import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffoldDefaults
 import androidx.compose.material3.adaptive.layout.PaneScaffoldDirective
 import androidx.compose.material3.adaptive.navigation.BackNavigationBehavior
 import androidx.compose.material3.adaptive.navigation3.ListDetailSceneStrategy
-import androidx.compose.runtime.mutableStateOf
-import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.scene.Scene
@@ -104,10 +102,7 @@ class PaneSceneStrategyTest {
 
     private class Fixture {
         val navigation =
-            NavigationState(
-                TOP_LEVEL_TABS.associateWith { NavBackStack<NavKey>(it) },
-                mutableStateOf(FeedsKey),
-            )
+            NavigationState.create()
         private val strategy = PaneSceneStrategy(navigation) { key, tab -> entry(key, tab) }
         private val scope = SceneStrategyScope<NavKey>()
         private val adaptive =

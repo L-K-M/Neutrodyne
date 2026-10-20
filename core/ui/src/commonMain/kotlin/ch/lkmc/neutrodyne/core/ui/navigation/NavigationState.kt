@@ -24,6 +24,7 @@ import ch.lkmc.neutrodyne.core.navigation.LibraryKey
 import ch.lkmc.neutrodyne.core.navigation.NavKeySerializers
 import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
+import kotlinx.collections.immutable.toPersistentList
 
 /**
  * The shared navigation state (01 AppNavigator and per-tab back stacks): one
@@ -36,13 +37,14 @@ import ch.lkmc.neutrodyne.core.navigation.UpNextKey
  * this call site in their own handlers.
  */
 @Stable
-public class NavigationState internal constructor(
+public class NavigationState private constructor(
     private val stacks: Map<TopLevelKey, NavBackStack<NavKey>>,
     private val selected: MutableState<TopLevelKey>,
 ) : AppNavigator {
+    private val mutationListeners = mutableSetOf<(NavigationDeparture?) -> Unit>()
+
     /** The five tabs in suite order. */
     public val tabs: List<TopLevelKey> get() = TOP_LEVEL_TABS
-
     public val selectedTab: TopLevelKey get() = selected.value
 
     // Unsaved gesture invalidation: a round trip still changes this when selection writes coalesce.
@@ -65,82 +67,135 @@ public class NavigationState internal constructor(
     internal var lastChangeWasPop: Boolean = false
         private set
 
-    public fun stack(tab: TopLevelKey): NavBackStack<NavKey> = stacks.getValue(tab)
+    /** Immutable snapshot. Mutation and synchronous departure publication belong to this owner. */
+    public fun stack(tab: TopLevelKey): List<NavKey> = stacks.getValue(tab).toPersistentList()
 
     /** The stacks [NeutrodyneNavHost] renders: Feeds, then the selected tab when different. */
     public fun visibleTabs(): List<TopLevelKey> =
         if (selectedTab == FeedsKey) listOf(FeedsKey) else listOf(FeedsKey, selectedTab)
 
-    override fun push(key: NavKey) {
-        lastChangeWasPop = false
-        stack(selectedTab).add(key)
+    internal fun observeMutations(listener: (NavigationDeparture?) -> Unit): () -> Unit {
+        mutationListeners.add(listener)
+        return { mutationListeners.remove(listener) }
     }
 
-    override fun selectTab(key: TopLevelKey) {
-        lastChangeWasPop = false
-        // 08 Re-tap behaviour: re-selecting the shown destination pops its stack back to the
-        // root; the root entry itself stays, so its saved scroll position survives.
-        if (key == selected.value) resetTab(key)
-        changeSelection(key)
+    private fun <T> mutate(action: () -> T): T {
+        val result = action()
+        // Publish every mutation, including leave-return writes coalesced before recomposition.
+        mutationListeners.toList().forEach { it(null) }
+        return result
     }
 
-    override fun pop(): Boolean {
-        lastChangeWasPop = true
-        val stack = stack(selectedTab)
-        if (stack.size > 1) {
-            stack.removeAt(stack.size - 1)
-            return true
+    override fun push(key: NavKey) =
+        mutate {
+            lastChangeWasPop = false
+            stacks.getValue(selectedTab).add(key)
+            Unit
         }
-        if (selectedTab != FeedsKey) {
-            changeSelection(FeedsKey)
-            return true
+
+    override fun selectTab(key: TopLevelKey) =
+        mutate {
+            lastChangeWasPop = false
+            if (key == selectedTab) resetStack(key)
+            changeSelection(key)
         }
-        return false
-    }
+
+    override fun pop(): Boolean =
+        mutate {
+            lastChangeWasPop = true
+            val stack = stacks.getValue(selectedTab)
+            when {
+                stack.size > 1 -> {
+                    removeTop(selectedTab)
+                    true
+                }
+
+                selectedTab != FeedsKey -> {
+                    changeSelection(FeedsKey)
+                    true
+                }
+
+                else -> {
+                    false
+                }
+            }
+        }
 
     override fun pop(key: NavKey): Boolean {
-        val stack = stack(selectedTab)
+        val stack = stacks.getValue(selectedTab)
         if (stack.size <= 1 || stack.last() != key) return false
-
         return pop()
     }
 
-    override fun resetTab(key: TopLevelKey) {
-        lastChangeWasPop = false
-        val stack = stack(key)
-        while (stack.size > 1) stack.removeAt(stack.size - 1)
+    override fun resetTab(key: TopLevelKey) =
+        mutate {
+            lastChangeWasPop = false
+            resetStack(key)
+        }
+
+    private fun resetStack(key: TopLevelKey) {
+        val stack = stacks.getValue(key)
+        while (stack.size > 1) removeTop(key)
+    }
+
+    private fun removeTop(tab: TopLevelKey) {
+        val stack = stacks.getValue(tab)
+        val departed = NavigationDeparture(tab, stack.removeAt(stack.lastIndex))
+        // Publish the removal itself: resetting and re-adding an equal key is a new visit.
+        mutationListeners.toList().forEach { it(departed) }
     }
 
     override fun open(
         tab: TopLevelKey,
         stack: List<NavKey>,
-    ) {
+    ) = mutate {
         lastChangeWasPop = false
-        resetTab(tab)
-        stack(tab).addAll(stack)
+        resetStack(tab)
+        stacks.getValue(tab).addAll(stack)
         changeSelection(tab)
     }
 
-    override fun pushDetail(key: NavKey) {
-        lastChangeWasPop = false
-        val stack = stack(selectedTab)
-        if (panePartitions >= 2 && stack.lastOrNull()?.let { it::class == key::class } == true) {
-            stack.removeAt(stack.size - 1)
+    override fun pushDetail(key: NavKey) =
+        mutate {
+            lastChangeWasPop = false
+            val stack = stacks.getValue(selectedTab)
+            if (panePartitions >= 2 && stack.lastOrNull()?.let { it::class == key::class } == true) {
+                removeTop(selectedTab)
+            }
+            stack.add(key)
+            Unit
         }
-        stack.add(key)
-    }
 
     private fun changeSelection(tab: TopLevelKey) {
-        if (tab == selected.value) return
-
+        if (tab == selectedTab) return
         selectionGeneration++
         selected.value = tab
     }
+
+    internal companion object {
+        internal fun create(initial: TopLevelKey = FeedsKey): NavigationState =
+            NavigationState(TOP_LEVEL_TABS.associateWith { NavBackStack<NavKey>(it) }, mutableStateOf(initial))
+
+        @Composable
+        internal fun remember(initial: TopLevelKey): NavigationState {
+            val stacks =
+                TOP_LEVEL_TABS.associateWith { tab ->
+                    key(tab) { rememberNavBackStack(NavKeySerializers.savedStateConfiguration, tab) }
+                }
+            val selected = rememberSaveable(stateSaver = TopLevelKeySaver) { mutableStateOf(initial) }
+            return remember(stacks) { NavigationState(stacks, selected) }
+        }
+    }
 }
+
+internal data class NavigationDeparture(
+    val tab: TopLevelKey,
+    val key: NavKey,
+)
 
 /** The suite order (08 Destinations): Feeds, Library, Up next, Downloads, Discover. */
 public val TOP_LEVEL_TABS: List<TopLevelKey> =
-    listOf(FeedsKey, LibraryKey, UpNextKey, DownloadsKey, DiscoverKey)
+    listOf(FeedsKey, LibraryKey, UpNextKey, DownloadsKey, DiscoverKey).toPersistentList()
 
 private val TOP_LEVEL_BY_NAME: Map<String, TopLevelKey> =
     TOP_LEVEL_TABS.associateBy { it::class.simpleName.orEmpty() }
@@ -156,14 +211,5 @@ private val TopLevelKeySaver =
  * `rememberNavBackStack` keeps a stable saveable slot across compositions and restores on Android.
  */
 @Composable
-public fun rememberNavigationState(initialTab: TopLevelKey = FeedsKey): NavigationState {
-    val stacks =
-        TOP_LEVEL_TABS.associateWith { tab ->
-            key(tab) { rememberNavBackStack(NavKeySerializers.savedStateConfiguration, tab) }
-        }
-    val selected =
-        rememberSaveable(stateSaver = TopLevelKeySaver) {
-            mutableStateOf(initialTab)
-        }
-    return remember(stacks) { NavigationState(stacks, selected) }
-}
+public fun rememberNavigationState(initialTab: TopLevelKey = FeedsKey): NavigationState =
+    NavigationState.remember(initialTab)

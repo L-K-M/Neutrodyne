@@ -1464,6 +1464,15 @@ Metadata conventions: list/detail/extra panes use `ListDetailSceneStrategy.listP
 
 The navigation host is shared by both shells and lives in `:core:ui`'s `commonMain` ([Dependency rules](#dependency-rules) rule 7): `NavigationState` implements `AppNavigator` (including 08's `pushDetail`, which reads `LocalPaneLayout`'s partition count through a state the root updates): one `NavBackStack<NavKey>` per `TopLevelKey`, each created with `rememberNavBackStack(NavKeySerializers.savedStateConfiguration, root)` inside `rememberNavigationState()` (saveable across process death on Android and across recomposition on the desktop), plus the selected tab in `rememberSaveable`. It is provided to the tree with `CompositionLocalProvider(LocalAppNavigator provides state)`. `NeutrodyneRoot` (08's layout: navigation suite, `NavDisplay`, player sheet or side panel) is also in `:core:ui` and receives everything feature- or domain-specific from its shell: the installer set from the graph, the player surface of `:feature:player` as a composable slot, and the root state (start-up gate, update badge, first-run cards, the "Continue on this device" offer) from the shell's start-up ViewModel. `MainActivity` (`setContent`) and 11's `NeutrodyneWindow` each call it.
 
+**Internal API decision (2026-10-20, M10 I2 checkpoint, not accepted):**
+`NavigationState` owns the mutable saveable stacks privately. `stack(tab)` returns
+an immutable persistent snapshot; callers navigate through `AppNavigator` rather
+than changing an exposed `NavBackStack`. Synchronous mutation notifications revoke
+entry focus permissions on tab/stack departure, including removal followed by an
+equal key in the same command. A continuously authorized list keeps its visit
+when another pane changes. The selected tab, stack savers and Back contract stay
+the same. This is an internal ownership change, not a serialized-state change.
+
 **Implementation note (2026-10-16, M2).** `AppNavigator.pop(key: NavKey)` removes an entry only when that exact key is the selected stack's top entry above its root. Otherwise it returns `false` without changing any stack, selected tab or transition marker. Sheet/dialog routes use this overload for completion and dismissal; the host's overlay scene callbacks capture their own entry key and use it too. This keeps a second signal from outgoing content from removing the screen underneath or switching tabs. Plain back navigation retains `pop()` and its existing root behavior. Actions that close an overlay before opening another route only open it when the scoped pop succeeds.
 
 **Root contract (2026-10-05).** `NeutrodyneRoot` takes only `:core:ui` and `:core:model` types; the shells map the domain flows into them. `:core:ui` may not see `:sync:api`, `:core:domain` or `:feature:player` (rule 7).

@@ -8,6 +8,7 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.layout.PaneScaffoldDirective
 import androidx.compose.material3.adaptive.navigation3.ListDetailSceneStrategy
@@ -54,6 +55,11 @@ public fun NeutrodyneNavHost(
     directive: PaneScaffoldDirective,
     modifier: Modifier = Modifier,
 ) {
+    val focusOwner = LocalPaneFocusOwner.current
+    if (focusOwner == null) {
+        NavigationFocusRoot(modifier) { NeutrodyneNavHost(state, installers, directive, Modifier.fillMaxSize()) }
+        return
+    }
     val provider =
         remember(installers) {
             entryProvider<NavKey> {
@@ -61,6 +67,10 @@ public fun NeutrodyneNavHost(
             }
         }
 
+    val panes =
+        remember(state, provider) {
+            PaneSceneStrategy(state) { key, tab -> withPaneRole(key, provider(key), tab) }
+        }
     val decoratedByTab: Map<TopLevelKey, List<NavEntry<NavKey>>> =
         state.tabs.associateWith { tab ->
             key(tab) {
@@ -71,7 +81,7 @@ public fun NeutrodyneNavHost(
                             rememberSaveableStateHolderNavEntryDecorator(),
                             rememberViewModelStoreNavEntryDecorator(),
                             rememberTabLocalNavEntryDecorator(tab),
-                            rememberPaneFocusDecorator(directive),
+                            rememberPaneFocusDecorator(focusOwner, state, panes),
                             rememberHeaderBarDecorator(state, tab, directive.maxHorizontalPartitions),
                         ),
                     entryProvider = { key -> withPaneRole(key, provider(key), tab) },
@@ -82,10 +92,6 @@ public fun NeutrodyneNavHost(
     val entries = state.visibleTabs().flatMap { decoratedByTab.getValue(it) }
 
     val adaptive = rememberListDetailSceneStrategy<NavKey>(directive = directive)
-    val panes =
-        remember(state, provider) {
-            PaneSceneStrategy(state) { key, tab -> withPaneRole(key, provider(key), tab) }
-        }
     panes.updateCurrent(
         adaptive,
         decoratedByTab,
@@ -95,44 +101,46 @@ public fun NeutrodyneNavHost(
     // The scene transitions share the pane-swap spec so reduced motion snaps both (see 08).
     val motionSpec = NeutrodyneMotion.navigation<IntOffset>()
 
-    SharedTransitionLayout {
-        val sharedScope = this.takeIf { directive.maxHorizontalPartitions == 1 && !LocalReducedMotion.current }
-        NavigationBackDispatch(panes, sharedScope) {
-            NavDisplay(
-                entries = entries,
-                modifier = modifier,
-                onBack = { state.pop() },
-                sceneStrategies =
-                    listOf(
-                        rememberNdBottomSheetSceneStrategy { entry ->
-                            state.pop(entry.metadata.getValue(PANE_NAV_KEY) as NavKey)
-                        },
-                        rememberNdDialogSceneStrategy { entry ->
-                            state.pop(entry.metadata.getValue(PANE_NAV_KEY) as NavKey)
-                        },
-                        panes,
-                    ),
-                transitionSpec = {
-                    transformFor(classifyTransition(initialState, targetState), motionSpec) {
-                        defaultTransitionSpec<NavKey>().invoke(this)
-                    }
-                },
-                popTransitionSpec = {
-                    transformFor(
-                        classifyPopTransition(initialState, targetState, state.lastChangeWasPop),
-                        motionSpec,
-                    ) {
-                        defaultPopTransitionSpec<NavKey>().invoke(this)
-                    }
-                },
-                predictivePopTransitionSpec = { swipeEdge ->
-                    transformFor(classifyPredictivePopTransition(initialState, targetState), motionSpec) {
-                        defaultPredictivePopTransitionSpec<NavKey>().invoke(this, swipeEdge)
-                    }
-                },
-                // Expanded panes share movable entries, not whole-entry animated bounds.
-                sharedTransitionScope = sharedScope,
-            )
+    PaneFocusTransactionHost(focusOwner, modifier, focusOwner.capture()) {
+        SharedTransitionLayout {
+            val sharedScope = this.takeIf { directive.maxHorizontalPartitions == 1 && !LocalReducedMotion.current }
+            NavigationBackDispatch(panes, sharedScope) {
+                NavDisplay(
+                    entries = entries,
+                    modifier = Modifier.fillMaxSize(),
+                    onBack = { state.pop() },
+                    sceneStrategies =
+                        listOf(
+                            rememberNdBottomSheetSceneStrategy { entry ->
+                                state.pop(entry.metadata.getValue(PANE_NAV_KEY) as NavKey)
+                            },
+                            rememberNdDialogSceneStrategy { entry ->
+                                state.pop(entry.metadata.getValue(PANE_NAV_KEY) as NavKey)
+                            },
+                            panes,
+                        ),
+                    transitionSpec = {
+                        transformFor(classifyTransition(initialState, targetState), motionSpec) {
+                            defaultTransitionSpec<NavKey>().invoke(this)
+                        }
+                    },
+                    popTransitionSpec = {
+                        transformFor(
+                            classifyPopTransition(initialState, targetState, state.lastChangeWasPop),
+                            motionSpec,
+                        ) {
+                            defaultPopTransitionSpec<NavKey>().invoke(this)
+                        }
+                    },
+                    predictivePopTransitionSpec = { swipeEdge ->
+                        transformFor(classifyPredictivePopTransition(initialState, targetState), motionSpec) {
+                            defaultPredictivePopTransitionSpec<NavKey>().invoke(this, swipeEdge)
+                        }
+                    },
+                    // Expanded panes share movable entries, not whole-entry animated bounds.
+                    sharedTransitionScope = sharedScope,
+                )
+            }
         }
     }
 }

@@ -64,16 +64,18 @@ class PaneFocusRetentionTest {
                     }
                 })
             setContent {
-                Column {
-                    Text(
-                        "Outside",
-                        Modifier.testTag("outside").focusable(),
-                    )
-                    NeutrodyneNavHost(
-                        rememberNavigationState(),
-                        installers,
-                        PaneScaffoldDirective.Default.copy(maxHorizontalPartitions = partitions),
-                    )
+                NavigationFocusRoot {
+                    Column {
+                        Text(
+                            "Outside",
+                            Modifier.testTag("outside").focusable(),
+                        )
+                        NeutrodyneNavHost(
+                            rememberNavigationState(),
+                            installers,
+                            PaneScaffoldDirective.Default.copy(maxHorizontalPartitions = partitions),
+                        )
+                    }
                 }
             }
             onNodeWithTag("first").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
@@ -104,8 +106,9 @@ class PaneFocusRetentionTest {
             mainClock.autoAdvance = false
             runOnIdle { partitions = 1 }
             mainClock.advanceTimeByFrame()
-            // Allocation has detached the leaf; restoration is waiting for the next frame.
-            onNodeWithTag("target").assertIsNotFocused()
+            // The completed-layout boundary restores within this frame, before the intentional transfer.
+            onNodeWithTag("target").assertIsFocused()
+            onNodeWithTag("first").assertIsNotFocused()
             onNodeWithTag("outside").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
             onNodeWithTag("outside").assertIsFocused()
             mainClock.autoAdvance = true

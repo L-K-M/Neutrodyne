@@ -89,6 +89,7 @@ import ch.lkmc.neutrodyne.core.navigation.SpeedKey
 import ch.lkmc.neutrodyne.core.navigation.TopLevelKey
 import ch.lkmc.neutrodyne.core.navigation.UpNextKey
 import ch.lkmc.neutrodyne.core.navigation.VerificationNoticeKey
+import ch.lkmc.neutrodyne.core.ui.navigation.NavigationFocusRoot
 import ch.lkmc.neutrodyne.core.ui.navigation.NavigationState
 import ch.lkmc.neutrodyne.core.ui.navigation.NeutrodyneNavHost
 import ch.lkmc.neutrodyne.core.ui.navigation.rememberNavigationState
@@ -342,7 +343,7 @@ private fun ReadyRoot(
         LocalPaneLayout provides layout,
         LocalMiniPlayerInset provides miniInset,
     ) {
-        Box(
+        NavigationFocusRoot(
             modifier =
                 modifier
                     .fillMaxSize()
